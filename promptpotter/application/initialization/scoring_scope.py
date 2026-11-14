@@ -25,12 +25,17 @@ from promptpotter.application.scoring.evaluators import (
 from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
-from promptpotter.domain.campaign import Compare, Optimize
+from promptpotter.domain.campaign import Campaign, Compare, Optimize
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.phases import STOP_REASON_INFO, StopLoop
+from promptpotter.domain.phases import STOP_REASON_INFO
+from promptpotter.domain.records.run_records import StopLoop
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
+from promptpotter.infrastructure.run_scope import RunScope, run_scope, scoped
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -38,16 +43,11 @@ from promptpotter.infrastructure.store.archive_queries import (
     MemoryScope,
     OpenAt,
 )
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import DiagnosticError
-from promptpotter.shared.run_scope import RunScope, run_scope, scoped
 
 if TYPE_CHECKING:
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import TaskDecomposition
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

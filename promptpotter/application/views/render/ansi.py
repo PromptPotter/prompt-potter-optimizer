@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, assert_never
+from collections.abc import Sequence
+from typing import assert_never
 
 from promptpotter.application.views.render.primitives import (
     BOLD,
@@ -37,16 +38,11 @@ from promptpotter.domain.phase_views import (
     VerificationEnterView,
     VerificationGradedView,
 )
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, SeriesReading, ThetaCaveat
 from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
 from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.domain.wounds import COLLAPSE_WORDS
 from promptpotter.shared.composite import render_composite_fitness_block
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.domain.ruler import SeriesReading
 
 
 def _render_init_enter(v: InitEnterView) -> str:

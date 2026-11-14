@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.scoring.evaluators import (
     JudgedTerm,
@@ -15,13 +15,9 @@ from promptpotter.application.scoring.evaluators import (
 from promptpotter.application.scoring.judges.grounding import ANSWER_GROUNDING, EVIDENCE_RETRIEVAL
 from promptpotter.application.scoring.judges.simpleqa import SEALQA, SIMPLEQA
 from promptpotter.domain.judges import Judge, JudgeSpec
-from promptpotter.domain.scoring import JudgeReading
+from promptpotter.domain.scoring import JudgeReading, MeasuredCell
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.plugin_registry import Registry
-
-if TYPE_CHECKING:
-    from promptpotter.domain.scoring import MeasuredCell
-
 
 ENTRY_POINT_GROUP = "promptpotter.judges"
 """Published: renaming it un-registers every third-party plugin at once."""

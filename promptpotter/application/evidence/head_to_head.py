@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Sequence
 from enum import StrEnum
-from typing import TYPE_CHECKING, NamedTuple, Self
+from typing import NamedTuple, Self
 
 from pydantic import Field, model_validator
 
@@ -40,6 +40,7 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
     worked_seconds,
 )
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_index import RunStatus
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -49,19 +50,16 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import ComparisonExit
+from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.statistics import bh_adjusted
 from promptpotter.shared.worded import Worded
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.scoring import Scorer
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 class GuardState(StrEnum):

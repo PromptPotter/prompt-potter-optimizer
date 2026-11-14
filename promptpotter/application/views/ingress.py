@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimizer_manifest import bound_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.arms import Proposal, candidate_label
 from promptpotter.domain.candidate_diff import (
@@ -13,6 +13,7 @@ from promptpotter.domain.candidate_diff import (
     flatten_prompts,
     flatten_sp_summary,
 )
+from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phase_views import (
     CandidatesGeneratedView,
     InitEnterView,
@@ -23,8 +24,10 @@ from promptpotter.domain.phase_views import (
     SpDiffView,
     WarningEntry,
 )
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_standing import RunStanding
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget, MeteredSpend
 from promptpotter.domain.wounds import collapse_reason
 from promptpotter.shared.answer_text import truncate
@@ -35,9 +38,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizers.nodes import RoundOpening
     from promptpotter.application.preflight import PreflightWarning
-    from promptpotter.domain.opt_search_point import NodePrompt
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.sample import Sample
 
 
 def init_enter(
@@ -46,9 +46,9 @@ def init_enter(
     dataset: Sequence[Sample],
     session: Session,
     warnings: Sequence[PreflightWarning],
+    selected: SelectedOptimizer,
 ) -> InitEnterView:
     schema = session.pipeline_schema
-    selected = bound_optimizer()
 
     ctx.original_sp_flat = flatten_sp_summary(session.pipeline_params.laid_nodes)
     ctx.node_param_keys = {s: sorted(k) for s, k in schema.node_param_keys().items()}

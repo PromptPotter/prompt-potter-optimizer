@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple
 
 from promptpotter.application.scoring.classification import scoreable_rows
 from promptpotter.application.scoring.formula.compiler import (
@@ -15,22 +15,20 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.cell_terms import CELL_BOUND_NAMES, CELL_TERMS, CellTerm
-from promptpotter.domain.pipeline_schema import NodeRole
+from promptpotter.domain.pipeline_schema import NodeRole, PipelineNode, PipelineSchema
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
     ROW_GRADES,
     TURN_SCALAR_KEYS,
     TURN_STEP_SUFFIX,
+    GradedCell,
     JudgeReading,
+    MeasuredCell,
     all_verifier_graded,
     extract_item_label,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
-    from promptpotter.domain.scoring import GradedCell, MeasuredCell
 
 
 @shapes_optimizer_prompt

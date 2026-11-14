@@ -7,11 +7,10 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from promptpotter.application.optimizer_manifest import bound_determinism
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_overlay import pinned_route
 from promptpotter.domain.records.run_records import (
@@ -20,6 +19,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
 from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
@@ -36,13 +36,10 @@ from promptpotter.infrastructure.llm.send_pacing import (
 )
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.wallet import keyed_client
+from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.shared.errors import OptimizerTimeoutError
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-from promptpotter.shared.run_scope import scoped
-
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
@@ -219,7 +216,7 @@ def _merged_config(
     if temperature is not None:
         laid["temperature"] = temperature
     # The determinism clamp goes LAST: it must beat every per-call setting, steered temperature included.
-    if (clamp := bound_determinism()) is not None:
+    if (clamp := run_scope().determinism) is not None:
         laid |= clamp.model_dump(exclude_none=True, exclude={"route_order"})
         # A route names one model's hosts: it pins only a call to the model it keys.
         if hosts := (clamp.route_order or {}).get(config.model):

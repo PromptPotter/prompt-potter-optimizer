@@ -1,16 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import argparse
 
+from promptpotter.application.caller import Caller
+from promptpotter.application.evidence.read import Evidence
+from promptpotter.application.read_params import EvidenceParams
 from promptpotter.application.views.evidence import evidence_lines
 from promptpotter.presentation.cli.commands.result import CommandResult
-
-if TYPE_CHECKING:
-    import argparse
-
-    from promptpotter.application.caller import Caller
-    from promptpotter.application.evidence.read import Evidence
-    from promptpotter.application.read_params import EvidenceParams
 
 
 def evidence_human(

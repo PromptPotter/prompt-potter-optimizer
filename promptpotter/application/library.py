@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import datetime
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal
 
 from pydantic import Field
 
 from promptpotter.application.datasets.draft_campaign import owned_draft
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.prompt_block import (
     Authored,
     BlockPack,
@@ -18,12 +19,9 @@ from promptpotter.domain.prompt_block import (
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_packs import bank_into_account_pack
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError, PayloadInvalidError
 from promptpotter.shared.identity import acting_principal
-
-if TYPE_CHECKING:
-    from promptpotter.config.prompt_blocks import PackShelf
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 class LibrarySource(StrictModel):

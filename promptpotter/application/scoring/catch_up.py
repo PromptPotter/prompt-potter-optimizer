@@ -8,18 +8,17 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.search_point_scorer import close_walk, open_walk
-from promptpotter.domain.scoring import CellSheet
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.optimizers.nodes import Race
-    from promptpotter.domain.paired_reading import ArmKey
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell
-    from promptpotter.domain.search_point import JobSearchPoint
 
 
 @dataclass(frozen=True)

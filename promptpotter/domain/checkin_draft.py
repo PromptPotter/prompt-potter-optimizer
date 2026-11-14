@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import Field, PrivateAttr
 
 from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.clock import utcnow_iso
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
 class UploadBasis(FrozenModel):

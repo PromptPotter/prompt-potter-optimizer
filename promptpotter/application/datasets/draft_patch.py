@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING, Any, NamedTuple
+from collections.abc import Mapping
+from typing import Any, NamedTuple
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import scorer_of
@@ -33,10 +34,12 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CAMPAIGN_RULE
-from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
+from promptpotter.domain.cell_terms import CellTerm
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit
 from promptpotter.domain.layer_fold import CLEAR, Layer, fold_layers, wire_patch
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import (
     ANSWER_FIELDS_KEY,
     OUTPUT_SCHEMA_KEY,
@@ -47,15 +50,8 @@ from promptpotter.domain.pipeline_schema import (
     narrowing_of,
 )
 from promptpotter.infrastructure.store.dataset_access import claim_own_definition
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from promptpotter.domain.cell_terms import CellTerm
-    from promptpotter.domain.checkin_draft import DraftFile
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 class DraftPatchPlan(NamedTuple):

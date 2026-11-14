@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import logging
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import latest_launch
@@ -10,14 +11,13 @@ from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.domain.command_kinds import Door, GradeBenchPayload
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import NotFoundError
 
 logger = logging.getLogger("promptpotter.presentation.cli.bench")
 
 
 async def cmd_bench(args: argparse.Namespace) -> CommandResult:
-    store = open_stores(args)
+    store = local_stores(tenant=args.tenant)
     if args.campaign:
         campaign_id: str | None = args.campaign
     else:
@@ -26,8 +26,9 @@ async def cmd_bench(args: argparse.Namespace) -> CommandResult:
     if not campaign_id:
         raise NotFoundError("No active campaign to bench — name one with --campaign.")
     call = CommandCall(GradeBenchPayload(campaign_id=campaign_id), door=Door.TERMINAL)
-    with ctrl_c_stops_pass(store, call):
-        sent = await CommandDispatcher(store).answer(measuring.grade_bench, call)
+    dispatcher = CommandDispatcher(store)
+    with ctrl_c_stops_pass(dispatcher, call):
+        sent = await dispatcher.answer(measuring.grade_bench, call)
     score, graded = sent.result, sent.payload.campaign_id
     logger.info("bench: %s -> graded", graded)
     return CommandResult(

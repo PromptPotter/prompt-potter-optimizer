@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import uuid
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import Any
 
 from pydantic import Field
 
@@ -13,22 +14,18 @@ from promptpotter.application.scoring.formula.compiler import (
     split_scoring_block,
 )
 from promptpotter.application.scoring.formula.matchers import matcher_of
+from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.checkin_draft import DraftBasis, DraftFile, UploadBasis
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import safe_name
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from promptpotter.domain.cell_terms import CellTerm
-    from promptpotter.domain.pipeline_params import NodeCall
-    from promptpotter.infrastructure.store.stores import Stores
 
 PREVIEW_ROWS = 10
 """Sample-preview head size returned alongside every mutation response."""

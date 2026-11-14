@@ -3,9 +3,12 @@ rendered by the verb's own renderer."""
 
 from __future__ import annotations
 
+import argparse
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import CommandReading
 from promptpotter.application.commands.loop_commands import read_payload_file
@@ -14,14 +17,10 @@ from promptpotter.application.read_params import PARAMS_FOR_READ, ReadParams
 from promptpotter.config.logging import setup_logging
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.verbs import VERBS
-from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.named_rows import imported
 
 if TYPE_CHECKING:
-    import argparse
-    from collections.abc import Callable
-
     Render = Callable[[ReadParams, Any, argparse.Namespace, Caller], CommandResult]
 
 _COMMANDS_PACKAGE = "promptpotter.presentation.cli.commands"
@@ -63,7 +62,7 @@ async def cmd_read(args: argparse.Namespace) -> CommandResult:
     verb = next(verb for verb in VERBS if verb.name == args.command)
     assert verb.read is not None and verb.render is not None
     model = PARAMS_FOR_READ[verb.read]
-    stores = open_stores(args)
+    stores = local_stores(tenant=args.tenant)
     # A flag left unset leaves the row's own default; a structured field is named by a YAML file.
     fields: dict[str, Any] = {
         name: read_payload_file(value) if isinstance(value, Path) else value

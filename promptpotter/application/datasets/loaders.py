@@ -14,11 +14,13 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 from types import CodeType, FunctionType, ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.datasets.harbor_panel import write_task_panel
 from promptpotter.application.datasets.tabular_ingest import materialize_samples, read_kept_table
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store.dataset_access import (
     MATERIALIZED_PANEL_FILE,
     ResolvedDataset,
@@ -29,14 +31,10 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.io import write_bytes
 from promptpotter.infrastructure.store.measurement_archive import config_key
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.extras import Extra, require_extra
 from promptpotter.shared.hashing import ADDRESS_HEX, module_source_digest, stable_hash
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

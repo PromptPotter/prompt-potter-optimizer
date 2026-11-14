@@ -5,13 +5,22 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated, ClassVar
+from types import ModuleType
+from typing import Annotated, ClassVar
 
 import numpy as np
 from pydantic import Field, model_validator
 
-from promptpotter.application.bench.node_context import Calls, Children, Lineage, Replay, Target
+from promptpotter.application.bench.node_context import (
+    Calls,
+    Children,
+    Lineage,
+    NodeContext,
+    Replay,
+    Target,
+)
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
@@ -19,37 +28,28 @@ from promptpotter.application.optimizers.descriptors import (
     cell_objectives,
 )
 from promptpotter.application.optimizers.fence import fence_untrusted
-from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizers.nodes import (
+    CycleRead,
+    MeasuredRound,
+    Panel,
+    PromptArity,
+    Proposals,
+    RewriteKnobs,
+    Selection,
+)
 from promptpotter.application.optimizers.paper_templates import child, shown, task_description
+from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.domain.arms import Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
-from promptpotter.domain.optimizer_state import StateSlice
+from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
+from promptpotter.domain.optimizer_state import StatePart, StateSlice
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind
-from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.scoring import ROW_GRADES
+from promptpotter.domain.results import OptimizerFact, RoundResult
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradedCell
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import greedy_column_subset, logistic
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import (
-        CycleRead,
-        MeasuredRound,
-        Panel,
-        PromptArity,
-        Proposals,
-        Selection,
-    )
-    from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.arms import Proposal
-    from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
-    from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, GradedCell
 
 
 class DescriptorStats(StrictModel):

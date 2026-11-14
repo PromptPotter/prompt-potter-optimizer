@@ -250,7 +250,7 @@ class LiveDashboardProjection(Projection):
         self._standings[record.round] = (record.level_series, record.run_standing)
         self._stand()
         prior = [r for r in self.state.rounds if r.round != record.round]
-        summary = self._with_bench(RoundSummary.of(record))
+        summary = self._with_bench(record.summary())
         self.state.rounds = sorted([*prior, summary], key=lambda r: r.round)
 
     def _handle_phase(self, record: PhaseRecord) -> None:

@@ -114,7 +114,6 @@ from promptpotter.application.pipeline_resolve import cycle_config, laid_config
 from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner.bench import cycle_bench, line_run
 from promptpotter.application.runner.inner import spawn
-from promptpotter.application.runner.inner.tasks import InnerSpawnContext
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring import catch_up, query_loop
@@ -160,6 +159,7 @@ from promptpotter.domain.command_kinds import (
     StartCheckinPayload,
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.job import (
@@ -183,7 +183,6 @@ from promptpotter.domain.phases import (
     CampaignPhase,
     PauseCause,
     RunPhase,
-    StopLoop,
     StopReason,
     WalkEnd,
 )
@@ -218,9 +217,9 @@ from promptpotter.domain.records.run_records import (
     SampleStartedRecord,
     SpendTombstoneRecord,
     StandingBudgetRecord,
+    StopLoop,
     TokenUsageRecord,
 )
-from promptpotter.domain.results import CycleResult
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
@@ -276,6 +275,7 @@ from promptpotter.infrastructure.llm.wallet import (
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.base import Projection
+from promptpotter.infrastructure.run_scope import InnerSpawnContext, rescope, scoped
 from promptpotter.infrastructure.store.account_spend import (
     account_bill,
     bank_spend,
@@ -346,12 +346,11 @@ from promptpotter.shared.measurement_context import (
     enter_instrument_mode,
     measured_pass,
 )
-from promptpotter.shared.run_scope import scoped
 
 
 @pytest.fixture
 def run_bound(tmp_path: Path) -> Iterator[None]:
-    with scoped(ledger=CycleEventLog(tmp_path / "bound.jsonl")), telemetry.at_round(1):
+    with scoped(ledger=CycleEventLog(tmp_path / "bound.jsonl")), scoped(round=1):
         yield
 
 
@@ -814,7 +813,7 @@ async def _walk(
     backend = _OrderedFakeBackend(len(dataset))
     # The walk's own campaign, which priced nothing yet.
     campaign = stores.projects_root / "walks" / uuid.uuid4().hex
-    telemetry.bind_priced(campaign)
+    rescope(priced=campaign)
     # An individual of its own, so a walk replays only the cells of the one it resumes.
     sp = resumes or JobSearchPoint(
         pipeline_params=PipelineParams().with_nodes({"search": {"walk": uuid.uuid4().hex}})
@@ -1274,7 +1273,7 @@ def test_the_last_skip_on_record_per_candidate_outlives_a_stop_and_a_rewind_drop
         ("b", 8, None),
         ("c", 4, "skipped"),
     )
-    with telemetry.at_round(2):
+    with scoped(round=2):
         for cid, n, cut in superseding:
             arm_walk(
                 skips,
@@ -1358,7 +1357,7 @@ async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
     cell = Sample(id=0, query=query, ground_truth=None, source_pin=pin)
     with (
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
-        telemetry.at_round(0),
+        scoped(round=0),
     ):
         # The connector DECLARES the seconds, the scoring seam enforces them, as in `measure_sample`.
         envelope = CellEnvelope(spawn.inner_cell_envelope_s(cell, {}), attempts=1, label=query)
@@ -1407,7 +1406,7 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
             await judge_call.ask(JudgeStage(model="m", provider="openai"), "grade", judge="j")
 
     # Another campaign's run banks both replies; this arm only ever replays them.
-    telemetry.bind_priced(tmp_path / "other")
+    rescope(priced=tmp_path / "other")
     with _billing_on(CycleEventLog(tmp_path / "other.jsonl"), spend_book()):
         await round_calls()
 
@@ -1456,7 +1455,7 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
         stopped = CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / "stopped"))
         for s in reread[:3]:
             stopped.append(PricedKeyRecord(priced_key=feed.cell_key(s.key)))
-        telemetry.bind_priced(campaign)
+        rescope(priced=campaign)
         with scoped(book=arm):
             walk = open_walk(picked, reread, session, kind=MeasurementRole.PANEL, measured=None)
             halted = await _stopped_by_operator(
@@ -2511,7 +2510,7 @@ def test_a_bench_pass_eats_none_of_an_arms_search_budget_and_replays_spend_it(
     # The pass's cells are backend cells filed as bench: admitted in the bucket they bill to.
     with (
         scoped(book=fresh),
-        telemetry.filed_as("bench"),
+        scoped(filed_as="bench"),
         reserved(CallLabel("cell", "backend"), pass_bound, paid_by="user"),
     ):
         pass
@@ -2678,7 +2677,7 @@ def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(tmp_path: Path) -> 
 @pytest.mark.usefixtures("run_bound")
 def test_a_key_two_cycles_of_one_campaign_read_is_priced_once(tmp_path: Path) -> None:
     campaign = tmp_path / "campaign"
-    telemetry.bind_priced(campaign)
+    rescope(priced=campaign)
     claims = []
     for cycle in ("a", "b"):
         with scoped(ledger=CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / cycle))):

@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.config.settings import settings
+from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.domain.spend import Budget
 from promptpotter.shared.errors import PayloadInvalidError
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping
-
-    from promptpotter.domain.command_kinds import ReadKind
 
 
 class Arg:

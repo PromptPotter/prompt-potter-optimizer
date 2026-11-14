@@ -8,13 +8,17 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 
 from promptpotter.config.paths import MACHINE_DIR
+from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
+from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
 from promptpotter.domain.records.run_records import BackendWarningRecord
+from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
 from promptpotter.infrastructure.llm.pricing import priced_pair
@@ -39,6 +43,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     reserved,
 )
 from promptpotter.infrastructure.llm.telemetry import append_record
+from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.store.io import HeldLock, take_lock
 from promptpotter.shared.errors import (
     CellHaltedError,
@@ -47,7 +52,6 @@ from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
 )
-from promptpotter.shared.run_scope import run_scope
 from promptpotter.shared.tls import tls_context
 
 _OUTAGE_POLL_S = 5.0
@@ -61,11 +65,6 @@ type CellBilling[S] = Callable[[dict[str, Any]], tuple[Reported | None, S]]
 _ANSWERED_STATUSES = frozenset({422})
 CELL = CallLabel("backend_cell", "backend")
 
-if TYPE_CHECKING:
-    from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
-    from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
-    from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
-    from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
 

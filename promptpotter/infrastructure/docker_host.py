@@ -5,16 +5,13 @@ import contextlib
 import logging
 import os
 import tempfile
+from collections.abc import Iterator, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from promptpotter.config.paths import PRODUCERS_DIR
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.store.io import rmtree_robust, validate_path_component
 from promptpotter.shared.errors import CellInfrastructureError
-
-if TYPE_CHECKING:
-    from collections.abc import Iterator, Mapping
 
 logger = logging.getLogger(__name__)
 

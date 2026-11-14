@@ -3,16 +3,13 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Callable
 from functools import partial
-from typing import TYPE_CHECKING
+from types import TracebackType
 
 from promptpotter.infrastructure.llm.send_pacing import SendBudget
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.shared.errors import CellHaltedError
-from promptpotter.shared.run_scope import scoped
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-    from types import TracebackType
 
 logger = logging.getLogger(__name__)
 

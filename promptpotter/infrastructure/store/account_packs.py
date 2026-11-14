@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from promptpotter.config.prompt_blocks import PackShelf
-from promptpotter.domain.prompt_block import ACCOUNT_PACK, BlockPack
+from promptpotter.domain.prompt_block import ACCOUNT_PACK, BlockPack, Snippet
 from promptpotter.infrastructure.store.io import write_lock, write_text
-
-if TYPE_CHECKING:
-    from promptpotter.domain.prompt_block import Snippet
 
 
 def bank_into_account_pack(shelf: PackShelf, snippet: Snippet) -> None:

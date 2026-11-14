@@ -77,6 +77,7 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.inner.tasks import measurement_modules
 from promptpotter.config.paths import (
     PROJECTS_DIR,
@@ -116,6 +117,7 @@ from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
+from promptpotter.infrastructure.run_scope import InnerSpawnContext, run_scope, scoped
 from promptpotter.infrastructure.run_state import producer_attached
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -132,13 +134,12 @@ from promptpotter.presentation.cli import campaign_runner
 from promptpotter.shared.hashing import module_source_digest
 from promptpotter.shared.identity import default_identity
 from promptpotter.shared.measurement_context import instrument_depth
-from promptpotter.shared.run_scope import run_scope, scoped
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
 
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.results import CycleResult
+    from promptpotter.domain.cycle_result import CycleResult
     from promptpotter.infrastructure.store.stores import Stores
 
 DATASET = "justlogic/d234"
@@ -365,10 +366,15 @@ def _asker() -> str:
     if not instrument_depth():
         return ""
     scope = run_scope()
-    assert scope.optimizer is not None and scope.determinism is not None, "an inner run binds both"
-    held = json.dumps(
-        [scope.determinism.seed, scope.optimizer.overlay], sort_keys=True, default=str
-    )
+    spawn, stores = scope.spawn, scope.account
+    assert isinstance(spawn, InnerSpawnContext) and stores is not None, "an inner run binds both"
+    assert scope.determinism is not None, "an inner run binds its clamp"
+    hop = spawn.inside[-1]
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    assert campaign is not None, "an inner run's campaign is minted before it calls"
+    laid = cycle_config(stores, campaign, hop).config.optimization.nodes
+    overlay = {node: dict(o.config) for node, o in sorted(laid.items())}
+    held = json.dumps([scope.determinism.seed, overlay], sort_keys=True, default=str)
     return hashlib.sha256(held.encode()).hexdigest()[:8]
 
 

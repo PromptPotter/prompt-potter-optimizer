@@ -5,7 +5,9 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.records.run_records import LLMCallProgressRecord
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 from promptpotter.shared.errors import (
     FileUnreadableError,
@@ -13,8 +15,6 @@ from promptpotter.shared.errors import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 
 logger = logging.getLogger(__name__)

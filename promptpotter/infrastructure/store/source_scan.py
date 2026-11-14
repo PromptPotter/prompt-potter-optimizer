@@ -4,8 +4,10 @@ import contextlib
 import hashlib
 import json
 import sys
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from types import ModuleType
+from typing import NamedTuple
 
 from promptpotter.config.paths import install_cache_root
 from promptpotter.infrastructure.store.io import read_json_tolerant, write_json
@@ -20,11 +22,6 @@ from promptpotter.shared.hashing import (
     shapes_optimizer_prompt,
     source_facts,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-    from types import ModuleType
-
 
 _PACKAGE_ROOT = Path(__file__).resolve().parents[2]
 

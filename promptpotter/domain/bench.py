@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, Literal, NamedTuple, Self
+from typing import Literal, NamedTuple, Self
 
 from pydantic import Field, model_validator
 
@@ -25,11 +25,6 @@ from promptpotter.domain.scoring import CellGrade
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
-
-if TYPE_CHECKING:
-    # `campaign.py` imports this module: the refusal is read here by its member's name.
-    from promptpotter.domain.campaign import CampaignRefusal
-    from promptpotter.domain.records.partition import PartitionRecord
 
 
 class DatasetSplit(StrictModel):
@@ -129,16 +124,6 @@ def partition_bank(
         search=ordered(s for s in bank if s.key not in bench_keys and s.key not in demo_keys),
         bench=tuple(s for s in bank if s.key in bench_keys),
         demo=tuple(s for s in bank if s.key in demo_keys),
-    )
-
-
-def restored_partition(bank: Sequence[Sample], drawn: PartitionRecord) -> BankPartition:
-    """*bank* is the one ``drawn.dataset_hash`` names, so a slot is its position."""
-    return BankPartition(
-        split=drawn.split,
-        search=tuple(bank[i] for i in drawn.search_ids),
-        bench=tuple(bank[i] for i in drawn.bench_ids),
-        demo=tuple(bank[i] for i in drawn.demo_ids),
     )
 
 
@@ -550,3 +535,18 @@ class BenchScore(FrozenModel):
 
     def lift(self, column: BenchColumn) -> MeasuredLift | None:
         return self.vs_origin.lift(COLUMN_GRADE[column])
+
+
+class CampaignRefusal(StrEnum):
+    """Why every run and pass on a campaign is refused, read off it and its dataset's definition
+    alone (`admission.py::campaign_refusal`): admission refuses with this code, and a served
+    can-run answer serves the same value (`BenchRefusal`)."""
+
+    NOT_ACTIVE = "campaign_not_active"
+    # Its dataset resolves to no definition naming a connector: gone, unoffered, or unreadable.
+    DEFINITION_UNREAD = "definition_unread"
+    # Its dataset's definition now names another connector than the one it was minted on.
+    CONNECTOR_MOVED = "connector_moved"
+
+
+assert {r.value for r in CampaignRefusal} <= {r.value for r in BenchRefusal}

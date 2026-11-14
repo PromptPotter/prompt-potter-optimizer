@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING, Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any
 
 from promptpotter.application.scoring.judges.call import (
     absent,
@@ -10,12 +11,7 @@ from promptpotter.application.scoring.judges.call import (
     judge_question,
 )
 from promptpotter.domain.judges import GradeFn, Judge, JudgeSpec, JudgeVerdict
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
-
-    from promptpotter.domain.scoring import MeasuredCell
-
+from promptpotter.domain.scoring import MeasuredCell
 
 # The TAIL is kept: a trace opens with setup identical across candidates.
 _TRACE_CAP = 6000

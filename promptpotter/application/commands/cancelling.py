@@ -3,17 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
 
 from promptpotter.application.command_reading import launched_jobs, owned_command
-from promptpotter.application.commands.dispatcher import Applier
+from promptpotter.application.commands.dispatcher import Applier, Dispatched
 from promptpotter.application.commands.launching import launch_cancels
-from promptpotter.domain.command_kinds import CommandKind
+from promptpotter.domain.command_kinds import CancelPayload, CommandKind
 from promptpotter.shared.errors import TaskUncancellableError
-
-if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import Dispatched
-    from promptpotter.domain.command_kinds import CancelPayload
 
 # A paid pass reads its cancel as its pause, by its own command id (`RunControl.acting`): it stops
 # at its next cell and answers over what it banked. Every kind `measuring.py` answers is one.

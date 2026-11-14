@@ -2,13 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable, Coroutine, Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.hashing import stable_hash
-
-if TYPE_CHECKING:
-    from promptpotter.domain.scoring import MeasuredCell
 
 
 class JudgeStage(StrictModel):

@@ -10,10 +10,11 @@ import contextlib
 import logging
 import math
 import time
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING, NamedTuple
 
-from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import ruler_clock
 from promptpotter.application.bench.node_context import (
     Children,
@@ -34,8 +35,6 @@ from promptpotter.application.optimizers.nodes import (
     OPERATOR_SEAT,
     MeasuredRound,
     Proposals,
-    ReadArm,
-    RoundContext,
     RoundOpening,
     RoundWalk,
 )
@@ -67,21 +66,26 @@ from promptpotter.application.scoring.search_point_scorer import (
 from promptpotter.application.scoring.selection import cells_read, crowning_cells, discordant
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.phase import stop_next_lines
-from promptpotter.domain.arm_reading import ArmFit
+from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import (
     ArmState,
     Concluded,
     Cut,
+    Elimination,
     Measured,
+    Measuring,
     Proposal,
+    Proposed,
     arm_name,
     is_electable,
     is_leader_eligible,
     walked_short,
 )
 from promptpotter.domain.cell_fold import measured_cells, unscoreable_cells
+from promptpotter.domain.command_kinds import SubmittedArm
 from promptpotter.domain.crowning_bar import BarRead, BarSubject
-from promptpotter.domain.opt_search_point import Locus, loci_of
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, loci_of
 from promptpotter.domain.optimizer_state import RoundOutput
 from promptpotter.domain.origin_panel import (
     OverlapReading,
@@ -103,7 +107,7 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.phase_views import MeasureEnterView
-from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason
+from promptpotter.domain.phases import CampaignPhase, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION
 from promptpotter.domain.records.run_records import (
     ArmRecord,
@@ -113,6 +117,7 @@ from promptpotter.domain.records.run_records import (
     PhaseRecord,
     RoundClosedRecord,
     RunPhaseRecord,
+    StopLoop,
 )
 from promptpotter.domain.results import Election, InRunCells, RoundResult, round_document_digest
 from promptpotter.domain.run_standing import (
@@ -123,17 +128,17 @@ from promptpotter.domain.run_standing import (
     line_reference,
     rounds_without_advance,
 )
-from promptpotter.domain.scoring import NO_CELLS, CellSheet
-from promptpotter.domain.search_point import SHOTS_KEY
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
+from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint
 from promptpotter.domain.wounds import ValidationFailure, collapse_counts
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.shared.errors import SendRefusedError, graceful
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Mapping, Sequence
-
     from promptpotter.application.optimizer_manifest import RoundPlan
     from promptpotter.application.optimizers.nodes import (
         Controller,
@@ -146,15 +151,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.application.scoring.query_loop import BlockRace
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-    from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.arms import Elimination, Measuring, Proposed
-    from promptpotter.domain.command_kinds import SubmittedArm
-    from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell, Scorer
-    from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 

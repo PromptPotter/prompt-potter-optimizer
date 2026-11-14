@@ -30,7 +30,7 @@ from promptpotter.config.paths import default_projects_root, jobs_dir, user_data
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.optimizer_state import STATE_KINDS
-from promptpotter.domain.records import RECORDS
+from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,

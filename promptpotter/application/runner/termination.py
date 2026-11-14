@@ -5,17 +5,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import traceback
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
+from promptpotter.domain.campaign_config import (
+    GateMode,
+    OptimizationConfig,
+)
 from promptpotter.domain.crowning_bar import BAR_ADMISSION
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
-    StopLoop,
     StopOutcome,
     StopReason,
 )
 from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import StopLoop
+from promptpotter.domain.round_health import DegradationHealth
+from promptpotter.domain.run_standing import RunStanding
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -28,16 +36,7 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.statistics import anytime_level_lower
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.campaign_config import (
-        GateMode,
-        OptimizationConfig,
-    )
-    from promptpotter.domain.round_health import DegradationHealth
-    from promptpotter.domain.run_standing import RunStanding
-    from promptpotter.domain.scoring import GradedCell
 
 logger = logging.getLogger(__name__)
 

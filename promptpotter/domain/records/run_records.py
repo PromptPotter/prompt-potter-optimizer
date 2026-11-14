@@ -18,17 +18,23 @@ from pydantic import (
 )
 
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.arms import ArmRole, ArmState, Proposal, Proposed
+from promptpotter.domain.arms import ArmRole, ArmState, Proposal, Proposed, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.crowning_bar import lift_prior
 from promptpotter.domain.cycle_paths import CycleHop, Subject
-from promptpotter.domain.dashboard_rows import RunLimits
+from promptpotter.domain.dashboard_rows import (
+    DashboardCandidate,
+    RoundHealth,
+    RoundSummary,
+    RunLimits,
+)
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import STATE_KINDS, OptimizerState, StatePart
-from promptpotter.domain.paired_reading import ArmKey, PriorStanding, RoundArm
+from promptpotter.domain.paired_reading import ArmKey, ArmName, PriorStanding, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
@@ -248,6 +254,40 @@ class RoundStatement(RoundOutcome):
             else panel_precision(rr.rows(leading).cells, line[0].results.cells),
             anchors=anchors,
             **own,
+        )
+
+    def summary(self) -> RoundSummary:
+        """This round as the dashboard banks it."""
+        arms = self.cells.arms
+        longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
+        election = self.election
+
+        def name(key: ArmKey) -> ArmName:
+            return arm_name(key, self.arms[key], self.round)
+
+        return RoundSummary(
+            round=self.round,
+            leading=None
+            if election is None or election.leading is None
+            else name(election.leading),
+            selected=None
+            if election is None or election.selected is None
+            else name(election.selected),
+            improved=None if self.round == 0 else self.improved,
+            verdict_reason=None if self.round == 0 or election is None else election.verdict_reason,
+            candidates=[
+                DashboardCandidate(reading=reading)
+                for reading in self.arm_readings()
+                if reading.role != MeasurementRole.PARENT
+            ],
+            selection=list(dict.fromkeys(self.positions[key] for key, _, _ in longest)),
+            health=RoundHealth.of(self.round, self.health),
+            overlap=self.overlap,
+            panel_precision=self.panel_precision,
+            optimizer_facts=self.optimizer_facts,
+            lift_prior=None
+            if election is None
+            else lift_prior(f.lift for f in election.fit.values() if f.lift is not None),
         )
 
     def restated(self, optimizer_state: OptimizerState) -> RoundRestatedRecord:
@@ -1378,3 +1418,20 @@ class RebaseRequest(FrozenModel):
                 f"{self.fork_from_round - 1}, not the round {self.hangs_from.round} it re-elects"
             )
         return self
+
+
+class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
+    def __init__(
+        self,
+        reason: StopReason,
+        *,
+        unmeasured: int | None = None,
+        fork: RebaseRequest | None = None,
+    ) -> None:
+        if (reason is StopReason.REBASED) != (fork is not None):
+            raise ValueError("a REBASED stop, and only one, carries the fork it asks for")
+        self.reason = reason
+        # Cells of the walk this stop left unmeasured, where the raiser is a walk.
+        self.unmeasured = unmeasured
+        self.fork = fork
+        super().__init__(reason.value)

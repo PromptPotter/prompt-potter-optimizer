@@ -58,6 +58,7 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.paired import grade_measurands
 from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.domain.arm_reading import fold_fitness_text, lift_text
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
@@ -74,7 +75,7 @@ from promptpotter.domain.optimizer_state import (
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
-from promptpotter.domain.results import CycleResult, RoundResult
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import (
     DeltaRuler,
     RulerOwn,
@@ -88,6 +89,7 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import LedgerCell, Scorer
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -97,7 +99,6 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError
-from promptpotter.shared.run_scope import scoped
 
 # 1. The estimator
 

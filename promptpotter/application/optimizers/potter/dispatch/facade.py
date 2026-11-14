@@ -4,16 +4,22 @@ import contextlib
 import functools
 import logging
 import sys
-from typing import TYPE_CHECKING, NamedTuple
+from collections.abc import Mapping, Sequence
+from types import ModuleType
+from typing import NamedTuple
 
 from promptpotter.application.bench.llm_call import FilledPrompt, InjectionBreakdown
 from promptpotter.application.bench.node_context import (
     Bounds,
+    Calls,
     Frontier,
     Lineage,
+    NodeContext,
     Ruler,
     Target,
 )
+from promptpotter.application.intelligence.indexes.axis import AxisIndex
+from promptpotter.application.optimizers.nodes import CycleRead
 from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
@@ -49,39 +55,29 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.variation.members import Cross, crossable
 from promptpotter.domain import ruler
-from promptpotter.domain.optimizer_state import Critique
+from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.l4.cells import InnerCells
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
+from promptpotter.domain.optimizer_state import Critique, CritiqueReadout, StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.domain.pool import EARNED_SOURCE, BlockPool, DemoPool
+from promptpotter.domain.paired_reading import RoundArm
+from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
+from promptpotter.domain.pool import EARNED_SOURCE, Access, BlockPool, DemoPool, PoolEntry
 from promptpotter.domain.records.run_records import RoundWarningRecord
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
+from promptpotter.domain.round_diagnostics import RoundDiagnostics
+from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_standing import rounds_without_advance
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.value_tree import Delivery
+from promptpotter.domain.wounds import RuntimeFailure
 from promptpotter.infrastructure.llm.telemetry import append_record, current_round
+from promptpotter.infrastructure.run_scope import RunScope, scoped
 from promptpotter.shared.errors import PromptCompositionError
-from promptpotter.shared.run_scope import RunScope, scoped
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-    from types import ModuleType
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
-    from promptpotter.application.optimizers.nodes import CycleRead
-    from promptpotter.domain.connector import MeasuredUnit
-    from promptpotter.domain.l4.cells import InnerCells
-    from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
-    from promptpotter.domain.optimizer_state import CritiqueReadout, StatePart
-    from promptpotter.domain.paired_reading import RoundArm
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
-    from promptpotter.domain.pool import Access, PoolEntry
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.round_diagnostics import RoundDiagnostics
-    from promptpotter.domain.ruler import AbilityReading, DeltaRuler
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, GradedCell
-    from promptpotter.domain.search_point import TaskDecomposition
-    from promptpotter.domain.value_tree import Delivery
-    from promptpotter.domain.wounds import RuntimeFailure
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +175,7 @@ class DispatchHub:
     ) -> FilledPrompt:
         """The layout is RESOLVED here, never passed in, so no caller can hand a node another node's panel set."""
         table = injection_table()
-        layout = node_layout(node, view.l2)
+        layout = node_layout(node, view.l2, view.ctx.read(Calls).levers(node))
         order = layout.all_placeholders()
         items = {name: DispatchHub.render_items(name, view) for name in order}
         budget = NODE_LAYOUTS[node].discretionary_chars if node in NODE_LAYOUTS else _NO_CEILING

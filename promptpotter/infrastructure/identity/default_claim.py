@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, settings
@@ -11,10 +10,7 @@ from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import held_lock
 from promptpotter.infrastructure.store.user_store import User, UserStore, read_accounts
-from promptpotter.shared.identity import TERMINAL_IDENTITY_ID
-
-if TYPE_CHECKING:
-    from promptpotter.shared.identity import IdentityContext
+from promptpotter.shared.identity import TERMINAL_IDENTITY_ID, IdentityContext
 
 logger = logging.getLogger(__name__)
 

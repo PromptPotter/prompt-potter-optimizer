@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from itertools import pairwise, zip_longest
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 from promptpotter.application.intelligence.rasch import (
     expected_information,
@@ -41,6 +41,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     signal,
 )
+from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 from promptpotter.application.optimizers.potter.records import ExplorationBudget
 from promptpotter.application.scoring.evaluators import compute_fitness
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
@@ -80,9 +81,6 @@ from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.shared.answer_text import tail
 from promptpotter.shared.composite import render_composite_fitness_block
-
-if TYPE_CHECKING:
-    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 
 
 @signal(

@@ -8,9 +8,10 @@ import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, assert_never
+from typing import assert_never
 
 from promptpotter.application.datasets.authored import ConfigLayers, effective_config
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import RunStart, admit_arms, probe_backend
 from promptpotter.application.jobs.launcher.checkin import OpenedCheckin, open_checkin
@@ -26,20 +27,16 @@ from promptpotter.application.jobs.mint import (
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.pipeline_resolve import ServedPipeline
+from promptpotter.domain.command_kinds import HeadToHeadRequest
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
 from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.infrastructure.store.dataset_access import runnable_definition
-
-if TYPE_CHECKING:
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.application.pipeline_resolve import ServedPipeline
-    from promptpotter.domain.command_kinds import HeadToHeadRequest
-    from promptpotter.domain.spend import Budget, HeldBudget
-    from promptpotter.infrastructure.llm.wallet import Send
-    from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
-    from promptpotter.infrastructure.store.draft_store import DraftClaim
-    from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.domain.spend import Budget, HeldBudget
+from promptpotter.infrastructure.llm.wallet import Send
+from promptpotter.infrastructure.store.dataset_access import ResolvedDataset, runnable_definition
+from promptpotter.infrastructure.store.draft_store import DraftClaim
+from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from typing import TYPE_CHECKING
 
 from promptpotter.application.scoring.judges.call import (
     absent,
@@ -12,10 +11,7 @@ from promptpotter.application.scoring.judges.call import (
     judge_question,
 )
 from promptpotter.domain.judges import GradeFn, Judge, JudgeSpec, JudgeVerdict
-
-if TYPE_CHECKING:
-    from promptpotter.domain.scoring import MeasuredCell
-
+from promptpotter.domain.scoring import MeasuredCell
 
 # Verbatim `openai/simple-evals/simpleqa_eval.py::GRADER_TEMPLATE`, quirks included: never fix it.
 _SIMPLEQA_RUBRIC = """

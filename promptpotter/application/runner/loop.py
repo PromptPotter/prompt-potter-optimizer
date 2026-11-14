@@ -6,14 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
-from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.cycle import Cycle, RoundContext
 from promptpotter.application.bench.node_context import walk_origin
 from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.bench.resume_and_fork.repair import origin_only
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.origin import lock_criterion
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.bench import bench_origin, declare_line_bench
@@ -31,20 +30,19 @@ from promptpotter.application.runner.termination import (
 from promptpotter.application.scoring.passes import measure_noise_floor
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import repairable_holes
-from promptpotter.domain.phases import STOP_REASON_INFO, StopLoop, StopReason
+from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
     OriginGatePass,
     RebaseRequest,
     RoundEnteredRecord,
+    StopLoop,
 )
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.spend import SpendRollup
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
-from promptpotter.infrastructure.llm.telemetry import at_round
-
-if TYPE_CHECKING:
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.spend import SpendRollup
-    from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.run_scope import scoped
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +106,7 @@ async def run_round_loop(
                 "Round %d (clean=%d/%s, parent=%s)", round_num, clean_rounds, cap, cycle.parent_fold
             )
 
-            with at_round(round_num):
+            with scoped(round=round_num):
                 open_round = round_num
                 ledger.append(RoundEnteredRecord(round=round_num))
 

@@ -68,6 +68,7 @@ from starlette.types import Message, Receive, Scope, Send
 
 from promptpotter.application import account, app_visits, health, notices, optimizers
 from promptpotter.application.bench import node_context
+from promptpotter.application.bench.cycle import RoundContext
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
 from promptpotter.application.caller import Caller
@@ -112,7 +113,6 @@ from promptpotter.application.maintenance.landing import apply_landing, last_lan
 from promptpotter.application.maintenance.migrate import MIGRATIONS
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import running_prompt, select_optimizer
-from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -133,7 +133,8 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmSlot, Broken, Cut
-from promptpotter.domain.campaign import CampaignRefusal, CampaignRefusedError, Optimize
+from promptpotter.domain.bench import CampaignRefusal
+from promptpotter.domain.campaign import CampaignRefusedError, Optimize
 from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_events import (
@@ -253,6 +254,7 @@ from promptpotter.infrastructure.identity.session import OIDCSessionStore, Sessi
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.producer_lock import hold_cycle, minted_producer, release_cycle
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.run_state import derive_run_state, producer_attached
 from promptpotter.infrastructure.store import io as store_io
 from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
@@ -339,7 +341,6 @@ from promptpotter.shared.identity import (
     require_capability,
 )
 from promptpotter.shared.measurement_context import MeasurementRole
-from promptpotter.shared.run_scope import scoped
 
 _FENCE, _FENCE_END = "<UNTRUSTED_DATASET_CONTENT", "</UNTRUSTED_DATASET_CONTENT>"
 

@@ -5,19 +5,27 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
+from promptpotter.application.scoring.evaluators import SampleEvaluator
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
-from promptpotter.domain.bench import BankPartition, restored_partition
+from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.partition import PartitionRecord
-from promptpotter.domain.records.run_records import InterventionRecord, PipelineRead
+from promptpotter.domain.records.run_records import (
+    BackendRevision,
+    InterventionRecord,
+    PipelineRead,
+)
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import Scorer
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import HeldBudget
+from promptpotter.domain.validators import StopRule
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.stores import Stores
@@ -27,11 +35,6 @@ from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
     from promptpotter.application.run_observers import RunObservers
-    from promptpotter.application.scoring.evaluators import SampleEvaluator
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.records.run_records import BackendRevision
-    from promptpotter.domain.search_point import TaskDecomposition
-    from promptpotter.domain.validators import StopRule
 
 
 @dataclass(frozen=True)
@@ -154,7 +157,7 @@ class Session:
             cycle_id=hop.cycle_id,
             purpose=purpose,
             bank=bank,
-            drawn=restored_partition(bank.samples, drawn),
+            drawn=drawn.restored(bank.samples),
         )
 
     @property

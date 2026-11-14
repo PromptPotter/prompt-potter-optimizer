@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from promptpotter.application.views.render.primitives import (
     DIM,
     RED,
@@ -14,10 +12,7 @@ from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.results_health import is_deprecated, terminal_node
 from promptpotter.domain.sample import sample_tag
-from promptpotter.domain.scoring import StaleOutcome, graded_answer
-
-if TYPE_CHECKING:
-    from promptpotter.domain.scoring import Grade, MeasuredCell
+from promptpotter.domain.scoring import Grade, MeasuredCell, StaleOutcome, graded_answer
 
 
 def _ellide(s: str, n: int) -> str:

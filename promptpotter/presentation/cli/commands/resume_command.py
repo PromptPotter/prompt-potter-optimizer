@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Coroutine
+from typing import Any
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.cycle_addressing import cycle_target
+from promptpotter.application.cycle_addressing import SessionCtx, cycle_target, load_session
+from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.pipeline_resolve import fork_preview
 from promptpotter.config.logging import setup_logging
@@ -31,16 +34,8 @@ from promptpotter.presentation.cli.commands.launch import (
 )
 from promptpotter.presentation.cli.commands.new import mint_and_run
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args
-from promptpotter.presentation.cli.session import load_session
 from promptpotter.shared.errors import PayloadInvalidError
-
-if TYPE_CHECKING:
-    from collections.abc import Coroutine
-
-    from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -138,7 +133,8 @@ async def _pivot_to_fresh(
         raise SystemExit("Cancelled. Revert the config edits and retry `resume`.")
     fresh = {act.field: act.value, "budget": budget_from_args(args)}
     return await mint_and_run(
-        ctx.store, MintCampaignPayload.model_validate(fresh), inline_launch(args)
+        CommandDispatcher(ctx.store, inline=inline_launch(args)),
+        MintCampaignPayload.model_validate(fresh),
     )
 
 
@@ -149,7 +145,7 @@ def cmd_resume(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
 
 async def _resume(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
-    stores = open_stores(args)
+    stores = local_stores(tenant=args.tenant)
     ctx = load_session(stores, cycle_target(stores, args.campaign, args.cycle))
 
     payload = _payload(args, ctx.hop)

@@ -25,7 +25,8 @@ from typing import (
 
 from pydantic import TypeAdapter, ValidationError
 
-from promptpotter.domain.records import RECORDS, CycleRecord
+from promptpotter.domain.record_kinds import RECORDS
+from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import (
     Bill,
     ChargeLine,

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
@@ -12,8 +12,10 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     prose_ceiling,
     signal,
 )
+from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.scoring.formula.matchers import MATCHERS
+from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
@@ -25,10 +27,6 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import Access
 from promptpotter.domain.sample import sample_tag
-
-if TYPE_CHECKING:
-    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
-    from promptpotter.domain.l4.cells import InnerCells
 
 
 def _schema_description_block(

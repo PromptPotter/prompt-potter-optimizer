@@ -1,17 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import argparse
 
+from promptpotter.application.caller import Caller
+from promptpotter.application.head_to_head_price import ArmPrice, HeadToHeadPrice
+from promptpotter.application.read_params import HeadToHeadPriceParams
 from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.new import head_to_head_command
 from promptpotter.presentation.cli.commands.result import CommandResult
-
-if TYPE_CHECKING:
-    import argparse
-
-    from promptpotter.application.caller import Caller
-    from promptpotter.application.head_to_head_price import ArmPrice, HeadToHeadPrice
-    from promptpotter.application.read_params import HeadToHeadPriceParams
 
 
 def _clock(seconds: float | None) -> str:

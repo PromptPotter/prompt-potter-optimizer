@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     ForkCut,
@@ -47,8 +47,10 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
     assert_origin_ready,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
+    ServedPipeline,
     cycle_config,
     draft_pipeline,
     draft_served,
@@ -57,15 +59,23 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_campaign,
     steer_verdict,
 )
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
+from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.command_events import CommandEffect
 from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
     CommandKind,
+    CommandPayload,
     Door,
+    ForkCyclePayload,
+    ForkSeed,
+    HeadToHeadRequest,
+    MintCampaignPayload,
     MintHeadToHeadPayload,
     PauseCyclePayload,
     StartCheckinPayload,
+    StartRunPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, InnerRun, Job
@@ -81,6 +91,7 @@ from promptpotter.domain.records.run_records import (
     OriginSource,
 )
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     ConflictError,
     LedgerUnreadableError,
@@ -89,21 +100,6 @@ from promptpotter.shared.errors import (
     TaskUncancellableError,
 )
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, acting_principal
-
-if TYPE_CHECKING:
-    from promptpotter.application.jobs.registry import JobRegistry
-    from promptpotter.application.pipeline_resolve import ServedPipeline
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.checkin_draft import DraftFile
-    from promptpotter.domain.command_kinds import (
-        CommandPayload,
-        ForkCyclePayload,
-        ForkSeed,
-        HeadToHeadRequest,
-        MintCampaignPayload,
-        StartRunPayload,
-    )
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

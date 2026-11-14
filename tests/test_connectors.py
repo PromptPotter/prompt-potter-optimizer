@@ -33,8 +33,8 @@ from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.spend_book import SendBound
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.shared.errors import CellInfrastructureError
-from promptpotter.shared.run_scope import scoped
 
 
 async def _no_wait(*_: Any) -> None:

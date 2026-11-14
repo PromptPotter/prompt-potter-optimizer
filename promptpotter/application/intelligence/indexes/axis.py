@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
+from promptpotter.application.intelligence.indexes.sample import (
+    FailureCluster,
+    SampleIndex,
+    SampleRecord,
+)
 from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import is_leader_eligible
+from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.pipeline_schema import LocusKind, PipelineSchema
+from promptpotter.domain.results import RoundResult
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
@@ -15,19 +24,6 @@ from promptpotter.shared.hashing import shapes_optimizer_prompt
 def _is_forbidden_axis(axis: str) -> bool:
     _, _, param = axis.partition(".")
     return param in PARAM_FORBIDDEN_KEYS
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.application.intelligence.indexes.sample import (
-        FailureCluster,
-        SampleIndex,
-        SampleRecord,
-    )
-    from promptpotter.domain.paired_reading import MeasurandUnit
-    from promptpotter.domain.pipeline_schema import LocusKind, PipelineSchema
-    from promptpotter.domain.results import RoundResult
 
 
 NOISE_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 0.02

@@ -2,14 +2,14 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, get_args
+from typing import Any, Literal, get_args
 
 from pydantic import Field
 
 from promptpotter.domain.arm_reading import ArmReading
-from promptpotter.domain.arms import ArmState, Proposed, arm_name
+from promptpotter.domain.arms import ArmState, Proposed
 from promptpotter.domain.bench import BandedValue
-from promptpotter.domain.crowning_bar import LiftPrior, lift_prior
+from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
@@ -26,10 +26,6 @@ from promptpotter.domain.verification import VerifyReading
 from promptpotter.domain.wounds import ValidationFailure
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
-
-if TYPE_CHECKING:
-    from promptpotter.domain.records.run_records import RoundStatement
-
 
 #: `noise`: the cells were measured no more sharply than they landed apart; `spread`: they differ.
 PrecisionVerdict = Literal["noise", "spread"]
@@ -300,42 +296,6 @@ class RoundSummary(FrozenModel):
     optimizer_facts: list[OptimizerFact] = Field(default_factory=list)
     # The noise walk: the generator's N(μ0, τ²) off this round's own arm-vs-parent θ lifts.
     lift_prior: LiftPrior | None = None
-
-    @classmethod
-    def of(cls, closed: RoundStatement) -> RoundSummary:
-        arms = closed.cells.arms
-        longest = arms[max(arms, key=lambda k: (len(arms[k]), k))] if arms else []
-        election, health = closed.election, closed.health
-
-        def name(key: ArmKey) -> ArmName:
-            return arm_name(key, closed.arms[key], closed.round)
-
-        return cls(
-            round=closed.round,
-            leading=None
-            if election is None or election.leading is None
-            else name(election.leading),
-            selected=None
-            if election is None or election.selected is None
-            else name(election.selected),
-            improved=None if closed.round == 0 else closed.improved,
-            verdict_reason=None
-            if closed.round == 0 or election is None
-            else election.verdict_reason,
-            candidates=[
-                DashboardCandidate(reading=reading)
-                for reading in closed.arm_readings()
-                if reading.role != MeasurementRole.PARENT
-            ],
-            selection=list(dict.fromkeys(closed.positions[key] for key, _, _ in longest)),
-            health=RoundHealth.of(closed.round, health),
-            overlap=closed.overlap,
-            panel_precision=closed.panel_precision,
-            optimizer_facts=closed.optimizer_facts,
-            lift_prior=None
-            if election is None
-            else lift_prior(f.lift for f in election.fit.values() if f.lift is not None),
-        )
 
 
 class ServedRound(RoundSummary):

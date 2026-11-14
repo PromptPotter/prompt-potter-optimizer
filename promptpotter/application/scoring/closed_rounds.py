@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import LaunchState
@@ -10,8 +9,14 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import (
+    RoundClosedRecord,
+    RoundEnteredRecord,
+    RoundRestatedRecord,
+)
 from promptpotter.domain.results import RoundOutcome, RoundResult
-from promptpotter.domain.scoring import CellSheet, MeasuredCell, WalkedCell
+from promptpotter.domain.sample import Bank
+from promptpotter.domain.scoring import CellSheet, MeasuredCell, Scorer, WalkedCell
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.archive_queries import walked_answers
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -23,15 +28,6 @@ from promptpotter.infrastructure.store.layout import ROUND_GLOB, round_number
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, derived
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
-
-if TYPE_CHECKING:
-    from promptpotter.domain.records.run_records import (
-        RoundClosedRecord,
-        RoundEnteredRecord,
-        RoundRestatedRecord,
-    )
-    from promptpotter.domain.sample import Bank
-    from promptpotter.domain.scoring import Scorer
 
 
 def campaign_scorer(stores: Stores, campaign_id: str) -> Scorer | None:

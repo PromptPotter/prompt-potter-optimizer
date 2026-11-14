@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import Field
@@ -18,14 +19,16 @@ from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.pipeline_schema import (
     CapabilityMenu,
+    KnobLayers,
     NestedPipelineRef,
     NodeConfigParam,
     NodeOutputSchema,
     NodeReach,
+    PipelineSchema,
     PipelineView,
     reach_map,
 )
-from promptpotter.domain.pool import Access, PoolOffer, PoolSource, kept, offers
+from promptpotter.domain.pool import Access, Pool, PoolEntry, PoolOffer, PoolSource, kept, offers
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.said import Tone
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -36,11 +39,7 @@ from promptpotter.shared.plugin_registry import BUILT_IN
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from promptpotter.application.optimizers.nodes import Initializer
-    from promptpotter.domain.pipeline_schema import KnobLayers, PipelineSchema
-    from promptpotter.domain.pool import Pool, PoolEntry
 
 
 class KnobRef(StrictModel):

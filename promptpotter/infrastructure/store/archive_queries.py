@@ -8,18 +8,18 @@ from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
 
 from pydantic import Field
 
+from promptpotter.domain.ruler import RulerReach
+from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer
+from promptpotter.domain.scoring import MeasuredCell, WalkedCell
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, standing
 from promptpotter.infrastructure.store.read_model import LedgerSpan, read_rows
 from promptpotter.shared.measurement_context import MeasurementRole
-from promptpotter.shared.run_scope import run_scope
 
 if TYPE_CHECKING:
-    from promptpotter.domain.ruler import RulerReach
-    from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer
-    from promptpotter.domain.scoring import MeasuredCell, WalkedCell
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores
 

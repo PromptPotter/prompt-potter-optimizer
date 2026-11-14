@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.views.render.primitives import fmt_ci
@@ -15,7 +16,6 @@ from promptpotter.domain.records.run_records import VERIFY_WORDS, VerifySaturate
 from promptpotter.domain.verification import VerifyReading
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import BadRequestError, PayloadInvalidError
 
 
@@ -33,7 +33,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
             "verify takes one searchpoint and no mask: "
             "`candidate:<campaign>/<cycle>/<candidate_id>[;in=<c::y~…>]`."
         )
-    stores = open_stores(args)
+    stores = local_stores(tenant=args.tenant)
     fields = {
         **spec.command_fields,
         "candidate_id": spec.candidate_id,
@@ -43,8 +43,9 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     }
     payload = PayloadInvalidError.validating(VerifyCandidatePayload, fields)
     call = CommandCall(payload, door=Door.TERMINAL)
-    with ctrl_c_stops_pass(stores, call):
-        dispatched = await CommandDispatcher(stores).answer(measuring.verify_candidate, call)
+    dispatcher = CommandDispatcher(stores)
+    with ctrl_c_stops_pass(dispatcher, call):
+        dispatched = await dispatcher.answer(measuring.verify_candidate, call)
 
     graded = dispatched.result
     if isinstance(graded, VerifySaturated):

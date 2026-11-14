@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import threading
+from collections.abc import Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +27,9 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.campaign import CampaignRefusedError
+from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import LaunchMove
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
@@ -38,13 +41,9 @@ from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.identity import IdentityContext
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.mint import OpenedCycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.domain.campaign_config import CycleConfig
-    from promptpotter.domain.results import CycleResult
 
 logger = logging.getLogger(__name__)
 

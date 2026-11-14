@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -20,18 +21,16 @@ from promptpotter.application.mask.divergence import (
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskCycle, MaskRecord, MaskRound
 from promptpotter.application.optimizer_manifest import select_optimizer
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.records.run_records import ResumeCheckpointRecord
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.records.run_records import ResumeCheckpointRecord
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.scoring import CellSheet, Scorer
 
 logger = logging.getLogger(__name__)
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import enum
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import TYPE_CHECKING, Self
+from pathlib import Path
+from typing import Self
 
 from pydantic import ValidationError
 
@@ -19,10 +21,6 @@ from promptpotter.domain.prompt_block import (
 from promptpotter.domain.refusal import Refusal
 from promptpotter.shared.errors import ConflictError, NotFoundError, validation_reason
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from pathlib import Path
 
 PACK_FILE = "pack.json"
 

@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING, Any, Literal, TypeIs, get_args
 from pydantic import Field
 
 from promptpotter.domain.activity import ActivityRecord, ActivityState
-from promptpotter.domain.records import RECORDS, CycleRecord
+from promptpotter.domain.record_kinds import RECORDS
+from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.strict_model import FrozenModel
 
 # A missing kind is a HOLE, not a filter: the tail still consumes its offset, and the client

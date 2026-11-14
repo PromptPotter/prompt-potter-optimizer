@@ -3,11 +3,15 @@ from __future__ import annotations
 import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import Any, assert_never
 
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
+from promptpotter.domain.paired_reading import MemberAddress, PairedReading
+from promptpotter.domain.records.run_records import RoundStatement
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -16,16 +20,10 @@ from promptpotter.infrastructure.store.archive_queries import (
     memory_scope,
     walked_answers,
 )
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import LedgerUnreadableError
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
-    from promptpotter.domain.paired_reading import MemberAddress, PairedReading
-    from promptpotter.domain.records.run_records import RoundStatement
-    from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

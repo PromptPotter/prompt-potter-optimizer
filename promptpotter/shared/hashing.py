@@ -4,12 +4,10 @@ import ast
 import functools
 import hashlib
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NewType, TypedDict
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-    from types import ModuleType
+from types import ModuleType
+from typing import Any, NewType, TypedDict
 
 ID_HEX = 16
 # 16 hex collides at archive scale (cells = configurations x samples); 64 strains Windows paths.

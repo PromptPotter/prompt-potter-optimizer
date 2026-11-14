@@ -10,18 +10,24 @@ from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.loaders import archive_entry
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.query_loop import QueryLoopState, Walk, run_walks
 from promptpotter.domain.arms import degradation_reading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.measurement_provenance import grade_answer
 from promptpotter.domain.pass_kinds import PASSES
-from promptpotter.domain.phases import StopLoop, WalkEnd
+from promptpotter.domain.phases import WalkEnd
+from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results_health import is_deprecated
+from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, MeasuredCell, WalkedCell
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, current_round, filed_as
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, current_round
+from promptpotter.infrastructure.run_scope import run_scope, scoped
+from promptpotter.infrastructure.store.io import HeldLock
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import SendRefusedError
@@ -30,15 +36,10 @@ from promptpotter.shared.measurement_context import (
     MeasurementRole,
     measured_pass_context,
 )
-from promptpotter.shared.run_scope import run_scope
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.scoring.query_loop import BlockRace, QueryLoopResult
-    from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
-    from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.io import HeldLock
 
 logger = logging.getLogger(__name__)
 
@@ -260,7 +261,7 @@ async def score_search_points[K: Hashable](
     *blocks* races them as a round's arms are raced."""
     row = PASSES[kind]
     # Opened inside the filing too: the walk's cells run in a copy of the context taken here.
-    with filed_as(row.spend):
+    with scoped(filed_as=row.spend or run_scope().filed_as):
         walks = {
             key: open_walk(
                 search_point,

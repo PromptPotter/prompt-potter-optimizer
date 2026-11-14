@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import TYPE_CHECKING
 
-from promptpotter.domain.pipeline_schema import NodeRole
-from promptpotter.domain.scoring import PipelineData, find_rank, is_verifier_graded
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
-    from promptpotter.domain.scoring import GradedCell, MeasuredCell
+from promptpotter.domain.pipeline_schema import NodeRole, PipelineNode, PipelineSchema
+from promptpotter.domain.scoring import (
+    GradedCell,
+    MeasuredCell,
+    PipelineData,
+    find_rank,
+    is_verifier_graded,
+)
 
 
 def judge_readings(facts: MeasuredCell) -> list[tuple[str, str, str]]:

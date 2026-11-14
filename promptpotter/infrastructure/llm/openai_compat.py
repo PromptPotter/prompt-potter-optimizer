@@ -4,10 +4,12 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import Any, TypeVar
 
+import httpx
 from pydantic import AliasPath, BaseModel, Field, ValidationError
 
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import (
@@ -51,11 +53,6 @@ from promptpotter.infrastructure.llm.send_pacing import (
 from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel, admitted, answered
 from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.errors import ErrorCategory, SendRefusedError, validation_reason
-
-if TYPE_CHECKING:
-    import httpx
-
-    from promptpotter.domain.backend import BackpressureReading
 
 logger = logging.getLogger(__name__)
 

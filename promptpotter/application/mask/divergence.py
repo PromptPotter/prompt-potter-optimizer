@@ -2,16 +2,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 from pydantic import Field
 
 from promptpotter.application.mask.record import MaskCycle, MaskReading, MaskRecord, MaskRound
 from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.strict_model import FrozenModel
-
-if TYPE_CHECKING:
-    from promptpotter.domain.paired_reading import ArmKey
 
 
 class VerdictOutcome(FrozenModel):

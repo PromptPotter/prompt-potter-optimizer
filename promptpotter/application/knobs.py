@@ -13,6 +13,7 @@ from pydantic_core import to_jsonable_python
 
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import CountKnob
+from promptpotter.domain.campaign import RunDeclaration
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, knob_label
 from promptpotter.domain.pipeline_schema import KnobLayer, KnobLayers
 from promptpotter.domain.pool import DemoPool
@@ -25,7 +26,6 @@ from promptpotter.shared.worded import Worded
 if TYPE_CHECKING:
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import MemberCoupling
-    from promptpotter.domain.campaign import RunDeclaration
 
 
 @dataclass(frozen=True)

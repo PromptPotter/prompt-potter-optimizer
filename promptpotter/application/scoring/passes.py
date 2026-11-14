@@ -40,7 +40,7 @@ from promptpotter.application.scoring.paired import MemberRows, grade_measurands
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
-from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BandedValue
+from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BandedValue, BenchScore
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -55,9 +55,12 @@ from promptpotter.domain.phase_views import VerificationEnterView, VerificationG
 from promptpotter.domain.phases import STOP_REASON_INFO
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import PhaseRecord, VerifySaturated
-from promptpotter.domain.scoring import MAX_PASS_ROWS
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import MAX_PASS_ROWS, CellSheet, Scorer, WalkedCell
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import (
+    BenchPasses,
     NoiseBand,
     VerificationPass,
     VerifyHeldAbsent,
@@ -66,13 +69,15 @@ from promptpotter.domain.verification import (
 )
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, at_round
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_verify,
     scan_ledger_walks,
 )
 from promptpotter.infrastructure.store.read_model import LedgerIndex
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, DiagnosticError
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
@@ -80,13 +85,6 @@ from promptpotter.shared.statistics import mean_ci
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.bench import BenchScore
-    from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, Scorer, WalkedCell
-    from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.domain.verification import BenchPasses
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -373,7 +371,7 @@ async def verify_candidate(
             rows=len(picked),
             strategy=strategy,
         )
-        with verb_ledger(stores, hop), at_round(round_num), _bracketed(enter) as ledger:
+        with verb_ledger(stores, hop), scoped(round=round_num), _bracketed(enter) as ledger:
             scored = await diagnostic_pass(
                 score_search_point(
                     jsp, picked, session, kind=MeasurementRole.VERIFY, measured=candidate_id
@@ -601,7 +599,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
         # The round an `at_end` launch grades under: its last.
         with (
             verb_ledger(stores, hop) as ledger,
-            at_round(rounds[-1].round),
+            scoped(round=rounds[-1].round),
             LedgerIndex.of(ledger.path).projecting() as projecting,
         ):
             dashboard = projecting.add(dashboard)

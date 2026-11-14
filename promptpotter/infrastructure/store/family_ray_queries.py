@@ -16,7 +16,8 @@ from promptpotter.domain.activity import ActivityFeed, ActivityItem
 from promptpotter.domain.cycle_paths import CyclePath, Subject
 from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, HierarchySteps, StepFacts
 from promptpotter.domain.projection_envelope import bearing_record
-from promptpotter.domain.records import RECORDS, CycleRecord
+from promptpotter.domain.record_kinds import RECORDS
+from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
     course_validator_ns,

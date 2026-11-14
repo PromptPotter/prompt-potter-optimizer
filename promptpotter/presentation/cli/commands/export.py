@@ -1,16 +1,12 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from promptpotter.application.caller import Caller
+from promptpotter.application.read_params import CycleExportParams
+from promptpotter.application.views.render.export import ExportFiles
 from promptpotter.presentation.cli.commands.result import CommandResult
-
-if TYPE_CHECKING:
-    import argparse
-
-    from promptpotter.application.caller import Caller
-    from promptpotter.application.read_params import CycleExportParams
-    from promptpotter.application.views.render.export import ExportFiles
 
 
 def export_written(

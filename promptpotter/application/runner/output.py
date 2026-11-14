@@ -25,15 +25,23 @@ from promptpotter.application.views.view_models import (
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.arm_reading import fitness_terms_text, fold_fitness_text, lift_band_text
 from promptpotter.domain.bench import BandedValue, BenchColumn, BenchReading, BenchScore
-from promptpotter.domain.cells import HardSampleOrder
+from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.cells import HardSampleOrder, HardSamples
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.export import build_prompt_export
+from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, lift_versus
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.records.run_records import RaceStandingRecord
+from promptpotter.domain.records.run_records import (
+    CycleFinal,
+    RaceStandingRecord,
+    RoundClosedRecord,
+    WallClock,
+)
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import health_reading
+from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import (
@@ -52,6 +60,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend,
     scan_ledger_spend_by_round,
 )
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, sibling_kind
 from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
@@ -59,12 +68,6 @@ from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClas
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.cells import HardSamples
-    from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
-    from promptpotter.domain.records.run_records import CycleFinal, RoundClosedRecord, WallClock
-    from promptpotter.domain.round_audit import RoundAudit
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 
 def render_review_md(

@@ -4,10 +4,13 @@ import asyncio
 import contextlib
 import logging
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+from promptpotter.domain.spend import TokenUsageKind
+from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.telemetry import (
     call_price,
@@ -16,12 +19,6 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.store.io import read_bytes_optional, write_text
 from promptpotter.shared.hashing import ADDRESS_HEX, stable_hash
-
-if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
-
-    from promptpotter.domain.spend import TokenUsageKind
-    from promptpotter.infrastructure.llm.request import ChatRequest
 
 logger = logging.getLogger(__name__)
 

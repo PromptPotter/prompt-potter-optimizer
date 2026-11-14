@@ -3,11 +3,12 @@ from __future__ import annotations
 import math
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 from numpy.typing import NDArray
 
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import (
     CalibrationModel,
     DeltaRuler,
@@ -16,13 +17,9 @@ from promptpotter.domain.ruler import (
     anchor_id_of,
     ruler_entry,
 )
-from promptpotter.domain.scoring import is_hit
+from promptpotter.domain.scoring import CellSheet, GradedCell, is_hit
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 from promptpotter.shared.statistics import logistic
-
-if TYPE_CHECKING:
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.scoring import CellSheet, GradedCell
 
 
 class Observation(NamedTuple):

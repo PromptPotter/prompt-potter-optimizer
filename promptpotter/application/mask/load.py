@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
 from promptpotter.application.datasets.authored import scorer_of
@@ -25,6 +26,7 @@ from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.arms import ArmState, Cut, arm_elimination, is_electable
 from promptpotter.domain.campaign_config import CampaignConfig, seed_layer
 from promptpotter.domain.cell_fold import measured_cells
+from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Lens
 from promptpotter.domain.paired_reading import ArmKey
@@ -48,10 +50,7 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from promptpotter.application.bench.difficulty import DifficultyView
-    from promptpotter.domain.cell_terms import CellTerm
 
 
 def lens_overrides(formula: str | None) -> ConfigOverrides:

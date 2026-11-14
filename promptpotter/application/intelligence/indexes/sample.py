@@ -3,16 +3,14 @@ from __future__ import annotations
 import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.domain.results_health import UNKNOWN_STEP, terminal_node
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
-
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

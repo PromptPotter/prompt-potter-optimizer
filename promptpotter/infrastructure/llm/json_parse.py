@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
+import httpx
 from json_repair import repair_json
 from pydantic import BaseModel, ValidationError
 
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.response import LLMResponse
-
-if TYPE_CHECKING:
-    import httpx
 
 logger = logging.getLogger(__name__)
 

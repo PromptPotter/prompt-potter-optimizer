@@ -77,7 +77,7 @@ from pydantic import SecretStr, ValidationError
 from promptpotter import connectors
 from promptpotter.application import optimizers
 from promptpotter.application.bench import node_context
-from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext, SliceMap
 from promptpotter.application.bench.difficulty import (
     judging_ruler,
     regraded_ruler,
@@ -126,7 +126,7 @@ from promptpotter.application.optimizers.gepa.members import (
     MinibatchBars,
     MinibatchGate,
 )
-from promptpotter.application.optimizers.nodes import Panel, ReadArm, RoundContext
+from promptpotter.application.optimizers.nodes import Panel
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -245,19 +245,13 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.bench import (
     COST_ABSENCE_WORDS,
+    CampaignRefusal,
     CostAbsence,
     DatasetSplit,
     PassStop,
     partition_bank,
 )
-from promptpotter.domain.campaign import (
-    Arm,
-    CampaignRefusal,
-    Compare,
-    HeadToHeadRecord,
-    Optimize,
-    Purpose,
-)
+from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import (
     ScoreSummary,
@@ -312,14 +306,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.phase_views import VerificationGradedView
-from promptpotter.domain.phases import (
-    CampaignPhase,
-    PauseCause,
-    RunPhase,
-    StopLoop,
-    StopReason,
-    WalkEnd,
-)
+from promptpotter.domain.phases import CampaignPhase, PauseCause, RunPhase, StopReason, WalkEnd
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -341,6 +328,7 @@ from promptpotter.domain.records.run_records import (
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
+    StopLoop,
 )
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
@@ -384,11 +372,11 @@ from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     require_spend_book,
 )
-from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     LiveDashboardProjection,
 )
+from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
@@ -410,7 +398,6 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.plugin_registry import Registry
-from promptpotter.shared.run_scope import run_scope, scoped
 from promptpotter.shared.statistics import paired_mean_t
 
 _H2H_FORMULA = "env_reward"
@@ -1341,7 +1328,7 @@ def _peer_cycle(
         ]
         return session.state.scoring.scorer.sheet(rows)
 
-    with at_round(1):
+    with scoped(round=1):
         seated = seat(
             stores,
             schema=schema,
@@ -1370,7 +1357,6 @@ def _peer_cycle(
         with scoped(
             ledger=ledger,
             spawn=inner_spawn_of(cycle.session),
-            optimizer=cycle.optimizer,
             determinism=cycle.config.optimization.determinism,
         ):
             run_init(cycle, ledger)
@@ -2297,7 +2283,7 @@ def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
             state=Proposed(role=c0_arm.role, slot=c0_arm.slot, individual=c0_arm.individual),
         )
     )
-    with at_round(0):
+    with scoped(round=0):
         c0_walk = asyncio.run(
             score_search_point(
                 cycle.points.measured(cycle.measured(origin.id)),
@@ -2456,7 +2442,7 @@ def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
                 patched.setattr(measuring, "verify_candidate", _passing(_press))
                 with (
                     pytest.raises(PassStoppedError) as ended,
-                    ctrl_c_stops_pass(stores, pressed_call),
+                    ctrl_c_stops_pass(CommandDispatcher(stores), pressed_call),
                 ):
                     await CommandDispatcher(stores).dispatch(pressed_call)
             return str(ended.value)
@@ -2620,7 +2606,7 @@ def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorde
         # The origin walked in round 0's door, which the round file's cells name.
         ledger.append(RoundEnteredRecord(round=0))
         walked = list(session.state.scoring.partition.search)[:4]
-        with at_round(0):
+        with scoped(round=0):
             asyncio.run(
                 open_origin_round(cycle, walked, ledger, spend=SpendRollup(), resumed_ending=None)
             )
@@ -4085,7 +4071,7 @@ def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_clos
     fired_ledger = CycleEventLog.open(cycle_dir)
     # Appended here, as the store appends a restate.
     carried = select_optimizer(OptimizerChoice(optimizer="potter")).slices
-    live = node_contract.SliceMap(carried)
+    live = SliceMap(carried)
     closed = round_result(1, optimizer_state=optimizer_state(), cells={})
     line = [round_result(0, optimizer_state=optimizer_state(), cells={}), closed]
     closing = seat(workspace(tmp_path / "fired_ws")).cycle
@@ -4122,7 +4108,7 @@ def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_clos
 
     def resumed(last: int) -> tuple[L2Memory, L3Memory, Ladder]:
         standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
-        state = node_contract.SliceMap(carried)
+        state = SliceMap(carried)
         state.seat(standing[last].close.closed_state)
         return state.get(L2Memory), state.get(L3Memory), state.get(Ladder)
 
@@ -5415,7 +5401,7 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
         async def measured() -> MeasuredCell:
             with (
                 scoped(ledger=CycleEventLog(tmp_path / "harness.jsonl")),
-                at_round(1),
+                scoped(round=1),
                 scoped(book=spend_book(book_usd, usd_reserve=None)),
             ):
                 return await measure_sample(row, session, PipelineParams.model_validate(params))

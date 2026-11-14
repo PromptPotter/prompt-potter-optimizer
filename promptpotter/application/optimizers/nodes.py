@@ -6,9 +6,9 @@ import functools
 import pkgutil
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, ModuleType
 from typing import (
     TYPE_CHECKING,
     Annotated,
@@ -22,49 +22,38 @@ from typing import (
     runtime_checkable,
 )
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
-from promptpotter.application.scoring.formula.matchers import MATCHERS
-from promptpotter.domain.arms import ArmSlot, Proposed
-from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob
-from promptpotter.domain.optimizer_state import OptimizerState, StatePart, StateSlice
+from promptpotter.config.prompt_blocks import PackShelf
+from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
+from promptpotter.domain.arms import ArmSlot, Concluded, Elimination, Proposal, Proposed
+from promptpotter.domain.campaign_config import ArmGateMode, CampaignConfig, Estimand, Knob
+from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.dashboard_rows import OptimizerLimit
+from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
+from promptpotter.domain.optimizer_state import StatePart
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.origin_panel import election_rows
-from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind
-from promptpotter.domain.pool import DemoPool
+from promptpotter.domain.paired_reading import ArmKey, PriorStanding
+from promptpotter.domain.phases import StopReason
+from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind, PipelineSchema
+from promptpotter.domain.pool import Access, DemoPool, Pool, PoolEntry
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.scoring import NO_CELLS, CellSheet
+from promptpotter.domain.results import OptimizerFact, RoundResult
+from promptpotter.domain.round_audit import RoundAudit
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.validators import StopSignal
 from promptpotter.infrastructure.store.source_scan import prompt_source_digest
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from types import ModuleType
-
-    from pydantic import BaseModel
-
-    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.cycle import ReadArm, RoundContext
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.knobs import CouplingSeverity
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.scoring.query_loop import BlockRace
-    from promptpotter.config.prompt_blocks import PackShelf
-    from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
-    from promptpotter.domain.arms import Concluded, Cut, Elimination, Proposal
-    from promptpotter.domain.campaign_config import ArmGateMode
-    from promptpotter.domain.cell_fold import ScoreSummary
-    from promptpotter.domain.dashboard_rows import OptimizerLimit
-    from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
-    from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-    from promptpotter.domain.paired_reading import ArmKey, PriorStanding
-    from promptpotter.domain.phases import StopReason
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Access, Pool, PoolEntry
-    from promptpotter.domain.results import OptimizerFact, RoundResult
-    from promptpotter.domain.round_audit import RoundAudit
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell
-    from promptpotter.domain.validators import StopSignal
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
 
 @dataclass(frozen=True)
@@ -231,45 +220,6 @@ class ReviewReading:
     feedback: list[str]
 
 
-class SliceMap:
-    """The state slices a cycle holds, one per kind its manifest carries, a written-first kind once its writer ran; the close banks them."""
-
-    def __init__(self, kinds: Iterable[type[StateSlice]]) -> None:
-        self._carried = {kind.kind: kind for kind in kinds}
-        self._held: dict[str, StateSlice] = {
-            name: kind() for name, kind in self._carried.items() if not kind.written_first()
-        }
-
-    def carries(self, kind: type[StateSlice]) -> bool:
-        return self._carried.get(kind.kind) is kind
-
-    def get[S: StateSlice](self, kind: type[S]) -> S:
-        if not self.carries(kind):
-            raise KeyError(f"the manifest carries no {kind.kind!r} slice")
-        found = self._held.get(kind.kind)
-        if not isinstance(found, kind):
-            raise ValueError(f"the {kind.kind!r} slice is read before its writer ran")
-        return found
-
-    def put(self, value: StateSlice) -> None:
-        if self._carried.get(value.kind) is not type(value):
-            raise KeyError(f"the manifest carries no {value.kind!r} slice")
-        self._held[value.kind] = value
-
-    def held(self) -> dict[str, StateSlice]:
-        return dict(self._held)
-
-    def seat(self, banked: OptimizerState) -> None:
-        """Take up what *banked* holds: a resume, a fork or a repair re-seats the cycle there."""
-        unwritten = {k for k, kind in self._carried.items() if kind.written_first()}
-        if not set(self._carried) - unwritten <= set(banked.slices) <= set(self._carried):
-            raise ValueError(
-                f"{banked.manifest!r} banked slices {sorted(banked.slices)}, "
-                f"but its manifest carries {sorted(self._carried)}"
-            )
-        self._held = dict(banked.slices)
-
-
 @dataclass(frozen=True)
 class OptimizerPhase:
     phase: str
@@ -396,35 +346,6 @@ def _source_digest(
 
 
 @dataclass(frozen=True)
-class RoundContext:
-    """A member never sees it: each is handed the ``NodeContext`` the bench builds over it."""
-
-    cycle: Cycle
-    round_num: int
-    ledger: CycleEventLog
-    # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
-    walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)
-
-    def asked(self, key: ArmKey, cells: Iterable[Sample]) -> frozenset[str]:
-        """What a walk of *key* on *cells* is asked: those, and every cell its walk was asked before."""
-        held = self.walks.get(key)
-        return frozenset(s.key for s in cells) | (frozenset() if held is None else held.asked)
-
-    def held(self, key: ArmKey) -> CellSheet:
-        held = self.walks.get(key)
-        return NO_CELLS if held is None else held.arm.rows
-
-    def walked(self, read: ReadArm, asked: frozenset[str]) -> None:
-        held = self.walks.get(read.key)
-        self.walks[read.key] = ArmWalk(read, asked) if held is None else held.continued(read, asked)
-
-    def cut_on(self, key: ArmKey, state: Cut) -> None:
-        """Its race stopped it past its draw: the walk keeps its rows, the arm reads cut."""
-        held = self.walks[key]
-        self.walks[key] = ArmWalk(ReadArm(key, state, held.arm.rows), held.asked)
-
-
-@dataclass(frozen=True)
 class Panel:
     """The parent's re-score reads ``cells``; the walks read ``order``, a block closing every ``block_size``."""
 
@@ -466,38 +387,6 @@ class Proposals:
                 ),
             )
         return arms
-
-
-@dataclass(frozen=True)
-class ReadArm:
-    """An individual read on a round's cells as a reference: an arm of that round, with its rows."""
-
-    key: ArmKey
-    state: Concluded
-    rows: CellSheet
-
-    @property
-    def individual(self) -> OptSearchPoint:
-        return self.state.individual
-
-
-@dataclass(frozen=True)
-class ArmWalk:
-    """One arm's walk of its round, which every later read of it continues: ``arm`` holds its rows,
-    each read adding the cells they lack, and a panel arm's state; ``asked`` every cell asked of it."""
-
-    arm: ReadArm
-    asked: frozenset[str]
-
-    def continued(self, read: ReadArm, asked: frozenset[str]) -> ArmWalk:
-        held = frozenset(cell.key for cell in self.arm.rows)
-        rows = self.arm.rows.merged(read.rows.where(functools.partial(_unheld, held)))
-        state = read.state if self.arm.state.role == MeasurementRole.PARENT else self.arm.state
-        return ArmWalk(ReadArm(read.key, state, rows), asked)
-
-
-def _unheld(held: frozenset[str], cell: GradedCell) -> bool:
-    return cell.key not in held
 
 
 @dataclass(frozen=True)
@@ -681,12 +570,6 @@ class Survivor(NodeMember, Protocol):
     def survive(
         self, ctx: NodeContext, ranked: Sequence[OptSearchPoint]
     ) -> Sequence[OptSearchPoint]: ...
-
-
-def admits(schema: PipelineSchema, matcher: str | None) -> frozenset[Presumption]:
-    """The one admission rule: what a run's chain and its cell's matcher (`matchers.py::matcher_of`) let a block presume."""
-    ranking = {Presumption.RANKING} if schema.emits_ranking else set()
-    return frozenset(ranking) | (frozenset() if matcher is None else MATCHERS[matcher].admits)
 
 
 class MintFacts(NamedTuple):

@@ -3,7 +3,8 @@ from __future__ import annotations
 import ast
 import random
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated, Any, ClassVar
+from types import ModuleType
+from typing import Annotated, Any, ClassVar
 
 from pydantic import Field
 
@@ -11,14 +12,26 @@ from promptpotter.application.bench.node_context import (
     Calls,
     Children,
     Lineage,
+    NodeContext,
     Progress,
     Replay,
     Target,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import prompt_chars
-from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizers.nodes import (
+    CycleRead,
+    Draw,
+    MeasuredRound,
+    Panel,
+    PromptArity,
+    Proposals,
+    Proposing,
+    RewriteKnobs,
+    Selection,
+)
 from promptpotter.application.optimizers.paper_templates import (
     rewrite,
     rewritten,
@@ -26,43 +39,21 @@ from promptpotter.application.optimizers.paper_templates import (
     task_description,
 )
 from promptpotter.application.optimizers.variation.members import Survival, SurvivalKnobs
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
-from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
-from promptpotter.domain.optimizer_state import StateSlice
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
+from promptpotter.domain.optimizer_state import StatePart, StateSlice
 from promptpotter.domain.paired_reading import ArmKey, PriorStanding
-from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.pool import DemoPool
-from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES
+from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
+from promptpotter.domain.pool import DemoPool, Pool
+from promptpotter.domain.results import OptimizerFact, RoundResult
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES, CellSheet, GradedCell
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.statistics import paired_mean_t
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import (
-        CycleRead,
-        Draw,
-        MeasuredRound,
-        Panel,
-        PromptArity,
-        Proposals,
-        Proposing,
-        Selection,
-    )
-    from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.opt_search_point import VariationMode
-    from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Pool
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, GradedCell
 
 
 # The population CAPO's selector keeps is the bench's (`OptimizerState.population`), banked beside this.

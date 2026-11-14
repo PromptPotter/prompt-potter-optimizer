@@ -2,24 +2,19 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from promptpotter.domain.arm_reading import ArmFit, fold_fitness_text, order_floor
 from promptpotter.domain.arms import Cut, Measured
-from promptpotter.domain.l4.inner_facts import SeriesGap, series_reason_head
+from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.l4.cells import InnerTaskSpec
+from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap, series_reason_head
 from promptpotter.domain.l4.proxies import (
+    OuterSampleProxies,
     effective_round_budget,
     floor_reason,
     parent_levels,
     unread_rounds,
 )
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts
-
-if TYPE_CHECKING:
-    from promptpotter.domain.l4.cells import InnerTaskSpec
-    from promptpotter.domain.l4.inner_facts import InnerCellFacts
-    from promptpotter.domain.l4.proxies import OuterSampleProxies
-    from promptpotter.domain.results import CycleResult
 
 
 def _clip(text: str, cap: int) -> str:

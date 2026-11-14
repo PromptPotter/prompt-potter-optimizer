@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.loop_commands import read_payload_file
 from promptpotter.application.cycle_addressing import cycle_target
@@ -17,7 +18,6 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args
 from promptpotter.shared.errors import PayloadInvalidError
 
@@ -28,7 +28,7 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
     """Every verb `verbs.py::command_verb` derives from a payload model runs here."""
     kind = next(kind for kind in CommandKind if kind.cli_verb == args.command)
     model = PAYLOAD_MODEL_FOR_KIND[kind]
-    stores = open_stores(args)
+    stores = local_stores(tenant=args.tenant)
     fields: dict[str, Any] = {
         name: read_payload_file(value) if isinstance(value, Path) else value
         for name, value in vars(args).items()

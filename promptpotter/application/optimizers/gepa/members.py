@@ -5,7 +5,8 @@ from __future__ import annotations
 import random
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, Annotated, ClassVar
+from types import ModuleType
+from typing import Annotated, ClassVar
 
 from pydantic import Field
 
@@ -14,45 +15,39 @@ from promptpotter.application.bench.node_context import (
     Children,
     Frontier,
     Lineage,
+    NodeContext,
     Replay,
     Target,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes, paper_templates
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.fence import fence_untrusted
-from promptpotter.application.optimizers.nodes import RewriteKnobs
+from promptpotter.application.optimizers.nodes import (
+    CycleRead,
+    MeasuredRound,
+    Panel,
+    PromptArity,
+    Proposals,
+    RewriteKnobs,
+    Selection,
+)
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.application.scoring.row_diagnostics import cell_feedback
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Cut, Elimination, Measured
 from promptpotter.domain.campaign_config import Estimand, Knob
-from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
+from promptpotter.domain.opt_search_point import VariationMode
+from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.records.run_records import CheckpointInputs
-from promptpotter.domain.results import OptimizerFact
+from promptpotter.domain.results import OptimizerFact, RoundResult
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import (
-        CycleRead,
-        MeasuredRound,
-        Panel,
-        PromptArity,
-        Proposals,
-        Selection,
-    )
-    from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.opt_search_point import VariationMode
-    from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet, GradedCell
 
 
 class ParetoSet(StateSlice, kind="pareto_set"):

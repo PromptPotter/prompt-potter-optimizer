@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from statistics import fmean
@@ -28,7 +29,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_point,
 )
 from promptpotter.application.scoring.selection import level_band
-from promptpotter.domain.arms import candidate_label
+from promptpotter.domain.arms import PointContext, candidate_label
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     COLUMN_GRADE,
@@ -39,6 +40,7 @@ from promptpotter.domain.bench import (
     BenchScore,
     BenchSubject,
     BenchTrigger,
+    CampaignRefusal,
     LiftCost,
     LineRun,
     OwnLevel,
@@ -48,6 +50,7 @@ from promptpotter.domain.bench import (
     bench_status,
 )
 from promptpotter.domain.campaign import Campaign, worked_seconds
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.l4.proxies import line_round_levels, spent_on_line
 from promptpotter.domain.paired_reading import (
@@ -66,13 +69,22 @@ from promptpotter.domain.phase_views import (
     VerificationEnterView,
     VerificationGradedView,
 )
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, RunPhase, StopOutcome
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    CampaignPhase,
+    RunPhase,
+    StopOutcome,
+    StopReason,
+)
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import LaunchClockRecord, PhaseRecord
+from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.run_standing import LineOutlay, declared_selection
-from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
+from promptpotter.domain.scoring import ROW_GRADES, CellSheet, Scorer, WalkedCell
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.domain.verification import BenchPasses, VerificationPass
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.store.archive_queries import bench_reads
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -83,23 +95,13 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_wall_clock,
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.initialization.session import LaunchClock, Session
-    from promptpotter.domain.arms import PointContext
-    from promptpotter.domain.campaign import CampaignRefusal
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.phases import StopReason
-    from promptpotter.domain.results import RoundOutcome, RoundResult
-    from promptpotter.domain.scoring import CellSheet, Scorer
-    from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 _BRACKET = PASSES[MeasurementRole.BENCH].bracket

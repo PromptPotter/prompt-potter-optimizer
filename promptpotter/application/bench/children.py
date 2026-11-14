@@ -2,17 +2,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Collection, Mapping
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from promptpotter.domain.opt_search_point import Locus, VariationMode
-from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
+from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
 from promptpotter.domain.search_point import SHOTS_KEY, missing_template_vars
 from promptpotter.domain.wounds import ValidationFailure
-
-if TYPE_CHECKING:
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.pipeline_params import PipelineParams
 
 logger = logging.getLogger(__name__)
 

@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Annotated, ClassVar
+from collections.abc import Mapping
+from typing import Annotated, ClassVar
 
 from pydantic import Field
 
-from promptpotter.application.bench.node_context import Target
+from promptpotter.application.bench.node_context import NodeContext, Target
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes
+from promptpotter.application.optimizers.nodes import CycleRead, MintFacts
+from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.pool import (
     EARNED_SOURCE,
@@ -23,15 +28,6 @@ from promptpotter.domain.pool import (
 )
 from promptpotter.domain.prompt_block import ACCOUNT_PACK, AUTHORED_SOURCE, PackName, Presumption
 from promptpotter.domain.strict_model import StrictModel
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import CycleRead, MintFacts
-    from promptpotter.config.prompt_blocks import PackShelf
-    from promptpotter.domain.optimizer_state import StatePart
 
 
 class PoolKnobs(StrictModel):

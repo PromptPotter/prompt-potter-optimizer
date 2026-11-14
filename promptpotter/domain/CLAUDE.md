@@ -15,4 +15,4 @@ No I/O, no async (`scripts/gate.py::_LAYERING`). Every model inherits `StrictMod
 
 ## Tolerance is scoped by what a payload is FOR
 
-`extra="forbid"` reaches every model nested in a `RoundStatement`, `CampaignConfig` and `Campaign`, so **renaming a field wipes run data**. A file written before the rename meets: **reporting** (`round_diagnostics.py`), every field defaulted; **scoring** (`ArmState`, `StopSignal`, `OptSearchPoint`), required, since a tolerant read hands back a silently defaulted winner; **ledger** (`CycleRecord` subclasses, `records/__init__.py::RECORDS`), never tolerant (`LedgerUnreadableError`).
+`extra="forbid"` reaches every model nested in a `RoundStatement`, `CampaignConfig` and `Campaign`, so **renaming a field wipes run data**. A file written before the rename meets: **reporting** (`round_diagnostics.py`), every field defaulted; **scoring** (`ArmState`, `StopSignal`, `OptSearchPoint`), required, since a tolerant read hands back a silently defaulted winner; **ledger** (`CycleRecord` subclasses, `records/__init__.py::RECORDS`, read through `record_kinds.py`), never tolerant (`LedgerUnreadableError`).

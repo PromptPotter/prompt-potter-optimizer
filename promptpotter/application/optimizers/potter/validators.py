@@ -6,7 +6,7 @@ import logging
 import re
 from collections.abc import Collection, Mapping, Sequence
 from itertools import pairwise
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
@@ -29,6 +29,7 @@ from promptpotter.domain.candidate_diff import (
     candidate_idea,
     same_idea,
 )
+from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
@@ -41,9 +42,6 @@ from promptpotter.domain.wounds import (
     RuntimeFailure,
     ValidationFailure,
 )
-
-if TYPE_CHECKING:
-    from promptpotter.domain.l4.cells import InnerCells
 
 logger = logging.getLogger(__name__)
 

@@ -6,12 +6,13 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from functools import partial
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from pydantic import Field, computed_field
 
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.l4.proxies import inner_facts_of
+from promptpotter.domain.sample import FiledAnswer
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.holders import holder_of
@@ -26,13 +27,10 @@ from promptpotter.infrastructure.store.measurement_archive import (
     cold_size,
     rejoined,
 )
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError, graceful
 from promptpotter.shared.measurement_context import MeasurementRole
-
-if TYPE_CHECKING:
-    from promptpotter.domain.sample import FiledAnswer
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 def workspace_trees(root: pathlib.Path) -> list[pathlib.Path]:

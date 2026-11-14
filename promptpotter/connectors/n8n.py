@@ -10,23 +10,20 @@ its round trip is measured.
 from __future__ import annotations
 
 import json
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import Any
 
 import httpx
 
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, Endpoint, cell_envelope_of
 from promptpotter.domain.connector import AuthScheme
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import OUTPUT_CONTRACT_KEYS
+from promptpotter.domain.sample import Sample
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.tls import tls_context
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store.stores import Stores
 
 HARNESS_NODE = "harness"
 ANSWER_KEY = "answer"

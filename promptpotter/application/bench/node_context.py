@@ -3,7 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
+
+from pydantic import BaseModel
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.children import (
@@ -13,6 +16,7 @@ from promptpotter.application.bench.children import (
     overlay_failures,
     placeholder_failures,
 )
+from promptpotter.application.bench.cycle import ReadArm
 from promptpotter.application.bench.llm_call import (
     FilledPrompt,
     LLMCallContext,
@@ -25,19 +29,26 @@ from promptpotter.application.intelligence.earned_blocks import (
     answer_space_signature,
     earned_blocks_for,
 )
+from promptpotter.application.intelligence.indexes.axis import AxisIndex
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.mask.backprop import select_branch_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
-from promptpotter.application.optimizers.nodes import CycleRead, ReadArm, admits
+from promptpotter.application.optimizers.nodes import CycleRead
 from promptpotter.application.runner.inner.tasks import inner_cells
 from promptpotter.application.scoring.arm_states import conclude, measuring
+from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
+from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.cell_fold import merge_known_outcomes
+from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import BarRead, CrowningBar
+from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import (
     OPERATOR_SOURCE,
+    EvidenceGrounding,
     Locus,
     OptSearchPoint,
     Variation,
@@ -45,10 +56,13 @@ from promptpotter.domain.opt_search_point import (
     node_source,
     taken,
 )
+from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
+from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
+from promptpotter.domain.phase_views import PhaseView
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
-from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
+from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode, PipelineSchema
+from promptpotter.domain.pool import Access, BlockPool, DemoPool, Pool, PoolEntry
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     CheckpointInputs,
@@ -56,51 +70,31 @@ from promptpotter.domain.records.run_records import (
     RaceStandingRecord,
     RoundProposedRecord,
     RoundRestatedRecord,
+    RoundStatement,
     WalkRead,
 )
-from promptpotter.domain.results import round_document_digest
-from promptpotter.domain.run_standing import RunStanding, walked_slot
-from promptpotter.domain.scoring import CellSheet
-from promptpotter.domain.search_point import SHOTS_KEY
+from promptpotter.domain.results import Reelection, RoundResult, round_document_digest
+from promptpotter.domain.ruler import LevelSeries
+from promptpotter.domain.run_standing import LineOutlay, RunStanding, walked_slot
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.value_tree import Delivery
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.shared.errors import SendRefusedError
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-
-    from pydantic import BaseModel
-
-    from promptpotter.application.bench.cycle import Cycle
+    from promptpotter.application.bench.cycle import Cycle, RoundContext
     from promptpotter.application.bench.difficulty import DifficultyView
-    from promptpotter.application.intelligence.indexes.axis import AxisIndex
-    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.optimizers.nodes import (
         Controller,
         NodeMember,
         Proposer,
         RaceSnapshot,
-        RoundContext,
     )
-    from promptpotter.domain.campaign_config import LivesConfig
-    from promptpotter.domain.connector import MeasuredUnit
-    from promptpotter.domain.l4.cells import InnerCells
-    from promptpotter.domain.opt_search_point import EvidenceGrounding
-    from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
-    from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-    from promptpotter.domain.phase_views import PhaseView
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.pool import Access
-    from promptpotter.domain.records.run_records import RoundStatement
-    from promptpotter.domain.results import Reelection, RoundResult
-    from promptpotter.domain.ruler import LevelSeries
-    from promptpotter.domain.run_standing import LineOutlay
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell
-    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-    from promptpotter.domain.value_tree import Delivery
-    from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 
 logger = logging.getLogger(__name__)
 
@@ -532,6 +526,10 @@ class Calls(CycleRead):
         """The one text *node* (its own, unnamed) runs under the cycle's selection."""
         node, selected = node or self._member.name, self._cycle.optimizer
         return running_prompt(node, selected.node_config(node), selected.manifest)
+
+    def levers(self, node: str | None = None) -> dict[str, Any]:
+        """*node*'s (its own, unnamed) levers as the cycle's selection laid them."""
+        return self._cycle.optimizer.levers(node or self._member.name)
 
     def _context(self, idx: int | None) -> LLMCallContext:
         session, node, round_num = self._cycle.session, self._member.name, self._round.round_num

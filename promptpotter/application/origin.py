@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, NamedTuple
 
+from promptpotter.application.bench.cycle import ReadArm
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.datasets.prompts import declared_origin_prompts
 from promptpotter.application.initialization.scoring_scope import scorer_setup
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizers.nodes import ReadArm
 from promptpotter.application.scoring.arm_states import (
     conclude,
     measuring,
@@ -29,6 +29,8 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
+from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import (
     OPERATOR_ORIGIN_SOURCES,
     CycleSeed,
@@ -38,6 +40,7 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE, ResolvedDataset
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
@@ -45,9 +48,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
 
 logger = logging.getLogger(__name__)

@@ -21,6 +21,7 @@ from promptpotter.domain.records.run_records import (
     RunPhaseRecord,
     TrailTombstoneRecord,
 )
+from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.layout import (
@@ -34,7 +35,6 @@ from promptpotter.infrastructure.store.user_store import UserStore
 from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
-    from promptpotter.domain.spend import Budget, CeilingMeter
     from promptpotter.infrastructure.store.stores import Stores
 
 

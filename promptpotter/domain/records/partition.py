@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import cached_property
 from typing import Literal
 
@@ -8,6 +9,7 @@ from pydantic import Field
 from promptpotter.domain.bench import BankPartition, DatasetSplit
 from promptpotter.domain.paired_reading import CellSet
 from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.sample import Sample
 from promptpotter.shared.clock import utcnow_iso
 
 
@@ -33,6 +35,15 @@ class PartitionRecord(CycleRecord):
             bench_ids=[s.id for s in partition.bench],
             bench_rows=partition.bench_rows,
             demo_ids=[s.id for s in partition.demo],
+        )
+
+    def restored(self, bank: Sequence[Sample]) -> BankPartition:
+        """*bank* is the one ``dataset_hash`` names, so a slot is its position."""
+        return BankPartition(
+            split=self.split,
+            search=tuple(bank[i] for i in self.search_ids),
+            bench=tuple(bank[i] for i in self.bench_ids),
+            demo=tuple(bank[i] for i in self.demo_ids),
         )
 
     @cached_property

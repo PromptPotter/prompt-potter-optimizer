@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import enum
-from typing import TYPE_CHECKING, Annotated, Literal, NamedTuple
+from collections.abc import Sequence
+from typing import Annotated, Literal, NamedTuple
 
 from pydantic import Field
 
@@ -10,11 +11,6 @@ from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.domain.records.run_records import RebaseRequest
 
 
 class CampaignPhase(enum.StrEnum):
@@ -858,20 +854,3 @@ ERROR_CATEGORY_INFO: Annotated[dict[ErrorCategory, ErrorCategoryInfo], shapes_op
     ErrorCategory.UNKNOWN: ErrorCategoryInfo(True, None),
 }
 assert set(ERROR_CATEGORY_INFO) == set(ErrorCategory), "every ErrorCategory must take a side"
-
-
-class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
-    def __init__(
-        self,
-        reason: StopReason,
-        *,
-        unmeasured: int | None = None,
-        fork: RebaseRequest | None = None,
-    ) -> None:
-        if (reason is StopReason.REBASED) != (fork is not None):
-            raise ValueError("a REBASED stop, and only one, carries the fork it asks for")
-        self.reason = reason
-        # Cells of the walk this stop left unmeasured, where the raiser is a walk.
-        self.unmeasured = unmeasured
-        self.fork = fork
-        super().__init__(reason.value)

@@ -14,7 +14,7 @@ from typing import Any, cast
 
 from offline_world import FakeBackend, Router
 
-from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext, SliceMap
 from promptpotter.application.bench.difficulty import DifficultyView
 from promptpotter.application.bench.node_context import stated_line
 from promptpotter.application.datasets.authored import (
@@ -38,7 +38,6 @@ from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import bench_defaults_pin
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
-from promptpotter.application.optimizers.nodes import ReadArm, RoundContext, SliceMap
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
     L1Readout,
@@ -51,7 +50,7 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
 from promptpotter.application.runner.inner import spawn
-from promptpotter.application.runner.inner.tasks import InnerSpawnContext, cell_optimizer
+from promptpotter.application.runner.inner.tasks import cell_optimizer
 from promptpotter.application.runner.loop import walk_round_zero
 from promptpotter.application.runner.mint import (
     close_init,
@@ -107,6 +106,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import EmbeddedRun, InnerRun
 from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
@@ -150,7 +150,7 @@ from promptpotter.domain.records.run_records import (
     TokenUsageRecord,
     parent_address,
 )
-from promptpotter.domain.results import CycleResult, Election, RoundResult
+from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import (
     AbilityReading,
@@ -182,8 +182,8 @@ from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFai
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook, bound_account, draws_on
-from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import hold_cycle
+from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
@@ -199,7 +199,6 @@ from promptpotter.infrastructure.store.read_model import ledger_line
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
-from promptpotter.shared.run_scope import scoped
 
 
 def ledger_records(ledger: CycleEventLog | Path) -> list[CycleRecord]:
@@ -767,11 +766,10 @@ async def launched_round(
     determinism = cycle_config.config.optimization.determinism
     try:
         with (
-            at_round(0),
             scoped(
+                round=0,
                 ledger=observers.ledger,
                 account=running.store,
-                optimizer=optimizer,
                 determinism=run_clamp(determinism, running.purpose),
             ),
             session_scope(running),
@@ -782,6 +780,7 @@ async def launched_round(
                 session=running,
                 observers=observers,
                 budget=held,
+                optimizer=optimizer,
             )
             cycle, _ = await open_cycle(
                 prep, session=running, ledger=observers.ledger, mode=RunMode()
@@ -954,7 +953,7 @@ def close_round(
                 state=Proposed(role=arm.role, slot=arm.slot, individual=arm.individual),
             )
         )
-    with at_round(n):
+    with scoped(round=n):
         for key, arm in rr.panel.items():
             ledger.append(ArmRecord(round=n, arm=key, state=arm))
     assert rr.election is not None, "a closed round elects"
@@ -1031,7 +1030,7 @@ async def inner_seat(
     pin = PinnedCell(cell=cell_seat, instrument="i").pin()
     asked = Sample(id=0, query=cell_seat.id, ground_truth=None, source_pin=pin)
     # Under the outer run's book, as a cell's spawn reads it.
-    with scoped(account=stores), scoped(spawn=spawning, book=spend_book(1000.0)), at_round(0):
+    with scoped(account=stores), scoped(spawn=spawning, book=spend_book(1000.0)), scoped(round=0):
         cell = spawn._resolve_inner_cell(asked, {"optimizer_prompt_overrides": overrides})
         async with spawn._open_seat(cell, spawn.claim_sandbox(spawning)) as opened:
             session = opened.session

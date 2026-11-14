@@ -3,34 +3,33 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
+import random
+from collections.abc import Callable, Sequence
+from typing import Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.bench.node_context import Children, Lineage, Replay, Target
+from promptpotter.application.bench.node_context import (
+    Children,
+    Lineage,
+    NodeContext,
+    Replay,
+    Target,
+)
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes
+from promptpotter.application.optimizers.nodes import (
+    CycleRead,
+    Panel,
+    PromptArity,
+    Proposals,
+    Proposing,
+)
 from promptpotter.domain.campaign_config import Estimand, Knob
-from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.results import OptimizerFact
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
+from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
+from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.strict_model import StrictModel
-
-if TYPE_CHECKING:
-    import random
-    from collections.abc import Callable, Sequence
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import (
-        CycleRead,
-        Panel,
-        PromptArity,
-        Proposals,
-        Proposing,
-    )
-    from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import RoundResult
-
 
 logger = logging.getLogger(__name__)
 

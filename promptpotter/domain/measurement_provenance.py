@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from promptpotter.domain.pass_kinds import PASSES
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.scoring import MeasuredCell
-    from promptpotter.shared.measurement_context import MeasurementRole
+from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.scoring import MeasuredCell
+from promptpotter.shared.measurement_context import MeasurementRole
 
 MEASUREMENT_GRADES = ("A", "B", "C")
 

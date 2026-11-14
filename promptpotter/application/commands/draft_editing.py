@@ -1,8 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from promptpotter.application.commands.dispatcher import Applier, Replaying, replays
+from promptpotter.application.commands.dispatcher import (
+    Applier,
+    Dispatched,
+    DispatchedToDraft,
+    Replaying,
+    replays,
+)
 from promptpotter.application.datasets.draft_build import (
     DraftCampaignWire,
     kept_draft_wire,
@@ -10,12 +14,12 @@ from promptpotter.application.datasets.draft_build import (
 )
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.datasets.draft_patch import apply_draft_patch, plan_draft_patch
-from promptpotter.domain.command_kinds import CommandKind
-
-if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import Dispatched, DispatchedToDraft
-    from promptpotter.domain.command_kinds import DiscardDraftPayload, EditDraftCampaignPayload
-    from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.domain.command_kinds import (
+    CommandKind,
+    DiscardDraftPayload,
+    EditDraftCampaignPayload,
+)
+from promptpotter.infrastructure.store.stores import Stores
 
 
 async def reread_draft_wire(stores: Stores, draft_id: str) -> DraftCampaignWire:

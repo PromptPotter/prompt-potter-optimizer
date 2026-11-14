@@ -3,25 +3,21 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from promptpotter.application import optimizers
 from promptpotter.application.knobs import check_couplings
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
+from promptpotter.domain.campaign import Arm
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
-from promptpotter.domain.pipeline_params import NodeCall
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
+from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import usd_text
 from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import model_profile
 from promptpotter.shared.errors import PayloadInvalidError
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign import Arm
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.sample import Sample
 
 
 @dataclass(frozen=True)

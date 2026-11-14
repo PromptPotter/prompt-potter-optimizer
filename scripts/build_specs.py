@@ -13,7 +13,7 @@ _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
-from promptpotter.domain.records import RECORDS
+from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.infrastructure.store.data_root import pinned_schemas
 from promptpotter.main import app
 

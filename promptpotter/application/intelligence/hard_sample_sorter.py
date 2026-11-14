@@ -3,23 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import pick_value
-from promptpotter.application.intelligence.rasch import build_round_order
+from promptpotter.application.intelligence.rasch import Observation, build_round_order
 from promptpotter.domain.cells import (
     HardSampleCell,
+    HardSampleOrder,
     HardSamples,
     SampleDifficulty,
 )
-from promptpotter.domain.ruler import RulerStanding
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.ruler import DeltaRuler, RulerStanding
 from promptpotter.shared.clock import utcnow_iso
-
-if TYPE_CHECKING:
-    from promptpotter.application.intelligence.rasch import Observation
-    from promptpotter.domain.cells import HardSampleOrder
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.ruler import DeltaRuler
 
 
 def arm_thetas(rounds: Sequence[RoundResult]) -> dict[str, float]:

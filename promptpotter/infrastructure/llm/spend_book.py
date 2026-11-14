@@ -7,8 +7,10 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, NamedTuple
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
 from promptpotter.domain.records.run_records import (
     Bill,
@@ -36,6 +38,7 @@ from promptpotter.domain.spend import (
     draws_coupon,
     usd_text,
 )
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
     append_record,
     billing_ledger,
@@ -45,7 +48,9 @@ from promptpotter.infrastructure.llm.telemetry import (
     filed_kind,
     token_usage_record,
 )
+from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.read_model import Money, money_on, still_held
+from promptpotter.infrastructure.store.wallet_store import ChargeBook
 from promptpotter.shared.errors import (
     ErrorCategory,
     HostAllowanceExhaustedError,
@@ -54,16 +59,10 @@ from promptpotter.shared.errors import (
     is_provider_credit_refusal,
 )
 from promptpotter.shared.measurement_context import instrument_mode
-from promptpotter.shared.run_scope import run_scope, scoped
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.infrastructure.store.wallet_store import ChargeBook
 
 
 @dataclass(frozen=True)

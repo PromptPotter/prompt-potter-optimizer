@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Protocol, get_args
 
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.said import Tone
 from promptpotter.shared.errors import PotterError
 from promptpotter.shared.extras import MissingExtraError
@@ -12,8 +14,6 @@ from promptpotter.shared.worded import Worded
 if TYPE_CHECKING:
     import httpx
 
-    from promptpotter.domain.cycle_paths import CycleHop
-    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.domain.sample import Sample
 
 

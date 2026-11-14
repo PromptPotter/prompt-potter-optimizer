@@ -5,20 +5,18 @@ words of an MCP task's status, and for a launch each job it launched (`Job.endin
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from promptpotter.application.jobs.launcher.admission import PassStoppedError
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
 from promptpotter.domain.records.run_records import LaunchedEffect, LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
-
-if TYPE_CHECKING:
-    from promptpotter.application.jobs.registry import JobRegistry
-    from promptpotter.infrastructure.store.stores import Stores
 
 type TaskStatus = Literal["working", "input_required", "completed", "failed", "cancelled"]
 

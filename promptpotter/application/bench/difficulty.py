@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, NamedTuple, assert_never
+from typing import NamedTuple, assert_never
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.rasch import (
@@ -13,9 +13,10 @@ from promptpotter.application.intelligence.rasch import (
     graduate_ruler_model,
 )
 from promptpotter.domain.arms import Concluded
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import is_floor_pinned
 from promptpotter.domain.measurement_provenance import meets_grade
-from promptpotter.domain.results import InRunCells
+from promptpotter.domain.results import InRunCells, RoundResult
 from promptpotter.domain.ruler import (
     AbilityReading,
     DeltaRuler,
@@ -29,16 +30,12 @@ from promptpotter.domain.ruler import (
     flat_ruler_id,
     theta_caveat,
 )
+from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
 from promptpotter.infrastructure.store.archive_queries import ArmOf, CellOf, OpenAt, memory_scope
 from promptpotter.infrastructure.store.read_model import derived
+from promptpotter.infrastructure.store.ruler_store import RulerStore
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.measurement_context import RoleScope
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
-    from promptpotter.infrastructure.store.ruler_store import RulerStore
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

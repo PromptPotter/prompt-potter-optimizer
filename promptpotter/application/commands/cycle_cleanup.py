@@ -4,16 +4,12 @@ the destroyers' one guard (`admission.py::destroying`)."""
 from __future__ import annotations
 
 import contextlib
-from typing import TYPE_CHECKING
 
-from promptpotter.application.commands.dispatcher import Applier, RejectedError
+from promptpotter.application.commands.dispatcher import Applier, DispatchedToCycle, RejectedError
 from promptpotter.application.jobs.launcher.admission import deletable_stubs, destroying
+from promptpotter.domain.command_kinds import CleanupEmptyCyclesPayload, DeleteCyclePayload
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.shared.errors import CycleBusyError
-
-if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import DispatchedToCycle
-    from promptpotter.domain.command_kinds import CleanupEmptyCyclesPayload, DeleteCyclePayload
 
 
 async def delete_cycle(dispatched: DispatchedToCycle[DeleteCyclePayload]) -> Applier[object]:

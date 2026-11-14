@@ -67,6 +67,7 @@ from promptpotter.application.bench.children import (
     carried_writes,
     overlay_failures,
 )
+from promptpotter.application.bench.cycle import RoundContext
 from promptpotter.application.bench.node_context import Calls, Children, NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import declare_steered_values
 from promptpotter.application.bench.task_context import (
@@ -147,13 +148,7 @@ from promptpotter.application.optimizer_manifest import (
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect, ParetoScores
-from promptpotter.application.optimizers.nodes import (
-    MintFacts,
-    Panel,
-    Proposals,
-    RoundContext,
-    admits,
-)
+from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.injections.panels import detectable_rows
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
@@ -201,12 +196,12 @@ from promptpotter.application.runner.inner.spawn import (
 )
 from promptpotter.application.runner.inner.tasks import (
     InnerBenchmarkConfig,
-    InnerSpawnContext,
     InnerTasks,
     inner_instrument_config,
 )
 from promptpotter.application.runner.round import author_arm, run_init
 from promptpotter.application.scoring.formula.compiler import campaign_terms
+from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.config import paths
 from promptpotter.config.paths import block_packs_root, install_datasets_root
@@ -216,14 +211,13 @@ from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import (
     BankPartition,
     BenchRefusal,
+    CampaignRefusal,
     DatasetSplit,
     partition_bank,
-    restored_partition,
 )
 from promptpotter.domain.campaign import (
     Arm,
     Campaign,
-    CampaignRefusal,
     CampaignRefusedError,
     Compare,
     DeterminismClamp,
@@ -314,13 +308,13 @@ from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
-from promptpotter.infrastructure.llm.telemetry import at_round
 from promptpotter.infrastructure.producer_lock import cycle_held
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard.projection import (
     DashboardCheckout,
     fold_at,
 )
+from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
 from promptpotter.infrastructure.store import source_scan
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
@@ -359,7 +353,6 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.hashing import SourceFacts, dataset_hash, source_facts, stable_hash
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole
-from promptpotter.shared.run_scope import scoped
 
 pytestmark = pytest.mark.usefixtures("offline", "optimizing_memory")
 
@@ -918,7 +911,6 @@ def ask(tmp_path: Path, offline: Router) -> Callable[..., Any]:
             with (
                 scoped(
                     ledger=CycleEventLog(tmp_path / "asked.jsonl"),
-                    optimizer=select_optimizer(OptimizerChoice(optimizer="potter")),
                     determinism=clamp,
                 ),
                 scoped(book=spend_book()),
@@ -2247,7 +2239,7 @@ def test_an_empty_answer_buys_a_turn_only_where_one_is_owed(
         asyncio.run(
             cli_new._hold_checkin(
                 campaign_runner._PARSER.parse_args(["new", "x"]),
-                built_stores,
+                CommandDispatcher(built_stores),
                 authored.draft_id,
                 None,
             )
@@ -3110,7 +3102,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     pin = PinnedCell(cell=inner_seat, instrument="i").pin()
     with (
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
-        at_round(0),
+        scoped(round=0),
         pytest.raises(CellUnscoreableError) as inner,
     ):
         asyncio.run(
@@ -3608,7 +3600,9 @@ def _gepa_seat(stores: Stores, population: list[OptSearchPoint]) -> RoundContext
 def test_l1s_wire_offers_the_roster_the_second_prompt_node_declares() -> None:
     # A SECOND prompt node, on a roster of its own, is written as the first is.
     two = _two_prompt_nodes()
-    wire = build_l1_response_schema(two, citable_fields=["critique"], inner_cells=None)
+    wire = build_l1_response_schema(
+        two, citable_fields=["critique"], inner_cells=None, field_names={}
+    )
     offered = wire["properties"]["variants"]["items"]["properties"]["prompt_fields_updates"]
     review = offered["properties"]["review"]["anyOf"][0]
     assert set(review["properties"]) == {"instruction", "rubric"}, (
@@ -3730,7 +3724,6 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
         no_cells = Panel(cells=[], order=[], block_size=0)
         with (
             scoped(
-                optimizer=reflected_on.cycle.optimizer,
                 determinism=reflected_on.cycle.config.optimization.determinism,
             ),
             scoped(book=spend_book()),
@@ -4035,7 +4028,7 @@ def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
     bank, _, _ = _split_bank()
     l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
     cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0), seed=0)
-    back = restored_partition(bank, PartitionRecord.of(cell_drawn, dataset_hash="d"))
+    back = PartitionRecord.of(cell_drawn, dataset_hash="d").restored(bank)
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"
     )

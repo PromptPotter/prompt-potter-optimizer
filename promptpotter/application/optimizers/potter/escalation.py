@@ -4,13 +4,17 @@ from __future__ import annotations
 
 import enum
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, ClassVar, Literal, NamedTuple, Protocol, Self
+from typing import Any, ClassVar, Literal, NamedTuple, Protocol, Self
+
+from pydantic import BaseModel
 
 from promptpotter.application.bench.node_context import (
     Bounds,
     Calls,
     Lineage,
+    NodeContext,
     Progress,
     Replay,
     Ruler,
@@ -25,7 +29,11 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     StandingForkProposal,
     TerminateProposal,
 )
-from promptpotter.application.optimizers.potter.knobs import EscalationKnobs, L1GenerateKnobs
+from promptpotter.application.optimizers.potter.knobs import (
+    EscalationKnobs,
+    EscalationLadder,
+    L1GenerateKnobs,
+)
 from promptpotter.application.optimizers.potter.records import (
     L1Layout,
     Ladder,
@@ -34,34 +42,26 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
-from promptpotter.domain.phase_views import OptimizerStepExitView
-from promptpotter.domain.phases import StopLoop, StopReason
+from promptpotter.domain.paired_reading import RoundArm
+from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.records.run_records import (
     CheckpointInputs,
     ConfigOverrides,
     ForkTrigger,
     RebaseRequest,
+    RoundStatement,
     RoundWarningRecord,
+    StopLoop,
 )
 from promptpotter.domain.results import Reelection
+from promptpotter.domain.ruler import AbilityReading, LevelSeries
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.shared.identity import Principal
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from pydantic import BaseModel
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizers.potter.knobs import EscalationLadder
-    from promptpotter.domain.paired_reading import RoundArm
-    from promptpotter.domain.phase_views import OptimizerStepEnterView
-    from promptpotter.domain.records.run_records import RoundStatement
-    from promptpotter.domain.ruler import AbilityReading, LevelSeries
 
 logger = logging.getLogger(__name__)
 

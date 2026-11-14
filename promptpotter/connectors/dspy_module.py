@@ -5,12 +5,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
-from promptpotter.domain.pipeline_params import NodeCall
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
@@ -35,12 +37,6 @@ from promptpotter.shared.errors import (
     cell_failure,
 )
 from promptpotter.shared.extras import Extra
-
-if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Coroutine, Mapping
-
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
 

@@ -8,12 +8,13 @@ import asyncio
 import contextlib
 import logging
 import random
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 from promptpotter.application.datasets.authored import ConfigLayers
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import campaign_refusal, slotless_share
 from promptpotter.application.jobs.mint import (
@@ -33,7 +34,6 @@ from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner.narrative import inner_narrative, narrative_head
 from promptpotter.application.runner.inner.tasks import (
-    InnerSpawnContext,
     ResolvedPanel,
     enter_inner_cell,
     inner_instrument_config,
@@ -43,9 +43,11 @@ from promptpotter.application.runner.inner.tasks import (
     parse_resolved,
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import InnerRun
 from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
@@ -59,16 +61,20 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.run_records import SpawnedBy, SpawnedRecord
 from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.telemetry import bound_round
+from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import (
     SandboxOwner,
     dataset_id_prefix,
     sandbox_owner_path,
 )
-from promptpotter.infrastructure.store.stores import build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     CellSendRefusedError,
@@ -84,18 +90,6 @@ from promptpotter.shared.measurement_context import (
     measured_pass,
     measured_pass_context,
 )
-from promptpotter.shared.run_scope import scoped
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.results import CycleResult
-    from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

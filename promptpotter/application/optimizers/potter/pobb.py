@@ -3,9 +3,10 @@ from __future__ import annotations
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import TYPE_CHECKING, TypedDict
+from typing import TypedDict
 
 import numpy as np
+from numpy.typing import NDArray
 
 from promptpotter.application.intelligence.rasch import (
     Observation,
@@ -14,19 +15,14 @@ from promptpotter.application.intelligence.rasch import (
     theta_cells,
 )
 from promptpotter.application.optimizers.nodes import RaceSnapshot
+from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.scoring.selection import discordant
 from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.paired_reading import ArmKey, PriorStanding
+from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, Grade, GradedCell, MeasuredCell
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.worded import Worded
-
-if TYPE_CHECKING:
-    from numpy.typing import NDArray
-
-    from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
-    from promptpotter.domain.ruler import DeltaRuler
-
 
 # θ draws per field member, enough that a p_best near ε reads the same across seeds.
 _DRAWS = 4000

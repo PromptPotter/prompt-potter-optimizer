@@ -8,6 +8,7 @@ from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, ArmName
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.said import Tone
 from promptpotter.domain.scoring import CellSheet, GradedCell, is_answer_collapsed
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
@@ -23,7 +24,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
 
 

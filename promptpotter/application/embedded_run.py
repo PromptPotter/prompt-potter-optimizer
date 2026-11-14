@@ -4,10 +4,9 @@ of its ceiling and no machine slot."""
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
-from typing import TYPE_CHECKING
 
 from promptpotter.application.account import local_stores
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
@@ -40,25 +39,18 @@ from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.pipeline_resolve import cycle_config, laid_session
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.campaign import Optimize
-from promptpotter.domain.command_kinds import Door
+from promptpotter.domain.campaign import Optimize, RunDeclaration
+from promptpotter.domain.command_kinds import Door, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.job import EmbeddedRun
-from promptpotter.domain.results import CycleResult
-from promptpotter.domain.sample import Bank
+from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.domain.campaign import RunDeclaration
-    from promptpotter.domain.command_kinds import HeadToHeadRequest
-    from promptpotter.domain.draft_edit import CampaignLayer
-    from promptpotter.domain.run_mode import RunMode
-    from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store.stores import Stores
 
 # This module IS the embedded surface: a capability it does not name is one a host cannot find.
 # Every verb but the run is a command the host files through `host_dispatcher`, as every door does.

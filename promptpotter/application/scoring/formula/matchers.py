@@ -10,6 +10,7 @@ from collections.abc import Callable
 from typing import NamedTuple
 
 from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.scoring import MeasuredCell, find_rank
 from promptpotter.shared.answer_text import (
@@ -484,3 +485,9 @@ def matcher_of(per_sample: str | None) -> str | None:
         and node.func.id in MATCHERS
     }
     return called.pop() if len(called) == 1 else None
+
+
+def admits(schema: PipelineSchema, matcher: str | None) -> frozenset[Presumption]:
+    """The one admission rule: what a run's chain and its cell's matcher (`matchers.py::matcher_of`) let a block presume."""
+    ranking = {Presumption.RANKING} if schema.emits_ranking else set()
+    return frozenset(ranking) | (frozenset() if matcher is None else MATCHERS[matcher].admits)

@@ -8,9 +8,10 @@ from pydantic import Field, model_validator
 
 from promptpotter.domain.arms import Cut
 from promptpotter.domain.cell_terms import CellTerm
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
-from promptpotter.domain.results import CycleResult, RoundResult
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import GradedCell, PipelineData
 from promptpotter.domain.strict_model import FrozenModel

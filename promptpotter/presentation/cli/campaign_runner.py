@@ -3,11 +3,13 @@ verb and no use case."""
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import importlib
 import json
 import sys
+from collections.abc import Callable, Coroutine
 from typing import TYPE_CHECKING, Any, cast
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
@@ -24,9 +26,6 @@ from promptpotter.shared.errors import PotterError
 from promptpotter.shared.named_rows import imported
 
 if TYPE_CHECKING:
-    import argparse
-    from collections.abc import Callable, Coroutine
-
     from promptpotter.presentation.cli.commands.result import CommandResult
 
 

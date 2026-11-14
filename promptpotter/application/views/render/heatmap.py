@@ -1,9 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from promptpotter.application.views.view_models import HardSamplesView
+from promptpotter.application.views.view_models import HardSamplesView
 
 # Graded, not binary: on a graded scorer every cell sits inside (0,1) and a split shades them alike.
 _SHADES = ("░", "▒", "▓", "█")

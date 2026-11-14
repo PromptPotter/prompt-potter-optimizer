@@ -10,24 +10,22 @@ from collections import deque
 from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractContextManager, asynccontextmanager
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
+
+import httpx
 
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.records.run_records import ProviderEasedRecord, ProviderHoldRecord
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import bound_account
 from promptpotter.infrastructure.llm.telemetry import bound_ledger
+from promptpotter.infrastructure.run_scope import RunScope, run_scope, scoped
 from promptpotter.shared.errors import (
     ContextOverflowError,
     ErrorCategory,
     RequestTooLargeError,
     SendRefusedError,
 )
-from promptpotter.shared.run_scope import RunScope, run_scope, scoped
-
-if TYPE_CHECKING:
-    import httpx
-
-    from promptpotter.infrastructure.ledger import CycleEventLog
 
 # The first send and each resend after a 5xx or a broken connection; a 429 spends none.
 SEND_ATTEMPTS: int = 5

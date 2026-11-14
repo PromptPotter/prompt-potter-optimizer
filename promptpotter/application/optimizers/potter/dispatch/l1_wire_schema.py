@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any, cast
 
 from promptpotter.application.bench.llm_call import wire_closed
-from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     BLOCK_ID_INSTRUCTION,
     LAYOUT_SCHEMA_INSTRUCTION,
     OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
     SCHEMA_DESCRIPTIONS_INSTRUCTION,
     SCHEMA_RENAME_INSTRUCTION,
+    RecombinationOffer,
     prose_ceiling,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
@@ -24,6 +24,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1Variant,
     recombinations_schema,
 )
+from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
@@ -31,11 +32,6 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-
-if TYPE_CHECKING:
-    from promptpotter.application.optimizers.potter.dispatch.bundle import RecombinationOffer
-    from promptpotter.domain.l4.cells import InnerCells
-
 
 # A ceiling on a non-prompt field reads as a live cap while binding nothing.
 assert set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) <= set(OptimizerPromptTemplate.model_fields), (
@@ -65,12 +61,12 @@ def _said(slot: dict[str, Any]) -> dict[str, Any]:
     return {**_arm(slot), **{k: slot[k] for k in ("description",) if k in slot}}
 
 
-def effective_l1_field_names() -> dict[str, str]:
+def effective_l1_field_names(levers: Mapping[str, Any]) -> dict[str, str]:
     """Unconditional: gating on the INNER cycle's own config would emit a rename nothing applied, then score it."""
-    return dict(bound_optimizer().levers("l1_generate").get(SCHEMA_RENAME_PARAM, {}))
+    return dict(levers.get(SCHEMA_RENAME_PARAM, {}))
 
 
-def _rename_variant_schema(variant: dict[str, Any], field_names: dict[str, str]) -> None:
+def _rename_variant_schema(variant: dict[str, Any], field_names: Mapping[str, str]) -> None:
     props = variant["properties"]
     variant["properties"] = {field_names.get(k, k): v for k, v in props.items()}
     required = variant.get("required")
@@ -115,6 +111,7 @@ def build_l1_response_schema(
     n_variants: int | None = None,
     pooled_fields: Mapping[str, Sequence[str]] | None = None,
     recombination: RecombinationOffer | None = None,
+    field_names: Mapping[str, str],
 ) -> dict[str, Any]:
     """Returns the BARE schema: an envelope nests it where the provider reads no ``type`` and every constraint goes inert.
     ``None`` *recombination* withdraws the slot."""
@@ -228,7 +225,6 @@ def build_l1_response_schema(
     variant_props["targets_rows"] = _said(variant_props["targets_rows"])
 
     # Rename LAST: every key above is addressed by its real field name.
-    field_names = effective_l1_field_names()
     if field_names:
         _rename_variant_schema(variant_items, field_names)
 

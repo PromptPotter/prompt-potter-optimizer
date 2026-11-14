@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.commands import archive_compaction
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.maintenance.archive_maintenance import (
@@ -11,7 +12,6 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.domain.command_kinds import CompactArchivePayload, Door
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import PayloadInvalidError
 
 _MB = 1024 * 1024
@@ -70,7 +70,7 @@ def _render_inventory(inv: ArchiveInventory, *, dataset: str | None) -> str:
 
 
 async def cmd_compact_archive(args: argparse.Namespace) -> CommandResult:
-    stores = open_stores(args)
+    stores = local_stores(tenant=args.tenant)
     mode = str(args.mode)
     dataset: str | None = args.dataset
     apply = bool(args.apply)

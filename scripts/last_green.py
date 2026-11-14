@@ -78,40 +78,45 @@ def _is_type_checking(test: ast.expr) -> bool:
     )
 
 
-def _import_names(path: Path) -> set[str]:
+def import_statements(path: Path) -> list[tuple[set[str], bool]]:
+    """Each package file one import statement of *path* names, and whether the statement sits
+    under ``TYPE_CHECKING``; function bodies included."""
     importer = _module_name(path.relative_to(REPO).as_posix())
     home = importer if path.name == "__init__.py" else importer.rpartition(".")[0]
-    found: set[str] = set()
+    modules = _package_modules()
+    found: list[tuple[set[str], bool]] = []
     # An import is a statement, so no expression is walked; a function body is.
-    todo: list[ast.AST] = [ast.parse(path.read_text(encoding="utf-8"))]
+    todo: list[tuple[ast.AST, bool]] = [(ast.parse(path.read_text(encoding="utf-8")), False)]
     while todo:
-        sub = todo.pop()
+        sub, typed = todo.pop()
+        names: list[str] = []
         if isinstance(sub, ast.Import):
-            found.update(a.name for a in sub.names)
+            names = [a.name for a in sub.names]
         elif isinstance(sub, ast.ImportFrom):
             base = sub.module or ""
             if sub.level:
                 up = home.split(".")[: len(home.split(".")) - (sub.level - 1)]
                 base = ".".join([*up, base] if base else up)
-            found.add(base)
-            found.update(f"{base}.{a.name}" for a in sub.names)
+            names = [base, *(f"{base}.{a.name}" for a in sub.names)]
+        if names:
+            found.append(({modules[n] for n in names if n in modules}, typed))
         for field, value in ast.iter_fields(sub):
-            if not isinstance(value, list) or (
-                field == "body" and isinstance(sub, ast.If) and _is_type_checking(sub.test)
-            ):
-                continue
-            todo.extend(
-                child
-                for child in value
-                if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
-            )
+            if isinstance(value, list):
+                inner = typed or (
+                    field == "body" and isinstance(sub, ast.If) and _is_type_checking(sub.test)
+                )
+                todo.extend(
+                    (child, inner)
+                    for child in value
+                    if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
+                )
     return found
 
 
 def imported(path: Path) -> set[str]:
-    """The package's files *path* imports, function bodies included, `TYPE_CHECKING` excluded."""
-    modules = _package_modules()
-    return {modules[name] for name in _import_names(path) if name in modules}
+    """The package's files *path* imports, function bodies and `TYPE_CHECKING` included: a layer a
+    type crosses is crossed."""
+    return {rel for files, _ in import_statements(path) for rel in files}
 
 
 class LastGreen:

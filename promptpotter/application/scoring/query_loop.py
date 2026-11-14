@@ -10,6 +10,7 @@ from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.run_phase_control import Flight, budget_stop
 from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
@@ -17,13 +18,13 @@ from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol,
     measure_sample,
 )
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
     StopCategory,
-    StopLoop,
     StopReason,
     WalkEnd,
 )
@@ -32,8 +33,10 @@ from promptpotter.domain.records.run_records import (
     RaceCatchUpRecord,
     SampleScoredRecord,
     SampleStartedRecord,
+    StopLoop,
 )
 from promptpotter.domain.results_health import is_deprecated
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
     CellSheet,
@@ -42,6 +45,7 @@ from promptpotter.domain.scoring import (
     Scorer,
     WalkedCell,
 )
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.send_pacing import HELD_POLL_S
@@ -54,23 +58,19 @@ from promptpotter.infrastructure.llm.telemetry import (
     bound_round,
     claim_campaign_price,
 )
+from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.store.command_log import effective_lookahead
+from promptpotter.infrastructure.store.io import HeldLock
 from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
     SendRefusedError,
     graceful,
 )
-from promptpotter.shared.run_scope import run_scope
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.indexes.sample import SampleIndex
     from promptpotter.application.scoring.catch_up import CatchUpPool, CaughtUp
-    from promptpotter.domain.cell_fold import ScoreSummary
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.io import HeldLock
-    from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 logger = logging.getLogger(__name__)
 

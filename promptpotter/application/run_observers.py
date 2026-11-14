@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -14,7 +13,8 @@ from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
-from promptpotter.domain.campaign import ceiling_meter
+from promptpotter.domain.campaign import Campaign, ceiling_meter
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
@@ -34,15 +34,11 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.run_scope import rescope, run_scope
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.measurement_context import instrument_depth
-from promptpotter.shared.run_scope import rescope, run_scope
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.campaign_config import CampaignConfig
 
 logger = logging.getLogger(__name__)
 

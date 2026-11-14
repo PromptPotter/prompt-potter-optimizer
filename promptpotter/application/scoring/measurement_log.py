@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.bench.difficulty import AbilityScale, judging_ruler, restamped
 from promptpotter.application.datasets.authored import (
@@ -33,6 +33,7 @@ from promptpotter.application.scoring.closed_rounds import (
 )
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.arms import Cut, Measuring, Proposed, arm_name
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.cells import (
     Cell,
@@ -51,17 +52,22 @@ from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pass_kinds import individual_cells
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.ruler import RulerReach, RulerScope
-from promptpotter.domain.sample import Bank
+from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import (
     CellSheet,
+    GradedCell,
+    PipelineData,
     SampleStatus,
+    Scorer,
     ground_truth_text,
     is_verifier_graded,
 )
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.infrastructure.ledger import ledger_chain
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import (
     OpenAt,
     list_populations,
@@ -71,21 +77,16 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.dataset_access import definition_version, resolve_dataset
+from promptpotter.infrastructure.store.dataset_access import (
+    ResolvedDataset,
+    definition_version,
+    resolve_dataset,
+)
 from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import Moment, derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError, NotFoundError, PayloadInvalidError
 from promptpotter.shared.measurement_context import RoleScope
-from promptpotter.shared.run_scope import scoped
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
-    from promptpotter.domain.scoring import GradedCell, PipelineData, Scorer
-    from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
-
 
 _SPAN_KEYS = frozenset({"step_tokens", "step_timings", "terminal_node", "total_time"})
 

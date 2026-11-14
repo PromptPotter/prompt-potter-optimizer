@@ -5,15 +5,16 @@ import types
 import uuid
 from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, TypeAliasType, Union, cast, get_args, get_origin
+from typing import Any, TypeAliasType, Union, cast, get_args, get_origin
 
 from pydantic import BaseModel, JsonValue, TypeAdapter
 
 from promptpotter.application.cycle_addressing import resolve_course, resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
-from promptpotter.application.jobs.launcher.launch import LaunchOutcome
+from promptpotter.application.jobs.launcher.launch import Inline, LaunchOutcome
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.views.render.phase import stop_next_lines
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_events import (
     WORKSPACE_SUBJECT,
     CommandAckRecord,
@@ -54,10 +55,6 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.identity import acting_principal, require_capability
 from promptpotter.shared.named_rows import imported, returned
-
-if TYPE_CHECKING:
-    from promptpotter.application.jobs.launcher.launch import Inline
-    from promptpotter.domain.campaign import Campaign
 
 
 class RejectedError(Exception):

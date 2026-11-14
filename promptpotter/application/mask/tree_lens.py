@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import TYPE_CHECKING, cast
+from typing import cast
 
 from promptpotter.application import optimizers
 from promptpotter.application.mask.divergence import (
@@ -12,6 +12,7 @@ from promptpotter.application.mask.divergence import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskReading, MaskRecord
+from promptpotter.application.optimizers.nodes import Eliminator
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Lens, Subject
 from promptpotter.domain.hierarchy import (
     HierarchyCandidate,
@@ -27,9 +28,6 @@ from promptpotter.domain.hierarchy import (
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.infrastructure.store.stores import Stores, resolve_cycle_path
 from promptpotter.shared.errors import BadRequestError
-
-if TYPE_CHECKING:
-    from promptpotter.application.optimizers.nodes import Eliminator
 
 
 def _abort_suppress(variant: str) -> frozenset[str]:

@@ -1,4 +1,4 @@
-"""Every ledger record kind: a module here declares its arms, found by walking this package."""
+"""The ledger record base: a module here declares its arms, and `record_kinds` walks them in."""
 
 from __future__ import annotations
 
@@ -23,4 +23,4 @@ class CycleRecord(FrozenModel):
             RECORDS.register(field.default, cls)
 
 
-RECORDS: KindTable[CycleRecord] = KindTable("record", walk=__name__)
+RECORDS: KindTable[CycleRecord] = KindTable("record")

@@ -1,28 +1,25 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
 
-from promptpotter.application.commands.dispatcher import Applier
+from promptpotter.application.commands.dispatcher import (
+    Applier,
+    CommandDispatcher,
+    Dispatched,
+    DispatchedToCycle,
+)
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import campaign_sends
+from promptpotter.domain.command_kinds import (
+    CancelQueuedRunPayload,
+    ChangeRunLimitsPayload,
+    SetConcurrentCyclesPayload,
+)
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.records.run_records import ComparisonExit
 from promptpotter.domain.spend import MONEY_AXES
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
-
-if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import (
-        CommandDispatcher,
-        Dispatched,
-        DispatchedToCycle,
-    )
-    from promptpotter.domain.command_kinds import (
-        CancelQueuedRunPayload,
-        ChangeRunLimitsPayload,
-        SetConcurrentCyclesPayload,
-    )
-    from promptpotter.domain.cycle_paths import CycleHop
 
 
 async def change_run_limits(

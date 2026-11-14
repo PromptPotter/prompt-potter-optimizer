@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import argparse
-from typing import TYPE_CHECKING
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.bench.resume_and_fork.ab_replay import ab_replay_cycle
 from promptpotter.application.cycle_addressing import (
     latest_launch,
@@ -16,37 +16,33 @@ from promptpotter.application.initialization.scoring_scope import open_diagnosti
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.presentation.cli.commands.result import CommandResult
-from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.shared.errors import NotFoundError
-
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.store.stores import Stores
-
-
-def _target(args: argparse.Namespace, stores: Stores) -> CycleHop:
-    if args.campaign:
-        root = named_campaign(stores, args.campaign).root_hop
-        if args.cycle:
-            cycle_id = resolve_cycle_id(stores, root.campaign_id, args.cycle)
-            return CycleHop(campaign_id=root.campaign_id, cycle_id=cycle_id)
-        return root
-    hop = latest_launch(stores)
-    if hop is None:
-        refusal = NotFoundError("No active campaign: pass --campaign, or start one.")
-        refusal.add_note(no_dataset_hint(stores))
-        raise refusal
-    if not args.cycle:
-        return hop
-    return CycleHop(
-        campaign_id=hop.campaign_id,
-        cycle_id=resolve_cycle_id(stores, hop.campaign_id, args.cycle),
-    )
 
 
 async def cmd_ab(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
-    stores = open_stores(args)
-    hop = _target(args, stores)
+    stores = local_stores(tenant=args.tenant)
+
+    def target() -> CycleHop:
+        if args.campaign:
+            root = named_campaign(stores, args.campaign).root_hop
+            if args.cycle:
+                cycle_id = resolve_cycle_id(stores, root.campaign_id, args.cycle)
+                return CycleHop(campaign_id=root.campaign_id, cycle_id=cycle_id)
+            return root
+        hop = latest_launch(stores)
+        if hop is None:
+            refusal = NotFoundError("No active campaign: pass --campaign, or start one.")
+            refusal.add_note(no_dataset_hint(stores))
+            raise refusal
+        if not args.cycle:
+            return hop
+        return CycleHop(
+            campaign_id=hop.campaign_id,
+            cycle_id=resolve_cycle_id(stores, hop.campaign_id, args.cycle),
+        )
+
+    hop = target()
     async with open_diagnostic(stores, hop) as opened:
         report = ab_replay_cycle(hop, opened.session, opened.config)
 

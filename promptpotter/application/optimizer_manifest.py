@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import functools
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -21,8 +21,10 @@ from promptpotter.config.paths import (
     checkin_manifest_path,
     optimizer_manifest_path,
 )
-from promptpotter.domain.campaign import DeterminismClamp
-from promptpotter.domain.campaign_config import OptimizerChoice
+from promptpotter.config.prompt_blocks import PackShelf
+from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.domain.campaign_config import ArmGateMode, OptimizerChoice
+from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -49,7 +51,10 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.domain.pool import DemoPool, Pool
+from promptpotter.domain.pool import Access, DemoPool, Pool
+from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.results import OptimizerFact, RoundResult
+from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.treatment import Treatment
@@ -62,11 +67,8 @@ from promptpotter.shared.errors import (
     unknown_slots_said,
 )
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
-from promptpotter.shared.run_scope import run_scope
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from promptpotter.application.optimizers.nodes import (
         Adapter,
         Controller,
@@ -79,14 +81,6 @@ if TYPE_CHECKING:
         Selector,
         Survivor,
     )
-    from promptpotter.config.prompt_blocks import PackShelf
-    from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.campaign_config import ArmGateMode
-    from promptpotter.domain.dashboard_rows import OptimizerLimit
-    from promptpotter.domain.pool import Access
-    from promptpotter.domain.prompt_block import Presumption
-    from promptpotter.domain.results import OptimizerFact, RoundResult
-    from promptpotter.domain.round_audit import RoundAudit
 
 
 @shapes_optimizer_prompt
@@ -580,7 +574,7 @@ class SelectedOptimizer:
         )
 
     def treatment(self, admits: frozenset[Presumption], shelf: PackShelf) -> Treatment:
-        """Under the bound L4 edit too: two inner cells under two arms are two treatments; *admits* is the run's admission (`nodes.py::admits`), *shelf* its account's packs."""
+        """Under the bound L4 edit too: two inner cells under two arms are two treatments; *admits* is the run's admission (`matchers.py::admits`), *shelf* its account's packs."""
         return Treatment(
             optimizer=self.name,
             version=self.version,
@@ -1011,21 +1005,6 @@ def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
 def checkin_manifest() -> CheckinManifest:
     path = checkin_manifest_path()
     return _checkin_at(path, _stamp(path))
-
-
-@shapes_optimizer_prompt
-def bound_optimizer() -> SelectedOptimizer:
-    selected = run_scope().optimizer
-    if selected is None:
-        raise RuntimeError(
-            "no optimizer is scoped to this task — the run seam scopes the launch's "
-            "selection before anything reads a node"
-        )
-    return selected
-
-
-def bound_determinism() -> DeterminismClamp | None:
-    return run_scope().determinism
 
 
 def resolved_overrides(overrides: Mapping[str, Mapping[str, Any]]) -> dict[str, dict[str, Any]]:

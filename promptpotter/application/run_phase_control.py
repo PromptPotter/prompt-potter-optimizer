@@ -3,8 +3,9 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
+from promptpotter.domain.command_kinds import SubmitArmsPayload
+from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     CampaignPhase,
@@ -12,6 +13,8 @@ from promptpotter.domain.phases import (
     StopReason,
 )
 from promptpotter.domain.records.run_records import FlightRecord, FlightWaiting, PhaseRecord
+from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.producer_lock import (
     hold_cycle,
@@ -20,15 +23,13 @@ from promptpotter.infrastructure.producer_lock import (
     release_pass,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_bench_open
-from promptpotter.infrastructure.store.command_log import CommandLog, Controls, requested_lookahead
-
-if TYPE_CHECKING:
-    from promptpotter.domain.command_kinds import SubmitArmsPayload
-    from promptpotter.domain.cycle_paths import CycleHop, Subject
-    from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.llm.spend_book import SpendBook
-    from promptpotter.infrastructure.store.command_log import PauseAsk
-    from promptpotter.infrastructure.store.stores import Stores
+from promptpotter.infrastructure.store.command_log import (
+    CommandLog,
+    Controls,
+    PauseAsk,
+    requested_lookahead,
+)
+from promptpotter.infrastructure.store.stores import Stores
 
 
 @dataclass(frozen=True)

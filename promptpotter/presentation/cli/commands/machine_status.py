@@ -1,20 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
-from typing import TYPE_CHECKING
 
 from promptpotter.application import health, notices
+from promptpotter.application.account import local_stores
+from promptpotter.application.caller import Caller
 from promptpotter.application.jobs.capacity import SLOT_BOUND_WORDS
+from promptpotter.application.jobs.machine_status import MachineStatusResponse
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.read_params import MachineStatusParams
 from promptpotter.presentation.cli.commands.result import CommandResult, said_text
-from promptpotter.presentation.cli.commands.workspace import open_stores
-
-if TYPE_CHECKING:
-    import argparse
-
-    from promptpotter.application.caller import Caller
-    from promptpotter.application.jobs.machine_status import MachineStatusResponse
-    from promptpotter.application.read_params import MachineStatusParams
 
 
 def machine_status_human(
@@ -50,7 +46,9 @@ def machine_status_human(
 
 
 async def cmd_close_admission(args: argparse.Namespace) -> CommandResult:
-    held = JobRegistry.attach(open_stores(args).jobs_dir).close_for_landing(args.target)
+    held = JobRegistry.attach(local_stores(tenant=args.tenant).jobs_dir).close_for_landing(
+        args.target
+    )
     return CommandResult(
         data={"target": args.target, "held": [job.job_id for job in held]},
         # The first word is the verdict `deploy-linux/update.sh` reads.

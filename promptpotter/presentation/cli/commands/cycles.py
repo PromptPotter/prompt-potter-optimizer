@@ -1,18 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import argparse
 
+from promptpotter.application.caller import Caller
 from promptpotter.application.cycle_addressing import latest_launch
+from promptpotter.application.read_params import HierarchyParams
 from promptpotter.domain.cycle_paths import Subject
-from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
+from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse, HierarchyResponse
 from promptpotter.presentation.cli.commands.result import CommandResult, said_text
-
-if TYPE_CHECKING:
-    import argparse
-
-    from promptpotter.application.caller import Caller
-    from promptpotter.application.read_params import HierarchyParams
-    from promptpotter.domain.hierarchy import HierarchyResponse
 
 
 def _line(course: HierarchyCourse, *, active: bool) -> str:

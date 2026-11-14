@@ -1,31 +1,28 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
+from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.rasch import (
+    RoundAbilities,
     candidate_abilities,
     graded_response,
     theta_cells,
     theta_lift_over_parent,
 )
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.crowning_bar import BarSubject, CrowningBar, LiftPrior, lift_prior
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES, CellSheet, GradedCell
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.ruler import DeltaRuler, ThetaLift
+from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES, CellSheet, GradeColumn, GradedCell
 from promptpotter.shared.statistics import (
     discordant_counts,
     mean_ci,
     sign_posterior,
 )
-
-if TYPE_CHECKING:
-    from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
-    from promptpotter.application.intelligence.rasch import RoundAbilities
-    from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.ruler import DeltaRuler, ThetaLift
-    from promptpotter.domain.scoring import GradeColumn
 
 
 def level_band(

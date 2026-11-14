@@ -1,27 +1,20 @@
 from __future__ import annotations
 
 import copy
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping, Sequence
+from typing import Any
 
-from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS
+from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_TEXT,
     OUTPUT_CONTRACT_KEYS,
     SCHEMA_TOGGLE_PARAM,
+    NodeSearchNarrowing,
+    PipelineSchema,
     described_field,
     description_path,
     pickable,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
-    from promptpotter.domain.pipeline_schema import (
-        NodeSearchNarrowing,
-        PipelineSchema,
-    )
 
 
 def overlay_is_locked_axis_only(overlay: Mapping[str, NodeCall]) -> bool:

@@ -7,22 +7,18 @@ from __future__ import annotations
 
 import enum
 from abc import abstractmethod
-from typing import TYPE_CHECKING, Annotated, ClassVar, Literal, NamedTuple
+from collections.abc import Iterable, Mapping, Sequence
+from typing import Annotated, ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
 from promptpotter.domain.optimizer_state import StateSlice
 from promptpotter.domain.prompt_block import AUTHORED_SOURCE, snippet_id
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
-
-if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping, Sequence
-
-    from promptpotter.domain.sample import Sample
-
 
 # How a reader takes a pool: not at all, as material it may adapt, or by entry id alone.
 Access = Literal["off", "open", "closed"]

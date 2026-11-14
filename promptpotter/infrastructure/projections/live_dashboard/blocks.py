@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from promptpotter.domain.arm_reading import ArmElection, ArmReading, panel_counts, panel_cuts
 from promptpotter.domain.arms import arm_name
 from promptpotter.domain.dashboard_rows import (
@@ -17,15 +15,13 @@ from promptpotter.domain.scoring import (
     is_verifier_graded,
 )
 from promptpotter.domain.spend import TokenAccount
+from promptpotter.infrastructure.projections.live_dashboard.round_buffer import (
+    RoundBuffer,
+    WalkedSample,
+)
 from promptpotter.infrastructure.projections.live_dashboard.state import RacingBlock
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.measurement_context import MeasurementRole
-
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.projections.live_dashboard.round_buffer import (
-        RoundBuffer,
-        WalkedSample,
-    )
 
 
 def _trim(text: str, n: int) -> str:

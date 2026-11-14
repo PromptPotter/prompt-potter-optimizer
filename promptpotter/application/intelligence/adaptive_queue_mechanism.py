@@ -4,15 +4,10 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Sequence
-from typing import TYPE_CHECKING
 
-from promptpotter.domain.scoring import ROW_GRADES
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import ROW_GRADES, GradedCell
 from promptpotter.shared.statistics import logistic
-
-if TYPE_CHECKING:
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell
-
 
 # Probit scale for ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))``.
 _PROBIT_SCALE = math.pi / 8.0

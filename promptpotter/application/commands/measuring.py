@@ -1,22 +1,17 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-from promptpotter.application.commands.dispatcher import Applier
+from promptpotter.application.commands.dispatcher import Applier, DispatchedToCycle
 from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
 from promptpotter.application.scoring import passes
 from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.command_kinds import (
+    GradeBenchPayload,
+    VerifyCandidatePayload,
+)
 from promptpotter.domain.phase_views import VerificationGradedView
 from promptpotter.domain.records.run_records import VerifySaturated
 from promptpotter.domain.spend import Budget
 from promptpotter.shared.measurement_context import MeasurementRole
-
-if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import DispatchedToCycle
-    from promptpotter.domain.command_kinds import (
-        GradeBenchPayload,
-        VerifyCandidatePayload,
-    )
 
 
 async def verify_candidate(

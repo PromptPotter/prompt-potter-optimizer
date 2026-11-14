@@ -6,9 +6,11 @@ import asyncio
 import concurrent.futures
 import contextlib
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, override
+from typing import Any, override
 
+from promptpotter.domain.export import PromptExport
 from promptpotter.shared.extras import Extra, require_extra
 
 try:
@@ -37,13 +39,6 @@ from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-    from pathlib import Path
-
-    from promptpotter.domain.export import PromptExport
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 def compile_loop(**knobs: Any) -> OptimizationLayer:
@@ -115,21 +110,7 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
 
         # Landed first: the definition is written under the root as this code reads it.
         stores = await enter()
-        self._write_definition(stores, items)
-        # No config: the file this compile just wrote IS the projection of `loop` and `node`.
-        session, result = await run_campaign(
-            self.dataset_name, stores=stores, program=program, budget=Budget(), mode=RunMode()
-        )
-
-        if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
-            return student
-        self.export = session.store.campaigns.read_export(session.hop)
-        if self.export is None or PROGRAM_NODE not in self.export.prompts:
-            return student
-        return _with_instructions(student, self.export.render(PROGRAM_NODE))
-
-    def _write_definition(self, stores: Stores, items: list[dict[str, str]]) -> Path:
-        return stores.write_own_definition(
+        stores.write_own_definition(
             self.dataset_name,
             # In trainset order: the connector reads a sample's example off its position.
             source={"recipe": "rows", "shuffled": False, "items": items},
@@ -150,6 +131,17 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             framing=TaskDecomposition(),
             origin={},
         )
+        # No config: the file this compile just wrote IS the projection of `loop` and `node`.
+        session, result = await run_campaign(
+            self.dataset_name, stores=stores, program=program, budget=Budget(), mode=RunMode()
+        )
+
+        if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
+            return student
+        self.export = session.store.campaigns.read_export(session.hop)
+        if self.export is None or PROGRAM_NODE not in self.export.prompts:
+            return student
+        return _with_instructions(student, self.export.render(PROGRAM_NODE))
 
 
 def _query_of(example: Any) -> str:

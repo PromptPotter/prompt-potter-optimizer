@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from promptpotter.application.views.render.primitives import BOLD, DIM, RESET, YELLOW
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 _GLYPH_PLAIN = (
     "      .-.",

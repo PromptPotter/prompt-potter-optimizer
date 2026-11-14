@@ -26,8 +26,10 @@ import os
 import re
 import tempfile
 import time
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from types import ModuleType
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast, get_args
 
 import httpx
@@ -39,10 +41,12 @@ from promptpotter.connectors.protocol import (
     InProcessWorkload,
     cell_envelope_of,
 )
-from promptpotter.domain.pipeline_params import NodeCall
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.records.run_records import BackendWarningRecord
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import StepUsage, TokenAccount
+from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.docker_host import (
     PACKAGE_CACHE_PROXY,
     docker,
@@ -66,6 +70,7 @@ from promptpotter.infrastructure.llm.spend_book import (
 )
 from promptpotter.infrastructure.llm.telemetry import append_record, rate_priced_usd
 from promptpotter.infrastructure.llm.wallet import ENV_KEY_PAYER, keyed_client
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     CellInfrastructureError,
     CellUnscoreableError,
@@ -80,18 +85,10 @@ from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.tls import tls_context
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-    from types import ModuleType
-
     from harbor.environments.docker.docker import DockerEnvironment
     from harbor.models.trial.paths import TrialPaths
     from harbor.models.trial.result import TrialResult
     from harbor.trial.trial import Trial
-
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.value_tree import Delivery
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

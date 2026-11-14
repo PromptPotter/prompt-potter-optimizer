@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import functools
 import random
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
@@ -12,39 +13,40 @@ from promptpotter.application.bench.round_analysis import compute_round_diagnost
 from promptpotter.application.datasets.loaders import sample_dataset
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers.nodes import ReadArm, SliceMap
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.selection import banked_lift_prior
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import Compare
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import ScoreSummary, merge_known_outcomes
 from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput
+from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput, StateSlice
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import ResumeCheckpointRecord, RoundProposedRecord
 from promptpotter.domain.results import Election, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import RulerStamp
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+from promptpotter.domain.verification import BenchPasses
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 from promptpotter.infrastructure.store.read_model import Moment
+from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import GradedCell, Scorer
-    from promptpotter.domain.verification import BenchPasses
 
 
 def _sibling_runtime_failures(session: Session) -> list[RuntimeFailure]:
@@ -465,3 +467,103 @@ class Cycle:
             self._sibling_failures = _sibling_runtime_failures(self.session)
         own = (rf for rr in self.rounds[1:] for rf in _cut_failures(rr))
         return _distinct([*self._sibling_failures, *own])
+
+
+class SliceMap:
+    """The state slices a cycle holds, one per kind its manifest carries, a written-first kind once its writer ran; the close banks them."""
+
+    def __init__(self, kinds: Iterable[type[StateSlice]]) -> None:
+        self._carried = {kind.kind: kind for kind in kinds}
+        self._held: dict[str, StateSlice] = {
+            name: kind() for name, kind in self._carried.items() if not kind.written_first()
+        }
+
+    def carries(self, kind: type[StateSlice]) -> bool:
+        return self._carried.get(kind.kind) is kind
+
+    def get[S: StateSlice](self, kind: type[S]) -> S:
+        if not self.carries(kind):
+            raise KeyError(f"the manifest carries no {kind.kind!r} slice")
+        found = self._held.get(kind.kind)
+        if not isinstance(found, kind):
+            raise ValueError(f"the {kind.kind!r} slice is read before its writer ran")
+        return found
+
+    def put(self, value: StateSlice) -> None:
+        if self._carried.get(value.kind) is not type(value):
+            raise KeyError(f"the manifest carries no {value.kind!r} slice")
+        self._held[value.kind] = value
+
+    def held(self) -> dict[str, StateSlice]:
+        return dict(self._held)
+
+    def seat(self, banked: OptimizerState) -> None:
+        """Take up what *banked* holds: a resume, a fork or a repair re-seats the cycle there."""
+        unwritten = {k for k, kind in self._carried.items() if kind.written_first()}
+        if not set(self._carried) - unwritten <= set(banked.slices) <= set(self._carried):
+            raise ValueError(
+                f"{banked.manifest!r} banked slices {sorted(banked.slices)}, "
+                f"but its manifest carries {sorted(self._carried)}"
+            )
+        self._held = dict(banked.slices)
+
+
+@dataclass(frozen=True)
+class RoundContext:
+    """A member never sees it: each is handed the ``NodeContext`` the bench builds over it."""
+
+    cycle: Cycle
+    round_num: int
+    ledger: CycleEventLog
+    # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
+    walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)
+
+    def asked(self, key: ArmKey, cells: Iterable[Sample]) -> frozenset[str]:
+        """What a walk of *key* on *cells* is asked: those, and every cell its walk was asked before."""
+        held = self.walks.get(key)
+        return frozenset(s.key for s in cells) | (frozenset() if held is None else held.asked)
+
+    def held(self, key: ArmKey) -> CellSheet:
+        held = self.walks.get(key)
+        return NO_CELLS if held is None else held.arm.rows
+
+    def walked(self, read: ReadArm, asked: frozenset[str]) -> None:
+        held = self.walks.get(read.key)
+        self.walks[read.key] = ArmWalk(read, asked) if held is None else held.continued(read, asked)
+
+    def cut_on(self, key: ArmKey, state: Cut) -> None:
+        """Its race stopped it past its draw: the walk keeps its rows, the arm reads cut."""
+        held = self.walks[key]
+        self.walks[key] = ArmWalk(ReadArm(key, state, held.arm.rows), held.asked)
+
+
+@dataclass(frozen=True)
+class ReadArm:
+    """An individual read on a round's cells as a reference: an arm of that round, with its rows."""
+
+    key: ArmKey
+    state: Concluded
+    rows: CellSheet
+
+    @property
+    def individual(self) -> OptSearchPoint:
+        return self.state.individual
+
+
+@dataclass(frozen=True)
+class ArmWalk:
+    """One arm's walk of its round, which every later read of it continues: ``arm`` holds its rows,
+    each read adding the cells they lack, and a panel arm's state; ``asked`` every cell asked of it."""
+
+    arm: ReadArm
+    asked: frozenset[str]
+
+    def continued(self, read: ReadArm, asked: frozenset[str]) -> ArmWalk:
+        held = frozenset(cell.key for cell in self.arm.rows)
+        rows = self.arm.rows.merged(read.rows.where(functools.partial(_unheld, held)))
+        state = read.state if self.arm.state.role == MeasurementRole.PARENT else self.arm.state
+        return ArmWalk(ReadArm(read.key, state, rows), asked)
+
+
+def _unheld(held: frozenset[str], cell: GradedCell) -> bool:
+    return cell.key not in held

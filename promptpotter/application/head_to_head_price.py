@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import math
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING
 
 from pydantic import Field
 
@@ -23,6 +22,7 @@ from promptpotter.application.preflight import (
 from promptpotter.application.runner.bench import line_launches
 from promptpotter.application.scoring.sample_measurement import measured_cell_price
 from promptpotter.domain.bench import partition_bank
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.command_kinds import MintHeadToHeadPayload
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.spend import Budget, CellPrice
@@ -35,11 +35,8 @@ from promptpotter.infrastructure.store.dataset_access import (
     runnable_definition,
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 class OptimizerRoundPrice(FrozenModel):

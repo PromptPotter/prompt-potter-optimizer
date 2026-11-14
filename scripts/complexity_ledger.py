@@ -29,6 +29,7 @@ import typing
 from collections.abc import Iterator
 from pathlib import Path
 
+from last_green import import_statements
 from processes import REPO, clone_cache, git, replace_changed, run
 
 # The ceiling each row's last raise declared; a row that never rose past it in this branch ignores it.
@@ -57,12 +58,14 @@ BASELINE = {
     # Function-local imports of the package's own modules. The bare invocation's first-run check
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
     "deferred_imports": 6,
+    # `TYPE_CHECKING` imports on a file-level import cycle: a knot hidden, not cut (`_type_cycles`).
+    "type_cycles": 81,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 20,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 33,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 197,
+    "p_served": 192,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.
@@ -71,7 +74,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes.
     "p_member": 12,
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
-    "p_reads": 325,
+    "p_reads": 315,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 7,
     # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).
@@ -471,6 +474,31 @@ def _source_counts(py_files: list[Path]) -> dict[str, int]:
     }
 
 
+def _type_cycles(py_files: list[Path]) -> int:
+    """``TYPE_CHECKING`` imports lying on a file-level import cycle: each a knot the type-only
+    block hides rather than cuts, so the layering it crosses is fictional at runtime."""
+    statements = {p.relative_to(REPO).as_posix(): import_statements(p) for p in py_files}
+    edges = {rel: {t for files, _ in found for t in files} for rel, found in statements.items()}
+
+    def reaches(start: str, goal: str) -> bool:
+        seen, todo = {start}, [start]
+        while todo:
+            for nxt in edges.get(todo.pop(), ()):
+                if nxt == goal:
+                    return True
+                if nxt not in seen:
+                    seen.add(nxt)
+                    todo.append(nxt)
+        return False
+
+    return sum(
+        any(reaches(t, rel) for t in files if t != rel)
+        for rel, found in statements.items()
+        for files, typed in found
+        if typed
+    )
+
+
 def _is_reexport_shim(init_file: Path) -> bool:
     """A module-level ``from … import`` binding a name that is no module and that the body never
     reads is there to be imported from HERE. A submodule imported for its registration is not."""
@@ -496,7 +524,7 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.application.optimizers.nodes import CycleRead
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
-    from promptpotter.domain.records import RECORDS
+    from promptpotter.domain.record_kinds import RECORDS
 
     py_files = _package_files("*.py")
     source = _source_counts(py_files)
@@ -533,6 +561,7 @@ def compute_ledger() -> dict[str, int]:
         "models_lax": source["models_lax"],
         **priced,
         "deferred_imports": source["deferred_imports"],
+        "type_cycles": _type_cycles(py_files),
         "p_record": records,
         "p_record_drift": records_left_out,
         "p_served": sum(prop not in read for prop in _served_properties()),

@@ -25,13 +25,13 @@ from promptpotter.domain.optimizer_template import (
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     readable_task_context,
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import FileKind, FileUnreadableError, unknown_slots_said
-from promptpotter.shared.run_scope import scoped
 
 ORIGIN_FIELD_MAX = 600
 

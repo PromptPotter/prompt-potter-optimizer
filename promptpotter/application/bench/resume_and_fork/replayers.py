@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import abc
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 from promptpotter.domain.records.run_records import CheckpointInputs, ResumeCheckpointRecord
 from promptpotter.domain.results import RoundResult
-
-if TYPE_CHECKING:
-    from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.ruler import DeltaRuler
 
 
 class ReplayMismatch(NamedTuple):

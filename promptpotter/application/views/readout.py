@@ -4,7 +4,7 @@ import logging
 import re
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from pathlib import Path
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.views.render.ansi import (
@@ -67,6 +67,7 @@ from promptpotter.domain.phase_views import (
     ViewAnchors,
 )
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import (
     AnnouncedArms,
     ArmRecord,
@@ -91,6 +92,7 @@ from promptpotter.domain.records.run_records import (
     SampleStartedRecord,
 )
 from promptpotter.domain.sample import sample_tag
+from promptpotter.domain.scoring import Grade, MeasuredCell
 from promptpotter.domain.spend import prefix_reading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
@@ -99,13 +101,6 @@ from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.measurement_context import MeasurementRole
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.scoring import Grade, MeasuredCell
-
 
 logger = logging.getLogger(__name__)
 

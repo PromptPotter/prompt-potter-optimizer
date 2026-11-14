@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import Any, Literal, cast
 
 from promptpotter.application.bench.node_context import (
     Calls,
     Children,
     Frontier,
     Lineage,
+    NodeContext,
     Ruler,
     Target,
 )
@@ -79,6 +81,7 @@ from promptpotter.application.optimizers.variation.members import (
 )
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import candidate_delta
+from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint, loci_of
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_ALL_NO_OP,
@@ -88,21 +91,19 @@ from promptpotter.domain.optimizer_state import (
     CritiqueReadout,
 )
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.search_point import SHOTS_KEY
-from promptpotter.domain.wounds import COLLAPSE_WORDS, RuntimeFailure, fatal_validation_failures
+from promptpotter.domain.wounds import (
+    COLLAPSE_WORDS,
+    RuntimeFailure,
+    ValidationFailure,
+    fatal_validation_failures,
+)
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.domain.l4.cells import InnerCells
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.wounds import ValidationFailure
 
 logger = logging.getLogger(__name__)
 
@@ -144,11 +145,12 @@ async def l1_generate(
     filled = DispatchHub.fill(calls.prompt(), view, node=ctx.node)
     budget = view.exploration_budget
     citable = citable_fields(
-        node_layout("l1_generate", view.l2),
+        node_layout("l1_generate", view.l2, calls.levers()),
         exploration_budget=budget,
         rendered=filled.rendered,
     )
     schema_field_rename = knobs.schema_field_rename
+    field_names = effective_l1_field_names(calls.levers())
     # Under `closed` the wire takes an active entry's id where a pooled field's text would go.
     pooled = (
         {name: {b.id: b.text for b in blocks} for name, blocks in view.block_window().items()}
@@ -164,13 +166,14 @@ async def l1_generate(
         n_variants=n_variants,
         pooled_fields=None if pooled is None else {f: list(ids) for f, ids in pooled.items()},
         recombination=view.recombination_offer("l1_generate"),
+        field_names=field_names,
     )
     # The wire speaks the DEMO POOL panel's ids; an individual holds sample keys.
     key_of = {s.id: s.key for s in view.demo_pool}
     hosted = view.l2.recombinations if view.l2.for_round == view.round_num else []
     try:
         generated = await calls.answer(
-            build_l1_response_model(effective_l1_field_names()),
+            build_l1_response_model(field_names),
             replace(filled, prompt_vars={"n_variants": str(n_variants), **filled.prompt_vars}),
             temperature=temperature,
             response_schema=output_schema,

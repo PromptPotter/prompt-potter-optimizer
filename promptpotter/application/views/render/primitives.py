@@ -2,23 +2,15 @@ from __future__ import annotations
 
 import re
 from collections import Counter
-from typing import TYPE_CHECKING, Any, get_args
+from collections.abc import Sequence
+from typing import Any, get_args
 
-from promptpotter.domain.arm_reading import level_text, lift_shown, lift_text
-from promptpotter.domain.bench import BenchColumn
-from promptpotter.domain.origin_panel import LineRate, overlap_line, triggered_rates
-from promptpotter.domain.paired_reading import READING_STATE_INFO
+from promptpotter.domain.arm_reading import ArmReading, level_text, lift_shown, lift_text
+from promptpotter.domain.bench import BenchColumn, BenchReading, BenchScore
+from promptpotter.domain.origin_panel import LineRate, OverlapReading, overlap_line, triggered_rates
+from promptpotter.domain.paired_reading import READING_STATE_INFO, Coverage, MeasuredLift
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.pipeline_schema import NodeKind
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.domain.arm_reading import ArmReading
-    from promptpotter.domain.bench import BenchReading, BenchScore
-    from promptpotter.domain.origin_panel import OverlapReading
-    from promptpotter.domain.paired_reading import Coverage, MeasuredLift
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 

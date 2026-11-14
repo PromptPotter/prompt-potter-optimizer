@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -23,7 +24,7 @@ from promptpotter.application.jobs.launcher.admission import land_job, open_spen
 from promptpotter.application.jobs.quota import cycle_share, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.knobs import measured_address
-from promptpotter.application.optimizer_manifest import bound_optimizer
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.origin import CampaignOrigin, seat_campaign_origin
 from promptpotter.application.preflight import run_preflight_checks
 from promptpotter.application.run_observers import (
@@ -37,33 +38,28 @@ from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.application.views.ingress import init_enter, init_exit
 from promptpotter.application.views.view_models import ViewContext
-from promptpotter.domain.campaign import ceiling_meter
+from promptpotter.domain.arms import PointContext
+from promptpotter.domain.campaign import Campaign, RunDeclaration, ceiling_meter
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.records.run_records import PhaseRecord, StandingBudgetRecord
+from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.backend import CELL
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.spend_book import filed
-from promptpotter.infrastructure.llm.telemetry import bind_priced
+from promptpotter.infrastructure.run_scope import rescope, run_scope
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.run_scope import rescope, run_scope
 
 if TYPE_CHECKING:
-    from collections.abc import Collection
-
     from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.domain.arms import PointContext
-    from promptpotter.domain.campaign import Campaign, RunDeclaration
-    from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.run_mode import RunMode
-    from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.ledger import CycleEventLog
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +91,8 @@ class PreparedRun:
     dataset: list[Sample]
     campaign: Campaign
     resumed_ending: StopReason | None
+    # The launch's one selection, which every cycle of its line runs.
+    optimizer: SelectedOptimizer
 
 
 def start_launch(session: Session) -> None:
@@ -115,6 +113,7 @@ async def open_launch(
     session: Session,
     observers: RunObservers,
     budget: HeldBudget,
+    optimizer: SelectedOptimizer,
 ) -> PreparedRun:
     """*bank* is the whole bank; the launch walks the split its cycle drew."""
     campaign_config = cycle.config
@@ -122,7 +121,7 @@ async def open_launch(
     dataset = list(partition.search)
     # Before this launch takes a cell: a re-read of a cell the campaign priced prices nothing.
     campaigns = session.store.campaigns
-    bind_priced(campaigns.campaign_root_dir(session.campaign_id))
+    rescope(priced=campaigns.campaign_root_dir(session.campaign_id))
     refresh_rates_in_background()
     # SET, never a `min`: admission already layered seed and standing.
     campaign_config = campaign_config.model_copy(
@@ -137,7 +136,7 @@ async def open_launch(
     assert campaign is not None, "a launch runs a campaign its session is bound to"
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
     declare_run_wiring(
-        session, campaign_config, observers.ledger, campaign=campaign, selected=bound_optimizer()
+        session, campaign_config, observers.ledger, campaign=campaign, selected=optimizer
     )
     # A fresh mint was admitted before its campaign existed: its ceiling is stored here, off the
     # loop, under the gate.
@@ -169,6 +168,7 @@ async def open_launch(
         dataset=dataset,
         campaign=campaign,
         resumed_ending=scan_cycle_facts(campaigns.ledger(session.hop)).resumed_ending,
+        optimizer=optimizer,
     )
 
 
@@ -249,7 +249,7 @@ async def onto_fork(
         prep.campaign_config,
         observers.ledger,
         campaign=prep.campaign,
-        selected=bound_optimizer(),
+        selected=prep.optimizer,
     )
     # The line's every emit lands on the cycle it moved onto, under the launch's one scope.
     rescope(ledger=observers.ledger)
@@ -374,6 +374,7 @@ async def _enter_init(
                 dataset=dataset,
                 session=session,
                 warnings=preflight_warnings,
+                selected=selected,
             ),
         )
     )
@@ -391,7 +392,7 @@ async def open_cycle(
     INIT stays open: its caller moves onto a fork first (`onto_fork`), then closes it (`close_init`).
     """
     origin, dataset, config = prep.origin, prep.dataset, prep.campaign_config
-    selected = bound_optimizer()
+    selected = prep.optimizer
     _init_cycle(session, resume_from_round_override=mode.from_round)
     # The one cross-campaign read of this cycle: preflight's and every round's earned blocks.
     survey = CampaignSurvey(session.store.campaigns)

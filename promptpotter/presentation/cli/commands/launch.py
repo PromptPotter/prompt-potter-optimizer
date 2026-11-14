@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import contextlib
 import functools
@@ -7,11 +8,13 @@ import logging
 import signal
 import sys
 from collections.abc import Callable, Coroutine, Iterator, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter import connectors
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
+from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
+from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.views.render.phase import render_completion
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.domain.account_words import refusal_words
@@ -22,18 +25,11 @@ from promptpotter.domain.command_kinds import (
     PauseCyclePayload,
 )
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.phases import stop_reason_outcome
+from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.shared.errors import PotterError
-
-if TYPE_CHECKING:
-    import argparse
-
-    from promptpotter.application.initialization.session import Session
-    from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.results import CycleResult
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -85,20 +81,20 @@ def held_run(launched: object) -> HeldRun:
 
 
 def ctrl_c_pauses(
-    stores: Stores, pauses: Sequence[PauseCyclePayload]
+    dispatcher: CommandDispatcher, pauses: Sequence[PauseCyclePayload]
 ) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
     """The first Ctrl+C sends *pauses* as the browser's press does, and nothing more; the second force-quits."""
 
     async def _pause_each() -> None:
         for pause in pauses:
             with contextlib.suppress(PotterError):
-                await CommandDispatcher(stores).dispatch(CommandCall(pause, door=Door.TERMINAL))
+                await dispatcher.dispatch(CommandCall(pause, door=Door.TERMINAL))
 
-    return _ctrl_c(stores, _pause_each)
+    return _ctrl_c(dispatcher, _pause_each)
 
 
 def ctrl_c_stops_pass(
-    stores: Stores, call: CommandCall[Any]
+    dispatcher: CommandDispatcher, call: CommandCall[Any]
 ) -> contextlib.AbstractContextManager[Callable[[CyclePayload], None]]:
     """A paid pass's Ctrl+C: the `cancel` of *call*'s command, as every other door's; the second
     press force-quits."""
@@ -106,21 +102,21 @@ def ctrl_c_stops_pass(
     async def _stop() -> None:
         with contextlib.suppress(PotterError):
             cancel = CancelPayload(command_id=call.command_id)
-            await CommandDispatcher(stores).dispatch(CommandCall(cancel, door=Door.TERMINAL))
+            await dispatcher.dispatch(CommandCall(cancel, door=Door.TERMINAL))
 
-    return _ctrl_c(stores, _stop)
+    return _ctrl_c(dispatcher, _stop)
 
 
 @contextlib.contextmanager
 def _ctrl_c(
-    stores: Stores, stop: Callable[[], Coroutine[Any, Any, None]]
+    dispatcher: CommandDispatcher, stop: Callable[[], Coroutine[Any, Any, None]]
 ) -> Iterator[Callable[[CyclePayload], None]]:
     loop = asyncio.get_running_loop()
     asked: set[asyncio.Task[None]] = set()
 
     async def send(payload: CyclePayload) -> None:
         try:
-            await CommandDispatcher(stores).dispatch(CommandCall(payload, door=Door.TERMINAL))
+            await dispatcher.dispatch(CommandCall(payload, door=Door.TERMINAL))
         except PotterError as exc:
             print(f"  {refusal_words(exc)}", flush=True)
 
@@ -151,7 +147,7 @@ def _ctrl_c(
 async def run_inline(held: HeldRun) -> CycleResult:
     hop = held.session.hop
     pause = PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
-    with ctrl_c_pauses(held.session.store, [pause]):
+    with ctrl_c_pauses(CommandDispatcher(held.session.store), [pause]):
         _, result = await held.run_inline(readout_sink=functools.partial(print, flush=True))
     return result
 

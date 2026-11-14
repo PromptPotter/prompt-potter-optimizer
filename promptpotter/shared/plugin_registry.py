@@ -1,13 +1,10 @@
 from __future__ import annotations
 
 import functools
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from importlib.metadata import EntryPoints, entry_points
 from types import MappingProxyType
-from typing import TYPE_CHECKING, Protocol
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Iterable, Iterator, Mapping
-
+from typing import Protocol
 
 BUILT_IN = "built-in"
 

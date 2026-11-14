@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.scoring.row_diagnostics import extract_sample_diagnostics
-from promptpotter.domain.arms import Concluded
+from promptpotter.domain.arms import ArmState, Concluded
+from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.origin_panel import OverlapReading
+from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.results_health import (
@@ -15,16 +17,10 @@ from promptpotter.domain.results_health import (
     terminal_node,
 )
 from promptpotter.domain.round_diagnostics import NearMiss, RoundDiagnostics, SampleDiag
-from promptpotter.domain.scoring import graded_answer
+from promptpotter.domain.round_health import DegradationHealth
+from promptpotter.domain.scoring import CellSheet, GradedCell, graded_answer
 from promptpotter.shared.answer_text import tail
 from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-if TYPE_CHECKING:
-    from promptpotter.domain.arms import ArmState
-    from promptpotter.domain.cell_fold import ScoreSummary
-    from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
-    from promptpotter.domain.round_health import DegradationHealth
-    from promptpotter.domain.scoring import CellSheet, GradedCell
 
 _RANK_BUCKET_KEYS: tuple[str, ...] = ("1", "2-5", "6-10", "11-20", "not_found")
 _TOP_K_LEVELS: tuple[int, ...] = (1, 3, 5, 10)

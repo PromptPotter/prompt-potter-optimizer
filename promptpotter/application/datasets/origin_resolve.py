@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
 from pydantic import ValidationError
 
@@ -22,6 +23,7 @@ from promptpotter.application.datasets.origin_readiness import (
     patch_at,
 )
 from promptpotter.application.jobs.launcher.admission import paid_call
+from promptpotter.application.pipeline_resolve import DraftPipeline
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.checkin_draft import (
     DraftFile,
@@ -33,13 +35,8 @@ from promptpotter.domain.command_kinds import EditDraftCampaignPayload
 from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
+from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.infrastructure.store.stores import Stores
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.application.pipeline_resolve import DraftPipeline
-    from promptpotter.domain.pipeline_schema import PipelineNode
 
 _PREVIEW_ROWS = 10
 

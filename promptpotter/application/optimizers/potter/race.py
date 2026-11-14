@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.bench.node_context import (
     Bounds,
     Frontier,
     Lineage,
+    NodeContext,
     Progress,
     Replay,
     Ruler,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
+from promptpotter.application.optimizers.nodes import Panel
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,
@@ -24,13 +26,8 @@ from promptpotter.application.optimizers.potter.pobb import (
 )
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey, PriorStanding
-from promptpotter.domain.scoring import NO_CELLS, CellSheet
-
-if TYPE_CHECKING:
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizers.nodes import Panel
-    from promptpotter.domain.scoring import GradedCell
-    from promptpotter.domain.validators import StopSignal
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
+from promptpotter.domain.validators import StopSignal
 
 
 class _RaceDecision(Replayed, kind=None):

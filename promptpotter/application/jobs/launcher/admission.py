@@ -27,9 +27,12 @@ from promptpotter.application.jobs.quota import (
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
-from promptpotter.domain.campaign import CampaignRefusal, CampaignRefusedError
+from promptpotter.domain.bench import CampaignRefusal
+from promptpotter.domain.campaign import Campaign, CampaignRefusedError
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
     CallBucket,
@@ -61,6 +64,7 @@ from promptpotter.domain.spend import (
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import LiveCycle, SpendBook, draws_on
 from promptpotter.infrastructure.llm.wallet import Send
+from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.account_spend import unreported_under
 from promptpotter.infrastructure.store.dataset_access import (
     definition_version,
@@ -81,13 +85,9 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
 from promptpotter.shared.measurement_context import MeasurementRole
-from promptpotter.shared.run_scope import run_scope, scoped
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.results import CycleResult
 
 logger = logging.getLogger(__name__)
 

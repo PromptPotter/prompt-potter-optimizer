@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from promptpotter.application.optimizer_manifest import bound_optimizer
 from promptpotter.application.optimizers.potter.records import L1Layout
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.strict_model import FrozenModel
@@ -356,10 +355,10 @@ def resolve_layout_override(
     return merged, []
 
 
-def resolve_node_layout(node: str) -> L1Layout:
-    """The layout the scoped selection laid on *node*, else its floor; a breaching one never
-    reaches here, refused at selection (`LayoutNode.lever_refusals`)."""
-    layout, _ = resolve_layout_override(node, bound_optimizer().levers(node).get("layout"))
+def resolve_node_layout(node: str, levers: Mapping[str, Any]) -> L1Layout:
+    """The layout *levers*, the cycle's selection's on *node*, lay, else its floor; a breaching
+    one never reaches here, refused at selection (`LayoutNode.lever_refusals`)."""
+    layout, _ = resolve_layout_override(node, levers.get("layout"))
     return layout
 
 

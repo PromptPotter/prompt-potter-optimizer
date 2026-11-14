@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import importlib
 import typing
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from pathlib import Path
 
 from promptpotter.application.optimizers.nodes import (
@@ -16,16 +16,13 @@ from promptpotter.application.optimizers.nodes import (
 )
 from promptpotter.config.paths import optimizers_root
 from promptpotter.domain.optimizer_state import StatePart
-from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind
+from promptpotter.domain.pipeline_schema import MEMBER_KINDS, NodeKind, PipelineSchema
 from promptpotter.domain.pool import Pool
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.plugin_registry import Registry
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Iterator
-
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
 ENTRY_POINT_GROUP = "promptpotter.optimizer_nodes"

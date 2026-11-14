@@ -5,7 +5,8 @@ import logging
 from collections.abc import Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, NamedTuple, assert_never, get_args
+from pathlib import Path
+from typing import Any, NamedTuple, assert_never, get_args
 
 from pydantic import ValidationError
 
@@ -40,7 +41,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.knobs import ConfigMapResponse, bench_defaults_pin, config_map
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
-from promptpotter.application.optimizers.nodes import MintFacts, admits
+from promptpotter.application.optimizers.nodes import MintFacts
 from promptpotter.application.pipeline_responses import (
     CampaignPipelineResponse,
     DatasetPipelineResponse,
@@ -54,12 +55,13 @@ from promptpotter.application.scoring.formula.compiler import (
     campaign_terms,
     split_scoring_block,
 )
-from promptpotter.application.scoring.formula.matchers import matcher_of
+from promptpotter.application.scoring.formula.matchers import admits, matcher_of
 from promptpotter.application.scoring.judges.registry import judge_instrument
-from promptpotter.connectors.protocol import PROBE_WORKLOAD
+from promptpotter.config.prompt_blocks import PackShelf
+from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
 from promptpotter.domain.arms import Concluded
-from promptpotter.domain.bench import partition_bank, restored_partition
-from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
+from promptpotter.domain.bench import partition_bank
+from promptpotter.domain.campaign import Campaign, CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.campaign_config import (
     CAMPAIGN_RULE,
     CampaignConfig,
@@ -68,6 +70,7 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.cycle_paths import CycleHop, Subject
+from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.layer_fold import Layer, fold_layers
 from promptpotter.domain.opt_search_point import render_prompt
 from promptpotter.domain.paired_reading import ArmKey
@@ -100,9 +103,11 @@ from promptpotter.domain.pipeline_schema import (
     NodeSearchNarrowing,
     ParamLayer,
     ParamSource,
+    PipelineSchema,
     reach_map,
     running_only,
 )
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     DefaultsDrift,
@@ -110,14 +115,20 @@ from promptpotter.domain.records.run_records import (
     PipelineRead,
     ScoringLockedRecord,
 )
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.search_point import missing_template_vars, strip_rendered_prompt
+from promptpotter.domain.spend import Budget
+from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_schema_menu
 from promptpotter.infrastructure.llm.pricing import remembered_priced
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.wallet import Send
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    ResolvedRun,
+    scan_resolved_run,
+)
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     campaign_defaults,
@@ -130,7 +141,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.read_model import derived
-from promptpotter.infrastructure.store.stores import descend_store, owned_campaign
+from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
 from promptpotter.shared.errors import (
     BadRequestError,
     DatasetAccessError,
@@ -143,21 +154,6 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from promptpotter.config.prompt_blocks import PackShelf
-    from promptpotter.connectors.protocol import Connector
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.judges import JudgeSpec
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.prompt_block import Presumption
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.spend import Budget
-    from promptpotter.domain.treatment import Treatment
-    from promptpotter.infrastructure.store.campaign_store.ledger_scan import ResolvedRun
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -828,9 +824,7 @@ def _cycle_mint(stores: Stores, m: _CampaignMerge) -> MintFacts | None:
     bank = None if drawn is None else stores.tenant_datasets.bank(drawn.dataset_hash)
     if drawn is None or bank is None:
         return None
-    return mint_facts(
-        m.cfg, restored_partition(bank.samples, drawn).demo, m.filtered, stores.block_packs
-    )
+    return mint_facts(m.cfg, drawn.restored(bank.samples).demo, m.filtered, stores.block_packs)
 
 
 def _rows(m: _Merge, folded: FoldedParams, ran: PipelineSchema) -> dict[str, list[NodeConfigParam]]:

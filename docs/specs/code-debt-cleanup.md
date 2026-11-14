@@ -194,7 +194,7 @@ row it closes.
 
 ### batch/26 · money
 
-- **Two carriers**: the run's `shared/run_scope.py::RunScope`, bound once where the cycle opens, carries
+- **Two carriers**: the run's `infrastructure/run_scope.py::RunScope`, bound once where the cycle opens, carries
   the plan, the ledger and the sender; the member's node context yields a per-call context holding
   node, config, round and index only. **Rides with:** money 1.
 - **The campaign store reaches into the LLM layer for a ledger read**: `campaign_store/store.py:58`
@@ -634,7 +634,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### hubs (after valid, before layers)
 
-- **A cycle's outcome is two types**: `domain/results.py::CycleResult` (what `run_cycle` returns,
+- **A cycle's outcome is two types**: `domain/cycle_result.py::CycleResult` (what `run_cycle` returns,
   its rounds with their cells) and `domain/records/run_records.py::CycleFinal` (what `CycleFinalRecord`
   banks), which `runner/entry.py` fills from the other field by field. Banking `CycleResult` whole
   would put every round's cells on the ledger beside `RoundClosedRecord`, against the chronology rule
@@ -658,24 +658,23 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### layers (alone, after valid, before the behaviour keys)
 
-- **The layering is fictional at runtime**: 659 function-level `from promptpotter` imports in the
-  engine, about 100 closing a package cycle against module-level imports the other way. Optimizer
-  members import `bench/node_context.py` lazily 18 times (and `bench/cycle.py` once) while `bench/`
-  imports optimizers at module level 3 times (`optimizers/nodes.py` holds 24 function-level imports,
-  `node_context.py` 23); `infrastructure/llm` and `infrastructure/store` import each other (3 and 1
-  lazy, module-level back); `application/jobs` → `application` (3 against 26);
-  `application/datasets` → `application` (2 against 13). `application/CLAUDE.md` already rules that a
-  back-import moved into a function hides the cycle. Action: a gate check counts the package pairs a
-  lazy import closes into a cycle, held to a falling baseline as `surface-ledger` is; then each knot is
-  cut at its root. Members' imports move, a re-key, hence before the behaviour keys. **Rides with:**
-  layers. **Re-test:** the check's baseline is 0.
-- **The bottom layer types an application object**: `shared/run_scope.py::RunScope` types its fields
-  under `TYPE_CHECKING` with `SelectedOptimizer`, `InnerSpawnContext`, `CycleEventLog`, `SendBudget`,
-  `SpendBook`, `MemoryScope`, `LLMReuseCache` and `Stores`. Action: the carrier moves into
-  `application/`, and the three `ContextVar`s of `llm/telemetry.py` beside it land on it in the same move
-  (money's sender and spend-book vars already did; `shared/measurement_context.py`'s two per-call vars
-  stay). **Rides with:** layers. **Re-test:** `promptpotter/shared/` holds no `RunScope`, and
-  `git grep -c "ContextVar(" -- promptpotter/infrastructure/llm/telemetry.py` is 0.
+- **The layering is fictional at runtime**: the package holds no function-local import and its
+  runtime file graph is acyclic, but 81 `TYPE_CHECKING` imports lie on a file-level cycle after
+  layers (122 at its base), so a type-only block hides each knot rather than cuts it. Every other
+  type-only import is hoisted, keeping only the two that keep `promptpotter --help` off httpx and
+  rich, the layer crossings and the Harbor extras. The knots left:
+  - the store hub and its parts: `stores` ↔ `session_pointer`, `account_spend`, `account_trail`,
+    `archive_queries`, `dataset_access`, `spend_book`, `run_scope`, `connectors/protocol`. A
+    narrower parameter cannot close these, so each part needs the protocol it reads in a module of
+    its own;
+  - the domain: `spend` ↔ `run_records`, `sample`, `pipeline_schema`, `pass_kinds`. Moving the
+    scoring fold re-keys the estimator;
+  - bench ↔ optimizers: bench still reads `nodes.py`'s `CycleRead`, member protocols and
+    `NODE_MEMBERS`, because the plugin contract and the round types share that module. Moving
+    `CycleRead` alone re-formed runtime cycles.
+
+  Action: each knot is cut at its root, held by `complexity_ledger.py::_type_cycles`. **Rides with:**
+  layers. **Re-test:** the `type_cycles` row of `BASELINE` falls to 0.
 
 ### docs (beside any chain: `docs/concepts/` and `docs/methods/` rewritten to the code)
 
@@ -1463,7 +1462,7 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 - **`run_init_round`, `seat`, `_peer_cycle` and `close_round` replay production by hand**:
   `tests/factories.py::run_init_round` re-composes `runner/entry.py::run_optimization`'s preamble and
   `_run_single_cycle` (`mint_framed_cycle`, `land_job`, `build_run_observers`, `start_launch`,
-  `at_round(0)`, `scoped`, `session_scope`, `open_launch`, `open_cycle`, `close_init`) less the fork
+  `scoped`, `session_scope`, `open_launch`, `open_cycle`, `close_init`) less the fork
   branch, a third copy of the embedded mint; 14 `seat` sites (a custom `schema=`, `scorer=` or
   `origin=`), 14 `close_round` sites and 12 `tests/test_scoring.py::_peer_cycle` sites (a C0 report run
   init cannot produce) need answers `offline_world.py::FakeBackend` cannot give: it serves one
@@ -1508,6 +1507,13 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   sat at 2% CPU for 20 minutes on a failing connector test instead of failing. Not yet reproduced.
   Action: reproduce it, name what the test waits on, and make that wait end with the failure.
   **Rides with:** tests-w. **Re-test:** the reproduced failure fails within its test's own timeout.
+- **A connection note can take a touch walk's click**: in a cloud full gate (layers, 2026-11-14)
+  `webapp/e2e/walk/records.spec.ts`'s first test failed on the `touch` project because an offline
+  note lay over the sidebar's "Add to the comparison" button, then passed on a rerun. The suspected
+  root is that the note is not pointer-transparent over the content it marks stale. Action: reproduce
+  it under load, then fix whichever is wrong: the note's hit area, or the walk clicking before the poll
+  settles. **Rides with:** tests-w. **Re-test:** `gate.py --only playwright` under a loaded full gate
+  never shows that interception.
 
 ### batch/32 · ts-arch
 

@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import Any, assert_never
 
 from promptpotter import connectors
 from promptpotter.application.datasets.loaders import (
@@ -28,9 +28,10 @@ from promptpotter.application.datasets.origin_readiness import columns_confirmed
 from promptpotter.application.datasets.tabular_ingest import read_kept_table
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.settings import settings
-from promptpotter.domain.checkin_draft import DatasetBasis, UploadBasis
+from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.store.dataset_access import (
@@ -49,10 +50,6 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
 )
 from promptpotter.shared.extras import Extra, install_hint, installed
-
-if TYPE_CHECKING:
-    from promptpotter.domain.checkin_draft import DraftFile
-    from promptpotter.domain.sample import Bank, Sample
 
 logger = logging.getLogger(__name__)
 

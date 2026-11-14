@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+import httpx
 
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.connector import (
@@ -17,7 +20,7 @@ from promptpotter.domain.connector import (
     bearer,
     data_envelope,
 )
-from promptpotter.domain.pipeline_params import NodeCall
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSpendBound
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import KeySource
@@ -26,11 +29,6 @@ from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.shared.extras import Extra
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    import httpx
-
-    from promptpotter.domain.pipeline_params import PipelineParams
     from promptpotter.infrastructure.store.stores import Stores
 
 

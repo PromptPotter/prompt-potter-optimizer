@@ -7,12 +7,13 @@ import json
 import logging
 import re
 import shlex
-from collections.abc import Iterator
+from collections.abc import Coroutine, Iterator, Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, get_args, get_origin
+from typing import Any, get_args, get_origin
 
 from pydantic import BaseModel
 
+from promptpotter.application.account import local_stores
 from promptpotter.application.commands import (
     draft_editing,
     launching,
@@ -27,7 +28,9 @@ from promptpotter.application.datasets.authored import (
 from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.datasets.origin_readiness import checklist_field
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
+from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.config.logging import setup_logging
+from promptpotter.domain.checkin_draft import OriginResolution
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     Door,
@@ -56,7 +59,6 @@ from promptpotter.presentation.cli.commands.launch import (
 )
 from promptpotter.presentation.cli.commands.result import CommandResult
 from promptpotter.presentation.cli.commands.verbs import ARM_GRAMMAR, SET_GRAMMAR, VERBS
-from promptpotter.presentation.cli.commands.workspace import open_stores
 from promptpotter.presentation.cli.parsers import budget_from_args, build_parser
 from promptpotter.shared.errors import (
     ConflictError,
@@ -64,14 +66,6 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
     PotterError,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Coroutine, Sequence
-
-    from promptpotter.application.jobs.launcher.launch import Inline
-    from promptpotter.application.jobs.launcher.run_job import HeldRun
-    from promptpotter.domain.checkin_draft import OriginResolution
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -189,7 +183,7 @@ def _said_incomplete(
     return refused
 
 
-async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
+async def _ingest_checkin(args: argparse.Namespace, dispatcher: CommandDispatcher) -> str:
     file_path = Path(args.dataset)
 
     def _bounded_read() -> bytes:
@@ -207,7 +201,7 @@ async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
     )
     # A refusal is `campaign_runner.main`'s to say, in its own words, as every verb's.
     draft = (
-        await CommandDispatcher(stores).answer(
+        await dispatcher.answer(
             workspace_edits.ingest_upload, CommandCall(payload, door=Door.TERMINAL)
         )
     ).result
@@ -216,11 +210,14 @@ async def _ingest_checkin(args: argparse.Namespace, stores: Stores) -> str:
 
 
 async def _hold_checkin(
-    args: argparse.Namespace, stores: Stores, draft_id: str, patch: EditDraftPatch | None
+    args: argparse.Namespace,
+    dispatcher: CommandDispatcher,
+    draft_id: str,
+    patch: EditDraftPatch | None,
 ) -> HeldRun:
     # Dispatched, as the browser's: a direct draft write records nothing and re-bills every retry.
     if patch is not None:
-        await CommandDispatcher(stores).answer(
+        await dispatcher.answer(
             draft_editing.edit_draft_campaign,
             CommandCall(
                 EditDraftCampaignPayload(draft_id=draft_id, patch=patch), door=Door.TERMINAL
@@ -231,7 +228,7 @@ async def _hold_checkin(
     # one is owed. One turn: a residual gap surfaces below with --set instructions.
     _checkin_line("origin resolver", "asking for the AI check-in")
     try:
-        turn = await CommandDispatcher(stores).answer(
+        turn = await dispatcher.answer(
             origin_resolving.resolve_origin,
             CommandCall(ResolveOriginPayload(draft_id=draft_id), door=Door.TERMINAL),
         )
@@ -246,7 +243,7 @@ async def _hold_checkin(
     # The Start checks the origin's readiness, once, on its one backend read.
     try:
         launched = await dispatch_start_checkin(
-            stores,
+            dispatcher.stores,
             CommandCall(
                 StartCheckinPayload(draft_id=draft_id, budget=budget_from_args(args)),
                 door=Door.TERMINAL,
@@ -261,7 +258,7 @@ async def _hold_checkin(
     return held
 
 
-def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload:
+def _named_mint(args: argparse.Namespace, dispatcher: CommandDispatcher) -> MintCampaignPayload:
     declared = None
     budget = budget_from_args(args)
     if args.config:
@@ -273,7 +270,7 @@ def _named_mint(args: argparse.Namespace, stores: Stores) -> MintCampaignPayload
             "`new` requires a dataset name. Pass it as a positional "
             "(`new justlogic/d234`) or via `--dataset-name <name>`."
         )
-        refused.add_note(no_dataset_hint(stores))
+        refused.add_note(no_dataset_hint(dispatcher.stores))
         raise refused
     knobs = _set_knobs(args.sets)
     task_text = (
@@ -300,14 +297,14 @@ def cmd_new(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
 async def _new(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     if not (args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)):
-        stores = open_stores(args)
-        return await mint_and_run(stores, _named_mint(args, stores), inline_launch(args))
+        dispatcher = CommandDispatcher(local_stores(tenant=args.tenant), inline=inline_launch(args))
+        return await mint_and_run(dispatcher, _named_mint(args, dispatcher))
     sets = args.sets
     patch = _sets_to_patch(sets) if sets else None
-    stores = open_stores(args)
-    draft_id = await _ingest_checkin(args, stores)
+    dispatcher = CommandDispatcher(local_stores(tenant=args.tenant))
+    draft_id = await _ingest_checkin(args, dispatcher)
     try:
-        held = await _hold_checkin(args, stores, draft_id, patch)
+        held = await _hold_checkin(args, dispatcher, draft_id, patch)
     except PotterError as exc:
         exc.add_note(_draft_kept(draft_id))
         raise
@@ -315,18 +312,17 @@ async def _new(args: argparse.Namespace) -> CommandResult:
 
 
 @contextlib.contextmanager
-def _named_dataset(stores: Stores) -> Iterator[None]:
+def _named_dataset(dispatcher: CommandDispatcher) -> Iterator[None]:
     """The refusal's own words, then what this account can start: a rewrite would drop its reason."""
     try:
         yield
     except DatasetAccessError as refused:
-        refused.add_note(no_dataset_hint(stores))
+        refused.add_note(no_dataset_hint(dispatcher.stores))
         raise
 
 
-async def mint_and_run(stores: Stores, mint: MintCampaignPayload, inline: Inline) -> CommandResult:
-    dispatcher = CommandDispatcher(stores, inline=inline)
-    with _named_dataset(stores):
+async def mint_and_run(dispatcher: CommandDispatcher, mint: MintCampaignPayload) -> CommandResult:
+    with _named_dataset(dispatcher):
         launched = (await dispatcher.dispatch(CommandCall(mint, door=Door.TERMINAL))).result
     held = held_run(launched)
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
@@ -414,10 +410,10 @@ def cmd_head_to_head(args: argparse.Namespace) -> Coroutine[Any, Any, CommandRes
 async def _head_to_head(args: argparse.Namespace) -> CommandResult:
     """Each arm runs in its own process, as a server launch does; this waits on them all."""
     setup_logging(style="full" if args.verbose else "cli")
-    stores = open_stores(args)
+    stores = local_stores(tenant=args.tenant)
     payload = _head_to_head_payload(args)
     dispatcher = CommandDispatcher(stores)
-    with _named_dataset(stores):
+    with _named_dataset(dispatcher):
         outcome = await dispatcher.answer(
             launching.mint_head_to_head, CommandCall(payload, door=Door.TERMINAL)
         )
@@ -436,7 +432,7 @@ async def _head_to_head(args: argparse.Namespace) -> CommandResult:
         PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, reason="Ctrl+C")
         for _, hop in arms
     ]
-    with ctrl_c_pauses(stores, pauses):
+    with ctrl_c_pauses(dispatcher, pauses):
         await asyncio.gather(*outcome.result.exits)
     ended = [
         f"  {arm_key}: {hop.campaign_id} — {dispatcher.stores.run_state(hop).run_phase.value}"

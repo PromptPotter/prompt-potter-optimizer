@@ -1,19 +1,15 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
-from promptpotter.application.commands.dispatcher import Applier, Replaying, replays
+from promptpotter.application.commands.dispatcher import Applier, Dispatched, Replaying, replays
 from promptpotter.application.maintenance.archive_maintenance import (
     ArchiveReport,
     compact_measurement_archive,
     purge_cold_store,
     restore_measurement_archive,
 )
-from promptpotter.domain.command_kinds import CommandKind
-
-if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import Dispatched
-    from promptpotter.domain.command_kinds import CompactArchivePayload
+from promptpotter.domain.command_kinds import CommandKind, CompactArchivePayload
 
 
 async def compact_archive(dispatched: Dispatched[CompactArchivePayload]) -> Applier[ArchiveReport]:

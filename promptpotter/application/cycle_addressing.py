@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
 
 from pydantic import Field
 
 from promptpotter.application.account import registered_or_default_identity
 from promptpotter.config.paths import default_projects_root
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import tenant_workspace
@@ -15,9 +16,6 @@ from promptpotter.infrastructure.store.session_pointer import (
 )
 from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
 from promptpotter.shared.errors import BadRequestError, NotFoundError
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign import Campaign
 
 
 def latest_launch(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None:
@@ -155,3 +153,28 @@ def resolve_cycle_id(stores: Stores, campaign_id: str, hint: str | None) -> str:
         f"Available: {_listed(matches)}.",
         code="ambiguous_id",
     )
+
+
+@dataclass
+class SessionCtx:
+    store: Stores
+    campaign: Campaign
+    cycle_id: str
+
+    @property
+    def campaign_id(self) -> str:
+        return self.campaign.campaign_id
+
+    @property
+    def hop(self) -> CycleHop:
+        """Derived, never stored: ``cycle_id`` is reassigned IN PLACE when a verb forks."""
+        return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
+
+
+def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
+    try:
+        campaign = named_campaign(store, hop.campaign_id)
+    except NotFoundError as refused:
+        refused.add_note("Run `python -m promptpotter new <dataset>` to mint a fresh campaign.")
+        raise
+    return SessionCtx(store, campaign, hop.cycle_id)

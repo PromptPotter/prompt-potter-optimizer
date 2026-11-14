@@ -1,23 +1,17 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from typing import TYPE_CHECKING
 
 from promptpotter.application.scoring.evaluators import materialize_round_values
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.selection import level_band
-from promptpotter.domain.arms import arm_end
+from promptpotter.domain.arms import ArmState, arm_end
 from promptpotter.domain.cell_fold import CellFold, ScoreSummary, field_accuracy, recall_at
+from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results_health import is_degraded, is_deprecated
-from promptpotter.domain.scoring import ROW_GRADES
+from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradedCell, Scorer
 from promptpotter.domain.spend import TokenAccount
-
-if TYPE_CHECKING:
-    from promptpotter.domain.arms import ArmState
-    from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
-
 
 # Meaned whatever the formula reads; `errored`/`degraded` are reported as rates.
 _MEANED_CHANNELS: tuple[str, ...] = ("latency", "cost", "tokens")

@@ -21,13 +21,13 @@ from promptpotter.infrastructure.llm.telemetry import (
     current_round,
 )
 from promptpotter.infrastructure.llm.wallet import keyed_client
+from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.llm_reuse_cache import hash_call
 from promptpotter.shared.errors import (
     CellSendRefusedError,
     SendRefusedError,
     UngeneratedRequestError,
 )
-from promptpotter.shared.run_scope import run_scope, scoped
 
 logger = logging.getLogger(__name__)
 

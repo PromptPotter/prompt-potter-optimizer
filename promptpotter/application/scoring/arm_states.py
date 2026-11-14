@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.scoring.search_point_scorer import SCORING_ERROR_ABORT, ScoredWalk
 from promptpotter.domain.arms import (
@@ -19,15 +19,12 @@ from promptpotter.domain.arms import (
     Skipped,
 )
 from promptpotter.domain.phases import WalkEnd
+from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
 from promptpotter.shared.errors import ErrorCategory
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.search_point import JobSearchPoint
-
 
 _CONFIG_DETERMINISTIC_ABORT = frozenset({ErrorCategory.CLIENT.value, ErrorCategory.PIPELINE.value})
 

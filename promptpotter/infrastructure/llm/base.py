@@ -4,8 +4,9 @@ import functools
 import json
 import socket
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import Any, NamedTuple
 
+import httpx
 from pydantic import SecretStr
 
 from promptpotter.domain.pipeline_schema import token_bound_of_bytes
@@ -17,11 +18,8 @@ from promptpotter.infrastructure.llm.pricing import (
 )
 from promptpotter.infrastructure.llm.send_pacing import Backpressure, RateLimiter
 from promptpotter.infrastructure.llm.spend_book import FRAMING_TOKENS, SendBound
-from promptpotter.shared.run_scope import run_scope
+from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.shared.tls import tls_context
-
-if TYPE_CHECKING:
-    import httpx
 
 # Per read gap: a reasoning model may think for minutes before its first byte.
 WIRE_TIMEOUT_S = 600.0

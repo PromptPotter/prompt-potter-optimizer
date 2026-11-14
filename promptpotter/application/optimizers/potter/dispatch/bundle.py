@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.arms import arm_name, is_leader_eligible
+from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineNode, PipelineSchema
@@ -15,7 +16,6 @@ from promptpotter.domain.results import RoundOutcome
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
-    from promptpotter.domain.l4.cells import InnerCells
 
 
 # A field with no entry is emitted unbounded.

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, assert_never
+from typing import Any, assert_never
 
 from promptpotter.application import account, library
 from promptpotter.application.account import AccountKey, put_account_key, remove_account_key
-from promptpotter.application.commands.dispatcher import Applier, Replaying, replays
+from promptpotter.application.commands.dispatcher import Applier, Dispatched, Replaying, replays
 from promptpotter.application.commands.draft_editing import reread_draft_wire
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
 from promptpotter.application.datasets.ingest import (
@@ -16,32 +16,27 @@ from promptpotter.application.datasets.ingest import (
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.config.settings import TERMS_VERSION
 from promptpotter.domain.command_kinds import (
+    AcceptTermsPayload,
     ArchiveCampaignPayload,
+    BankSnippetPayload,
     CommandKind,
     DeleteCampaignPayload,
+    IngestUploadPayload,
+    LifecyclePayload,
+    OpenDatasetDraftPayload,
+    OpenOriginDraftPayload,
+    RemoveApiKeyPayload,
+    SetApiKeyPayload,
+    SetCampaignLabelPayload,
+    SetUserSettingsPayload,
     UnarchiveCampaignPayload,
 )
 from promptpotter.domain.records.run_records import DraftOpenedEffect
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import LedgerUnreadableError
-
-if TYPE_CHECKING:
-    from promptpotter.application.commands.dispatcher import Dispatched
-    from promptpotter.domain.command_kinds import (
-        AcceptTermsPayload,
-        BankSnippetPayload,
-        IngestUploadPayload,
-        LifecyclePayload,
-        OpenDatasetDraftPayload,
-        OpenOriginDraftPayload,
-        RemoveApiKeyPayload,
-        SetApiKeyPayload,
-        SetCampaignLabelPayload,
-        SetUserSettingsPayload,
-    )
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 async def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applier[object]:

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     RUNTIME_FAILURE_RECENCY_WINDOW,
@@ -10,15 +10,13 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     signal,
 )
+from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamKind
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
-
-if TYPE_CHECKING:
-    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 
 # Closed vocabularies, safe in an UNFENCED panel; any other LLM-authored value reports its size.
 _PLAIN_EVIDENCE_VALUES = NODE_LAYOUTS["l1_generate"].possible | frozenset(

@@ -1,11 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
-from contextlib import contextmanager
-from contextvars import ContextVar
-from pathlib import Path
-from typing import TYPE_CHECKING
-
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import (
     Bill,
@@ -14,17 +8,13 @@ from promptpotter.domain.records.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.spend import TokenAccount, TokenUsageKind
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.pricing import compute_usd
+from promptpotter.infrastructure.run_scope import UNBOUND, run_scope
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
 from promptpotter.infrastructure.store.io import write_lock
 from promptpotter.infrastructure.store.layout import CampaignLayout, cycle_ledgers
 from promptpotter.shared.measurement_context import measured_pass
-from promptpotter.shared.run_scope import UNBOUND, run_scope
-
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.ledger import CycleEventLog
-
-_CURRENT_ROUND: ContextVar[int | None] = ContextVar("current_round", default=None)
 
 
 def active_cycle_ledger() -> CycleEventLog | None:
@@ -50,46 +40,20 @@ def billing_ledger(what: str) -> CycleEventLog:
     return ledger
 
 
-_FILED_AS: ContextVar[TokenUsageKind | None] = ContextVar("filed_as", default=None)
-
-
-@contextmanager
-def filed_as(kind: TokenUsageKind | None) -> Iterator[None]:
-    if kind is None:
-        yield
-        return
-    token = _FILED_AS.set(kind)
-    try:
-        yield
-    finally:
-        _FILED_AS.reset(token)
-
-
 def filed_kind(kind: TokenUsageKind) -> TokenUsageKind:
-    return _FILED_AS.get() or kind
-
-
-@contextmanager
-def at_round(round_num: int) -> Iterator[None]:
-    """The ONE binder of the round: a run binds 0 for its whole span, each round its own inside it."""
-    token = _CURRENT_ROUND.set(round_num)
-    try:
-        yield
-    finally:
-        _CURRENT_ROUND.reset(token)
+    return run_scope().filed_as or kind
 
 
 def current_round() -> int | None:
     """``None`` outside any round, which only a record whose ``round`` is optional may carry."""
-    return _CURRENT_ROUND.get()
+    return run_scope().round
 
 
 def bound_round() -> int:
-    round_num = _CURRENT_ROUND.get()
-    if round_num is None:
+    if (round_num := run_scope().round) is None:
         raise RuntimeError(
             "a record names the round it was measured in and none is bound: "
-            "the entry driving this walk binds one first (`at_round`)"
+            "the entry driving this walk scopes one first (`scoped(round=…)`)"
         )
     return round_num
 
@@ -197,18 +161,8 @@ def token_usage_record(
     )
 
 
-# The campaign dir whose cycles' ledgers name the cells (`ReplayFeed.cell_key`) and calls
-# (`call:{reuse key}`) it priced: per CAMPAIGN, never per spend book or process.
-_PRICED: ContextVar[Path | None] = ContextVar("priced", default=None)
-
-
-def bind_priced(campaign_dir: Path) -> None:
-    """The run's campaign: a cell or call any of its cycles priced replays free for it ever after."""
-    _PRICED.set(campaign_dir)
-
-
 def campaign_priced(key: str) -> bool:
-    campaign = _PRICED.get()
+    campaign = run_scope().priced
     return campaign is not None and key in scan_ledger_priced_keys(cycle_ledgers(campaign))
 
 
@@ -216,7 +170,7 @@ def claim_campaign_price(key: str) -> bool:
     """Whether this reading of *key* is its campaign's first, which this call claims under the
     campaign's write lock, so two processes holding its cycles price it once; outside a campaign's
     run every reading is."""
-    campaign = _PRICED.get()
+    campaign = run_scope().priced
     if campaign is None:
         return True
     with write_lock(CampaignLayout(campaign).manifest):

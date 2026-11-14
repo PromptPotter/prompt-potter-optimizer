@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Mapping, Sequence
 
-from promptpotter.application.bench.node_context import Bounds, Lineage, Replay, Ruler
+from promptpotter.application.bench.node_context import Bounds, Lineage, NodeContext, Replay, Ruler
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.optimizers.nodes import Selection
+from promptpotter.application.intelligence.rasch import RoundAbilities
+from promptpotter.application.optimizers.nodes import MeasuredRound, Selection
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs
 from promptpotter.application.scoring.selection import (
     closest_to_bar,
@@ -14,16 +15,8 @@ from promptpotter.application.scoring.selection import (
 from promptpotter.domain.crowning_bar import CrowningBar
 from promptpotter.domain.origin_panel import election_rows
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.ruler import DeltaRuler, ThetaLift
 from promptpotter.domain.scoring import NO_CELLS, CellSheet
-
-if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.intelligence.rasch import RoundAbilities
-    from promptpotter.application.optimizers.nodes import MeasuredRound
-    from promptpotter.domain.ruler import ThetaLift
 
 
 def _theta(value: float | None) -> str:

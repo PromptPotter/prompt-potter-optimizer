@@ -10,17 +10,25 @@ from collections.abc import Mapping
 from dataclasses import replace
 from enum import StrEnum
 from statistics import fmean
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
-from promptpotter.domain.pipeline_schema import LLMSpendBound, WebSpendBound
+from promptpotter.domain.pipeline_schema import (
+    LLMSpendBound,
+    NodeSpendBound,
+    PipelineNode,
+    PipelineSchema,
+    WebSpendBound,
+)
 from promptpotter.domain.results_health import classify_result, is_deprecated, terminal_node
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import (
@@ -35,6 +43,7 @@ from promptpotter.domain.scoring import (
     turn_scalars,
 )
 from promptpotter.domain.spend import CellPrice, StepUsage, TokenAccount
+from promptpotter.infrastructure.backend import CellBilling
 from promptpotter.infrastructure.llm.base import hold_ceiling
 from promptpotter.infrastructure.llm.heartbeat import heartbeat
 from promptpotter.infrastructure.llm.send_failure import failed_send
@@ -52,14 +61,8 @@ from promptpotter.infrastructure.llm.telemetry import (
     emit_replay_usage,
     rate_priced_usd,
 )
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory, SendRefusedError
-
-if TYPE_CHECKING:
-    from promptpotter.application.intelligence.indexes.sample import SampleIndex
-    from promptpotter.connectors.protocol import Connector
-    from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode, PipelineSchema
-    from promptpotter.infrastructure.backend import CellBilling
-    from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)
 

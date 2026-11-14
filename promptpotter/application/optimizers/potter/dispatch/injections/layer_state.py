@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Collection, Sequence
 
+from promptpotter.application.bench.node_context import Calls
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L3_PLAN_MAX_CHARS,
     ElectionRow,
@@ -12,6 +13,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     election_table_rows,
     signal,
 )
+from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
     NODE_LAYOUTS,
@@ -25,19 +27,13 @@ from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import Measured, arm_name
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
-from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
+from promptpotter.domain.optimizer_state import CritiqueReadout
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, PipelineSchema
+from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
-
-if TYPE_CHECKING:
-    from collections.abc import Collection, Sequence
-
-    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
-    from promptpotter.domain.optimizer_state import CritiqueReadout
-    from promptpotter.domain.paired_reading import ArmKey
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import RoundOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +138,11 @@ def _r_l1_overrides(b: PotterView) -> list[Item]:
 def _r_l1_layout(b: PotterView) -> list[Item]:
     """Listed slot → panels, the shape an edit takes, so each line is an edit ready to answer."""
     steered = b.l2.steered_layout("l1_generate")
-    layout = resolve_node_layout("l1_generate") if steered is None else steered
+    layout = (
+        resolve_node_layout("l1_generate", b.ctx.read(Calls).levers("l1_generate"))
+        if steered is None
+        else steered
+    )
     lines = [
         f'  "{slot}": {json.dumps([p for p in layout.slot(slot) if p not in b.silent_l1_panels])}'
         for slot in L1_LAYOUT_SLOTS

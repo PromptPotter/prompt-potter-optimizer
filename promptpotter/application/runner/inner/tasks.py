@@ -7,8 +7,8 @@ from __future__ import annotations
 import itertools
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
-from pathlib import Path
+from dataclasses import replace
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, ValidationError, model_validator
@@ -34,7 +34,7 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
 )
 from promptpotter.domain.cells import PinnedCell, Seat
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4 import proxies
 from promptpotter.domain.l4.cells import CellOptimizer, InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.pipeline_params import NodeCall, lay_nodes
@@ -45,27 +45,23 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
 )
 from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.ruler import RulerReach
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.llm.telemetry import current_round
+from promptpotter.infrastructure.run_scope import UNBOUND, InnerSpawnContext, rescope, run_scope
 from promptpotter.infrastructure.store.archive_queries import CampaignWalks, CellOf
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeline, resolve_dataset
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, DatasetAccessError, PayloadInvalidError
 from promptpotter.shared.hashing import module_source_digest, shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import enter_instrument_mode
-from promptpotter.shared.run_scope import UNBOUND, rescope, run_scope
 
 if TYPE_CHECKING:
-    from types import ModuleType
-
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.campaign import Purpose
-    from promptpotter.domain.ruler import RulerReach
-    from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-    from promptpotter.infrastructure.store.stores import Stores
-    from promptpotter.shared.identity import IdentityContext
 
 
 class InnerBenchmarkConfig(FrozenModel):
@@ -419,30 +415,6 @@ def inner_instrument_config(
             "optimizer_narrowing": narrowing,
         }
     )
-
-
-@dataclass(frozen=True)
-class InnerSpawnContext:
-    """``shared_root`` stays the REAL workspace root: sandboxing the shared caches re-scores every inner origin."""
-
-    inner_sandbox_root: Path
-    identity: IdentityContext
-    shared_root: Path
-    # The spawner's tiers, so a cell resolves its dataset where the spawner does.
-    install_datasets_root: Path
-    research_datasets_root: Path | None
-    # The chain the cell's sandbox sits in, ending at its owner: the spawner's cycle.
-    inside: CyclePath
-    # Outermost first, ending at the asker's: a pause filed on any of them stops the cell.
-    enclosing: tuple[Subject, ...]
-    # The commands the spawner's passes act for: a `cancel` of one stops the cell.
-    acting: tuple[str, ...]
-    # What the spawner is FOR: each cell declares it, so withholds what the spawner would.
-    purpose: Purpose
-    # The tenant ruler lines the spawner's open round reads, which every cell it spawns reads too.
-    ruler: RulerReach
-    # Resolved ONCE at publish: a per-cell read lets an edit split one run's cells.
-    cells: InnerCells | None = None
 
 
 def _outer_cells(session: Session) -> InnerCells | None:

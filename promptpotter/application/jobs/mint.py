@@ -3,7 +3,7 @@ from __future__ import annotations
 import functools
 import logging
 from collections import Counter
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -61,15 +61,18 @@ from promptpotter.domain.campaign import (
     SharedPart,
 )
 from promptpotter.domain.campaign_config import (
+    CampaignConfig,
     CycleConfig,
     LaidSpan,
 )
 from promptpotter.domain.command_events import CommandLanded, draft_subject, subject_key
+from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.opt_search_point import NodePrompt
+from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.phases import NextAct
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
+from promptpotter.domain.pipeline_schema import CapabilityMenu, NodeSearchNarrowing, PipelineSchema
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     BackendRevision,
@@ -79,6 +82,9 @@ from promptpotter.domain.records.run_records import (
     OriginSource,
     RunWiringRecord,
 )
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.treatment import Treatment
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
 from promptpotter.infrastructure.store.dataset_access import (
@@ -86,23 +92,13 @@ from promptpotter.infrastructure.store.dataset_access import (
     runnable_definition,
 )
 from promptpotter.infrastructure.store.io import validate_path_component
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PayloadInvalidError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from promptpotter.application.datasets.authored import ConfigLayers
     from promptpotter.application.initialization.session import Session
-    from promptpotter.domain.campaign_config import CampaignConfig
-    from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.pipeline_schema import CapabilityMenu, PipelineSchema
-    from promptpotter.domain.prompt_block import Presumption
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import TaskDecomposition
-    from promptpotter.domain.treatment import Treatment
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 logger = logging.getLogger(__name__)

@@ -11,6 +11,7 @@ from promptpotter.domain.pipeline_overlay import (
     pin_default_routes,
 )
 from promptpotter.domain.pipeline_params import PipelineParams, lay_nodes
+from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 from promptpotter.domain.search_point import (
     SHOTS_KEY,
     JobSearchPoint,
@@ -21,7 +22,6 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
 
 if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
     from promptpotter.domain.sample import Sample
 
 

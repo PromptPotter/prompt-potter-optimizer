@@ -6,7 +6,7 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 
@@ -34,7 +34,9 @@ from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import OptimizerChoice
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.optimizer_state import STATE_KINDS
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -58,10 +60,6 @@ from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
-
-if TYPE_CHECKING:
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.cycle_paths import CycleHop
 
 logger = logging.getLogger(__name__)
 

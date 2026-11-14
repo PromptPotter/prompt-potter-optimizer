@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.bench.node_context import restated_round
@@ -13,18 +14,16 @@ from promptpotter.domain.cell_fold import repairable_holes
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.records.run_records import ForkDirection, ForkGradedRecord, ForkTrigger
+from promptpotter.domain.results import RoundResult
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    StandingRound,
+    StandingRounds,
+)
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
-
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-        StandingRound,
-        StandingRounds,
-    )
 
 logger = logging.getLogger(__name__)
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Hashable, Mapping, Sequence
 from functools import partial
 from pathlib import Path
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
 from pydantic import Field
 
@@ -68,8 +68,10 @@ from promptpotter.application.scoring.closed_rounds import (
     cycle_instrument,
     walked_rows,
 )
+from promptpotter.application.scoring.formula.compiler import CompiledExpression
 from promptpotter.application.scoring.paired import MemberRows, as_family
 from promptpotter.domain.arms import Concluded, Proposed, arm_name
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
     flatten_prompts,
@@ -87,7 +89,13 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.said import Said
-from promptpotter.domain.scoring import CellSheet, GradedCell, ScoringFormulaError, WalkedCell
+from promptpotter.domain.scoring import (
+    CellSheet,
+    GradedCell,
+    Scorer,
+    ScoringFormulaError,
+    WalkedCell,
+)
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import ledger_chain
@@ -107,18 +115,12 @@ from promptpotter.infrastructure.store.layout import (
     campaign_cycles_dir,
 )
 from promptpotter.infrastructure.store.read_model import derived, file_sig
-from promptpotter.infrastructure.store.stores import descend_store
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import sample_sd
-
-if TYPE_CHECKING:
-    from promptpotter.application.scoring.formula.compiler import CompiledExpression
-    from promptpotter.domain.campaign import Campaign
-    from promptpotter.domain.scoring import Scorer
-    from promptpotter.infrastructure.store.stores import Stores
 
 
 class EffectProvenance(StrictModel):

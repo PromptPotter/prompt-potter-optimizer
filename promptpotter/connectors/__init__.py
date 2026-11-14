@@ -3,15 +3,12 @@ from __future__ import annotations
 import importlib
 import pkgutil
 import typing
+from collections.abc import Iterator
 
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.cell_terms import misdeclared_connector_terms
 from promptpotter.domain.connector import ConnectorExecution
 from promptpotter.shared.plugin_registry import BUILT_IN, Registry, built_in_origin
-
-if typing.TYPE_CHECKING:
-    from collections.abc import Iterator
-
 
 ENTRY_POINT_GROUP = "promptpotter.connectors"
 """Published: renaming it un-registers every third-party plugin at once."""

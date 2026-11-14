@@ -11,17 +11,15 @@ from promptpotter.application.bench.resume_and_fork.repair import apply_correcti
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.records.run_records import ComparisonExit, ForkTrigger
-from promptpotter.domain.results import round_document_digest
-from promptpotter.domain.run_mode import OnDivergence
+from promptpotter.domain.results import RoundResult, round_document_digest
+from promptpotter.domain.run_mode import OnDivergence, RunMode
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.run_mode import RunMode
-    from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 
 logger = logging.getLogger(__name__)
 

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from types import MappingProxyType
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from types import MappingProxyType, ModuleType
+from typing import Any, ClassVar, Literal
+
+from pydantic import BaseModel
 
 from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.bench.node_context import (
@@ -12,6 +14,7 @@ from promptpotter.application.bench.node_context import (
     Children,
     Frontier,
     Lineage,
+    NodeContext,
     Progress,
     Replay,
     Ruler,
@@ -22,8 +25,19 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     stratum_shares,
 )
 from promptpotter.application.intelligence.rasch import build_round_order
+from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes
-from promptpotter.application.optimizers.nodes import OptimizerPhase
+from promptpotter.application.optimizers.nodes import (
+    CycleRead,
+    Draw,
+    MeasuredRound,
+    OptimizerPhase,
+    Panel,
+    PromptArity,
+    Proposals,
+    ReviewReading,
+    Selection,
+)
 from promptpotter.application.optimizers.potter.couplings import ADAPTIVE_QUEUE, LADDER, POBB
 from promptpotter.application.optimizers.potter.dispatch.bundle import injection_registry
 from promptpotter.application.optimizers.potter.dispatch.facade import (
@@ -98,46 +112,24 @@ from promptpotter.application.optimizers.potter.records import (
 from promptpotter.application.optimizers.potter.validators import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.application.views.render.primitives import fmt_fitness
+from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.dashboard_rows import OptimizerLimit
-from promptpotter.domain.optimizer_state import Critique
+from promptpotter.domain.opt_search_point import VariationMode
+from promptpotter.domain.optimizer_state import Critique, StatePart
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
-from promptpotter.domain.phases import StopLoop
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
-from promptpotter.domain.pool import BlockPool, DemoPool
+from promptpotter.domain.pool import BlockPool, DemoPool, Pool
+from promptpotter.domain.records.run_records import StopLoop
+from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
+from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.run_standing import rounds_without_advance
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.shared.answer_text import truncate
-
-if TYPE_CHECKING:
-    from types import ModuleType
-
-    from pydantic import BaseModel
-
-    from promptpotter.application.bench.node_context import NodeContext
-    from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.optimizers.nodes import (
-        CycleRead,
-        Draw,
-        MeasuredRound,
-        Panel,
-        PromptArity,
-        Proposals,
-        ReviewReading,
-        Selection,
-    )
-    from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
-    from promptpotter.domain.arm_reading import DisplayMetric
-    from promptpotter.domain.opt_search_point import VariationMode
-    from promptpotter.domain.optimizer_state import StatePart
-    from promptpotter.domain.paired_reading import ArmKey
-    from promptpotter.domain.pool import Pool
-    from promptpotter.domain.results import OptimizerFact, RoundResult
-    from promptpotter.domain.round_audit import RoundAudit
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import CellSheet
-
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +416,9 @@ class L2Context(LayoutNode):
             if key in self.steers[L1Generate.name]
         }
 
-        prior = node_layout("l1_generate", ctx.slice(L2Memory))
+        prior = node_layout(
+            "l1_generate", ctx.slice(L2Memory), ctx.read(Calls).levers("l1_generate")
+        )
         layout_outcomes: list[ValidatorOutcome] = []
         accepted_layout: L1Layout | None = None
         layout_refused = False

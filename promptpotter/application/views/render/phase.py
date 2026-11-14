@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import textwrap
-from typing import TYPE_CHECKING, assert_never
+from collections.abc import Sequence
+from pathlib import Path
+from typing import assert_never
 
 from promptpotter.application.views.render.primitives import (
     BOLD,
@@ -27,23 +29,18 @@ from promptpotter.domain.arm_reading import (
 )
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND
 from promptpotter.domain.connector import MeasuredUnit, unit_count
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.origin_panel import (
     ROUND_ADVANCE_INFO,
     RoundAdvance,
     StallEffect,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, NextAct, StopOutcome, StopReason
+from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.records.run_records import RoundClosedRecord
+from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.results_health import health_reading
-from promptpotter.domain.ruler import PLATEAU_ROUNDS, LevelSeries
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-    from pathlib import Path
-
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.records.run_records import RoundClosedRecord
-    from promptpotter.domain.results import CycleResult, RoundOutcome
-    from promptpotter.domain.ruler import AbilityReading
+from promptpotter.domain.ruler import PLATEAU_ROUNDS, AbilityReading, LevelSeries
 
 
 def _spelled(act: NextAct) -> str:

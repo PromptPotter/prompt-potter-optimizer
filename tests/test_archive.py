@@ -58,7 +58,7 @@ from factories import (
 )
 
 from promptpotter.application import optimizers
-from promptpotter.application.bench.cycle import Cycle
+from promptpotter.application.bench.cycle import Cycle, ReadArm
 from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
@@ -94,7 +94,7 @@ from promptpotter.application.optimizers.capo.members import (
     PopulationKept,
 )
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
-from promptpotter.application.optimizers.nodes import MeasuredRound, Panel, ReadArm
+from promptpotter.application.optimizers.nodes import MeasuredRound, Panel
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
 from promptpotter.application.optimizers.potter.pobb import EliminationGate
 from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
@@ -178,6 +178,7 @@ from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.run_scope import rescope, scoped
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -220,7 +221,6 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasurementRole
-from promptpotter.shared.run_scope import rescope, scoped
 
 _CAMPAIGN = "testds__20260101-000000"
 

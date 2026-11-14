@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from collections.abc import Sequence
+from typing import Any
 
 import httpx
 
@@ -13,14 +14,9 @@ from promptpotter.connectors.protocol import (
     UploadDefaults,
     cell_envelope_of,
 )
-from promptpotter.domain.pipeline_params import STEPS_KEY
+from promptpotter.domain.pipeline_params import STEPS_KEY, PipelineParams
+from promptpotter.domain.sample import Sample
 from promptpotter.shared.tls import tls_context
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
-
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
 

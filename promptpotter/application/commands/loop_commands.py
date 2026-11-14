@@ -2,22 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
-from promptpotter.application.commands.dispatcher import Applier
+from promptpotter.application.commands.dispatcher import Applier, DispatchedToCycle
+from promptpotter.domain.command_kinds import (
+    PauseCyclePayload,
+    SetSampleLookaheadPayload,
+    SkipSearchpointPayload,
+    SubmitArmsPayload,
+)
 from promptpotter.infrastructure.store.io import read_yaml
 from promptpotter.shared.errors import PayloadInvalidError
-
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from promptpotter.application.commands.dispatcher import DispatchedToCycle
-    from promptpotter.domain.command_kinds import (
-        PauseCyclePayload,
-        SetSampleLookaheadPayload,
-        SkipSearchpointPayload,
-        SubmitArmsPayload,
-    )
 
 
 def read_payload_file(path: Path) -> Any:

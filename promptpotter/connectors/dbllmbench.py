@@ -11,15 +11,18 @@ from __future__ import annotations
 
 import contextlib
 import json
-from typing import TYPE_CHECKING, Any
+from collections.abc import Mapping
+from typing import Any
 from uuid import uuid4
 
 import yaml
 
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
-from promptpotter.domain.pipeline_params import NodeCall
+from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import LLMSpendBound
+from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import TurnRecord
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage
 from promptpotter.infrastructure.docker_host import (
@@ -40,14 +43,6 @@ from promptpotter.shared.errors import (
     cell_failure,
     is_provider_credit_refusal,
 )
-
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
-    from promptpotter.domain.pipeline_params import PipelineParams
-    from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import TurnRecord
-
 
 WRITER_NODE = "query_writer"
 
