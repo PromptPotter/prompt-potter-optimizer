@@ -12,7 +12,6 @@ interface Selection {
   observe: ObserveState | null;
   setObserve: (s: ObserveState) => void;
   setSelectionForRound: (r: number | null) => void;
-  setSelectionForSampleSet: (ids: number[] | null) => void;
 }
 
 export function useSelection(): Selection {
@@ -25,7 +24,6 @@ export function useSelection(): Selection {
       observe: keys.observe,
       setObserve: (observe) => setViewKeys({ observe }),
       setSelectionForRound: (r) => setViewKeys({ round: r, observe: null }),
-      setSelectionForSampleSet: (samples) => setViewKeys({ samples }),
     }),
     [round, keys.samples, keys.observe, setViewKeys],
   );

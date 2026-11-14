@@ -1,5 +1,6 @@
 import { useState } from "react";
-import type { NodeSchemaReading, SelectedCandidate } from "@/lib/types";
+import type { SelectedCandidate } from "@/lib/types";
+import type { PipelineAt } from "@/lib/hooks/useConnector";
 import type { CyclePath } from "@/lib/ids";
 import { Dialog, HoverCard } from "@/components/ui";
 import { SteerForkPanel } from "./SteerForkPanel";
@@ -7,11 +8,11 @@ import { SteerForkPanel } from "./SteerForkPanel";
 export function SteerForkAction({
   candidate,
   path,
-  schema,
+  pipelineAt = null,
 }: {
   candidate: SelectedCandidate;
   path: CyclePath | null;
-  schema: NodeSchemaReading;
+  pipelineAt?: PipelineAt | null;
 }) {
   const [open, setOpen] = useState(false);
 
@@ -33,7 +34,7 @@ export function SteerForkAction({
           <SteerForkPanel
             candidate={candidate}
             path={path}
-            schema={schema}
+            pipelineAt={pipelineAt}
             onDone={() => setOpen(false)}
             onCancel={() => setOpen(false)}
           />

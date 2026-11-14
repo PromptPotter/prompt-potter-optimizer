@@ -9,7 +9,7 @@ export function Term({
 }: {
   children: ReactNode;
   content: ReactNode;
-  className?: string;
+  className?: string | undefined;
 }) {
   return (
     <HoverCard content={content} focusable>

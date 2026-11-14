@@ -3,6 +3,7 @@ import type { MeasuredUnit, OverlapReading, SampleCoverage, ServedRound } from "
 import { fmtSampleTag, unitCount } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
+import { useWorkspace } from "@/lib/workspace";
 import { roundMeasuredSets, sameSampleSet, toggleInSet } from "@/lib/derivations";
 import { Button, Chip, ChipGroup, HoverCard, SegmentedControl, type Segment } from "@/components/ui";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";
@@ -25,7 +26,8 @@ export function SampleSetControl({
   overlap: OverlapReading | null;
   unit: MeasuredUnit;
 }) {
-  const { sampleSet, setSelectionForSampleSet } = useSelection();
+  const { sampleSet } = useSelection();
+  const { setViewKeys } = useWorkspace();
   const [detailOpen, setDetailOpen] = useState(false);
   const [load, setLoad] = useState<LoadMode>("measured");
 
@@ -51,27 +53,30 @@ export function SampleSetControl({
             (shared.has(sid) ? " On the served set: C0 and each new best since answered it." : "");
           return (
             // Three facts, three channels (fill, opacity, underline) — more than a `Chip` carries.
-            <button
+            <HoverCard
               key={sid}
-              type="button"
-              className={cx("ss-cell", on && "on", everywhere && "everywhere", shared.has(sid) && "shared")}
-              aria-pressed={on}
-              aria-label={`Sample ${sid} — ${on ? "in" : "not in"} the overlap set. ${note}`}
-              title={`Sample ${fmtSampleTag(sid)} — ${on ? "in" : "not in"} the overlap set. Click to toggle. ${note}`}
-              onClick={() => setSelectionForSampleSet(toggleInSet(sampleSet, sid))}
+              content={`Sample ${fmtSampleTag(sid)} — ${on ? "in" : "not in"} the overlap set. ${note}`}
             >
-              {sid}
-            </button>
+              <button
+                type="button"
+                className={cx("ss-cell", on && "on", everywhere && "everywhere", shared.has(sid) && "shared")}
+                aria-pressed={on}
+                aria-label={`Sample ${sid} — ${on ? "in" : "not in"} the overlap set. ${note}`}
+                onClick={() => setViewKeys({ samples: toggleInSet(sampleSet, sid) })}
+              >
+                {sid}
+              </button>
+            </HoverCard>
           );
         })}
       </div>
 
       <div className="ss-row">
-        <Button className="ss-action" onClick={() => setSelectionForSampleSet(universe)}>
+        <Button className="ss-action" onClick={() => setViewKeys({ samples: universe })}>
           All measured
         </Button>
         <HoverCard content="Deselect every sample and build the set up one at a time. Press ∩ above to close the picker.">
-          <Button className="ss-action" onClick={() => setSelectionForSampleSet([])}>
+          <Button className="ss-action" onClick={() => setViewKeys({ samples: [] })}>
             Off
           </Button>
         </HoverCard>
@@ -81,7 +86,7 @@ export function SampleSetControl({
           >
             <Chip
               on={sameSampleSet(sampleSet, overlap.positions)}
-              onClick={() => setSelectionForSampleSet(overlap.positions)}
+              onClick={() => setViewKeys({ samples: overlap.positions })}
             >
               overlap · {overlap.positions.length}
             </Chip>
@@ -94,7 +99,7 @@ export function SampleSetControl({
               on={sameSampleSet(sampleSet, rs.ids)}
               ariaLabel={`Round ${rs.round} — ${unitCount(rs.ids.length, unit)}`}
               title={`${unitCount(rs.ids.length, unit)} measured in round ${rs.round}`}
-              onClick={() => setSelectionForSampleSet(rs.ids)}
+              onClick={() => setViewKeys({ samples: rs.ids })}
             >
               R{rs.round}
             </Chip>

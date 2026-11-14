@@ -1,18 +1,16 @@
 import { useMemo } from "react";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import type { HierarchyCampaign, HierarchyCandidate, SubjectReading } from "@/lib/api/types";
-import { useCampaignPipeline } from "@/lib/hooks/useConnector";
 import { candidateSubject, readingPath } from "@/lib/api/reads";
 import {
   applyFlatEdits,
-  candidatesAtPath,
+  type channelArms,
   descendantsOf,
   mainLineOf,
   type CompareItem,
   type LineageIndex,
-  nodeSchemaReading,
 } from "@/lib/derivations";
-import { useCells, type CellsPreset } from "@/lib/hooks/useCells";
+import type { CellsPreset } from "@/lib/hooks/useCells";
 import { shownData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { lineageIndexOf, useLineageTree } from "@/lib/lineage";
@@ -42,17 +40,10 @@ export function useChannelTree(run: HierarchyCampaign | null) {
 }
 
 export function useChannelHead(
-  index: LineageIndex,
-  reading: SubjectReading | null,
+  { own, winner, latest }: ReturnType<typeof channelArms>,
   selected: HierarchyCandidate | null,
 ) {
   return useMemo(() => {
-    const candidates = candidatesAtPath(index, reading && readingPath(reading));
-    // On the reading's own course: a repair re-measures an individual another course answers for.
-    const mine = reading ? candidates.filter((c) => c.facts.individual === reading.candidate_id) : [];
-    const own = mine.find((c) => c.facts.answers_for_id) ?? mine[0] ?? null;
-    const winner = candidates.find((c) => c.facts.stands) ?? own;
-    const latest = candidates.find((c) => c.facts.course_latest) ?? null;
     const sameAs = (a: HierarchyCandidate | null, b: HierarchyCandidate | null) =>
       !!a && !!b && a.address === b.address;
     const isWinner = sameAs(selected, winner);
@@ -88,7 +79,7 @@ export function useChannelHead(
       value: isWinner ? "winner" : isLatest ? "latest" : "picked",
       nodeFor: (v: string) => byValue[v] ?? null,
     };
-  }, [index, reading, selected]);
+  }, [own, winner, latest, selected]);
 }
 
 // The individuals an unrun scenario edit withdrew: every edited seed and its descendants.
@@ -139,8 +130,10 @@ export function usePickedPoint(
     [path, selected],
   );
   const pickedCampaign = path?.at(-1)?.campaignId ?? "";
-  const pipelineRead = useCampaignPipeline(at ? pickedCampaign || null : null, at);
-  const schema = nodeSchemaReading(pipelineRead);
+  const pipelineAt = useMemo(
+    () => (at && pickedCampaign ? { campaignId: pickedCampaign, subject: at } : null),
+    [at, pickedCampaign],
+  );
   const id = selected?.facts.individual ?? null;
   const armKey = selected?.facts.reading.arm.key ?? null;
   const cfg = useMemo(
@@ -152,7 +145,6 @@ export function usePickedPoint(
     () => (path && id && datasetName ? { path, datasetName, candidateId: id, scope: "cycle" } : null),
     [path, id, datasetName],
   );
-  const cellsRead = useCells(cellsPreset).read;
   const key = useMemo(
     () =>
       selected
@@ -180,11 +172,10 @@ export function usePickedPoint(
     reading: readingOf(armKey),
     cfg,
     cellsPreset,
-    cellsRead,
     overlay,
     unfiled,
     roundRead,
-    schema,
+    pipelineAt,
     spentTo,
     line,
   };

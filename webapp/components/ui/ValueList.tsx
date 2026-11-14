@@ -2,6 +2,7 @@ import { useState } from "react";
 import { cx } from "@/lib/cx";
 import { CommitInput } from "./CommitInput";
 import { Popover } from "./Popover";
+import { Term } from "./Term";
 import s from "./ValueList.module.css";
 
 export function ValueList({
@@ -163,9 +164,9 @@ function ValueLabel({ value, userAdded }: { value: string; userAdded: readonly s
     <>
       {value}
       {userAdded?.includes(value) ? (
-        <span className={s.tag} title="You added this — nothing in the catalogue vouches for it.">
+        <Term className={s.tag} content="You added this — nothing in the catalogue vouches for it.">
           user
-        </span>
+        </Term>
       ) : null}
     </>
   );

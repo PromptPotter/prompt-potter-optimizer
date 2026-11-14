@@ -35,6 +35,7 @@ from promptpotter.application.hierarchy_subtree import subtree_version
 from promptpotter.application.read_params import (
     PARAMS_FOR_READ,
     CampaignPipelineParams,
+    CouponParams,
     CycleDashboardParams,
     CycleEventsParams,
     CycleExportParams,
@@ -94,25 +95,22 @@ def _conditional(
     return _model_json(build(), headers={"ETag": etag})
 
 
-def _hashed(request: Request, model: BaseModel, *, stamp: str | None = None) -> Response:
-    """Decided after the work, for a read no input stamp covers; ``stamp`` moves on every request."""
-    response = _model_json(model)
-    validated = (
-        model.model_dump_json(by_alias=True, exclude={stamp}).encode() if stamp else response.body
-    )
-    etag = _weak(hashlib.sha256(validated).hexdigest())
-    if client_has_etag(request.headers.get("if-none-match"), etag):
-        return Response(status_code=304, headers={"ETag": etag})
-    response.headers["ETag"] = etag
-    return response
-
-
 @dataclass(frozen=True, slots=True)
 class _Asked:
     """What a framed row reads of its request beside its params."""
 
     request: Request
     caller: Caller
+
+
+def _hashed(asked: _Asked, read: CampaignPipelineParams | CouponParams) -> Response:
+    """Decided after the work, for a read no input stamp covers."""
+    response = _model_json(read.answer(asked.caller))
+    etag = _weak(hashlib.sha256(response.body).hexdigest())
+    if client_has_etag(asked.request.headers.get("if-none-match"), etag):
+        return Response(status_code=304, headers={"ETag": etag})
+    response.headers["ETag"] = etag
+    return response
 
 
 def _me(asked: _Asked, read: MeParams) -> Response:
@@ -162,11 +160,9 @@ def _events(asked: _Asked, read: CycleEventsParams | FeedParams) -> Response:
 
 
 def _evidence(asked: _Asked, read: EvidenceParams) -> Response:
-    return _hashed(asked.request, read.answer(asked.caller), stamp="generated_at")
-
-
-def _pipeline(asked: _Asked, read: CampaignPipelineParams) -> Response:
-    return _hashed(asked.request, read.answer(asked.caller))
+    # Every store it may pool, at the versions the feed names them by: a settled course answers unread.
+    version = sorted(feed_versions(asked.caller.stores, asked.caller.jobs, "store:").items())
+    return _conditional(asked.request, (*version, read), lambda: read.answer(asked.caller))
 
 
 def _cells(asked: _Asked, read: DatasetCellsParams) -> Response:
@@ -206,7 +202,8 @@ _FRAMED: dict[ReadKind, _Framing] = {
         _events, {"response_class": EventSourceResponse, "response_model": FeedFrame}
     ),
     ReadKind.EVIDENCE: _Framing(_evidence),
-    ReadKind.CAMPAIGN_PIPELINE: _Framing(_pipeline),
+    ReadKind.CAMPAIGN_PIPELINE: _Framing(_hashed),
+    ReadKind.COUPON: _Framing(_hashed),
     ReadKind.DATASET_CELLS: _Framing(_cells),
 }
 

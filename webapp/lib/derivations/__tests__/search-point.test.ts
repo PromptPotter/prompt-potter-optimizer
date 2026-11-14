@@ -124,7 +124,7 @@ const standing = (round: number, i: number) => {
   return runStanding(round, label, { selection: { round, label, key: `r${round}c${i}` } });
 };
 
-const NO_PICK: ObserveSelection = { candidate: null, round: null, observe: null };
+const NO_PICK: ObserveSelection = { round: null, observe: null };
 const asked = (observe: ObserveSelection["observe"]): ObserveSelection => ({ ...NO_PICK, observe });
 
 describe("resolveObserveSubject — best", () => {
@@ -257,24 +257,9 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     expect(joined(zero)).toBe(true);
   });
 
-  it("selected: a closed pick and an in-flight pick both find their row", () => {
-    const pick = (snap: ServedDashboard, live: boolean, round: number, arm: string, label: string) =>
-      resolveObserveSubject(snap, stood, live, { candidate: { round, arm, label }, round, observe: null });
-    const past = pick(closed, false, 1, "r1c0", "C1.1");
-    expect(past.state).toBe("selected");
-    expect(past.point).toMatchObject({ round: 1, label: "C1.1", title: "selected · C1.1" });
-    expect(past.point?.row?.reading.arm.key).toBe("r1c0");
-    expect(past.reading?.round).toBe(1);
-    const now = pick(running, true, 3, "C3.1", "C3.1");
-    expect(now.point?.row?.source).toBe("inflight");
-    expect(joined(now)).toBe(true);
-    expect(level(now)).toBe(0.5);
-    expect(now.live).toBe(true);
-  });
-
   it("an asked-for state wins while it has a target, and is dropped when it has none", () => {
     expect(resolveObserveSubject(running, stood, true, asked("best")).point?.label).toBe("C1.2");
-    expect(resolveObserveSubject(closed, stood, false, asked("selected")).state).toBe("best");
+    expect(resolveObserveSubject(closed, stood, false, asked("round")).state).toBe("best");
     expect(
       resolveObserveSubject(closed, stood, false, { ...NO_PICK, round: 2, observe: "best" }).point,
     ).toMatchObject({ round: 1, label: "C1.2" });
@@ -318,15 +303,14 @@ describe("originPoint — the origin as the served tree names it", () => {
 
 describe("observeOptions", () => {
   it("DROPS unavailable states rather than disabling them, and keeps one order", () => {
-    const none = { best: false, latest: false, round: false, selected: false };
+    const none = { best: false, latest: false, round: false };
     expect(observeOptions({ ...none, best: true, latest: true })).toEqual([
       { value: "best", label: "Best" },
       { value: "latest", label: "Most recent" },
     ]);
-    expect(observeOptions({ ...none, latest: true, round: true, selected: true }, 4)).toEqual([
+    expect(observeOptions({ ...none, latest: true, round: true }, 4)).toEqual([
       { value: "latest", label: "Most recent" },
       { value: "round", label: "Round 4" },
-      { value: "selected", label: "Selected" },
     ]);
     expect(observeOptions(none)).toEqual([]);
   });

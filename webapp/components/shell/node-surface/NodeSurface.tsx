@@ -6,7 +6,7 @@ import {
   SCHEMA_DESCRIPTION_PREFIX,
   type PipelineViewNode,
 } from "@/lib/api/types";
-import type { NodeSchemaReading } from "@/lib/types";
+import { useNodeSchema, type PipelineAt } from "@/lib/hooks/useConnector";
 import type { CandidateSearchPoint, ConfigMode } from "@/lib/derivations";
 import {
   authoredAnswerFields,
@@ -25,7 +25,7 @@ export function NodeSurface({
   node,
   point,
   overlay,
-  schema,
+  pipelineAt = null,
   label,
   mode,
   compact,
@@ -44,7 +44,8 @@ export function NodeSurface({
   point: CandidateSearchPoint;
   // The draft's overlay (search-space) or the candidate's values — never `point.pipeline_overlay`.
   overlay: Record<string, unknown>;
-  schema: NodeSchemaReading;
+  // Whose pipeline's rows it reads; absent, the viewed one.
+  pipelineAt?: PipelineAt | null;
   label?: string;
   mode: ConfigMode;
   compact?: boolean | undefined;
@@ -54,6 +55,7 @@ export function NodeSurface({
   onNarrowing?: ((node: string, rows: ParamIntent[]) => void) | undefined;
 }) {
   const kind = node?.kind;
+  const schema = useNodeSchema(pipelineAt, promptScope);
   // A node shows its own prompt; the whole pipeline shows each prompt node's, by its served `prompt` rows.
   const promptNodes = (schema.config ? Object.entries(schema.config) : [])
     .filter(([id]) => node === null || id === node.id)
@@ -115,7 +117,8 @@ export function NodeSurface({
 
       <NodeConfigEditor
         mode={mode}
-        schema={schema}
+        pipelineAt={pipelineAt}
+        scope={promptScope}
         node={node?.id}
         overlay={overlay}
         readOnly={configReadOnly}

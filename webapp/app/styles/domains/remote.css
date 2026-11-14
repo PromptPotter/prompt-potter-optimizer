@@ -116,6 +116,6 @@
 .run-limits-control-note{color:var(--color-success);font-size:var(--text-xs)}
 
 @media (max-width:640px){
-  .remote-control > .remote-btn .remote-btn-label{display:none}
+  .remote-control .remote-btn-label{display:none}
 }
 @media (prefers-reduced-motion:reduce){.remote-readout .chev{transition:none}}

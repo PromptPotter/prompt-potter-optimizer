@@ -6,7 +6,7 @@ import {
   READING_STATE_INFO,
   type ReadingState,
 } from "@/lib/api/types";
-import type { NodeSchemaReading } from "@/lib/types";
+import type { PipelineAt } from "@/lib/hooks/useConnector";
 import type { ReadFailure } from "@/lib/read-cache";
 import { liftOf, liftVersus, NOT_SEPARABLE, type ObserveConfig } from "@/lib/derivations";
 import { FailureLine, Said, Term } from "@/components/ui";
@@ -26,7 +26,7 @@ export function SearchpointDrillIn({
   benchPass,
   stats,
   measurements,
-  schema,
+  pipelineAt = null,
   pending,
   failure = null,
   overlay,
@@ -39,7 +39,8 @@ export function SearchpointDrillIn({
   benchPass?: VerificationMark | null;
   stats?: ReactNode;
   measurements?: ReactNode;
-  schema: NodeSchemaReading;
+  // Whose pipeline its node rows are; absent, the viewed one.
+  pipelineAt?: PipelineAt | null;
   pending: string;
   // The failed read `cfg` and `reading` come from: said in place of `pending`.
   failure?: ReadFailure | null;
@@ -68,7 +69,7 @@ export function SearchpointDrillIn({
           node={null}
           point={{ origin_prompts: cfg.prompts, pipeline_overlay: {} }}
           overlay={overlay ?? cfg.config}
-          schema={schema}
+          pipelineAt={pipelineAt}
           mode="values"
           onConfigChange={onOverlay}
         />

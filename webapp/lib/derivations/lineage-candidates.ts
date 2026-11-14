@@ -6,8 +6,10 @@ import type {
   SubtreeCampaign,
   SubtreeCourse,
   SubtreeEntry,
+  SubjectReading,
   DisplayMetric,
 } from "@/lib/api/types";
+import { readingPath } from "@/lib/api/reads";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
 import type { CandidatePick } from "@/lib/address";
 import { tagValue } from "./hierarchy";
@@ -91,6 +93,17 @@ function courseOf(index: LineageIndex, node: LineageNode): SubtreeCourse | null 
 function candidateAt(index: LineageIndex, address: string | null): HierarchyCandidate | null {
   const entry = address ? index.byAddress.get(address) : undefined;
   return entry?.level === "candidate" ? entry : null;
+}
+
+// A channel's arms on its reading's course: its own (a repair re-measures an individual another
+// course answers for), the one standing, and the newest; `seed` is what its pick reads until picked.
+export function channelArms(index: LineageIndex, reading: SubjectReading | null, headline: boolean) {
+  const candidates = candidatesAtPath(index, reading && readingPath(reading));
+  const mine = reading ? candidates.filter((c) => c.facts.individual === reading.candidate_id) : [];
+  const own = mine.find((c) => c.facts.answers_for_id) ?? mine[0] ?? null;
+  const winner = candidates.find((c) => c.facts.stands) ?? own;
+  const latest = candidates.find((c) => c.facts.course_latest) ?? null;
+  return { own, winner, latest, seed: headline ? winner : own };
 }
 
 export function candidatesAtPath(index: LineageIndex, path: CyclePath | null): HierarchyCandidate[] {

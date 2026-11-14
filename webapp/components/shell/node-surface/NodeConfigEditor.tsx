@@ -25,12 +25,14 @@ import {
 } from "@/lib/derivations";
 import { readGap } from "@/lib/hooks/useRead";
 import type { ReadResult } from "@/lib/read-cache";
-import type { NodeSchemaReading } from "@/lib/types";
+import { useNodeSchema, type PipelineAt } from "@/lib/hooks/useConnector";
+import type { NodeScope } from "@/lib/address";
 
 export function NodeConfigEditor(props: {
   mode: ConfigMode;
-  // A prop, not the connector context: two hosts resolve it from different reads.
-  schema: NodeSchemaReading;
+  // Which pipeline's rows it edits (`useNodeSchema`): identity, never the rows.
+  pipelineAt: PipelineAt | null;
+  scope: NodeScope;
   overlay: Record<string, unknown>;
   node: string | undefined;
   readOnly: boolean;
@@ -44,7 +46,8 @@ export function NodeConfigEditor(props: {
 }) {
   const {
     mode,
-    schema: { read, config: declared, isSingleNode },
+    pipelineAt,
+    scope,
     overlay,
     node,
     readOnly,
@@ -55,6 +58,7 @@ export function NodeConfigEditor(props: {
     onChange,
     keysAskedElsewhere,
   } = props;
+  const { read, config: declared, isSingleNode } = useNodeSchema(pipelineAt, scope);
   const nodeId = node ?? "";
   const base = useMemo(
     () => configRows(declared, overlay, mode, node),
@@ -343,12 +347,12 @@ function ConfigRowView({
         {onToggleLock ? (
           <LockButton locked={row.locked} readOnly={readOnly} onClick={onToggleLock} />
         ) : row.movableBy.length > 0 ? (
-          <span
+          <Term
             className="config-optmovable"
-            title={`Searched by ${row.movableBy.map((a) => MOVABLE_AGENT_LABELS[a]).join(", ")}.`}
+            content={`Searched by ${row.movableBy.map((a) => MOVABLE_AGENT_LABELS[a]).join(", ")}.`}
           >
             🔓
-          </span>
+          </Term>
         ) : (
           <span className="config-optlocked" title={lockReason(row, readOnly)}>
             🔒

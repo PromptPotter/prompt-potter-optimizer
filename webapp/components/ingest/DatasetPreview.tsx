@@ -1,4 +1,4 @@
-import { DataTable, type Column } from "@/components/ui";
+import { DataTable, Term, type Column } from "@/components/ui";
 import type { DraftCampaignWire } from "@/lib/api/types";
 import { PLACEHOLDER } from "@/lib/format";
 
@@ -20,7 +20,11 @@ export function DatasetPreview({ draft }: { draft: DraftCampaignWire }) {
     cell: (row) => {
       // NOT `?? ""`: a ragged row lacks trailing keys, and a missing cell is not an empty value.
       const v = row[h];
-      return <span title={v ?? "This row carries no value for this column."}>{v ?? PLACEHOLDER}</span>;
+      return v === undefined ? (
+        <Term content="This row carries no value for this column.">{PLACEHOLDER}</Term>
+      ) : (
+        <span title={v}>{v}</span>
+      );
     },
   }));
 

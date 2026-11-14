@@ -60,7 +60,7 @@ export const TimeRay = memo(function TimeRay() {
             type="button"
             className="dash-time-ray-more"
             onClick={loadOlder}
-            title="Load the window of history before this one."
+            title="Load earlier history"
           >
             ‹ earlier
           </button>
@@ -88,7 +88,7 @@ export const TimeRay = memo(function TimeRay() {
             type="button"
             className="dash-time-ray-now"
             onClick={() => setAt(null)}
-            title="Stop replaying and follow the run again."
+            title="Follow the run live"
           >
             now ›
           </button>

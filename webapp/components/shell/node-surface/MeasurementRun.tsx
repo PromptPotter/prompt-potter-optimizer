@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { useWorkspace } from "@/lib/workspace";
 import { useRound } from "@/lib/hooks/useRound";
-import { nodeSchemaReading } from "@/lib/derivations";
-import { useConnector } from "@/lib/hooks/useConnector";
 import { ARM_END_INFO } from "@/lib/api/types";
 import type { CellsPreset } from "@/lib/hooks/useCells";
 import { useViewedDashboard } from "@/lib/poll";
@@ -28,8 +26,6 @@ export function MeasurementRun({
   round: number;
 }) {
   const { dash, isLive } = useViewedDashboard();
-  const read = useConnector();
-  const schema = nodeSchemaReading(read);
   const { viewed, pick, pickCandidate } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
   const onSelectCandidate = (c: ArmRow | null): void => {
@@ -188,7 +184,6 @@ export function MeasurementRun({
                       node={null}
                       point={spec}
                       overlay={spec.pipeline_overlay}
-                      schema={schema}
                       mode="values"
                       compact
                     />

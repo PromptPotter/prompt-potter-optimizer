@@ -3,9 +3,10 @@ import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
 import { SubjectSignals } from "@/components/shell/searchpoint/SubjectSignals";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
-import { COPY_WITHOUT_CELLS, searchpointCopyChoices, selectedNodeOf } from "@/lib/derivations";
+import { COPY_WITHOUT_CELLS, selectedNodeOf } from "@/lib/derivations";
 import { fmtUnit, PLACEHOLDER, shortId } from "@/lib/format";
-import { failureOf, shownData } from "@/lib/hooks/useRead";
+import { failureOf } from "@/lib/hooks/useRead";
+import { useSearchpointCopy } from "@/lib/hooks/useSearchpointCopy";
 import { CopyButton, FailureLine, Said, SegmentedControl, Term } from "@/components/ui";
 import { ChannelMap } from "./ChannelMap";
 import { MainLine } from "./channel-parts";
@@ -27,10 +28,17 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
   const axis = spec.axis_label;
   const { edits, setEdits } = useScenarioEdits();
   const { index } = useChannelTree(run);
-  const { selected, select, folds, toggleFold } = useChannelView(item, index);
-  const head = useChannelHead(index, reading, selected);
+  const { arms, selected, select, folds, toggleFold } = useChannelView(item, index);
+  const head = useChannelHead(arms, selected);
   const picked = usePickedPoint(item, selected, index);
   const { spentTo, line } = picked;
+  const copy = useSearchpointCopy({
+    path: picked.path,
+    round: selected?.facts.reading.arm.round ?? null,
+    arm: selected?.facts.reading.arm.key ?? null,
+    label: selected?.label ?? "",
+    datasetName: reading?.dataset_name ?? null,
+  });
   const invalidated = useInvalidated(index);
   const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
   const rulerNote = rulerNoteOf(item, ownNote);
@@ -181,7 +189,7 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
                 <MeasurementsPane preset={{ ...picked.cellsPreset, groupBy: "none" }} />
               )
             }
-            schema={picked.schema}
+            pipelineAt={picked.pipelineAt}
             overlay={picked.overlay}
             failure={failureOf(picked.roundRead)}
             pending={
@@ -205,7 +213,7 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
                 <SteerForkAction
                   candidate={selectedNodeOf(selected, picked.path.at(-1)?.cycleId ?? "")}
                   path={picked.path}
-                  schema={picked.schema}
+                  pipelineAt={picked.pipelineAt}
                 />
                 </>
               )
@@ -213,16 +221,9 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
           />
         </details>
         <ChannelRestore subjectKey={picked.key} />
-        <CopyButton
-          choices={searchpointCopyChoices({
-            cfg: picked.cfg,
-            reading: picked.reading,
-            cells: shownData(picked.cellsRead)?.cells ?? [],
-          })}
-          title="Copy this searchpoint"
-        />
+        <CopyButton choices={copy.choices} title="Copy this searchpoint" />
       </div>
-      <FailureLine failure={failureOf(picked.cellsRead)} lead={COPY_WITHOUT_CELLS} />
+      <FailureLine failure={copy.cellsFailure} lead={COPY_WITHOUT_CELLS} />
     </>
   );
 }

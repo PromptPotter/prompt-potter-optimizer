@@ -13,7 +13,6 @@ import { useCheckinDraft, useIngest } from "@/lib/state/ingest-flow";
 import { draftPrompts } from "@/lib/prompt-fields";
 import { useWorkspace } from "@/lib/workspace";
 import { cx } from "@/lib/cx";
-import type { NodeSchemaReading } from "@/lib/types";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { readGap, shownData } from "@/lib/hooks/useRead";
 import { useViewedDashboard } from "@/lib/poll";
@@ -22,7 +21,6 @@ import { useSearchpointRead, type SearchpointRead } from "@/lib/hooks/useSearchp
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import {
   interiorNodes,
-  nodeSchemaReading,
   type ObserveState,
   type ObserveSubject,
 } from "@/lib/derivations";
@@ -60,7 +58,6 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
         : undefined,
     [draft, isOptimizer, served],
   );
-  const schema = nodeSchemaReading(read, isOptimizer ? "optimizer" : "target");
   const { dash, isLive } = useViewedDashboard();
   const optimizer = served?.optimizer_setup ?? null;
   const subject = useObserveSubject();
@@ -150,7 +147,6 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
             id={id}
             node={node}
             origin={origin}
-            schema={schema}
             modelCapabilities={modelCapabilities}
             onPromptApply={onPromptApply}
           />
@@ -160,7 +156,6 @@ export function NodeDetail({ node: selected }: { node: SelectedNode }) {
             authoring={authoring}
             subject={subject}
             observed={observed}
-            schema={schema}
             modelCapabilities={modelCapabilities}
             isLive={isLive}
             onPromptApply={onPromptApply}
@@ -196,14 +191,12 @@ function OptimizerProgram({
   id,
   node,
   origin,
-  schema,
   modelCapabilities,
   onPromptApply,
 }: {
   id: string;
   node: Parameters<typeof NodeSurface>[0]["node"];
   origin: OptimizerNodePrompt | null;
-  schema: NodeSchemaReading;
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
   // A check-in's: its optimizer prompt is edited here, as `nodes.<node>.config.<field>`.
   onPromptApply: ((patch: DraftPatch) => void) | undefined;
@@ -214,7 +207,6 @@ function OptimizerProgram({
         node={node}
         point={{ origin_prompts: startPrompts(id, origin), pipeline_overlay: {} }}
         overlay={{}}
-        schema={schema}
         modelCapabilities={modelCapabilities}
         mode="values"
         promptScope="optimizer"
@@ -235,7 +227,6 @@ function TargetProgram({
   authoring,
   subject,
   observed,
-  schema,
   modelCapabilities,
   isLive,
   onPromptApply,
@@ -244,7 +235,6 @@ function TargetProgram({
   authoring: NodeAuthoring | undefined;
   subject: ObserveSubject;
   observed: SearchpointRead;
-  schema: NodeSchemaReading;
   modelCapabilities: Parameters<typeof NodeSurface>[0]["modelCapabilities"];
   isLive: boolean;
   onPromptApply: ((patch: DraftPatch) => void) | undefined;
@@ -257,7 +247,6 @@ function TargetProgram({
         node={scoped ? node : null}
         point={{ origin_prompts: authoring.prompts, pipeline_overlay: {} }}
         overlay={scoped ? authoring.overlay : {}}
-        schema={schema}
         modelCapabilities={modelCapabilities}
         mode={scoped ? "search-space" : "values"}
         onApply={scoped ? onPromptApply : undefined}
@@ -286,7 +275,6 @@ function TargetProgram({
             node={node}
             point={{ origin_prompts: cfg.prompts, pipeline_overlay: {} }}
             overlay={cfg.config}
-            schema={schema}
             modelCapabilities={modelCapabilities}
             label={cfg.label}
             mode="values"

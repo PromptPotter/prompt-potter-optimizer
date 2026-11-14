@@ -34,11 +34,11 @@ export type CandidatesModel = ReturnType<typeof useCandidatesModel>;
 export function useCandidatesModel(dash: ServedDashboard) {
   const { isLive } = useViewedDashboard();
   const unit = dash.measured_unit;
-  const { viewed, pick, pickCandidate, navigate } = useWorkspace();
+  const { viewed, pick, pickCandidate, navigate, setViewKeys } = useWorkspace();
   const campaignId = viewed?.root.campaignId ?? null;
   const cycleId = viewed?.root.cycleId ?? null;
   const viewedPath = viewed?.path ?? null;
-  const { sampleSet, setSelectionForSampleSet } = useSelection();
+  const { sampleSet } = useSelection();
   const comparing = useCompareSelection();
 
   const { showOverlap: overlapPicked, showCache } = useCandidatesState();
@@ -142,10 +142,10 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const overlapDisabled = areCourses || (!hasOverlap && sampleUniverse.length === 0);
   const stepOverlap = () => {
     if (rung === 2) {
-      setSelectionForSampleSet(null);
+      setViewKeys({ samples: null });
       setShowOverlap(false);
     } else if (rung === 1 || !hasOverlap) {
-      setSelectionForSampleSet(overlap?.positions ?? sampleUniverse);
+      setViewKeys({ samples: overlap?.positions ?? sampleUniverse });
       setShowOverlap(true);
     } else {
       setShowOverlap(true);

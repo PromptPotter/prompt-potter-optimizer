@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { HoverCard, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
+import { useWorkspace } from "@/lib/workspace";
 import {
   MOVEMENT_CLASS,
   orderAtStep,
@@ -32,7 +33,7 @@ export function SeriesView({
   maxHeight?: number;
 }) {
   const columns = useMemo(() => unionFirstAppearance(sorted.rounds), [sorted.rounds]);
-  const { setSelectionForSampleSet } = useSelection();
+  const { setViewKeys } = useWorkspace();
 
   return (
     <div
@@ -75,7 +76,7 @@ export function SeriesView({
                         className={cx("st-sq", MOVEMENT_CLASS[kind], "st-series-cell")}
                         aria-label={`Sample ${sid}, round ${r.round}, position ${p} of ${total}. ${titleNote}. Hover for the sample order at this step; click to compare fitness on the samples up to here.`}
                         {...pressable(() =>
-                          setSelectionForSampleSet(seedFromOrder(orderAtStep(r.selection, sid, p), selectMode)),
+                          setViewKeys({ samples: seedFromOrder(orderAtStep(r.selection, sid, p), selectMode) }),
                         )}
                       >
                         {p}

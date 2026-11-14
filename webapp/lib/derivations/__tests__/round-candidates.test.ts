@@ -108,8 +108,7 @@ describe("roundCandidates — a run that stopped mid-L2", () => {
     expect(crowned.map((r) => r.reading.arm.label)).toEqual(["C0", "C1.2"]);
   });
 
-  it("reads the last closed round's optimizer facts, never the empty stub's", () => {
-    expect(roundReading(dash, 4)).toBeNull();
+  it("reads the last closed round's optimizer facts", () => {
     const last = roundReading(dash, 3);
     expect(last?.round).toBe(3);
     expect(last?.facts).toEqual(dash.rounds[3]?.optimizer_facts);

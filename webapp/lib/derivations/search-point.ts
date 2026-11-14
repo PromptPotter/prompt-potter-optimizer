@@ -9,24 +9,24 @@ import type {
   RunStanding,
   ServedArm,
 } from "@/lib/api/types";
-import type { ArmRow, SelectedCandidate } from "@/lib/types";
+import type { ArmRow } from "@/lib/types";
 import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
 
-export type ObserveState = "best" | "latest" | "round" | "selected";
+// The Leader shows the leader: the pick renders in the inspector alone (`ScoringInspector`).
+export type ObserveState = "best" | "latest" | "round";
 
 const OBSERVE_LABELS: Record<ObserveState, string> = {
   best: "Best",
   latest: "Most recent",
   round: "Round",
-  selected: "Selected",
 };
 
 export function observeOptions(
   avail: Record<ObserveState, boolean>,
   round: number | null = null,
 ): { value: ObserveState; label: string }[] {
-  const order: ObserveState[] = ["best", "latest", "round", "selected"];
+  const order: ObserveState[] = ["best", "latest", "round"];
   return order
     .filter((s) => avail[s])
     .map((s) => ({
@@ -136,7 +136,6 @@ export function originPoint(
 }
 
 export interface ObserveSelection {
-  candidate: Pick<SelectedCandidate, "round" | "arm" | "label"> | null;
   round: number | null;
   observe: ObserveState | null;
 }
@@ -153,8 +152,6 @@ export interface ObserveSubject {
 
 function subjectTitle(state: ObserveState, target: ObserveTarget, inFlight: boolean): string {
   switch (state) {
-    case "selected":
-      return `selected · ${target.label}`;
     case "round":
       return `round ${target.round} · ${target.label}`;
     case "best":
@@ -174,26 +171,15 @@ export function resolveObserveSubject(
   const observed = dash?.observed ?? null;
   const latest = observed;
   const inFlight = isLive && latest?.round === roundOf(dash);
-  const picked = selection.candidate;
   const targets: Record<ObserveState, ObserveTarget | null> = {
     best: standing?.selection ?? null,
     latest,
     round: selection.round != null ? roundObserveTarget(dash, selection.round) : null,
-    selected: picked ? { key: picked.arm, round: picked.round, label: picked.label } : null,
   };
   const asked = selection.observe && targets[selection.observe] ? selection.observe : null;
-  const followsLive = !asked && !targets.selected && !targets.round;
+  const followsLive = !asked && !targets.round;
   const state: ObserveState =
-    asked ??
-    (targets.selected
-      ? "selected"
-      : targets.round
-        ? "round"
-        : inFlight
-          ? "latest"
-          : targets.best
-            ? "best"
-            : "latest");
+    asked ?? (targets.round ? "round" : inFlight ? "latest" : targets.best ? "best" : "latest");
   const target = targets[state];
   const liveRound = isLive ? (dash?.round_axis.live ?? null) : null;
   const round = followsLive && liveRound != null ? liveRound : (target?.round ?? null);
@@ -206,7 +192,6 @@ export function resolveObserveSubject(
         best: !!targets.best,
         latest: !!targets.latest,
         round: !!targets.round,
-        selected: !!targets.selected,
       },
       selection.round,
     ),

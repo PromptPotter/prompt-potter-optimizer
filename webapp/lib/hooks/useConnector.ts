@@ -12,6 +12,9 @@ import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import { useCheckinDraft } from "@/lib/state/ingest-flow";
 import { heldRead, type ReadResult } from "@/lib/read-cache";
 import { useWorkspace } from "@/lib/workspace";
+import type { NodeScope } from "@/lib/address";
+import { nodeSchemaReading } from "@/lib/derivations";
+import type { NodeSchemaReading } from "@/lib/types";
 
 // The registered backends beside the one the viewed pipeline runs on.
 export interface BackendReading {
@@ -53,6 +56,20 @@ export function useConnector(): ReadResult<CampaignPipelineResponse> {
     () => (draft ? heldRead(draft.pipeline) : served),
     [draft, served],
   );
+}
+
+// Which pipeline a node surface reads: a picked point's campaign at its subject; null, the viewed one.
+export interface PipelineAt {
+  campaignId: string;
+  subject: string;
+}
+
+// The node rows of the pipeline a surface names, for one scope: the one door every node surface
+// reads, so a host hands identity, never the rows.
+export function useNodeSchema(at: PipelineAt | null, scope: NodeScope): NodeSchemaReading {
+  const viewed = useConnector();
+  const picked = useCampaignPipeline(at?.campaignId ?? null, at?.subject ?? null);
+  return nodeSchemaReading(at ? picked : viewed, scope);
 }
 
 export function useBackend(): BackendReading {

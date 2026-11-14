@@ -75,7 +75,6 @@ export function PipelineSetupSection({
                   node={llmNode}
                   point={searchPoint(draftPrompts(draft.origin_prompts), overlay)}
                   overlay={overlay}
-                  schema={schema}
                   mode="search-space"
                   modelCapabilities={pipeline.model_capabilities}
                   onApply={onApply}

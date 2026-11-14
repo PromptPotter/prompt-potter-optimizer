@@ -13,7 +13,8 @@ import { useRound } from "@/lib/hooks/useRound";
 import { encodeCyclePath, pathRoot, type CyclePath } from "@/lib/ids";
 import { useEntry } from "@/lib/hooks/useRegistry";
 import { phaseWalks, searchPoint } from "@/lib/derivations";
-import type { NodeSchemaReading, SelectedCandidate } from "@/lib/types";
+import type { SelectedCandidate } from "@/lib/types";
+import type { PipelineAt } from "@/lib/hooks/useConnector";
 import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
 import { Empty, FailureLine, HoverCard, ReadState, Said } from "@/components/ui";
 import { LimitReconcile } from "./LimitReconcile";
@@ -35,13 +36,13 @@ function editOf(
 export function SteerForkPanel({
   candidate,
   path,
-  schema,
+  pipelineAt,
   onDone,
   onCancel,
 }: {
   candidate: SelectedCandidate;
   path: CyclePath;
-  schema: NodeSchemaReading;
+  pipelineAt: PipelineAt | null;
   onDone: () => void;
   onCancel: () => void;
 }) {
@@ -134,7 +135,7 @@ export function SteerForkPanel({
         node={null}
         point={searchPoint(seedPrompts, overlay)}
         overlay={overlay}
-        schema={schema}
+        pipelineAt={pipelineAt}
         mode="values"
         onApply={(p) => {
           // The editor writes fields; each node's shots ride the seed unchanged.

@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import type { HierarchyCampaign, HierarchyCandidate } from "@/lib/api/types";
-import type { CompareItem, LineageIndex } from "@/lib/derivations";
+import { channelArms, type CompareItem, type LineageIndex } from "@/lib/derivations";
 import { subjectKey } from "@/lib/api/reads";
 import { decodeCyclePath } from "@/lib/ids";
 import { createModuleStore } from "@/lib/state/module-store";
@@ -44,8 +44,6 @@ export type Fold = "detail" | "map" | "setup";
 // resolves, null for none) and which folds are open.
 export interface ChannelView {
   picked: string | null;
-  // Set once the channel seeded its pick from its winner or own point, or the operator picked.
-  seeded: boolean;
   folds: Record<Fold, boolean>;
 }
 
@@ -64,13 +62,13 @@ function edit(next: (prev: readonly CompareChannel[]) => readonly CompareChannel
 }
 
 function unviewed(opensDetail: boolean): ChannelView {
-  return { picked: null, seeded: false, folds: { detail: opensDetail, map: false, setup: true } };
+  return { picked: null, folds: { detail: opensDetail, map: false, setup: true } };
 }
 
 // What a channel's card, detail and map highlight and fold. The pick is read off the channel's
-// served tree, so a pick the tree no longer holds highlights nothing; a candidate channel opens
-// on its detail fold.
-export function useChannelView({ channel, reading }: CompareItem, index: LineageIndex) {
+// served tree, so a pick the tree no longer holds highlights nothing; until the operator picks it
+// is the channel's seed (`channelArms`); a candidate channel opens on its detail fold.
+export function useChannelView({ channel, reading, headline }: CompareItem, index: LineageIndex) {
   const subject = channel.subject;
   const opensDetail = reading?.kind === "candidate";
   const stored = store.useStore().views[subject];
@@ -82,13 +80,15 @@ export function useChannelView({ channel, reading }: CompareItem, index: Lineage
       store.set({ views: { ...views, [subject]: { ...now, ...next(now) } } });
     };
     return {
-      select: (c: HierarchyCandidate | null) => put(() => ({ picked: c?.address ?? null, seeded: true })),
+      select: (c: HierarchyCandidate | null) => put(() => ({ picked: c?.address ?? null })),
       toggleFold: (fold: Fold) => put((now) => ({ folds: { ...now.folds, [fold]: !now.folds[fold] } })),
     };
   }, [subject, opensDetail]);
   const view = stored ?? unviewed(opensDetail);
+  const arms = useMemo(() => channelArms(index, reading, headline !== null), [index, reading, headline]);
   const entry = view.picked === null ? undefined : index.byAddress.get(view.picked);
-  return { ...view, selected: entry?.level === "candidate" ? entry : null, ...actions };
+  const selected = (entry?.level === "candidate" ? entry : null) ?? arms.seed;
+  return { ...view, arms, selected, ...actions };
 }
 
 const actions = {

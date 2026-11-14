@@ -1,12 +1,12 @@
 import { useRound } from "@/lib/hooks/useRound";
-import { useCells, type CellsPreset } from "@/lib/hooks/useCells";
-import { failureOf, shownData } from "@/lib/hooks/useRead";
+import type { CellsPreset } from "@/lib/hooks/useCells";
+import { failureOf } from "@/lib/hooks/useRead";
+import { useSearchpointCopy } from "@/lib/hooks/useSearchpointCopy";
 import { useViewedDashboard } from "@/lib/poll";
 import { useWorkspace } from "@/lib/workspace";
 import type { SelectedCandidate } from "@/lib/types";
-import { COPY_WITHOUT_CELLS, nodeSchemaReading, searchpointCopyChoices } from "@/lib/derivations";
+import { COPY_WITHOUT_CELLS } from "@/lib/derivations";
 import { CopyButton, FailureLine, Toolbar, ToolbarSpacer } from "@/components/ui";
-import { useConnector } from "@/lib/hooks/useConnector";
 import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
 import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
 import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
@@ -25,15 +25,19 @@ export function ScoringInspector({ selected, onClose }: Props) {
 
 function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose: () => void }) {
   const { dash } = useViewedDashboard();
-  const schema = nodeSchemaReading(useConnector());
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
   const round = useRound(viewedPath, selected.round);
   const reading = round.reading(selected.arm);
   const cfg = round.cfg(selected.arm, selected.label);
   const preset: CellsPreset = { candidateId: selected.arm, scope: "cycle" };
-  const cellsRead = useCells(preset).read;
-  const cells = shownData(cellsRead)?.cells ?? [];
+  const copy = useSearchpointCopy({
+    path: viewedPath,
+    round: selected.round,
+    arm: selected.arm,
+    label: selected.label,
+    datasetName: null,
+  });
   const benchPass =
     dash?.verification.find((m) => m.kind === "bench" && m.arm.key === selected.arm) ?? null;
 
@@ -43,7 +47,7 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
         <span className="inspector-title">Scoring · {selected.label}</span>
         <ToolbarSpacer />
         <CopyButton
-          choices={searchpointCopyChoices({ cfg, reading, cells })}
+          choices={copy.choices}
           title={`Copy ${selected.label}`}
         />
         <button
@@ -56,13 +60,12 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
           ×
         </button>
       </Toolbar>
-      <FailureLine failure={failureOf(cellsRead)} lead={COPY_WITHOUT_CELLS} className="inspector-note" />
+      <FailureLine failure={copy.cellsFailure} lead={COPY_WITHOUT_CELLS} className="inspector-note" />
       <SearchpointDrillIn
         reading={reading}
         cfg={cfg}
         benchPass={benchPass?.state === "done" ? null : benchPass}
         measurements={<MeasurementsPane preset={{ ...preset, groupBy: "none" }} />}
-        schema={schema}
         failure={failureOf(round.read)}
         pending={
           round.unfiled
@@ -77,7 +80,6 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
             <SteerForkAction
               candidate={selected}
               path={viewedPath}
-              schema={schema}
             />
           </>
         }

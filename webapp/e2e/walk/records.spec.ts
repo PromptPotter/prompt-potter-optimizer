@@ -1,4 +1,4 @@
-import { test, expect, open, ready, showSidebar, hideSidebar } from "../harness";
+import { test, expect, open, press, ready, showSidebar, hideSidebar } from "../harness";
 
 test.describe("records", () => {
   test("Compare mounts, and a campaign can be ticked into the comparison", async ({
@@ -8,7 +8,7 @@ test.describe("records", () => {
     await open(page, `${rich.addr}/compare`);
     await showSidebar(page);
     const tick = page.getByRole("button", { name: "Add to the comparison" }).first();
-    await tick.click();
+    await press(tick);
     await hideSidebar(page);
     await ready(page);
     await expect(page.locator("#view-compare")).toBeVisible();

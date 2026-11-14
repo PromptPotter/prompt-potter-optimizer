@@ -110,13 +110,19 @@ export function HoverCard({
         if (e.pointerType === "mouse") leave(e);
       }}
       // Focus a press gave is the press's: the release below decides, as iOS focuses a tapped span
-      // only sometimes. Any other focus is the keyboard's, and opens it.
+      // only sometimes. A press lasts to its click, since a touch browser focuses after the release.
+      // Any other focus is the keyboard's, and opens it.
       onPointerDown={() => {
         pressed.current = true;
       }}
       onPointerUp={(e) => {
-        pressed.current = false;
         if (e.pointerType !== "mouse" && ownPress(e.currentTarget, e.target)) show();
+      }}
+      onPointerCancel={() => {
+        pressed.current = false;
+      }}
+      onClickCapture={() => {
+        pressed.current = false;
       }}
       onFocus={() => {
         if (!pressed.current) show();

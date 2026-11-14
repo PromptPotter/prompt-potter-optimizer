@@ -8,8 +8,9 @@ export interface RoundReading {
   facts: OptimizerFact[];
 }
 
+// A round's closed reading; the round no file holds yet (`round_axis.unfiled`) has none.
 export function roundReading(dash: ServedDashboard | null, round: number): RoundReading | null {
-  if (!dash?.round_axis.completed.includes(round)) return null;
+  if (!dash || round === dash.round_axis.unfiled) return null;
   const r = dash.rounds.find((x) => x.round === round);
   if (!r) return null;
   return {

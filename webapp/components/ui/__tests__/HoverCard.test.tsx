@@ -69,9 +69,14 @@ describe("HoverCard", () => {
     const row = screen.getByText("row");
     fireEvent.pointerEnter(row, { pointerType: "touch" });
     fireEvent.pointerDown(row, { pointerType: "touch" });
-    fireEvent.focus(row);
     fireEvent.pointerUp(row, { pointerType: "touch" });
+    // A touch browser focuses the control after the release, before its click.
+    fireEvent.focus(row);
+    fireEvent.click(row);
     expect(screen.queryByRole("note")).toBeNull();
+    // The press ended at its click: a later focus is the keyboard's.
+    fireEvent.focus(row);
+    expect(screen.getByRole("note").textContent).toContain("meta");
   });
 
   it("leaves a tap in a menu the trigger opened to that menu", () => {

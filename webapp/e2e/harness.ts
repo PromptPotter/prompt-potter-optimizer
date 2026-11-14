@@ -1,7 +1,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { test as base, expect, type Page, type APIRequestContext } from "@playwright/test";
+import { test as base, expect, type Locator, type Page, type APIRequestContext } from "@playwright/test";
 import {
   STOP_REASON_INFO,
   type CommandPayloads,
@@ -340,16 +340,22 @@ export function reportTape(label: string, tape: Tape | null, minReplayed?: numbe
   ).toBeGreaterThanOrEqual(minReplayed);
 }
 
+/** A finger taps: a click on the touch project is a mouse, whose hover opens a row's card over the
+ *  next control, and no phone hovers. */
+export async function press(target: Locator) {
+  await (base.info().project.use.hasTouch ? target.tap() : target.click());
+}
+
 /** On a phone the sidebar is the list screen, behind the title row's back button. */
 export async function showSidebar(page: Page) {
   const back = page.getByRole("button", { name: /^Campaigns/ });
-  if (await back.isVisible()) await back.click();
+  if (await back.isVisible()) await press(back);
 }
 
 /** Back from a phone's list screen: the viewed campaign's row reopens the views it left. */
 export async function hideSidebar(page: Page) {
   const row = page.locator('.mobile-list .unit-library-item[aria-current="true"]');
-  if (await row.isVisible()) await row.click();
+  if (await row.isVisible()) await press(row);
 }
 
 // The panes, not only the page: `.main` clips and `.content` scrolls, so the document never overflows.

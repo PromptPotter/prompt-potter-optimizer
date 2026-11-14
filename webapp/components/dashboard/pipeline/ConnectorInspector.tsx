@@ -1,4 +1,4 @@
-import { HoverCard } from "@/components/ui";
+import { HoverCard, Term } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { PLACEHOLDER } from "@/lib/format";
 import { connectorReachability, interiorNodes } from "@/lib/derivations";
@@ -95,7 +95,10 @@ export function ConnectorInspector() {
       )}
       {others.length > 0 && (
         <div className="connector-pop-switch">
-          <div className="head">Other backends</div>
+          <div className="head">
+            Other backends ·{" "}
+            <Term content="Switching is read-only today — see the connection-security docs.">read-only</Term>
+          </div>
           <ul>
             {others.map((b) => (
               <li key={b.id}>
@@ -103,7 +106,6 @@ export function ConnectorInspector() {
                   type="button"
                   className="alt"
                   disabled
-                  title="Switching is read-only today — see connection-security docs"
                 >
                   <span className="alt-name">{b.id}</span>
                 </button>

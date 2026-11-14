@@ -48,17 +48,9 @@ export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
   const viewedPath = viewed?.path ?? null;
   const { index } = useViewedLineage();
   const { dash } = useViewedDashboard();
-  const attached = dash?.producer.attached === true;
   const placed = point ? armAt(index, viewedPath, point.key) : null;
   const pair = useCompareWithOrigin(viewedPath, placed ? placed.facts.reading.arm.key : null);
-  // A closed round and a newly scored cell re-ask at once rather than on the slow beat.
-  const rounds = dash?.rounds.length ?? 0;
-  const cells = point?.row?.reading.panel.scored ?? 0;
-  const read = useEvidence(
-    pair.subjects,
-    { live: attached, moved: attached ? `${rounds}:${cells}` : "" },
-    WITH_CONFIG,
-  );
+  const read = useEvidence(pair.subjects, dash?.producer.attached === true, WITH_CONFIG);
   const evidence = readyData(read);
 
   const [originKey, shownKey] = pair.subjects;

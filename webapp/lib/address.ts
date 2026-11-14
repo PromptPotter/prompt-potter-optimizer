@@ -109,7 +109,7 @@ const RETIRED_CYCLE_SEG = "c";
 const DRAFT_SEG = "d";
 const NEW_SEG = "new";
 const KEY_SEP = "=";
-const OBSERVE: readonly ObserveState[] = ["best", "latest", "round", "selected"];
+const OBSERVE: readonly ObserveState[] = ["best", "latest", "round"];
 
 export const DEFAULT_VIEWS: readonly View[] = [{ family: "chat", key: null }];
 

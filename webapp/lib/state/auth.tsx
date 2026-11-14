@@ -10,7 +10,6 @@ import {
 import { failureKind, failurePasses, meRead } from "@/lib/api";
 import { type MeResponse, SIGN_IN_REFUSAL_INFO } from "@/lib/api/types";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
-import { reportIncident } from "@/lib/diagnostics";
 import { clearReadCache, readThrough } from "@/lib/read-cache";
 
 type AuthStatus = "loading" | "authed" | "unauthed";
@@ -67,9 +66,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       .catch((e: unknown) => {
         if (cancelled || probeIdRef.current !== probeId) return;
+        // The cache reported the failure (`read-cache.ts::fail`); this reacts to it alone.
         const kind = failureKind(e);
-        // A 401 is the probe's ordinary answer; anything else is an incident.
-        if (kind !== "auth") reportIncident(e, { surface: "me" });
         // A failure that passes says nothing of the session: a probed one keeps its identity and
         // cache; an unprobed one stays `loading` (never anon, so a signed-in reload during an
         // outage or a throttle is not signed out) and re-probes on the reconnect beat (I7).

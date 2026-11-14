@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FailureLine } from "@/components/ui";
+import { FailureLine, HoverCard } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useShellHeight } from "@/lib/hooks/useShellHeight";
 import { RunControlButton } from "@/components/shell/remote/RunControlButton";
@@ -41,16 +41,17 @@ export function RemoteControl() {
           <span className="remote-btn-label">outer</span>
         </button>
       ) : innerHop ? (
-        <button
-          type="button"
-          className="remote-btn remote-drill"
-          onClick={() => m.toInner(innerHop.campaign_id, innerHop.cycle_id)}
-          aria-label="Open the running inner cycle's dashboard"
-          title={`An inner run is live — ${innerHop.campaign_id}. Open its dashboard.`}
-        >
-          <span aria-hidden="true">⤷</span>
-          <span className="remote-btn-label">inner</span>
-        </button>
+        <HoverCard content={`An inner run is live — ${innerHop.campaign_id}.`}>
+          <button
+            type="button"
+            className="remote-btn remote-drill"
+            onClick={() => m.toInner(innerHop.campaign_id, innerHop.cycle_id)}
+            aria-label="Open the running inner cycle's dashboard"
+          >
+            <span aria-hidden="true">⤷</span>
+            <span className="remote-btn-label">inner</span>
+          </button>
+        </HoverCard>
       ) : null}
       <RunControlButton />
       {m.skipRefusal === "" && (

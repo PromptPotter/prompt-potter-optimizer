@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { CardFrame, DataTable, Empty, Said, Select, type Column } from "@/components/ui";
+import { CardFrame, DataTable, Empty, Said, Select, Term, type Column } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
 import { fmtMetric, fmtMetricInterval, type MetricFormat } from "@/lib/format";
 
@@ -196,9 +196,9 @@ function gridColumns(
           if (r.kind === "margin") return margin(clv);
           const cell = at.get(cellKey(r.level.level, clv.level));
           return !cell ? (
-            <span className="l4-cell-empty" title="No subject in this selection ran that combination.">
+            <Term className="l4-cell-empty" content="No subject in this selection ran that combination.">
               —
-            </span>
+            </Term>
           ) : (
             <span title={fmtMetricInterval(metric, cell.ci_lo, cell.ci_hi)}>
               {fmtMetric(metric, cell.value)}

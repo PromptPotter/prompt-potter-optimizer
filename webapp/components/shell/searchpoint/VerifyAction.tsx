@@ -94,13 +94,14 @@ export function VerifyAction({
           </Button>
         </HoverCard>
         {acting && (
-          <Button
-            onClick={() => void stop.run("cancel", () => commands.cancel({ command_id: acting }))}
-            disabled={stop.pending !== null}
-            title="Stop at the next cell; what it measured is read and kept."
-          >
-            Stop
-          </Button>
+          <HoverCard content="Stop at the next cell; what it measured is read and kept.">
+            <Button
+              onClick={() => void stop.run("cancel", () => commands.cancel({ command_id: acting }))}
+              disabled={stop.pending !== null}
+            >
+              Stop
+            </Button>
+          </HoverCard>
         )}
         <Menu
           align="left"

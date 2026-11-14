@@ -33,7 +33,6 @@
   .run-title{align-items:center}
   .run-back{display:inline-flex;align-items:center;gap:2px;padding:var(--space-8)}
   .run-name{font-size:var(--text-md);font-weight:500}
-  .run-setup{align-items:baseline}
   .run-setup-lines{flex:1 1 auto;min-width:0;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden}
   .run-setup.is-whole .run-setup-lines{display:block}
   .run-setup-toggle{display:inline-flex}

@@ -129,7 +129,7 @@ export function quotaRead(): ReadDescriptor<QuotaStatus> {
 // The account's money: the host's allowance, what each wallet paid, and the keys it holds; every
 // ledger's spend moves it.
 export function couponRead(): ReadDescriptor<CouponStatus> {
-  return { ...once<CouponStatus>("coupon", readUrl("coupon", {})), auth: true, subject: STORES };
+  return { ...byEtag<CouponStatus>("coupon", readUrl("coupon", {})), auth: true, subject: STORES };
 }
 
 // Start's refusal tracks the wallet, which every ledger moves.
@@ -523,6 +523,7 @@ export function evidenceRead(
   if (opts.grid) qs.set("grid", opts.grid);
   return {
     ...byEtag<Evidence>("evidence", readUrl("evidence", {}, qs)),
+    // Only while a measured course is attached: a settled one's answer stands.
     ...(live ? { subject: STORES } : {}),
     // A refused metric or grid keeps the same subjects' last reading.
     keep: `evidence${SEP}${named.join("&")}`,

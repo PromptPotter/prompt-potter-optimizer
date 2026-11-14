@@ -71,13 +71,7 @@ export function ComparePane() {
     const line = byAddress.get(campaignAt(byAddress, c.rootCampaignId)?.facts.line ?? "");
     return line?.level === "course" ? [line] : [];
   });
-  const pulse = {
-    live: compared.some((a) => a.state.attached),
-    moved: compared
-      .map((a) => `${a.address}:${a.facts.rounds_closed}:${a.state.status.run_phase}`)
-      .join("|"),
-  };
-  const read = useEvidence(selected, pulse, {
+  const read = useEvidence(selected, compared.some((a) => a.state.attached), {
     ranking,
     winnerChain,
     config,

@@ -20,11 +20,12 @@
   min-width: 8px;
 }
 
-/* A coarse pointer's 44px hit area overhangs a 24px icon chip by 10px (`responsive.css`): the row
-   holds that inset at its end, so its last control never widens the row's scroll box. */
+/* A coarse pointer's 44px hit area overhangs a 24px icon chip (`responsive.css`): the row is that
+   tall and holds the inline overhang at both ends, so no control grows the row's scroll box. */
 @media (pointer: coarse) {
   .bar {
-    padding-inline-end: calc((var(--touch-target-min) - 24px) / 2);
+    min-block-size: var(--touch-target-min);
+    padding-inline: calc((var(--touch-target-min) - 24px) / 2);
   }
 }
 

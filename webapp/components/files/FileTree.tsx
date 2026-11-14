@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 import { filesRead } from "@/lib/api";
 import type { FileEntry } from "@/lib/api/types";
 import { useActivePointer, useRegistry } from "@/lib/hooks/useRegistry";
@@ -51,14 +51,12 @@ function buildTree(entries: FileEntry[]): ScopedTree {
   return tree;
 }
 
-interface Props {
-  campaignId: string | null;
-  cycleId: string | null;
-  selected: { scope: string; path: string } | null;
-  onSelect: (scope: string, path: string) => void;
-}
+export type FilePick = { scope: string; path: string };
 
-export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
+// The Files pane's one picked file and its one writer, read by the row that picks it.
+export const FileSelection = createContext<[FilePick | null, (f: FilePick) => void]>([null, () => {}]);
+
+export function FileTree({ campaignId, cycleId }: { campaignId: string | null; cycleId: string | null }) {
   const registryFailure = failureOf(useRegistry().read);
   const pointerFailure = failureOf(useActivePointer().read);
   const read = useRead(campaignId && cycleId ? filesRead(campaignId, cycleId) : null);
@@ -76,41 +74,18 @@ export function FileTree({ campaignId, cycleId, selected, onSelect }: Props) {
         )
       }
     >
-      {(listing) => <FileScopes entries={listing.entries} selected={selected} onSelect={onSelect} />}
+      {(listing) => <FileScopes entries={listing.entries} />}
     </ReadState>
   );
 }
 
-function FileScopes({
-  entries,
-  selected,
-  onSelect,
-}: {
-  entries: FileEntry[];
-  selected: Props["selected"];
-  onSelect: Props["onSelect"];
-}) {
+function FileScopes({ entries }: { entries: FileEntry[] }) {
   const tree = useMemo(() => buildTree(entries), [entries]);
   return (
     <div>
-      <ScopeBlock label="unit (root)" node={tree.cycle} scope="cycle" selected={selected} onSelect={onSelect} />
-      <ScopeBlock label="campaign (telemetry)" node={tree.campaign} scope="campaign" selected={selected} onSelect={onSelect} />
+      <ScopeBlock label="unit (root)" node={tree.cycle} scope="cycle" />
+      <ScopeBlock label="campaign (telemetry)" node={tree.campaign} scope="campaign" />
     </div>
-  );
-}
-
-interface ScopeBlockProps {
-  label: string;
-  node: DirNode;
-  scope: string;
-  selected: { scope: string; path: string } | null;
-  onSelect: (scope: string, path: string) => void;
-}
-
-function ScopeBlock({ label, node, scope, selected, onSelect }: ScopeBlockProps) {
-  if (Object.keys(node.dirs).length === 0 && node.files.length === 0) return null;
-  return (
-    <DirBlock name={label} node={node} scope={scope} selected={selected} onSelect={onSelect} topLevel />
   );
 }
 
@@ -118,12 +93,16 @@ interface DirBlockProps {
   name: string;
   node: DirNode;
   scope: string;
-  selected: { scope: string; path: string } | null;
-  onSelect: (scope: string, path: string) => void;
   topLevel?: boolean;
 }
 
-function DirBlock({ name, node, scope, selected, onSelect, topLevel }: DirBlockProps) {
+function ScopeBlock({ label, node, scope }: Omit<DirBlockProps, "name" | "topLevel"> & { label: string }) {
+  if (Object.keys(node.dirs).length === 0 && node.files.length === 0) return null;
+  return <DirBlock name={label} node={node} scope={scope} topLevel />;
+}
+
+function DirBlock({ name, node, scope, topLevel }: DirBlockProps) {
+  const [selected, onSelect] = useContext(FileSelection);
   const [collapsed, setCollapsed] = useState(false);
   const dirs = Object.entries(node.dirs).sort(([a], [b]) => a.localeCompare(b));
   const files = node.files.slice().sort((a, b) => a.name.localeCompare(b.name));
@@ -140,7 +119,7 @@ function DirBlock({ name, node, scope, selected, onSelect, topLevel }: DirBlockP
       </button>
       <div className="tree-children">
         {dirs.map(([d, child]) => (
-          <DirBlock key={d} name={d} node={child} scope={scope} selected={selected} onSelect={onSelect} />
+          <DirBlock key={d} name={d} node={child} scope={scope} />
         ))}
         {files.map((f) => {
           const isSelected = selected?.scope === f.scope && selected.path === f.path;
@@ -152,7 +131,7 @@ function DirBlock({ name, node, scope, selected, onSelect, topLevel }: DirBlockP
               title={f.path}
               aria-label={`Open file ${f.name}`}
               aria-current={isSelected ? "true" : undefined}
-              onClick={() => onSelect(f.scope, f.path)}
+              onClick={() => onSelect({ scope: f.scope, path: f.path })}
             >
               {f.name}
             </button>

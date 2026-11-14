@@ -357,7 +357,7 @@ row it closes.
   history. The same root serves the wire: the polled live dashboard re-serves every closed round on every frame (570 kB at 16
   rounds, `domain/dashboard_rows.py::served_rounds`); a browser stitch of `…/rounds/{n}` per round, or a
   new read, breaks R7, so the closed-round series' read is decided first, then every `dash.rounds` reader
-  moves. **Rides with:** narr; webb-4's Owns gain `hooks/useOriginEvidence.ts`, `hooks/useVerify.ts` and
+  moves. **Rides with:** narr 2; webb-5's Owns gain `hooks/useOriginEvidence.ts`, `hooks/useVerify.ts` and
   the `dash.rounds` panes. **Re-test:** `git grep -nE "dash\??\.rounds" -- webapp/lib webapp/components`.
 - **The live dashboard keeps a third hold tracker** (narr-1's landing): `live_dashboard/projection.py::_holds`
   keeps the last `ProviderHoldRecord` per sender and, unlike `narration.py::Narration`'s, is never
@@ -809,74 +809,34 @@ and derived the knob couplings from each member's draws and the escalation ladde
 mob 2 landed the phone's ⋯ fold for a one-row toolbar, the masthead setup line as a tap-expandable
 Toolbar, and the phone walk's back step. Left:
 
-- **A one-row toolbar's hit area overhangs its row vertically**: on a coarse pointer the 44 px
-  `::before` hit area around a 24 px control reaches past its row, so the Candidates header measures
-  9 px and the setup line 15 px of vertical overflow (`scrollHeight − clientHeight` at 375/393/412).
-  The inline overhang is reserved by the primitive's padding (landing 53); the block one is not. Root:
-  the primitive reserves both overhangs or declares that a hit area may overhang into its neighbours.
-  **Rides with:** mob-3.
 - **The walk server takes its world by a hand-set hash**: `webapp/e2e/serve.mjs` reads
   `PP_E2E_WORLD`, a `.gate_cache/walk-world/<hash>` path a person copies from the gate, so a gate
   rebuild removes the hash and the server exits "no workspace". Root: the server asks the gate for
   the current world. **Rides with:** mob-3.
 
-### webb-4 (a webb re-plan on addr's tip; its landing is not yet placed)
+### webb-5 (what webb-4 left at its landing)
 
-- **U5: one viewed searchpoint.** Three hosts (`searchpointCopyChoices(`) assemble a picked arm from
-  several reads each, and the Leader and the inspector show one pick at once. Action (operator,
-  2026-11-05): one rendering that hosts give identity only; the Leader always shows the leader; the pick
-  (`workspace.tsx::pick`) renders once, where `ScoringInspector.tsx::ScoringInspector` stands. Which
-  existing read serves the picked arm's spec is decided first: a new read breaks R7. **Rides with:**
-  webb-4. **Re-test:** `git grep -n "searchpointCopyChoices(" -- webapp` is 1.
-- **The sample set has one store and three writing intents**: the hash holds it and
-  `workspace.tsx::setViewKeys` writes it, but the picker, the overlap toggle
-  (`useCandidatesModel.ts::stepOverlap`) and the trajectory seed (`TrajectorySeriesView.tsx`) each write
-  through `setSelectionForSampleSet`, and `FileTree::onSelect` is drilled through its parents. Action:
-  decide whether "open the picker seeded with X" is one intent, then one door. **Rides with:** webb-4.
-  **Re-test:** `git grep -l "setSelectionForSampleSet" -- webapp/components` lists 1 file.
 - **The output contract is flattened in the browser**: `lib/derivations/output-contract.ts::outputContract`
   walks a JSON Schema with its own `MAX_DEPTH = 3`. Action: `domain/pipeline_schema.py::NodeOutputSchema`
   serves the flattened contract rows and `shell/node-surface/NodeSurface.tsx` draws them. **Rides with:**
-  webb-4, after rk-run (which holds `pipeline_schema.py`); its Owns gain both files. **Re-test:**
+  webb-5, after rk-run (which holds `pipeline_schema.py`); its Owns gain both files. **Re-test:**
   `git grep -n "MAX_DEPTH" -- webapp` is empty.
 - **Adapters over a flat served shape**: `useCandidatesModel.ts` joins about twelve sources; `.facts.` is
   opened at many sites; liveness is re-derived at each `phaseWalks(` site. Action: the served rows carry
-  what the adapters join. **Rides with:** webb-4. **Re-test:** `git grep -c "\.facts\." -- webapp/components webapp/lib`.
-- **A channel's seed is a store latch written in render**: `compare/ChannelCard.tsx:35`'s
-  `view.select(seed)` sets `lib/state/compare-selection.ts::ChannelView.seeded` during render. Action: the
-  pick reads `picked ?? seed` until the operator picks; the flag and the render-phase write go. **Rides
-  with:** webb-4. **Re-test:** `git grep -n "seeded" -- webapp/lib/state/compare-selection.ts webapp/components/compare/ChannelCard.tsx` is empty.
-- **`NodeConfigEditor`'s `schema` is a source prop two hosts fill from different reads**:
-  `lib/types/connector.ts::NodeSchemaReading` is threaded through 8 files. Action: the editor reads
-  `useConnector` at an identity prop. **Rides with:** webb-4, which lands first:
-  `lib/derivations/connector-state.ts::nodeSchemaReading` is shared with lw's barrel row. **Re-test:**
-  `git grep -c "NodeSchemaReading" -- webapp`.
-- **Teaching prose in `title=` outlived its shipped lint**: `webapp/eslint.config.mjs::titleIsALabel`
-  counts a title's static characters only, so 8 hits stand (`AccountActivityTab`, `CleanupConfirmModal`,
-  `ForestCard`, `SampleSetControl` ×2, `ConnectorInspector`, `NodeConfigEditor`, `RemoteControl`), and an
-  instruction under 60 characters ("Click to toggle.", "Open its dashboard.") passes. Action: the lint
-  reads a template title's words too, and each hit says its prose through `ui/Term` or `ui/HoverCard`.
-  **Rides with:** webb-4. **Re-test:** `git grep -cE 'title=("[^"]{60,}|\{\`[^\`]{60,})' -- webapp/components`.
-- **The webapp's read state, past the feed**: the feed took the cadences and `syncBeat`; what it did not
-  touch still stands to re-test (c714ec217 fixed `usePickedPoint`'s and `ChannelDetail.tsx`'s failure
-  clauses): a `/me` failure reported twice, by the cache (`read-cache.ts:196`) and by `state/auth.tsx:72`,
-  which also fires on a 401; `api/reads.ts::couponRead` through `once()` without a validator
-  (`reads.ts:77-86,131-133`); evidence hashed after the build (`routers/reads.py:164-165` via `_hashed`,
-  `:97-107`); "has measurements" asked through `round-reading.ts:12`'s `completed.includes` beside the
-  served `round_axis.unfiled`. Open question: `channel-hooks.ts:164-169`'s `spentTo` may still read null
-  mid-round. Action: one owner each. **Rides with:** webb-4. **Re-test:** each clause, first.
-- **`useEvidence`'s pulse re-derives what the feed says**: `compare/ComparePane.tsx:73` and
-  `hooks/useOriginEvidence.ts` build the pulse that re-asks a settled course's evidence. Action: the pulse
-  goes, and the evidence read names its subject. **Rides with:** webb-4. **Re-test:**
-  `git grep -n "pulse" -- webapp/lib/hooks/useEvidence.ts` is empty.
+  what the adapters join. **Rides with:** webb-5. **Re-test:** `git grep -c "\.facts\." -- webapp/components webapp/lib`.
 - **A lift's name is composed twice**: `webapp/lib/derivations/paired-reading.ts::liftVersus` re-spells
   `paired_reading.py::lift_versus`'s "vs {over} {words}" (the words are generated, the composition is
   not), because the round read serves no label (`RoundView.candidates[].reading.vs_reference`). In
   `components/files/RoundFileView.tsx` the lift column's name comes from the first served arm's cell
   set alone, and its hint reads "on the cells both measured" whatever that set is. Action: the reading
   serves its lift's name, which `RoundFileView` and `shell/searchpoint/SearchpointDrillIn.tsx` read;
-  `liftVersus` and the hint's fixed wording go. **Rides with:** webb-4. **Re-test:**
+  `liftVersus` and the hint's fixed wording go. **Rides with:** webb-5. **Re-test:**
   `git grep -n "liftVersus" -- webapp` is empty.
+- **A ChannelMap deselect snaps back to the seed** (webb-4's landing, reported): with the seed read as
+  `picked ?? seed`, clearing the pick shows the seed again. Action: a deselect is a pick of nothing,
+  held apart from no pick. **Rides with:** webb-5. **Re-test:** deselect a channel; none stays shown.
+- **Compare at 375 floats the remote bar above the tab bar** (webb-4's landing; base too). **Rides
+  with:** mob-3. **Re-test:** a 375 shot of Compare shows the bar flush with the tab bar.
 
 ### batch/27 · rec
 
@@ -1471,13 +1431,6 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   sat at 2% CPU for 20 minutes on a failing connector test instead of failing. Not yet reproduced.
   Action: reproduce it, name what the test waits on, and make that wait end with the failure.
   **Rides with:** tests-w. **Re-test:** the reproduced failure fails within its test's own timeout.
-- **A connection note can take a touch walk's click**: in a cloud full gate (layers, 2026-11-14)
-  `webapp/e2e/walk/records.spec.ts`'s first test failed on the `touch` project because an offline
-  note lay over the sidebar's "Add to the comparison" button, then passed on a rerun. The suspected
-  root is that the note is not pointer-transparent over the content it marks stale. Action: reproduce
-  it under load, then fix whichever is wrong: the note's hit area, or the walk clicking before the poll
-  settles. **Rides with:** tests-w. **Re-test:** `gate.py --only playwright` under a loaded full gate
-  never shows that interception.
 
 ### batch/32 · ts-arch
 

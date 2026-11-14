@@ -6,13 +6,15 @@ import tseslint from "typescript-eslint";
 
 // The components whose `title` is a heading drawn on the page, not a hover text.
 const HEADINGS = new Set(["AccountSection", "Card", "Dialog", "Empty", "Overrides", "SidePanel"]);
-// A label fits on one hover line; past this, a title is prose.
+// A label fits on one hover line; past this, or past a sentence's end, a title is prose.
 const LABEL_MAX = 60;
+const SENTENCE_END = /[.!?](\s|$)/;
 
 const staticText = (node) => {
   if (node?.type === "JSXExpressionContainer") return staticText(node.expression);
   if (node?.type === "Literal" && typeof node.value === "string") return node.value;
-  if (node?.type === "TemplateLiteral") return node.quasis.map((q) => q.value.cooked ?? "").join("");
+  // A template's interpolations are words too: each reads as one.
+  if (node?.type === "TemplateLiteral") return node.quasis.map((q) => q.value.cooked ?? "").join("x");
   // Either branch may be what shows: the longer one is measured.
   if (node?.type === "ConditionalExpression" || node?.type === "LogicalExpression") {
     const [a, b] = node.type === "LogicalExpression" ? [node.left, node.right] : [node.consequent, node.alternate];
@@ -29,7 +31,8 @@ const titleIsALabel = {
       if (node.name.name !== "title") return;
       const el = node.parent.name;
       if (el.type === "JSXIdentifier" && HEADINGS.has(el.name)) return;
-      if (staticText(node.value).length < LABEL_MAX) return;
+      const text = staticText(node.value);
+      if (text.length < LABEL_MAX && !SENTENCE_END.test(text)) return;
       context.report({ node, message: "Teaching prose in `title=`: say it through `ui/Term` or `ui/HoverCard`." });
     },
   }),

@@ -11,7 +11,6 @@ import {
   channelInk,
   channelLevel,
   rulerNoteOf,
-  useChannelHead,
   useChannelTree,
   useInvalidated,
 } from "./channel-hooks";
@@ -29,10 +28,6 @@ export function ChannelCard(props: ChannelProps) {
   const { reading, headline } = item;
   const { index } = useChannelTree(run);
   const view = useChannelView(item, index);
-  const head = useChannelHead(index, reading, view.selected);
-  // A bench headline leads the card with the campaign's pick, so the highlight starts on it.
-  const seed = headline ? head.nodeFor("winner") : head.own;
-  if (seed && !view.seeded) view.select(seed);
   const invalidated = useInvalidated(index);
   const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
   return (

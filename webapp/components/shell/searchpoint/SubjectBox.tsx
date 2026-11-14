@@ -5,7 +5,9 @@ import { useOrigin } from "@/lib/hooks/useOrigin";
 import { useOriginEvidence } from "@/lib/hooks/useOriginEvidence";
 import { useSearchpointRead } from "@/lib/hooks/useSearchpointRead";
 import { useSelection } from "@/lib/state/selection";
-import { searchpointCopyChoices, searchpointText, type ObserveState } from "@/lib/derivations";
+import { useSearchpointCopy } from "@/lib/hooks/useSearchpointCopy";
+import { useWorkspace } from "@/lib/workspace";
+import type { ObserveState } from "@/lib/derivations";
 import { CopyButton, Empty, FailureLine, Loading, SegmentedControl } from "@/components/ui";
 import { RoundFacts, RoundVerdict } from "./RoundFacts";
 import { SubjectDiff } from "./SubjectDiff";
@@ -26,6 +28,14 @@ export function SubjectBox() {
 
   const cfg = shown.cfg;
   const evidence = useOriginEvidence(point);
+  const { viewed } = useWorkspace();
+  const copy = useSearchpointCopy({
+    path: viewed?.path ?? null,
+    round: point?.round ?? null,
+    arm: point?.key ?? null,
+    label: point?.title ?? "",
+    datasetName: null,
+  });
 
   if (!dash?.cycle_id) return null;
   const row = point?.row ?? null;
@@ -42,15 +52,7 @@ export function SubjectBox() {
             ariaLabel="Which searchpoint to show"
           />
         ) : null}
-        <CopyButton
-          choices={[
-            ...searchpointCopyChoices({ cfg, reading: row?.reading ?? null }),
-            ...(cfg
-              ? [{ key: "text", label: "Prompt + config as text", data: searchpointText(cfg) }]
-              : []),
-          ]}
-          title="Copy this searchpoint"
-        />
+        <CopyButton choices={copy.choices} title="Copy this searchpoint" />
       </div>
       {subject.state === "best" && standing ? (
         <WinnerStanding standing={standing} />
