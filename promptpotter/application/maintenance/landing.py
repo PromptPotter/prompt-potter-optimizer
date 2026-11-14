@@ -72,7 +72,7 @@ from promptpotter.infrastructure.store.stores import (
     tenant_stores,
 )
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, PotterError
+from promptpotter.shared.errors import ConflictError, NextAct, PotterError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.named_rows import walked
 
@@ -136,7 +136,7 @@ class Refused(NamedTuple):
     remedy: str = ""
 
 
-# A refusal names its first few paths; `land-data --dry-run` lists every one.
+# A refusal names its first few paths; its act, a dry run, lists every one.
 _NAMED = 3
 
 
@@ -390,9 +390,10 @@ def _refusal(data_root: Path, refused: Refused) -> ConflictError:
     remedy = f": {refused.remedy}" if refused.remedy else ""
     return ConflictError(
         f"refusing to land the data root {data_root}, having written nothing: {refused.why}"
-        f"{said}{remedy}. `land-data --dry-run` lists all that refuses it.",
+        f"{said}{remedy}.",
         code="data_root_unlanded",
         details={"paths": named, "count": len(refused.paths)},
+        next_acts=(NextAct(field="dry_run", value="every path it refuses, listed"),),
     )
 
 

@@ -109,6 +109,7 @@ from promptpotter.shared.errors import (
     ConflictError,
     FileKind,
     FileUnreadableError,
+    NextAct,
     NotFoundError,
 )
 
@@ -514,7 +515,11 @@ class CampaignStore:
         last = self.standing_rounds(hop, moment=None).last_closed
         if last is None or after_round > last:
             held = "none" if last is None else f"0..{last}"
-            raise BadRequestError(f"--from {after_round}: ledger's completed rounds are {held}")
+            raise BadRequestError(
+                f"round {after_round} is not one the ledger completed: its completed rounds are "
+                f"{held}",
+                next_acts=(NextAct(kind="start-run"),),
+            )
         return after_round + 1
 
     def rewind_to_round(self, hop: CycleHop, after_round: int) -> None:

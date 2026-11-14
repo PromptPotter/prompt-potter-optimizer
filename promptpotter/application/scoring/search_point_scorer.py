@@ -101,7 +101,6 @@ def _resolve_prior_cache(
     dataset: list[Sample],
     *,
     feed: ReplayFeed | None,
-    label: str,
 ) -> tuple[dict[int, MeasuredCell], dict[int, MeasuredCell]]:
     cached_sample_results: dict[int, MeasuredCell] = {}
     if feed is not None:
@@ -112,17 +111,6 @@ def _resolve_prior_cache(
         logger.info(
             "Evicted %d deprecated prior result(s) (fatal warnings); will remeasure.",
             len(deprecated_samples),
-        )
-
-    if replays := len(cached_sample_results):
-        total = len(dataset)
-        logger.debug(
-            "%s cache: %d/%d already measured for this JSP — will replay %d, measure %d fresh.",
-            label,
-            replays,
-            total,
-            replays,
-            total - replays,
         )
     return cached_sample_results, deprecated_samples
 
@@ -321,7 +309,7 @@ def open_walk(
     node_configs = [] if row.fresh else entry.node_configs
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.
     feed = ReplayFeed(store.archive, node_configs) if node_configs else None
-    cached_sample_results, deprecated_samples = _resolve_prior_cache(dataset, feed=feed, label=kind)
+    cached_sample_results, deprecated_samples = _resolve_prior_cache(dataset, feed=feed)
     cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
     book = run_scope().book
     rereads = frozenset(

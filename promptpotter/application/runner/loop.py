@@ -60,6 +60,7 @@ class LoopEnd(NamedTuple):
     interrupted_round: int | None = None
     cancelled: asyncio.CancelledError | None = None
     stepped: bool = False
+    detail: str = ""
 
 
 def round_bounds(session: Session, config: CampaignConfig) -> tuple[CampaignConfig, int | None]:
@@ -101,10 +102,6 @@ async def run_round_loop(
             if pause_at is not None and clean_rounds >= pause_at:
                 return LoopEnd(StopReason.PAUSED, stepped=True)
 
-            logger.debug(
-                "Round %d (clean=%d/%s, parent=%s)", round_num, clean_rounds, cap, cycle.parent_fold
-            )
-
             with scoped(round=round_num):
                 open_round = round_num
                 append_record(RoundEnteredRecord(round=round_num))
@@ -130,14 +127,12 @@ async def run_round_loop(
             round_num += 1
 
     except RUN_ENDS as exc:
-        return loop_end_on(exc, cycle, session, round_num=round_num, open_round=open_round)
+        return loop_end_on(exc, cycle, open_round=open_round)
 
 
-def loop_end_on(
-    exc: BaseException, cycle: Cycle, session: Session, *, round_num: int, open_round: int | None
-) -> LoopEnd:
+def loop_end_on(exc: BaseException, cycle: Cycle, *, open_round: int | None) -> LoopEnd:
     """A run end raised inside a round, round 0's door's included, read as the loop's end."""
-    stop_reason, error = end_run_on(exc, session, where=f"at round {round_num}")
+    stop_reason, error, detail = end_run_on(exc)
     # Before the finalize reads a selection or banks a decision: the stop may sit inside a round.
     cycle.unwind_unclosed()
     return LoopEnd(
@@ -147,6 +142,7 @@ def loop_end_on(
         interrupted_round=open_round,
         # Handed back, never swallowed: `runner/entry.py` re-raises it past the finalize.
         cancelled=exc if isinstance(exc, asyncio.CancelledError) else None,
+        detail=detail,
     )
 
 
@@ -204,7 +200,7 @@ async def open_origin_round(
         pass_origin_gate(by="resume")
         await bench_line_origin(cycle, spend)
     except RUN_ENDS as exc:
-        return loop_end_on(exc, cycle, session, round_num=0, open_round=open_round)
+        return loop_end_on(exc, cycle, open_round=open_round)
     return None
 
 

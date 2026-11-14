@@ -377,9 +377,21 @@ if yaml.load(_yaml_text(_hazards), Loader=_YAML_LOADER) != _hazards:
 del _hazards
 
 
+# The deepest shipped YAML nests 9 (`justlogic/family.yaml`); the loader's composer recurses, and a
+# few thousand levels end the interpreter with no exception, while its event stream stays flat.
+YAML_MAX_DEPTH = 64
+_OPENS = (yaml.MappingStartEvent, yaml.SequenceStartEvent)
+_CLOSES = (yaml.MappingEndEvent, yaml.SequenceEndEvent)
+
+
 def parse_yaml(text: str | bytes) -> Any:
     """`yaml.YAMLError` is no `ValueError`, which every guard in this tree catches, so it is wrapped here."""
     try:
+        depth = 0
+        for event in yaml.parse(text, Loader=_YAML_LOADER):
+            depth += isinstance(event, _OPENS) - isinstance(event, _CLOSES)
+            if depth > YAML_MAX_DEPTH:
+                raise ValueError(f"nested past {YAML_MAX_DEPTH} levels")
         return yaml.load(text, Loader=_YAML_LOADER)
     except yaml.YAMLError as exc:
         raise ValueError(f"not valid YAML — {exc}") from exc

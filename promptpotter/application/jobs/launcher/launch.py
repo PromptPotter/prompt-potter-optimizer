@@ -73,13 +73,6 @@ async def hold(request: LaunchRequest, start: RunStart, mode: RunMode) -> HeldRu
         if request.hop == UNRESOLVED_HOP:
             stamps = opened.hop
             await asyncio.to_thread(start.land, opened.hop, held)
-            logger.info(
-                "%s: minted %s/%s (job %s)",
-                request.verb,
-                opened.hop.campaign_id,
-                opened.hop.cycle_id,
-                start.job_id,
-            )
         return HeldRun.of(start, opened, held, closing, mode)
     except BaseException as exc:
         await asyncio.to_thread(start.release, exc, stamps=stamps)
@@ -190,7 +183,6 @@ def _detach(coro: Coroutine[Any, Any, object], *, what: str) -> None:
 
 def _report_detached(task: asyncio.Task[object], what: str) -> None:
     if task.cancelled():
-        logger.info("%s was cancelled", what)
         return
     exc = task.exception()
     if exc is not None:

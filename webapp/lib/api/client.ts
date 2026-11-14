@@ -1,4 +1,9 @@
-import { FEED_SUBJECT_HEADER, FEED_VERSIONS_HEADER, type ErrorEnvelope } from "@/lib/api/types";
+import {
+  FEED_SUBJECT_HEADER,
+  FEED_VERSIONS_HEADER,
+  type ErrorEnvelope,
+  type NextAct,
+} from "@/lib/api/types";
 
 export const API = "/api/v1";
 
@@ -29,6 +34,7 @@ export class ApiError extends Error {
     readonly errorId: string | null = null,
     readonly details: Record<string, unknown> | null = null,
     readonly serverMessage: string | null = null,
+    readonly nextActs: readonly NextAct[] = [],
   ) {
     super(serverMessage ?? `${status} ${url}`);
     this.name = "ApiError";
@@ -81,9 +87,9 @@ export async function toApiError(r: Response): Promise<ApiError> {
   if (typeof body !== "object" || body === null || !("error_id" in body)) {
     return new ApiError(r.status, r.url);
   }
-  const { code, error_id, details, message } = body as ErrorEnvelope;
+  const { code, error_id, details, message, next_acts } = body as ErrorEnvelope;
   // An empty sentence is no sentence: `operatorMessage` falls back to the kind's.
-  return new ApiError(r.status, r.url, code, error_id, details, message || null);
+  return new ApiError(r.status, r.url, code, error_id, details, message || null, next_acts);
 }
 
 export async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {

@@ -10,11 +10,11 @@ from typing import Any, NamedTuple
 from promptpotter.domain.phases import (
     LaunchStage,
     PauseCause,
-    PauseReading,
     ProducerReading,
     ProducerState,
     RunPhase,
     RunState,
+    StopReading,
 )
 from promptpotter.domain.records.run_records import (
     ArmsGate,
@@ -111,7 +111,7 @@ def read_run_state(
     if scoring:
         run = RunState(RunPhase.PAUSED if asked is not None else RunPhase.SCORING, producer)
     elif last is not None and isinstance(last.state, Ended):
-        return RunState(RunPhase.TERMINAL, producer, ended=last.state.stop_reason)
+        return RunState(RunPhase.TERMINAL, producer, stop=last.stop_reading)
     elif asked is not None or declared is RunPhase.PAUSED:
         run = RunState(RunPhase.PAUSED, producer)
     elif (
@@ -128,18 +128,11 @@ def read_run_state(
         return run
     # A pass declares no stop: the pause it reads as is the one asked of it.
     if not scoring and last is not None and isinstance(last.state, Paused):
-        return run._replace(
-            pause=PauseReading(
-                stop_reason=last.state.stop_reason,
-                cause=last.state.cause,
-                detail=last.state.detail,
-                at=last.timestamp,
-            )
-        )
+        return run._replace(stop=last.stop_reading)
     if asked is None:
         return run
     return run._replace(
-        pause=PauseReading(
+        stop=StopReading(
             stop_reason=None,
             cause=PauseCause.COMMAND,
             detail=f"pause by {asked.issued_by.display}",

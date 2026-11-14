@@ -500,7 +500,6 @@ class RateLimiter:
     _requests: deque[tuple[float, str]] = field(default_factory=deque)
     _tokens: deque[_TokenReservation] = field(default_factory=deque)
     _waiting: list[_Waiter] = field(default_factory=list)
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
     def apply_discovered(self, rpm: int | None, tpm: int | None) -> None:
         if rpm is not None and not self.rpm_pinned:
@@ -515,19 +514,17 @@ class RateLimiter:
         self._waiting.append(waiter)
         try:
             while True:
-                # Never held across the sleep: there, ``asyncio.Lock``'s FIFO becomes the scheduler.
-                async with self._lock:
-                    now = loop_now()
-                    self._prune(now)
-                    if self._next_up(now) is waiter:
-                        self._waiting.remove(waiter)
-                        self._requests.append((now, waiter.tenant))
-                        entry = _TokenReservation(
-                            ts=now, tokens=estimated_tokens, tenant=waiter.tenant
-                        )
-                        self._tokens.append(entry)
-                        return entry
-                    wait = self._wait_needed(now, estimated_tokens)
+                # No await between the read and the take, so no lock: one asks at a time on its loop,
+                # and a lock would bind to the first loop that contends it, refusing the next run's.
+                now = loop_now()
+                self._prune(now)
+                if self._next_up(now) is waiter:
+                    self._waiting.remove(waiter)
+                    self._requests.append((now, waiter.tenant))
+                    entry = _TokenReservation(ts=now, tokens=estimated_tokens, tenant=waiter.tenant)
+                    self._tokens.append(entry)
+                    return entry
+                wait = self._wait_needed(now, estimated_tokens)
                 await held_slice(wait if wait > 0 else _YIELD_S, "rate limiter")
         finally:
             if waiter in self._waiting:

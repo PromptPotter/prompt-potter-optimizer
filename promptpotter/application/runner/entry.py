@@ -33,6 +33,7 @@ from promptpotter.application.runner.termination import (
     RUN_ENDS,
     RUN_STOPS,
     end_run_on,
+    run_stop_detail,
     run_stop_reason,
 )
 from promptpotter.application.served_dashboard import fork_remainder
@@ -140,6 +141,7 @@ def close_cycle(
     pause_cause: PauseCause,
     rebasing: bool,
     selected: SelectedOptimizer,
+    detail: str,
 ) -> CycleResult:
     """*rebasing*: the line continues onto a fork, whose close banks the launch's clock."""
     finished_at = utcnow_iso()
@@ -172,6 +174,7 @@ def close_cycle(
             open_round=open_round,
             pause_cause=pause_cause,
             rebasing=rebasing,
+            detail=detail,
         )
     finally:
         observers.drain_all()
@@ -188,6 +191,7 @@ def _finalize_run(
     open_round: int | None,
     pause_cause: PauseCause,
     rebasing: bool,
+    detail: str,
 ) -> None:
     stop_reason = cycle_result.stop_reason
     info = STOP_REASON_INFO[stop_reason]
@@ -237,7 +241,7 @@ def _finalize_run(
             ),
         )
         # After what it banked, and before the drain renders the artifacts that name the stop.
-        declare_run_stop(session, observers, stop_reason, interrupted_by=pause_cause)
+        declare_run_stop(session, observers, stop_reason, interrupted_by=pause_cause, detail=detail)
 
 
 @dataclass
@@ -269,6 +273,7 @@ async def _run_single_cycle(
     fork: RebaseRequest | None = None
     open_round: int | None = None
     pause_cause = PauseCause.INTERRUPT
+    detail = ""
     try:
         cycle, cut = await open_cycle(prep, session=session, mode=mode)
         if cut is not None:
@@ -289,11 +294,11 @@ async def _run_single_cycle(
             spend=observers.dashboard.spend,
             resumed_ending=prep.resumed_ending,
         ) or await run_round_loop(cycle, cycle.config, session)
-        stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = ended
+        stop_reason, cycle_error, fork, open_round, cancel_exc, stepped, detail = ended
         if stepped:
             pause_cause = PauseCause.STEP
     except RUN_ENDS as exc:
-        stop_reason, cycle_error = end_run_on(exc, session, where="before the round loop")
+        stop_reason, cycle_error, detail = end_run_on(exc)
         if isinstance(exc, asyncio.CancelledError):
             cancel_exc = exc
 
@@ -315,7 +320,7 @@ async def _run_single_cycle(
                 )
         except (*RUN_STOPS, KeyboardInterrupt, asyncio.CancelledError) as exc:
             # Only a pause escapes the pass; the resume takes the pass again.
-            stop_reason, cycle_error = run_stop_reason(exc), None
+            stop_reason, cycle_error, detail = run_stop_reason(exc), None, run_stop_detail(exc)
             if isinstance(exc, asyncio.CancelledError):
                 cancel_exc = exc
 
@@ -331,6 +336,7 @@ async def _run_single_cycle(
         pause_cause=PauseCause.CANCELLED if cancel_exc is not None else pause_cause,
         rebasing=rebasing,
         selected=prep.optimizer,
+        detail=detail,
     )
     return _CycleOutcome(
         session=session,
@@ -455,7 +461,7 @@ async def run_optimization(
                     optimizer=optimizer,
                 )
             except RUN_STOPS as stop:
-                stop_reason, cycle_error = end_run_on(stop, session, where="in run prep")
+                stop_reason, cycle_error, detail = end_run_on(stop)
                 outcome = _CycleOutcome(
                     session=session,
                     cycle_result=close_cycle(
@@ -469,6 +475,7 @@ async def run_optimization(
                         pause_cause=PauseCause.INTERRUPT,
                         rebasing=False,
                         selected=optimizer,
+                        detail=detail,
                     ),
                     fork=None,
                     observers=observers,

@@ -24,11 +24,11 @@ from promptpotter.domain.paired_reading import ArmName
 from promptpotter.domain.phases import (
     PRODUCER_STATE_INFO,
     RUN_PHASE_INFO,
-    PauseReading,
     ProducerReading,
     RunAdmission,
     RunPhase,
     RunState,
+    StopReading,
 )
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import CycleShareRecord, ForkRemainder
@@ -81,7 +81,7 @@ class WarmingDashboard(StrictModel):
     run_phase: RunPhase
     producer: ProducerReading
     admission: RunAdmission
-    pause: PauseReading | None
+    stop: StopReading | None
 
 
 class SampleWalk(StrictModel):
@@ -278,9 +278,9 @@ class ServedDashboard(DashboardFacts):
         "run control offers or the sentence where it offers none, and each verb's refusal — the "
         "same answer the dispatcher refuses on."
     )
-    pause: PauseReading | None = Field(
-        description="Why the cycle reads `paused` — what caused it, the stop it was left on and "
-        "what the operator does next (`RunState.pause`); null in every other phase."
+    stop: StopReading | None = Field(
+        description="Why the cycle reads `paused` or `terminal` — what caused it, the stop it was "
+        "left on and what said so (`RunState.stop`); null in every other phase."
     )
     overlap_line_round: int | None = Field(
         description="Which of `rounds` carries the newest overlap line that was read — the one "
@@ -557,7 +557,7 @@ def _serve(
         run_phase=run.run_phase,
         producer=run.producer,
         admission=admission,
-        pause=run.pause,
+        stop=run.stop,
         overlap_line_round=None if line_round is None else line_round.round,
         overlap_line_n=None if line_round is None else len(line_round.overlap.positions),
         composite_fitness_weights=None
@@ -622,7 +622,7 @@ def served_dashboard(
             run_phase=run.run_phase,
             producer=run.producer,
             admission=admission,
-            pause=run.pause,
+            stop=run.stop,
         )
     folded = stores.campaigns.run_limits(hop, at=at)
     assert folded is not None, "a folded state stands on its wiring"

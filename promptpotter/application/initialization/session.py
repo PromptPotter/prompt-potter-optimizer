@@ -29,7 +29,7 @@ from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError
+from promptpotter.shared.errors import MINT_FRESH, ConflictError
 from promptpotter.shared.identity import IdentityContext, default_identity
 
 if TYPE_CHECKING:
@@ -136,7 +136,8 @@ class Session:
         if drawn is None:
             raise ConflictError(
                 f"cycle {hop.cycle_id} holds no drawn partition over its chain: its mint draws "
-                "one and a fork stands on its parent's, so this cycle stands on neither."
+                "one and a fork stands on its parent's, so this cycle stands on neither.",
+                next_acts=(MINT_FRESH,),
             )
         bank = (
             self.bank
@@ -147,6 +148,7 @@ class Session:
             raise ConflictError(
                 f"cycle {hop.cycle_id} drew bank {drawn.dataset_hash}, which is no longer held",
                 code="campaign_roster_unreadable",
+                next_acts=(MINT_FRESH,),
             )
         return replace(
             self,

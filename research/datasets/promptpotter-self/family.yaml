@@ -42,7 +42,7 @@ campaign:
   # inner series differences, and scores nothing: read on the rows the search selected on, it
   # is in-sample.
   # The re-anchor is LINEAR and only exists because `compile_scorer` refuses an empty formula and
-  # `clamp_unit_score` clamps [0,1]: one headline point of lift is one fitness point, so the paired
+  # its scorer clamps [0,1]: one headline point of lift is one fitness point, so the paired
   # estimator's reported effect IS the mean held-out lift — a number you can read, not merely order
   # by. The window is half a unit each side of zero: a 20-row bench moves in steps of 0.05, so a
   # cell clips only past ten rows of lift or loss. A `floored` cell measured no lift and scores 0.0.

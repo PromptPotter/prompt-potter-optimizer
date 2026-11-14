@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import functools
 import json
-import logging
 import os
 import random
 import sys
@@ -36,8 +35,6 @@ from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.extras import Extra, require_extra
 from promptpotter.shared.hashing import ADDRESS_HEX, module_source_digest, stable_hash
 
-logger = logging.getLogger(__name__)
-
 _PACKAGE = __name__.rpartition(".")[0]
 
 Row = dict[str, Any]
@@ -64,6 +61,14 @@ class SourceKind(Enum):
         return self in (SourceKind.UPLOAD, SourceKind.INLINE)
 
 
+def _source_lacks(field: str, said: str) -> PayloadInvalidError:
+    return PayloadInvalidError(
+        f"the definition's `source:` names no `{field}`: {said}.",
+        code="source_incomplete",
+        details={"lacks": field},
+    )
+
+
 @dataclass(frozen=True, slots=True)
 class Source:
     """A definition's ``source:`` section: where the rows come from, at which commit, cut how."""
@@ -81,7 +86,7 @@ class Source:
         params = dict(section)
         recipe = str(params.pop("recipe", ""))
         if not recipe:
-            raise ValueError(f"`source:` names no recipe: {sorted(section)}")
+            raise _source_lacks("recipe", f"it names {sorted(section)}")
         kind = next(
             (
                 k
@@ -98,7 +103,7 @@ class Source:
         # A moving ref re-cuts the bank on the next machine that fetches it, under the name it has.
         rev = str(params.pop("rev", ""))
         if not rev:
-            raise ValueError(f"`source:` fetches {repo} at no pinned `rev`")
+            raise _source_lacks("rev", f"it fetches {repo} at no pinned commit")
         return cls(recipe, kind, repo, rev, params)
 
     @property
@@ -431,7 +436,7 @@ def no_dataset_hint(stores: Stores) -> str:
     """Every dataset this account reads: its own definitions first, then the installed templates."""
     lines = [f"  {ref.dataset.name}" for ref in list_readable_datasets(stores)]
     body = "\n".join(lines) if lines else "  (no datasets readable here)"
-    return "Available datasets, each a `mint-campaign` takes by name:\n\n" + body
+    return "Available datasets, by name:\n\n" + body
 
 
 def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:
@@ -441,8 +446,7 @@ def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:
     if src is None or src.recipe not in PANEL_RECIPES:
         return False
     out = stores.tenant_datasets.materialized_panel_dir(dataset.name)
-    n = PANEL_RECIPES[src.recipe](src, out)
-    logger.info("Built panel '%s' from its source: %d tasks -> %s", dataset.name, n, out)
+    PANEL_RECIPES[src.recipe](src, out)
     return True
 
 
@@ -458,7 +462,6 @@ def fetch_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
     if src is None or src.recipe not in BANK_RECIPES:
         return Bank.of(())
     bank = _cut(_loader(stores, src))
-    logger.info("Loaded dataset '%s' from its source: %d items", dataset.name, len(bank.samples))
     stores.tenant_datasets.record_cut(src.identity, bank)
     return bank
 

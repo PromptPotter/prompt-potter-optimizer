@@ -194,10 +194,14 @@ WOUNDS: dict[str, dict[str, tuple[tuple[Heal, ...], str]]] = {
         "L2ContextOutput_0": ((Heal.NONCOMPLIANT,) * 3, "layer_parse_failure"),
     },
     "capo": {
-        "capo_crossover_538586935.0": ((Heal.NONCOMPLIANT,), PARSE_FAILURE_MALFORMED),
+        "capo_init_164716606.0": ((Heal.NONCOMPLIANT,), PARSE_FAILURE_MALFORMED),
+        "capo_crossover_547430771.0": ((Heal.NONCOMPLIANT,), PARSE_FAILURE_MALFORMED),
         "capo_crossover_1395829419.0": ((Heal.EMPTY,), PARSE_FAILURE_TOOLING),
     },
-    "gepa": {"gepa_reflect_1270264589.0": ((Heal.EMPTY,), PARSE_FAILURE_TOOLING)},
+    "gepa": {
+        "gepa_reflect_1270264589.0": ((Heal.EMPTY,), PARSE_FAILURE_TOOLING),
+        "gepa_reflect_1276920231.0": ((Heal.NONCOMPLIANT,), PARSE_FAILURE_MALFORMED),
+    },
     "levi": {
         "levi_paradigm_shift_1980294598.0": ((Heal.NONCOMPLIANT,), PARSE_FAILURE_MALFORMED),
         "levi_refine_1987354733.0": ((Heal.EMPTY,), PARSE_FAILURE_TOOLING),

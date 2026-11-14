@@ -177,7 +177,12 @@ from promptpotter.domain.spend import (
     TokenUsageKind,
 )
 from promptpotter.domain.verification import BenchPass, BenchPasses
-from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
+from promptpotter.domain.wounds import (
+    NurseOwner,
+    RuntimeFailure,
+    ValidationFailure,
+    ValidationReason,
+)
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook, bound_account, draws_on
@@ -323,7 +328,7 @@ def arm_state(
     slot: ArmSlot | None = None,
     total: int = 4,
     cut: CutKind | None = None,
-    invalid_reason: str | None = None,
+    invalid_reason: ValidationReason | None = None,
     locked_in: bool = False,
     elimination: dict[str, Any] | None = None,
     **overrides: Any,
@@ -1161,7 +1166,12 @@ def round_result(
         candidates_scored = 0
     panel = candidates_scored + no_op + dup
     reasons = [
-        r for r, n in (("no_op_variant", no_op), ("duplicate_variant", dup)) for _ in range(n)
+        r
+        for r, n in (
+            (ValidationReason.NO_OP_VARIANT, no_op),
+            (ValidationReason.DUPLICATE_VARIANT, dup),
+        )
+        for _ in range(n)
     ]
     built: dict[ArmKey, ArmState] = {
         **{

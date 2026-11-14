@@ -18,7 +18,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import usd_text
 from promptpotter.infrastructure.llm.pricing import route_priced
 from promptpotter.infrastructure.llm.registry import model_profile
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.errors import MINT_FRESH, PayloadInvalidError
 
 
 @dataclass(frozen=True)
@@ -116,7 +116,7 @@ def _check_task_context_present(
             "only panel feeding l1_generate's task_intent slot. Empty, that slot renders as the "
             "static template alone: the generator proposes edits knowing the failing samples and "
             "nothing about what the pipeline is for. Ship a `task.md` in the "
-            "dataset's definition — the first mint decomposes its body — or pass `--task-file` / `--task-text`."
+            "dataset's definition — the first mint decomposes its body — or give the mint a task text."
         ),
     )
 
@@ -172,7 +172,7 @@ def check_cap_funds_round(
     short = _round_short(config, selected, search, cell_usd, measured_cell_usd)
     if short is None:
         return None
-    advice = "Raise it with `set-limits` (its `budget.usd`), or narrow the round in `optimization.nodes`."
+    advice = "Raise its `budget.usd`, or narrow the round in `optimization.nodes`."
     if short.billed:
         return PreflightWarning(
             code="spend_cap_below_round",
@@ -206,9 +206,9 @@ def _check_origin_already_run(origin_campaigns: Sequence[str]) -> PreflightWarni
         code="origin_already_run",
         title=f"identical origin already run in {', '.join(origin_campaigns)}",
         detail=(
-            "A fresh `mint-campaign` re-measures the identical seed. A `start-run` continues one "
-            "of those instead; `mint-campaign` is for an origin you have CHANGED (optimizer "
-            "prompt, config, or dataset)."
+            "A fresh campaign re-measures the identical seed. Resuming one of those continues it "
+            "instead; a fresh campaign is for an origin you have CHANGED (optimizer prompt, "
+            "config, or dataset)."
         ),
     )
 
@@ -302,9 +302,10 @@ def refuse_arm_below_round(
         raise PayloadInvalidError(
             f"{where} cannot be shown to close one round under its {usd_text(cap)}: no archived run "
             f"prices a cell on these models and {bound}. Nothing was minted. Measure the origin "
-            "once with a plain `mint-campaign` on this dataset, or bound the arms by tokens or rounds with "
-            "no dollar cap.",
+            "once with a plain campaign on this dataset, or bound the arms by tokens or rounds "
+            "with no dollar cap.",
             code="arm_unpriced",
+            next_acts=(MINT_FRESH,),
         )
     short = _round_short(config, selected, search, cell_usd, measured_cell_usd)
     if short is None:

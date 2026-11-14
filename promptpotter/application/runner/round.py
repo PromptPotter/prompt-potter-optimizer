@@ -136,7 +136,7 @@ from promptpotter.domain.run_standing import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
 from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint
-from promptpotter.domain.wounds import ValidationFailure, collapse_counts
+from promptpotter.domain.wounds import ValidationFailure, ValidationReason, collapse_counts
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.shared.errors import SendRefusedError, graceful
@@ -193,7 +193,10 @@ def author_arm(ctx: RoundContext, parent: OptSearchPoint, arm: SubmittedArm) -> 
     shots = {Locus(node, SHOTS_KEY): keys for node, keys in arm.shots.items()}
     over = [
         ValidationFailure(
-            axis=locus.name, value=str(len(keys)), allowed=[str(cap)], reason="shots_over_cap"
+            axis=locus.name,
+            value=str(len(keys)),
+            allowed=[str(cap)],
+            reason=ValidationReason.SHOTS_OVER_CAP,
         )
         for locus, keys in shots.items()
         if len(keys) > cap
@@ -215,12 +218,6 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
     answered = standing.submitted.get(ctx.round_num)
     if answered is not None and rounds and answered.consumed == round_document_digest(rounds[-1]):
         return list(answered.proposals)
-    logger.warning(
-        "Arm gate: round %d holds for the operator's arms (%d draft(s)). Answer with "
-        "`submit-arms`.",
-        ctx.round_num,
-        len(drafts),
-    )
     append_record(RunPhaseRecord(state=ArmsGate(drafts=list(drafts))))
 
     def _take() -> list[Proposal] | None:
@@ -546,10 +543,6 @@ async def _measure_gaps(
     *top_up* races them on."""
     if not gaps:
         return {}
-    for step, samples in gaps.values():
-        logger.info(
-            "overlap: measuring %s on %d cell(s) of the origin panel", step.arm.label, len(samples)
-        )
     raced = await score_search_points(
         {
             ArmKey(member): (
@@ -1031,12 +1024,6 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
                 )
         else:
             raise StopLoop(StopReason.ADAPTER_OWED) from last
-        logger.info(
-            "Round %d's %s landed late; round %d reads it.",
-            prior.round,
-            adapter.name,
-            ctx.round_num,
-        )
 
 
 def _crowning_read(cycle: Cycle, measured: MeasuredRound, winner: ArmKey | None) -> BarRead | None:
@@ -1275,10 +1262,14 @@ async def _walked(ctx: RoundContext, walk: RoundWalk, panel: Panel) -> Proposals
         await reread_walk(ctx, banked.reads)
         return Proposals(list(banked.proposals))
     seeds, proposers, _ = walk.walked
+    refused: list[Proposal] = []
     if seeds:
         seeded = await _walk(ctx, seeds, panel)
         cycle.population = [p.individual for p in seeded.proposals if not p.refused]
+        # A refused seed is an arm of its round, as every refused child is: its fault is served.
+        refused = [p for p in seeded.proposals if p.refused]
     population = await _walk(ctx, proposers, panel)
+    population = replace(population, proposals=[*population.proposals, *refused])
     bank_walk(ctx, population.proposals)
     return population
 

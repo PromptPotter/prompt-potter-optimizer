@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -38,8 +36,6 @@ from promptpotter.shared.errors import PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.pipeline_resolve import DraftPipeline
-
-logger = logging.getLogger(__name__)
 
 
 class OriginIncompleteError(PayloadInvalidError):
@@ -107,11 +103,9 @@ class FreshMint:
     @asynccontextmanager
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
         """The session, then the mint: a refused one writes nothing."""
-        t0 = time.perf_counter()
         async with init_services(
             dataset_name=self.dataset_name, identity=stores.identity, stores=stores
         ) as session:
-            logger.info("mint[%s]: init=%.2fs", self.dataset_name, time.perf_counter() - t0)
             session, config = laid_session(session, self.layers)
             yield await mint_framed_cycle(
                 session,

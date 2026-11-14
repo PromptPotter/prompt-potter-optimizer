@@ -4,7 +4,6 @@ import asyncio
 import contextlib
 import logging
 from collections.abc import Callable
-from functools import partial
 from types import TracebackType
 
 from promptpotter.infrastructure.llm.send_pacing import SendBudget
@@ -32,22 +31,14 @@ class CellEnvelope:
     @property
     def on_suspend(self) -> Callable[[float], None]:
         """Read BEFORE ``__aenter__`` so the heartbeat task outlives the timeout scope."""
-        return partial(self._give_back, cause="the machine suspended")
+        return self._give_back
 
-    def _give_back(self, seconds: float, *, cause: str) -> None:
+    def _give_back(self, seconds: float) -> None:
         before = self.unworked
         self._budget.give_back(seconds)
         if self.unworked == before:
             return
         budget = self.budget_s
-        logger.debug(
-            "cell %s: +%.1fs envelope (%s); %.0fs given back of a %.0fs budget",
-            self.label,
-            seconds,
-            cause,
-            self.unworked,
-            budget,
-        )
         if not self._announced and self.unworked > budget:
             self._announced = True
             logger.warning(
@@ -63,7 +54,7 @@ class CellEnvelope:
         self._bound.enter_context(
             scoped(
                 send_budget=self._budget,
-                stall_sink=partial(self._give_back, cause="queued behind the shared rate limiter"),
+                stall_sink=self._give_back,
             )
         )
         await self._deadline.__aenter__()

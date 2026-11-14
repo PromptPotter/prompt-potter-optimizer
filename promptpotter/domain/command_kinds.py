@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections import ChainMap
+from collections.abc import Mapping
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self, get_args
 
@@ -43,6 +45,7 @@ from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import RequestBody, StrictModel, UploadBytes, WireInt
 from promptpotter.domain.verification import VerifyStrategy
+from promptpotter.shared.errors import NextAct
 from promptpotter.shared.identity import (
     ACCOUNT_KEYS_CAP,
     CAMPAIGN_BUDGET_CAP,
@@ -402,6 +405,20 @@ class CommandPayload(RequestBody):
     unmatched: ClassVar[bool] = False
     # What the terminal prints after the ack; a `{field}` in it reads that field of the applied answer.
     follow_up: ClassVar[str] = ""
+    # A field's terminal flag by its dotted path, where it is not `--` its dashed leaf; each model up
+    # the line declares its own. The terminal builds its flags from `cli_flag` and spells an act's.
+    cli_flags: ClassVar[Mapping[str, str]] = {
+        "budget.usd": "--max-usd",
+        "budget.tokens": "--max-tokens",
+        "budget.rounds": "--max-rounds",
+        "budget.wall_clock_s": "--max-wall-clock",
+    }
+
+    @classmethod
+    def cli_flag(cls, path: str) -> str:
+        """The terminal's flag for the field at dotted *path*."""
+        flags: ChainMap[str, str] = ChainMap(*(vars(m).get("cli_flags", {}) for m in cls.__mro__))
+        return flags.get(path) or f"--{path.rpartition('.')[2].replace('_', '-')}"
 
     def __init_subclass__(cls, kind: CommandKind | None = None, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -457,6 +474,7 @@ class CyclePayload(CampaignPayload):
     inner_refusal: ClassVar[str | None]
     # False: a terminal names the cycle, never defaulting to the active one.
     implied_target: ClassVar[bool] = True
+    cli_flags: ClassVar[Mapping[str, str]] = {"campaign_id": "--campaign", "cycle_id": "--cycle"}
 
 
 class LoopPayload(CyclePayload):
@@ -606,6 +624,7 @@ class StartRunPayload(CyclePayload, kind=CommandKind.START_RUN):
     takes (``mode``)."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
+    cli_flags: ClassVar[Mapping[str, str]] = {"mode.from_round": "--from"}
 
     budget: Budget = Budget()
     step_rounds: WireInt | None = Field(default=None, ge=1, le=100)
@@ -660,6 +679,7 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
     A parent a producer still holds is paused by the applier once the fork's run is admitted."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
+    cli_flags: ClassVar[Mapping[str, str]] = {"round": "--rewind", "reason": "--rewind-reason"}
 
     budget: Budget = Field(
         default_factory=Budget,
@@ -1120,18 +1140,20 @@ def _fills(model: object, dotted: str) -> bool:
     return True
 
 
-# A stop's next act is a kind every door presses, filling a field its payload has; or, kind-less,
-# a field set or a file read, never both and never neither.
+def takes_act(act: NextAct) -> bool:
+    """A kind every door presses, filling a field its payload has; or, kind-less, a field set or a
+    file read, never both and never neither; a stop's checked below, a refusal's at the gate."""
+    if not act.kind:
+        return bool(act.field) != bool(act.reads)
+    model = PAYLOAD_MODEL_FOR_KIND.get(act.kind)
+    return model is not None and not act.reads and (not act.field or _fills(model, act.field))
+
+
 if _unacted := sorted(
     f"{reason}: {act.kind} {act.field} {act.reads}"
     for reason, info in STOP_REASON_INFO.items()
     for act in info.next_acts
-    if (
-        act.kind not in PAYLOAD_MODEL_FOR_KIND
-        or (act.field and not _fills(PAYLOAD_MODEL_FOR_KIND[act.kind], act.field))
-        or act.reads
-    )
-    if act.kind or bool(act.field) == bool(act.reads)
+    if not takes_act(act)
 ):
     raise RuntimeError(f"STOP_REASON_INFO next acts no kind takes: {_unacted}")
 # A secret no digest names would match two keys as one act.

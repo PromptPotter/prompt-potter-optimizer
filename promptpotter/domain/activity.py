@@ -60,13 +60,13 @@ def _arms_gate(round_num: int | None, drafts: list[Said]) -> ActivityDecision:
     """One button keeps every draft; an arm of the operator's own is written text."""
     held = "The round" if round_num is None else f"Round {round_num}"
     drafted = (
-        "Keep a draft below with `--keep <index>`, add arms of your own in the file, or both."
+        "Keep a draft below, add arms of your own, or both."
         if drafts
         else "No proposer ran: every arm this round measures is yours."
     )
     return ActivityDecision(
         title=f"{held} holds for your arms",
-        lead=f"{held} measures nothing until you answer with `submit-arms`. {drafted}",
+        lead=f"{held} measures nothing until you answer it with its arms. {drafted}",
         facts=drafts,
         reasons=[],
         actions=[

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -81,15 +80,12 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, DiagnosticError
+from promptpotter.shared.errors import ConflictError, DiagnosticError, NextAct
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.statistics import paired_mean_t
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-
-
-logger = logging.getLogger(__name__)
 
 
 _VERIFY_LIFT_CAP = 5
@@ -320,11 +316,14 @@ async def verify_candidate(
         )
         if samples is not None and samples > budget:
             raise DiagnosticError(
-                f"--samples {samples} is above this candidate's verify budget of {budget} "
+                f"{samples} samples is above this candidate's verify budget of {budget} "
                 f"({round_cells} cells per candidate per round, lifted by the "
                 f"rounds run since the last verification, capped at {len(unmeasured)} unmeasured "
                 f"and at {MAX_PASS_ROWS} per pass). "
-                f"Pass {budget} or fewer, or verify again after more rounds."
+                "Ask for fewer, or verify again after more rounds.",
+                next_acts=(
+                    NextAct(kind="verify-candidate", field="samples", value=f"{budget} or fewer"),
+                ),
             )
         # The ruler the campaign's elections read now, less the candidate under verification.
         ruler = judging_ruler(
@@ -344,14 +343,6 @@ async def verify_candidate(
             delta={} if ruler is None else ruler.delta,
         )
 
-        logger.info(
-            "verify %s (%s/%s): scoring %d new sample(s); %d already in archive for this config",
-            label,
-            hop.campaign_id,
-            hop.cycle_id,
-            len(picked),
-            len(measured_keys),
-        )
         # Bound at the candidate's round: each cell's record names one, and the pass bills there.
         enter = PassOpened(
             verification=MeasurementRole.VERIFY,
@@ -630,7 +621,9 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                 )
             except RUN_STOPS as stop:
                 info = STOP_REASON_INFO[run_stop_reason(stop)]
-                raise BenchTriggerError(f"{info.label}. {info.next_step}".strip()) from None
+                raise BenchTriggerError(
+                    f"{info.label}. {info.next_step}".strip(), next_acts=info.next_acts
+                ) from None
             finally:
                 # The verb's own clock and cost; each pass it sent banked itself as it was graded.
                 if banked is not None:

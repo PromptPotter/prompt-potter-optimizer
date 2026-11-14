@@ -407,11 +407,6 @@ async def _run_transition(
         result = layer.parse(ctx, await calls.answer(layer.reply_model(view), filled))
     except OptimizerPromptParseError as parse_err:
         # Unhandled it kills the cycle, and under L4 that voids a whole outer sample.
-        logger.error(
-            "%s: optimizer prompt parse failure — refinement discarded, prior framing kept. [%s]",
-            layer.name,
-            parse_err.diagnosis(),
-        )
         append_record(
             RoundWarningRecord(
                 kind="layer_parse_failure",
@@ -453,12 +448,7 @@ def _layer_control(fired: LayerCall, result: TransitionResult, view: PotterView)
                 layer.layer_id,
             )
         else:
-            logger.info(
-                "%s emitted terminate_proposal — cycle will exit HALTED (ABORT): %s",
-                layer.layer_id,
-                reason,
-            )
-            raise StopLoop(StopReason.OPTIMIZER_ABORT)
+            raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{layer.layer_id}: {reason}")
 
     if result.fork_proposal is not None:
         if not capability.rebase_capability:
@@ -527,16 +517,6 @@ def _rebase_request(
             else None
         ),
         hangs_from=hangs_from,
-    )
-    logger.info(
-        "%s emitted fork_proposal; %s stands the fork on round %d of %d%s%s "
-        "— cycle will exit with REBASED",
-        layer_id,
-        "it" if stand_on else "UCB",
-        branch,
-        round_num,
-        f", re-electing {stand_on}" if hangs_from is not None else "",
-        ", unlocking schema_field_rename" if unlock else "",
     )
     return request
 

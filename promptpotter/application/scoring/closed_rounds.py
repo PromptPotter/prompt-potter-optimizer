@@ -27,7 +27,7 @@ from promptpotter.infrastructure.store.io import unlink_robust, write_json
 from promptpotter.infrastructure.store.layout import ROUND_GLOB, round_number
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, derived
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.errors import MINT_FRESH, NextAct, NotFoundError
 
 
 def campaign_scorer(stores: Stores, campaign_id: str) -> Scorer | None:
@@ -116,11 +116,14 @@ def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Score
         taken = walked_rows(stores, cells, scorer)
         if len(taken) != len(walked):
             kept = {cell.key for cell in taken}
+            # The origin has no round before it: only a fresh campaign measures it again.
+            before = NextAct(kind="start-run", field="mode.from_round", value=str(close.round - 1))
+            again = "a run resumed from before it" if close.round else "only a fresh campaign"
             raise NotFoundError(
                 f"round {close.round} of cycle {hop.cycle_id} closed on answers the measurement "
                 f"archive no longer holds (samples {sorted(walked - kept)}). Its rows "
-                "cannot be read back; a `start-run` whose `mode.from_round` is before it walks it "
-                "again."
+                f"cannot be read back; {again} walks it again.",
+                next_acts=(before if close.round else MINT_FRESH,),
             )
         return taken
 

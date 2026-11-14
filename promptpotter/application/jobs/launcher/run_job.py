@@ -116,7 +116,6 @@ async def spawn_job(held: HeldRun) -> asyncio.Task[None]:
         await exited.wait()
 
     exited_task = asyncio.create_task(watch(), name=f"job-{spec.job_id}")
-    logger.info("job %s runs in process %s (log %s)", spec.job_id, child.pid, log_path)
     return exited_task
 
 

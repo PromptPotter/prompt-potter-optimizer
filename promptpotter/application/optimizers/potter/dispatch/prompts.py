@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from typing import Any
 
@@ -10,8 +9,6 @@ from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
-
-logger = logging.getLogger(__name__)
 
 
 def effective_optimizer_prompts(

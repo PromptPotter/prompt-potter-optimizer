@@ -122,7 +122,7 @@ from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
 from promptpotter.application.optimizers import nodes as node_contract
-from promptpotter.application.optimizers.capo.members import CapoObjective
+from promptpotter.application.optimizers.capo.members import CapoInit, CapoObjective
 from promptpotter.application.optimizers.gepa.members import (
     MinibatchBar,
     MinibatchBars,
@@ -366,7 +366,7 @@ from promptpotter.domain.verification import (
     VerifyPass,
     VerifyStrategy,
 )
-from promptpotter.domain.wounds import fatal_validation_failures
+from promptpotter.domain.wounds import ValidationReason, fatal_validation_failures
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import (
@@ -1653,7 +1653,7 @@ def test_only_an_invalid_measurement_bars_an_arm_from_leading() -> None:
     # A STOP IS NOT A VERDICT.
     for arm, eligible in (
         (arm_state("C1.3", cut="broken"), False),
-        (arm_state("C1.5", invalid_reason="no_op_variant"), False),
+        (arm_state("C1.5", invalid_reason=ValidationReason.NO_OP_VARIANT), False),
         (
             arm_state(
                 "C1.2",
@@ -3953,6 +3953,29 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
     assert fatal == [["forbidden_axis"], []], "an L1 edit of answer_format reached the backend"
 
 
+@pytest.mark.usefixtures("optimizing_memory")
+def test_capo_inits_reply_of_only_blank_instructions_is_one_refused_child(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # An array of blanks seeds nothing; read as in form, it left the round without one arm or a word.
+    member = cast("CapoInit", optimizers.NODE_MEMBERS.get("capo_init"))
+    with _peer_cycle(
+        workspace(tmp_path / "blank_init"),
+        _PEER_HOP,
+        monkeypatch,
+        "capo",
+        {"capo_init": {"config": {"size": 2, "k_max": 0}}},
+        lambda _p, _s: True,
+    ) as (cycle, _):
+        offline.llm.says = lambda _body: json.dumps(["  ", ""])
+        drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
+        no_cells = Panel(cells=[], order=[], block_size=0)
+        proposed = asyncio.run(member.propose(drawing, no_cells, node_contract.Proposals([])))
+    assert [p.refused for p in proposed.proposals] == [True], (
+        "a reply of blank instructions drew no child and refused none"
+    )
+
+
 # Round 3's fork offer reads the rounds the disk-faulted closes landed.
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
@@ -4158,7 +4181,7 @@ def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_drop
             assert (acks(taken), acks(untaken)) == (["accepted", "applied"], ["accepted", "voided"])
             press(PauseCyclePayload(**address), "pause-1")
             assert control.pause_requested()
-            waiting = commanded.run_state(command_hop).pause
+            waiting = commanded.run_state(command_hop).stop
             assert waiting is not None and waiting.stop_reason is None, (
                 "a pause the loop has not reached read as a run already stopped"
             )
@@ -4171,7 +4194,7 @@ def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_drop
         release_cycle(command_dir)
     paused = commanded.run_state(command_hop)
     assert paused.run_phase is RunPhase.PAUSED
-    assert paused.pause is not None and paused.pause.cause is PauseCause.COMMAND
+    assert paused.stop is not None and paused.stop.cause is PauseCause.COMMAND
     for late, key in ((skip, "skip-3"), (PauseCyclePayload(**address), "pause-2")):
         with pytest.raises(ConflictError):
             press(late, key)

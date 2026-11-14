@@ -7,6 +7,7 @@ from pydantic import Field
 from promptpotter.application.datasets.startability import dataset_reading, offered
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.dataset_start import StartBlock
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.dataset_access import (
     DatasetTier,
@@ -52,6 +53,10 @@ class DatasetIndexEntry(StrictModel):
             "``open-dataset-draft`` refuses with, worded by `START_BLOCK_WORDS`."
         ),
     )
+    refusal: Refusal | None = Field(
+        description="What refused its rows where a refusal says which field of its definition "
+        "is wrong; null otherwise."
+    )
 
 
 def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
@@ -63,6 +68,7 @@ def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
             summary=None if ref.card is None else ref.card.summary,
             n_samples=reading.n_held,
             start_block=reading.block,
+            refusal=None if reading.refused is None else Refusal.of(reading.refused),
         )
         for ref in list_readable_datasets(stores)
         if offered(stores, ref.dataset.name)

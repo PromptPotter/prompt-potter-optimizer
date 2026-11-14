@@ -16,7 +16,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     read_active_pointer,
 )
 from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
-from promptpotter.shared.errors import BadRequestError, NotFoundError
+from promptpotter.shared.errors import MINT_FRESH, BadRequestError, NextAct, NotFoundError
 
 
 def latest_launch(stores: Stores, *, inside: CyclePath = ()) -> CycleHop | None:
@@ -35,7 +35,8 @@ def launched(stores: Stores) -> CycleHop:
     """`latest_launch` for a terminal verb naming no campaign, refused where nothing ran."""
     if (hop := latest_launch(stores)) is None:
         refusal = NotFoundError(
-            "No active cycle — name its campaign and cycle, or start one with `mint-campaign`."
+            "No active cycle — name its campaign and cycle, or start one.",
+            next_acts=(MINT_FRESH,),
         )
         refusal.add_note(no_dataset_hint(stores))
         raise refusal
@@ -157,9 +158,10 @@ def resolve_cycle_id(stores: Stores, campaign_id: str, hint: str | None) -> str:
     raise BadRequestError(
         f"{hint!r} matches {len(matches)} cycles in {campaign_id!r}: {_listed(matches)}."
         if hint
-        else f"campaign {campaign_id!r} has {len(matches)} cycles; pass --cycle <prefix>. "
+        else f"campaign {campaign_id!r} has {len(matches)} cycles; name one. "
         f"Available: {_listed(matches)}.",
         code="ambiguous_id",
+        next_acts=(NextAct(field="cycle_id", value="an id prefix of one"),),
     )
 
 
@@ -183,6 +185,6 @@ def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
     try:
         campaign = named_campaign(store, hop.campaign_id)
     except NotFoundError as refused:
-        refused.add_note("Run `python -m promptpotter new <dataset>` to mint a fresh campaign.")
+        refused.next_acts = (MINT_FRESH,)
         raise
     return SessionCtx(store, campaign, hop.cycle_id)

@@ -35,7 +35,12 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import Standin
 from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, owned_campaign
-from promptpotter.shared.errors import ConflictError, CycleBusyError, PayloadInvalidError
+from promptpotter.shared.errors import (
+    MINT_FRESH,
+    ConflictError,
+    CycleBusyError,
+    PayloadInvalidError,
+)
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import Principal, acting_principal
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -74,13 +79,6 @@ def _fork_sibling_setup(
     cut = campaign_store.append(
         parent,
         decision(ForkCutFrom(from_round=from_round, fork=payload), child.cycle_id, node=None),
-    )
-    logger.info(
-        "Forked %s → %s at round %d [trigger=%s]",
-        parent.cycle_id,
-        child.cycle_id,
-        from_round,
-        payload.trigger.value,
     )
     # ONE record: the cut, the seed and the babysat stamp (decisions.md § 0005) land as one fact.
     campaign_store.mint_cycle(
@@ -138,7 +136,9 @@ def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) 
         None,
     )
     if origin is None:
-        raise ConflictError("the parent's line measured no origin to branch from")
+        raise ConflictError(
+            "the parent's line measured no origin to branch from", next_acts=(MINT_FRESH,)
+        )
     below = [held.close for r, held in sorted(standing.rounds.items()) if r < max(cut_round, 1)]
     return line_reference(below, origin=origin)
 
@@ -198,7 +198,8 @@ def cut_fork(
     if campaign_store.last(parent, PartitionRecord) is None:
         raise ConflictError(
             f"cycle {parent.cycle_id} holds no drawn partition over its chain, "
-            "so no fork can stand on it"
+            "so no fork can stand on it",
+            next_acts=(MINT_FRESH,),
         )
     standing = campaign_store.standing_rounds(parent, moment=None)
     # A rewind in place refuses past its last close (`rewind_enters`); so does the cut.

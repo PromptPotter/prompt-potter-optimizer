@@ -36,8 +36,10 @@ from processes import REPO, clone_cache, git, replace_changed, run
 BASELINE = {
     # Lines of the package's own Python: a change removes more than it adds (operator, 2026-11-13),
     # judged, not counted (2026-11-14): a raise names the substance its lines carry.
-    # webb-5b (+130): the output contract's flattening, moved from the browser (-275 lines there).
-    "package_lines": 110579,
+    # webb-5b (+138): the output contract's flattening, moved from the browser (-275 lines there).
+    # faults-1 (+12): a stop's own words served and narrated at every door, a refused send's among
+    # them; a payload field's terminal flag declared once beside the payload; refusal acts checked.
+    "package_lines": 109790,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.

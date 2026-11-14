@@ -243,7 +243,6 @@ class SampleIndex:
                 ", ".join(skipped[:5]),
                 len(rows) - len(skipped),
             )
-        logger.debug("SampleIndex refreshed: %d of %d configurations folded", moved, len(rows))
 
     @classmethod
     def ensure_for(

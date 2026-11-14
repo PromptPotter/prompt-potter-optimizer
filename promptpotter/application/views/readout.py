@@ -19,6 +19,7 @@ from promptpotter.application.views.render.candidate import (
     individual_summary,
 )
 from promptpotter.application.views.render.phase import (
+    acts_line,
     fmt_elapsed,
     render_advance_status,
     render_progress_table,
@@ -64,6 +65,7 @@ from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
+    ArmsGate,
     ElectionRecord,
     Ended,
     LLMCallProgressRecord,
@@ -204,8 +206,11 @@ class ReadoutProjection(Projection):
             self._write(render_run_spend(record.spend))
         state = record.state
         if not isinstance(state, Paused | Ended):
-            # The arms gate is its narration row.
+            # The arms gate is its narration row, then the act that answers it.
             self._say(record)
+            if isinstance(state, ArmsGate):
+                for line in acts_line(state.next_acts):
+                    self._write(f"    {line}")
             return
         # Every entry point's readout ends on why, so no completion box repeats it; this block is
         # the stop's narration row.
@@ -213,7 +218,7 @@ class ReadoutProjection(Projection):
         paused = state if isinstance(state, Paused) else None
         head, *rest = stop_lines(
             state.stop_reason,
-            detail="" if paused is None else paused.detail,
+            detail=state.detail,
             cause=None if paused is None else paused.cause,
         )
         ink = DIM if stop_reason_outcome(state.stop_reason) is StopOutcome.SUCCESS else YELLOW

@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import traceback
 from collections.abc import Sequence
-from typing import TYPE_CHECKING
 
+from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.campaign_config import (
     GateMode,
     OptimizationConfig,
@@ -35,11 +34,6 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.statistics import anytime_level_lower
 
-if TYPE_CHECKING:
-    from promptpotter.application.initialization.session import Session
-
-logger = logging.getLogger(__name__)
-
 RUN_STOPS = (StopLoop, SendRefusedError)
 # `SystemExit` and `GeneratorExit` still pass.
 RUN_ENDS = (Exception, KeyboardInterrupt, asyncio.CancelledError)
@@ -66,39 +60,30 @@ def run_stop_reason(exc: BaseException) -> StopReason:
             return StopReason.CRASHED
 
 
-def end_run_on(
-    exc: BaseException, session: Session, *, where: str
-) -> tuple[StopReason, ErrorRecord | None]:
-    """Call INSIDE the ``except``: the traceback is read off the live exception, dead by finalize."""
-    reason = run_stop_reason(exc)
-    info = STOP_REASON_INFO[reason]
+def run_stop_detail(exc: BaseException) -> str:
+    """What a run stop said of itself, its ending's `detail`: a `StopLoop`'s own words, a refused
+    send's sentence."""
     if isinstance(exc, SendRefusedError):
-        logger.warning("Run halted: %s", exc)
-    elif isinstance(exc, asyncio.CancelledError):
-        logger.warning(
-            "Optimization cancelled %s (%s); finalizing as paused (resumable).",
-            where,
-            session.cycle_id,
-        )
-    elif isinstance(exc, KeyboardInterrupt):
-        logger.warning("Optimization paused %s (%s).", where, str(exc) or "user-initiated")
+        return refusal_words(exc)
+    return exc.detail if isinstance(exc, StopLoop) else ""
+
+
+def end_run_on(exc: BaseException) -> tuple[StopReason, ErrorRecord | None, str]:
+    """Call INSIDE the ``except``: the traceback is read off the live exception, dead by finalize.
+    Answers the stop, its error record where it failed, and `run_stop_detail`."""
+    reason, detail = run_stop_reason(exc), run_stop_detail(exc)
+    info = STOP_REASON_INFO[reason]
     if info.outcome is not StopOutcome.FAILED:
-        return reason, None
-    tb: str | None = None
-    if info.has_traceback:
-        tb = traceback.format_exc()
-        logger.exception("Optimization ended %s: %s.", where, info.label)
-    else:
-        logger.warning("Optimization ended %s: %s — %s", where, info.label, exc)
+        return reason, None, detail
     record = ErrorRecord.raised(
         exc,
         kind=type(exc).__name__,
         stop_reason=reason,
-        traceback=tb,
+        traceback=traceback.format_exc() if info.has_traceback else None,
         round=current_round(),
     )
     append_record(record)
-    return reason, record
+    return reason, record, detail
 
 
 def origin_gate_tripped(health: DegradationHealth, mode: GateMode) -> StopReason | None:

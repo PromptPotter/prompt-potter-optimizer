@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import logging
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
@@ -71,7 +70,6 @@ from promptpotter.domain.command_events import CommandLanded, draft_subject, sub
 from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
-from promptpotter.domain.phases import NextAct
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import CapabilityMenu, NodeSearchNarrowing, PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
@@ -96,14 +94,11 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import validate_path_component
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, PayloadInvalidError
+from promptpotter.shared.errors import ConflictError, NextAct, PayloadInvalidError
 
 if TYPE_CHECKING:
     from promptpotter.application.datasets.authored import ConfigLayers
     from promptpotter.application.initialization.session import Session
-
-
-logger = logging.getLogger(__name__)
 
 
 def refuse_unrunnable(
@@ -295,8 +290,6 @@ class ConfigDriftError(ConflictError):
         capabilities_moved: list[str],
         revision_moved: str | None,
     ) -> None:
-        # The act past it, which every door words: a fresh campaign on the same dataset.
-        self.next_act = NextAct("mint-campaign", "dataset_name", campaign.dataset_name)
         causes: list[str] = []
         if drift is not None:
             moved = ", ".join(drift.moved())
@@ -324,8 +317,11 @@ class ConfigDriftError(ConflictError):
                 "defaults_pin_moved": drift is not None,
                 "capabilities_moved": capabilities_moved,
                 "backend_revision_moved": revision_moved is not None,
-                "next_act": self.next_act._asdict(),
             },
+            # A fresh campaign on the same dataset, which every door words.
+            next_acts=(
+                NextAct(kind="mint-campaign", field="dataset_name", value=campaign.dataset_name),
+            ),
         )
 
 
@@ -432,9 +428,12 @@ def _refuse_off_record(
             f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} differs from {stood_by} on "
             f"{'; '.join(_differs_line(n, stood[n], running[n]) for n in differs)}, so it would "
             "not be graded on that bench set. Nothing was minted: declare the arms alike, or name "
-            "a new head-to-head id (`cycles` lists the taken ones).",
+            "a new head-to-head id.",
             code="arm_off_bench_set",
             details={"differs_on": differs, "declared_origin": record.origin, "arms": dict(arms)},
+            next_acts=(
+                NextAct(field="head_to_head.head_to_head_id", value="one no head-to-head holds"),
+            ),
         )
     if (taken := arms.get(arm.arm_key)) is not None:
         raise ConflictError(
@@ -580,7 +579,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     campaigns.create_campaign(campaign)
     # The name labels the bank its newest campaign declares, an L4 inner cell's as every other.
     session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
-    logger.info("Minted fresh campaign %s — cycle %s", hop.campaign_id, hop.cycle_id)
     return session
 
 
@@ -706,7 +704,6 @@ async def _mint_after_framing(
                         for f in node.prompt_fields
                     ),
                 )
-        logger.info("Committed task framing for %s from its check-in", session.dataset_name)
         framed = [
             replace(
                 plan,

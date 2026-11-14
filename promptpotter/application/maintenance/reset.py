@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import contextlib
-import logging
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
@@ -33,8 +32,6 @@ from promptpotter.infrastructure.store.layout import (
     tenant_workspace,
 )
 from promptpotter.shared.errors import ConflictError
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,7 +200,6 @@ def resetting(plan: ResetPlan, registry: JobRegistry) -> Iterator[None]:
         if in_inner_sandbox(root):
             with contextlib.suppress(OSError):
                 root.rmdir()
-    logger.info("reset: removed %d file(s), kept %d", len(plan.drops), plan.kept)
 
 
 def apply_reset(plan: ResetPlan) -> None:

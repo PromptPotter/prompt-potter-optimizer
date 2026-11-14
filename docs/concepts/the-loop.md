@@ -37,7 +37,8 @@ first match wins, once per round. Which preemptors fire L2 before patience runs 
 
 A *healthy* round is L1-critique's job; a *systemic fault* (evidence starvation) routes to L2, which self-heals
 or — on a fault no prompt move can fix — emits `terminate_proposal`, the one stop a layer authors: the run halts
-with a human-action request carrying the backend's reason, and the operator fixes it and `resume`s.
+on `optimizer_abort`, its stop carrying the layer's reason to every door (the served `stop`, the chat, the
+readout), and the operator fixes the backend and `resume`s.
 
 ## Origin and check-in
 

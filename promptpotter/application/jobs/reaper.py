@@ -51,7 +51,6 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
         except OSError as exc:
             logger.warning("could not reclaim orphan inner sandbox %s: %s", sandbox, exc)
             continue
-        logger.info("reclaimed orphan inner sandbox %s (owner cycle gone)", sandbox.name)
         reclaimed += 1
     return reclaimed
 
@@ -79,8 +78,6 @@ def sweep_dead_cycles(projects_root: Path) -> int:
         for tenant in sorted(projects_root.iterdir() if projects_root.is_dir() else ())
         if campaigns_root_dir_for(WorkspaceDir(tenant)).is_dir()
     )
-    if reaped:
-        logger.info("sweep stamped %d dead cycle(s) terminal", reaped)
     return reaped
 
 

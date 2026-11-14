@@ -393,9 +393,7 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
             # never a definition moved while the job waited.
             refuse_campaign(stores, campaign_at(stores, hop))
 
-    t0 = time.perf_counter()
     await refuse_unreachable(request.connector(stores), request.endpoint(stores))
-    t_probe = time.perf_counter()
     declared, asked = declare_run_budget(
         request.declared_budget(stores), stores=stores, hop=hop, requested=request.budget
     )
@@ -410,16 +408,6 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
         hop=hop,
         step_rounds=request.step_rounds,
         sends=request.sends(stores),
-    )
-    t_caps = time.perf_counter()
-
-    logger.info(
-        "admission[%s %s]: probe=%.2fs wallet=%.2fs (job %s)",
-        request.verb,
-        request.dataset_name,
-        t_probe - t0,
-        t_caps - t_probe,
-        job.job_id,
     )
     return held
 

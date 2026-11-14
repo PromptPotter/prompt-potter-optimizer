@@ -62,6 +62,7 @@ from promptpotter.presentation.terminal.server_banner import render_server_banne
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     ContentTooLargeError,
+    NextAct,
     PayloadInvalidError,
     PotterError,
     UnauthorizedError,
@@ -187,6 +188,7 @@ def _error_response(
     code: str,
     message: str,
     details: dict[str, object] | None = None,
+    next_acts: tuple[NextAct, ...] = (),
     headers: Mapping[str, str] | None = None,
     exc_info: bool = False,
     banked: bool = True,
@@ -216,7 +218,13 @@ def _error_response(
             f"{request.method} {request.url.path} -> {status} {code}{reason} [{error_id}]{facts}: {message}",
             status,
         )
-    body = ErrorEnvelope(code=code, message=message, error_id=error_id, details=details or {})
+    body = ErrorEnvelope(
+        code=code,
+        message=message,
+        error_id=error_id,
+        details=details or {},
+        next_acts=next_acts,
+    )
     return JSONResponse(status_code=status, content=body.model_dump(mode="json"), headers=headers)
 
 
@@ -229,6 +237,7 @@ async def potter_error_handler(request: Request, exc: PotterError) -> JSONRespon
         code=refused.code,
         message=refused.message,
         details=refused.details,
+        next_acts=refused.next_acts,
         headers=(
             {"Retry-After": str(math.ceil(exc.retry_after_s))}
             if isinstance(exc, RateLimitedError)

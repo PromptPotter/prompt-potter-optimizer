@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import logging
 from collections.abc import Mapping, Sequence
 from typing import NamedTuple
 
@@ -74,8 +73,6 @@ from promptpotter.infrastructure.llm.telemetry import append_record, current_rou
 from promptpotter.infrastructure.run_scope import RunScope, scoped
 from promptpotter.shared.errors import PromptCompositionError
 
-logger = logging.getLogger(__name__)
-
 # Selection still runs under no ceiling, so the preview path is the ONE composition path.
 _NO_CEILING = 1 << 30
 
@@ -95,13 +92,6 @@ def _cap_runaway(name: str, items: list[Item], cap: int) -> list[Item]:
         used += step
     if not kept:
         kept = [Item(items[0].text[:cap] + "…", items[0].trusted)]
-    logger.warning(
-        "injection %r rendered %d chars over its %d-char backstop — %d item(s) dropped",
-        name,
-        total - cap,
-        cap,
-        len(items) - len(kept),
-    )
     append_record(
         RoundWarningRecord(
             kind="injection_budget_overrun",

@@ -49,6 +49,7 @@ from promptpotter.shared.errors import (
     FileUnreadableError,
     NotFoundError,
     PayloadInvalidError,
+    PotterError,
 )
 from promptpotter.shared.extras import Extra, install_hint, installed
 
@@ -124,6 +125,8 @@ class DatasetReading:
 
     n_held: int | None
     block: StartBlock | None
+    # What refused it, where a refusal says why its rows could not be read.
+    refused: PotterError | None = None
 
 
 def dataset_reading(stores: Stores, name: str) -> DatasetReading:
@@ -134,13 +137,15 @@ def dataset_reading(stores: Stores, name: str) -> DatasetReading:
         return DatasetReading(None, StartBlock.MISSING_EXTRA)
     try:
         held = held_bank(stores, dataset)
+        block = _held_block(dataset, held)
     except BackendUnreachableError:
         return DatasetReading(None, StartBlock.BACKEND_UNREACHABLE)
-    except (FileUnreadableError, PayloadInvalidError, ValueError, OSError):
+    except (FileUnreadableError, PayloadInvalidError) as refused:
+        return DatasetReading(None, StartBlock.UNREADABLE, refused)
+    except (ValueError, OSError):
         logger.exception("datasets: %s could not be read for the listing", name)
         return DatasetReading(None, StartBlock.UNREADABLE)
-    n_held = None if held is None else len(held.samples)
-    return DatasetReading(n_held, _held_block(dataset, held))
+    return DatasetReading(None if held is None else len(held.samples), block)
 
 
 def checkin_bank(stores: Stores, name: str) -> Bank:

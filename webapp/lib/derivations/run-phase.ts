@@ -3,9 +3,9 @@ import {
   type HierarchyState,
   type LookaheadDepth,
   type NextAct,
-  type PauseReading,
   type RunPhase,
   type SampleLookahead,
+  type StopReading,
   type StopReason,
   DASHBOARD_STATE_PAUSE_WORDS,
   LOOKAHEAD_WORDS,
@@ -34,6 +34,7 @@ const ACT_CONTROL: Record<Exclude<NextAct["kind"], "">, string> = {
   "verify-candidate": "Verify",
   "mint-campaign": "New campaign",
   "fork-cycle": "Steer-fork",
+  "submit-arms": "Submit arms",
 };
 
 /** An act past a stop in the browser's words: the control it presses and the field it fills, or
@@ -44,26 +45,26 @@ function actText(act: NextAct): string {
   return [act.kind && ACT_CONTROL[act.kind], field].filter(Boolean).join(" ");
 }
 
-/** A stop's step and the acts the cycle's admission offers, as one line: a campaign that
- * refuses a launch (served `launch_refusal`) offers no `start-run`. */
-function stopNextStep(reason: StopReason, launchRefusal: string): string {
-  const info = STOP_REASON_INFO[reason];
+/** *said*, then the acts past it in the browser's words: a stop's or a refusal's. */
+export function withActs(said: string, acts: readonly NextAct[]): string {
+  const spelled = [...new Set(acts.map(actText))];
+  return spelled.length > 0 ? `${said} Next: ${spelled.join("; ")}.`.trim() : said;
+}
+
+/** A stop as served, then its step and the acts the cycle's admission offers — a pause asked and
+ * not yet reached, where the run stops. A campaign that refuses a launch (served
+ * `launch_refusal`) offers no `start-run`. */
+export function stopNote(stop: StopReading, launchRefusal: string): string {
+  if (stop.stop_reason === null) return `${stop.said} — ${RUN_PHASE_INFO.paused.parked}`;
+  const info = STOP_REASON_INFO[stop.stop_reason];
   const offered = info.next_acts.filter((act) => !(launchRefusal && act.kind === "start-run"));
-  const acts = [...new Set(offered.map(actText))];
-  return acts.length > 0 ? `${info.next_step} Next: ${acts.join("; ")}.`.trim() : info.next_step;
+  const next = withActs(info.next_step, offered);
+  return next ? `${stop.said} — ${next}` : stop.said;
 }
 
-/** What the operator does now, as the run's stop reason states it; empty where it owes nothing. */
+/** What the run's stop said and what the operator does now; empty where it has not stopped. */
 export function runNextStep(state: HierarchyState): string {
-  const reason = state.status.stop_reason;
-  return reason === null ? "" : stopNextStep(reason, state.admission.launch_refusal);
-}
-
-/** A pause's next step: its stop reason's, or — asked, not yet reached — where the run stops. */
-export function pauseNextStep(pause: PauseReading, launchRefusal: string): string {
-  return pause.stop_reason === null
-    ? RUN_PHASE_INFO.paused.parked
-    : stopNextStep(pause.stop_reason, launchRefusal);
+  return state.stop === null ? "" : stopNote(state.stop, state.admission.launch_refusal);
 }
 
 /** How many more cells the spend limits admit, where money holds the walk. */

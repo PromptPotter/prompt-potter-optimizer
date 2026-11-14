@@ -36,7 +36,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import PayloadInvalidError
+from promptpotter.shared.errors import NextAct, PayloadInvalidError
 
 
 class OptimizerRoundPrice(FrozenModel):
@@ -175,9 +175,12 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     if cell is None:
         raise PayloadInvalidError(
             f"no archive row prices a cell of {plan.dataset_name} on the models it runs, so "
-            "there is no measured price to read. Buy one with a campaign's origin round "
-            f"(`new {plan.dataset_name}`), whose cells the archive files.",
+            "there is no measured price to read. Buy one with a campaign's origin round, whose "
+            "cells the archive files.",
             code="cell_unpriced",
+            next_acts=(
+                NextAct(kind="mint-campaign", field="dataset_name", value=plan.dataset_name),
+            ),
         )
     names = {select_optimizer(c.optimization).name for c in configs}
     return priced_head_to_head(

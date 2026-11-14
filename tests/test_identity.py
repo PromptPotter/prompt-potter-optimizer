@@ -318,6 +318,7 @@ from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
+    FRAMING_FILE,
     DatasetCard,
     ResolvedDataset,
     campaign_defaults,
@@ -325,6 +326,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     list_readable_datasets,
     read_dataset_definition,
     read_dataset_pipeline,
+    read_framing_file,
     resolve_dataset,
     runnable_definition,
     with_node_templates,
@@ -1317,6 +1319,15 @@ def test_one_torn_definition_file_answers_one_way_at_every_door(
             FileKind.STORED_CONFIG,
             str(install_root / "miscarded" / DEFINITION_FILE),
         ), "a malformed card ran, or one file answered two ways"
+
+
+def test_a_framing_nested_past_the_yaml_depth_bound_is_a_torn_file(tmp_path: Path) -> None:
+    # The loader's composer recurses: unbounded, the deep front matter ends the read in no refusal.
+    framing = tmp_path / FRAMING_FILE
+    framing.write_text("---\n" + "[" * 5000 + "]" * 5000 + "\n---\nbody\n", encoding="utf-8")
+    with pytest.raises(FileUnreadableError) as torn:
+        read_framing_file(framing)
+    assert torn.value.kind is FileKind.STORED_CONFIG, "a deep framing file read as another fault"
 
 
 def test_the_listing_reads_each_card_and_never_the_research_tier(tiered: Stores) -> None:

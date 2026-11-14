@@ -596,12 +596,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   Action: each knot is cut at its root, held by `complexity_ledger.py::_type_cycles`. **Rides with:**
   layers. **Re-test:** the `type_cycles` row of `BASELINE` falls to 0.
 
-### docs (beside any chain: `docs/concepts/` and `docs/methods/` rewritten to the code)
-
-- **Concept and method docs state what the code does not** (the rest of a docs-vs-code pass; the docs
-  chain rewrote the others): `the-loop.md:38-40`'s `terminate_proposal` line waits on the faults row that
-  makes the abort report. **Rides with:** faults. **Re-test:** the line re-read against its code.
-
 ### bkeys-2 (what bkeys left at its landing)
 
 - **A rename re-keys every banked L4 cell**: the estimator id hashes its modules' source, so rn-conn's
@@ -821,11 +815,8 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `application/` and `domain/`, banned at the gate as `gate.py::_IMPORTS_OPTIMIZER` bans an optimizer
   import. Invariant: the gate lists every `except` there that neither raises nor hands its fault on, and
   the list is empty.
-  **Rides with:** faults 1. **Re-test:** `git grep -l "^import logging" -- promptpotter/application`.
-- **The wound map has no home** (`docs/developer/self-healing-internals.md`, deleted at batch/21). Action:
-  its two-axis table and `classify_result`'s two row rules become `domain/results_health.py::classify_result`'s
-  docstring, from `git show d9012dc0e:docs/developer/self-healing-internals.md`. **Rides with:** faults.
-  **Re-test:** `git grep -n "NurseOwner" -- promptpotter/domain/results_health.py` is non-empty.
+  **Rides with:** faults 2 (faults 1 cut the logs no reader needed: 41 modules import `logging`).
+  **Re-test:** `git grep -l "^import logging" -- promptpotter/application`.
 - **A `derived_file_stale` warning names the projection's class, never the file it could not write**:
   `read_model.py::LedgerIndex.shielded` has only the `Projected` protocol, which carries no path. Action:
   a `derives` ClassVar on each `Projected`, which the warning names. **Rides with:** faults 1, a fault
@@ -844,39 +835,23 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `Refusal`'s own message. Root: the phase's refusal is a `Refusal` with its `next_acts`.
   **Rides with:** faults 2, after faults 1's `next_acts`. **Re-test:**
   `git grep -nE "no_action|\.parked\b" -- promptpotter/domain/phases.py` is empty.
-- **A text node's form failure has three answers**: capo's init out of form ends the cycle `crashed`,
-  gepa's `fenced` reads an unfenced reply as the instruction (so its form never fails), and every other
-  text node (capo's crossover, levi's seed and refine, potter's L1 and L2) refuses its child. det's
-  `wounded/` legs drive the third; the first cannot sit in a green leg. Action: one answer, the child
-  refused as a fault value; capo's init and gepa's `fenced` read it. Decisions move on the wounded legs
-  only: name them. **Rides with:** faults 1. **Re-test:** a capo init and a gepa reflect out of form each
-  read as a refused child on `wounded/`.
-- **`ValidationFailure.reason`'s description lists its codes by hand**: it named the dead
-  `PARSE_FAILURE_WRONG_TYPE` and omits `l1_all_no_op_variants`; the text is hashed into every treatment
-  digest (det 2 moved all five). Action: the codes are an enum the field types, and the description
-  goes. **Rides with:** faults 1. **Re-test:** the field's type is the enum.
-- **A refusal carries prose, a stop carries acts** (✓, a refusal census: 337 `PotterError` raises): a
-  refusal is `domain/refusal.py::Refusal` {code, message, details} while a run stop carries
-  `next_acts: tuple[NextAct]` (`phases.py:495-522`) each door spells, so 20 served refusals spell CLI flags
-  or verbs (`passes.py:333` `--samples`;
-  `store.py:592` `--from`; `entry.py:477` `--diag`; `cycle_addressing.py:134`, `loaders.py:575`,
-  `preflight.py:212-213` and `:308` say `mint-campaign`, wrong at the terminal too, where the CLI verb is `new`), and ~12 of 74 409s name no next step (`session.py:154`,
-  `fork_siblings.py:141`, `store.py:523`, `passes.py:512-531`, `passes.py:639`, `scoring_scope.py:148`).
-  Root: `Refusal` carries `next_acts`, each door spells the act, and no message names a verb or flag
-  (`phases.py:522`'s rule extended); this subsumes the `ConfigDriftError` row. Beside it (✓): a definition whose
-  `source:` lacks recipe or rev raises a bare `ValueError` (`loaders.py:87,104`), swallowed by the listing
-  into "Its samples could not be read on this install" (`startability.py:143-145`) and a 500 at start
-  (`main.py:270-279`) (root: `Source.of` raises a refusal naming the field); ✓ `OPTIMIZER_ABORT` has an
-  empty `next_step` and no acts (`phases.py:614-616`) and its reason is only logged (`escalation.py:516-531`),
-  a state the system enters but cannot report. **Rides with:** faults 1.
-- **A deep YAML ends the process, never a refusal** (faults-w's landing): `store/io.py::parse_yaml` loads
-  with `CSafeLoader`, so `"["*5000+"1"+"]"*5000` exits the interpreter with no exception (depth 2000
-  parses). The server writes those files, so no tenant path is shown yet. Root: one depth bound where
-  `parse_yaml` reads. **Rides with:** faults. **Re-test:** that text raises `ValueError`.
-- **Reported beside faults-w** (verify first): `commands/launching.py::launch_cancels`' refusal names
-  "the launch's ledger", not a path; `llm/registry.py`'s cached `RateLimiter._lock` stays bound to its
-  event loop across `asyncio.run`; `scoring/formula/compiler.py`'s refusal message carries the whole
-  formula. **Rides with:** faults.
+- **An origin gate's last error reaches a log alone** (faults-1's report): `DegradationHealth.last_error`
+  is read only by `runner/loop.py`'s `logger.error` at the origin-gate halt, so the readout and the
+  browser never say why round 0 was graded unhealthy. Root: the stop's served detail (`Ended.detail`, as
+  `OPTIMIZER_ABORT` carries it) holds it. **Rides with:** faults 2. **Re-test:** an `ORIGIN_GATE`
+  readout names the origin's last error, and the log goes.
+- **Three refusals sit outside the act rule** (faults-1's report): `campaign_store/store.py`'s
+  `mint_cycle` / `cycle_minted_otherwise` 409 names no next act; `maintenance`'s `LANDING_REMEDY` and
+  harbor's pin-roster `ValueError` name `land-data` and a terminal verb in prose, outside the
+  `refusal-words` scan because no command kind exists for them. Root: each is a `Refusal` with its
+  `next_acts`. **Rides with:** faults 2. **Re-test:** `refusal-words` scans all three.
+- **Three served acts reach no door** (faults-1's review): `origin_listing.py::DatasetIndexEntry.refusal`
+  has no webapp or CLI reader; `webapp/lib/hooks/useQueuedStart.ts`'s `said` carries a refusal's
+  message without its `next_acts`; `run_records.py::ArmsGate.next_acts` is a `ClassVar`, so no wire
+  field carries it and `run-phase.ts`'s "Submit arms" control is never fed an act. Root: an act a
+  refusal or a hold names rides the row it is served on, and every door reads it there.
+  **Rides with:** faults 2. **Re-test:** each of the three is read by the webapp (a `withActs` call)
+  and by the CLI (`acts_line`).
 
 ### lite-2 (what lite left at its landing)
 

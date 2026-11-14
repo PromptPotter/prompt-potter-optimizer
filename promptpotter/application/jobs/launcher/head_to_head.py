@@ -185,14 +185,6 @@ class AdmittedHeadToHead(LaunchOutcome):
         finally:
             if isinstance(self.source, CheckinArms):
                 self.source.claim.release()
-        logger.info(
-            "head-to-head %s: minted %s",
-            self.request.head_to_head_id,
-            ", ".join(
-                f"{arm.arm_key}={cycle.hop.campaign_id}"
-                for arm, cycle in zip(self.request.arms, minted, strict=True)
-            ),
-        )
         # Each arm's session is the source's, which `launched` closes past every hand-off.
         return [
             HeldArm(arm.arm_key, HeldRun.of(start, cycle, held, AsyncExitStack(), RunMode()))

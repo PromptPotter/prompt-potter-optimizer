@@ -11,6 +11,7 @@ from promptpotter.domain.pipeline_params import lay_nodes
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
+from promptpotter.domain.wounds import ValidationReason
 
 
 class L1Layout(StrictModel):
@@ -123,7 +124,7 @@ class L1Readout(RoundOutput, kind="l1_readout"):
     # ``None`` where nothing was proposed: a share of zero proposals is no yield.
     l1_yield: float | None = None
     l1_proposed: int = 0
-    l1_rejected: dict[str, int] = Field(default_factory=dict)
+    l1_rejected: dict[ValidationReason, int] = Field(default_factory=dict)
     # ``None`` where no call was composed: round 0.
     l1_citable: list[str] | None = None
     l1_exploration_budget: str | None = None

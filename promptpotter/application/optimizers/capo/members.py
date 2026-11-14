@@ -36,6 +36,7 @@ from promptpotter.application.optimizers.paper_templates import (
     rewritten,
     shown,
     task_description,
+    unmarked,
 )
 from promptpotter.application.optimizers.variation.members import Survival, SurvivalKnobs
 from promptpotter.domain.arm_reading import DisplayMetric
@@ -481,6 +482,19 @@ class CapoInitKnobs(RewriteKnobs):
     )
 
 
+def _instructions(raw: str) -> list[str] | None:
+    """The reply's array of instructions, stripped; ``None`` out of form, an array holding no
+    non-blank string included."""
+    start, end = raw.find("["), raw.rfind("]")
+    try:
+        listed = ast.literal_eval(raw[start : end + 1]) if 0 <= start < end else None
+    except (ValueError, SyntaxError):
+        return None
+    if not isinstance(listed, list) or not all(isinstance(s, str) for s in listed):
+        return None
+    return [s.strip() for s in listed if s.strip()] or None
+
+
 class CapoInit(nodes.Proposer):
     """Draws the initial population, which sets the objective every later race and selection ranks on."""
 
@@ -509,11 +523,8 @@ class CapoInit(nodes.Proposer):
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         knobs = ctx.knobs(CapoInitKnobs)
         raw = await ctx.read(Calls).ask(init_prompt(ctx))
-        start, end = raw.find("["), raw.rfind("]")
-        listed = ast.literal_eval(raw[start : end + 1]) if 0 <= start < end else None
-        if not isinstance(listed, list) or not all(isinstance(s, str) for s in listed):
-            raise ValueError(f"{self.name} answered no array of instructions: {raw[:300]!r}")
-        instructions = [s.strip() for s in listed if s.strip()]
+        listed = _instructions(raw)
+        instructions = listed or []
         pool = [s.key for s in ctx.drawn(DemoPool)]
         target = ctx.read(Target)
         node = target.prompt_node
@@ -521,10 +532,17 @@ class CapoInit(nodes.Proposer):
         rng = ctx.read(Replay).rng()
         drawn = rng.sample(instructions, min(knobs.size, len(instructions)))
         children = ctx.read(Children)
+        origin = ctx.read(Lineage).origin
+        # Out of form, the reply is one child refused, as every text node's is (`paper_templates.py`).
         initial = nodes.Proposals(
-            [
+            (
+                []
+                if listed is not None
+                else [children.child([origin], failures=[unmarked(self.name, raw)])]
+            )
+            + [
                 children.child(
-                    [ctx.read(Lineage).origin],
+                    [origin],
                     prompt_loci={
                         **rewritten(ctx, node, text),
                         shots: rng.sample(pool, min(rng.randint(0, knobs.k_max), len(pool))),
@@ -534,9 +552,8 @@ class CapoInit(nodes.Proposer):
                 for n, text in enumerate(drawn)
             ]
         )
-        live = [p.individual for p in initial.proposals if not p.refused]
-        if not live:
-            raise ValueError(f"{self.name} drew no initial individual that passed validation")
+        # The longest initial prompt that stands; where none stands, the origin each was drawn from.
+        live = [p.individual for p in initial.proposals if not p.refused] or [origin]
         ctx.put(
             CapoObjective(
                 length_penalty=knobs.length_penalty,

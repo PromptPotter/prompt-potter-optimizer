@@ -75,6 +75,7 @@ from promptpotter.infrastructure.store.user_store import User
 from promptpotter.shared.errors import (
     BudgetUnenforceableError,
     LaunchRefusalReason,
+    NextAct,
     NotFoundError,
     PayloadInvalidError,
     PotterError,
@@ -97,10 +98,6 @@ class QuotaExceededError(PotterError):
     serves 429 (`RateLimitedError`). Both map to one HTTP response through the ``PotterError`` seam."""
 
     http_status = 409
-
-    def __init__(self, *, code: str, message: str) -> None:
-        super().__init__(message)
-        self.code = code
 
 
 # Per process: survives the request scope, not a restart, and each server grants a stranger its
@@ -635,9 +632,9 @@ def share_campaign_ceiling(
             message=(
                 f"This campaign's ceiling ({money_text(money)}) is used up: "
                 f"{money_text(spent, on=money)} {CEILING_METER_LABELS[meter]}{held} the campaign's "
-                "ceiling "
-                "with `set-limits`."
+                "ceiling."
             ),
+            next_acts=(NextAct(kind="set-limits"),),
         )
     return left.bound_over(stores.campaigns.cycle_metered(hop, meter))
 
@@ -712,8 +709,9 @@ def _refuse_unshared(
                         f"Only one of this launch and cycle {other.cycle_id} holds a {axis} "
                         f"ceiling ({unbounded} runs with none), and a campaign's {axis} ceiling "
                         "binds every live cycle or none. Pause the other one, or move the "
-                        "campaign's ceiling with `set-limits`."
+                        "campaign's ceiling."
                     ),
+                    next_acts=(NextAct(kind="set-limits", field=f"budget.{axis}"),),
                 )
 
 

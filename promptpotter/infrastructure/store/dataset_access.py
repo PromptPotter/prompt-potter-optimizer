@@ -290,9 +290,9 @@ def dataset_framing(raw: bytes) -> DatasetFraming:
     if m is None:
         return DatasetFraming(text.strip(), TaskDecomposition())
     try:
-        fields = yaml.safe_load(m.group(1)) or {}
-    except yaml.YAMLError as exc:
-        raise ValueError(f"front matter is not valid YAML — {exc}") from exc
+        fields = parse_yaml(m.group(1)) or {}
+    except ValueError as exc:
+        raise ValueError(f"front matter is {exc}") from exc
     if not isinstance(fields, dict):
         raise ValueError("front matter must be a mapping")
     body = text[m.end() :].strip()

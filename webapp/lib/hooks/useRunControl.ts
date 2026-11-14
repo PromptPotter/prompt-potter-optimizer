@@ -2,7 +2,7 @@ import { useState } from "react";
 import { commands, cycleAddress } from "@/lib/api";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import type { RunAdmission } from "@/lib/api/types";
-import { pauseNextStep, phasePauseLabel, phaseWalks } from "@/lib/derivations";
+import { phasePauseLabel, phaseWalks, stopNote } from "@/lib/derivations";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useWorkspace } from "@/lib/state/workspace";
 
@@ -16,8 +16,8 @@ interface RunControl {
   failure: CommandFailure | null;
   label: string;
   noneReason: string | null;
-  // served: `dash.pause`; null in every other phase.
-  pauseNote: string | null;
+  // served: `dash.stop`; null while the cycle has not stopped.
+  stopNote: string | null;
   toggle: () => void;
   // Launch the cycle for *rounds* closed rounds, then pause it as `stepped`; null while it runs.
   step: ((rounds: number) => void) | null;
@@ -33,7 +33,7 @@ export function useRunControl(): RunControl | null {
   const runPhase = dash?.run_phase;
   const admission = dash?.admission;
   const action = admission?.offers ?? null;
-  const pause = dash?.pause ?? null;
+  const stop = dash?.stop ?? null;
 
   const [prevRunPhase, setPrevRunPhase] = useState(runPhase);
   if (runPhase !== prevRunPhase) {
@@ -79,9 +79,7 @@ export function useRunControl(): RunControl | null {
     label: action === "pause" ? "Pause run" : action === "resume" ? "Resume run" : "Start run",
     // No dashboard yet: a warming cycle's launch is already in flight.
     noneReason: admission === undefined ? "Starting up…" : admission.refusal || null,
-    pauseNote: pause
-      ? `${pause.said} — ${pauseNextStep(pause, admission?.launch_refusal ?? "")}`
-      : null,
+    stopNote: stop ? stopNote(stop, admission?.launch_refusal ?? "") : null,
     toggle,
     step: action === null || action === "pause" ? null : step,
   };

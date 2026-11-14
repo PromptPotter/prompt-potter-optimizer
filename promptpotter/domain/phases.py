@@ -8,7 +8,7 @@ from pydantic import Field, computed_field
 
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.errors import ErrorCategory
+from promptpotter.shared.errors import ErrorCategory, NextAct
 from promptpotter.shared.worded import Worded
 
 
@@ -123,25 +123,31 @@ class PauseCause(enum.StrEnum):
     OWED = "owed"
 
 
-def paused_by(cause: PauseCause, detail: str) -> str:
-    """A pause's cause as every door words it: "Paused by interrupt"."""
-    return f"Paused by {cause.value}" + (f": {detail}" if detail else "")
+def stop_said(stop_reason: StopReason | None, *, cause: PauseCause | None, detail: str) -> str:
+    """A stop as every door words it: its label, a pause's its cause ("Paused by interrupt"), then
+    what said so, in the declarer's own words."""
+    if cause is not None:
+        label = f"Paused by {cause.value}"
+    else:
+        assert stop_reason is not None, "a stop no pause caused names its reason"
+        label = STOP_REASON_INFO[stop_reason].label
+    return f"{label}: {detail}" if detail else label
 
 
-class PauseReading(FrozenModel):
-    """Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach."""
+class StopReading(FrozenModel):
+    """Why a cycle reads stopped: its declared stop, or an accepted pause not yet reached."""
 
     stop_reason: StopReason | None = Field(
         description="Null on an accepted pause the loop has yet to reach."
     )
-    cause: PauseCause
-    detail: str = Field(description="Who or what asked, in the declarer's own words.")
+    cause: PauseCause | None = Field(description="What paused it; null on a run that ended.")
+    detail: str = Field(description="Who asked, or what its raiser said, in its own words.")
     at: str
 
-    @computed_field(description="SERVED: the cause as every door words it (`paused_by`).")  # type: ignore[prop-decorator]
+    @computed_field(description="SERVED: the stop as every door words it (`stop_said`).")  # type: ignore[prop-decorator]
     @property
     def said(self) -> str:
-        return paused_by(self.cause, self.detail)
+        return stop_said(self.stop_reason, cause=self.cause, detail=self.detail)
 
 
 class ProducerState(enum.StrEnum):
@@ -262,12 +268,11 @@ class RunState(NamedTuple):
 
     run_phase: RunPhase
     producer: ProducerReading
-    pause: PauseReading | None = None
+    # Set where the cycle reads paused or terminal: its stop, whose next acts its relaunch fills.
+    stop: StopReading | None = None
     inner: bool = False
     gate: GateKind | None = None
     drafts: int = 0
-    # A terminal cycle's declared stop, whose next acts its relaunch fills.
-    ended: StopReason | None = None
 
     @property
     def resumable(self) -> bool:
@@ -447,7 +452,7 @@ class RunAdmission(FrozenModel):
         refuses_launch = bool(campaign_refusal) and info.action in ("resume", "start")
         if refuses_launch and offers is not None:
             offers, refusal = None, campaign_refusal
-        stop = run.ended or (None if run.pause is None else run.pause.stop_reason)
+        stop = None if run.stop is None else run.stop.stop_reason
         acts = () if stop is None or pausing or refuses_launch else STOP_REASON_INFO[stop].next_acts
         return cls(
             offers=offers,
@@ -513,26 +518,6 @@ class StopCategory(enum.StrEnum):
     FAILURE = "failure"
 
 
-class NextAct(NamedTuple):
-    """A remedy past a stop: a *kind* a door presses and the one payload field it fills (dotted
-    into a model); with no kind, a declared *field* the operator sets; or a file it *reads*.
-    *value* describes what goes in the field. Each door words its own spelling from it, the
-    terminal its verb and flag (`views/render/phase.py`). A kind is checked against the kind
-    table at its import (`command_kinds.py`)."""
-
-    kind: Literal["", "start-run", "set-limits", "verify-candidate", "mint-campaign", "fork-cycle"]
-    field: str = ""
-    value: str = ""
-    reads: str = ""
-
-    @property
-    def payload(self) -> dict[str, dict[str, str]]:
-        """What a press sends beside the cycle's address: a `start-run`'s *value* is the literal
-        its dotted *field* takes; any other act's *value* describes, so it sends none."""
-        head, _, leaf = self.field.partition(".")
-        return {head: {leaf: self.value}} if self.kind == "start-run" and leaf else {}
-
-
 class StopReasonInfo(NamedTuple):
     """``halts_mid_round``: a round this reason CUTS is left on disk PARTIAL. No defaults, on purpose."""
 
@@ -560,9 +545,9 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "else read the review.",
             True,
             (
-                NextAct("set-limits", "budget.rounds", "more"),
-                NextAct("start-run"),
-                NextAct("", reads="review.md"),
+                NextAct(kind="set-limits", field="budget.rounds", value="more"),
+                NextAct(kind="start-run"),
+                NextAct(reads="review.md"),
             ),
         ),
         StopReason.TARGET_HIT: StopReasonInfo(
@@ -595,7 +580,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "Resuming picks it up at the next checkpoint.",
             False,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         # Unlike PAUSED the round is discarded, not persisted partial: `resume` alone re-buys the cut.
         StopReason.PANEL_CUT: StopReasonInfo(
@@ -609,9 +594,9 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "elect on the holed panel.",
             False,
             (
-                NextAct("", "Connector.cell_envelope_s"),
-                NextAct("", "optimization.panel_gate", "off"),
-                NextAct("start-run"),
+                NextAct(field="Connector.cell_envelope_s"),
+                NextAct(field="optimization.panel_gate", value="off"),
+                NextAct(kind="start-run"),
             ),
         ),
         StopReason.ADAPTER_OWED: StopReasonInfo(
@@ -623,10 +608,18 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The round before's adapter landed nothing in its re-runs; resuming re-runs it before "
             "the next walk.",
             False,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         StopReason.OPTIMIZER_ABORT: StopReasonInfo(
-            "Optimizer abort", StopOutcome.HALTED, StopCategory.SEARCH, False, False, "", True, ()
+            "Optimizer abort",
+            StopOutcome.HALTED,
+            StopCategory.SEARCH,
+            False,
+            False,
+            "The optimizer judged the run past recovering and said why: fix what it names, then "
+            "resume, or start a fresh campaign.",
+            True,
+            (NextAct(kind="start-run"), NextAct(kind="mint-campaign")),
         ),
         # The counter is CUMULATIVE across resume: a new ceiling must clear what it already counted.
         StopReason.SPEND_BUDGET: StopReasonInfo(
@@ -639,8 +632,10 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "resume.",
             True,
             (
-                NextAct("set-limits", "budget.usd", "above what the cap already counts"),
-                NextAct("start-run"),
+                NextAct(
+                    kind="set-limits", field="budget.usd", value="above what the cap already counts"
+                ),
+                NextAct(kind="start-run"),
             ),
         ),
         StopReason.TOKEN_BUDGET: StopReasonInfo(
@@ -652,8 +647,10 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Raise the token cap above what is already spent, then resume.",
             True,
             (
-                NextAct("set-limits", "budget.tokens", "above what is already spent"),
-                NextAct("start-run"),
+                NextAct(
+                    kind="set-limits", field="budget.tokens", value="above what is already spent"
+                ),
+                NextAct(kind="start-run"),
             ),
         ),
         # Not SPEND_BUDGET: `set-limits` moves the campaign's ceiling, never the host's coupon.
@@ -666,7 +663,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The box's allowance for this account is spent: a resume sends on the account's own key, "
             "and a backend's sends still run on the box's key.",
             True,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         # A cell still open at the edge was cut; each launch's clock starts afresh.
         StopReason.WALL_CLOCK: StopReasonInfo(
@@ -677,7 +674,10 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "Resuming runs another launch under the same clock; the run limits move it.",
             True,
-            (NextAct("start-run"), NextAct("set-limits", "budget.wall_clock_s", "")),
+            (
+                NextAct(kind="start-run"),
+                NextAct(kind="set-limits", field="budget.wall_clock_s", value=""),
+            ),
         ),
         StopReason.ORIGIN_GATE: StopReasonInfo(
             "Origin gate (unhealthy origin)",
@@ -690,7 +690,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "An edited origin is a new campaign or an operator-steered fork at round 0: resuming "
             "refuses it.",
             True,
-            (NextAct("start-run"), NextAct("mint-campaign"), NextAct("fork-cycle")),
+            (NextAct(kind="start-run"), NextAct(kind="mint-campaign"), NextAct(kind="fork-cycle")),
         ),
         StopReason.BACKEND_UNREACHABLE: StopReasonInfo(
             "Backend unreachable",
@@ -701,7 +701,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The unreached cell is a hole, not a score: restore the backend or the network it "
             "needs, then resuming re-measures it.",
             True,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         # Not SPEND_BUDGET: that ceiling is ours and `set-limits` moves it. This one is the provider's.
         StopReason.PROVIDER_CREDIT: StopReasonInfo(
@@ -713,7 +713,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Raise the provider key's limit or top up its credit, then resume; a refused cell is a "
             "hole it re-measures.",
             True,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         # Not BACKEND_UNREACHABLE: the provider answered, with a refusal the run already waited out.
         StopReason.PROVIDER_THROTTLED: StopReasonInfo(
@@ -725,7 +725,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Use your own key for that provider (OpenRouter BYOK), route to another host, or wait "
             "out its quota, then resume; the refused cell is a hole it re-measures.",
             True,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         # Not BACKEND_UNREACHABLE: the send was refused before it left, for want of a price.
         StopReason.PRICE_LIST_UNREACHABLE: StopReasonInfo(
@@ -738,7 +738,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "answer, so no send under the USD ceiling could be priced. Resume once it answers; a "
             "refused cell is a hole it re-measures.",
             True,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         # Not SPEND_BUDGET: no ceiling was reached; the send has no price to hold.
         StopReason.NO_RATE: StopReasonInfo(
@@ -751,7 +751,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "Run it on a provider and model the rate table prices, or drop the dollar cap and bound "
             "the run in tokens; then resume.",
             True,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         StopReason.CRASHED: StopReasonInfo(
             "Crashed",
@@ -762,7 +762,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The run raised an error it did not expect, and its traceback is kept; resuming re-runs "
             "from the last closed round.",
             False,
-            (NextAct("start-run"),),
+            (NextAct(kind="start-run"),),
         ),
         # Not CRASHED: the run declined the operator's own input (`PayloadInvalidError`).
         StopReason.INPUT_REFUSED: StopReasonInfo(
@@ -774,7 +774,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "The run declined its input at run init, so nothing was searched. A spend cap under one "
             "round is raised in the run limits or met by narrowing the round's nodes; then resume.",
             False,
-            (NextAct("set-limits", "budget.usd", ""), NextAct("start-run")),
+            (NextAct(kind="set-limits", field="budget.usd", value=""), NextAct(kind="start-run")),
         ),
         # A JOB's ending, never a cycle's: the launch left before it held a run.
         StopReason.NOT_ADMITTED: StopReasonInfo(
@@ -804,7 +804,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "A recorded decision no longer replays under the edited config: fork here to branch "
             "under it, or revert the edit to continue.",
             False,
-            (NextAct("start-run", "mode.on_divergence", "fork"),),
+            (NextAct(kind="start-run", field="mode.on_divergence", value="fork"),),
         ),
         StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo(
             "Optimizer timeout",

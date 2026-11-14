@@ -171,7 +171,8 @@ Departures from the paper:
 - **Unstated values, chosen:** the Pareto set is the pool's first `pareto_size` rows in bank order (50; the paper sizes it per benchmark); the minibatch is drawn uniformly each round by the run's seed (the reference implementation walks a once-per-epoch shuffle); dominance as the reference reads it (dominated when every cell it leads another survivor also leads, lowest aggregate removed first); examples as its `# Example` / `## Inputs` / `## Generated Outputs` / `## Feedback` markdown inside the untrusted-content fence.
 - **The acceptance test** compares means over minibatch cells both graded (the reference: sums); a parent perfect on the minibatch still reflects, as Alg. 1 has it (the reference skips).
 - **μ_f** is what the scorer can say about a cell — objective, correctness where the composite differs, expected answer, each judge's banked reason (paper: per benchmark, App. E.1).
-- **Top-k 20** (App. E.2) is not carried (no llm-node knob); a reply without a fenced block is taken whole, as the reference does.
+- **Top-k 20** (App. E.2) is not carried (no llm-node knob).
+- **A reply without a fenced block is one refused child**, as every text node's out-of-form reply (the reference takes it whole).
 - **A repeated reflection samples afresh** at 0.6, seeded as § CAPO's population and operators states.
 - **One model for reflection and target** is the campaign's overlay, as CAPO's.
 - **A scored member carries a verdict on every Pareto-set cell**; one missing any is refused, a `candidate_refused` decision (ARCHIVAL); a round seating no one reflects on the incumbent again.

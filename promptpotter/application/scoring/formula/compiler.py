@@ -178,7 +178,9 @@ class CompiledExpression(NamedTuple):
 # Pure over its two strings, and every read of a campaign's bench or rows compiles its formula.
 @functools.lru_cache(maxsize=256)
 def compile_expression(formula: str, *, source: str) -> CompiledExpression:
-    """A term the record lacks raises ``ScoringTermMissingError``, which a read side reports as *unscorable*."""
+    """A term the record lacks raises ``ScoringTermMissingError``, which a read side reports as *unscorable*.
+    A refusal's sentence names the formula by its *source*; its details carry the text."""
+    said = {"formula": formula}
     try:
         tree = ast.parse(formula, f"<{source}>", "eval")
         validate_ast(tree, source=source)
@@ -187,11 +189,12 @@ def compile_expression(formula: str, *, source: str) -> CompiledExpression:
         code = compile(numeric, f"<{source}>", "eval")
     except (SyntaxError, ValueError) as exc:  # ValueError: a null byte
         raise ScoringFormulaError(
-            f"Scoring formula rejected — {formula!r} in {source} does not parse: {exc}."
+            f"Scoring formula rejected — the {source} does not parse: {exc}.", details=said
         ) from exc
     except (RecursionError, MemoryError) as exc:
         raise ScoringFormulaError(
-            f"Scoring formula rejected — the one in {source} nests past what this server parses."
+            f"Scoring formula rejected — the one in {source} nests past what this server parses.",
+            details=said,
         ) from exc
 
     def _evaluate(namespace: dict[str, Any], subject: str) -> float:
@@ -200,46 +203,37 @@ def compile_expression(formula: str, *, source: str) -> CompiledExpression:
         except NameError as exc:
             carried = sorted(k for k, v in namespace.items() if not callable(v))
             raise ScoringTermMissingError(
-                f"The {source} {formula!r} names a term {subject} does not carry: {exc}. "
-                f"{subject} carries {carried}."
+                f"The {source} names a term {subject} does not carry: {exc}. "
+                f"{subject} carries {carried}.",
+                details=said,
             ) from exc
         except Exception as exc:
             raise ScoringFormulaError(
-                f"The {source} {formula!r} raised on {subject}: {type(exc).__name__}: {exc}."
+                f"The {source} raised on {subject}: {type(exc).__name__}: {exc}.", details=said
             ) from exc
         try:
             value = float(raw)
         except (TypeError, ValueError) as exc:
             raise ScoringFormulaError(
-                f"The {source} {formula!r} returned non-numeric {raw!r} on {subject} — "
-                "it must evaluate to a number."
+                f"The {source} returned non-numeric {raw!r} on {subject} — "
+                "it must evaluate to a number.",
+                details=said,
             ) from exc
         if not math.isfinite(value):
             raise ScoringFormulaError(
-                f"The {source} {formula!r} evaluated to {value!r} on {subject} — a non-finite "
+                f"The {source} evaluated to {value!r} on {subject} — a non-finite "
                 "result is missing data (a division by zero, or a term that was never measured), "
-                "not a perfect one. Fix the formula or exclude the measurement."
+                "not a perfect one. Fix the formula or exclude the measurement.",
+                details=said,
             )
         return value
 
     return CompiledExpression(names=names, evaluate=_evaluate)
 
 
-def clamp_unit_score(raw: Any, *, formula: str, subject: str) -> float:
-    """NaN must never reach the clamp: ``min(1.0, nan)`` is 1.0, scoring a ``0/0`` as PERFECT."""
-    try:
-        value = float(raw)
-    except (TypeError, ValueError) as exc:
-        raise ScoringFormulaError(
-            f"Scoring formula {formula!r} returned non-numeric {raw!r} on {subject} — "
-            "it must evaluate to a number."
-        ) from exc
-    if not math.isfinite(value):
-        raise ScoringFormulaError(
-            f"Scoring formula {formula!r} evaluated to {value!r} on {subject} — a non-finite "
-            "score is missing data (a division by zero, or a term that was never measured), "
-            "not a perfect one. Fix the formula or exclude the measurement."
-        )
+def _unit(value: float) -> float:
+    """Of an evaluation, finite by `compile_expression`: ``min(1.0, nan)`` is 1.0, scoring a
+    ``0/0`` as PERFECT."""
     return max(0.0, min(1.0, value))
 
 
@@ -428,7 +422,7 @@ def compile_scorer(
     def _fitness(facts: MeasuredCell, grade: Grade) -> float:
         query = facts.query[:80]
         value = compiled.evaluate(cell_namespace(facts, grade), f"query {query!r}")
-        return clamp_unit_score(value, formula=per_sample, subject=f"query {query!r}")
+        return _unit(value)
 
     unit = fitness_unit_of(per_sample)
     if not per_cell:
@@ -452,14 +446,8 @@ def compile_scorer(
     def _objective(facts: MeasuredCell, grade: Grade) -> float:
         subject = f"query {facts.query[:80]!r}"
         namespace = objective_namespace(facts, grade)
-        charged = clamp_unit_score(
-            composite.evaluate(namespace, subject), formula=per_cell, subject=subject
-        )
-        solved = clamp_unit_score(
-            composite.evaluate({**namespace, "fitness": 1.0}, subject),
-            formula=per_cell,
-            subject=subject,
-        )
+        charged = _unit(composite.evaluate(namespace, subject))
+        solved = _unit(composite.evaluate({**namespace, "fitness": 1.0}, subject))
         # Written as a step from `charged`, so a solved cell returns its composite bit-for-bit.
         return charged + MISS_COST_SHARE * (solved - charged)
 

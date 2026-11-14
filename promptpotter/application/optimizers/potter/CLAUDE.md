@@ -23,7 +23,7 @@
 
 ## L2 — what `l2_context` (and L3's `l3_plan`) may write
 
-**L2 fires on L1 stall, an unusable L1 reply or evidence starvation; `escalation.py` routes, never diagnoses; its one stop is `NextAction.STOP_L3_PATIENCE` → `OPTIMIZER_EXHAUSTED`.** L2 judges recoverability; `terminate_proposal` is its exit for a backend fault.
+**L2 fires on L1 stall, an unusable L1 reply or evidence starvation; `escalation.py` routes, never diagnoses; its own stop is `NextAction.STOP_L3_PATIENCE` → `OPTIMIZER_EXHAUSTED`.** L2 judges recoverability; `terminate_proposal` is its exit for a backend fault.
 
 - **L2 writes exactly `l1_layout` and `l1_overrides`, one node overlay on `l1_generate`** (`L2Memory.steer`), never `pipeline_params`; as recombination host, `recombinations` (ids and loci only); plus the layer-control channel. Each steer cites an axis, sample or yield number.
 - **No layer writes `task_context`**: no wire schema has its field; target text is L1's alone, through `prompt_fields_updates`. <!-- probe: git grep -cE "task_context:" -- promptpotter/application/optimizers/potter/dispatch/schemas.py == 0 -->

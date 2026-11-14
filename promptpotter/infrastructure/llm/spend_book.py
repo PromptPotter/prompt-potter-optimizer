@@ -511,7 +511,7 @@ class SpendBook:
             f"{what}: no rate bounds what it may cost{on}, so the dollar ceiling cannot be "
             "enforced for it and nothing was sent. Run it on a (provider, model) pair the rate "
             "table prices (`nodes.{node}.config`), or drop the dollar cap and bound the run in "
-            "tokens (`budget: {usd: null, tokens: N}`); then a `start-run`.",
+            "tokens (`budget: {usd: null, tokens: N}`); then resume.",
             category=ErrorCategory.NO_RATE,
         )
 

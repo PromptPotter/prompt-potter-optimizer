@@ -289,6 +289,66 @@ def _unbuilt_schemas(out: str) -> Outcome:
     return (1, "a model's schema does not build:\n" + out) if out.strip() else (0, "")
 
 
+# A refusal's sentence names no terminal verb or flag, as a stop's `next_step` does not: each
+# door spells the refusal's `next_acts` (`shared/errors.py::NextAct`). The CLI's own words are its.
+# Each act is one a door takes, as a stop's is at import (`command_kinds.py::takes_act`).
+_REFUSAL_PROBE = """
+import ast, re
+from pathlib import Path
+from promptpotter.domain.command_kinds import CommandKind, takes_act
+from promptpotter.presentation.cli.main import VERBS
+from promptpotter.shared.errors import NextAct
+words = {k.value for k in CommandKind} | {v.name for v in VERBS}
+ticked, flag = re.compile(r"`+([^`]+)`+"), re.compile(r"(?<![\\w-])--[a-z]")
+def names_one(text):
+    if flag.search(text) or "python -m promptpotter" in text:
+        return True
+    return any(t.split()[0] in words for t in ticked.findall(text) if t.split())
+paths = sorted(Path("promptpotter").rglob("*.py"))
+def tree_of(path):
+    return ast.parse(path.read_text(encoding="utf-8"))
+# Two walks holding one tree at a time: the refusal classes first, then each module against them.
+bases = {
+    c.name: {getattr(b, "id", getattr(b, "attr", "")) for b in c.bases}
+    for path in paths for c in ast.walk(tree_of(path)) if isinstance(c, ast.ClassDef)
+}
+refusals, grown = {"PotterError"}, True
+while grown:
+    fresh = {name for name, of in bases.items() if of & refusals} - refusals
+    refusals |= fresh
+    grown = bool(fresh)
+for path in paths:
+    if path.as_posix().startswith("promptpotter/presentation/cli/"):
+        continue
+    tree = tree_of(path)
+    for owner in ast.walk(tree):
+        inside = isinstance(owner, ast.ClassDef) and owner.name in refusals
+        for call in ast.walk(owner) if inside or owner is tree else ():
+            if not isinstance(call, ast.Call):
+                continue
+            name = getattr(call.func, "id", None) or getattr(call.func, "attr", "")
+            if name in refusals or name == "add_note" or (inside and name == "__init__"):
+                text = "".join(
+                    n.value for arg in (*call.args, *(k.value for k in call.keywords))
+                    for n in ast.walk(arg) if isinstance(n, ast.Constant) and isinstance(n.value, str)
+                )
+                if names_one(text):
+                    print(f"  {path.as_posix()}:{call.lineno}: {text[:90]!r}")
+    for call in ast.walk(tree):
+        if isinstance(call, ast.Call) and getattr(call.func, "id", "") == "NextAct":
+            named = {k.arg: k.value for k in call.keywords if k.arg != "value"}
+            if all(isinstance(v, ast.Constant) for v in named.values()) and not takes_act(
+                NextAct(**{k: v.value for k, v in named.items()})
+            ):
+                print(f"  {path.as_posix()}:{call.lineno}: an act no door takes")
+"""
+
+
+def _worded_refusals(out: str) -> Outcome:
+    said = "a refusal names a verb or a flag, or offers an act no door takes:\n"
+    return (1, said + out) if out.strip() else (0, "")
+
+
 def _probe(source: str, judge: Callable[[str], Outcome]) -> Callable[[Selection], Outcome]:
     argv = [source] if source.endswith(".py") else ["-c", source]
 
@@ -1360,6 +1420,13 @@ CHECKS: tuple[Check, ...] = (
         "py",
         _probe(_HANDLER_PROBE, _dangling_handlers),
         mb=115,  # 92
+        reads=_ENGINE_RUNTIME,
+    ),
+    Check(
+        "refusal-words",
+        "py",
+        _probe(_REFUSAL_PROBE, _worded_refusals),
+        mb=70,  # 52
         reads=_ENGINE_RUNTIME,
     ),
     Check("instruction-files", "py", _instruction_files, mb=45, tier="commit", reads=_TREE),  # 33

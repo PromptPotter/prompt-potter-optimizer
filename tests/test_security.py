@@ -216,7 +216,7 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.said import Said, pins
 from promptpotter.domain.spend import NOTHING_PAID, Budget
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure, ValidationReason
 from promptpotter.infrastructure import docker_host
 from promptpotter.infrastructure.identity.accounts import (
     IdentityBundle,
@@ -692,7 +692,7 @@ def poisoned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Poisoned:
         axis="llm_only.model",
         value=poisoned_value,
         allowed=["openai/gpt-oss-120b"],
-        reason="not_in_available_models",
+        reason=ValidationReason.NOT_IN_AVAILABLE_MODELS,
     )
     # The broken arm carries the backend's warning, and the round reads the poisoned sample.
     broken = arm_state("c1", slot=ArmSlot(round=1, idx=1, total=2), cut="broken")

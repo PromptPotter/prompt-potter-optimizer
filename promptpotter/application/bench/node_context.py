@@ -10,7 +10,6 @@ from pydantic import BaseModel
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.children import (
-    DROPPED_MANDATORY_PLACEHOLDER,
     admission_failures,
     carried_writes,
     overlay_failures,
@@ -82,7 +81,7 @@ from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import Delivery
-from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
+from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure, ValidationReason
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.shared.errors import SendRefusedError
@@ -668,7 +667,11 @@ class Children(CycleRead):
         ]
         if individual.prompts != proposal.individual.prompts:
             failures = [
-                *(f for f in failures if f.reason != DROPPED_MANDATORY_PLACEHOLDER),
+                *(
+                    f
+                    for f in failures
+                    if f.reason != ValidationReason.DROPPED_MANDATORY_PLACEHOLDER
+                ),
                 *placeholder_failures(individual, schema),
             ]
         held = proposal.overlay

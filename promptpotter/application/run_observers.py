@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,8 +40,6 @@ from promptpotter.infrastructure.store.session_pointer import save_active_pointe
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.measurement_context import instrument_depth
 
-logger = logging.getLogger(__name__)
-
 
 def declare_run_stop(
     session: Session,
@@ -50,8 +47,10 @@ def declare_run_stop(
     stop_reason: StopReason,
     *,
     interrupted_by: PauseCause,
+    detail: str = "",
 ) -> None:
-    """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second record."""
+    """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second
+    record. *detail* is an ending's reason, where its raiser gave one."""
     limits = session.store.campaigns.run_limits(session.hop)
     assert limits is not None, "a run stops on the wiring it declared"
     budget = limits.budget
@@ -65,7 +64,7 @@ def declare_run_stop(
         share=Budget() if held is None else held.allotment.only(MONEY_AXES),
     )
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
-        stop = RunPhaseRecord.stop(stop_reason, spend=spend)
+        stop = RunPhaseRecord.stop(stop_reason, detail=detail, spend=spend)
     else:
         cause, detail = session.state.control.take_pause() or (interrupted_by, "")
         stop = RunPhaseRecord.stop(stop_reason, cause=cause, detail=detail, spend=spend)

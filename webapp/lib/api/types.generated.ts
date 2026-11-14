@@ -8,12 +8,31 @@ export interface ErrorEnvelope {
   /** The code a client branches on: the refusal's kind. */
   code: string;
   /** The sentence an operator reads, naming its remedy and the Account tab it lives
-   * in, where it names one. */
+   * in, where it names one; never a verb or a flag, which its acts carry. */
   message: string;
   /** The refusal's facts, by name. */
   details: Record<string, unknown>;
+  /** The acts past it, as a stop's: each door spells one its own way (the
+   * terminal's verb and flag, the browser's control, the MCP tool its kind
+   * names). */
+  next_acts: NextAct[];
   /** Names the server log line that holds this failure. */
   error_id: string;
+}
+
+/** A remedy past a stop or a refusal: a *kind* a door presses and the one payload
+ * field it fills (dotted into a model); with no kind, a declared *field* the
+ * operator sets; or a file it *reads*. *value* describes what goes in the
+ * field. Each door words its own spelling from it: the terminal its verb and
+ * flag (`views/render/phase.py::acts_line`), the API and the webapp the kind,
+ * MCP the tool of that name; so no sentence beside it names a verb or a flag.
+ * Each is one a door takes (`command_kinds.py::takes_act`), a stop's at
+ * import and a refusal's at the gate. */
+export interface NextAct {
+  kind: '' | 'start-run' | 'set-limits' | 'verify-candidate' | 'mint-campaign' | 'fork-cycle' | 'submit-arms';
+  field: string;
+  value: string;
+  reads: string;
 }
 
 export interface HealthResponse {
@@ -439,10 +458,14 @@ export interface Refusal {
   /** The code a client branches on: the refusal's kind. */
   code: string;
   /** The sentence an operator reads, naming its remedy and the Account tab it lives
-   * in, where it names one. */
+   * in, where it names one; never a verb or a flag, which its acts carry. */
   message: string;
   /** The refusal's facts, by name. */
   details: Record<string, unknown>;
+  /** The acts past it, as a stop's: each door spells one its own way (the
+   * terminal's verb and flag, the browser's control, the MCP tool its kind
+   * names). */
+  next_acts: NextAct[];
 }
 
 export interface BackendResponse {
@@ -532,8 +555,8 @@ export interface HierarchyState {
   status: RunStatus;
   /** A process holds this cycle, running or launching it. */
   attached: boolean;
-  /** Why the run reads paused; null otherwise. */
-  pause: PauseReading | null;
+  /** Why the run reads paused or ended, or null. */
+  stop: StopReading | null;
   admission: RunAdmission;
   /** An operator intervened by hand, so the run is no longer purely reproducible. */
   intervened: boolean;
@@ -548,16 +571,17 @@ export interface RunStatus {
   mark: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'success' | 'halted' | 'failed' | 'archived' | 'unknown';
 }
 
-/** Why a cycle reads paused: its declaration, or an accepted pause the loop has
- * yet to reach. */
-export interface PauseReading {
+/** Why a cycle reads stopped: its declared stop, or an accepted pause not yet
+ * reached. */
+export interface StopReading {
   /** Null on an accepted pause the loop has yet to reach. */
   stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound' | 'owed';
-  /** Who or what asked, in the declarer's own words. */
+  /** What paused it; null on a run that ended. */
+  cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound' | 'owed' | null;
+  /** Who asked, or what its raiser said, in its own words. */
   detail: string;
   at: string;
-  /** SERVED: the cause as every door words it (`paused_by`). */
+  /** SERVED: the stop as every door words it (`stop_said`). */
   said: string;
 }
 
@@ -1651,10 +1675,9 @@ export interface ServedDashboard {
    * control offers or the sentence where it offers none, and each verb's
    * refusal — the same answer the dispatcher refuses on. */
   admission: RunAdmission;
-  /** Why the cycle reads `paused` — what caused it, the stop it was left on and
-   * what the operator does next (`RunState.pause`); null in every other
-   * phase. */
-  pause: PauseReading | null;
+  /** Why the cycle reads `paused` or `terminal` — what caused it, the stop it was
+   * left on and what said so (`RunState.stop`); null in every other phase. */
+  stop: StopReading | null;
   /** Which of `rounds` carries the newest overlap line that was read — the one set
    * of cells its members' rates may be set side by side on. */
   overlap_line_round: number | null;
@@ -2027,27 +2050,7 @@ export interface ValidationFailure {
   /** The accept-set the validator checked against. Empty list when the failure is
    * mode-based (parse error, forbidden axis) rather than membership-based. */
   allowed: string[];
-  /** Reason code that steers L2's healing direction. One of: ``forbidden_axis``
-   * (operator-locked param touched), ``type_mismatch`` (wrong declared type),
-   * ``not_in_available_models`` / ``not_in_param_allowed_values`` /
-   * ``not_accepted_by_model`` (value outside the axis's resolved space — the
-   * last where the node declared it and the chosen model refuses it, so the
-   * healing move is the model, not the value),
-   * ``reproposes_known_failing_config`` (matches a prior
-   * ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` /
-   * ``optimizer_prompt_parse_failure`` (generator-side failure),
-   * ``steers_inner_stopping`` (an L4 override telling the inner loop when to
-   * STOP rather than how to search — it edits the frame `held_out_lift`
-   * averages over instead of the search it measures), ``steers_across_seeds``
-   * (an L4 override making an inner node reason over the seed panel, which
-   * exists only one level up — the rule renders empty where it lands),
-   * ``guts_inherited_contract`` (an L4 override replacing a long prompt field
-   * with a fraction of its length, deleting contracts the parent carried in
-   * plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-
-   * detect), ``hallucinated_node`` (named a node absent from the schema —
-   * NON-fatal: the phantom edit is stripped, the candidate still scores;
-   * routed as signal, not a synthetic-0). */
-  reason: string;
+  reason: 'forbidden_axis' | 'unknown_param' | 'type_mismatch' | 'not_in_available_models' | 'not_in_param_allowed_values' | 'not_accepted_by_model' | 'reproposes_known_failing_config' | 'hallucinated_node' | 'dropped_mandatory_placeholder' | 'shots_without_demo_pool' | 'shot_not_in_demo_pool' | 'shot_repeated' | 'shots_over_cap' | 'not_in_block_pool' | 'citation_not_in_panel' | 'over_ceiling' | 'optimizer_prompt_parse_failure' | 'l1_provider_empty_response' | 'steers_inner_stopping' | 'steers_across_seeds' | 'guts_inherited_contract' | 'layout_node_not_l4_editable' | 'l1_layout_unparseable' | 'l1_layout_missing_mandatory' | 'l1_layout_unknown_placeholder' | 'l1_layout_voids_prefix' | 'l1_layout_unchanged_from_prior' | 'no_op_variant' | 'duplicate_variant' | 'repeat_variant';
 }
 
 /** One scored sample as `dashboard.json` serves it, display-trimmed and one shape
@@ -2327,7 +2330,7 @@ export interface WarmingDashboard {
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   producer: ProducerReading;
   admission: RunAdmission;
-  pause: PauseReading | null;
+  stop: StopReading | null;
 }
 
 /** One closed round as a surface reads it: its arms and its verdict. Its rows are
@@ -4297,6 +4300,9 @@ export interface DatasetIndexEntry {
   /** ``null`` = a check-in can open it here. Otherwise why not: the same reading
    * ``open-dataset-draft`` refuses with, worded by `START_BLOCK_WORDS`. */
   start_block: 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable' | null;
+  /** What refused its rows where a refusal says which field of its definition is
+   * wrong; null otherwise. */
+  refusal: Refusal | null;
 }
 
 /** One dataset's pipeline as DECLARED — the body of ``GET
@@ -5602,13 +5608,6 @@ export interface StopReasonInfo {
   next_acts: NextAct[];
 }
 
-export interface NextAct {
-  kind: '' | 'start-run' | 'set-limits' | 'verify-candidate' | 'mint-campaign' | 'fork-cycle';
-  field: string;
-  value: string;
-  reads: string;
-}
-
 export interface NodeKindInfo {
   label: string;
   role: string;
@@ -6048,7 +6047,7 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "paused": { label: "Paused", outcome: "paused", category: "operator", halts_mid_round: true, has_traceback: false, next_step: "Resuming picks it up at the next checkpoint.", grades_selection: false, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
   "panel_cut": { label: "Panel cut by a declared bound", outcome: "paused", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Cells were cut at their time bound. Give them room (the connector's cell envelope, or the backend deadline their rows name) before resuming, or turn the panel gate off to elect on the holed panel.", grades_selection: false, next_acts: [{ kind: "", field: "Connector.cell_envelope_s", value: "", reads: "" }, { kind: "", field: "optimization.panel_gate", value: "off", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },
   "adapter_output_owed": { label: "Adapter output owed", outcome: "paused", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "The round before's adapter landed nothing in its re-runs; resuming re-runs it before the next walk.", grades_selection: false, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
-  "optimizer_abort": { label: "Optimizer abort", outcome: "halted", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
+  "optimizer_abort": { label: "Optimizer abort", outcome: "halted", category: "search", halts_mid_round: false, has_traceback: false, next_step: "The optimizer judged the run past recovering and said why: fix what it names, then resume, or start a fresh campaign.", grades_selection: true, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }, { kind: "mint-campaign", field: "", value: "", reads: "" }] },
   "spend_budget": { label: "Spend budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The spend cap counts every launch so far: raise it above what it already counts, then resume.", grades_selection: true, next_acts: [{ kind: "set-limits", field: "budget.usd", value: "above what the cap already counts", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },
   "token_budget": { label: "Token budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "Raise the token cap above what is already spent, then resume.", grades_selection: true, next_acts: [{ kind: "set-limits", field: "budget.tokens", value: "above what is already spent", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },
   "host_allowance": { label: "Host allowance used up", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The box's allowance for this account is spent: a resume sends on the account's own key, and a backend's sends still run on the box's key.", grades_selection: true, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },

@@ -1,3 +1,4 @@
+import { withActs } from "@/lib/derivations";
 import { ApiError, type FailureKind } from "./client";
 
 export function mintIdempotencyKey(): string {
@@ -15,10 +16,11 @@ const KIND_SENTENCE: Record<FailureKind, string> = {
   refused: "The server declined the request.",
 };
 
-// Never rebuild a sentence from the envelope's details: only the server knows a refusal's remedy.
+// Never rebuild a sentence from the envelope's details: only the server knows a refusal's remedy,
+// its sentence and its served acts.
 export function operatorMessage(e: unknown, kind: FailureKind): string {
   if (!(e instanceof ApiError) || e.serverMessage === null) return KIND_SENTENCE[kind];
-  return e.serverMessage;
+  return withActs(e.serverMessage, e.nextActs);
 }
 
 // A transient write may have landed before the connection dropped, and a resend mints a fresh

@@ -12,6 +12,8 @@ import asyncio
 import contextvars
 import dataclasses
 import json
+import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -108,15 +110,21 @@ from promptpotter.application.pipeline_resolve import (
     permitted_narrowing,
     steer_verdict,
 )
+from promptpotter.application.run_observers import build_run_observers, declare_run_wiring
+from promptpotter.application.runner.entry import close_cycle
 from promptpotter.application.runner.inner.tasks import inner_spawn_of
 from promptpotter.application.runner.loop import LoopEnd, open_origin_round, run_round_loop
+from promptpotter.application.runner.mint import start_launch
 from promptpotter.application.runner.round import run_init
+from promptpotter.application.runner.termination import RUN_STOPS, end_run_on
 from promptpotter.application.scoring import query_loop, search_point_scorer
-from promptpotter.application.scoring.closed_rounds import closed_rounds
+from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
+from promptpotter.application.views.render.phase import acts_line
 from promptpotter.config.paths import MEASUREMENTS_DIR
+from promptpotter.domain.activity import ActivityFeed
 from promptpotter.domain.arms import ArmSlot, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.campaign_config import (
@@ -170,6 +178,7 @@ from promptpotter.domain.records.run_records import (
     RunPhaseRecord,
     SpawnedBy,
     SpawnedRecord,
+    StopLoop,
 )
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_mode import RunMode
@@ -180,6 +189,7 @@ from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.spend_book import SendBound
 from promptpotter.infrastructure.run_scope import rescope, scoped
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store.archive_queries import (
@@ -210,15 +220,20 @@ from promptpotter.infrastructure.store.measurement_archive import (
     config_key,
     standing,
 )
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, owned_campaign
+from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
+    BadRequestError,
     ConflictError,
     FileKind,
     FileUnreadableError,
+    NotFoundError,
     PayloadInvalidError,
     PotterError,
     ResumeDivergenceError,
+    SendRefusedError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -1076,6 +1091,41 @@ def test_a_resume_from_3_that_halts_on_a_divergence_below_it_displaces_no_round_
         asyncio.run(resume_with_divergence_check(resuming.cycle, [], RunMode(from_round=3)))
     assert stores.campaigns.standing_rounds(halted, moment=None).last_closed == 4, (
         "a resume its divergence halted had already rewound the line"
+    )
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_round_the_archive_lost_or_a_rewind_past_the_ledger_offers_a_resume_the_terminal_takes(
+    built_stores: Stores, three_rounds: _ThreeRounds
+) -> None:
+    # Each act is printed in the flag its payload declares: `--from-round` parsed nowhere.
+    stores, scorer = built_stores, scorer_of()
+    hop, ledger, closed, *_ = three_rounds
+    pick = prompted(instruction="c3")
+    walked = filed(stores.archive, [archive_row(f"q{i}", predicted="g") for i in range(3)])
+    rows = scorer.sheet(a.cell for _, ref, _ in walked if (a := stores.archive.answer(ref)))
+    slot = ArmSlot(round=3, idx=0, total=1)
+    closed.append(
+        _round(
+            round=3,
+            arms={ArmKey(pick.id): arm_state("c3", slot=slot, individual=pick)},
+            election=election(ArmKey(pick.id)),
+            cells={ArmKey(pick.id): rows},
+        )
+    )
+    close_round(ledger, closed, cycle=seat(stores, bank=samples(3, "g")).cycle)
+    shutil.rmtree(stores.archive.base_dir / MEASUREMENTS_DIR)
+    with pytest.raises(NotFoundError) as lost:
+        closed_round(stores, hop, 3, scorer, moment=None)
+    with pytest.raises(BadRequestError) as past:
+        stores.campaigns.rewind_to_round(hop, 9)
+    taken = [
+        cli_main._PARSER.parse_args(spelled.split())
+        for refused in (lost.value, past.value)
+        for spelled in re.findall(r"`([^`]+)`", "".join(acts_line(refused.next_acts)))
+    ]
+    assert [(t.command, t.resume_from_round) for t in taken] == [("resume", 2), ("resume", None)], (
+        "a lost round's act resumed past it, or an act was spelled in a flag the terminal lacks"
     )
 
 
@@ -2508,3 +2558,57 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
     # A later launch, after an ending the gate never made, stands on the pass already banked.
     assert launch(replayed=True) is StopReason.ROUNDS_BUDGET, "a banked pass was not read"
     assert passes() == ["resume"], "one override was banked twice"
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_halts_own_words_are_the_stop_its_run_serves_and_its_chat_says(
+    built_stores: Stores,
+) -> None:
+    # A refused send's sentence and an L2 terminate's reason, raised where a run ends, reach the
+    # served stop and the chat through the close every launch takes (`entry.py::close_cycle`).
+    stores = built_stores
+    with pytest.raises(SendRefusedError) as unpriced:
+        spend_book(None, usd_reserve=0.05).refuse_unpriced(
+            SendBound(input_tokens=1, output_tokens=1, usd=None, unpriced=("acme/unpriced-1",)),
+            "diagnostic",
+            "the probe",
+            "host",
+        )
+    aborted = StopLoop(StopReason.OPTIMIZER_ABORT, detail="l2: the backend's index is gone")
+    for n, (raised, words) in enumerate(
+        ((unpriced.value, "acme/unpriced-1"), (aborted, "l2: the backend's index is gone"))
+    ):
+        hop = CycleHop(campaign_id=f"halted{n}__20260101-000000", cycle_id=f"halted{n}")
+        campaign = minted_campaign(hop)
+        stored_campaign(stores, campaign)
+        stores.campaigns.mint_cycle(hop)
+        cycle = seat(stores, hop=hop).cycle
+        session, config, selected = cycle.session, cycle.config, cycle.optimizer
+        declare_run_wiring(session, config, campaign=campaign, selected=selected)
+        observers = build_run_observers(session=session, campaign_config=config)
+        start_launch(session)
+        try:
+            with scoped(ledger=cycle_ledger(cycle), account=stores):
+                try:
+                    raise raised
+                except RUN_STOPS as stop:
+                    stop_reason, error, detail = end_run_on(stop)
+                close_cycle(
+                    None,
+                    session,
+                    observers,
+                    stop_reason=stop_reason,
+                    cycle_error=error,
+                    open_round=None,
+                    config=config,
+                    pause_cause=PauseCause.INTERRUPT,
+                    rebasing=False,
+                    selected=selected,
+                    detail=detail,
+                )
+        finally:
+            observers.release()
+        served = stores.run_state(hop).stop
+        assert served is not None and words in served.said, f"stop {n}'s reading lost its words"
+        notices = LedgerIndex.of(cycle_ledger(cycle).path).view(ActivityFeed).state.notices
+        assert any(words in (said.detail or "") for said in notices), f"the chat lost stop {n}"

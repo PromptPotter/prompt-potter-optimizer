@@ -449,8 +449,8 @@ CYCLE_AXES = frozenset({"rounds", "wall_clock_s"})
 def cycle_axes_only(budget: Budget) -> Budget:
     if money := budget.named & MONEY_AXES:
         raise ValueError(
-            f"{', '.join(sorted(money))} bound the whole campaign, never one cycle: set it with "
-            "`set-limits`, or a launch's `budget`"
+            f"{', '.join(sorted(money))} bound the whole campaign, never one cycle: set it in the "
+            "campaign's limits, or a launch's `budget`"
         )
     return budget
 

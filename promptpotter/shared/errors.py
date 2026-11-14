@@ -8,7 +8,7 @@ from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from typing import Any, Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from promptpotter.shared.account_tabs import AccountTab
 
@@ -96,17 +96,58 @@ def is_provider_credit_refusal(detail: str) -> bool:
     return _PROVIDER_CREDIT_REFUSAL.search(detail) is not None
 
 
+class NextAct(BaseModel):
+    """A remedy past a stop or a refusal: a *kind* a door presses and the one payload field it
+    fills (dotted into a model); with no kind, a declared *field* the operator sets; or a file it
+    *reads*. *value* describes what goes in the field. Each door words its own spelling from it:
+    the terminal its verb and flag (`views/render/phase.py::acts_line`), the API and the webapp the
+    kind, MCP the tool of that name; so no sentence beside it names a verb or a flag. Each is one a
+    door takes (`command_kinds.py::takes_act`), a stop's at import and a refusal's at the gate."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal[
+        "",
+        "start-run",
+        "set-limits",
+        "verify-candidate",
+        "mint-campaign",
+        "fork-cycle",
+        "submit-arms",
+    ] = ""
+    field: str = ""
+    value: str = ""
+    reads: str = ""
+
+    @property
+    def payload(self) -> dict[str, dict[str, str]]:
+        """What a press sends beside the cycle's address: a `start-run`'s *value* is the literal
+        its dotted *field* takes; any other act's *value* describes, so it sends none."""
+        head, _, leaf = self.field.partition(".")
+        return {head: {leaf: self.value}} if self.kind == "start-run" and leaf else {}
+
+
+#: The act past a cycle or campaign that cannot stand: a fresh campaign, on a dataset named.
+MINT_FRESH = NextAct(kind="mint-campaign", field="dataset_name")
+
+
 class PotterError(Exception):
     http_status: int = 500
     code: str = "internal_error"
 
     def __init__(
-        self, message: str, *, code: str | None = None, details: dict[str, Any] | None = None
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+        next_acts: tuple[NextAct, ...] = (),
     ) -> None:
         super().__init__(message)
         if code is not None:
             self.code = code
         self.details: dict[str, Any] = details or {}
+        self.next_acts = next_acts
 
     @property
     def message(self) -> str:

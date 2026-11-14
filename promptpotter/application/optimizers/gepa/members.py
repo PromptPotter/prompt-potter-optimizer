@@ -111,7 +111,7 @@ def reflection_prompt(ctx: NodeContext, *, instruction: str, rows: Iterable[Grad
 def fenced(text: str) -> str | None:
     start, end = text.find(_FENCE), text.rfind(_FENCE)
     if start < 0 or end <= start:
-        return text.strip() or None
+        return None
     body = _LANGUAGE_TAG.sub("", text[start + len(_FENCE) : end], count=1).strip()
     return body or None
 

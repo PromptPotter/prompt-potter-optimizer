@@ -38,7 +38,7 @@ export function RunControlButton() {
         title={
           run.action === "pause"
             ? "Pause at the next checkpoint, once cells in flight answer"
-            : (run.pauseNote ??
+            : (run.stopNote ??
               (run.action === "resume" ? "Resume the paused run" : "Start / resume the run"))
         }
       >

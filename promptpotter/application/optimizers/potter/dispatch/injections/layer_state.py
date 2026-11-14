@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Collection, Sequence
 
 from promptpotter.application.bench.node_context import Calls
@@ -33,9 +32,6 @@ from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.value_tree import visibility_of
-
-logger = logging.getLogger(__name__)
-
 
 _PLAN_HEADER = "PLAN:\n"
 

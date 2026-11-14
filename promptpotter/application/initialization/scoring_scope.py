@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from asyncio import CancelledError
 from collections.abc import AsyncIterator, Awaitable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
@@ -48,8 +47,6 @@ from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-
-logger = logging.getLogger(__name__)
 
 
 def scorer_setup(
@@ -169,7 +166,9 @@ def cycle_partition(
 def _refused(stop: StopLoop) -> DiagnosticError:
     info = STOP_REASON_INFO[stop.reason]
     unmeasured = "" if stop.unmeasured is None else f", {stop.unmeasured} cell(s) unmeasured"
-    return DiagnosticError(f"{info.label}{unmeasured}. {info.next_step}".strip())
+    return DiagnosticError(
+        f"{info.label}{unmeasured}. {info.next_step}".strip(), next_acts=info.next_acts
+    )
 
 
 async def diagnostic_pass(scoring: Awaitable[ScoredWalk], session: Session) -> ScoredWalk:

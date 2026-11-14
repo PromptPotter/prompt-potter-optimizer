@@ -122,7 +122,28 @@ def ran_to_output_ceiling(facts: MeasuredCell) -> bool:
 
 
 def classify_result(facts: MeasuredCell) -> ResultClassification:
-    """Truncation is INFRA (a provider ceiling, recurring per sample); a backend 4xx is FATAL on one sighting."""
+    """Truncation is INFRA (a provider ceiling, recurring per sample); a backend 4xx is FATAL on one sighting.
+
+    A fatal code is one row of the wound map: every wound is two axes. The DETECTION POINT picks the
+    record, its score effect and lifecycle (parse-time → `ValidationFailure`, synthetic 0, per
+    candidate; mid-eval → `RuntimeFailure`, a real score and rate, accumulated and deduped;
+    post-parse → `ValidatorOutcome`, no score effect, per round). The NURSE OWNER falls out of the
+    record: only a `RuntimeFailure` carries a choice, `owner: NurseOwner` ∈ {L1, OPERATOR}.
+
+    | | Wound 1 | Wound 2 | Wound 3 | Wound 4 |
+    |---|---|---|---|---|
+    | Producer → Nurse | L1 → L1 | L1 → L1 / OPERATOR | L2 → L3 | L2 → L3 |
+    | Detector | `children.py::overlay_failures`, potter's `validators.py`, at parse | `DegradationCheck`, mid-eval | L2's patience (`escalation.py::decide_heal`) | `layout.py::validate_l1_layout`, post-parse |
+    | Record | `ValidationFailure` | `RuntimeFailure` | (patience event) | `ValidatorOutcome` |
+    | Storage | the arm's `validation_failures`; a round with no arm, `L1Readout.l1_parse_failure` | `Cycle.runtime_failures`, off the banked rounds | the ladder's L2 `stall_count` | `L2Memory.guard_breaches` |
+    | Nurse's writeback | L1 re-proposes a valid override | L1 retunes the node · or the operator trims schema/model | `L3Memory.plan` | `L3Memory.plan` |
+    | Score effect | synthetic 0 | real score, candidate eliminated mid-eval | none | none: fires after L2 ran |
+
+    Two rules a new row keeps: every `content_empty` row is gated on the result not having answered
+    (the advisory describes one ATTEMPT; the backend's retry beside it can succeed), and a fatal code
+    is deterministic for the whole config, so a rule that could fire on a row that answered correctly
+    eliminates a good one.
+    """
     advisories = _collect_advisories(facts)
     structural_advs = _structural_advisory_keys(facts)
     infra: set[str] = set()

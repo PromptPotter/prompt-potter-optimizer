@@ -8,12 +8,9 @@ from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, Variatio
 from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
 from promptpotter.domain.search_point import SHOTS_KEY, missing_template_vars
-from promptpotter.domain.wounds import ValidationFailure
+from promptpotter.domain.wounds import ValidationFailure, ValidationReason
 
 logger = logging.getLogger(__name__)
-
-
-DROPPED_MANDATORY_PLACEHOLDER = "dropped_mandatory_placeholder"
 
 
 _JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {
@@ -38,7 +35,10 @@ def _matches_declared_type(value: Any, declared: str) -> bool:
 
 def _off_carrier(locus: Locus, value: object, allowed: list[str]) -> ValidationFailure:
     return ValidationFailure(
-        axis=locus.name, value=str(value)[:300], allowed=allowed, reason="unknown_param"
+        axis=locus.name,
+        value=str(value)[:300],
+        allowed=allowed,
+        reason=ValidationReason.UNKNOWN_PARAM,
     )
 
 
@@ -65,7 +65,7 @@ def carried_writes(
                     axis=node,
                     value=node,
                     allowed=sorted(schema.running),
-                    reason="hallucinated_node",
+                    reason=ValidationReason.HALLUCINATED_NODE,
                 )
             )
         return False
@@ -83,7 +83,7 @@ def carried_writes(
                         axis=locus.name,
                         value=str(value)[:300],
                         allowed=node.open_prompt_fields,
-                        reason="forbidden_axis",
+                        reason=ValidationReason.FORBIDDEN_AXIS,
                     )
                 )
             case "prompt":
@@ -97,7 +97,7 @@ def carried_writes(
                             axis=locus.name,
                             value=", ".join(map(str, value)),
                             allowed=[],
-                            reason="shots_without_demo_pool",
+                            reason=ValidationReason.SHOTS_WITHOUT_DEMO_POOL,
                         )
                     )
                 elif strays := [key for key in value if key not in demo]:
@@ -106,7 +106,7 @@ def carried_writes(
                             axis=locus.name,
                             value=", ".join(map(str, strays)),
                             allowed=[],
-                            reason="shot_not_in_demo_pool",
+                            reason=ValidationReason.SHOT_NOT_IN_DEMO_POOL,
                         )
                     )
                 else:
@@ -149,7 +149,7 @@ def overlay_failures(
                         axis=f"{node_name}.{param}",
                         value=str(value),
                         allowed=[],
-                        reason="forbidden_axis",
+                        reason=ValidationReason.FORBIDDEN_AXIS,
                     )
                 )
                 continue
@@ -160,7 +160,7 @@ def overlay_failures(
                         axis=f"{node_name}.{param}",
                         value=str(value),
                         allowed=sorted(node_emittable),
-                        reason="unknown_param",
+                        reason=ValidationReason.UNKNOWN_PARAM,
                     )
                 )
                 continue
@@ -175,7 +175,7 @@ def overlay_failures(
                         axis=f"{node_name}.{param}",
                         value=f"{value!r} ({type(value).__name__})",
                         allowed=[declared_type],
-                        reason="type_mismatch",
+                        reason=ValidationReason.TYPE_MISMATCH,
                     )
                 )
                 continue
@@ -191,11 +191,11 @@ def overlay_failures(
                         value=str(value),
                         allowed=list(allowed),
                         reason=(
-                            "not_in_available_models"
+                            ValidationReason.NOT_IN_AVAILABLE_MODELS
                             if param == "model"
-                            else "not_accepted_by_model"
+                            else ValidationReason.NOT_ACCEPTED_BY_MODEL
                             if value in declared
-                            else "not_in_param_allowed_values"
+                            else ValidationReason.NOT_IN_PARAM_ALLOWED_VALUES
                         ),
                     )
                 )
@@ -217,7 +217,7 @@ def placeholder_failures(
                     axis=f"{node.name}.prompt",
                     value="dropped:" + ",".join(missing),
                     allowed=list(declared),
-                    reason=DROPPED_MANDATORY_PLACEHOLDER,
+                    reason=ValidationReason.DROPPED_MANDATORY_PLACEHOLDER,
                 )
             )
     return failures

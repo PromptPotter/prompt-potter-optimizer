@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -31,8 +30,6 @@ from promptpotter.shared.errors import DiagnosticError
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -220,14 +217,6 @@ def ab_replay_cycle(
         record, replay_verdict(session, campaign_config, optimizer, mismatches)
     )
     n_rounds = sum(len(c.rounds) for c in record.cycles)
-    logger.info(
-        "A/B replay: campaign %s, %d cycle(s), %d round(s), %d mismatch(es), %d divergence(s)",
-        hop.campaign_id,
-        len(record.cycles),
-        n_rounds,
-        len(mismatches),
-        len(result.divergences),
-    )
     return AbReport(
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,

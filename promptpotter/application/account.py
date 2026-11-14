@@ -242,16 +242,15 @@ def sign_in_oidc(
     host_admin = accounts.is_declared_host(verified.email)
     root, rings = default_projects_root(), list[str]()
     # A blocked account still gets a session: the session seam empties its capabilities per request.
-    if resolve_access_state(verified.email, bundle) == "blocked":
-        logger.info("Blocked account signed in: %s (%s)", verified.email, verified.provider)
-    elif host_admin:
+    blocked = resolve_access_state(verified.email, bundle) == "blocked"
+    if host_admin and not blocked:
         # The terminal's tree is the box's own, so who takes it is declared, never inferred from
         # arrival order.
         refused = accounts.claim_default(projects_root=root, user_id=user_id, email=verified.email)
         if refused is not None:
             logger.warning("The host's sign-in did not claim this box: %s", refused)
             rings.append(f"Your sign-in did not claim this box: {refused}")
-    elif accounts.host_user_id(root) is None:
+    elif not blocked and accounts.host_user_id(root) is None:
         why = (
             "HOST_ADMIN_EMAIL's account has not signed in yet"
             if settings.HOST_ADMIN_EMAIL.strip()

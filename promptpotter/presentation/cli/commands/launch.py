@@ -48,6 +48,7 @@ from promptpotter.domain.checkin_draft import OriginResolution
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     CancelPayload,
+    CommandPayload,
     CyclePayload,
     Door,
     EditDraftCampaignPayload,
@@ -528,14 +529,6 @@ def _spelled(value: object) -> str:
     return value if isinstance(value, str) else json.dumps(value)
 
 
-_BUDGET_FLAGS = {
-    "usd": "--max-usd",
-    "tokens": "--max-tokens",
-    "rounds": "--max-rounds",
-    "wall_clock_s": "--max-wall-clock",
-}
-
-
 def _arm_spec(arm: ArmRequest) -> str:
     knobs = arm.optimization
     sets = [
@@ -560,7 +553,8 @@ def head_to_head_command(mint: MintHeadToHeadPayload) -> str:
         words += ["--arm", _arm_spec(arm)]
     for axis in sorted(request.budget.named):
         bound = getattr(request.budget, axis)
-        words += [_BUDGET_FLAGS[axis], "none" if bound is None else _spelled(bound)]
+        flag = CommandPayload.cli_flag(f"budget.{axis}")
+        words += [flag, "none" if bound is None else _spelled(bound)]
     back = _head_to_head_payload(build_parser(VERBS).parse_args(words)).head_to_head
 
     def declared(r: HeadToHeadRequest) -> list[tuple[str, dict[str, Any]]]:
@@ -721,7 +715,7 @@ def _confirm_steer(ctx: SessionCtx, overlay: dict[str, dict[str, object]]) -> No
 async def _pivot_to_fresh(
     args: argparse.Namespace, ctx: SessionCtx, drift: ConfigDriftError
 ) -> CommandResult:
-    act = drift.next_act
+    (act,) = drift.next_acts
     answer = confirm_tty(
         f"Start a fresh campaign on `{act.value}` instead?", default_no=True, context=str(drift)
     )

@@ -98,10 +98,9 @@ def interpolate_prompt(text: str, variables: dict[str, Any]) -> str:
 
     safe_vars = {k: v for k, v in variables.items() if k not in _EXCLUDED_FIELDS}
     for key in expected:
+        # A variable no sample field fills is left as written.
         if key in safe_vars:
             text = text.replace("{{" + key + "}}", str(safe_vars[key]))
-        else:
-            logger.debug("Template variable {{%s}} not in sample fields — left as-is", key)
     return text
 
 

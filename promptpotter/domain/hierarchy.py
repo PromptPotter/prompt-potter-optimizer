@@ -12,7 +12,7 @@ from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phases import PauseReading, RunAdmission, RunState
+from promptpotter.domain.phases import RunAdmission, RunState, StopReading
 from promptpotter.domain.records.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.said import Said
@@ -85,7 +85,7 @@ class HierarchyState(FrozenModel):
 
     status: RunStatus
     attached: bool = Field(description="A process holds this cycle, running or launching it.")
-    pause: PauseReading | None = Field(description="Why the run reads paused; null otherwise.")
+    stop: StopReading | None = Field(description="Why the run reads paused or ended, or null.")
     admission: RunAdmission
     intervened: bool = Field(
         description="An operator intervened by hand, so the run is no longer purely reproducible."
@@ -105,7 +105,7 @@ class HierarchyState(FrozenModel):
         return cls(
             status=RunStatus.of(run.run_phase, stop, lifecycle=lifecycle),
             attached=run.producer.attached,
-            pause=run.pause,
+            stop=run.stop,
             admission=admission,
             intervened=index is not None and index.human_intervened,
         )

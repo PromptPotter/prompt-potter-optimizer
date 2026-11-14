@@ -231,7 +231,6 @@ async def _session(
         ),
         jobs_dir=stores.jobs_dir,
     )
-    logger.info("Backend: %s %s", connector.name, client.base_url)
     try:
         if served is None:
             served = await served_pipeline(
@@ -239,7 +238,6 @@ async def _session(
             )
         declaration = served.over(definition.pipeline)
         pipeline_schema = parse_pipeline_response(declaration)
-        logger.info("Pipeline: %s (%d nodes)", dataset.name, len(pipeline_schema.nodes))
         _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
         _verify_observation_names(pipeline_schema, connector, dataset_name)
         backend_revision = await _read_backend_revision(client, connector)
@@ -248,7 +246,6 @@ async def _session(
         )
         # By hash, never a label: every answer this session files names a bank the store holds.
         stores.tenant_datasets.put_bank(bank)
-        logger.info("Dataset: %s (%d samples)", dataset_name, len(bank.samples))
         # After the samples, never before: the invariant is about the schema AND the bank together.
         _warn_if_labels_have_no_ranker(pipeline_schema, bank.samples, connector)
         yield Session(

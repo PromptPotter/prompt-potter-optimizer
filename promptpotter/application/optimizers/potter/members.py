@@ -7,7 +7,6 @@ from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel
 
-from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.bench.node_context import (
     Bounds,
     Calls,
@@ -126,6 +125,7 @@ from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
+from promptpotter.domain.wounds import ValidationReason
 from promptpotter.shared.answer_text import truncate
 
 logger = logging.getLogger(__name__)
@@ -599,7 +599,7 @@ class Escalation(nodes.Controller):
         knobs = ctx.knobs(EscalationKnobs)
         # Structural, not a stall: heals L2 now instead of burning l1_patience rounds.
         l1_mandatory_breach = any(
-            vf.reason == DROPPED_MANDATORY_PLACEHOLDER
+            vf.reason == ValidationReason.DROPPED_MANDATORY_PLACEHOLDER
             for arm in round_result.panel.values()
             for vf in arm.validation_failures
         )

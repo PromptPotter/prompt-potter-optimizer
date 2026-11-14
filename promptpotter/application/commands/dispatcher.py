@@ -49,6 +49,8 @@ from promptpotter.infrastructure.store.stores import (
 from promptpotter.shared.errors import (
     BadRequestError,
     ConflictError,
+    FileKind,
+    FileUnreadableError,
     NotFoundError,
     PayloadInvalidError,
     PotterError,
@@ -114,6 +116,12 @@ class Replaying[P: CommandPayload]:
     jobs: JobRegistry
     payload: P
     end: CommandAckRecord
+
+    def misread(self, said: str) -> FileUnreadableError:
+        """Its end acks another kind's effect: the account's command log that holds it."""
+        return FileUnreadableError(
+            FileKind.LEDGER, path=str(self.stores.commands.path), reason=said
+        )
 
 
 type Replay[R] = Callable[[Replaying[Any]], Awaitable[R]]

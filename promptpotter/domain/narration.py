@@ -6,9 +6,10 @@ from typing import ClassVar, Literal, NamedTuple, assert_never, get_args
 from promptpotter.domain.arms import ArmState, Cut, Measured, Proposed
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.cycle_index import STATUS_MARK_INFO
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, level_text
 from promptpotter.domain.phase_acts import PassOpened
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, paused_by
+from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome, stop_said
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
@@ -17,7 +18,6 @@ from promptpotter.domain.records.run_records import (
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
-    Paused,
     PhaseRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
@@ -269,8 +269,14 @@ class Narration:
         if isinstance(record.state, Running):
             self._launched += 1
         self._held.clear()
-        if isinstance(state := record.state, Paused):
-            return _Line("warn", paused_by(state.cause, ""), state.detail or None, "run")
+        if (stop := record.stop_reading) is not None:
+            assert stop.stop_reason is not None, "a declared stop names its reason"
+            outcome = STOP_REASON_INFO[stop.stop_reason].outcome
+            if outcome is StopOutcome.FAILED:  # said by its error record
+                return None
+            tone: Tone = "warn" if outcome is StopOutcome.PAUSED else STATUS_MARK_INFO[outcome].tone
+            label = stop_said(stop.stop_reason, cause=stop.cause, detail="")
+            return _Line(tone, label, stop.detail or None, "run")
         if (gate := self.gate) is None:
             return None
         # The arms gate's row, said while it holds: each draft it offers, or that no proposer ran.

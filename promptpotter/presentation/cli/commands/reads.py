@@ -108,7 +108,7 @@ def _line(course: HierarchyCourse, *, active: bool) -> str:
     state = course.state
     return (
         course.address
-        + ("" if state.pause is None else f"  {state.pause.said}")
+        + ("" if state.stop is None else f"  {state.stop.said}")
         + (
             f"  next: {state.admission.offers}"
             if state.admission.offers
@@ -247,8 +247,8 @@ def dashboard_human(
         lines[0] += f" · round {dash.round} · {len(dash.rounds)} closed"
         if dash.said is not None:
             lines.append(said_text(dash.said))
-    if dash.pause is not None:
-        lines.append(dash.pause.said)
+    if dash.stop is not None:
+        lines.append(dash.stop.said)
     lines.append(f"next: {admission.offers}" if admission.offers else f"({admission.refusal})")
     return CommandResult(data=dash.model_dump(mode="json"), human="\n".join(lines))
 

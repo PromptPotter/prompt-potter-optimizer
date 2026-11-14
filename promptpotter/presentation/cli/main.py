@@ -12,7 +12,7 @@ import dataclasses
 import importlib
 import json
 import sys
-from collections.abc import Callable, Coroutine, Iterable, Mapping
+from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, TypeAliasType, cast, get_args, get_origin
 
@@ -24,8 +24,11 @@ from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
     CommandKind,
+    CommandPayload,
     CyclePayload,
+    ForkCyclePayload,
     ReadKind,
+    StartRunPayload,
 )
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
 from promptpotter.domain.hierarchy import ListingLifecycle
@@ -35,7 +38,7 @@ from promptpotter.domain.run_mode import OnDivergence
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import VerifyStrategy
-from promptpotter.shared.errors import PayloadInvalidError, PotterError
+from promptpotter.shared.errors import NextAct, PayloadInvalidError, PotterError
 from promptpotter.shared.named_rows import imported
 
 
@@ -64,8 +67,8 @@ class Verb:
     render: str | None = None
     # A read verb's flags its renderer reads, which no field of the row's model takes.
     render_args: tuple[str, ...] = ()
-    # Per payload field of a kind naming this verb, no `Arg` of its name: how the terminal carries it
-    # instead (`_unsaid`, checked at import).
+    # Per payload field of a kind naming this verb, no `Arg` carrying its flag: how the terminal
+    # carries it instead (`_unsaid`, checked at import).
     unspelled: Mapping[str, str] = dataclasses.field(default_factory=dict)
     # A written verb dispatching no kind: why no other door carries it.
     terminal_only: str = ""
@@ -121,45 +124,41 @@ def _budget_axis(axis: str, cast: Callable[[str], float]) -> Callable[[str], Bud
 
 BUDGET_AXES = (
     Arg(
-        "--max-usd",
-        dest="max_usd",
+        CommandPayload.cli_flag("budget.usd"),
         type=_budget_axis("usd", float),
-        default=None,
         metavar="USD|none",
         help="Campaign USD ceiling (optimizer + backend, every live cycle); 0 halts after the "
         "current round, `none` leaves only your account's allowance. Omit to leave it as it stands.",
     ),
     Arg(
-        "--max-tokens",
-        dest="max_tokens",
+        CommandPayload.cli_flag("budget.tokens"),
         type=_budget_axis("tokens", int),
-        default=None,
         metavar="N|none",
         help="Campaign token ceiling (in + out) — the unit that survives an unpriced model; "
         "whichever ceiling trips first halts. Omit to leave it as it stands.",
     ),
     Arg(
-        "--max-rounds",
-        dest="max_rounds",
+        CommandPayload.cli_flag("budget.rounds"),
         type=_budget_axis("rounds", int),
-        default=None,
         metavar="N|none",
         help="L1 round cap, read at the next round boundary; `none` lifts it, so the spend "
         "ceiling governs. Omit to leave it as it stands.",
     ),
     Arg(
-        "--max-wall-clock",
-        dest="max_wall_clock",
+        CommandPayload.cli_flag("budget.wall_clock_s"),
         type=_budget_axis("wall_clock_s", float),
-        default=None,
         metavar="S|none",
         help="Wall-clock bound in seconds for each launch; a remote cell still open at the edge "
         "is cut. Omit to leave it as it stands.",
     ),
 )
 
-ACTIVE_CAMPAIGN = Arg("--campaign", default="", help="Campaign id (default: the active one).")
-ACTIVE_CYCLE = Arg("--cycle", default="", help="Cycle id (default: the active one).")
+ACTIVE_CAMPAIGN = Arg(
+    CyclePayload.cli_flag("campaign_id"), default="", help="Campaign id (default: the active one)."
+)
+ACTIVE_CYCLE = Arg(
+    CyclePayload.cli_flag("cycle_id"), default="", help="Cycle id (default: the active one)."
+)
 CAMPAIGN_ID = Arg("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
 
 
@@ -354,10 +353,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "resume",
         "cli.commands.launch:cmd_resume",
         unspelled={
-            "mode.from_round": "`--from ROUND`",
-            "mode.on_divergence": "`--on-divergence`",
-            "round": "`--rewind ROUND`",
-            "reason": "`--rewind-reason`",
             "keep_rounds": "`--rewind` keeps them, a bare `--steer` does not",
             "seed.pipeline_overlay": "`--steer NODE.PARAM=VALUE`, folded per node",
             "seed.origin_prompts": "a terminal fork edits no prompt; the browser's steer-fork does",
@@ -369,18 +364,18 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "left off; flags handle rewind and divergence.",
         args=(
             Arg(
-                "--campaign",
+                StartRunPayload.cli_flag("campaign_id"),
                 default="",
                 help="Campaign id, 6-hex suffix, or unambiguous prefix (default: the active one). Its "
                 "cycle's own session is resumed; the active pointer is not consulted.",
             ),
             Arg(
-                "--cycle",
+                StartRunPayload.cli_flag("cycle_id"),
                 default="",
                 help="Cycle id (default: the active one, or the named campaign's only cycle).",
             ),
             Arg(
-                "--from",
+                StartRunPayload.cli_flag("mode.from_round"),
                 dest="resume_from_round",
                 type=int,
                 default=None,
@@ -396,7 +391,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "run on, or `fork` a sibling cycle at the divergent round and run that.",
             ),
             Arg(
-                "--rewind",
+                ForkCyclePayload.cli_flag("round"),
                 dest="rewind_to_round",
                 type=int,
                 default=None,
@@ -406,7 +401,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "preserved intact. Contrast with `--from N` which rewinds in place.",
             ),
             Arg(
-                "--rewind-reason",
+                ForkCyclePayload.cli_flag("reason"),
                 dest="rewind_reason",
                 type=str,
                 default="",
@@ -876,14 +871,14 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
 )
 
 
-def _field_args(name: str, field: FieldInfo) -> tuple[Arg, ...]:
+def _field_args(model: type[CommandPayload], name: str, field: FieldInfo) -> tuple[Arg, ...]:
     annotation: Any = field.annotation
     # A `type` alias is spelled by what it stands for.
     while isinstance(annotation, TypeAliasType):
         annotation = annotation.__value__
     if annotation is Budget:
         return BUDGET_AXES
-    flag = f"--{name.replace('_', '-')}"
+    flag = model.cli_flag(name)
     spec: dict[str, Any] = {"help": field.description}
     # Never `is bool`: past a final class, mypy narrows `type[Any]` away and drops every later arm.
     if isinstance(annotation, type) and issubclass(annotation, bool):
@@ -915,7 +910,7 @@ def command_verb(kind: CommandKind) -> Verb:
     model = PAYLOAD_MODEL_FOR_KIND[kind]
     address: tuple[Arg, ...] = ()
     if issubclass(model, CyclePayload):
-        cycle = ACTIVE_CYCLE if model.implied_target else Arg("--cycle", required=True)
+        cycle = ACTIVE_CYCLE if model.implied_target else Arg(*ACTIVE_CYCLE.flags, required=True)
         address = (ACTIVE_CAMPAIGN, cycle)
     elif issubclass(model, CampaignPayload):
         address = (CAMPAIGN_ID,)
@@ -923,7 +918,7 @@ def command_verb(kind: CommandKind) -> Verb:
         arg
         for name, field in model.model_fields.items()
         if name not in CyclePayload.model_fields
-        for arg in _field_args(name, field)
+        for arg in _field_args(model, name, field)
     )
     assert kind.cli_verb is not None
     return Verb(
@@ -947,21 +942,25 @@ def _paths(model: type[BaseModel], prefix: str = "") -> dict[str, FieldInfo]:
 
 def _unsaid(verb: Verb) -> list[str]:
     """What *verb* leaves unsaid: a payload field, nested ones too, with no `Arg` or `unspelled`
-    reason on it or a model holding it, or the reverse."""
+    reason on it or a model holding it, or the reverse. A flag spells a field only as its payload
+    declares it (`CommandPayload.cli_flag`), so an act the terminal spells is a flag it takes."""
     if verb.read is not None:
         return []
-    kinds = [kind for kind in CommandKind if kind.cli_verb == verb.name]
-    if not kinds:
+    models = [PAYLOAD_MODEL_FOR_KIND[kind] for kind in CommandKind if kind.cli_verb == verb.name]
+    if not models:
         return [] if verb.terminal_only else [f"`{verb.name}` dispatches no kind and says not why"]
-    dests = {arg.dest for arg in verb.args}
     fields = {
         name: field
-        for kind in kinds
-        for name, field in _paths(PAYLOAD_MODEL_FOR_KIND[kind]).items()
+        for model in models
+        for name, field in _paths(model).items()
         if name.split(".")[0] not in CyclePayload.model_fields
     }
+    flags = {flag for arg in verb.args for flag in arg.flags}
+    spelled = {arg.dest for arg in verb.args if not arg.flags[0].startswith("-")} | {
+        name for name in fields if any(model.cli_flag(name) in flags for model in models)
+    }
     budgets = {name for name, field in fields.items() if field.annotation is Budget}
-    said, holders = dests | verb.unspelled.keys(), {name.rpartition(".")[0] for name in fields}
+    said, holders = spelled | verb.unspelled.keys(), {name.rpartition(".")[0] for name in fields}
     unsaid = [
         f"`{verb.name}` spells no `{name}`"
         for name in sorted(fields.keys() - budgets - holders)
@@ -971,7 +970,7 @@ def _unsaid(verb: Verb) -> list[str]:
         unsaid.append(f"`{verb.name}` takes a budget without `BUDGET_AXES`")
     unsaid += [
         f"`{verb.name}` says why it does not spell `{name}`, which it spells or no kind has"
-        for name in sorted(verb.unspelled.keys() - (fields.keys() - dests))
+        for name in sorted(verb.unspelled.keys() - (fields.keys() - spelled))
     ]
     return unsaid
 
@@ -1047,8 +1046,17 @@ def main() -> None:
             # One stream: the refusal is the answer, and stderr stays empty of it.
             print(json.dumps(refused.model_dump(mode="json")))
         else:
-            # What this terminal alone can do about it rides the refusal as a note, said after it.
-            said = [f"Error: {refused.message}", *getattr(exc, "__notes__", ())]
+            # Its acts in this terminal's verbs and flags, then what this terminal alone can do
+            # about it, riding the refusal as a note.
+            acts = cast(
+                "Callable[[Sequence[NextAct]], list[str]]",
+                imported("promptpotter.application.views.render", "phase:acts_line"),
+            )
+            said = [
+                f"Error: {refused.message}",
+                *acts(refused.next_acts),
+                *getattr(exc, "__notes__", ()),
+            ]
             print("\n\n".join(said), file=sys.stderr)
         sys.exit(1)
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:

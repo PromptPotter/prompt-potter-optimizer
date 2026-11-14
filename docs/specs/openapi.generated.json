@@ -5152,6 +5152,17 @@
             "title": "Name",
             "type": "string"
           },
+          "refusal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Refusal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What refused its rows where a refusal says which field of its definition is wrong; null otherwise."
+          },
           "start_block": {
             "anyOf": [
               {
@@ -5201,7 +5212,8 @@
         "required": [
           "name",
           "tier",
-          "start_block"
+          "start_block",
+          "refusal"
         ],
         "title": "DatasetIndexEntry",
         "type": "object"
@@ -6387,9 +6399,18 @@
             "type": "string"
           },
           "message": {
-            "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one.",
+            "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one; never a verb or a flag, which its acts carry.",
             "title": "Message",
             "type": "string"
+          },
+          "next_acts": {
+            "default": [],
+            "description": "The acts past it, as a stop's: each door spells one its own way (the terminal's verb and flag, the browser's control, the MCP tool its kind names).",
+            "items": {
+              "$ref": "#/components/schemas/NextAct"
+            },
+            "title": "Next Acts",
+            "type": "array"
           }
         },
         "required": [
@@ -8622,25 +8643,25 @@
             "title": "Intervened",
             "type": "boolean"
           },
-          "pause": {
+          "status": {
+            "$ref": "#/components/schemas/RunStatus"
+          },
+          "stop": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/PauseReading"
+                "$ref": "#/components/schemas/StopReading"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Why the run reads paused; null otherwise."
-          },
-          "status": {
-            "$ref": "#/components/schemas/RunStatus"
+            "description": "Why the run reads paused or ended, or null."
           }
         },
         "required": [
           "status",
           "attached",
-          "pause",
+          "stop",
           "admission",
           "intervened"
         ],
@@ -10913,6 +10934,43 @@
           "dataset"
         ],
         "title": "NestedPipelineRef",
+        "type": "object"
+      },
+      "NextAct": {
+        "additionalProperties": false,
+        "description": "A remedy past a stop or a refusal: a *kind* a door presses and the one payload field it\nfills (dotted into a model); with no kind, a declared *field* the operator sets; or a file it\n*reads*. *value* describes what goes in the field. Each door words its own spelling from it:\nthe terminal its verb and flag (`views/render/phase.py::acts_line`), the API and the webapp the\nkind, MCP the tool of that name; so no sentence beside it names a verb or a flag. Each is one a\ndoor takes (`command_kinds.py::takes_act`), a stop's at import and a refusal's at the gate.",
+        "properties": {
+          "field": {
+            "default": "",
+            "title": "Field",
+            "type": "string"
+          },
+          "kind": {
+            "default": "",
+            "enum": [
+              "",
+              "start-run",
+              "set-limits",
+              "verify-candidate",
+              "mint-campaign",
+              "fork-cycle",
+              "submit-arms"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "reads": {
+            "default": "",
+            "title": "Reads",
+            "type": "string"
+          },
+          "value": {
+            "default": "",
+            "title": "Value",
+            "type": "string"
+          }
+        },
+        "title": "NextAct",
         "type": "object"
       },
       "NodeBlock": {
@@ -13254,50 +13312,6 @@
         "title": "PauseCyclePayload",
         "type": "object"
       },
-      "PauseReading": {
-        "additionalProperties": false,
-        "description": "Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach.",
-        "properties": {
-          "at": {
-            "title": "At",
-            "type": "string"
-          },
-          "cause": {
-            "$ref": "#/components/schemas/PauseCause"
-          },
-          "detail": {
-            "description": "Who or what asked, in the declarer's own words.",
-            "title": "Detail",
-            "type": "string"
-          },
-          "said": {
-            "description": "SERVED: the cause as every door words it (`paused_by`).",
-            "readOnly": true,
-            "title": "Said",
-            "type": "string"
-          },
-          "stop_reason": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/StopReason"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null on an accepted pause the loop has yet to reach."
-          }
-        },
-        "required": [
-          "stop_reason",
-          "cause",
-          "detail",
-          "at",
-          "said"
-        ],
-        "title": "PauseReading",
-        "type": "object"
-      },
       "PipelineMode": {
         "additionalProperties": false,
         "description": "One pipeline the connector declares, as a check-in's Mode offers it.",
@@ -14210,9 +14224,18 @@
             "type": "object"
           },
           "message": {
-            "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one.",
+            "description": "The sentence an operator reads, naming its remedy and the Account tab it lives in, where it names one; never a verb or a flag, which its acts carry.",
             "title": "Message",
             "type": "string"
+          },
+          "next_acts": {
+            "default": [],
+            "description": "The acts past it, as a stop's: each door spells one its own way (the terminal's verb and flag, the browser's control, the MCP tool its kind names).",
+            "items": {
+              "$ref": "#/components/schemas/NextAct"
+            },
+            "title": "Next Acts",
+            "type": "array"
           }
         },
         "required": [
@@ -15685,17 +15708,6 @@
             ],
             "description": "The cycle's calls billed past their hold (`run_limits.overshoot`), off the account's charge book; null on a replay, which reads none."
           },
-          "pause": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PauseReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Why the cycle reads `paused` — what caused it, the stop it was left on and what the operator does next (`RunState.pause`); null in every other phase."
-          },
           "producer": {
             "$ref": "#/components/schemas/ProducerReading",
             "description": "The cycle's producer, derived with the phase."
@@ -15778,6 +15790,17 @@
             "$ref": "#/components/schemas/DashboardState",
             "default": "init"
           },
+          "stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReading"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the cycle reads `paused` or `terminal` — what caused it, the stop it was left on and what said so (`RunState.stop`); null in every other phase."
+          },
           "stop_reason": {
             "anyOf": [
               {
@@ -15827,7 +15850,7 @@
           "run_phase",
           "producer",
           "admission",
-          "pause",
+          "stop",
           "overlap_line_round",
           "overlap_line_n",
           "composite_fitness_weights",
@@ -16506,6 +16529,58 @@
           "arm"
         ],
         "title": "StepFacts",
+        "type": "object"
+      },
+      "StopReading": {
+        "additionalProperties": false,
+        "description": "Why a cycle reads stopped: its declared stop, or an accepted pause not yet reached.",
+        "properties": {
+          "at": {
+            "title": "At",
+            "type": "string"
+          },
+          "cause": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PauseCause"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What paused it; null on a run that ended."
+          },
+          "detail": {
+            "description": "Who asked, or what its raiser said, in its own words.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "said": {
+            "description": "SERVED: the stop as every door words it (`stop_said`).",
+            "readOnly": true,
+            "title": "Said",
+            "type": "string"
+          },
+          "stop_reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReason"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null on an accepted pause the loop has yet to reach."
+          }
+        },
+        "required": [
+          "stop_reason",
+          "cause",
+          "detail",
+          "at",
+          "said"
+        ],
+        "title": "StopReading",
         "type": "object"
       },
       "StopReason": {
@@ -17750,9 +17825,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "Reason code that steers L2's healing direction. One of: ``forbidden_axis`` (operator-locked param touched), ``type_mismatch`` (wrong declared type), ``not_in_available_models`` / ``not_in_param_allowed_values`` / ``not_accepted_by_model`` (value outside the axis's resolved space — the last where the node declared it and the chosen model refuses it, so the healing move is the model, not the value), ``reproposes_known_failing_config`` (matches a prior ``RuntimeFailure.observed_config`` row), ``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` (generator-side failure), ``steers_inner_stopping`` (an L4 override telling the inner loop when to STOP rather than how to search — it edits the frame `held_out_lift` averages over instead of the search it measures), ``steers_across_seeds`` (an L4 override making an inner node reason over the seed panel, which exists only one level up — the rule renders empty where it lands), ``guts_inherited_contract`` (an L4 override replacing a long prompt field with a fraction of its length, deleting contracts the parent carried in plain prose), ``no_op_variant`` / ``duplicate_variant`` (invariant-detect), ``hallucinated_node`` (named a node absent from the schema — NON-fatal: the phantom edit is stripped, the candidate still scores; routed as signal, not a synthetic-0).",
-            "title": "Reason",
-            "type": "string"
+            "$ref": "#/components/schemas/ValidationReason"
           },
           "value": {
             "description": "The offending value as rendered for the prompt; truncated to ≤300 chars for raw LLM output. Always a string — original type is encoded into the rendering when relevant.",
@@ -17768,6 +17841,43 @@
         ],
         "title": "ValidationFailure",
         "type": "object"
+      },
+      "ValidationReason": {
+        "description": "Why an L1 output was refused, the code that steers L2's healing direction.",
+        "enum": [
+          "forbidden_axis",
+          "unknown_param",
+          "type_mismatch",
+          "not_in_available_models",
+          "not_in_param_allowed_values",
+          "not_accepted_by_model",
+          "reproposes_known_failing_config",
+          "hallucinated_node",
+          "dropped_mandatory_placeholder",
+          "shots_without_demo_pool",
+          "shot_not_in_demo_pool",
+          "shot_repeated",
+          "shots_over_cap",
+          "not_in_block_pool",
+          "citation_not_in_panel",
+          "over_ceiling",
+          "optimizer_prompt_parse_failure",
+          "l1_provider_empty_response",
+          "steers_inner_stopping",
+          "steers_across_seeds",
+          "guts_inherited_contract",
+          "layout_node_not_l4_editable",
+          "l1_layout_unparseable",
+          "l1_layout_missing_mandatory",
+          "l1_layout_unknown_placeholder",
+          "l1_layout_voids_prefix",
+          "l1_layout_unchanged_from_prior",
+          "no_op_variant",
+          "duplicate_variant",
+          "repeat_variant"
+        ],
+        "title": "ValidationReason",
+        "type": "string"
       },
       "Variation": {
         "additionalProperties": false,
@@ -18236,21 +18346,21 @@
             "title": "Cycle Id",
             "type": "string"
           },
-          "pause": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PauseReading"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "producer": {
             "$ref": "#/components/schemas/ProducerReading"
           },
           "run_phase": {
             "$ref": "#/components/schemas/RunPhase"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StopReading"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "warming_up": {
             "const": true,
@@ -18265,7 +18375,7 @@
           "run_phase",
           "producer",
           "admission",
-          "pause"
+          "stop"
         ],
         "title": "WarmingDashboard",
         "type": "object"

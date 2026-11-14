@@ -22,7 +22,7 @@ from promptpotter.application.views.render.primitives import (
     render_pipeline_overlay,
 )
 from promptpotter.domain.arm_reading import fitness_terms_text, fold_fitness_text
-from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND
+from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CyclePayload
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.origin_panel import (
@@ -33,53 +33,54 @@ from promptpotter.domain.origin_panel import (
 from promptpotter.domain.paired_reading import level_text
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
-    NextAct,
     PauseCause,
     StopOutcome,
     StopReason,
-    paused_by,
+    stop_said,
 )
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import RoundClosedRecord
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.ruler import PLATEAU_ROUNDS, AbilityReading, LevelSeries
+from promptpotter.shared.errors import NextAct
 
 
 def _spelled(act: NextAct) -> str:
-    """The terminal's spelling of *act*: its kind's verb and the flag that sets its field."""
+    """The terminal's spelling of *act*: its kind's verb and the flag its payload declares for its
+    field (`CommandPayload.cli_flag`); kind-less, a cycle's address flag, else the field itself."""
     if act.reads:
         return f"else read `{act.reads}`"
+    # A start-run's value is the literal its field takes; any other's describes one.
+    value = f" {act.value}" if act.payload else f" <{act.value}>" if act.value else ""
     if not act.kind:
+        if act.field in CyclePayload.cli_flags:
+            return f"`{CyclePayload.cli_flag(act.field)}{value}`"
         return f"`{act.field}: {act.value}`" if act.value else f"`{act.field}`"
-    verb = PAYLOAD_MODEL_FOR_KIND[act.kind].kind.cli_verb
-    if not act.field:
-        return f"`{verb}`"
-    axis, name = act.field.startswith("budget."), act.field.rsplit(".", 1)[-1]
-    flag = f"--max-{name.removesuffix('_s')}" if axis else f"--{name}"
-    value = f" <{act.value}>" if act.value else ""
-    return f"`{verb} {flag.replace('_', '-')}{value}`"
+    model = PAYLOAD_MODEL_FOR_KIND[act.kind]
+    flag = f" {model.cli_flag(act.field)}{value}" if act.field else ""
+    return f"`{model.kind.cli_verb}{flag}`"
+
+
+def acts_line(acts: Sequence[NextAct]) -> list[str]:
+    """The terminal's commands for the acts past a stop or a refusal."""
+    spelled = list(dict.fromkeys(_spelled(act) for act in acts))
+    return [f"cli:  {'; '.join(spelled)}"] if spelled else []
 
 
 def stop_next_lines(stop_reason: StopReason) -> list[str]:
     """The step past a stop and the terminal's commands for it."""
     info = STOP_REASON_INFO[stop_reason]
-    spelled = list(dict.fromkeys(_spelled(act) for act in info.next_acts))
-    return [
-        *([f"next: {info.next_step}"] if info.next_step else []),
-        *([f"cli:  {'; '.join(spelled)}"] if spelled else []),
-    ]
+    return [*([f"next: {info.next_step}"] if info.next_step else []), *acts_line(info.next_acts)]
 
 
 def stop_lines(
     stop_reason: StopReason, *, detail: str = "", cause: PauseCause | None = None
 ) -> list[str]:
-    """A stop at every surface that names one: its outcome, label (a pause's, its cause), what said
-    so, then ``stop_next_lines``."""
-    info = STOP_REASON_INFO[stop_reason]
-    label = info.label if cause is None else paused_by(cause, "")
-    said = f" — {detail}" if detail else ""
-    return [f"{info.outcome.value.upper()} · {label}{said}", *stop_next_lines(stop_reason)]
+    """A stop at every surface that names one: its outcome, ``stop_said``, then ``stop_next_lines``."""
+    said = stop_said(stop_reason, cause=cause, detail=detail)
+    outcome = STOP_REASON_INFO[stop_reason].outcome
+    return [f"{outcome.value.upper()} · {said}", *stop_next_lines(stop_reason)]
 
 
 def fmt_elapsed(seconds: float) -> str:

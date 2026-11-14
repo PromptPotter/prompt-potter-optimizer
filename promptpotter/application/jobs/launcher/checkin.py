@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -49,8 +48,6 @@ from promptpotter.infrastructure.store.stores import Stores
 if TYPE_CHECKING:
     from promptpotter.application.datasets.authored import ConfigLayers
     from promptpotter.application.initialization.session import Session
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)

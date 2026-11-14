@@ -403,7 +403,6 @@ class Walk:
         # Asked of every row, replays included: the stale-data protocol re-measures a replayed cell.
         category = taken.facts.error_category
         if category is not None and (stop := ERROR_CATEGORY_INFO[category].stops) is not None:
-            logger.warning("%s: %s", STOP_REASON_INFO[stop].label, taken.facts.error)
             raise StopLoop(stop, unmeasured=n - len(self.results) + 1)
 
         if acq.fresh:
@@ -506,17 +505,6 @@ class Walk:
     ) -> list[asyncio.Task[_Acquired]]:
         """A cell in flight or returned-not-taken is DISCARDED: written, the rows depend on in-flight depth."""
         self.outcome = outcome
-        if self.running or self.finished:
-            cause = "the phase ended" if outcome is None else (outcome.ended_on or "complete")
-            if outcome is not None and outcome.stop_signal is not None:
-                cause = f"{cause}: {outcome.stop_signal.check_name}"
-            logger.info(
-                "Discarding %d look-ahead acquisition(s) after query %d/%d (%s).",
-                len(self.running) + len(self.finished),
-                len(self.results),
-                self.n,
-                cause,
-            )
         for cell in self.finished.values():
             _quiet(cell)
         self.drop_claim_waits()
@@ -784,7 +772,6 @@ class _ScoringPhase[K: Hashable]:
             )
             return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         if now.pause or now.tripped is None:
-            logger.debug("Pause after query %d/%d.", len(walk.results), walk.n)
             raise KeyboardInterrupt("graceful")
         logger.warning(
             "Budget ceiling reached after query %d/%d (%s); halting mid-round.",

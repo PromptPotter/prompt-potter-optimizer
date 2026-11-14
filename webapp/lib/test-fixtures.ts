@@ -399,7 +399,7 @@ export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchySta
   return {
     status: { run_phase: "terminal", stop_reason: null, mark: "unknown" },
     attached: false,
-    pause: null,
+    stop: null,
     admission: {
       offers: null,
       refusal: "",
@@ -600,7 +600,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     observed: null,
     walk: null,
     round_axis: { completed: [], live: null, position: null, unfiled: null },
-    pause: null,
+    stop: null,
     said: null,
     ...over,
   };

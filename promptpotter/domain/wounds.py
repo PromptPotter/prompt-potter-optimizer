@@ -18,6 +18,51 @@ class NurseOwner(enum.StrEnum):
     OPERATOR = "operator"
 
 
+class ValidationReason(enum.StrEnum):
+    """Why an L1 output was refused, the code that steers L2's healing direction."""
+
+    # A node's param, set off the axis's resolved space or its declared shape.
+    FORBIDDEN_AXIS = "forbidden_axis"
+    UNKNOWN_PARAM = "unknown_param"
+    TYPE_MISMATCH = "type_mismatch"
+    NOT_IN_AVAILABLE_MODELS = "not_in_available_models"
+    NOT_IN_PARAM_ALLOWED_VALUES = "not_in_param_allowed_values"
+    # Declared by the node, refused by the chosen model: the healing move is the model.
+    NOT_ACCEPTED_BY_MODEL = "not_accepted_by_model"
+    # Matches a prior `RuntimeFailure.observed_config` row.
+    REPROPOSES_KNOWN_FAILING_CONFIG = "reproposes_known_failing_config"
+    # Non-fatal: the phantom node's edit is stripped and the candidate still scores.
+    HALLUCINATED_NODE = "hallucinated_node"
+    DROPPED_MANDATORY_PLACEHOLDER = "dropped_mandatory_placeholder"
+    # Few-shot demos and pooled blocks, out of what the round offered.
+    SHOTS_WITHOUT_DEMO_POOL = "shots_without_demo_pool"
+    SHOT_NOT_IN_DEMO_POOL = "shot_not_in_demo_pool"
+    SHOT_REPEATED = "shot_repeated"
+    SHOTS_OVER_CAP = "shots_over_cap"
+    NOT_IN_BLOCK_POOL = "not_in_block_pool"
+    CITATION_NOT_IN_PANEL = "citation_not_in_panel"
+    OVER_CEILING = "over_ceiling"
+    # The generator's own reply.
+    OPTIMIZER_PROMPT_PARSE_FAILURE = "optimizer_prompt_parse_failure"
+    L1_PROVIDER_EMPTY_RESPONSE = "l1_provider_empty_response"
+    # An L4 override: stopping the inner loop, reasoning over the seed panel one level up, or
+    # replacing a long prompt field with a fraction of it.
+    STEERS_INNER_STOPPING = "steers_inner_stopping"
+    STEERS_ACROSS_SEEDS = "steers_across_seeds"
+    GUTS_INHERITED_CONTRACT = "guts_inherited_contract"
+    # An L4 layout edit: on a node no layout is offered for, or one `resolve_layout_override` refuses.
+    LAYOUT_NODE_NOT_L4_EDITABLE = "layout_node_not_l4_editable"
+    L1_LAYOUT_UNPARSEABLE = "l1_layout_unparseable"
+    L1_LAYOUT_MISSING_MANDATORY = "l1_layout_missing_mandatory"
+    L1_LAYOUT_UNKNOWN_PLACEHOLDER = "l1_layout_unknown_placeholder"
+    L1_LAYOUT_VOIDS_PREFIX = "l1_layout_voids_prefix"
+    L1_LAYOUT_UNCHANGED_FROM_PRIOR = "l1_layout_unchanged_from_prior"
+    # Invariant-detect: a collapse, counted by `collapse_counts`.
+    NO_OP_VARIANT = "no_op_variant"
+    DUPLICATE_VARIANT = "duplicate_variant"
+    REPEAT_VARIANT = "repeat_variant"
+
+
 # In `domain/`: `RoundResult` counts collapses off these and may not import their validator.
 INVARIANT_REASONS: frozenset[str] = frozenset(
     {"no_op_variant", "duplicate_variant", "repeat_variant"}
@@ -58,32 +103,7 @@ class ValidationFailure(FrozenModel):
             "rather than membership-based."
         ),
     )
-    reason: str = Field(
-        description=(
-            "Reason code that steers L2's healing direction. One of: "
-            "``forbidden_axis`` (operator-locked param touched), "
-            "``type_mismatch`` (wrong declared type), "
-            "``not_in_available_models`` / ``not_in_param_allowed_values`` / "
-            "``not_accepted_by_model`` (value outside the axis's resolved space — "
-            "the last where the node declared it and the chosen model refuses it, so "
-            "the healing move is the model, not the value), "
-            "``reproposes_known_failing_config`` (matches a prior "
-            "``RuntimeFailure.observed_config`` row), "
-            "``l1_provider_empty_response`` / ``optimizer_prompt_parse_failure`` "
-            "(generator-side failure), "
-            "``steers_inner_stopping`` (an L4 override telling the inner loop when to STOP "
-            "rather than how to search — it edits the frame `held_out_lift` averages over "
-            "instead of the search it measures), "
-            "``steers_across_seeds`` (an L4 override making an inner node reason over the seed "
-            "panel, which exists only one level up — the rule renders empty where it lands), "
-            "``guts_inherited_contract`` (an L4 override replacing a long prompt field with a "
-            "fraction of its length, deleting contracts the parent carried in plain prose), "
-            "``no_op_variant`` / ``duplicate_variant`` (invariant-detect), "
-            "``hallucinated_node`` (named a node absent from the schema — "
-            "NON-fatal: the phantom edit is stripped, the candidate still scores; "
-            "routed as signal, not a synthetic-0)."
-        ),
-    )
+    reason: ValidationReason
 
 
 def collapse_reason(failures: Iterable[ValidationFailure]) -> str | None:

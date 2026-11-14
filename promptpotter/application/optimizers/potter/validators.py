@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import logging
 import re
 from collections.abc import Collection, Mapping, Sequence
 from itertools import pairwise
 from typing import Any
 
 from promptpotter.application import optimizers
-from promptpotter.application.bench.children import DROPPED_MANDATORY_PLACEHOLDER
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L1_HELD_PROMPT_FIELDS,
     prose_ceiling,
@@ -40,9 +38,8 @@ from promptpotter.domain.wounds import (
     INVARIANT_REASONS,
     RuntimeFailure,
     ValidationFailure,
+    ValidationReason,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def l1_blocks_in_pool(
@@ -54,7 +51,7 @@ def l1_blocks_in_pool(
             axis=Locus(node, field).name,
             value=value[:300],
             allowed=list(offered.get(field, ())),
-            reason="not_in_block_pool",
+            reason=ValidationReason.NOT_IN_BLOCK_POOL,
         )
         for node, fields in updates.items()
         for field, value in fields.items()
@@ -73,7 +70,7 @@ def l1_prompt_fields_open(
             axis=locus.name,
             value=value[:300],
             allowed=node.open_prompt_fields,
-            reason="forbidden_axis",
+            reason=ValidationReason.FORBIDDEN_AXIS,
         )
         for locus, value in prompt_edit.items()
         if locus.key in L1_HELD_PROMPT_FIELDS
@@ -104,7 +101,7 @@ def l1_citation_in_panel(
             axis="evidence_grounding",
             value=grounding.citation[:300],
             allowed=[grounding.field],
-            reason="citation_not_in_panel",
+            reason=ValidationReason.CITATION_NOT_IN_PANEL,
         )
     ]
 
@@ -117,14 +114,19 @@ def l1_shots_in_demo_pool(
     for node, shots in shots_by_node.items():
         axis = Locus(node, SHOTS_KEY).name
         failures += [
-            ValidationFailure(axis=axis, value=str(i), allowed=[], reason="shot_not_in_demo_pool")
+            ValidationFailure(
+                axis=axis, value=str(i), allowed=[], reason=ValidationReason.SHOT_NOT_IN_DEMO_POOL
+            )
             for i in shots
             if i not in demo_ids
         ]
         if len(set(shots)) != len(shots):
             failures.append(
                 ValidationFailure(
-                    axis=axis, value=str(list(shots)), allowed=[], reason="shot_repeated"
+                    axis=axis,
+                    value=str(list(shots)),
+                    allowed=[],
+                    reason=ValidationReason.SHOT_REPEATED,
                 )
             )
         if len(shots) > k_max:
@@ -133,7 +135,7 @@ def l1_shots_in_demo_pool(
                     axis=axis,
                     value=str(len(shots)),
                     allowed=[str(k_max)],
-                    reason="shots_over_cap",
+                    reason=ValidationReason.SHOTS_OVER_CAP,
                 )
             )
     return failures
@@ -164,7 +166,7 @@ def l1_config_not_in_runtime_failures(
                             axis=f"{node_name}.{param}",
                             value=str(value),
                             allowed=[],
-                            reason="reproposes_known_failing_config",
+                            reason=ValidationReason.REPROPOSES_KNOWN_FAILING_CONFIG,
                         )
                     )
                     break
@@ -200,16 +202,16 @@ def l1_inner_placeholders_intact(
                     axis=f"{node_name}.prompt",
                     value="dropped:" + ",".join(missing),
                     allowed=declared,
-                    reason=DROPPED_MANDATORY_PLACEHOLDER,
+                    reason=ValidationReason.DROPPED_MANDATORY_PLACEHOLDER,
                 )
             )
     return failures
 
 
 # PHRASES, never tokens: "stop proposing the same axis in consecutive rounds" is a legal steer.
-_FORBIDDEN_INNER_STEERS: tuple[tuple[str, tuple[str, ...]], ...] = (
+_FORBIDDEN_INNER_STEERS: tuple[tuple[ValidationReason, tuple[str, ...]], ...] = (
     (
-        "steers_inner_stopping",
+        ValidationReason.STEERS_INNER_STOPPING,
         (
             "early stop",
             "stop early",
@@ -234,7 +236,7 @@ _FORBIDDEN_INNER_STEERS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     # Quantified forms only: a seed IS one whole inner run, and bare "seed" is legal ("seed prompt").
     (
-        "steers_across_seeds",
+        ValidationReason.STEERS_ACROSS_SEEDS,
         (
             "each seed",
             "every seed",
@@ -318,7 +320,7 @@ def l1_prompt_field_not_gutted(
                     axis=f"{node_name}.{field}",
                     value=f"{len(value)}B replaces {len(parent)}B",
                     allowed=[],
-                    reason="guts_inherited_contract",
+                    reason=ValidationReason.GUTS_INHERITED_CONTRACT,
                 )
             )
     return failures
@@ -341,7 +343,7 @@ def l1_prose_within_ceiling(
                         axis=f"{node_name}.{param}",
                         value=f"{len(value)} chars",
                         allowed=[str(ceiling)],
-                        reason="over_ceiling",
+                        reason=ValidationReason.OVER_CEILING,
                     )
                 )
     return failures
@@ -363,7 +365,7 @@ def l1_inner_layout_applies(overlay: Mapping[str, Any]) -> list[ValidationFailur
                     axis=axis,
                     value=str(edit)[:80],
                     allowed=sorted(offered),
-                    reason="layout_node_not_l4_editable",
+                    reason=ValidationReason.LAYOUT_NODE_NOT_L4_EDITABLE,
                 )
             )
             continue
@@ -374,7 +376,7 @@ def l1_inner_layout_applies(overlay: Mapping[str, Any]) -> list[ValidationFailur
                     axis=axis,
                     value=", ".join(sorted(named)),
                     allowed=sorted(spec.possible),
-                    reason=outcome.validator_id,
+                    reason=ValidationReason(outcome.validator_id),
                 )
             )
     return failures
@@ -428,7 +430,7 @@ def detect_invariants(
                     axis="variant",
                     value="(no mutation)",
                     allowed=["non-empty mutation"],
-                    reason="no_op_variant",
+                    reason=ValidationReason.NO_OP_VARIANT,
                 )
             )
             continue
@@ -439,7 +441,7 @@ def detect_invariants(
                     axis="variant",
                     value=f"duplicate of C{seen[sig] + 1}",
                     allowed=["unique mutation"],
-                    reason="duplicate_variant",
+                    reason=ValidationReason.DUPLICATE_VARIANT,
                 )
             )
             continue
@@ -462,16 +464,9 @@ def detect_invariants(
                     axis="variant",
                     value=f"re-proposes the idea measured and lost in round {echo}",
                     allowed=["an idea this cycle has not already lost with"],
-                    reason="repeat_variant",
+                    reason=ValidationReason.REPEAT_VARIANT,
                 )
             )
-    elif repeats:
-        logger.debug(
-            "repeat_variant: %d/%d proposals re-propose a lost idea — none rejected "
-            "(rejecting all would leave the round with no candidates)",
-            len(repeats),
-            n_live,
-        )
     return [
         cp.model_copy(update={"validation_failures": vfs})
         for cp, vfs in zip(proposals, failures, strict=True)

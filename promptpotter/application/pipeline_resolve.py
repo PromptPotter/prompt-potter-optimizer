@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import functools
-import logging
 from collections.abc import Mapping, Sequence
 from contextlib import aclosing
 from dataclasses import dataclass, field, replace
@@ -153,8 +152,6 @@ from promptpotter.shared.errors import (
 )
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, has_capability
-
-logger = logging.getLogger(__name__)
 
 JUDGE_INSTRUMENT_KEY = "judge_instrument"
 """The node-config key the judges' fingerprint rides into measurement identity — ONE key over the
@@ -500,7 +497,6 @@ def _apply_starting_prompts(
             )
         laid = {**pipeline_params.node(pnode.name).laid_keys(), "prompt": rendered}
         pipeline_params = pipeline_params.with_nodes({**pipeline_params.nodes, pnode.name: laid})
-        logger.info("Starting prompt: %s origin.yaml[%s]", dataset_name, pnode.name)
     return pipeline_params
 
 
@@ -1276,12 +1272,6 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     _validate_model_ownership(pipeline_params, filtered=filtered, dataset_name=dataset_name)
     # Asked here so a channel the connector cannot run stops init, not every cell of the origin.
     session.backend_client.connector.prompt_delivery(pipeline_params)
-
-    excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
-    declared = session.pipeline_schema
-    unrun = [n.name for n in declared.declared_nodes if n.name not in declared.running]
-    unrun_str = f"  Declared, run by no walk: {', '.join(unrun)}" if unrun else ""
-    logger.info("Running nodes: %s%s%s", ", ".join(filtered.running), excl_str, unrun_str)
 
     return replace(
         session,

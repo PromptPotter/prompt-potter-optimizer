@@ -94,8 +94,6 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     ConflictError,
-    FileKind,
-    FileUnreadableError,
     NotFoundError,
     PayloadInvalidError,
     TaskUncancellableError,
@@ -218,7 +216,9 @@ async def relaunched(replaying: Replaying[Any]) -> StartAnswer:
     `read_command` reads them (the cycle a queued mint took since that ack included), as the ack
     recorded them once a record is reaped; arm by arm where it asked a head-to-head, watching no
     exit (another act owns them)."""
-    recorded = _recorded_launches(replaying.end.effect)
+    if not isinstance(effect := replaying.end.effect, LaunchedEffect):
+        raise replaying.misread(f"a launch's ack names no job, its effect is {effect.kind!r}")
+    recorded = effect.launches
     live = await asyncio.to_thread(
         replaying.jobs.launched_by,
         [launch.job_id for launch in recorded],
@@ -268,17 +268,6 @@ def launch_cancels(
         )
         acts.append(CommandCall(pause, key, door=door))
     return acts
-
-
-def _recorded_launches(effect: CommandEffect) -> list[LaunchedJob]:
-    """What a launch's ack recorded, which every launch kind's retry answers."""
-    if not isinstance(effect, LaunchedEffect):
-        raise FileUnreadableError(
-            FileKind.LEDGER,
-            path="the launch's ledger",
-            reason=f"a launch's ack names no job, its effect is {effect.kind!r}",
-        )
-    return effect.launches
 
 
 async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[Launched]:

@@ -169,8 +169,11 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   remainder carries an overdraft.
 - **landed 77, webb-5b:** a node's output contract and a lift's name are served, so the browser's
   copies go; the gate boots on any `python3`.
-- **then:** faults-1 (a refusal names its next acts), then narr 3 (the acts bank facts, not text; one door to a run's
-  ledger), then ren (classes defined twice, a gate refusing another).
+- **landed 78, faults-1:** a refusal carries its next acts as a stop does, so no message names a verb
+  or flag (the gate's `refusal-words` holds it); a stop's own words reach every door; a text node's
+  form failure is one refused child; a deep YAML is a refusal; 43 logs no reader needed go.
+- **then:** narr 3 and coupon (the host sets an account's coupon; the coupon's quota faults), then
+  ren (classes defined twice, a gate refusing another).
 
 The re-keys end at the behaviour-key switch.
 

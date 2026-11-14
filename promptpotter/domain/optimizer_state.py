@@ -7,12 +7,13 @@ from pydantic import ConfigDict, Field, SerializeAsAny, model_validator
 from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.domain.wounds import ValidationReason
 
 # The one parse failure charged against the prompt; ask it, never `is not None`.
-PARSE_FAILURE_MALFORMED: str = "optimizer_prompt_parse_failure"
+PARSE_FAILURE_MALFORMED = ValidationReason.OPTIMIZER_PROMPT_PARSE_FAILURE
 # Empty or truncated content is missing data, not a verdict: never charged, yet an L4 cell whose
 # every round reached no cell FLOORS, whatever the reason (`l4/proxies.py::floor_reason`).
-PARSE_FAILURE_TOOLING: str = "l1_provider_empty_response"
+PARSE_FAILURE_TOOLING = ValidationReason.L1_PROVIDER_EMPTY_RESPONSE
 # A response whose every variant leaves its parent unchanged: zero candidates, never charged.
 PARSE_FAILURE_ALL_NO_OP: str = "l1_all_no_op_variants"
 
