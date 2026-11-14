@@ -47,6 +47,7 @@ from promptpotter.application.evidence.head_to_head import (
 )
 from promptpotter.application.evidence.metric_catalogue import (
     MEASURAND,
+    MetricSpec,
     available_channels,
     cell_channels,
     merge_cells,
@@ -446,6 +447,7 @@ def subject_evidence(
             channels_by_subject[key],
             reads[key].bench_channels,
             reads[key].cycle,
+            metric=spec_metric,
             include_winner_chain=include_winner_chain,
             include_config=include_config,
         )
@@ -724,10 +726,13 @@ def _winner_chain(
     spec: Subject,
     compiled: CompiledExpression,
     channels: dict[str, dict[str, float]],
+    metric: MetricSpec,
 ) -> list[WinnerChainPoint]:
     """Each point reads its OWN cells: subsets move between rounds, so the head's would redraw earlier ones."""
     if head.chain is not None:
-        return [_winner_chain_point(p, cell_channels(p.sheet), compiled) for p in head.chain]
+        return [
+            _winner_chain_point(p, cell_channels(p.sheet), compiled, metric) for p in head.chain
+        ]
     cycle = _graded_cycle(stores, spec.campaign_id, head.cycle_dir)
     crowns = cycle.walked.crowns if cycle is not None else {}
     at = head.point.round
@@ -738,8 +743,8 @@ def _winner_chain(
         if cycle is not None and (p := cycle.point(r, candidate_id=crowns.get(r, ""))) is not None
     ]
     return [
-        *(_winner_chain_point(p, cell_channels(p.sheet), compiled) for p in points),
-        _winner_chain_point(head.point, channels, compiled),
+        *(_winner_chain_point(p, cell_channels(p.sheet), compiled, metric) for p in points),
+        _winner_chain_point(head.point, channels, compiled, metric),
     ]
 
 
@@ -753,18 +758,19 @@ def _config_of(point: _ChainPoint) -> dict[str, str]:
 
 
 def _winner_chain_point(
-    point: _ChainPoint, channels: dict[str, dict[str, float]], compiled: CompiledExpression
+    point: _ChainPoint,
+    channels: dict[str, dict[str, float]],
+    compiled: CompiledExpression,
+    metric: MetricSpec,
 ) -> WinnerChainPoint:
     values, _ = _score_cells(compiled, channels)
-    value, ci_lo, ci_hi, n_cells = merge_cells(values)
+    estimate = merge_cells(values, metric)
     return WinnerChainPoint(
         candidate_id=point.candidate_id,
         round=point.round,
         label=point.label,
-        value=value,
-        ci_lo=ci_lo,
-        ci_hi=ci_hi,
-        n_cells=n_cells,
+        estimate=estimate,
+        n_cells=0 if estimate is None or estimate.n is None else estimate.n,
     )
 
 
@@ -847,6 +853,7 @@ def _reading_row(
     bench_channels: dict[str, dict[str, float]],
     cycle: _CycleFacts,
     *,
+    metric: MetricSpec,
     include_winner_chain: bool,
     include_config: bool,
 ) -> SubjectReading:
@@ -855,7 +862,7 @@ def _reading_row(
     state = head.point.arm.state
     assert state is not None, "a point is an arm its records named"
     report = head.point.concluded
-    value, ci_lo, ci_hi, n_cells = merge_cells(values)
+    estimate = merge_cells(values, metric)
     return SubjectReading(
         key=spec.key,
         kind=spec.kind,
@@ -878,7 +885,7 @@ def _reading_row(
         ),
         scenario=head.scenario,
         winner_chain=(
-            _winner_chain(stores, head, spec, compiled, channels)
+            _winner_chain(stores, head, spec, compiled, channels, metric)
             if include_winner_chain and spec.kind != "campaign"
             else None
         ),
@@ -900,10 +907,8 @@ def _reading_row(
         cell_means=_cell_means(channels),
         values=values,
         bench_values=bench_values,
-        value=value,
-        ci_lo=ci_lo,
-        ci_hi=ci_hi,
-        n_cells=n_cells,
+        estimate=estimate,
+        n_cells=0 if estimate is None or estimate.n is None else estimate.n,
         unscorable_cells=unscorable,
     )
 

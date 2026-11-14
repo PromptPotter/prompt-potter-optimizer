@@ -40,13 +40,14 @@ from promptpotter.application.scoring.paired import MemberRows, grade_measurands
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
-from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BandedValue, BenchScore
+from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BenchScore
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
     ArmName,
     CellSetName,
+    Estimate,
     MemberAddress,
     ReadingState,
 )
@@ -81,7 +82,7 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, DiagnosticError
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
-from promptpotter.shared.statistics import mean_ci
+from promptpotter.shared.statistics import paired_mean_t
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -139,7 +140,7 @@ def pick_fresh(
 
 
 def _held(
-    strategy: VerifyStrategy, n_fresh: int, fresh: BandedValue | None, recorded: BandedValue | None
+    strategy: VerifyStrategy, n_fresh: int, fresh: Estimate | None, recorded: Estimate | None
 ) -> bool | None:
     if strategy != "random":
         return None
@@ -188,7 +189,7 @@ def verify_reading(
     unit = scorer.fitness_unit
     fresh_level, recorded_level = own_level(fresh, unit), own_level(recorded, unit)
 
-    def increment(a: BandedValue | None, b: BandedValue | None) -> float | None:
+    def increment(a: Estimate | None, b: Estimate | None) -> float | None:
         return None if a is None or b is None else a.value - b.value
 
     strategy = banked.strategy
@@ -509,7 +510,9 @@ async def measure_noise_floor(
             if scored.stopped is None and fitness is not None and composite is not None:
                 composites.append(composite)
                 fitnesses.append(fitness)
-        band = mean_ci(composites) if len(composites) == k else None
+        # The run-to-run spread, never the support's bound: k replicates of one prompt.
+        band = paired_mean_t(composites, [0.0] * k) if len(composites) == k else None
+
         unread = band is None or recorded.composite is None
         graded = VerificationGradedView(
             verification=NoiseFloorPass(
@@ -528,8 +531,24 @@ async def measure_noise_floor(
             if band is None or recorded.composite is None
             else NoiseBand(
                 raw=composites,
-                band=BandedValue(value=band[0], ci_lo=band[1], ci_hi=band[2]),
-                fresh_fitness=sum(fitnesses) / len(fitnesses),
+                band=Estimate(
+                    value=band[0],
+                    ci_lo=band[1],
+                    ci_hi=band[2],
+                    n=k,
+                    se=None,
+                    unit="score",
+                    form="level",
+                ),
+                fresh_fitness=Estimate(
+                    value=sum(fitnesses) / len(fitnesses),
+                    ci_lo=None,
+                    ci_hi=None,
+                    n=len(fitnesses),
+                    se=None,
+                    unit=scorer.fitness_unit,
+                    form="level",
+                ),
                 recorded=recorded,
             ),
             state=ReadingState.MEMBER_UNSCOREABLE if unread else ReadingState.READ,

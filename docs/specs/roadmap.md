@@ -150,10 +150,15 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   ledgers from a fold snapshot.
 - **landed 69, webb-5a:** an L4 panel's nested card names its dataset, the theme key has one home,
   and `npm run e2e` walks the gate's world, never the operator's workspace.
-- **readings:** one reading for every comparison, the 31 `*Reading` classes folded; key-neutral
-  behind the behaviour keys.
-- **then:** faults; narr (the stored dashboard views go, renderers reading the records), ren (the two
-  `knobs.py` and `free_tier.py` pairs; six class names defined twice, a gate refusing a seventh).
+- **landed 70, la:** the CLI in five modules, identity in three, every registry complete at import.
+- **landed 71, lite** (with the small batch): a model per data-root file, core's lister for a rate,
+  one name for the walk's world.
+- **landed 72, readings:** one `Estimate` is every level's and lift's reading, a θ lift among them.
+  The race and the election read one ruler and row set, which moves potter's election. Level bands
+  are bounded, a binary lift reads exact McNemar, and θ's prior centres on the lift.
+- **then:** narr-2 (the stored dashboard views go, renderers read the records, one way to the
+  ledger), faults-1 (a refusal names its next acts), ren (classes defined twice, a gate refusing
+  another).
 
 The re-keys end at the behaviour-key switch.
 

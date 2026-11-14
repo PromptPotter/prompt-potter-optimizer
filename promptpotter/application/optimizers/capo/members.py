@@ -43,7 +43,7 @@ from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart, StateSlice
-from promptpotter.domain.paired_reading import ArmKey, PriorStanding
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 from promptpotter.domain.pool import DemoPool, Pool
 from promptpotter.domain.results import OptimizerFact, RoundResult
@@ -350,9 +350,7 @@ class PairedTRace(nodes.Race):
             if not tested:
                 continue
             # A rival's one-sided p is also P(arm beats it) as a t fiducial, which `p_better` reads.
-            breakdown = {
-                pid: PriorStanding(p_better=p, n_paired=width) for pid, (p, width) in tested.items()
-            }
+            breakdown = {pid: p for pid, (p, _) in tested.items()}
             p_best = min(p for p, _ in tested.values())
             snapshot = nodes.RaceSnapshot(p_best, cid, len(arm_rows), breakdown)
             self._progress.race_standing(snapshot)

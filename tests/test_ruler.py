@@ -57,7 +57,7 @@ from promptpotter.application.runner.bench import own_level
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.paired import grade_measurands
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.domain.arm_reading import fold_fitness_text, lift_text
+from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import (
@@ -72,7 +72,7 @@ from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
 )
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, lift_text
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
@@ -152,10 +152,9 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
         p = 1.0 / (1.0 + np.exp(-(theta - np.array([ruler[c] for c in cells]))))
         return dict(zip(cells, (rng.random(len(cells)) < p).astype(float).tolist(), strict=True))
 
-    def theta_of(
-        responses: dict[str, float], scale: Any, sigma_theta: float = 1.5
-    ) -> tuple[float, float]:
-        read = fit_theta(responses, scale, sigma_theta=sigma_theta)
+    def theta_of(responses: dict[str, float], scale: Any) -> tuple[float, float]:
+        read = fit_theta(responses, scale)
+
         assert read is not None, "an arm with cells on the ruler carried no θ"
         return read
 
@@ -188,10 +187,11 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
     # Hits far below θ and misses far above, as a δ fit on these rows reads them: φ would be ≪ 1.
     separated = {f"{s}.{i}": float(s in easy) for i, s in enumerate([*easy, *hard] * 6)}
     for binary in (measure(0.8, easy, n=60), separated):
-        bin_theta, bin_se = theta_of(binary, ruler, sigma_theta=1.5)
+        bin_theta, bin_se = theta_of(binary, ruler)
         p_hat = 1.0 / (1.0 + np.exp(-(bin_theta - np.array([ruler[k] for k in binary]))))
         bern_se = 1.0 / np.sqrt(float(np.sum(p_hat * (1 - p_hat))) + 1 / 1.5**2)
         assert abs(bin_se - bern_se) < 0.15 * bern_se, "φ moved the SE of a dichotomous dataset"
+
     flat = {f"{sid}.{i}": 0.5 for i, sid in enumerate(easy * 6)}
     assert theta_of(flat, ruler)[1] > 0.1, (
         "no residual spread read as infinite confidence: every gate would fire"
@@ -210,8 +210,9 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
 
     # Every δ sits five logits from the θ=0 seed, where an undamped `grad / info` step limit-cycles.
     far = dict.fromkeys(map(str, range(20)), 5.55)
-    parent_theta, parent_se = theta_of(dict.fromkeys(far, 0.20), far, sigma_theta=1.34)
-    better_theta, better_se = theta_of(dict.fromkeys(far, 0.45), far, sigma_theta=1.34)
+    parent_theta, parent_se = theta_of(dict.fromkeys(far, 0.20), far)
+    better_theta, better_se = theta_of(dict.fromkeys(far, 0.45), far)
+
     assert 2.0 < parent_theta < better_theta < 7.0 and parent_theta < 5.55, (
         parent_theta,
         better_theta,
@@ -491,7 +492,7 @@ def test_a_theta_off_the_judging_scale_is_withheld_and_its_caveat_names_why() ->
         (tied, ["1", "2", "3"], ThetaCaveat.PRIOR_PINNED),
         (None, ["1", "2"], ThetaCaveat.COLD_RULER),
     ):
-        served = theta_caveat(scale, read_on, all_miss=False)
+        served = theta_caveat(scale, read_on, prior_dominated=False)
         assert served is expected, "the pin cancels inside a lift, a skipped cell does not"
 
 
@@ -812,7 +813,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     # The L4 formula is no matcher's call, so every printer's source reads a score; a matcher's a rate.
     l4_sources = (
         round_fold.fitness_unit,
-        own_level(graded, l4.fitness_unit).unit_of("fitness"),
+        own_level(graded, l4.fitness_unit).fitness.unit,  # type: ignore[union-attr]
         grade_measurands(l4)[0].unit,
     )
     assert l4_sources == ("score",) * 3, "a non-rate formula's fitness printed as a percent"

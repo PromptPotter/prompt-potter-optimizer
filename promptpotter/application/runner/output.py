@@ -14,7 +14,7 @@ from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.application.scoring.measurement_log import cycle_hard_samples
 from promptpotter.application.views.render.markdown import to_markdown
 from promptpotter.application.views.render.phase import stop_next_lines
-from promptpotter.application.views.render.primitives import fmt_ci, fmt_fitness, overlap_series
+from promptpotter.application.views.render.primitives import fmt_fitness, overlap_series
 from promptpotter.application.views.view_models import (
     DigestStatusView,
     ForkSummaryView,
@@ -23,15 +23,15 @@ from promptpotter.application.views.view_models import (
     RoundDigestView,
 )
 from promptpotter.config.settings import APP_VERSION
-from promptpotter.domain.arm_reading import fitness_terms_text, fold_fitness_text, lift_band_text
-from promptpotter.domain.bench import BandedValue, BenchColumn, BenchReading, BenchScore
+from promptpotter.domain.arm_reading import fitness_terms_text, fold_fitness_text
+from promptpotter.domain.bench import BenchColumn, BenchReading, BenchScore
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cells import HardSampleOrder, HardSamples
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
-from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, lift_versus
+from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, Estimate, lift_versus
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.records.run_records import (
     CycleFinal,
@@ -188,22 +188,20 @@ def _render_header(
 
 def _bench_line(name: str, reading: BenchReading, bench: BenchScore) -> str:
     return (
-        f"- {name} (round {reading.round}): {_bench_columns(reading.of, bench.headline, '{:.3f}')} · "
+        f"- {name} (round {reading.round}): {_bench_columns(reading.of, bench.headline)} · "
         f"{reading.n}/{bench.bench_size} rows"
     )
 
 
 def _bench_columns(
-    of: Callable[[BenchColumn], BandedValue | None],
+    of: Callable[[BenchColumn], Estimate | None],
     headline: BenchColumn,
-    spec: str,
 ) -> str:
     def cell(column: BenchColumn) -> str:
         banded = of(column)
         if banded is None:
             return f"{column} —"
-        value = spec.format(banded.value)
-        band = fmt_ci(banded.ci_lo, banded.ci_hi, spec=spec)
+        value, band = banded.point, banded.band or "—"
         return f"{column} {f'**{value}**' if column == headline else value} (95% {band})"
 
     return " · ".join(cell(c) for c in sorted(get_args(BenchColumn), key=lambda c: c != headline))
@@ -220,7 +218,7 @@ def _render_bench(final: CycleFinal | None, bench: BenchScore | None) -> list[st
     def lift(column: BenchColumn) -> str:
         if (measured := bench.lift(column)) is None:
             return f"{column} —"
-        text = lift_band_text(measured.estimate, measured.measurand.unit)
+        text = measured.estimate.text
         return f"{column} {f'**{text}**' if column == bench.headline else text}"
 
     columns = sorted(get_args(BenchColumn), key=lambda c: c != bench.headline)
@@ -496,7 +494,7 @@ def _score_cells(round_data: RoundResult, key: ArmKey) -> str:
     fit = round_data.fit(key)
     theta = "—" if fit is None or fit.theta is None else f"{fit.theta:+.3f}"
     read = fit.vs_reference.headline if fit is not None and fit.vs_reference else None
-    lift = "—" if read is None else lift_band_text(read.estimate, read.measurand.unit)
+    lift = "—" if read is None else read.estimate.text
     election = round_data.election
     won = "✓" if election is not None and key == election.selected else "·"
     composite = fmt_fitness(fold.composite_fitness)

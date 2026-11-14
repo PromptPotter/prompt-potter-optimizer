@@ -21,8 +21,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
     resolve_layout_override,
 )
-from promptpotter.application.optimizers.potter.pobb import EliminationGate
-from promptpotter.domain.arms import Cut, Eliminated, Measured, Proposal
+from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_REJECT,
     candidate_delta,
@@ -382,29 +381,20 @@ def l1_inner_layout_applies(overlay: Mapping[str, Any]) -> list[ValidationFailur
 
 
 def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset[str]]]:
-    """Measured losses only, each read against the round BEFORE its own."""
+    """Measured losses only, each read against the round BEFORE its own: ONE bar, the arm's lift
+    over its reference wholly below, for a finished arm and a cut one alike."""
     out: list[tuple[int, frozenset[str]]] = []
     for parent_round, rr in pairwise(prior_rounds):
         if (head := parent_round.head) is None:
             continue
         parent, parent_pp = head.individual.prompts, head.individual.pipeline_params
         for key, arm in rr.panel.items():
-            fold = rr.folds.get(key)
-            match arm:
-                case Cut(reason=Eliminated(elimination=cut)) if fold and fold.total:
-                    # ε alone measured this arm against its priors; lock-in cut it on the leader's.
-                    lost = cut.context.get("gate") == EliminationGate.EPSILON
-                case Measured() if fold and fold.total:
-                    lost = (
-                        (fit := rr.fit(key)) is not None
-                        and fit.vs_reference is not None
-                        and (lift := fit.vs_reference.headline) is not None
-                        and lift.estimate.side == "below"
-                    )
-                case _:
-                    lost = False
-            if not lost:
+            fold, fit = rr.folds.get(key), rr.fit(key)
+            reading = None if fit is None else fit.vs_reference
+            lift = None if reading is None else reading.headline
+            if not (fold and fold.total and lift is not None and lift.side == "below"):
                 continue
+
             prompts = arm.individual.prompts
             if fp := candidate_idea(prompts, parent, arm.overlay, parent_pp):
                 out.append((rr.round, fp))

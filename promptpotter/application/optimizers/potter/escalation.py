@@ -56,7 +56,7 @@ from promptpotter.domain.records.run_records import (
     StopLoop,
 )
 from promptpotter.domain.results import Reelection
-from promptpotter.domain.ruler import AbilityReading, LevelSeries
+from promptpotter.domain.ruler import AbilityReading, LevelSeries, clears
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
@@ -225,7 +225,7 @@ def _improved(
 ) -> tuple[bool, str]:
     """The scale is NOT fixed per cycle: a layer entered before the ruler warmed compares composites."""
     if current is not None and entry is not None and (lift := current.lift_over(entry)) is not None:
-        return lift.clears(admission, support=None), "theta"
+        return clears(lift, admission, support=None), "theta"
     scale = "theta_appeared" if current is not None and entry is None else "composite"
     return current_comp > entry_comp, scale
 

@@ -4,7 +4,7 @@ from typing import Literal, NamedTuple, get_args
 
 from pydantic import Field
 
-from promptpotter.domain.bench import BandedValue
+from promptpotter.domain.paired_reading import Estimate
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.worded import Worded
@@ -114,7 +114,7 @@ class ConstantFloor(FrozenModel):
 
     label: str = Field(description="The label the constant answer gives: the most common truth.")
     floor: float = Field(description="What the constant answer scores: the share of truths it is.")
-    lift: BandedValue = Field(
+    lift: Estimate = Field(
         description="The origin's mean per-cell fitness minus the floor's score on that cell."
     )
 

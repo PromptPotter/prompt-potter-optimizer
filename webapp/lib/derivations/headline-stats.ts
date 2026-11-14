@@ -18,6 +18,6 @@ export function metricLevel(
 ): number | null {
   if (!reading) return null;
   return metric === "ability"
-    ? (reading.ability?.theta ?? null)
+    ? (reading.ability?.theta?.value ?? null)
     : (reading.own?.[metric]?.value ?? null);
 }

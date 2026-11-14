@@ -16,18 +16,10 @@ from promptpotter.application.evidence.head_to_head import (
     HeadToHead,
     HeadToHeadRow,
 )
-from promptpotter.application.evidence.metric_catalogue import MetricSpec
 from promptpotter.application.evidence.read import Evidence
 from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.application.views.render.primitives import fmt_ci, fmt_pvalue
-from promptpotter.domain.arm_reading import (
-    level_text,
-    lift_band_text,
-    lift_interval_text,
-    lift_text,
-)
+from promptpotter.application.views.render.primitives import fmt_pvalue
 from promptpotter.domain.bench import (
-    BandedValue,
     BenchColumn,
     BenchScore,
     DatasetSplit,
@@ -36,7 +28,10 @@ from promptpotter.domain.campaign import BenchSet
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     CellSet,
+    Estimate,
     PairedReading,
+    level_text,
+    lift_text,
 )
 from promptpotter.domain.spend import RATE_PRICED_LABEL, SPEND_KIND_LABELS
 
@@ -78,19 +73,13 @@ def _mark(differs: bool) -> str:
     return "x" if differs else ""
 
 
-def _metric_text(value: float | None, metric: MetricSpec) -> str:
-    """A value of the read metric; only a lift earns a sign."""
-    if value is None:
-        return _ABSENT
-    return lift_text(value, metric.unit) if metric.lift else level_text(value, metric.unit)
+def _point(estimate: Estimate | None) -> str:
+    return _ABSENT if estimate is None else estimate.point
 
 
-def _metric_ci(lo: float | None, hi: float | None, metric: MetricSpec) -> str:
-    if lo is None or hi is None:
-        return _ABSENT
-    if metric.lift:
-        return lift_interval_text(lo, hi, metric.unit)
-    return f"[{level_text(lo, metric.unit)}, {level_text(hi, metric.unit)}]"
+def _band(estimate: Estimate | None) -> str:
+    band = None if estimate is None else estimate.band
+    return _ABSENT if band is None else band
 
 
 # --- the roster ---------------------------------------------------------------------------------
@@ -112,7 +101,7 @@ _ROSTER = (
 )
 
 
-def _roster_row(r: SubjectReading, metric: MetricSpec) -> Row:
+def _roster_row(r: SubjectReading) -> Row:
     # `~` on the kind: a masked channel shares its label with the record it masks, and two rows must not read alike.
     return (
         r.created_at[:10],
@@ -123,8 +112,8 @@ def _roster_row(r: SubjectReading, metric: MetricSpec) -> Row:
         r.authorship or "-",
         r.arm_id or "-",
         r.ability.ruler.id if r.ability is not None else "-",
-        _metric_text(r.value, metric),
-        _metric_ci(r.ci_lo, r.ci_hi, metric),
+        _point(r.estimate),
+        _band(r.estimate),
         str(r.n_cells),
         str(len(r.unscorable_cells)),
         str(r.cycle_rounds_scored),
@@ -142,7 +131,7 @@ def _roster_lines(ev: Evidence) -> list[str]:
         f"Offered here: {', '.join(s.key for s in m.catalogue) or '-'} — pass --metric KEY, or "
         f"--metric 'expr:<formula>' over {', '.join(m.namespace) or '-'}.",
         "",
-        *_table(_ROSTER, (_roster_row(r, m.spec) for r in ev.subjects)),
+        *_table(_ROSTER, (_roster_row(r) for r in ev.subjects)),
     ]
     lines += _scenario_lines(ev)
     lines += _winner_chain_lines(ev)
@@ -206,8 +195,8 @@ _CHAIN = (
 
 
 def _winner_chain_lines(ev: Evidence) -> list[str]:
-    metric = ev.metric.spec
     lines: list[str] = []
+
     for r in ev.subjects:
         if not r.winner_chain:
             continue
@@ -218,8 +207,8 @@ def _winner_chain_lines(ev: Evidence) -> list[str]:
                 (
                     f"r{p.round}",
                     p.label,
-                    _metric_text(p.value, metric),
-                    _metric_ci(p.ci_lo, p.ci_hi, metric),
+                    _point(p.estimate),
+                    _band(p.estimate),
                     str(p.n_cells),
                 )
                 for p in r.winner_chain
@@ -307,10 +296,10 @@ def _h2h_row(r: HeadToHeadRow, h2h: HeadToHead, beside: BenchColumn) -> Row:
     bench: Row = (
         (
             str(graded.selected.round),
-            _value(graded.selected.level, "{:.3f}"),
-            _band(graded.selected.level, "{:.3f}"),
-            _value(graded.origin.level, "{:.3f}"),
-            _band(graded.origin.level, "{:.3f}"),
+            _point(graded.selected.level),
+            _band(graded.selected.level),
+            _point(graded.origin.level),
+            _band(graded.origin.level),
             _lift_text(b, h2h.headline, banded=True),
             _lift_text(b, beside, banded=False),
         )
@@ -487,16 +476,16 @@ def _contrast_row(c: ArmContrast) -> Row:
     lift = c.lift
     if lift is None:
         return (*head, *(_ABSENT,) * 8)
-    est, family = lift.estimate, lift.family
-    floored = "*" if est.p_value <= est.p_floor else " "
+    family = lift.family
+    floored = "*" if lift.p_value <= lift.p_floor else " "
     return (
         *head,
-        lift_band_text(est, lift.measurand.unit),
+        lift.estimate.text,
         str(len(c.differences)),
         _num(c.se_clustered, "{:.4f}"),
         _num(c.se_naive, "{:.4f}"),
         _num(c.design_effect, "{:.2f}"),
-        f"{fmt_pvalue(est.p_value)}{floored}",
+        f"{fmt_pvalue(lift.p_value)}{floored}",
         fmt_pvalue(None if family is None else family.p_adjusted),
         fmt_pvalue(c.q_value),
     )
@@ -513,10 +502,8 @@ def _election_lines(rows: list[HeadToHeadRow]) -> list[str]:
             (
                 r.campaign_id,
                 election.elects_on,
-                _ABSENT if ability is None else _num(ability.theta, "{:+.3f}"),
-                _ABSENT
-                if ability is None
-                else fmt_ci(ability.ci_lo, ability.ci_hi, spec="{:+.3f}"),
+                _point(None if ability is None else ability.theta),
+                _band(None if ability is None else ability.theta),
                 _ABSENT if ability is None or ability.caveat is None else ability.caveat.value,
                 election.reads_on,
             )
@@ -532,24 +519,13 @@ def _election_lines(rows: list[HeadToHeadRow]) -> list[str]:
 def _lift_text(bench: BenchScore, column: BenchColumn, *, banded: bool) -> str:
     if (measured := bench.lift(column)) is None:
         return _ABSENT
-    unit = measured.measurand.unit
-    if banded:
-        return lift_band_text(measured.estimate, unit)
-    return lift_text(measured.estimate.value, unit)
-
-
-def _value(banded: BandedValue | None, spec: str) -> str:
-    return _ABSENT if banded is None else spec.format(banded.value)
-
-
-def _band(banded: BandedValue | None, spec: str) -> str:
-    return _ABSENT if banded is None else fmt_ci(banded.ci_lo, banded.ci_hi, spec=spec)
+    return measured.estimate.text if banded else measured.estimate.point
 
 
 def _origin_text(bench: BenchScore) -> str:
     if bench.origin is None:
         return _ABSENT
-    return f"{bench.origin.sp_hash[:8]} at {_value(bench.origin.level, '{:.3f}')}"
+    return f"{bench.origin.sp_hash[:8]} at {_point(bench.origin.level)}"
 
 
 # --- configuration, factors, grid -----------------------------------------------------------
@@ -610,7 +586,7 @@ def _factor_lines(ev: Evidence) -> list[str]:
                 (
                     (
                         level.level,
-                        _metric_text(level.value, ev.metric.spec),
+                        _point(level.estimate),
                         str(level.n_cells),
                         str(len(level.subjects)),
                     )
@@ -650,9 +626,7 @@ def _grid_lines(ev: Evidence) -> list[str]:
                 (
                     row,
                     *(
-                        _ABSENT
-                        if (cell := at.get((row, col))) is None or cell.value is None
-                        else _metric_text(cell.value, ev.metric.spec)
+                        _point(None if (cell := at.get((row, col))) is None else cell.estimate)
                         for col in cols
                     ),
                 )
@@ -700,13 +674,12 @@ def _pair_row(label: str, pair: PairedReading) -> Row:
     lift = pair.headline
     if lift is None or pair.coverage is None:
         return (label, READING_STATE_INFO[pair.state].sentence, *(_ABSENT,) * 3)
-    est = lift.estimate
-    floored = "*" if est.p_value <= est.p_floor else " "
+    floored = "*" if lift.p_value <= lift.p_floor else " "
     return (
         label,
-        lift_band_text(est, lift.measurand.unit),
+        lift.estimate.text,
         str(pair.coverage.scored),
-        f"{fmt_pvalue(est.p_value)}{floored}",
+        f"{fmt_pvalue(lift.p_value)}{floored}",
         fmt_pvalue(None if lift.family is None else lift.family.p_adjusted),
     )
 
@@ -892,13 +865,12 @@ def _ranking_lines(ev: Evidence, top: int) -> list[str]:
                 f"{READING_STATE_INFO[c.reading.state].sentence}"
             )
             continue
-        est = lift.estimate
         rows.append(
             (
-                lift_text(est.value, unit),
-                lift_interval_text(est.ci_lo, est.ci_hi, unit),
+                lift.estimate.point,
+                _band(lift.estimate),
                 str(coverage.scored),
-                "" if est.side == "spans" else "*",
+                "" if lift.side == "spans" else "*",
                 c.campaign_id,
                 c.label,
             )

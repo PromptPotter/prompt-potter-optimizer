@@ -47,7 +47,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
   const overlay = useViewedLineage();
   const wonOnTheta = useViewedCourse()?.facts.elects_on === "ability";
   const { lens, setLens, maskActive, readUnder, scoringMaskActive } = overlay;
-  const { history, overlap, coverage, sampleUniverse, viewedNode, areCourses, views, floorPinned } =
+  const { history, overlap, coverage, sampleUniverse, viewedNode, areCourses, views, priorDominated } =
     useCandidateBars(overlay.index);
 
   const { open: maskOpen, mask } = useMaskState();
@@ -197,7 +197,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
     wonOnTheta,
     views,
     areCourses,
-    floorPinned,
+    priorDominated,
     metrics,
     toggleMetric: (m: DisplayMetric) => toggleMetric(m, cycleId, metrics),
     showCache,

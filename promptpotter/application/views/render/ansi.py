@@ -19,9 +19,9 @@ from promptpotter.application.views.render.primitives import (
     fmt_coverage,
     fmt_fitness,
 )
-from promptpotter.domain.arm_reading import fold_fitness_text, level_text, lift_band_text
+from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.candidate_diff import group_diff_keys
-from promptpotter.domain.paired_reading import READING_STATE_INFO
+from promptpotter.domain.paired_reading import READING_STATE_INFO, level_text
 from promptpotter.domain.phase_views import (
     BenchScoredView,
     CandidatesGeneratedView,
@@ -282,25 +282,20 @@ def render_noise_band(v: VerificationGradedView) -> str:
     raw = ", ".join(f"{c:.4f}" for c in band.raw)
     return (
         f"noise floor {v.verification.arm.label}: k={len(band.raw)} composite "
-        f"{band.band.value:.4f} [{band.band.ci_lo:.4f}, {band.band.ci_hi:.4f}] on "
-        f"{len(v.verification.sample_keys)} rows (raw: {raw}); recorded on the same rows "
-        f"{'—' if recorded is None else f'{recorded.value:.4f}'}"
+        f"{band.band.text} on {len(v.verification.sample_keys)} rows (raw: {raw}); recorded on "
+        f"the same rows {'—' if recorded is None else recorded.point}"
     )
 
 
 def _render_verify_graded(r: VerifyReading) -> str:
     levels = " → ".join(
-        "—" if (level := side.fitness) is None else f"{level.value:.3f}"
-        for side in (r.recorded, r.fresh)
+        "—" if (level := side.fitness) is None else level.point for side in (r.recorded, r.fresh)
     )
     verdict = {True: " — held", False: f" — {YELLOW}dropped{RESET}{DIM}", None: ""}[r.held]
     lift = ""
     pair = r.vs_origin
     if (paired := pair.headline) is not None and pair.coverage is not None:
-        lift = (
-            f", lift over C0 {lift_band_text(paired.estimate, paired.measurand.unit)} "
-            f"on {fmt_coverage(pair.coverage)}"
-        )
+        lift = f", lift over C0 {paired.estimate.text} on {fmt_coverage(pair.coverage)}"
     return (
         f"  {DIM}verify {r.label}: fitness {levels} on {r.fresh.n} unseen cells"
         f"{lift}{verdict}{RESET}"
@@ -317,11 +312,11 @@ def _render_bench_scored(v: BenchScoredView) -> str:
         return f"  {YELLOW if info.fault else DIM}bench: no headline — {info.sentence}{RESET}"
     selected = graded.selected
     levels = " → ".join(
-        "—" if (level := reading.of(column)) is None else f"{level.value:.3f}" for reading in graded
+        "—" if (level := reading.of(column)) is None else level.point for reading in graded
     )
     band = ""
     if (lift := bench.lift(column)) is not None:
-        band = f", lift {lift_band_text(lift.estimate, lift.measurand.unit)}"
+        band = f", lift {lift.estimate.text}"
     return (
         f"  bench: {column} {levels} (origin → R{selected.round} selection, "
         f"{selected.n} held-out rows{band})"

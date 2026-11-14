@@ -5,10 +5,17 @@ from collections import Counter
 from collections.abc import Sequence
 from typing import Any, get_args
 
-from promptpotter.domain.arm_reading import ArmReading, level_text, lift_shown, lift_text
+from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.bench import BenchColumn, BenchReading, BenchScore
 from promptpotter.domain.origin_panel import LineRate, OverlapReading, overlap_line, triggered_rates
-from promptpotter.domain.paired_reading import READING_STATE_INFO, Coverage, MeasuredLift
+from promptpotter.domain.paired_reading import (
+    READING_STATE_INFO,
+    Coverage,
+    MeasuredLift,
+    level_text,
+    lift_shown,
+    lift_text,
+)
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 
@@ -22,9 +29,7 @@ def bench_readout(bench: BenchScore) -> str:
         return READING_STATE_INFO[bench.status.state].sentence
 
     def level(reading: BenchReading) -> str:
-        return level_text(
-            None if reading.level is None else reading.level.value, reading.level_unit
-        )
+        return "—" if reading.level is None else reading.level.point
 
     # `—` where the selection is the origin: one pass read twice compares nothing.
     read = bench.lift(bench.headline)
@@ -72,12 +77,6 @@ def overlap_series(overlap: OverlapReading) -> str:
     arms = "  →  ".join(map(rate, line))
     side = f"  ·  triggered: {', '.join(map(rate, triggered))}" if triggered else ""
     return f"origin panel of {len(overlap.positions)}{paid}: {arms}{side}"
-
-
-def fmt_ci(lower: float | None, upper: float | None, *, spec: str) -> str:
-    if lower is None or upper is None:
-        return "—"
-    return f"[{spec.format(lower)}, {spec.format(upper)}]"
 
 
 def fmt_field_accuracy(shares: dict[str, float]) -> str:
@@ -250,11 +249,7 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
         label = s.arm.label[:8]
         fitness = None if s.own is None else s.own.fitness
         composite = None if s.own is None else s.own.composite
-        ci_str = fmt_ci(
-            None if fitness is None else fitness.ci_lo,
-            None if fitness is None else fitness.ci_hi,
-            spec="{:.3f}",
-        )
+        ci_str = (None if fitness is None else fitness.band) or "—"
         lift = s.vs_reference.on_whole_set if s.vs_reference else None
         delta_str = "---" if lift is None else lift_text(lift.estimate.value, lift.measurand.unit)
         if s.state == "cut":
@@ -264,17 +259,13 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
         else:
             winner_mark = ""
         theta = None if s.ability is None else s.ability.theta
-        theta_str = "---" if theta is None else f"{theta:+.3f}"
+        theta_str = "---" if theta is None else theta.point
         cells = (
             f"{s.panel.scored}/{s.panel.expected}"
             if s.panel.expected and s.panel.scored is not None
             else str(0 if s.own is None else s.own.n)
         )
-        fitness_str = (
-            "—"
-            if s.own is None
-            else level_text(None if fitness is None else fitness.value, s.own.fitness_unit)
-        )
+        fitness_str = "—" if fitness is None else fitness.point
         row = (
             f"{i:<4d}{label:<8s}{cells:>7s}   {fitness_str:>8s}   {ci_str:>16s}   "
             f"{fmt_fitness(None if composite is None else composite.value):>9s}   "

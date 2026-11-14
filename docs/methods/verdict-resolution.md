@@ -17,8 +17,13 @@ they never disagree about what "better" means.
 **Holm corrects across PAIRS and cannot correct across METRICS.** Any surface reporting a pairwise
 comparison must say so: trying several metrics and keeping the tightest is a comparison no column
 prices. `p` is null where nothing was tested (below two shared cells) — not a test that returned 1.00.
-**The floor gates the claim**: `p_value` is `max(Student-t p, p_floor)` and `side` is `spans` wherever
-`p_floor` exceeds `alpha`. `min_detectable_effect` and `panel_precision` serve reads only.
+**The floor gates the claim**: `p_value` is `max(p, p_floor)`, `p` the exact two-sided sign test
+(McNemar) on a measurand declared binary and Student-t on a graded one, and `side` is `spans` wherever
+`p_value` reaches `alpha` (`paired_reading.py::interval_side`). `min_detectable_effect` (the
+head-to-head's at Holm's first step) and `panel_precision` serve reads only. A level's band is
+`shared/statistics.py::bounded_mean_interval`: Clopper-Pearson on a binary column, else a t on the
+largest variance the support allows (20/20 reads [0.832, 1] binary, [0.820, 1] graded; both cover
+p = 0.95 at n = 20 98.4% of the time, the Wald-t it replaced 64.1%).
 
 **Scope:** fixed pipeline, labelled dataset, scalar fitness. θ is one latent ability per candidate,
 so multi-objective fitness, open-ended synthesis and unlabelled tasks are not supported.
@@ -32,8 +37,14 @@ P(hit_{c,s} = 1) = σ(θ_c − δ_s)
 ```
 
 Candidate ability × sample difficulty, fit jointly by MAP (alternating Newton, Laplace SEs,
-`mean(θ) == 0`; `intelligence/rasch.py::fit_rasch`) ONCE, at ruler lock. Every later reading holds δ
-fixed and solves θ alone, one arm at a time (`::fit_theta`), or the scale moves under the round it judges.
+`mean(θ) == 0`; `intelligence/rasch.py::fit_rasch`), re-fit as each round folds its cells AFTER its
+election (`difficulty.py::DifficultyView.fold`), so a round's race and election read the scale it
+opened on. Every reading holds δ fixed and solves θ alone, one arm at a time (`::fit_theta`), or the
+scale moves under the round it judges. Each δ enters at its SE, its slope scaled by
+`1/√(1+π·a²·se_δ²/8)` (`DeltaRuler.entries`), and an arm's prior sits on its lift: arm and bar are
+both fit centred on the parent's own read (`rasch.py::candidate_abilities`), so an equal arm on 8
+cells against a parent at θ = +1.5 on 40 reads −0.02, where per-arm N(0, 1.5²) priors read −0.27.
+
 `δ_s` selects samples and ranks hardness; `θ_c` is the **round-winner gate**.
 
 **θ is why per-round resubsetting is safe.** On different subsets raw fitness drifts — whoever drew
@@ -98,15 +109,16 @@ at 0.77. Only potter's L2/L3 stall comparator keeps the high-water, as its own s
 verdict, per level, per arm and per series (asked before differencing two levels); a sound round can
 carry a pinned arm. In severity order:
 
-- **The 0% floor** (`floor_pinned`, per arm). An all-miss arm pins θ to a constant whatever it saw,
-  so every lift from it is `0.000`. Not answer-collapse (one answer everywhere, which the election refuses): an
-  arm can answer differently every time and be wrong every time.
+- **Prior-dominated** (`prior_dominated`, per arm). An all-miss or all-hit arm has no edge to fit:
+  its θ is where the prior stopped it, so a lift from it reads the prior. Not answer-collapse (one
+  answer everywhere, which the election refuses): an arm can answer differently every time and be
+  wrong every time.
 - **A flat ruler** (`flat_ruler`). The ruler's own δ span is below `BAND_COLLAPSE_LOGITS`, so θ is
   fitness plus a constant. What an all-zeros fit looks like; checked before `collapsed_band`,
   whose ratio reads ~1 on a globally flat ruler.
 - **A cold ruler** (`cold_ruler`). Too few rows from individuals outside the election: θ is
   logit-fitness, not a shared scale. The lift (on cells both answered) holds, the level does not.
-  `calibration_model` `None` = cold; two θ are comparable only when `ruler.id` matches.
+  `calibration_model` `None` = cold; two θ are comparable only on one warm `ruler.id`, never cold.
 - **A collapsed band** (`collapsed_band`). The round's cells span a sliver of the ruler (measured:
   28 cells over 0.63 logits on a ruler spanning 11.4), so θ = `logit(fitness) + c` and the parent's
   floor tracks the band's centre (one origin read `-0.340` on round 0, `-1.385` on the band).
@@ -126,7 +138,8 @@ carry a pinned arm. In severity order:
 reads C0 and each declared pick on the fixed ORIGIN PANEL — per dataset, the cells the origin
 answered, every member topped up onto them once. Fixed, because a set re-chosen from what the line
 shared contracted as it grew. It is a rate, needing no ruler — readable when θ's scale has collapsed.
-The panel's rows also feed the election (less the parent's crowning cells), so it is a REUSED set and
+The panel's rows also feed the race and the election beside each draw (`results.py::RoundResult.raced`), so it is a REUSED set and
+
 the overlap reading is optimistic for every pick: **the unbiased headline is the bench.** Every
 surface renders this one reading.
 
@@ -269,7 +282,7 @@ early paired comparison ties, `p_best` pins at 0.5 and the gates go blind; the d
 discordance-potential samples. **At a low base rate the static order hits the same region with the
 symptom INVERTED:** the candidate misses the MISS stratum too, near-ties narrow both SEs, and `p_best`
 reads DECISIVE (`sealqa/longseal-12`: four arms cut at `elimination_n_min`, identical to six
-decimals). Read `n_discordant` on the p_best stream to tell the two apart.
+decimals). Count the discordant cells (`selection.py::discordant`) to tell the two apart.
 
 ---
 

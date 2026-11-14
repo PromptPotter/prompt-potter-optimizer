@@ -317,7 +317,7 @@ def _row_verdicts(rows: list[SubjectReading]) -> list[_RowVerdict]:
             return _RowVerdict(
                 False,
                 "rulers_differ",
-                "Read against a different ruler from the rest of this selection — its cells "
+                "Read on a cold ruler, or another than the rest of this selection — its cells "
                 "still pair where they overlap, its absolute level is on another scale.",
             )
         return _RowVerdict(True, "one_ruler", "")
@@ -339,7 +339,7 @@ def replicates(rows: list[SubjectReading]) -> list[ArmReplicate]:
             by_arm.setdefault(row.arm_id, []).append(row)
     out = []
     for arm, same in sorted(by_arm.items()):
-        levels = [r.value for r in same if r.value is not None]
+        levels = [r.estimate.value for r in same if r.estimate is not None]
         if len(levels) > 1:
             out.append(
                 ArmReplicate(
@@ -426,11 +426,13 @@ def power(
     decomposition: EvidenceVariance | None, rows: list[SubjectReading]
 ) -> EvidencePower | None:
     """Pairing removes the cell effect and leaves the residual on both arms: SE = residual * sqrt(2 / cells)."""
-    levels = [r.value for r in rows if r.value is not None]
+    levels = [r.estimate.value for r in rows if r.estimate is not None]
     if decomposition is None or len(levels) < 2 or decomposition.n_cells < 1:
         return None
     se = decomposition.residual_sd * (2.0 / decomposition.n_cells) ** 0.5
-    mde = min_detectable_effect(se)
+    # At Holm's first step, the bar the family's widest pair meets.
+    mde = min_detectable_effect(se, alpha=0.05 / math.comb(len(rows), 2))
+
     gap = max(levels) - min(levels)
     # Same k the MDE used, re-solved for the cell count: n = 2 * (k * residual / gap)^2.
     needed = None
@@ -456,7 +458,8 @@ def order_confound(rows: list[SubjectReading]) -> OrderConfound | None:
             return None
         return rank_correlation(order, [float(v) for v in values if v is not None])
 
-    level_rho = rho([r.value for r in rows])
+    level_rho = rho([None if r.estimate is None else r.estimate.value for r in rows])
+
     return OrderConfound(
         level_vs_order=level_rho,
         spend_vs_order=rho([r.cycle_spend_usd for r in rows]),

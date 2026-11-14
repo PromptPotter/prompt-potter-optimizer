@@ -13,14 +13,15 @@ from promptpotter.application.scoring.formula.compiler import (
     compile_expression,
 )
 from promptpotter.domain.paired_reading import (
+    ROUND_LIFT_SPEC,
     CellSet,
     CellSetBasis,
     CellSetName,
     Coverage,
     CoverageState,
+    Estimate,
     EstimatorSpec,
     FlipCounts,
-    LiftEstimate,
     Measurand,
     MeasurandKind,
     MeasuredLift,
@@ -31,6 +32,7 @@ from promptpotter.domain.paired_reading import (
     TestFamily,
     interval_side,
 )
+from promptpotter.domain.round_health import ConstantFloor
 from promptpotter.domain.scoring import (
     ROW_GRADES,
     CellSheet,
@@ -38,6 +40,8 @@ from promptpotter.domain.scoring import (
     GradedCell,
     Scorer,
     ScoringFormulaError,
+    constant_answer,
+    enumerable_truth_labels,
 )
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import (
@@ -46,6 +50,7 @@ from promptpotter.shared.statistics import (
     p_floor,
     paired_diff_posterior,
     paired_mean_t,
+    sign_test_p,
 )
 
 
@@ -239,7 +244,7 @@ def as_family(readings: Sequence[PairedReading], family_id: str) -> list[PairedR
 
 def in_family(lifts: Sequence[MeasuredLift | None], family_id: str) -> list[MeasuredLift | None]:
     tested = [lift for lift in lifts if lift is not None]
-    adjusted = iter(holm_adjusted([lift.estimate.p_value for lift in tested]))
+    adjusted = iter(holm_adjusted([lift.p_value for lift in tested]))
     return [
         None
         if lift is None
@@ -361,34 +366,49 @@ def _owed(value: float | None, measurand: Measurand) -> float:
     return value
 
 
+def origin_floor(rows: CellSheet) -> ConstantFloor | None:
+    """The origin's fitness over the constant answer, on its cells with a ground truth."""
+    paired = [cell for cell in rows if cell.scored and cell.facts.ground_truth]
+    if (truth := enumerable_truth_labels(paired)) is None or len(paired) < 2:
+        return None
+    constant, fitness = constant_answer(truth), ROW_GRADES["fitness"]
+    measurand = Measurand(
+        kind=MeasurandKind.GRADE,
+        key="fitness",
+        scorer_id=rows.scorer_id,
+        binary=fitness.binary,
+        unit="score",
+    )
+    against, own = [constant.score(c) for c in paired], [fitness.read(c) for c in paired]
+    lift = _lift(measurand, against, own, ROUND_LIFT_SPEC).estimate
+    return ConstantFloor(label=constant.label, floor=constant.share, lift=lift)
+
+
 def _lift(
     measurand: Measurand, a_values: list[float], b_values: list[float], spec: EstimatorSpec
 ) -> MeasuredLift:
     n = len(a_values)
     flips: FlipCounts | None = None
+    mean, lo, hi, p, _ = paired_mean_t(b_values, a_values, alpha=spec.alpha)
+    assert lo is not None and hi is not None and p is not None
+    floor = p_floor(b_values, a_values)
     if measurand.binary:
         if not {*a_values, *b_values} <= {0.0, 1.0}:
             raise ValueError(f"measurand {measurand.key!r} is declared binary and is not")
         gained, lost = discordant_counts(b_values, a_values)
         flips = FlipCounts(gained=gained, lost=lost, unchanged=n - gained - lost)
-    # Tested against the null by shifting it out, so the estimate stays `rate_b - rate_a`.
-    against_null = [value - spec.null_value for value in b_values]
-    mean, lo, hi, p, _ = paired_mean_t(against_null, a_values, alpha=spec.alpha)
-    assert lo is not None and hi is not None and p is not None
-    ci_lo, ci_hi = lo + spec.null_value, hi + spec.null_value
-    floor = p_floor(against_null, a_values)
+        # Exact McNemar on the cells that flipped, never the t: 7 gained, 1 lost is 0.070, not 0.030.
+        p = min(1.0, 2.0 * sign_test_p(max(gained, lost), min(gained, lost)))
     return MeasuredLift(
         measurand=measurand,
         rate_a=sum(a_values) / n,
         rate_b=sum(b_values) / n,
-        estimate=LiftEstimate(
-            value=mean + spec.null_value,
-            ci_lo=ci_lo,
-            ci_hi=ci_hi,
-            side=interval_side(ci_lo, ci_hi, spec.null_value, p_floor=floor, alpha=spec.alpha),
-            p_value=max(p, floor),
-            p_floor=floor,
+        estimate=Estimate(
+            value=mean, ci_lo=lo, ci_hi=hi, n=n, se=None, unit=measurand.unit, form="lift"
         ),
+        side=interval_side(mean, max(p, floor), spec.alpha),
+        p_value=max(p, floor),
+        p_floor=floor,
         flips=flips,
         family=None,
     )

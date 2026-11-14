@@ -13,10 +13,9 @@ from promptpotter.application.scoring.selection import (
     readable_lifts,
 )
 from promptpotter.domain.crowning_bar import CrowningBar
-from promptpotter.domain.origin_panel import election_rows
-from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.ruler import DeltaRuler, ThetaLift
-from promptpotter.domain.scoring import NO_CELLS, CellSheet
+from promptpotter.domain.paired_reading import ArmKey, Estimate
+from promptpotter.domain.ruler import DeltaRuler
+from promptpotter.domain.scoring import CellSheet
 
 
 def _theta(value: float | None) -> str:
@@ -24,7 +23,7 @@ def _theta(value: float | None) -> str:
     return "n/a" if value is None else f"{value:+.3f}"
 
 
-def _lift(key: ArmKey, lift: ThetaLift, abilities: RoundAbilities) -> str:
+def _lift(key: ArmKey, lift: Estimate, abilities: RoundAbilities) -> str:
     return (
         f"θ lift {lift.value:+.3f} logits, se {lift.se:.3f} "
         f"(θ {_theta(abilities.theta.get(key))} vs parent {_theta(abilities.bar[key][0])})"
@@ -35,7 +34,7 @@ def _verdict_reason(
     *,
     winner: ArmKey | None,
     leading: ArmKey | None,
-    reads: Mapping[ArmKey, ThetaLift],
+    reads: Mapping[ArmKey, Estimate],
     electable: Sequence[ArmKey],
     abilities: RoundAbilities,
     labels: Mapping[ArmKey, str],
@@ -71,7 +70,7 @@ def _verdict_reason(
 
 
 def _kept_for_a_fresh_read(
-    leading: ArmKey, reads: Mapping[ArmKey, ThetaLift], lineage: Lineage
+    leading: ArmKey, reads: Mapping[ArmKey, Estimate], lineage: Lineage
 ) -> bool:
     """A held round's leader ahead of its parent, once: only the next round's panel says whether it clears the bar."""
     return reads[leading].value > 0.0 and not any(leading in rr.arms for rr in lineage.rounds)
@@ -83,15 +82,15 @@ class RoundWinner(Replayed, kind="round_winner"):
     bar: CrowningBar
     # Names which of the round's banked references the bar was; its rows are the close's.
     parent: ArmKey
-    crowned: list[str]
 
     def elect(
-        self, pooled: Callable[[ArmKey], CellSheet], ruler: DeltaRuler | None
+        self, raced: Callable[[ArmKey], CellSheet], ruler: DeltaRuler | None
     ) -> tuple[ArmKey | None, RoundAbilities]:
+        """On the rows and the ruler the round's race read."""
         return elect_round_winner(
             self.arms,
-            {key: pooled(key) for key in self.arms},
-            pooled(self.parent),
+            {key: raced(key) for key in self.arms},
+            raced(self.parent),
             self.coverage_floor,
             ruler,
             bar=self.bar,
@@ -99,12 +98,7 @@ class RoundWinner(Replayed, kind="round_winner"):
 
     def replay(self, ctx: ReplayContext) -> ArmKey | None:
         """The parent is the reference the round BANKED, never a panel rebuilt here: that one re-elects differently."""
-        rnd, crowned = ctx.round_data, frozenset(self.crowned)
-
-        def pooled(key: ArmKey) -> CellSheet:
-            return election_rows(rnd.rows(key), rnd.overlap_results.get(key, NO_CELLS), crowned)
-
-        return self.elect(pooled, ctx.ruler)[0]
+        return self.elect(ctx.round_data.raced, ctx.ruler)[0]
 
 
 def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
@@ -116,9 +110,9 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
         coverage_floor=measured.coverage_floor,
         bar=ctx.read(Bounds).crowning_bar(ctx.knobs(ElectionKnobs).admission),
         parent=measured.parent.key,
-        crowned=sorted(measured.crowned),
     )
-    selected, abilities = inputs.elect(measured.pooled, ruler)
+    selected, abilities = inputs.elect(measured.raced.__getitem__, ruler)
+
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)
     if selected is not None:

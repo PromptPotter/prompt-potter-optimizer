@@ -13,31 +13,26 @@ from promptpotter.application.intelligence.rasch import (
 )
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.crowning_bar import BarSubject, CrowningBar, LiftPrior, lift_prior
-from promptpotter.domain.origin_panel import election_rows
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, Estimate, MeasurandUnit
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.ruler import DeltaRuler, ThetaLift
-from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES, CellSheet, GradeColumn, GradedCell
+from promptpotter.domain.ruler import DeltaRuler, clears, p_better
+from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradeColumn, GradedCell
 from promptpotter.shared.statistics import (
+    bounded_mean_interval,
     discordant_counts,
-    mean_ci,
     sign_posterior,
 )
 
 
-def level_band(
-    sheet: CellSheet, column: GradeColumn
-) -> tuple[float | None, float | None, float | None]:
+def level_band(sheet: CellSheet, column: GradeColumn, unit: MeasurandUnit) -> Estimate | None:
     values = list(sheet.column(column).values())
     if not values:
-        return (None, None, None)
+        return None
     level = sum(values) / len(values)
-    band = mean_ci(values)
-    if band is None:
-        return (level, None, None)
-    _, ci_lo, ci_hi = band
-    # Clipped to the metric's support: the SE floor gives an all-0.0 arm a band reaching below zero.
-    return (level, min(max(ci_lo, 0.0), 1.0), min(max(ci_hi, 0.0), 1.0))
+    lo, hi = bounded_mean_interval(values, binary=column.binary) or (None, None)
+    return Estimate(
+        value=level, ci_lo=lo, ci_hi=hi, n=len(values), se=None, unit=unit, form="level"
+    )
 
 
 class PairedGrade(NamedTuple):
@@ -76,24 +71,20 @@ def crowning_cells(rounds: Sequence[RoundResult], parent: str) -> frozenset[str]
     """The cells *parent*'s admission was won on — its discordant wins over the bar, on the rows that
     election read: a race drawn onto them replays the luck that crowned it. A tie reads as any draw."""
     crowned: set[str] = set()
-    for at, rr in enumerate(rounds):
+    for rr in rounds:
         election = rr.election
         if election is None or election.selected != parent or (reference := rr.reference) is None:
             continue
-        bar = reference.arm
-        skip = crowning_cells(rounds[:at], bar)
-        own, against = (
-            paired_grades(election_rows(rr.rows(key), rr.overlap_results.get(key, NO_CELLS), skip))
-            for key in (ArmKey(parent), bar)
-        )
+        own, against = (paired_grades(rr.raced(key)) for key in (ArmKey(parent), reference.arm))
+
         crowned.update(c for c, g in own.items() if c in against and g.verdict > against[c].verdict)
     return frozenset(crowned)
 
 
 def readable_lifts(
     keys: Sequence[ArmKey], coverage_floor: int, abilities: RoundAbilities
-) -> dict[ArmKey, ThetaLift]:
-    reads: dict[ArmKey, ThetaLift] = {}
+) -> dict[ArmKey, Estimate]:
+    reads: dict[ArmKey, Estimate] = {}
     for key in keys:
         # PoBB's `n_min` IS this floor: both count `theta_cells`.
         if abilities.cells.get(key, 0) < coverage_floor:
@@ -105,7 +96,7 @@ def readable_lifts(
 
 
 def closest_to_bar(
-    reads: Mapping[ArmKey, ThetaLift], *, beside: ArmKey | None = None
+    reads: Mapping[ArmKey, Estimate], *, beside: ArmKey | None = None
 ) -> ArmKey | None:
     """On the θ lift ADMISSION takes; the first walked holds a tie."""
     return max((key for key in reads if key != beside), key=lambda k: reads[k].value, default=None)
@@ -136,7 +127,7 @@ def elect_round_winner(
     for key, lift in reads.items():
         if not verdicts[key].clears:
             continue
-        rank = (lift.p_better, abilities.cells[key])
+        rank = (p_better(lift), abilities.cells[key])
         if rank > best_rank:
             best_rank = rank
             winner = key
@@ -166,7 +157,7 @@ def discordant(rows: CellSheet, bar: CellSheet) -> tuple[int, int]:
 
 
 def bar_subjects(
-    lifts: Mapping[ArmKey, ThetaLift],
+    lifts: Mapping[ArmKey, Estimate],
     rows: Mapping[ArmKey, CellSheet],
     parent_results: CellSheet,
     admission: float,
@@ -177,6 +168,6 @@ def bar_subjects(
     subjects: dict[ArmKey, BarSubject] = {}
     for key, lift in lifts.items():
         wins, losses = discordant(rows[key], parent_results)
-        posterior = wins > losses and lift.clears(admission, support=sign_posterior(wins, losses))
+        posterior = wins > losses and clears(lift, admission, support=sign_posterior(wins, losses))
         subjects[key] = BarSubject(wins, losses, lift, posterior)
     return subjects

@@ -25,7 +25,7 @@ from promptpotter.application.optimizers.potter.pobb import (
     wire_sheet,
 )
 from promptpotter.domain.arms import Elimination
-from promptpotter.domain.paired_reading import ArmKey, PriorStanding
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.validators import StopSignal
 
@@ -36,7 +36,7 @@ class _RaceDecision(Replayed, kind=None):
     queries_scored: int
     p_best: float
     leader: ArmKey
-    paired_breakdown: dict[ArmKey, PriorStanding]
+    paired_breakdown: dict[ArmKey, float]
     # The cells the field was read on by `Sample.key`, each rival's grades as read: a replay re-draws from these.
     candidate_cells: list[str]
     prior_histories: dict[ArmKey, dict[str, dict[str, float | None]]]
@@ -44,8 +44,8 @@ class _RaceDecision(Replayed, kind=None):
     def _read(self, ctx: ReplayContext) -> tuple[CellSheet, dict[ArmKey, CellSheet]] | None:
         """``None`` where a cell the live check read is no longer among the arm's rescored rows."""
         # A cut in the top-up read the arm's origin-panel rows too.
-        rd = ctx.round_data
-        rows = rd.rows(self.arm).merged(rd.overlap_results.get(self.arm, NO_CELLS)).by_key()
+        rows = ctx.round_data.raced(self.arm).by_key()
+
         if any(cell not in rows for cell in self.candidate_cells):
             return None
         priors = {pid: graded_sheet(grades) for pid, grades in self.prior_histories.items()}

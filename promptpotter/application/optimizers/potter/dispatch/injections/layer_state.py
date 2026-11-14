@@ -23,12 +23,11 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.application.optimizers.potter.dispatch.prompts import (
     effective_optimizer_prompts,
 )
-from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import Measured, arm_name
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.optimizer_state import CritiqueReadout
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.paired_reading import ArmKey, level_text
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, PipelineSchema
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.sample import sample_tag

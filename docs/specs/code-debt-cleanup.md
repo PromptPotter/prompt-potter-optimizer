@@ -688,50 +688,42 @@ and derived the knob couplings from each member's draws and the escalation ladde
   so `webapp/e2e/spend/l4.spec.ts` may halt on its ceiling. Action: size it from one measured depth-2
   run. **Rides with:** the next paid walk.
 
-### readings (after the L4 C0 re-measure; behaviour keys make it key-neutral)
+### readings-2 (what readings left at its landing)
 
-- **One estimate is read ~10 ways**: of the 31 `*Reading` classes, about 10 are estimates off cells
-  (`ArmReading`, `PairedReading`, `MetricReading`, `FactorReading`, …); the other ~22 carry a status
-  (`CommandReading`, `PauseReading`, …) and stay. Action: one reading (estimate, interval, n, state) that
-  every estimate returns and every surface renders, and `paired.py::read_pair`'s estimator spec gains a
-  kind (paired t, θ, exact sign), each returning `MeasuredLift`; rk-dec's bar and rk-opt's lift test read
-  it. θ and paired t stay distinct measurands (θ is unpaired and model-based, which PoBB's truncation
-  needs); CAPO, GEPA and LEVI keep their papers' bars. **Rides with:** readings. **Re-test:** the
-  chain's census lists the estimate readings; one remains.
-- **A finished arm meets a harder bar than a cut one**: `lost_ideas` asks a finished arm's interval to
-  sit wholly below, a cut arm only the ε posterior. Action: one bar for both. **Rides with:** readings.
-- **A round's advance mixes a point and an interval**: `origin_panel.py::RoundAdvance`'s "tops" half is
-  a point compare beside an interval read. Action: one interval read. **Rides with:** readings.
-- **The level interval undercovers at the ends** (✓, a statistics pass): the one level interval is
-  Wald-t with an SE floor of 1/(4n) (`shared/statistics.py:110-125`, `:143-149`), read by
-  `selection.py:29-41`'s `level_band`, which clips (`:40`): 20/20 gives [0.974, 1.0] against an exact
-  Clopper-Pearson lower bound of 0.832, 0/6 an upper bound of 0.107 against 0.459, and true coverage is
-  64% at p = 0.95, n = 20. Readers: the bench headline, the round fitness CI, the noise-floor band. Root:
-  one bounded-mean interval in `shared/statistics.py`, chosen by the declared `Measurand.binary` (exact
-  or Wilson for binary, a variance-bounded t for graded); the clip goes. **Rides with:** readings 1.
-- **The Rasch fit's readings break their stated invariants** (reported unless ✓): the young-ruler joint
-  MAP shrinks δ̂ inward (slope 0.30 at 3 individuals per cell), so θ is not subset-invariant against
-  `verdict-resolution.md:39-40` (root: θ read under δ ~ N(δ̂, se_δ²), or δ by MML, the warm gate counting
-  se_δ); `fit_theta`'s fixed N(0, 1.5²) prior per arm (`rasch.py:238`) shrinks arm and parent apart, so
-  an equal arm on 8 cells against a parent at θ = +1.5 on 40 reads −0.28 (`DeltaRuler.sigma_theta` is
-  carried, unused; root: the prior on the difference); ✓ `comparable_to` compares `ruler.id`
-  (`ruler.py:387-388`) and a cold id is `flat:<objective>` (`:84-85`), so 8/10 on easy cells vs 4/10 on
-  hard reads +1.45 logits stamped "directly comparable" (root: a cold identity carries its cell set, or
-  cold readings refuse); φ's binariness is inferred from the values (`rasch.py:271-272`) against
-  `paired_reading.py:378-381`'s DECLARED rule (one 0.999 for 1.0 cuts θ SE 0.546 → 0.324); FLOOR_PINNED's
-  wording is false (the all-miss θ is −1.84 at n = 6, −2.74 at n = 20; a 1/20 arm over it reads +0.529,
-  not 0.000; `verdict-resolution.md:93-95`, `ruler.py:160-164`), with no ceiling twin (root:
-  "prior-dominated", one rule for both ends); the paired binary lift is a t-test plus a floor, not exact
-  McNemar (`paired.py:367-397`; 7/1/12 gives p = 0.030 vs 0.070); the head-to-head MDE ignores Holm
-  (`comparison.py:433` vs `:269`); `rasch.py:451-475`'s "with hysteresis" is stale (the margin is
-  0.002/obs). **Rides with:** readings (re-keys the estimator: name it).
-- **The race and the election read different rulers** (✓): `race.py:144-153` builds `PoBBCheck` on
-  `ctx.read(Ruler)` as of round open with `NO_CELLS` for the origin panel, while the election re-fits
-  (`round.py:611-654`, `link`) and reads rows merged with `on_panel`, so `candidate-elimination.md:35-37`
-  and `pobb.py:151`'s "cannot disagree" is false; the ε cut is the half that stands; and
-  `verdict-resolution.md:34-36`'s "the joint fit runs once, at ruler lock" is false (re-fit every round,
-  `difficulty.py:223-256`). Decided (orchestrator; the operator may reverse it): the code, not the doc,
-  is fixed: both read one ruler and one row set, and the doc then states it. **Rides with:** readings 2.
+- **A lift is read two ways**: `paired_reading.py::Estimate` is the one level and lift every surface
+  renders, and `paired.py::_lift`'s test is the measurand's (exact sign where it is declared binary,
+  paired t where graded), but a θ lift is a bare `Estimate` (`ruler.py::theta_lift`), never a
+  `MeasuredLift`, so rk-dec's bar and rk-opt's lift test read two shapes. Action: θ returns
+  `MeasuredLift` beside the paired kinds; θ and paired t stay distinct measurands (θ is unpaired and
+  model-based, which PoBB's truncation needs); CAPO, GEPA and LEVI keep their papers' bars. No
+  `EstimatorSpec.kind`: the measurand's declaration already picks the paired test, and a kind would be
+  a second door to it. **Rides with:** rk-dec. **Re-test:** the chain's census lists the estimate
+  readings; one remains.
+- **φ's binariness is inferred from the values** (`rasch.py::_dispersion`) against the DECLARED rule
+  (`paired_reading.py::Measurand.binary`; one 0.999 for 1.0 cuts θ SE 0.546 → 0.324), but the response
+  θ reads (`objective`) is declared graded on every scorer (`scoring.py::ROW_GRADES`), so reading the
+  declaration fits φ on every binary dataset, whose δ-on-the-same-rows residuals read φ = 0.10 (θ_se
+  0.28 where the information gives 0.89: the election crowns on noise). Root: the scorer declares
+  whether its objective is two-valued (no `per_cell` cost term on a hit), and `fit_theta` takes that
+  declaration. The same missing declaration has two more holders:
+  - `evidence/comparison.py::metric_measurand` hard-codes `binary=False` (`MetricSpec` declares none);
+  - `crowning_bar.py::CrowningBar.separates` never separates a graded measurand.
+
+  **Rides with:** readings' successor. **Re-test:** a 0.999 for a 1.0 moves θ_se < 1%, and
+  `git grep -c "binary=False" -- promptpotter/application/evidence/comparison.py` is 0.
+- **A verify compares against a point**: `VerifyReading.held` reads the recorded level as known, but
+  the recorded level carries no band. Root: the record keeps the level's `Estimate`, and the verify
+  reads both bands. **Re-test:** a verify whose recorded level has a wide band is never "held" on a
+  point comparison.
+- **`EliminationGate` is a one-member enum** (`potter/pobb.py:30`). It is wired through the lens and
+  `mask/record.py:31` and stands in for a concept with one value. Action: delete it and its wiring.
+  **Re-test:** `git grep -c EliminationGate -- promptpotter` is 0.
+- **The warm gate counts no se_δ**: θ now reads each δ under its SE (`DeltaRuler.entries`), but the
+  young-ruler joint MAP still shrinks δ̂ inward (slope 0.30 at 3 individuals per cell) and the warm
+  gate warms on row counts alone.
+ Root: δ by MML, or the warm gate reads se_δ.
+  **Rides with:** readings' successor.
+
 
 ### batch/26 · rn-conn
 
@@ -783,10 +775,8 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `headline` / `coverage` for None. Action: a read arm and an unread arm discriminated on `state`, the
   validator and the readers' None branches deleted. A reshape wipes run data. **Re-test:**
   `git grep -c "_state_fits_content" -- promptpotter/domain/paired_reading.py` is 0.
-- **Fields written, never read: 30 left** (`scripts/complexity_ledger.py::_unread_fields`, the
-  `p_unread_fields` ceiling). `PriorStanding.n_paired` / `n_discordant` are written in the capo and potter
-  packages, so deleting them re-keys behaviour; `InnerCellFacts.origin_headroom` sits in the hashed
-  `l4/proxies.py`. Action: each goes, or names its reader. **Re-test:** the ceiling is 0.
+- **Fields written, never read: 27 left** (`scripts/complexity_ledger.py::_unread_fields`, the
+  `p_unread_fields` ceiling). `InnerCellFacts.origin_headroom` sits in the hashed `l4/proxies.py`. Action: each goes, or names its reader. **Re-test:** the ceiling is 0.
 - **`SampleScoredRecord.running` stamps a running fold on every cell** (9.3 % of a 1.5 MB ledger). Its
   readers (`Narration.fold`, `StandingArm.fold`, the live board's rows) need the scorer's evaluators,
   which no domain fold holds. Action: the readers fold `StandingArm.cells` through
@@ -951,6 +941,18 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `::_host_tiers` walk it with `.get` and `_as_tokens`, the shape lite removed from the three data-root
   files. Action: one model for the payload, validated at the fetch. **Re-test:** `git grep -c "_as_tokens"
   -- promptpotter/infrastructure/llm/pricing.py` is 0.
+
+### la-2 (what la left at its landing)
+
+- **`run_state.py` still reaches `campaign_store/` transitively**: `infrastructure/holders.py:15`
+  imports `campaign_store/ledger_scan.py::scan_cycle_hold`. So the run-state leg imports neither
+  directly, yet still loads it. Root: what holders reads off the ledger belongs in
+  `store/read_model.py`. **Re-test:** importing `run_state` alone loads no `campaign_store` module.
+- **The CLI prompts for an API key under `--json`**: a verb run with no provider key asks on the
+  terminal before it answers, so a `--json` caller gets an interactive prompt rather than a Refusal.
+  Root: the key check runs before the `--json` refusal path; under `--json` a missing key is a typed
+  refusal. **Re-test:** `resume --json` with no key set exits 1 with Refusal JSON on stdout and reads
+  nothing from stdin.
 
 ### batch/29 · xconn
 

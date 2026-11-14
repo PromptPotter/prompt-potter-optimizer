@@ -1,6 +1,7 @@
 import type { HeadToHead } from "@/lib/api/types";
 import { GuardBadge } from "./GuardBadge";
-import { sideTone, fmtLiftBand, fmtPValue, PLACEHOLDER } from "@/lib/format";
+import { sideTone, fmtPValue, PLACEHOLDER } from "@/lib/format";
+
 import { DataTable, Said, type Column } from "@/components/ui";
 
 export function HeadToHeadVerdict({ h2h, scorerId }: { h2h: HeadToHead; scorerId: string }) {
@@ -62,9 +63,7 @@ const CONTRAST_COLUMNS: readonly Column<ArmContrast>[] = [
     width: "minmax(10rem, 2fr)",
     cell: ({ lift }) =>
       lift ? (
-        <span className={sideTone(lift.estimate.side)}>
-          {fmtLiftBand(lift.measurand.unit, lift.estimate)}
-        </span>
+        <span className={sideTone(lift.side)}>{lift.estimate.text}</span>
       ) : (
         <span className="l4-dim">under two rows</span>
       ),

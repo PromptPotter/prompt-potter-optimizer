@@ -34,7 +34,10 @@ PoBB is a **block race** (`potter/race.py::PoBBRace`): every arm walks the panel
 
 The **origin panel's top-up is one more stretch of the same race** (`runner/round.py::read_origin_panel`): a cut there lands as the arm's `Cut`, which `runner/round.py::panel_triggers` reads, so the monitor never buys it back.
 
+**The race and the election read one row set** (`results.py::RoundResult.raced`: the draw, then the origin-panel cells it lacks) **on one ruler**, the scale the round opened on; the round's cells join δ after its election.
+
 **The election's bar** admits an arm on
+
 a raw θ lift above `domain/ruler.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND its
 `P(θ_arm > θ_parent)` bounded by what the DISCORDANT pairs support (`shared/statistics.py::sign_posterior`; directional, so contradicting pairs collapse the claim to 0.5; **discordance counts VERDICTS, `Grade.fitness`, never the objective**) above potter's `theta_election` `admission` — never PoBB's ε, which
 says when to stop BUYING an arm, not when to promote one. An `admission` below `sign_posterior(1, 0)`

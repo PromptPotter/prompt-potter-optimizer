@@ -3,13 +3,13 @@ from __future__ import annotations
 import math
 from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
-from dataclasses import dataclass
 from enum import StrEnum
 from statistics import NormalDist
 from typing import Literal, NamedTuple
 
 from pydantic import Field
 
+from promptpotter.domain.paired_reading import Estimate
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import stable_hash
@@ -81,6 +81,9 @@ class RulerStamp(FrozenModel):
         return RulerReach(version=self.version, own=self.own)
 
 
+# ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))``.
+PROBIT_SCALE = math.pi / 8.0
+
 # A cold id carries the OBJECTIVE: flat δ depends on no fit, so nothing else separates two readings.
 _FLAT_PREFIX = "flat"
 
@@ -99,8 +102,8 @@ class ThetaCaveat(StrEnum):
     """A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact.
     Each is read off the cells a θ was read on: one level's, one arm's, a whole series'."""
 
-    # All-miss, so θ sits on the prior's floor and every LIFT taken against it reads 0.000.
-    FLOOR_PINNED = "floor_pinned"
+    # All-miss or all-hit: θ is wherever the prior stops it, so a lift from it reads the prior.
+    PRIOR_DOMINATED = "prior_dominated"
     # No δ scale: θ is logit-fitness, read on the cells an arm shares with the parent it is judged against.
     COLD_RULER = "cold_ruler"
     # The INSTRUMENT: the ruler itself spans almost nothing, so no draw could have been wider.
@@ -156,10 +159,11 @@ THETA_CAVEAT_INFO: Worded[ThetaCaveat, ThetaCaveatInfo] = Worded(
             "beside it, and two candidates may be read on different ones. A later round includes them.",
             "attention",
         ),
-        ThetaCaveat.FLOOR_PINNED: ThetaCaveatInfo(
-            "No θ for an all-wrong candidate",
-            "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift "
-            "taken from it, is a placeholder. Other candidates are unaffected.",
+        ThetaCaveat.PRIOR_DOMINATED: ThetaCaveatInfo(
+            "No θ for an all-wrong or all-right candidate",
+            "It missed, or got right, every sample it answered, so θ has no edge to measure: its θ "
+            "is where the prior stopped it, and a lift taken from it reads the prior. Other "
+            "candidates are unaffected.",
             "attention",
         ),
     }
@@ -174,11 +178,11 @@ if _missing_caveat_info:
 
 
 def theta_caveat(
-    ruler: DeltaRuler | None, cells: Collection[str], *, all_miss: bool
+    ruler: DeltaRuler | None, cells: Collection[str], *, prior_dominated: bool
 ) -> ThetaCaveat | None:
     """The one deriver, over the cells a θ was read on; the order is severity."""
-    if all_miss:
-        return ThetaCaveat.FLOOR_PINNED
+    if prior_dominated:
+        return ThetaCaveat.PRIOR_DOMINATED
     if ruler is None:
         return ThetaCaveat.COLD_RULER
     if (band := ruler.band_span(cells)) is not None:
@@ -236,9 +240,11 @@ class DeltaRuler(FrozenModel):
     anchor_id: str
 
     def entries(self) -> dict[str, RulerEntry]:
+        """Each θ is read under δ ~ N(δ̂, se²): the probit rule folds the δ's SE into its slope."""
         return {
-            key: ((d, self.discrimination[key]) if key in self.discrimination else d)
+            key: (d, a / math.sqrt(1.0 + PROBIT_SCALE * (a * self.delta_se[key]) ** 2))
             for key, d in self.delta.items()
+            for a in (self.discrimination.get(key, 1.0),)
         }
 
     @property
@@ -313,38 +319,39 @@ FIT_SLACK = 1e-3
 _POWER_Z = NormalDist().inv_cdf(0.8)
 
 
-@dataclass(frozen=True)
-class ThetaLift:
+def theta_lift(theta: float, se: float, bar_theta: float, bar_se: float) -> Estimate:
     """θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE."""
+    return Estimate.normal(
+        theta - bar_theta, math.hypot(se, bar_se), unit="theta", form="lift", n=None
+    )
 
-    value: float
-    se: float
 
-    @property
-    def p_better(self) -> float:
-        """``P(θ > θ_bar)``, unbounded: the election ranks on it."""
-        if self.se <= 1e-12:
-            return 1.0 if self.value > 0.0 else 0.0
-        return NormalDist().cdf(self.value / self.se)
+def p_better(lift: Estimate) -> float:
+    """``P(θ > θ_bar)`` off a θ lift, unbounded: the election ranks on it."""
+    se = lift.se or 0.0
+    if se <= 1e-12:
+        return 1.0 if lift.value > 0.0 else 0.0
+    return NormalDist().cdf(lift.value / se)
 
-    def reach(self, support: float | None) -> float:
-        """``p_better`` capped by the discordant cells' sign posterior; ``None``: no cell pairs the two."""
-        p = self.p_better
-        if support is None:
-            return p
+
+def clears(lift: Estimate, admission: float | None, *, support: float | None) -> bool:
+    """The election's one bar: past what a fit resolves, and ``p_better`` past *admission*, capped
+    by the discordant cells' sign posterior *support* (``None``: no cell pairs the two)."""
+    # No SE margin on the value: subtracting one turns a wide-posterior gain negative.
+    if admission is None or lift.value <= FIT_SLACK:
+        return False
+    p = p_better(lift)
+    if support is not None:
         # The bound's mass on the SIDE θ read, not `|bound - 0.5|`, which reads 3 losses as 3 wins.
         side = support if p > 0.5 else 1.0 - support
         extent = min(abs(p - 0.5), max(0.0, side - 0.5))
-        return 0.5 + extent if p > 0.5 else 0.5 - extent
+        p = 0.5 + extent if p > 0.5 else 0.5 - extent
+    return p > admission
 
-    def clears(self, admission: float | None, *, support: float | None) -> bool:
-        """The election's one bar: past what a fit resolves, and past *admission*; no bar clears none."""
-        # No SE margin on the value: subtracting one turns a wide-posterior gain negative.
-        return admission is not None and self.value > FIT_SLACK and self.reach(support) > admission
 
-    def detectable(self, admission: float) -> float:
-        """The true lift `clears` meets at 80% power on this se."""
-        return (NormalDist().inv_cdf(admission) + _POWER_Z) * self.se
+def detectable(se: float, admission: float) -> float:
+    """The true θ lift `clears` meets at 80% power on *se*."""
+    return (NormalDist().inv_cdf(admission) + _POWER_Z) * se
 
 
 class AbilityReading(FrozenModel):
@@ -368,13 +375,14 @@ class AbilityReading(FrozenModel):
     pinned_share: float | None
 
     def comparable_to(self, other: AbilityReading) -> bool:
-        return self.ruler.id == other.ruler.id
+        """Never on a cold ruler: its id names no cell set, so easy and hard cells read alike."""
+        return not self.ruler.cold and self.ruler.id == other.ruler.id
 
-    def lift_over(self, other: AbilityReading) -> ThetaLift | None:
+    def lift_over(self, other: AbilityReading) -> Estimate | None:
         """``None`` where the two sit on different scales."""
         if not self.comparable_to(other):
             return None
-        return ThetaLift(self.theta - other.theta, math.hypot(self.se, other.se))
+        return theta_lift(self.theta, self.se, other.theta, other.se)
 
     def scale(self, *, named: bool = True) -> str:
         if self.ruler.cold:
@@ -386,15 +394,6 @@ class AbilityReading(FrozenModel):
 # Well inside one round's θ SE: a plateau advises stopping, and a false stop costs more than a miss.
 PLATEAU_THETA_BAND = 0.05
 PLATEAU_ROUNDS = 3
-
-
-_THETA_BAND_Z = NormalDist().inv_cdf(0.975)
-
-
-def theta_band(theta: float | None, se: float | None) -> tuple[float, float] | None:
-    if theta is None or se is None:
-        return None
-    return theta - _THETA_BAND_Z * se, theta + _THETA_BAND_Z * se
 
 
 class SeriesReading(FrozenModel):

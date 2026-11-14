@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from functools import cache
 from statistics import NormalDist
 from typing import Literal, NamedTuple, overload
@@ -64,21 +64,20 @@ def _t_sf(x: float, df: float) -> float:
     return tail if x >= 0.0 else 1.0 - tail
 
 
+def _bisect(holds: Callable[[float], bool], lo: float, hi: float) -> float:
+    """The last point of ``[lo, hi]`` where a monotone *holds*, true at *lo*, still holds."""
+    for _ in range(60):
+        mid = (lo + hi) / 2.0
+        lo, hi = (mid, hi) if holds(mid) else (lo, mid)
+    return lo
+
+
 def _t_ppf(p: float, df: float) -> float:
     """Valid for ``p >= 0.5`` only."""
-    target = 1.0 - p
-    lo, hi = 0.0, 1.0
-    while _t_sf(hi, df) > target:
+    hi = 1.0
+    while _t_sf(hi, df) > 1.0 - p:
         hi *= 2.0
-    for _ in range(200):
-        mid = 0.5 * (lo + hi)
-        if _t_sf(mid, df) > target:
-            lo = mid
-        else:
-            hi = mid
-        if hi - lo <= 1e-15 * max(1.0, hi):
-            break
-    return 0.5 * (lo + hi)
+    return _bisect(lambda x: _t_sf(x, df) > 1.0 - p, 0.0, hi)
 
 
 @cache
@@ -129,13 +128,30 @@ def paired_diff_posterior(
     return (mean_d, se_d, n)
 
 
-def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, float] | None:
-    n = len(values)
-    if n < 2:
+def bounded_mean_interval(
+    values: Sequence[float], *, binary: bool, alpha: float = 0.05
+) -> tuple[float, float] | None:
+    """The means a test at *alpha* accepts: Clopper-Pearson where the measurand is DECLARED binary,
+    else a t whose variance is the most the support allows at that mean, ``(μ-a)(b-μ)``, so a
+    constant arm keeps a band its own spread would close. ``None`` where it brackets nothing."""
+    n, mean = len(values), sum(values) / max(len(values), 1)
+    if n < (1 if binary else 2):
         return None
-    mean, se = _normal_posterior(values)
-    half = t_critical(n - 1, alpha) * se
-    return (mean, mean - half, mean + half)
+    a, b = min(0.0, *values), max(1.0, *values)
+    if binary:
+        k = round(mean * n)
+
+        def accepted(mu: float) -> bool:
+            above = k == 0 or _beta_cdf(mu, k, n - k + 1) > alpha / 2
+            return above and (k == n or 1.0 - _beta_cdf(mu, k + 1, n - k) > alpha / 2)
+    else:
+        t = t_critical(n - 1, alpha)
+
+        def accepted(mu: float) -> bool:
+            return abs(mean - mu) <= t * math.sqrt(max((mu - a) * (b - mu), 0.0) / n)
+
+    lo = a if accepted(a) else _bisect(lambda mu: not accepted(mu), a, mean)
+    return lo, b if accepted(b) else _bisect(accepted, mean, b)
 
 
 def paired_mean_t(
@@ -218,18 +234,10 @@ def anytime_level_lower(total: float, n: int, alpha: float) -> float | None:
             - rest * math.log1p(-level)
         )
 
-    bar, lo, hi = -math.log(alpha), 0.0, total / n
-    if hi <= 0.0:
-        return 0.0
-    if log_e(hi) >= bar:
+    bar, hi = -math.log(alpha), total / n
+    if hi <= 0.0 or log_e(hi) >= bar:
         return hi
-    for _ in range(60):
-        mid = (lo + hi) / 2.0
-        if log_e(mid) >= bar:
-            lo = mid
-        else:
-            hi = mid
-    return lo
+    return _bisect(lambda level: log_e(level) >= bar, 0.0, hi)
 
 
 def holm_adjusted(p_values: list[float]) -> list[float]:

@@ -20,17 +20,18 @@ from promptpotter.domain.arms import (
     arm_end,
     walked_short,
 )
-from promptpotter.domain.bench import BandedValue, BenchReading, OwnLevel
+from promptpotter.domain.bench import BenchReading, OwnLevel
 from promptpotter.domain.cell_fold import CellFold, ScoreSummary
 from promptpotter.domain.origin_panel import LineRate
 from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
-    LiftEstimate,
+    Estimate,
     MeasurandUnit,
     PairedReading,
+    level_text,
 )
-from promptpotter.domain.ruler import ThetaCaveat, ThetaLift, theta_band
+from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.verification import VerifyReading
@@ -74,90 +75,13 @@ class ScoreboardRow(FrozenModel):
 type DisplayMetric = Literal["fitness", "composite", "ability"]
 
 
-class UnitFormat(NamedTuple):
-    """How one unit reads: a level is ``prefix``, the value times ``scale`` at ``digits``, then ``suffix``; a lift is signed."""
-
-    scale: float
-    digits: int
-    prefix: str
-    suffix: str
-    lift_digits: int
-    lift_word: str
-    lift_name: str
-    compact: bool
-
-
-# A rate's lift reads in percentage points, never in percent.
-UNIT_FORMATS: Worded[MeasurandUnit, UnitFormat] = Worded(
-    {
-        "rate": UnitFormat(100.0, 0, "", "%", 1, "pts", "point", False),
-        "score": UnitFormat(1.0, 2, "", "", 3, "score", "unit of score", False),
-        "theta": UnitFormat(1.0, 2, "θ ", "", 3, "logits", "logit", False),
-        "seconds": UnitFormat(1.0, 2, "", "s", 2, "s", "second", False),
-        "usd": UnitFormat(1.0, 4, "$", "", 4, "USD", "dollar", False),
-        "tokens": UnitFormat(1.0, 0, "", " tok", 0, "tok", "token", True),
-        "rank": UnitFormat(1.0, 2, "", "", 2, "ranks", "rank", False),
-        "rounds": UnitFormat(1.0, 1, "", "", 1, "rounds", "round", False),
-    }
-)
-
-_COMPACT_STEPS = ((1_000_000.0, "M"), (1_000.0, "k"))
-
-
-def _number(value: float, fmt: UnitFormat, digits: int, sign: str) -> str:
-    scaled = fmt.scale * value
-    for step, mark in _COMPACT_STEPS if fmt.compact else ():
-        if abs(scaled) >= step:
-            return f"{scaled / step:{sign}.1f}{mark}"
-    return f"{scaled:{sign}.{digits}f}"
-
-
-def level_text(value: float | None, unit: MeasurandUnit) -> str:
-    """A level as a person reads it in its unit; `—` where it is absent."""
-    if value is None:
-        return "—"
-    fmt = UNIT_FORMATS[unit]
-    return f"{fmt.prefix}{_number(value, fmt, fmt.digits, '')}{fmt.suffix}"
-
-
 def fold_fitness_text(fold: CellFold | None) -> str:
     return "—" if fold is None else level_text(fold.fitness, fold.fitness_unit)
-
-
-def _signed(value: float, fmt: UnitFormat) -> str:
-    return _number(value, fmt, fmt.lift_digits, "+")
-
-
-def lift_shown(value: float, unit: MeasurandUnit) -> float:
-    """The lift as `lift_text` prints it, so a colour or a sign reads what the reader sees."""
-    fmt = UNIT_FORMATS[unit]
-    return round(fmt.scale * value, fmt.lift_digits)
-
-
-# Ties a value to its word and a bound to its pair, so a narrow line breaks only between them.
-_NBSP = "\N{NO-BREAK SPACE}"
-
-
-def lift_text(value: float, unit: MeasurandUnit) -> str:
-    """A lift as a person reads it in its unit: every surface that prints one prints this."""
-    fmt = UNIT_FORMATS[unit]
-    return f"{_signed(value, fmt)}{_NBSP}{fmt.lift_word}"
-
-
-def lift_interval_text(lo: float, hi: float, unit: MeasurandUnit) -> str:
-    """A lift's interval, its bounds signed in the unit `lift_text` names."""
-    fmt = UNIT_FORMATS[unit]
-    return f"[{_signed(lo, fmt)},{_NBSP}{_signed(hi, fmt)}]"
 
 
 def fitness_terms_text(terms: Mapping[str, float]) -> str:
     """Each scoring-formula term's round mean, as the composite block prints one."""
     return "  ".join(f"{name}={value:.3f}" for name, value in terms.items())
-
-
-def lift_band_text(estimate: LiftEstimate, unit: MeasurandUnit) -> str:
-    interval = lift_interval_text(estimate.ci_lo, estimate.ci_hi, unit)
-    return f"{lift_text(estimate.value, unit)} {interval}"
 
 
 class DisplayMetricInfo(NamedTuple):
@@ -219,7 +143,7 @@ class ArmFit(FrozenModel):
     # This arm over the individual it was judged against; `None` on an arm with no reference.
     vs_reference: PairedReading | None = None
     # Its θ over its parent's on the same fit: the arm-vs-parent pair a lift prior is read off.
-    lift: ThetaLift | None = None
+    lift: Estimate | None = None
 
 
 def panel_counts(arm: ArmState, fold: ScoreSummary | None) -> tuple[int | None, int | None]:
@@ -274,13 +198,7 @@ class ArmPanel(FrozenModel):
 class ArmAbility(FrozenModel):
     """One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale."""
 
-    theta: float | None
-    se: float | None
-    ci_lo: float | None = Field(
-        description="Lower bound of the 95% interval on `theta` (`ruler.py::theta_band`); null "
-        "where `theta` or `se` is."
-    )
-    ci_hi: float | None = Field(description="Upper bound of the same interval.")
+    theta: Estimate | None = Field(description="Null where the round's fit read no θ for the arm.")
     caveat: ThetaCaveat | None = Field(
         description="Why `theta` is not this arm's ability, of the ARM's own scope."
     )
@@ -291,8 +209,12 @@ class ArmAbility(FrozenModel):
     ) -> ArmAbility | None:
         if (theta, se, caveat) == (None, None, None):
             return None
-        lo, hi = theta_band(theta, se) or (None, None)
-        return cls(theta=theta, se=se, ci_lo=lo, ci_hi=hi, caveat=caveat)
+        read = (
+            None
+            if theta is None or se is None
+            else Estimate.normal(theta, se, unit="theta", form="level", n=None)
+        )
+        return cls(theta=read, caveat=caveat)
 
 
 class ElectionColumn(FrozenModel):
@@ -395,14 +317,19 @@ def _own_level(fold: ScoreSummary) -> OwnLevel | None:
     fitness, composite = fold.fitness, fold.composite_fitness
     if fitness is None and composite is None:
         return None
-    band = (fold.mean_fitness_ci_lo, fold.mean_fitness_ci_hi)
-    lo, hi = band if None not in band else (None, None)
     return OwnLevel(
-        fitness=None if fitness is None else BandedValue(value=fitness, ci_lo=lo, ci_hi=hi),
+        fitness=fold.fitness_band,
         composite=None
         if composite is None
-        else BandedValue(value=composite, ci_lo=None, ci_hi=None),
-        fitness_unit=fold.fitness_unit,
+        else Estimate(
+            value=composite,
+            ci_lo=None,
+            ci_hi=None,
+            n=fold.total,
+            se=None,
+            unit="score",
+            form="level",
+        ),
         n=fold.total,
     )
 

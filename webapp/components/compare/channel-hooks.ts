@@ -14,7 +14,8 @@ import type { CellsPreset } from "@/lib/hooks/useCells";
 import { shownData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { lineageIndexOf, useLineageTree } from "@/lib/state/lineage";
-import { fmtMetric, fmtMetricInterval, type MetricFormat } from "@/lib/format";
+import { PLACEHOLDER } from "@/lib/format";
+
 import { type CyclePath, decodeCyclePath, encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import { editsFor, pointKeyOf, useScenarioEdits } from "./config-edit";
 
@@ -99,14 +100,14 @@ export function useInvalidated(index: LineageIndex): ReadonlySet<string> {
 export function channelLevel(
   reading: SubjectReading | null,
   withdrawn: boolean,
-  metric: MetricFormat,
 ) {
+
   return (
     reading && {
-      value: withdrawn ? "?" : fmtMetric(metric, reading.value),
+      value: withdrawn ? "?" : (reading.estimate?.point ?? PLACEHOLDER),
       band: withdrawn
         ? "? · ? cells"
-        : `${fmtMetricInterval(metric, reading.ci_lo, reading.ci_hi)} · ${reading.n_cells} cell${
+        : `${reading.estimate?.band ?? PLACEHOLDER} · ${reading.n_cells} cell${
             reading.n_cells === 1 ? "" : "s"
           }`,
     }

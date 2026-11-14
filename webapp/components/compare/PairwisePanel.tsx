@@ -80,8 +80,9 @@ function pairColumns(names: ReadonlyMap<string, string>): Column<PairRow>[] {
       ),
     },
     ...liftColumns<PairRow>("lift · 95% CI"),
-    num("p", "p", (lift) => fmtPValue(lift.estimate.p_value)),
+    num("p", "p", (lift) => fmtPValue(lift.p_value)),
     num("p-holm", "p (Holm)", (lift) => fmtPValue(lift.family?.p_adjusted ?? null)),
-    num("p-floor", "p floor", (lift) => lift.estimate.p_floor.toPrecision(2)),
+    num("p-floor", "p floor", (lift) => lift.p_floor.toPrecision(2)
+),
   ];
 }

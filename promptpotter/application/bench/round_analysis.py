@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import Any
 
+from promptpotter.application.scoring.paired import origin_floor
 from promptpotter.application.scoring.row_diagnostics import extract_sample_diagnostics
 from promptpotter.domain.arms import ArmState, Concluded
 from promptpotter.domain.cell_fold import ScoreSummary
@@ -67,6 +68,7 @@ def head_health(
         prior_healths=assemble_prior_healths(priors, round),
         not_attempted=max(0, head.expected_samples - len(rows)) if picked else 0,
         is_origin=round == 0,
+        constant_floor=origin_floor(rows) if round == 0 else None,
     )
 
 

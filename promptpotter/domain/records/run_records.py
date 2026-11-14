@@ -34,7 +34,7 @@ from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import STATE_KINDS, OptimizerState, StatePart
-from promptpotter.domain.paired_reading import ArmKey, ArmName, PriorStanding, RoundArm
+from promptpotter.domain.paired_reading import ArmKey, ArmName, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
@@ -413,7 +413,7 @@ class RaceStandingRecord(CycleRecord):
     current: ArmKey
     n_samples: int
     p_best: float
-    paired_breakdown: dict[ArmKey, PriorStanding]
+    paired_breakdown: dict[ArmKey, float]
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

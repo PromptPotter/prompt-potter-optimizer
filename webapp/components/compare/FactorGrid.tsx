@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { CardFrame, DataTable, Empty, Said, Select, Term, type Column } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
-import { fmtMetric, fmtMetricInterval, type MetricFormat } from "@/lib/format";
+import { PLACEHOLDER } from "@/lib/format";
+
 
 function clip(value: string, width: number): string {
   return value.length <= width ? value : `${value.slice(0, width - 1)}…`;
@@ -53,7 +54,7 @@ export function FactorGrid({
   const [colKey, setColKey] = useState<string>(() => factors[1]?.key ?? "");
 
   const served = evidence.grid;
-  const metric = evidence.metric.spec;
+
   const cross = (row: string, col: string) => {
     setRowKey(row);
     setColKey(col);
@@ -135,7 +136,8 @@ export function FactorGrid({
           <DataTable
             ariaLabel={`${served.row_key} by ${served.col_key}`}
             className="l4-factor-grid"
-            columns={gridColumns(served.row_key, served.col_key, col?.levels ?? [], at, metric)}
+            columns={gridColumns(served.row_key, served.col_key, col?.levels ?? [], at)}
+
             rows={[
               ...(row?.levels ?? []).map((level): GridRow => ({ kind: "level", level })),
               { kind: "margin" },
@@ -166,11 +168,10 @@ function gridColumns(
   colKey: string,
   colLevels: readonly Level[],
   at: ReadonlyMap<string, Cell>,
-  metric: MetricFormat,
 ): Column<GridRow>[] {
   const margin = (lv: Level) => (
-    <span className="l4-margin" title={fmtMetricInterval(metric, lv.ci_lo, lv.ci_hi)}>
-      {fmtMetric(metric, lv.value)}
+    <span className="l4-margin" title={lv.estimate?.band ?? PLACEHOLDER}>
+      {lv.estimate?.point ?? PLACEHOLDER}
     </span>
   );
   return [
@@ -200,8 +201,8 @@ function gridColumns(
               —
             </Term>
           ) : (
-            <span title={fmtMetricInterval(metric, cell.ci_lo, cell.ci_hi)}>
-              {fmtMetric(metric, cell.value)}
+            <span title={cell.estimate?.band ?? PLACEHOLDER}>
+              {cell.estimate?.point ?? PLACEHOLDER}
               <span className="l4-cell-n">
                 {" "}
                 · {cell.n_cells} cells, {cell.subjects.length} subj

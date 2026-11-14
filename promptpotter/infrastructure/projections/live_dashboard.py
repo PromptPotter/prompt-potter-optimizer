@@ -17,7 +17,7 @@ from promptpotter.domain.arm_reading import (
 )
 from promptpotter.domain.arms import ArmState, Concluded, Measuring, arm_name
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import BandedValue, BenchReading
+from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
@@ -659,7 +659,7 @@ class LiveDashboardProjection(Projection):
                         # Its rows are every rescore's, as its bracket opened them.
                         ended = _opened(taken.kind, taken.arm, len(taken.cells)).ended(
                             scored=len(taken.cells),
-                            level=BandedValue(value=fitness, ci_lo=None, ci_hi=None),
+                            level=fitness,
                             failed_as=None,
                         )
                 self._mark(ended)
@@ -746,7 +746,8 @@ class LiveDashboardProjection(Projection):
                 and held.kind == record.role.value
                 and held.arm.key == record.individual_id
             ):
-                running = None if record.running is None else record.running.fitness
+                running = None if record.running is None else record.running.fitness_band
+
                 self._mark(held.scored_one(running))
                 return
 

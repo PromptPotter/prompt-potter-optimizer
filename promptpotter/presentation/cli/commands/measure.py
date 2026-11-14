@@ -11,13 +11,11 @@ from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import launched, named_campaign, resolve_cycle_id
 from promptpotter.application.initialization.scoring_scope import open_diagnostic
-from promptpotter.application.views.render.primitives import bench_readout, fmt_ci
+from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.arm_reading import lift_band_text
-from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.command_kinds import Door, GradeBenchPayload, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import CycleHop, Subject
-from promptpotter.domain.paired_reading import READING_STATE_INFO
+from promptpotter.domain.paired_reading import READING_STATE_INFO, Estimate
 from promptpotter.domain.records.run_records import VERIFY_WORDS, VerifySaturated
 from promptpotter.domain.verification import VerifyReading
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
@@ -100,10 +98,8 @@ async def cmd_bench(args: argparse.Namespace) -> CommandResult:
     )
 
 
-def _level(level: BandedValue | None) -> str:
-    if level is None:
-        return "—"
-    return f"{level.value:.3f} {fmt_ci(level.ci_lo, level.ci_hi, spec='{:.3f}')}"
+def _level(level: Estimate | None) -> str:
+    return "—" if level is None else level.text
 
 
 async def cmd_verify(args: argparse.Namespace) -> CommandResult:
@@ -147,8 +143,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
         lines.append(f"  lift over C0: {READING_STATE_INFO[pair.state].sentence}")
     else:
         lifts = ", ".join(
-            f"{lift.measurand.key} {lift_band_text(lift.estimate, lift.measurand.unit)}"
-            for lift in (pair.headline, *pair.beside)
+            f"{lift.measurand.key} {lift.estimate.text}" for lift in (pair.headline, *pair.beside)
         )
         lines.append(f"  lift over C0, paired on {pair.coverage.scored} shared cells: {lifts}")
     return CommandResult(data=reading.model_dump(mode="json"), human="\n".join(lines))

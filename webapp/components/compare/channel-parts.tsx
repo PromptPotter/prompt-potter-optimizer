@@ -20,12 +20,10 @@ import { cx } from "@/lib/cx";
 import {
   sideTone,
   fmtDuration,
-  fmtInterval,
   fmtLift,
-  fmtLiftInterval,
-  fmtSigned,
   fmtUnit,
   fmtUsd,
+
   PLACEHOLDER,
 } from "@/lib/format";
 import { Badge, Term } from "@/components/ui";
@@ -38,8 +36,7 @@ interface MetricFigure {
 
 function StepLift({ lift }: { lift: MeasuredLift | null }) {
   if (lift === null) return null;
-  const { estimate, measurand } = lift;
-  return <span className={sideTone(estimate.side)}> {fmtLift(measurand.unit, estimate.value)}</span>;
+  return <span className={sideTone(lift.side)}> {lift.estimate.point}</span>;
 }
 
 export function MainLine({ steps }: { steps: readonly LineStep[] }) {
@@ -65,7 +62,7 @@ export function MainLine({ steps }: { steps: readonly LineStep[] }) {
             <span className="cmp-line-round">R{reading.arm.round}</span>
             <span className="cmp-line-label">{s.node.label}</span>
             <span className="cmp-line-score">
-              {reading.own ? fmtUnit(reading.own.fitness_unit, reading.own.fitness?.value) : PLACEHOLDER}
+              {reading.own?.fitness?.point ?? PLACEHOLDER}
               <StepLift lift={liftOf(reading.vs_reference)} />
             </span>
             <span className="cmp-line-change" title={reading.changes_description || undefined}>
@@ -106,21 +103,17 @@ export function benchLead(row: HeadToHeadRow | null): {
             band: bench === null ? "" : READING_STATE_INFO[bench.status.state].sentence,
           }
         : {
-            value: fmtUnit("score", level?.value),
-            band: `${s.headline} ${fmtInterval("score", level?.ci_lo, level?.ci_hi)} · ${s.n}/${bench.bench_size} rows`,
+            value: level?.point ?? PLACEHOLDER,
+            band: `${s.headline} ${level?.band ?? PLACEHOLDER} · ${s.n}/${bench.bench_size} rows`,
           },
     lift:
       lift === null
         ? { value: PLACEHOLDER, band: "" }
         : lift.read
           ? {
-              value: fmtLift(lift.lift.measurand.unit, lift.lift.estimate.value),
-              band: fmtLiftInterval(
-                lift.lift.measurand.unit,
-                lift.lift.estimate.ci_lo,
-                lift.lift.estimate.ci_hi,
-              ),
-              tone: sideTone(lift.lift.estimate.side),
+              value: lift.lift.estimate.point,
+              band: lift.lift.estimate.band ?? PLACEHOLDER,
+              tone: sideTone(lift.lift.side),
             }
           : { value: lift.label, band: lift.sentence },
   };
@@ -147,7 +140,8 @@ function ElectedOn({ election }: { election: HeadToHeadRow["election"] }) {
   if (!election) return PLACEHOLDER;
   const ability = election.ability;
   if (election.reads_on === "ability" && ability) {
-    return `θ ${fmtSigned(ability.theta, 3)}`;
+    return ability.theta?.point ?? "θ unread";
+
   }
   if (election.reads_on === election.elects_on) return election.reads_on;
   return `${election.reads_on} · θ ${ability?.caveat ?? "unread"}`;

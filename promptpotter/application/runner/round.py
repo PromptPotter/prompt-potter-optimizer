@@ -63,7 +63,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     reread_cells,
     score_search_points,
 )
-from promptpotter.application.scoring.selection import cells_read, crowning_cells, discordant
+from promptpotter.application.scoring.selection import cells_read, discordant
 from promptpotter.application.views.ingress import propose_enter, propose_exit, select_exit
 from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
@@ -91,7 +91,6 @@ from promptpotter.domain.origin_panel import (
     OverlapReading,
     PanelTrigger,
     TriggeredReading,
-    election_rows,
     origin_panel,
 )
 from promptpotter.domain.paired_reading import (
@@ -646,21 +645,10 @@ async def measure_population(
                 anchors=cycle.session.state.view_context.anchors(),
             )
         )
-    crowned = crowning_cells(cycle.rounds, parent.key)
-
-    def pooled(key: ArmKey, drawn: CellSheet) -> CellSheet:
-        return election_rows(drawn, on_panel.get(key, NO_CELLS), crowned)
-
-    # Every cell the round bought joins the δ fit before a θ is read.
-    cycle.difficulty.link(
-        [
-            (arm.sp_hash, rows[key].merged(on_panel.get(key, NO_CELLS)))
-            for key, arm in arms.items()
-            if arm.sp_hash
-        ]
-        + [(parent.state.sp_hash, parent.rows.merged(on_panel.get(parent.key, NO_CELLS)))]
-    )
-    ruler = cycle.difficulty.ruler
+    raced = {
+        key: sheet.merged(on_panel.get(key, NO_CELLS))
+        for key, sheet in {**rows, parent.key: parent.rows}.items()
+    }
     # Never in a `finally`: an unwound round did not score. Round 0's is `emit_origin_round`.
     cycle.session.state.control.spend_sample_lookahead()
     # The shared anchor's single-draw noise is correlated across arms, so it favours none.
@@ -688,13 +676,13 @@ async def measure_population(
 
     # Fixed δ decouples the arms, so this is the fit `elect_round_winner` takes of the same rows.
     abilities = candidate_abilities(
-        {key: pooled(key, rows[key]) for key in electable}, pooled(parent.key, parent.rows), ruler
+        {key: raced[key] for key in electable}, raced[parent.key], ruler
     )
     fit = {
         key: ArmFit(
             theta=abilities.theta.get(key),
             theta_se=abilities.theta_se.get(key),
-            theta_caveat=cycle.difficulty.scale.caveat(pooled(key, rows[key]).cells),
+            theta_caveat=cycle.difficulty.scale.caveat(raced[key].cells),
             vs_reference=readings.get(key),
             lift=theta_lift_over_parent(abilities, key),
         )
@@ -720,7 +708,7 @@ async def measure_population(
         cut=cut,
         origin_panel_slots=origin_panel_slots,
         on_panel=on_panel,
-        crowned=crowned,
+        raced=raced,
     )
 
 
@@ -1072,10 +1060,10 @@ def _crowning_read(cycle: Cycle, measured: MeasuredRound, winner: ArmKey | None)
     is the selector's own admission, so under it the pick clears as its selector picked it."""
     if winner is None:
         return None
-    parent = measured.pooled(measured.parent.key)
+    parent = measured.raced[measured.parent.key]
     subjects = {
         key: BarSubject(
-            *discordant(measured.pooled(key), parent),
+            *discordant(measured.raced[key], parent),
             None if (fit := measured.fit.get(key)) is None else fit.lift,
             key == winner,
         )
@@ -1458,6 +1446,9 @@ async def execute_round(
     selection = plan.selector.select(NodeContext(ctx, plan.selector), measured)
     cycle.population = _survivors(ctx, selection)
     result = _crowned(ctx, measured, selection)
+    # δ folds after the election, which read the race's ruler: the round's cells reach the next draw.
+    cycle.difficulty.fold(result)
+
     result = await _adapt_beside_overlap(
         ctx, result, measured, population, pool, is_final_round=is_final_round
     )

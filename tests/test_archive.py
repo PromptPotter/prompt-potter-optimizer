@@ -868,7 +868,6 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
         coverage_floor=1,
         bar=CrowningBar(statistic="posterior", admission=0.5),
         parent=bar_arm,
-        crowned=[],
     )
     kept = PopulationKept(objective=paired.objective, survivors=[unwalked])
     for inputs, recorded in (
@@ -949,7 +948,7 @@ def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
             cut=None,
             origin_panel_slots=[],
             on_panel={},
-            crowned=frozenset(),
+            raced={walked_child: arm, read_parent.key: bar},
         ),
     )
     assert selection.selected == walked_child, "guard: the live election charges the error"

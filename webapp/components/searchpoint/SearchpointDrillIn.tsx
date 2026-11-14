@@ -10,14 +10,7 @@ import type { PipelineAt } from "@/lib/hooks/useConnector";
 import type { ReadFailure } from "@/lib/read-cache";
 import { liftOf, liftVersus, NOT_SEPARABLE, type ObserveConfig } from "@/lib/derivations";
 import { FailureLine, Said, Term } from "@/components/ui";
-import {
-  fmtLevelBand,
-  fmtLiftBand,
-  fmtThetaSe,
-  fmtUnit,
-  PLACEHOLDER,
-  sideTone,
-} from "@/lib/format";
+import { fmtUnit, PLACEHOLDER, sideTone } from "@/lib/format";
 import { NodeSurface } from "@/components/node-surface/NodeSurface";
 
 export function SearchpointDrillIn({
@@ -85,7 +78,7 @@ export function SearchpointDrillIn({
             {own != null && fitness != null && (
               <Fact
                 k="fitness"
-                v={`${fmtLevelBand(own.fitness_unit, fitness)}${onPanel(reading.panel)}`}
+                v={`${fitness.text}${onPanel(reading.panel)}`}
               />
             )}
             {(benchPass != null || bench != null) && (
@@ -96,10 +89,10 @@ export function SearchpointDrillIn({
                   benchPass?.failed_as != null
                     ? <FailedPass state={benchPass.failed_as} />
                     : benchPass != null
-                    ? `${fmtUnit("rate", benchPass.level?.value)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
+                    ? `${benchPass.level?.point ?? PLACEHOLDER} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
                       ? `${PLACEHOLDER} of ${bench?.n}`
-                      : `${fmtLevelBand(bench.level_unit, bench.level)} of ${bench.n}`
+                      : `${bench.level.text} of ${bench.n}`
                 }
               />
             )}
@@ -116,8 +109,8 @@ export function SearchpointDrillIn({
                 hint="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
                 v={
                   <>
-                    {fmtLiftBand(paired.measurand.unit, paired.estimate)}
-                    {paired.estimate.side !== "spans" ? (
+                    {paired.estimate.text}
+                    {paired.side !== "spans" ? (
                       " clears 0"
                     ) : (
                       <span className={sideTone(null)}> — {NOT_SEPARABLE}</span>
@@ -130,7 +123,8 @@ export function SearchpointDrillIn({
               <Fact
                 k="ability"
                 hint="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher fitness."
-                v={fmtThetaSe(reading.ability.theta, reading.ability.se)}
+                v={reading.ability.theta.text}
+
               />
             )}
             {composite != null && <Fact k="composite" v={fmtUnit("score", composite)} />}

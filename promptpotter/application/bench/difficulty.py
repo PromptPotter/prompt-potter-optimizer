@@ -14,7 +14,7 @@ from promptpotter.application.intelligence.rasch import (
 )
 from promptpotter.domain.arms import Concluded
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cell_fold import is_floor_pinned
+from promptpotter.domain.cell_fold import is_prior_dominated
 from promptpotter.domain.measurement_provenance import meets_grade
 from promptpotter.domain.results import InRunCells, RoundResult
 from promptpotter.domain.ruler import (
@@ -123,7 +123,7 @@ class AbilityScale(NamedTuple):
     def caveat(self, rows: Iterable[GradedCell]) -> ThetaCaveat | None:
         rows = list(rows)
         cells = [cell.key for cell in rows if cell.scored]
-        return theta_caveat(self.judging.ruler, cells, all_miss=is_floor_pinned(rows))
+        return theta_caveat(self.judging.ruler, cells, prior_dominated=is_prior_dominated(rows))
 
     def frontier(self, results: Iterable[GradedCell]) -> AbilityReading | None:
         """The SOLE stamping site: θ, its scale and its caveat are minted together."""
@@ -261,22 +261,15 @@ class DifficultyView:
         )
 
     def fold(self, rr: RoundResult) -> None:
-        """Round 0's, after it adopts the origin: its cells reach round 1's draw."""
-        self._fold(
-            (arm.sp_hash, rr.rows(key))
-            for key, arm in rr.arms.items()
-            if isinstance(arm, Concluded) and arm.sp_hash
-        )
-
-    def link(self, sheets: Iterable[tuple[str, CellSheet]]) -> None:
-        """After the round's walks and before its election: its arms' cells join the fit their θ is
-        read on, so every cell the round bought carries a δ and θ reads them all."""
-        self._fold(sheets)
-        self.judging = self._read(ruler_clock(self.session), self.judged)
-
-    def _fold(self, sheets: Iterable[tuple[str, CellSheet]]) -> None:
+        """After the round's election, which read the scale as the round opened: every cell the
+        round bought (`RoundResult.raced`) reaches the next round's draw and θ."""
         session = self.session
         assert session.campaign_id, "an election runs inside a campaign"
+        sheets = [
+            (arm.sp_hash, rr.raced(key))
+            for key, arm in rr.arms.items()
+            if isinstance(arm, Concluded) and arm.sp_hash
+        ]
         session.store.ruler.fold(
             session_ruler_scope(session),
             ruler_rows(session.store, sheets, session.state.scoring.partition.admitted_keys),

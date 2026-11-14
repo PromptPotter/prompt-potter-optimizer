@@ -42,7 +42,7 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
   const invalidated = useInvalidated(index);
   const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
   const rulerNote = rulerNoteOf(item, ownNote);
-  const level = channelLevel(reading, withdrawn, spec);
+  const level = channelLevel(reading, withdrawn);
   const map = <ChannelMap item={item} run={run} points={points} />;
   if (reading === null) return map;
   if (!level) return null;

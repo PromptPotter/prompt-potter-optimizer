@@ -4,14 +4,7 @@ import {
   VERIFY_STRATEGY_LABELS,
 } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import {
-  fmtLevelBand,
-  fmtLift,
-  fmtLiftInterval,
-  fmtSigned,
-  fmtUnit,
-  unitCount,
-} from "@/lib/format";
+import { fmtSigned, PLACEHOLDER, unitCount } from "@/lib/format";
 import { Term } from "@/components/ui";
 import { PairedLift } from "@/components/searchpoint/PairedLift";
 
@@ -32,10 +25,8 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             </Term>
           </dt>
           <dd>
-            {fmtUnit("score", recorded.fitness?.value)} →{" "}
-            <strong>
-              {fresh.fitness ? fmtLevelBand("score", fresh.fitness) : fmtUnit("score", null)}
-            </strong>{" "}
+            {recorded.fitness?.text ?? PLACEHOLDER} →{" "}
+            <strong>{fresh.fitness?.text ?? PLACEHOLDER}</strong>{" "}
             ({fmtSigned(reading.fitness_increment, 2)})
           </dd>
         </div>
@@ -46,8 +37,8 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             </Term>
           </dt>
           <dd>
-            {fmtUnit("score", recorded.composite?.value)} →{" "}
-            <strong>{fmtUnit("score", fresh.composite?.value)}</strong> (
+            {recorded.composite?.text ?? PLACEHOLDER} →{" "}
+            <strong>{fresh.composite?.text ?? PLACEHOLDER}</strong> (
             {fmtSigned(reading.composite_increment, 2)})
           </dd>
         </div>
@@ -59,12 +50,12 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
           </dt>
           <dd>
             <PairedLift reading={reading.vs_origin} unread="sentence">
-              {({ estimate, measurand }, shared) => (
+              {({ estimate }, shared) => (
                 <>
-                  <strong>{fmtLift(measurand.unit, estimate.value)}</strong>{" "}
-                  {fmtLiftInterval(measurand.unit, estimate.ci_lo, estimate.ci_hi)} on {shared} shared
+                  <strong>{estimate.text}</strong> on {shared} shared
                 </>
               )}
+
             </PairedLift>
           </dd>
         </div>

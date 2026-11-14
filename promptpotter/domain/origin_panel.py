@@ -14,7 +14,6 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
     ReadingStateKind,
 )
-from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.worded import Worded
 
@@ -94,7 +93,6 @@ def round_advance(
     round_num: int,
     improved: bool,
     lead: PairedReading,
-    earlier: Sequence[PairedReading],
     bar: CrowningBar | None,
 ) -> RoundAdvance:
     """*improved* is the bar's promotion; only *lead* (pick over C0, origin panel) moves the line,
@@ -111,16 +109,8 @@ def round_advance(
         case ReadingStateKind.READ:
             lift = lead.headline
             assert lift is not None and bar is not None, "a read pair carries its lift and bar"
-            # A pair that lost a cell is a rate over a different exam: compare whole-panel rates only.
-            whole = lead.on_whole_set
-            tops = all(
-                whole is not None
-                and (rival := pick.on_whole_set) is not None
-                and whole.rate_b > rival.rate_b
-                for pick in earlier
-                if pick.headline is not None
-            )
-            separated = bar.separates(lift) and tops
+            # ONE interval read: the pick over C0 as the bar reads it, never a point compare beside it.
+            separated = bar.separates(lift)
             return RoundAdvance.ADVANCED if separated else RoundAdvance.NOT_SEPARATED
 
 
@@ -180,7 +170,7 @@ class OverlapReading(FrozenModel):
             earlier=tuple(earlier),
             triggered=tuple(triggered),
             vs_parent=vs_parent,
-            advance=round_advance(round_num, improved, lead, earlier, bar),
+            advance=round_advance(round_num, improved, lead, bar),
         )
 
     @classmethod
@@ -251,14 +241,6 @@ def line_by_individual(overlap: OverlapReading | None) -> dict[str, LineRate]:
     whole = len(overlap.positions)
     rates = (*triggered_rates(overlap), *overlap_line(overlap))
     return {r.arm.key: r for r in rates if r.n == whole}
-
-
-def election_rows(drawn: CellSheet, on_panel: CellSheet, crowned: Collection[str]) -> CellSheet:
-    """What a round elects on: an individual's draw, then the origin-panel cells it lacks, less the parent's crowning cells."""
-    skip = {cell.key for cell in drawn} | set(crowned)
-    return drawn.where(lambda cell: cell.key not in crowned).merged(
-        on_panel.where(lambda cell: cell.key not in skip)
-    )
 
 
 def origin_panel(

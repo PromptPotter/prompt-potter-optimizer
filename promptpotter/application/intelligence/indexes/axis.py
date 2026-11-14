@@ -11,9 +11,8 @@ from promptpotter.application.intelligence.indexes.sample import (
     SampleIndex,
     SampleRecord,
 )
-from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import is_leader_eligible
-from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.paired_reading import MeasurandUnit, level_text
 from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.pipeline_schema import LocusKind, PipelineSchema
 from promptpotter.domain.results import RoundResult

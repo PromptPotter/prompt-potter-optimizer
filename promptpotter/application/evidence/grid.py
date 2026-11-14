@@ -5,7 +5,7 @@ from typing import Literal
 
 from promptpotter.application.evidence.metric_catalogue import MetricSpec, merge_cells
 from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.paired_reading import Estimate, MeasurandUnit
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import BadRequestError
 
@@ -30,9 +30,7 @@ class FactorLevel(StrictModel):
 
     level: str
     subjects: list[str]
-    value: float | None
-    ci_lo: float | None
-    ci_hi: float | None
+    estimate: Estimate | None
     n_cells: int
 
 
@@ -75,9 +73,7 @@ class FactorCell(StrictModel):
     row: str
     col: str
     subjects: list[str]
-    value: float | None
-    ci_lo: float | None
-    ci_hi: float | None
+    estimate: Estimate | None
     n_cells: int
 
 
@@ -142,8 +138,8 @@ def _pool_note(spec: MetricSpec, poolable: bool) -> str:
 
 
 def _pool(
-    members: list[str], by_key: Mapping[str, SubjectReading], poolable: bool
-) -> tuple[float | None, float | None, float | None, int]:
+    members: list[str], by_key: Mapping[str, SubjectReading], poolable: bool, spec: MetricSpec
+) -> Estimate | None:
     """Pools cells, never subject means; keyed `subject|cell` so one cell id on two datasets stays two readings."""
     return merge_cells(
         {
@@ -152,7 +148,8 @@ def _pool(
             for cell, v in (by_key[s].values if s in by_key else {}).items()
         }
         if poolable
-        else {}
+        else {},
+        spec,
     )
 
 
@@ -181,15 +178,13 @@ def factors(
         readings: list[FactorLevel] = []
         for level in sorted(grouped):
             members = sorted(grouped[level])
-            value, lo, hi, n_cells = _pool(members, by_key, poolable)
+            estimate = _pool(members, by_key, poolable, spec)
             readings.append(
                 FactorLevel(
                     level=level,
                     subjects=members,
-                    value=value,
-                    ci_lo=lo,
-                    ci_hi=hi,
-                    n_cells=n_cells,
+                    estimate=estimate,
+                    n_cells=0 if estimate is None or estimate.n is None else estimate.n,
                 )
             )
         out.append(
@@ -242,16 +237,15 @@ def grid_reading(
     cells: list[FactorCell] = []
     for coord in sorted(grouped):
         members = sorted(grouped[coord])
-        value, lo, hi, n_cells = _pool(members, by_key, poolable)
+        estimate = _pool(members, by_key, poolable, spec)
+
         cells.append(
             FactorCell(
                 row=coord[0],
                 col=coord[1],
                 subjects=members,
-                value=value,
-                ci_lo=lo,
-                ci_hi=hi,
-                n_cells=n_cells,
+                estimate=estimate,
+                n_cells=0 if estimate is None or estimate.n is None else estimate.n,
             )
         )
     return FactorGridReading(

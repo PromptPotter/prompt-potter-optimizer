@@ -29,13 +29,13 @@ def _channel_means(scoreable: Sequence[GradedCell], names: Iterable[str]) -> dic
 
 
 def fold_cells(sheet: CellSheet, fitness_unit: MeasurandUnit) -> CellFold:
-    fitness, _, _ = level_band(sheet, ROW_GRADES["fitness"])
-    composite, _, _ = level_band(sheet, ROW_GRADES["objective"])
+    fitness = level_band(sheet, ROW_GRADES["fitness"], fitness_unit)
+    composite = level_band(sheet, ROW_GRADES["objective"], "score")
     return CellFold(
         total=len(sheet.scoreable),
-        fitness=fitness,
+        fitness=None if fitness is None else fitness.value,
         fitness_unit=fitness_unit,
-        composite_fitness=composite,
+        composite_fitness=None if composite is None else composite.value,
         deprecated=sum(1 for cell in sheet if is_deprecated(cell.facts)),
         degraded=sum(1 for cell in sheet if is_degraded(cell.facts)),
         recall_at=recall_at(sheet),
@@ -54,15 +54,13 @@ def compute_composite_fitness(
     evaluator_values.update(_channel_means(sheet.scoreable, {*_MEANED_CHANNELS, *terms}))
     if fold.fitness is not None:
         evaluator_values["fitness"] = fold.fitness
-    _, ci_lo, ci_hi = level_band(sheet, ROW_GRADES["fitness"])
     return ScoreSummary(
         **fold.model_dump(),
         walked=len(sheet.cells),
         cached=sum(1 for cell in sheet if cell.facts.cached),
         evaluators=evaluator_values,
         fitness_terms=sorted(terms & evaluator_values.keys()),
-        mean_fitness_ci_lo=ci_lo,
-        mean_fitness_ci_hi=ci_hi,
+        fitness_band=level_band(sheet, ROW_GRADES["fitness"], scorer.fitness_unit),
         tokens=TokenAccount.from_measured_rows(cell.facts for cell in sheet),
     )
 

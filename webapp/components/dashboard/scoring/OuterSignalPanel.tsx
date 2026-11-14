@@ -18,15 +18,12 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { liftOf, type LiftSide } from "@/lib/derivations";
-import { fmtLiftBand, fmtLogits, sideTone } from "@/lib/format";
+import { fmtLogits, sideTone } from "@/lib/format";
 
 type Lift = {
   round: number;
-  lift: number;
-  lo: number;
-  hi: number;
+  estimate: MeasuredLift["estimate"];
   side: LiftSide;
-  unit: MeasuredLift["measurand"]["unit"];
   label: string;
   advance: RoundAdvance;
 };
@@ -40,14 +37,10 @@ function liftsOf(rounds: ServedRound[]): Lift[] {
     const lift = liftOf(lead);
     const label = lead.b?.address.arm?.label;
     if (!lift || !label) continue;
-    const { estimate } = lift;
     out.push({
       round: r.round,
-      lift: estimate.value,
-      lo: estimate.ci_lo,
-      hi: estimate.ci_hi,
-      side: estimate.side,
-      unit: lift.measurand.unit,
+      estimate: lift.estimate,
+      side: lift.side,
       label,
       advance,
     });
@@ -55,7 +48,6 @@ function liftsOf(rounds: ServedRound[]): Lift[] {
   return out;
 }
 
-const bandOf = (d: Lift) => fmtLiftBand(d.unit, { value: d.lift, ci_lo: d.lo, ci_hi: d.hi });
 
 function AdvanceBadge({ advance }: { advance: RoundAdvance }) {
   const { label, sentence } = ROUND_ADVANCE_INFO[advance];
@@ -67,7 +59,7 @@ function AdvanceBadge({ advance }: { advance: RoundAdvance }) {
 }
 
 function LiftRow({ d, domain, latest }: { d: Lift; domain: IntervalDomain; latest: boolean }) {
-  const value = bandOf(d);
+  const value = d.estimate.text;
   return (
     <IntervalRow
       className={cx(sideTone(d.side), latest && "ov-latest")}
@@ -75,9 +67,9 @@ function LiftRow({ d, domain, latest }: { d: Lift; domain: IntervalDomain; lates
       title={`${d.label} — round ${d.round}`}
       value={value}
       domain={domain}
-      point={d.lift}
-      lo={d.lo}
-      hi={d.hi}
+      point={d.estimate.value}
+      lo={d.estimate.ci_lo}
+      hi={d.estimate.ci_hi}
       reference={0}
       ariaLabel={`Round ${d.round}: ${value}, ${ROUND_ADVANCE_INFO[d.advance].label}`}
     />
@@ -91,7 +83,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
 
   // ONE axis across rounds, zero on it: per-round auto-scaling hides the tightening.
   const domain = useMemo(
-    () => intervalDomain([0, ...lifts.flatMap((d) => [d.lo, d.hi])]),
+    () => intervalDomain([0, ...lifts.flatMap((d) => [d.estimate.ci_lo ?? d.estimate.value, d.estimate.ci_hi ?? d.estimate.value])]),
     [lifts],
   );
 
@@ -120,7 +112,8 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
         <>
           <p className="note-lede">
             <AdvanceBadge advance={latest.advance} /> Round {latest.round}&rsquo;s pick{" "}
-            {latest.label} lifts <strong>{bandOf(latest)}</strong> over the origin, on the origin
+            {latest.label} lifts <strong>{latest.estimate.text}</strong>
+ over the origin, on the origin
             panel.
           </p>
           <div className="ov-interval-rows">
@@ -142,7 +135,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
           Round {walked.round}&rsquo;s arms lift μ0 {fmtLogits(walked.lift_prior.mu0)} over their
           parent, τ {fmtLogits(walked.lift_prior.tau)} across {walked.lift_prior.pairs} pairs.
           {held?.hold_up
-            ? ` Round ${held.round}'s promotion holds ${fmtLogits(held.hold_up.value)} ± ${fmtLogits(held.hold_up.se)} over the parent it beat.`
+            ? ` Round ${held.round}'s promotion holds ${held.hold_up.text} over the parent it beat.`
             : ""}
         </p>
       ) : null}

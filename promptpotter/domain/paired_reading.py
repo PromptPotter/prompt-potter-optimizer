@@ -1,13 +1,14 @@
-"""Imports no sibling that reads a round; no ``@computed_field``, since a reading is banked on ``extra="forbid"``."""
+"""Imports no sibling that reads a round; no ``@computed_field`` but `Estimate.text`, which says why, since a reading is banked on ``extra="forbid"``."""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Collection
 from enum import StrEnum
+from statistics import NormalDist
 from typing import Literal, NamedTuple, NewType, Self, assert_never
 
-from pydantic import Field, model_validator
+from pydantic import ConfigDict, Field, computed_field, model_validator
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
@@ -217,26 +218,14 @@ def instrument_of(dataset_hash: str, pipeline_params: PipelineParams | None) -> 
     return dataset_hash if inner is None else f"{dataset_hash}@{inner}"
 
 
-def interval_side(
-    lo: float, hi: float, null_value: float, *, p_floor: float, alpha: float
-) -> LiftSide:
-    """`spans` wherever *p_floor* is above *alpha*: too few cells differ for any test to reach it."""
-    if p_floor > alpha:
-        return "spans"
-    return "above" if lo > null_value else "below" if hi < null_value else "spans"
+def interval_side(value: float, p_value: float, alpha: float) -> LiftSide:
+    """Off the test the lift ran, floor included, against no change: under the t it is where the
+    bracket sits, under the exact sign test the bracket is not the test."""
+    return "spans" if p_value >= alpha else "above" if value > 0.0 else "below"
 
 
 # An individual's content id; a proposal rejected before it cost a cell is keyed by its slot.
 ArmKey = NewType("ArmKey", str)
-
-
-class PriorStanding(FrozenModel):
-    """A racing arm's odds over one prior, and the graded cells the test read."""
-
-    p_better: float
-    n_paired: int
-    # ``None`` where the test counts no discordant pairs (CAPO's paired t).
-    n_discordant: int | None = None
 
 
 class RoundArm(FrozenModel):
@@ -381,32 +370,151 @@ class Measurand(FrozenModel):
     unit: MeasurandUnit
 
 
+class UnitFormat(NamedTuple):
+    """How one unit reads: a level is ``prefix``, the value times ``scale`` at ``digits``, then ``suffix``; a lift is signed."""
+
+    scale: float
+    digits: int
+    prefix: str
+    suffix: str
+    lift_digits: int
+    lift_word: str
+    lift_name: str
+    compact: bool
+
+
+# A rate's lift reads in percentage points, never in percent.
+UNIT_FORMATS: Worded[MeasurandUnit, UnitFormat] = Worded(
+    {
+        "rate": UnitFormat(100.0, 0, "", "%", 1, "pts", "point", False),
+        "score": UnitFormat(1.0, 2, "", "", 3, "score", "unit of score", False),
+        "theta": UnitFormat(1.0, 2, "θ ", "", 3, "logits", "logit", False),
+        "seconds": UnitFormat(1.0, 2, "", "s", 2, "s", "second", False),
+        "usd": UnitFormat(1.0, 4, "$", "", 4, "USD", "dollar", False),
+        "tokens": UnitFormat(1.0, 0, "", " tok", 0, "tok", "token", True),
+        "rank": UnitFormat(1.0, 2, "", "", 2, "ranks", "rank", False),
+        "rounds": UnitFormat(1.0, 1, "", "", 1, "rounds", "round", False),
+    }
+)
+
+_COMPACT_STEPS = ((1_000_000.0, "M"), (1_000.0, "k"))
+
+
+def _number(value: float, fmt: UnitFormat, digits: int, sign: str) -> str:
+    scaled = fmt.scale * value
+    for step, mark in _COMPACT_STEPS if fmt.compact else ():
+        if abs(scaled) >= step:
+            return f"{scaled / step:{sign}.1f}{mark}"
+    return f"{scaled:{sign}.{digits}f}"
+
+
+def level_text(value: float | None, unit: MeasurandUnit) -> str:
+    """A level as a person reads it in its unit; `—` where it is absent."""
+    if value is None:
+        return "—"
+    fmt = UNIT_FORMATS[unit]
+    return f"{fmt.prefix}{_number(value, fmt, fmt.digits, '')}{fmt.suffix}"
+
+
+def _signed(value: float, fmt: UnitFormat) -> str:
+    return _number(value, fmt, fmt.lift_digits, "+")
+
+
+def lift_shown(value: float, unit: MeasurandUnit) -> float:
+    """The lift as `lift_text` prints it, so a colour or a sign reads what the reader sees."""
+    fmt = UNIT_FORMATS[unit]
+    return round(fmt.scale * value, fmt.lift_digits)
+
+
+# Ties a value to its word and a bound to its pair, so a narrow line breaks only between them.
+_NBSP = "\N{NO-BREAK SPACE}"
+
+
+def lift_text(value: float, unit: MeasurandUnit) -> str:
+    """A lift as a person reads it in its unit: every surface that prints one prints this."""
+    fmt = UNIT_FORMATS[unit]
+    return f"{_signed(value, fmt)}{_NBSP}{fmt.lift_word}"
+
+
+#: A level of one individual, or a lift of one over another: a lift prints signed in its unit's word.
+EstimateForm = Literal["level", "lift"]
+
+_Z95 = NormalDist().inv_cdf(0.975)
+
+
+class Estimate(FrozenModel):
+    """THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.
+    Every surface prints `text`, or `band` (the interval alone); none prints a bound of its own."""
+
+    # `extra="ignore"`: the computed words are dumped beside the fields and must read back.
+    model_config = ConfigDict(extra="ignore")
+
+    value: float
+    ci_lo: float | None = Field(
+        description="The 95% interval on `value`; both bounds are null where the estimate has "
+        "no spread (under two cells)."
+    )
+    ci_hi: float | None
+    n: int | None = Field(description="The cells it was read on; null where none was counted.")
+    se: float | None = Field(description="Its standard error; null where none was taken.")
+    unit: MeasurandUnit
+    form: EstimateForm
+
+    @model_validator(mode="after")
+    def _band_is_whole(self) -> Self:
+        if (self.ci_lo is None) is not (self.ci_hi is None):
+            raise ValueError("an interval has both bounds or neither")
+        return self
+
+    @classmethod
+    def normal(
+        cls, value: float, se: float, *, unit: MeasurandUnit, form: EstimateForm, n: int | None
+    ) -> Estimate:
+        """The z band ``value ± 1.96·se``."""
+        half = _Z95 * se
+        return cls(
+            value=value, ci_lo=value - half, ci_hi=value + half, n=n, se=se, unit=unit, form=form
+        )
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="SERVED: the interval alone, its bounds in the unit `point` names; null with "
+        "no spread."
+    )
+    @property
+    def band(self) -> str | None:
+        if self.ci_lo is None or self.ci_hi is None:
+            return None
+        if self.form == "level":
+            return f"[{level_text(self.ci_lo, self.unit)}, {level_text(self.ci_hi, self.unit)}]"
+        fmt = UNIT_FORMATS[self.unit]
+        return f"[{_signed(self.ci_lo, fmt)},{_NBSP}{_signed(self.ci_hi, fmt)}]"
+
+    @computed_field(description="SERVED: the value alone, as a person reads it in its unit.")  # type: ignore[prop-decorator]
+    @property
+    def point(self) -> str:
+        if self.form == "lift":
+            return lift_text(self.value, self.unit)
+        return level_text(self.value, self.unit)
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="SERVED: `point`, then `band` where there is one; no surface prints an "
+        "estimate of its own."
+    )
+    @property
+    def text(self) -> str:
+        band = self.band
+        return self.point if band is None else f"{self.point} {band}"
+
+
 class EstimatorSpec(FrozenModel):
-    """How a lift's two-sided interval and test were taken; the estimate is the mean paired difference."""
+    """How a lift's two-sided interval and test were taken, against no change; the estimate is the
+    mean paired difference. The test is the measurand's: exact sign where it is declared binary."""
 
     alpha: float
-    null_value: float = Field(description="The difference the test and `side` are read against.")
 
 
 #: One spec for every lift a round banks, so each arm's and the pick's are read on one bar.
-ROUND_LIFT_SPEC = EstimatorSpec(alpha=0.05, null_value=0.0)
-
-
-class LiftEstimate(FrozenModel):
-    """A mean paired difference with its interval and test."""
-
-    value: float
-    ci_lo: float
-    ci_hi: float
-    side: LiftSide
-    p_value: float = Field(
-        description="The Student-t p, never below `p_floor`: where the two are equal the floor "
-        "binds, and the cells that differ are what limits the claim."
-    )
-    p_floor: float = Field(
-        description="The smallest p an exact sign test can reach on the cells that differ "
-        "from the null. Above the spec's `alpha`, `side` is `spans` whatever the interval says."
-    )
+ROUND_LIFT_SPEC = EstimatorSpec(alpha=0.05)
 
 
 class TestFamily(FrozenModel):
@@ -432,7 +540,16 @@ class MeasuredLift(FrozenModel):
     measurand: Measurand
     rate_a: float = Field(description="`a`'s mean over the cells BOTH scored, never its own level.")
     rate_b: float
-    estimate: LiftEstimate
+    estimate: Estimate
+    side: LiftSide
+    p_value: float = Field(
+        description="The Student-t p, never below `p_floor`: where the two are equal the floor "
+        "binds, and the cells that differ are what limits the claim."
+    )
+    p_floor: float = Field(
+        description="The smallest p an exact sign test can reach on the cells that differ "
+        "from the null. Above the spec's `alpha`, `side` is `spans` whatever the interval says."
+    )
     flips: FlipCounts | None
     family: TestFamily | None
 
@@ -440,6 +557,8 @@ class MeasuredLift(FrozenModel):
     def _one_population(self) -> Self:
         if not math.isclose(self.rate_b - self.rate_a, self.estimate.value, abs_tol=1e-9):
             raise ValueError("a lift is rate_b - rate_a over the cells both members scored")
+        if self.estimate.form != "lift" or self.estimate.unit != self.measurand.unit:
+            raise ValueError("a lift's estimate is a lift in its measurand's unit")
         if (self.flips is not None) != self.measurand.binary:
             raise ValueError("flips exist exactly where the measurand is declared binary")
         return self
@@ -537,17 +656,15 @@ class PairedReading(FrozenModel):
         if not 2 <= self.coverage.scored <= self.coverage.shared <= self.cell_set.size:
             raise ValueError("a read pair scored two or more of the cells its set names")
         for lift in (self.headline, *self.beside):
-            estimate = lift.estimate
-            if estimate.p_value < estimate.p_floor or estimate.side != interval_side(
-                estimate.ci_lo,
-                estimate.ci_hi,
-                self.spec.null_value,
-                p_floor=estimate.p_floor,
-                alpha=self.spec.alpha,
+            lo, hi = lift.estimate.ci_lo, lift.estimate.ci_hi
+            if (
+                lo is None
+                or hi is None
+                or lift.p_value < lift.p_floor
+                or lift.side != interval_side(lift.estimate.value, lift.p_value, self.spec.alpha)
             ):
                 raise ValueError(
-                    "a lift's side is read off its own bounds, floor and the spec's null, and "
-                    "its p is never below that floor"
+                    "a lift's side is read off its own test, and its p is never below its floor"
                 )
             if lift.flips is not None and (
                 lift.flips.gained + lift.flips.lost + lift.flips.unchanged != self.coverage.scored

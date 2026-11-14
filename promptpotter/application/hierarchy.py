@@ -15,12 +15,7 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.runner.bench import cycle_bench
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
-from promptpotter.domain.arm_reading import (
-    ArmReading,
-    fitness_terms_text,
-    level_text,
-    lift_band_text,
-)
+from promptpotter.domain.arm_reading import ArmReading, fitness_terms_text
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import (
     LIFECYCLE_STATUS_LABELS,
@@ -59,6 +54,7 @@ from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
     PairedReading,
     ReadingState,
+    level_text,
     lift_versus,
 )
 from promptpotter.domain.phases import LaunchStage
@@ -148,7 +144,7 @@ def _lift_row(key: FigureKey, pair: PairedReading, over: str) -> Figure:
     return _figure(
         key,
         label,
-        lift_band_text(lift.estimate, unit),
+        lift.estimate.text,
         f"{1 - pair.spec.alpha:.0%} band · "
         f"{over} {level_text(lift.rate_a, unit)} → {level_text(lift.rate_b, unit)}",
     )
@@ -182,9 +178,7 @@ def _bench_row(state: ReadingState, bench: BenchScore | None) -> Figure:
     return _figure(
         "bench",
         "Bench",
-        READING_STATE_INFO[state].label
-        if selected is None or level is None
-        else level_text(level.value, selected.level_unit),
+        READING_STATE_INFO[state].label if selected is None or level is None else level.point,
         " · ".join(notes),
     )
 
@@ -242,12 +236,11 @@ def candidate_lines(reading: ArmReading, standing: CandidateStanding) -> list[Sa
 
 def candidate_figures(reading: ArmReading) -> list[Figure]:
     panel, ability, own = reading.panel, reading.ability, reading.own
-    fitness = None if own is None or own.fitness is None else own.fitness.value
     rows = [
         _figure(
             "fitness",
             "Fitness",
-            "—" if own is None else level_text(fitness, own.fitness_unit),
+            "—" if own is None or own.fitness is None else own.fitness.point,
             None
             if panel.scored is None
             else f"{panel.scored}{'' if panel.expected is None else f' of {panel.expected}'} scored",
@@ -256,14 +249,11 @@ def candidate_figures(reading: ArmReading) -> list[Figure]:
     if terms := fitness_terms_text(reading.fitness_terms):
         rows.append(_figure("fitness_terms", "Formula terms", terms))
     if ability is not None and (ability.theta is not None or ability.caveat is not None):
-        theta = "—" if ability.theta is None else f"{ability.theta:.2f}"
         rows.append(
             _figure(
                 "ability",
                 "Ability θ",
-                theta
-                if ability.se is None or ability.theta is None
-                else f"{theta} ± {ability.se:.2f}",
+                "—" if ability.theta is None else ability.theta.text,
                 None if ability.caveat is None else "not ability — see below",
             )
         )

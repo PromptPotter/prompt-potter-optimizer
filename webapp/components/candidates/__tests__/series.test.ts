@@ -8,7 +8,7 @@ import {
 } from "../series";
 import type { VerificationMark } from "@/lib/api/types";
 import type { ArmBar, CandidateBar } from "@/lib/types";
-import { armReading, hierarchyCandidate, ownLevel } from "@/lib/test-fixtures";
+import { armReading, estimate, hierarchyCandidate, ownLevel } from "@/lib/test-fixtures";
 
 function bar(
   reading: Parameters<typeof armReading>[0] = {},
@@ -65,7 +65,7 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
     const v = bar(
       {
         own: ownLevel(0.7),
-        ability: { theta: -1.5, se: 0.2, ci_lo: -1.9, ci_hi: -1.1, caveat: null },
+        ability: { theta: estimate(-1.5, [-1.9, -1.1], { unit: "theta", se: 0.2 }), caveat: null },
         panel: { cached: 3, scored: 6, cached_share: 0.25 },
       },
       { overlap: { rate: 0.5, n: 4 } },
@@ -135,7 +135,7 @@ describe("the confidence band", () => {
       state: "done",
       rows: 6,
       scored: 6,
-      level: { value: 0.5, ci_lo: 0.2, ci_hi: 0.8 },
+      level: estimate(0.5, [0.2, 0.8]),
       failed_as: null,
     };
     const running: VerificationMark = {
@@ -143,7 +143,7 @@ describe("the confidence band", () => {
       kind: "bench",
       state: "running",
       scored: 3,
-      level: { value: 0.4, ci_lo: null, ci_hi: null },
+      level: estimate(0.4),
     };
     const views = [
       bar({ own: ownLevel(0.75) }, { verify, bench: running }),

@@ -13,7 +13,7 @@ from promptpotter.domain.paired_reading import (
     CellSet,
     CellSetBasis,
     CellSetName,
-    MeasurandUnit,
+    Estimate,
     MeasuredLift,
     PairedReading,
     ReadingState,
@@ -161,33 +161,14 @@ BENCH_HEADLINE: BenchColumn = "fitness"
 COLUMN_GRADE: dict[BenchColumn, CellGrade] = {"fitness": "fitness", "composite": "objective"}
 
 
-class BandedValue(FrozenModel):
-    value: float
-    ci_lo: float | None = Field(
-        description="The 95% band on `value`, drawn from the same per-row values; both bounds are "
-        "`None` below two rows, which have no spread."
-    )
-    ci_hi: float | None
-
-    @model_validator(mode="after")
-    def _band_is_whole(self) -> Self:
-        if (self.ci_lo is None) is not (self.ci_hi is None):
-            raise ValueError("a band has both bounds or neither")
-        return self
-
-
 class OwnLevel(FrozenModel):
     """One individual's own level on one set of rows, in both columns; never one side of a pair."""
 
-    fitness: BandedValue | None = Field(
+    fitness: Estimate | None = Field(
         description="Mean per-row fitness — the hit rate under a scorer that grades each row 0 "
-        "or 1."
+        "or 1 — in the reading scorer's unit: a `rate` where its formula is one matcher's call."
     )
-    fitness_unit: MeasurandUnit = Field(
-        description="The reading scorer's unit for `fitness`: a `rate` where its formula is one "
-        "matcher's call, a `score` otherwise."
-    )
-    composite: BandedValue | None = Field(
+    composite: Estimate | None = Field(
         description="Under the reading scorer's formula, which charges cost and length — so it is "
         "never the change in the hit rate."
     )
@@ -196,12 +177,9 @@ class OwnLevel(FrozenModel):
         "both columns are read over."
     )
 
-    def of(self, column: BenchColumn) -> BandedValue | None:
-        value: BandedValue | None = getattr(self, column)
+    def of(self, column: BenchColumn) -> Estimate | None:
+        value: Estimate | None = getattr(self, column)
         return value
-
-    def unit_of(self, column: BenchColumn) -> MeasurandUnit:
-        return self.fitness_unit if column == "fitness" else "score"
 
 
 class BenchReading(OwnLevel):
@@ -210,11 +188,10 @@ class BenchReading(OwnLevel):
     round: int = Field(description="The round whose selection this is; 0 is the origin.")
     sp_hash: str = Field(description="The searchpoint scored — the archive's `prompt_fields_id`.")
     headline: BenchColumn = Field(description="Which column the headline reads.")
-    level: BandedValue | None = Field(
+    level: Estimate | None = Field(
         description="The headline: this reading in its `headline` column, chosen here so no "
         "surface selects a column of its own. Stamped by :meth:`read` alone."
     )
-    level_unit: MeasurandUnit = Field(description="The unit `level` reads in.")
 
     @classmethod
     def read(cls, own: OwnLevel, *, round: int, sp_hash: str, headline: BenchColumn) -> Self:
@@ -223,9 +200,7 @@ class BenchReading(OwnLevel):
             sp_hash=sp_hash,
             headline=headline,
             level=own.of(headline),
-            level_unit=own.unit_of(headline),
             fitness=own.fitness,
-            fitness_unit=own.fitness_unit,
             composite=own.composite,
             n=own.n,
         )

@@ -4,7 +4,7 @@ import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { PairedLift } from "@/components/searchpoint/PairedLift";
 import type { PairedReading, ServedArm } from "@/lib/api/types";
 import { liftVersus } from "@/lib/derivations";
-import { fmtLiftBand, fmtSigned, fmtUnit, PLACEHOLDER } from "@/lib/format";
+import { fmtSigned, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { failureOf, readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import type { CyclePath } from "@/lib/ids";
@@ -14,7 +14,7 @@ function ArmLift({ reading }: { reading: PairedReading | null }) {
   if (reading === null) return <>—</>;
   return (
     <PairedLift reading={reading}>
-      {({ estimate, measurand }) => fmtLiftBand(measurand.unit, estimate)}
+      {({ estimate }) => estimate.text}
     </PairedLift>
   );
 }
@@ -44,14 +44,14 @@ function scoreboardColumns(
       label: "Fitness",
       width: "6rem",
       align: "end",
-      cell: ({ reading: s }) => (s.own ? fmtUnit(s.own.fitness_unit, s.own.fitness?.value) : PLACEHOLDER),
+      cell: ({ reading: s }) => s.own?.fitness?.text ?? PLACEHOLDER,
     },
     {
       id: "composite",
       label: "Composite",
       width: "6rem",
       align: "end",
-      cell: ({ reading: s }) => fmtUnit("score", s.own?.composite?.value),
+      cell: ({ reading: s }) => s.own?.composite?.text ?? PLACEHOLDER,
     },
     {
       id: "theta",
@@ -64,7 +64,7 @@ function scoreboardColumns(
       ),
       width: "5rem",
       align: "end",
-      cell: ({ reading: s }) => fmtSigned(s.ability?.theta, 3),
+      cell: ({ reading: s }) => s.ability?.theta?.text ?? PLACEHOLDER,
     },
     {
       id: "lift",
@@ -109,7 +109,8 @@ export function RoundFileView({
           <Badge className="round-file-badge">round {round}</Badge>
           {own && (
             <>
-              <span>fitness {fmtUnit(own.fitness_unit, own.fitness?.value)}</span>
+              <span>fitness {own.fitness?.text ?? PLACEHOLDER}</span>
+
               {Object.entries(headline.fitness_terms).map(([name, value]) => (
                 <span key={name}>
                   {name} {fmtSigned(value, 3)}

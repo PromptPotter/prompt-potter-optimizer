@@ -50,7 +50,7 @@ BASELINE = {
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 48,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
-    "models_lax": 8,
+    "models_lax": 9,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
     "injections": 32,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
@@ -66,9 +66,9 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 35,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 198,
+    "p_served": 199,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
-    "p_unread_fields": 30,
+    "p_unread_fields": 27,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.
@@ -361,8 +361,8 @@ def _unread_fields(sites: dict[Path, str], recorded: list[object]) -> list[tuple
     """A declared field no production code reads by name (`.field`, `["field"]`, a destructured
     binding, a class pattern's keyword) and no stamp: written and never read."""
     read: set[str] = set()
-    for text in sites.values():
-        code = _without_types(text)
+    for path, text in sites.items():
+        code = _without_types(text) if path.suffix in (".ts", ".tsx") else text
         read.update(name for match in _READ.findall(code) for name in match if name)
         for groups in _DESTRUCTURED.findall(code):
             read.update(m[1] for e in "".join(groups).split(",") if (m := re.match(r"\s*(\w+)", e)))

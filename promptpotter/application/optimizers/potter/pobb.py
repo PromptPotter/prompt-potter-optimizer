@@ -16,9 +16,8 @@ from promptpotter.application.intelligence.rasch import (
 )
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
-from promptpotter.application.scoring.selection import discordant
 from promptpotter.domain.cycle_paths import Lens
-from promptpotter.domain.paired_reading import ArmKey, PriorStanding
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, Grade, GradedCell, MeasuredCell
 from promptpotter.domain.validators import StopSignal
@@ -70,7 +69,7 @@ class PoBBStop(StopSignal):
     check_result: EliminationContext
     cells: list[str]
     priors: dict[ArmKey, CellSheet]
-    paired_breakdown: dict[ArmKey, PriorStanding]
+    paired_breakdown: dict[ArmKey, float]
 
 
 def race_sheet(cells: Iterable[GradedCell]) -> CellSheet:
@@ -177,14 +176,8 @@ class PoBBCheck:
         stops: dict[ArmKey, PoBBStop] = {}
         for key in (key for key in racing if key in draws):
             rivals = {pid: field[pid] for pid in draws if pid != key}
-            paired_breakdown = {
-                pid: PriorStanding(
-                    p_better=float(np.mean(draws[key] > draws[pid])),
-                    n_paired=len(cells),
-                    n_discordant=sum(discordant(field[key], rival)),
-                )
-                for pid, rival in rivals.items()
-            }
+            paired_breakdown = {pid: float(np.mean(draws[key] > draws[pid])) for pid in rivals}
+
             n = len(field[key].cells)
             if self._on_snapshot is not None:
                 self._on_snapshot(RaceSnapshot(p_best[key], key, n, paired_breakdown))

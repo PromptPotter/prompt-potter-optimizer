@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.paired_reading import Estimate, MeasurandUnit
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
@@ -34,9 +34,8 @@ class ScoreSummary(CellFold):
     evaluators: dict[str, float]
     # The `evaluators` the scoring formula reads, `fitness` aside: each one's round mean.
     fitness_terms: list[str]
-    # Student-t CI on the mean per-cell FITNESS, whatever the formula; ``None`` under two cells.
-    mean_fitness_ci_lo: float | None
-    mean_fitness_ci_hi: float | None
+    # The mean per-cell FITNESS with its interval, whatever the formula; ``None`` where `fitness` is.
+    fitness_band: Estimate | None
     # BACKEND tokens only, replayed rows excluded: judge and optimizer spend carry no arm.
     tokens: TokenAccount | None
 
@@ -91,9 +90,10 @@ def measured_cells(rows: Iterable[GradedCell]) -> set[str]:
     return {cell.key for cell in rows if cell.scored}
 
 
-def is_floor_pinned(rows: Iterable[GradedCell]) -> bool:
-    """``fitness``, never ``objective``: a ``per_cell`` composite charges a miss, so all-miss is not 0."""
-    graded = [
+def is_prior_dominated(rows: Iterable[GradedCell]) -> bool:
+    """All-miss or all-hit, on ``fitness``, never ``objective``: a ``per_cell`` composite charges a
+    miss, so all-miss is not 0."""
+    graded = {
         fitness for cell in rows if cell.scored and (fitness := cell.grade.fitness) is not None
-    ]
-    return bool(graded) and all(fitness <= 0.0 for fitness in graded)
+    }
+    return bool(graded) and (max(graded) <= 0.0 or min(graded) >= 1.0)

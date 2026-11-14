@@ -4,7 +4,6 @@ import { ensureChartRegistered, lineLook, lineMotion } from "@/lib/chart";
 import { getCss, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { liftOf } from "@/lib/derivations";
-import { fmtLift } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
 import {
   activeSeries,
@@ -179,7 +178,7 @@ const ciWhiskerPlugin: Plugin<"bar", BandOpts> = {
           | undefined;
         const x = el?.getProps?.(["x"], true).x;
         if (typeof x !== "number") continue;
-        // No clamp: the server clips `mean_fitness_ci` to [0,1] and θ's axis is fitted to its data.
+        // No clamp: the server bounds `fitness_band` to [0,1] and θ's axis is fitted to its data.
         const yLo = yScale.getPixelForValue(lo);
         const yHi = yScale.getPixelForValue(hi);
         ctx.beginPath();
@@ -397,9 +396,8 @@ export const FitnessChart = memo(function FitnessChart({
 
   const crown = useMemo(() => {
     const lift = standingIdx == null ? null : liftOf(views[standingIdx]?.reading?.vs_reference ?? null);
-    return lift == null || lift.estimate.side === "spans"
-      ? ""
-      : ` ${fmtLift(lift.measurand.unit, lift.estimate.value)}`;
+    return lift == null || lift.side === "spans" ? "" : ` ${lift.estimate.point}`;
+
   }, [views, standingIdx]);
 
   const cutCounts = useMemo(

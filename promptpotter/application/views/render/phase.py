@@ -21,12 +21,7 @@ from promptpotter.application.views.render.primitives import (
     overlap_series,
     render_pipeline_overlay,
 )
-from promptpotter.domain.arm_reading import (
-    fitness_terms_text,
-    fold_fitness_text,
-    level_text,
-    lift_band_text,
-)
+from promptpotter.domain.arm_reading import fitness_terms_text, fold_fitness_text
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_result import CycleResult
@@ -35,6 +30,7 @@ from promptpotter.domain.origin_panel import (
     RoundAdvance,
     StallEffect,
 )
+from promptpotter.domain.paired_reading import level_text
 from promptpotter.domain.phases import STOP_REASON_INFO, NextAct, StopOutcome, StopReason
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import RoundClosedRecord
@@ -139,15 +135,14 @@ def round_verdict_basis(round_result: RoundOutcome) -> list[str]:
     fit = None if selected is None else round_result.fit(selected)
     reading = None if fit is None else fit.vs_reference
     if reading is not None and reading.headline is not None and reading.coverage is not None:
-        lift = reading.headline.estimate
+        lift = reading.headline
         verdict = (
             f"{YELLOW}spans 0 — not separated from its reference{RESET}"
             if lift.side == "spans"
             else "clears 0"
         )
         lines.append(
-            f"lift vs reference: {lift_band_text(lift, reading.headline.measurand.unit)}"
-            f" on {fmt_coverage(reading.coverage)}  |  {verdict}"
+            f"lift vs reference: {lift.estimate.text} on {fmt_coverage(reading.coverage)}  |  {verdict}"
         )
 
     # The ONLY line two rounds can be differenced on: every other number is read on the subset this round bought.
@@ -176,9 +171,8 @@ def render_round_stats(
             None,
         )
         if best is not None:
-            fitness = level_text(
-                None if best.fitness is None else best.fitness.value, best.fitness_unit
-            )
+            fitness = "—" if best.fitness is None else best.fitness.point
+
             total, deprecated = best.n, 0
     suffix = f"  ({deprecated} deprecated)" if deprecated else ""
     if fold is not None and (terms := fitness_terms_text(fold.term_means)):

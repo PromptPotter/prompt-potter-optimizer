@@ -57,9 +57,9 @@ export function useCandidateBars(index: LineageIndex) {
     [viewedNode, inflightByKey, sampleSet, marks],
   );
 
-  const floorPinned = useMemo(
+  const priorDominated = useMemo(
     () =>
-      views.filter((v) => v.reading?.ability?.caveat === "floor_pinned").map((v) => v.label),
+      views.filter((v) => v.reading?.ability?.caveat === "prior_dominated").map((v) => v.label),
     [views],
   );
 
@@ -71,6 +71,6 @@ export function useCandidateBars(index: LineageIndex) {
     viewedNode,
     areCourses,
     views,
-    floorPinned,
+    priorDominated,
   };
 }

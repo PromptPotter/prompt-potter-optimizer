@@ -200,11 +200,11 @@ export function whiskerBands(ctx: SeriesCtx): WhiskerBand[] {
     });
   }
   if (ctx.metrics.has("ability")) {
-    // served: domain/ruler.py::theta_band
     bands.push({
       anchor: "ability",
-      lo: ctx.views.map((v) => v.reading?.ability?.ci_lo ?? null),
-      hi: ctx.views.map((v) => v.reading?.ability?.ci_hi ?? null),
+      lo: ctx.views.map((v) => v.reading?.ability?.theta?.ci_lo ?? null),
+      hi: ctx.views.map((v) => v.reading?.ability?.theta?.ci_hi ?? null),
+
     });
   }
   return bands;

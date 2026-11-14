@@ -2,19 +2,19 @@ import { THETA_CAVEAT_INFO, type AbilityReading } from "@/lib/api/types";
 import type { ThetaCaveat as Caveat } from "@/lib/types";
 import { Said } from "@/components/ui";
 
-// Footnotes under the chart, each one served `Said` row; the all-miss one names its arms.
+// Footnotes under the chart, each one served `Said` row; the prior-dominated one names its arms.
 export function ThetaCaveats({
   caveat,
-  floorPinned,
+  priorDominated,
 }: {
   caveat: Caveat | null;
-  floorPinned: readonly string[];
+  priorDominated: readonly string[];
 }) {
   return (
     <>
-      {caveat && caveat !== "floor_pinned" ? <Said {...THETA_CAVEAT_INFO[caveat]} /> : null}
-      {floorPinned.length > 0 ? (
-        <Said {...THETA_CAVEAT_INFO.floor_pinned} sub={floorPinned.join(", ")} />
+      {caveat && caveat !== "prior_dominated" ? <Said {...THETA_CAVEAT_INFO[caveat]} /> : null}
+      {priorDominated.length > 0 ? (
+        <Said {...THETA_CAVEAT_INFO.prior_dominated} sub={priorDominated.join(", ")} />
       ) : null}
     </>
   );

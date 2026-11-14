@@ -820,12 +820,11 @@ export interface CellSet {
   size: number;
 }
 
-/** How a lift's two-sided interval and test were taken; the estimate is the mean
- * paired difference. */
+/** How a lift's two-sided interval and test were taken, against no change; the
+ * estimate is the mean paired difference. The test is the measurand's: exact
+ * sign where it is declared binary. */
 export interface EstimatorSpec {
   alpha: number;
-  /** The difference the test and `side` are read against. */
-  null_value: number;
 }
 
 /** How much of the cell set a lift stands on. */
@@ -847,7 +846,15 @@ export interface MeasuredLift {
   /** `a`'s mean over the cells BOTH scored, never its own level. */
   rate_a: number;
   rate_b: number;
-  estimate: LiftEstimate;
+  estimate: Estimate;
+  side: 'above' | 'below' | 'spans';
+  /** The Student-t p, never below `p_floor`: where the two are equal the floor
+   * binds, and the cells that differ are what limits the claim. */
+  p_value: number;
+  /** The smallest p an exact sign test can reach on the cells that differ from the
+   * null. Above the spec's `alpha`, `side` is `spans` whatever the interval
+   * says. */
+  p_floor: number;
   flips: FlipCounts | null;
   family: TestFamily | null;
 }
@@ -864,19 +871,29 @@ export interface Measurand {
   unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
 }
 
-/** A mean paired difference with its interval and test. */
-export interface LiftEstimate {
+/** THE estimate off cells — a level or a lift, in its unit, with its two-sided
+ * 95% interval. Every surface prints `text`, or `band` (the interval alone);
+ * none prints a bound of its own. */
+export interface Estimate {
   value: number;
-  ci_lo: number;
-  ci_hi: number;
-  side: 'above' | 'below' | 'spans';
-  /** The Student-t p, never below `p_floor`: where the two are equal the floor
-   * binds, and the cells that differ are what limits the claim. */
-  p_value: number;
-  /** The smallest p an exact sign test can reach on the cells that differ from the
-   * null. Above the spec's `alpha`, `side` is `spans` whatever the interval
-   * says. */
-  p_floor: number;
+  /** The 95% interval on `value`; both bounds are null where the estimate has no
+   * spread (under two cells). */
+  ci_lo: number | null;
+  ci_hi: number | null;
+  /** The cells it was read on; null where none was counted. */
+  n: number | null;
+  /** Its standard error; null where none was taken. */
+  se: number | null;
+  unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
+  form: 'level' | 'lift';
+  /** SERVED: the interval alone, its bounds in the unit `point` names; null with no
+   * spread. */
+  band: string | null;
+  /** SERVED: the value alone, as a person reads it in its unit. */
+  point: string;
+  /** SERVED: `point`, then `band` where there is one; no surface prints an estimate
+   * of its own. */
+  text: string;
 }
 
 /** What moving from member `a` to member `b` did cell by cell, on a binary
@@ -999,15 +1016,13 @@ export interface PassStop {
 
 /** One individual's bench pass, read under a named scorer. */
 export interface BenchReading {
-  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
-   * 1. */
-  fitness: BandedValue | null;
-  /** The reading scorer's unit for `fitness`: a `rate` where its formula is one
-   * matcher's call, a `score` otherwise. */
-  fitness_unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
+  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1
+   * — in the reading scorer's unit: a `rate` where its formula is one
+   * matcher's call. */
+  fitness: Estimate | null;
   /** Under the reading scorer's formula, which charges cost and length — so it is
    * never the change in the hit rate. */
-  composite: BandedValue | null;
+  composite: Estimate | null;
   /** Rows carrying a verdict — a miss the prompt caused included: the population
    * both columns are read over. */
   n: number;
@@ -1019,17 +1034,7 @@ export interface BenchReading {
   headline: 'fitness' | 'composite';
   /** The headline: this reading in its `headline` column, chosen here so no surface
    * selects a column of its own. Stamped by :meth:`read` alone. */
-  level: BandedValue | null;
-  /** The unit `level` reads in. */
-  level_unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
-}
-
-export interface BandedValue {
-  value: number;
-  /** The 95% band on `value`, drawn from the same per-row values; both bounds are
-   * `None` below two rows, which have no spread. */
-  ci_lo: number | null;
-  ci_hi: number | null;
+  level: Estimate | null;
 }
 
 /** The headline lift per USD its SEARCH incurred, or why there is none. */
@@ -1058,15 +1063,13 @@ export interface BenchScope {
 /** One individual's own level on one set of rows, in both columns; never one side
  * of a pair. */
 export interface OwnLevel {
-  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or
-   * 1. */
-  fitness: BandedValue | null;
-  /** The reading scorer's unit for `fitness`: a `rate` where its formula is one
-   * matcher's call, a `score` otherwise. */
-  fitness_unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
+  /** Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1
+   * — in the reading scorer's unit: a `rate` where its formula is one
+   * matcher's call. */
+  fitness: Estimate | null;
   /** Under the reading scorer's formula, which charges cost and length — so it is
    * never the change in the hit rate. */
-  composite: BandedValue | null;
+  composite: Estimate | null;
   /** Rows carrying a verdict — a miss the prompt caused included: the population
    * both columns are read over. */
   n: number;
@@ -1493,15 +1496,10 @@ export interface TokenAccount {
 
 /** One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale. */
 export interface ArmAbility {
-  theta: number | null;
-  se: number | null;
-  /** Lower bound of the 95% interval on `theta` (`ruler.py::theta_band`); null
-   * where `theta` or `se` is. */
-  ci_lo: number | null;
-  /** Upper bound of the same interval. */
-  ci_hi: number | null;
+  /** Null where the round's fit read no θ for the arm. */
+  theta: Estimate | null;
   /** Why `theta` is not this arm's ability, of the ARM's own scope. */
-  caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** What one arm's round decided about it. Built by :meth:`of` alone. */
@@ -1737,7 +1735,7 @@ export interface ServedRound {
    * in the cycle on `series_reading`'s one scale, its later rows as parent
    * included: the lift that held beside the one it was crowned on. Null on a
    * round that promoted nothing. */
-  hold_up: ThetaLift | null;
+  hold_up: Estimate | null;
 }
 
 /** One candidate as `dashboard.json` serves it, the same shape live or closed. */
@@ -1828,7 +1826,7 @@ export interface SeriesReading {
   reading: AbilityReading;
   /** The level's own caveat, else its series'. Null, and it differences any other
    * level of the series that is null too. */
-  caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** A Rasch θ and the δ scale it was read on, held as one value because apart they
@@ -1841,7 +1839,7 @@ export interface AbilityReading {
   ruler_span: number | null;
   round_span: number | null;
   calibration_model: '1PL' | '2PL' | null;
-  caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
   unlinked: number;
   pinned_share: number | null;
 }
@@ -1872,12 +1870,6 @@ export interface RulerScope {
   dataset: string;
 }
 
-/** θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE. */
-export interface ThetaLift {
-  value: number;
-  se: number;
-}
-
 /** The latest verify or bench pass on one arm, as its records left it. */
 export interface VerificationMark {
   kind: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
@@ -1891,7 +1883,7 @@ export interface VerificationMark {
   /** Fitness over the rows scored: the running value, unbanded, while `running`;
    * the pass's reading once `done`. Null before the first row, and on a
    * `failed` pass, which reads nothing. */
-  level: BandedValue | null;
+  level: Estimate | null;
   /** How a `failed` pass reads, so why it ended without a reading; null otherwise. */
   failed_as: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs' | null;
 }
@@ -2371,9 +2363,9 @@ export interface Election {
 export interface ArmFit {
   theta: number | null;
   theta_se: number | null;
-  theta_caveat: 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
+  theta_caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
   vs_reference: PairedReading | null;
-  lift: ThetaLift | null;
+  lift: Estimate | null;
 }
 
 /** A layer restating a round as electing another arm than its selector's, and
@@ -2390,11 +2382,10 @@ export interface Principal {
   display: string;
 }
 
-/** The bar's verdict on one subject and the number a result quotes for it. */
+/** The bar's verdict on one subject. */
 export interface BarRead {
   statistic: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes';
   clears: boolean;
-  quote: string;
 }
 
 /** One arm as every round read serves it, in flight (`current_round.candidates`)
@@ -2601,9 +2592,7 @@ export interface SubjectReading {
    * which only a round's selection has — keyed like `values` and never pooled
    * with them: two scopes never pair. */
   bench_values: Record<string, number>;
-  value: number | null;
-  ci_lo: number | null;
-  ci_hi: number | null;
+  estimate: Estimate | null;
   n_cells: number;
   unscorable_cells: string[];
   levels: Record<string, string>;
@@ -2625,9 +2614,7 @@ export interface WinnerChainPoint {
   candidate_id: string;
   round: number;
   label: string;
-  value: number | null;
-  ci_lo: number | null;
-  ci_hi: number | null;
+  estimate: Estimate | null;
   n_cells: number;
 }
 
@@ -2941,9 +2928,7 @@ export interface FactorReading {
 export interface FactorLevel {
   level: string;
   subjects: string[];
-  value: number | null;
-  ci_lo: number | null;
-  ci_hi: number | null;
+  estimate: Estimate | null;
   n_cells: number;
 }
 
@@ -2962,9 +2947,7 @@ export interface FactorCell {
   row: string;
   col: string;
   subjects: string[];
-  value: number | null;
-  ci_lo: number | null;
-  ci_hi: number | null;
+  estimate: Estimate | null;
   n_cells: number;
 }
 
@@ -4610,8 +4593,8 @@ export interface NoiseFloorPass {
  * both over exactly the pass's rows (bl3.B2). */
 export interface NoiseBand {
   raw: number[];
-  band: BandedValue;
-  fresh_fitness: number;
+  band: Estimate;
+  fresh_fitness: Estimate;
   recorded: OwnLevel;
 }
 
@@ -5469,7 +5452,7 @@ export type MovableAgent = 'proposer' | 'optimizer';
 export type PoolSource = 'library' | 'partition';
 
 // promptpotter.domain.ruler::ThetaCaveat
-export type ThetaCaveat = 'floor_pinned' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta';
+export type ThetaCaveat = 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta';
 
 // promptpotter.domain.run_standing::LivesWord
 export type LivesWord = 'banked' | 'spent_pip' | 'empty' | 'empty_sentence' | 'life' | 'lives';
@@ -5521,17 +5504,6 @@ export interface DisplayMetricInfo {
   unit: MeasurandUnit;
 }
 
-export interface UnitFormat {
-  scale: number;
-  digits: number;
-  prefix: string;
-  suffix: string;
-  lift_digits: number;
-  lift_word: string;
-  lift_name: string;
-  compact: boolean;
-}
-
 export interface ArmEndInfo {
   label: string;
   tone: Tone;
@@ -5567,6 +5539,17 @@ export interface ReadingStateInfo {
   label: string;
   sentence: string;
   fault: boolean;
+}
+
+export interface UnitFormat {
+  scale: number;
+  digits: number;
+  prefix: string;
+  suffix: string;
+  lift_digits: number;
+  lift_word: string;
+  lift_name: string;
+  compact: boolean;
 }
 
 export interface RunPhaseInfo {
@@ -5818,18 +5801,6 @@ export const DISPLAY_METRIC_INFO: Record<DisplayMetric, DisplayMetricInfo> = {
   "composite": { label: "composite", glyph: "∑", title: "Composite fitness under the active scoring formula (equals fitness when no formula is set).", unit: "score" },
 };
 
-// Mirror of domain/arm_reading.py::UNIT_FORMATS, in display order.
-export const UNIT_FORMATS: Record<MeasurandUnit, UnitFormat> = {
-  "rate": { scale: 100.0, digits: 0, prefix: "", suffix: "%", lift_digits: 1, lift_word: "pts", lift_name: "point", compact: false },
-  "score": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 3, lift_word: "score", lift_name: "unit of score", compact: false },
-  "theta": { scale: 1.0, digits: 2, prefix: "θ ", suffix: "", lift_digits: 3, lift_word: "logits", lift_name: "logit", compact: false },
-  "seconds": { scale: 1.0, digits: 2, prefix: "", suffix: "s", lift_digits: 2, lift_word: "s", lift_name: "second", compact: false },
-  "usd": { scale: 1.0, digits: 4, prefix: "$", suffix: "", lift_digits: 4, lift_word: "USD", lift_name: "dollar", compact: false },
-  "tokens": { scale: 1.0, digits: 0, prefix: "", suffix: " tok", lift_digits: 0, lift_word: "tok", lift_name: "token", compact: true },
-  "rank": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 2, lift_word: "ranks", lift_name: "rank", compact: false },
-  "rounds": { scale: 1.0, digits: 1, prefix: "", suffix: "", lift_digits: 1, lift_word: "rounds", lift_name: "round", compact: false },
-};
-
 // Mirror of domain/arms.py::ARM_END_INFO, in display order.
 export const ARM_END_INFO: Record<'invalid' | 'skipped' | 'broken' | 'refused' | 'eliminated' | 'locked_in', ArmEndInfo> = {
   "invalid": { label: "invalid", tone: "danger", sentence: "Refused before its first cell: its own validation failed fatally, so nothing was measured." },
@@ -6001,6 +5972,18 @@ export const READING_STATE_INFO: Record<ReadingState, ReadingStateInfo> = {
   "instrument_differs": { label: "instruments differ", sentence: "The members were measured by different instruments.", fault: false },
 };
 
+// Mirror of domain/paired_reading.py::UNIT_FORMATS, in display order.
+export const UNIT_FORMATS: Record<MeasurandUnit, UnitFormat> = {
+  "rate": { scale: 100.0, digits: 0, prefix: "", suffix: "%", lift_digits: 1, lift_word: "pts", lift_name: "point", compact: false },
+  "score": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 3, lift_word: "score", lift_name: "unit of score", compact: false },
+  "theta": { scale: 1.0, digits: 2, prefix: "θ ", suffix: "", lift_digits: 3, lift_word: "logits", lift_name: "logit", compact: false },
+  "seconds": { scale: 1.0, digits: 2, prefix: "", suffix: "s", lift_digits: 2, lift_word: "s", lift_name: "second", compact: false },
+  "usd": { scale: 1.0, digits: 4, prefix: "$", suffix: "", lift_digits: 4, lift_word: "USD", lift_name: "dollar", compact: false },
+  "tokens": { scale: 1.0, digits: 0, prefix: "", suffix: " tok", lift_digits: 0, lift_word: "tok", lift_name: "token", compact: true },
+  "rank": { scale: 1.0, digits: 2, prefix: "", suffix: "", lift_digits: 2, lift_word: "ranks", lift_name: "rank", compact: false },
+  "rounds": { scale: 1.0, digits: 1, prefix: "", suffix: "", lift_digits: 1, lift_word: "rounds", lift_name: "round", compact: false },
+};
+
 // Mirror of domain/phases.py::DASHBOARD_STATE_PAUSE_WORDS, in display order.
 export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {
   "init": "starting up",
@@ -6126,7 +6109,7 @@ export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
   "collapsed_band": { label: "θ is plain fitness this round", detail: "This round's samples were all about equally hard, so θ ranks candidates exactly as fitness does. A round drawing harder and easier samples reads differently.", tone: "attention" },
   "prior_pinned": { label: "θ shifts between rounds", detail: "Most samples this round got the default difficulty, because every candidate answered them alike. That default moves as rounds come in, so compare θ within a round, not across rounds.", tone: "attention" },
   "unmeasured_delta": { label: "θ leaves some samples out", detail: "Some samples have no difficulty rating yet, so θ reads fewer samples than the fitness beside it, and two candidates may be read on different ones. A later round includes them.", tone: "attention" },
-  "floor_pinned": { label: "No θ for an all-wrong candidate", detail: "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift taken from it, is a placeholder. Other candidates are unaffected.", tone: "attention" },
+  "prior_dominated": { label: "No θ for an all-wrong or all-right candidate", detail: "It missed, or got right, every sample it answered, so θ has no edge to measure: its θ is where the prior stopped it, and a lift taken from it reads the prior. Other candidates are unaffected.", tone: "attention" },
 };
 
 // Mirror of domain/run_standing.py::LIVES_WORDS, in display order.
@@ -6221,7 +6204,6 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [ARM_VERDICT_LABELS, ["retired", "invalid", "origin", "elected", "uncontested", "selected", "not_elected", "unmeasured", "awaiting"]],
   [CANDIDATE_COUNT_WORDS, ["replayed"]],
   [DISPLAY_METRIC_INFO, ["fitness", "ability", "composite"]],
-  [UNIT_FORMATS, ["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]],
   [ARM_END_INFO, ["invalid", "skipped", "broken", "refused", "eliminated", "locked_in"]],
   [BENCH_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],
   [COST_ABSENCE_WORDS, ["no_lift", "unpriced_tokens", "zero_spend"]],
@@ -6240,6 +6222,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [CELL_SET_NAME_WORDS, ["origin_panel", "reference_cells", "bench_split", "measured_by_both"]],
   [LIFT_SIDE_TONE, ["above", "below", "spans"]],
   [READING_STATE_INFO, ["read", "not_asked", "pending", "not_held", "no_holdout", "held_elsewhere", "pass_stopped", "past_tolerance", "member_unscoreable", "under_two_cells", "no_selection", "same_individual", "run_failed", "scope_differs", "measurand_differs", "dataset_differs", "cell_set_differs", "instrument_differs"]],
+  [UNIT_FORMATS, ["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]],
   [DASHBOARD_STATE_PAUSE_WORDS, ["init", "origin", "proposing", "scoring", "between_samples", "between_candidates", "optimizer_step", "bench", "stopped"]],
   [RUN_PHASE_INFO, ["queued", "starting", "running", "scoring", "paused", "gate", "detached", "terminal"]],
   [STOP_REASON_INFO, ["rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_cut", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
@@ -6250,7 +6233,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [VERIFY_WORDS, ["saturated"]],
   [HEALTH_CAUSE_INFO, ["origin_unmeasured", "origin_incomplete", "structural", "unscoreable", "holed", "evidence_starved", "structural_untested", "persistent", "degraded", "transient"]],
   [HEALTH_GRADE_INFO, ["healthy", "degraded", "critical", "unmeasured"]],
-  [THETA_CAVEAT_INFO, ["cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "floor_pinned"]],
+  [THETA_CAVEAT_INFO, ["cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "prior_dominated"]],
   [LIVES_WORDS, ["banked", "spent_pip", "empty", "empty_sentence", "life", "lives"]],
   [SAMPLE_STATUS_LABELS, ["HIT", "MISS", "ERR", "UNSC"]],
   [CAP_AXIS_INFO, ["usd", "tokens", "rounds", "wall_clock_s"]],

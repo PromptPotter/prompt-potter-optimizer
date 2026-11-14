@@ -5,18 +5,20 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.domain.arm_reading import UNIT_FORMATS, level_text, lift_text
 from promptpotter.domain.arms import ArmSlot, Concluded, arm_name
 from promptpotter.domain.bench import COST_ABSENCE_WORDS, LiftCost
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
 from promptpotter.domain.paired_reading import (
     READING_STATE_INFO,
+    UNIT_FORMATS,
     ArmKey,
     ArmName,
     PairedReading,
     ReadingState,
     RoundArm,
+    level_text,
+    lift_text,
     lift_versus,
 )
 from promptpotter.domain.results import RoundOutcome, RoundResult

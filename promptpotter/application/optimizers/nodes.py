@@ -33,8 +33,7 @@ from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.domain.origin_panel import election_rows
-from promptpotter.domain.paired_reading import ArmKey, PriorStanding
+from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind, PipelineSchema
 from promptpotter.domain.pool import Access, DemoPool, Pool, PoolEntry
@@ -42,7 +41,7 @@ from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
+from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.hashing import normalized_module, stable_hash
@@ -442,15 +441,12 @@ class MeasuredRound:
     # The origin panel by sample slot; `on_panel` holds each member's rows there beside its draw.
     origin_panel_slots: list[int]
     on_panel: dict[str, CellSheet]
-    crowned: frozenset[str]
+    # Each arm and the parent as the race read them (`RoundResult.raced`): what the election reads.
+    raced: dict[ArmKey, CellSheet]
 
     @property
     def labels(self) -> dict[ArmKey, str]:
         return {key: arm.label for key, arm in self.arms.items()}
-
-    def pooled(self, key: ArmKey) -> CellSheet:
-        drawn = self.parent.rows if key == self.parent.key else self.rows[key]
-        return election_rows(drawn, self.on_panel.get(key, NO_CELLS), self.crowned)
 
 
 @dataclass(frozen=True)
@@ -518,7 +514,7 @@ class RaceSnapshot:
     p_best: float
     current: ArmKey
     n_samples: int
-    paired_breakdown: dict[ArmKey, PriorStanding]
+    paired_breakdown: dict[ArmKey, float]
 
 
 class Race(Protocol):

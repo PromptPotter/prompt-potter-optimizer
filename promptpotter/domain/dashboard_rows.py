@@ -8,16 +8,15 @@ from pydantic import Field
 
 from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.arms import ArmState, Proposed
-from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
-from promptpotter.domain.paired_reading import ArmKey, ArmName, ReadingState
+from promptpotter.domain.paired_reading import ArmKey, ArmName, Estimate, ReadingState
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import floor_said, health_reading
 from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
-from promptpotter.domain.ruler import LevelSeries, SeriesReading, ThetaLift
+from promptpotter.domain.ruler import LevelSeries, SeriesReading
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import Budget
@@ -215,7 +214,7 @@ class VerificationMark(FrozenModel):
     state: VerificationState
     rows: int = Field(description="Rows the pass sends.")
     scored: int = Field(description="Rows of it scored so far.")
-    level: BandedValue | None = Field(
+    level: Estimate | None = Field(
         description="Fitness over the rows scored: the running value, unbanded, while `running`; "
         "the pass's reading once `done`. Null before the first row, and on a `failed` pass, "
         "which reads nothing."
@@ -224,12 +223,11 @@ class VerificationMark(FrozenModel):
         description="How a `failed` pass reads, so why it ended without a reading; null otherwise."
     )
 
-    def scored_one(self, fitness: float | None) -> VerificationMark:
-        level = None if fitness is None else BandedValue(value=fitness, ci_lo=None, ci_hi=None)
+    def scored_one(self, level: Estimate | None) -> VerificationMark:
         return self.model_copy(update={"scored": self.scored + 1, "level": level})
 
     def ended(
-        self, *, scored: int, level: BandedValue | None, failed_as: ReadingState | None
+        self, *, scored: int, level: Estimate | None, failed_as: ReadingState | None
     ) -> VerificationMark:
         state: VerificationState = "done" if failed_as is None else "failed"
         return self.model_copy(
@@ -313,7 +311,7 @@ class ServedRound(RoundSummary):
         description="This round's level on the cycle's `LevelSeries`, read under the caveat that "
         "withholds it from differencing; null where no scored cell sits on the scale."
     )
-    hold_up: ThetaLift | None = Field(
+    hold_up: Estimate | None = Field(
         description="This round's promotion over the parent it beat, each read on every row it met "
         "in the cycle on `series_reading`'s one scale, its later rows as parent included: the lift "
         "that held beside the one it was crowned on. Null on a round that promoted nothing."

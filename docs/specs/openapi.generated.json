@@ -578,58 +578,20 @@
             ],
             "description": "Why `theta` is not this arm's ability, of the ARM's own scope."
           },
-          "ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Upper bound of the same interval.",
-            "title": "Ci Hi"
-          },
-          "ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Lower bound of the 95% interval on `theta` (`ruler.py::theta_band`); null where `theta` or `se` is.",
-            "title": "Ci Lo"
-          },
-          "se": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Se"
-          },
           "theta": {
             "anyOf": [
               {
-                "type": "number"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Theta"
+            "description": "Null where the round's fit read no θ for the arm."
           }
         },
         "required": [
           "theta",
-          "se",
-          "ci_lo",
-          "ci_hi",
           "caveat"
         ],
         "title": "ArmAbility",
@@ -780,7 +742,7 @@
           "lift": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ThetaLift"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
@@ -1516,45 +1478,6 @@
         "title": "BackendWarning",
         "type": "object"
       },
-      "BandedValue": {
-        "additionalProperties": false,
-        "properties": {
-          "ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Hi"
-          },
-          "ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The 95% band on `value`, drawn from the same per-row values; both bounds are `None` below two rows, which have no spread.",
-            "title": "Ci Lo"
-          },
-          "value": {
-            "title": "Value",
-            "type": "number"
-          }
-        },
-        "required": [
-          "value",
-          "ci_lo",
-          "ci_hi"
-        ],
-        "title": "BandedValue",
-        "type": "object"
-      },
       "BankSnippetPayload": {
         "additionalProperties": false,
         "description": "Bank an edited library snippet into this account's own block pack as the next version of\nthe one it was edited from; a text the library already holds is that snippet.",
@@ -1592,15 +1515,11 @@
       },
       "BarRead": {
         "additionalProperties": false,
-        "description": "The bar's verdict on one subject and the number a result quotes for it.",
+        "description": "The bar's verdict on one subject.",
         "properties": {
           "clears": {
             "title": "Clears",
             "type": "boolean"
-          },
-          "quote": {
-            "title": "Quote",
-            "type": "string"
           },
           "statistic": {
             "enum": [
@@ -1615,8 +1534,7 @@
         },
         "required": [
           "statistic",
-          "clears",
-          "quote"
+          "clears"
         ],
         "title": "BarRead",
         "type": "object"
@@ -1709,7 +1627,7 @@
           "composite": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BandedValue"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
@@ -1720,17 +1638,13 @@
           "fitness": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BandedValue"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
-          },
-          "fitness_unit": {
-            "$ref": "#/components/schemas/MeasurandUnit",
-            "description": "The reading scorer's unit for `fitness`: a `rate` where its formula is one matcher's call, a `score` otherwise."
+            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1 — in the reading scorer's unit: a `rate` where its formula is one matcher's call."
           },
           "headline": {
             "description": "Which column the headline reads.",
@@ -1744,17 +1658,13 @@
           "level": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BandedValue"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
             ],
             "description": "The headline: this reading in its `headline` column, chosen here so no surface selects a column of its own. Stamped by :meth:`read` alone."
-          },
-          "level_unit": {
-            "$ref": "#/components/schemas/MeasurandUnit",
-            "description": "The unit `level` reads in."
           },
           "n": {
             "description": "Rows carrying a verdict — a miss the prompt caused included: the population both columns are read over.",
@@ -1774,14 +1684,12 @@
         },
         "required": [
           "fitness",
-          "fitness_unit",
           "composite",
           "n",
           "round",
           "sp_hash",
           "headline",
-          "level",
-          "level_unit"
+          "level"
         ],
         "title": "BenchReading",
         "type": "object"
@@ -6425,23 +6333,123 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
-      "EstimatorSpec": {
-        "additionalProperties": false,
-        "description": "How a lift's two-sided interval and test were taken; the estimate is the mean paired difference.",
+      "Estimate": {
+        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nEvery surface prints `text`, or `band` (the interval alone); none prints a bound of its own.",
         "properties": {
-          "alpha": {
-            "title": "Alpha",
-            "type": "number"
+          "band": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SERVED: the interval alone, its bounds in the unit `point` names; null with no spread.",
+            "readOnly": true,
+            "title": "Band"
           },
-          "null_value": {
-            "description": "The difference the test and `side` are read against.",
-            "title": "Null Value",
+          "ci_hi": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ci Hi"
+          },
+          "ci_lo": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 95% interval on `value`; both bounds are null where the estimate has no spread (under two cells).",
+            "title": "Ci Lo"
+          },
+          "form": {
+            "enum": [
+              "level",
+              "lift"
+            ],
+            "title": "Form",
+            "type": "string"
+          },
+          "n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cells it was read on; null where none was counted.",
+            "title": "N"
+          },
+          "point": {
+            "description": "SERVED: the value alone, as a person reads it in its unit.",
+            "readOnly": true,
+            "title": "Point",
+            "type": "string"
+          },
+          "se": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its standard error; null where none was taken.",
+            "title": "Se"
+          },
+          "text": {
+            "description": "SERVED: `point`, then `band` where there is one; no surface prints an estimate of its own.",
+            "readOnly": true,
+            "title": "Text",
+            "type": "string"
+          },
+          "unit": {
+            "$ref": "#/components/schemas/MeasurandUnit"
+          },
+          "value": {
+            "title": "Value",
             "type": "number"
           }
         },
         "required": [
-          "alpha",
-          "null_value"
+          "value",
+          "ci_lo",
+          "ci_hi",
+          "n",
+          "se",
+          "unit",
+          "form",
+          "band",
+          "point",
+          "text"
+        ],
+        "title": "Estimate",
+        "type": "object"
+      },
+      "EstimatorSpec": {
+        "additionalProperties": false,
+        "description": "How a lift's two-sided interval and test were taken, against no change; the estimate is the\nmean paired difference. The test is the measurand's: exact sign where it is declared binary.",
+        "properties": {
+          "alpha": {
+            "title": "Alpha",
+            "type": "number"
+          }
+        },
+        "required": [
+          "alpha"
         ],
         "title": "EstimatorSpec",
         "type": "object"
@@ -6729,31 +6737,19 @@
         "additionalProperties": false,
         "description": "One cell of a 2-D projection — every subject sharing a (row, column) coordinate, pooled.\n\nServed rather than left to the browser for the reason every other number here is: a cell\nholding three subjects IS an aggregate, and a surface that averaged them would re-answer under\nits own guess at the weighting (``webapp/CLAUDE.md`` § Scoring authority).",
         "properties": {
-          "ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Hi"
-          },
-          "ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Lo"
-          },
           "col": {
             "title": "Col",
             "type": "string"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Estimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "n_cells": {
             "title": "N Cells",
@@ -6769,26 +6765,13 @@
             },
             "title": "Subjects",
             "type": "array"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
           }
         },
         "required": [
           "row",
           "col",
           "subjects",
-          "value",
-          "ci_lo",
-          "ci_hi",
+          "estimate",
           "n_cells"
         ],
         "title": "FactorCell",
@@ -6839,27 +6822,15 @@
         "additionalProperties": false,
         "description": "One level of one factor, and what the subjects at that level measured together.\n\n``value`` is the MARGINAL — pooled over every cell every subject at this level scored, not a\nmean of their means, so a subject that measured twice as many cells carries twice the weight it\nearned. ``None`` where the factor is not poolable, or where a level holds no scored cell; a\nsurface renders that as absent rather than as zero.",
         "properties": {
-          "ci_hi": {
+          "estimate": {
             "anyOf": [
               {
-                "type": "number"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Ci Hi"
-          },
-          "ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Lo"
+            ]
           },
           "level": {
             "title": "Level",
@@ -6875,25 +6846,12 @@
             },
             "title": "Subjects",
             "type": "array"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
           }
         },
         "required": [
           "level",
           "subjects",
-          "value",
-          "ci_lo",
-          "ci_hi",
+          "estimate",
           "n_cells"
         ],
         "title": "FactorLevel",
@@ -9422,53 +9380,6 @@
         "title": "LiftCost",
         "type": "object"
       },
-      "LiftEstimate": {
-        "additionalProperties": false,
-        "description": "A mean paired difference with its interval and test.",
-        "properties": {
-          "ci_hi": {
-            "title": "Ci Hi",
-            "type": "number"
-          },
-          "ci_lo": {
-            "title": "Ci Lo",
-            "type": "number"
-          },
-          "p_floor": {
-            "description": "The smallest p an exact sign test can reach on the cells that differ from the null. Above the spec's `alpha`, `side` is `spans` whatever the interval says.",
-            "title": "P Floor",
-            "type": "number"
-          },
-          "p_value": {
-            "description": "The Student-t p, never below `p_floor`: where the two are equal the floor binds, and the cells that differ are what limits the claim.",
-            "title": "P Value",
-            "type": "number"
-          },
-          "side": {
-            "enum": [
-              "above",
-              "below",
-              "spans"
-            ],
-            "title": "Side",
-            "type": "string"
-          },
-          "value": {
-            "title": "Value",
-            "type": "number"
-          }
-        },
-        "required": [
-          "value",
-          "ci_lo",
-          "ci_hi",
-          "side",
-          "p_value",
-          "p_floor"
-        ],
-        "title": "LiftEstimate",
-        "type": "object"
-      },
       "LiftPrior": {
         "additionalProperties": false,
         "description": "The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean, τ² their\nobserved variance less their mean noise variance, floored at 0.",
@@ -10290,7 +10201,7 @@
         "description": "One measurand's lift of member `b` over member `a`, on the cells both scored.",
         "properties": {
           "estimate": {
-            "$ref": "#/components/schemas/LiftEstimate"
+            "$ref": "#/components/schemas/Estimate"
           },
           "family": {
             "anyOf": [
@@ -10315,6 +10226,16 @@
           "measurand": {
             "$ref": "#/components/schemas/Measurand"
           },
+          "p_floor": {
+            "description": "The smallest p an exact sign test can reach on the cells that differ from the null. Above the spec's `alpha`, `side` is `spans` whatever the interval says.",
+            "title": "P Floor",
+            "type": "number"
+          },
+          "p_value": {
+            "description": "The Student-t p, never below `p_floor`: where the two are equal the floor binds, and the cells that differ are what limits the claim.",
+            "title": "P Value",
+            "type": "number"
+          },
           "rate_a": {
             "description": "`a`'s mean over the cells BOTH scored, never its own level.",
             "title": "Rate A",
@@ -10323,6 +10244,15 @@
           "rate_b": {
             "title": "Rate B",
             "type": "number"
+          },
+          "side": {
+            "enum": [
+              "above",
+              "below",
+              "spans"
+            ],
+            "title": "Side",
+            "type": "string"
           }
         },
         "required": [
@@ -10330,6 +10260,9 @@
           "rate_a",
           "rate_b",
           "estimate",
+          "side",
+          "p_value",
+          "p_floor",
           "flips",
           "family"
         ],
@@ -11454,11 +11387,10 @@
         "description": "A noise-floor pass's reading: its fresh composites beside the recorded level, both over\nexactly the pass's rows (bl3.B2).",
         "properties": {
           "band": {
-            "$ref": "#/components/schemas/BandedValue"
+            "$ref": "#/components/schemas/Estimate"
           },
           "fresh_fitness": {
-            "title": "Fresh Fitness",
-            "type": "number"
+            "$ref": "#/components/schemas/Estimate"
           },
           "raw": {
             "items": {
@@ -12713,7 +12645,7 @@
           "composite": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BandedValue"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
@@ -12724,17 +12656,13 @@
           "fitness": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BandedValue"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1."
-          },
-          "fitness_unit": {
-            "$ref": "#/components/schemas/MeasurandUnit",
-            "description": "The reading scorer's unit for `fitness`: a `rate` where its formula is one matcher's call, a `score` otherwise."
+            "description": "Mean per-row fitness — the hit rate under a scorer that grades each row 0 or 1 — in the reading scorer's unit: a `rate` where its formula is one matcher's call."
           },
           "n": {
             "description": "Rows carrying a verdict — a miss the prompt caused included: the population both columns are read over.",
@@ -12744,7 +12672,6 @@
         },
         "required": [
           "fitness",
-          "fitness_unit",
           "composite",
           "n"
         ],
@@ -15752,7 +15679,7 @@
           "hold_up": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/ThetaLift"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
@@ -16492,7 +16419,7 @@
       },
       "SubjectReading": {
         "additionalProperties": false,
-        "description": "One subject, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same subject, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and named in ``unscorable_cells`` rather than scored — the\ntwo absences are different facts and a surface renders them as different glyphs.\n``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
+        "description": "One subject, read under the selected metric — its identity, its per-cell values and the one\nestimate they merge to. ONE row, because a roster row and a metric reading that live in separate\nlists can disagree about the same subject, and under the default metric they held the same\nnumber reached two ways.\n\n``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the\nmetric cannot read is ABSENT from it and named in ``unscorable_cells`` rather than scored — the\ntwo absences are different facts and a surface renders them as different glyphs.\nestimate's bounds are None below two scored cells — one reading has no spread, and a\nbracket drawn from it is a fiction.",
         "properties": {
           "ability": {
             "anyOf": [
@@ -16553,28 +16480,6 @@
             "title": "Cell Means",
             "type": "object"
           },
-          "ci_hi": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Hi"
-          },
-          "ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Lo"
-          },
           "comparable": {
             "anyOf": [
               {
@@ -16630,6 +16535,16 @@
           "dataset_name": {
             "title": "Dataset Name",
             "type": "string"
+          },
+          "estimate": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Estimate"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "expected_samples": {
             "anyOf": [
@@ -16735,17 +16650,6 @@
             "title": "Unscorable Cells",
             "type": "array"
           },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
-          },
           "values": {
             "additionalProperties": {
               "type": "number"
@@ -16798,9 +16702,7 @@
           "spend_to_round",
           "cell_means",
           "values",
-          "value",
-          "ci_lo",
-          "ci_hi",
+          "estimate",
           "n_cells",
           "unscorable_cells"
         ],
@@ -17405,7 +17307,7 @@
       "ThetaCaveat": {
         "description": "A state in which θ is NOT ability; every number still renders, so WHICH fired is the fact.\nEach is read off the cells a θ was read on: one level's, one arm's, a whole series'.",
         "enum": [
-          "floor_pinned",
+          "prior_dominated",
           "cold_ruler",
           "flat_ruler",
           "collapsed_band",
@@ -17414,25 +17316,6 @@
         ],
         "title": "ThetaCaveat",
         "type": "string"
-      },
-      "ThetaLift": {
-        "description": "θ over a bar's θ, and the noise of the DIFFERENCE, never either side's own SE.",
-        "properties": {
-          "se": {
-            "title": "Se",
-            "type": "number"
-          },
-          "value": {
-            "title": "Value",
-            "type": "number"
-          }
-        },
-        "required": [
-          "value",
-          "se"
-        ],
-        "title": "ThetaLift",
-        "type": "object"
       },
       "TokenAccount": {
         "additionalProperties": false,
@@ -17898,7 +17781,7 @@
           "level": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BandedValue"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
@@ -18314,27 +18197,15 @@
             "title": "Candidate Id",
             "type": "string"
           },
-          "ci_hi": {
+          "estimate": {
             "anyOf": [
               {
-                "type": "number"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Ci Hi"
-          },
-          "ci_lo": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Ci Lo"
+            ]
           },
           "label": {
             "title": "Label",
@@ -18347,26 +18218,13 @@
           "round": {
             "title": "Round",
             "type": "integer"
-          },
-          "value": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Value"
           }
         },
         "required": [
           "candidate_id",
           "round",
           "label",
-          "value",
-          "ci_lo",
-          "ci_hi",
+          "estimate",
           "n_cells"
         ],
         "title": "WinnerChainPoint",

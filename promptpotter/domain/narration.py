@@ -3,11 +3,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator
 from typing import ClassVar, Literal, NamedTuple, assert_never, get_args
 
-from promptpotter.domain.arm_reading import level_text
 from promptpotter.domain.arms import ArmState, Cut, Measured, Proposed
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit
+from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, level_text
 from promptpotter.domain.phase_views import VerificationEnterView
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase
 from promptpotter.domain.records.cell_beat import CellBeatRecord

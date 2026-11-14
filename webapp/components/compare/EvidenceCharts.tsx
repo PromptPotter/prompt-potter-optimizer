@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { Bar, Line } from "react-chartjs-2";
-import type { Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api/types";
+import type { Estimate, Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api/types";
 import { maskedSubject } from "@/lib/api/reads";
 import {
   DataTable,
@@ -11,7 +11,8 @@ import {
   type IntervalDomain,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtMetric, fmtMetricInterval, shortId, type MetricFormat } from "@/lib/format";
+import { PLACEHOLDER, shortId } from "@/lib/format";
+
 import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
 import { getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
 
@@ -164,8 +165,8 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
 function Merged({ evidence }: { evidence: Evidence }) {
   const rows = evidence.subjects;
   const domain = intervalDomain(
-    [...rows, ...rows.flatMap((r) => r.winner_chain ?? [])].flatMap((r) =>
-      r.value === null ? [] : [r.ci_lo ?? r.value, r.value, r.ci_hi ?? r.value],
+    [...rows, ...rows.flatMap((r) => r.winner_chain ?? [])].flatMap(({ estimate: e }) =>
+      e === null ? [] : [e.ci_lo ?? e.value, e.value, e.ci_hi ?? e.value],
     ),
   );
   if (domain === null) {
@@ -181,7 +182,6 @@ function Merged({ evidence }: { evidence: Evidence }) {
             label={seriesLabel(r)}
             title={r.key}
             row={r}
-            metric={evidence.metric.spec}
             domain={domain}
             ink={seriesVar(i)}
             className={cx(r.comparable === false && "cmp-row-muted")}
@@ -192,7 +192,6 @@ function Merged({ evidence }: { evidence: Evidence }) {
               label={`r${p.round} ${p.label}`}
               title={p.candidate_id}
               row={p}
-              metric={evidence.metric.spec}
               domain={domain}
               ink={seriesVar(i)}
               className="cmp-row-nested"
@@ -208,21 +207,19 @@ function MergedRow({
   label,
   title,
   row,
-  metric,
   domain,
   ink,
   className,
 }: {
   label: string;
   title: string;
-  row: { value: number | null; ci_lo: number | null; ci_hi: number | null; n_cells: number };
-  metric: MetricFormat;
+  row: { estimate: Estimate | null; n_cells: number };
   domain: IntervalDomain;
   ink: string;
   className: string;
 }) {
-  const value = fmtMetric(metric, row.value);
-  const interval = fmtMetricInterval(metric, row.ci_lo, row.ci_hi);
+  const value = row.estimate?.point ?? PLACEHOLDER;
+  const interval = row.estimate?.band ?? PLACEHOLDER;
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
     <IntervalRow
@@ -239,9 +236,10 @@ function MergedRow({
         </>
       }
       domain={domain}
-      point={row.value}
-      lo={row.ci_lo}
-      hi={row.ci_hi}
+      point={row.estimate?.value ?? null}
+      lo={row.estimate?.ci_lo ?? null}
+      hi={row.estimate?.ci_hi ?? null}
+
       pointInk={ink}
       intervalInk="var(--color-ci)"
       ariaLabel={`${label}: ${value} ${interval} over ${cells}`}

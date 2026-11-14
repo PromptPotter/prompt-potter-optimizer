@@ -311,7 +311,6 @@ class Lineage(CycleRead):
                 "bar": BarRead(
                     statistic=cycle.config.optimization.crowning_bar,
                     clears=True,
-                    quote="re-elected by a layer",
                 ),
             }
         )

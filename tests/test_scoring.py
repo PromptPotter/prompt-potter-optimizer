@@ -19,9 +19,9 @@ from contextlib import (
     contextmanager,
 )
 from itertools import count, product
-from math import sqrt
+from math import comb, sqrt
 from pathlib import Path
-from statistics import fmean, mean, stdev
+from statistics import fmean, stdev
 from typing import Any, NamedTuple, NoReturn, cast
 from unittest.mock import Mock
 
@@ -256,7 +256,7 @@ from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimiz
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import (
     ScoreSummary,
-    is_floor_pinned,
+    is_prior_dominated,
     merge_known_outcomes,
     unscoreable_cells,
 )
@@ -286,7 +286,6 @@ from promptpotter.domain.origin_panel import (
     PanelTrigger,
     RoundAdvance,
     TriggeredReading,
-    election_rows,
     line_by_individual,
     origin_panel,
     round_advance,
@@ -333,7 +332,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import ThetaCaveat
+from promptpotter.domain.ruler import ThetaCaveat, p_better
 from promptpotter.domain.run_standing import (
     LineOutlay,
     RunStanding,
@@ -425,7 +424,7 @@ def _read_pair(a: MemberRows, b: MemberRows, panel: list[Sample], **asked: Any) 
         "masked": False,
         "dataset_hash": "d",
         "measurands": [hit],
-        "spec": EstimatorSpec(alpha=0.05, null_value=0.0),
+        "spec": EstimatorSpec(alpha=0.05),
         "scope": RoleScope.DECISION,
         "instrument_id": "i",
     }
@@ -891,9 +890,10 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(
     assert compute_composite_fitness(walked, charged, _LLM_ONLY).composite_fitness == pytest.approx(
         (solved_cheap + solved_costly + miss_cheap + miss_costly) / 4
     ), "the faulted cell left the mean"
-    assert is_floor_pinned(rows[2:4]) and not is_floor_pinned(rows[1:4]), (
+    assert is_prior_dominated(rows[2:4]) and not is_prior_dominated(rows[1:4]), (
         "the 0% floor is a fact about correctness, never about a charged miss's objective"
     )
+    assert is_prior_dominated(rows[:2]), "the ceiling is the floor's twin: a costly hit is a hit"
 
     def objectives(*cells: MeasuredCell) -> list[float]:
         return [_objective(r) for r in charged.sheet(cells)]
@@ -1471,7 +1471,7 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     shallow = sheet(measurements([1.0] * 5 + [0.0], range(14, 20)))
     ab = candidate_abilities({"deep": deep, "shallow": shallow}, half, flat)
     lifts = {c: theta_lift_over_parent(ab, c) for c in ("deep", "shallow")}
-    p = {c: lift.p_better for c, lift in lifts.items() if lift is not None}
+    p = {c: p_better(lift) for c, lift in lifts.items() if lift is not None}
     assert ab.theta["shallow"] > ab.theta["deep"], "the thin arm's POINT lift is the larger"
     assert ab.theta_se["shallow"] > 1.8 * ab.theta_se["deep"], "on nearly twice the SE"
     assert p["deep"] > p["shallow"], "so it demonstrated less"
@@ -1524,10 +1524,6 @@ def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
         crowned_on.cells[1].key,
     }, "a crowned pick's discordant wins stay out of every race it judges, a lone arm's included"
     assert not crowning_cells([won], "c1"), "an ancestor's are its child's own measurements"
-    luck = crowning_cells([won], "c0")
-    assert not luck & {c.key for c in election_rows(crowned_on, NO_CELLS, luck)}, (
-        "the bar read a crowning cell off a draw that held it"
-    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -1540,7 +1536,7 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
     twenty = sheet(measurements([1.0] * 20 + [0.0] * 8))
     near_key = ArmKey("near")
     arms = {
-        near_key: sheet(measurements([1.0] * 5 + [0.0] * 3)),  # closest to the bar, on a wide SE
+        near_key: sheet(measurements([1.0] * 11 + [0.0] * 5)),  # closest to the bar, on a wide SE
         deep_key: sheet(measurements([1.0] * 18 + [0.0] * 10)),  # further off, on the whole panel
         ArmKey("thin"): sheet(measurements([1.0] * 3)),  # the highest θ, under the floor
     }
@@ -1615,13 +1611,18 @@ def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
         _PEER_HOP,
         monkeypatch,
         "potter",
-        {"l1_generate": {"config": {"n_variants": 2}}},
+        {"l1_generate": {"config": {"n_variants": 3}}},
         every_other,
     ) as (cycle, ledger):
-        offline.llm.says = _potter_says("Check each premise.", "Guess.")
-        first = asyncio.run(execute_round(cycle, 1, ledger)).result
-    assert first.election is not None
-    stamp, stores = first.election.ruler, cycle.session.store
+        offline.llm.says = _potter_says("Check each premise.", "Guess.", "Check twice.")
+        asyncio.run(execute_round(cycle, 1, ledger))
+
+        # Round 1's cells fold after its election, so round 2 is the first to read them.
+        offline.llm.says = _potter_says("Guess.")
+        second = asyncio.run(execute_round(cycle, 2, ledger)).result
+    assert second.election is not None
+    stamp, stores = second.election.ruler, cycle.session.store
+
     opt = cycle.config.optimization
     n_min, two_pl = opt.elimination_n_min, opt.enable_2pl_graduation
     read = judging_ruler(
@@ -2314,7 +2315,7 @@ def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_an_arm_is_read_on_the_theta_its_election_takes_over_every_cell_of_its_round(
+def test_an_arm_is_read_on_the_theta_its_election_takes_on_the_scale_its_race_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     with _bench_cycle(tmp_path, monkeypatch, offline) as bench:
@@ -2323,11 +2324,10 @@ def test_an_arm_is_read_on_the_theta_its_election_takes_over_every_cell_of_its_r
         crowned = picked.election.selected
         assert crowned is not None
         [bar] = [picked.rows(key) for key in picked.arms if key not in picked.panel]
-        linked = cycle.difficulty.ruler_of(picked.election.ruler)
-        assert linked is not None and set(linked.delta) >= {
-            cell.key for cell in picked.rows(crowned).scoreable
-        }, "the round's own cells join the δ fit before its election, so θ reads every one"
-        read = candidate_abilities({crowned: picked.rows(crowned)}, bar, linked)
+        # The scale the round OPENED on: its own cells fold after the election.
+        opened = cycle.difficulty.ruler_of(picked.election.ruler)
+        read = candidate_abilities({crowned: picked.rows(crowned)}, bar, opened)
+
         fit = picked.fit(crowned)
         assert fit is not None and (fit.theta, fit.theta_se) == (
             read.theta[crowned],
@@ -3755,14 +3755,8 @@ def test_a_pick_one_panel_cell_holed_reads_on_the_cells_both_scored() -> None:
     holed = _line_read(1, True, ("C1.1", [*_CLEAN_PANEL[:8], None]), c0=_C0_PANEL)
     assert holed.lead.coverage is not None and holed.lead.headline is not None
     assert (holed.lead.coverage.scored, holed.lead.coverage.excluded_faulted) == (8, 1)
-    assert (
-        holed.lead.headline.estimate.side == "above" and holed.advance is RoundAdvance.ADVANCED
-    ), "one of nine panel cells errored: read on the eight both scored, and it decides"
-    earlier = ("C1.1", [1.0] * 4 + [0.0] * 5)
-    short = _line_read(2, True, earlier, ("C2.1", [*_CLEAN_PANEL[:8], None]), c0=_C0_PANEL)
-    whole = _line_read(2, True, earlier, ("C2.1", _CLEAN_PANEL), c0=_C0_PANEL)
-    assert (short.advance, whole.advance) == (RoundAdvance.NOT_SEPARATED, RoundAdvance.ADVANCED), (
-        "against an earlier pick the holed one is a rate over another exam: it tops nobody"
+    assert holed.lead.headline.side == "above" and holed.advance is RoundAdvance.ADVANCED, (
+        "one of nine panel cells errored: read on the eight both scored, and it decides"
     )
 
 
@@ -3791,9 +3785,9 @@ def test_no_pair_to_read_stands_alone_and_a_pair_owed_refused_or_unlanded_is_no_
     }
     for state, advance in promoted_on.items():
         pair = lead if state is ReadingState.READ else PairedReading.unread(state)
-        assert round_advance(1, True, pair, (), _TODAYS_BAR) is advance, state
-        assert round_advance(1, False, pair, (), _TODAYS_BAR) is RoundAdvance.HELD, state
-        assert round_advance(0, True, pair, (), _TODAYS_BAR) is RoundAdvance.ORIGIN, state
+        assert round_advance(1, True, pair, _TODAYS_BAR) is advance, state
+        assert round_advance(1, False, pair, _TODAYS_BAR) is RoundAdvance.HELD, state
+        assert round_advance(0, True, pair, _TODAYS_BAR) is RoundAdvance.ORIGIN, state
 
 
 def _lived_peer(
@@ -4454,22 +4448,25 @@ def test_the_paired_t_matches_ttest_rel_and_brackets_the_evidence_it_tests() -> 
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_level_is_bracketed_on_the_student_t_its_paired_lift_is_tested_on() -> None:
-    cand = _PAIRED_CAND
+def test_a_level_band_covers_its_level_at_the_ends_of_its_support() -> None:
+    def band(grades: list[float], column: str) -> tuple[float | None, float | None]:
+        level = level_band(sheet(measurements(grades)), ROW_GRADES[column], "rate")
+        assert level is not None
+        return level.ci_lo, level.ci_hi
 
-    def band(grades: list[float]) -> tuple[float | None, float | None]:
-        return level_band(sheet(measurements(grades)), ROW_GRADES["fitness"])[1:]
-
-    band_lo, band_hi = band(cand)
-    half = 2.364624251592785 * stdev(cand) / len(cand) ** 0.5  # scipy `t.ppf(0.975, 7)`
-    assert (band_lo, band_hi) == pytest.approx((mean(cand) - half, mean(cand) + half), abs=1e-9), (
-        "on the normal quantile an eight-cell band is a fifth too narrow"
-    )
-    # scipy `t.ppf(0.975, 3)` over the SE floor 1/(4n) at n = 4.
-    assert band([0.0] * 4) == pytest.approx((0.0, 3.182446305284263 / (4 * 4)), abs=1e-9), (
-        "four cells at 0.0 have no spread, yet PoBB's 1/(4n) floor holds the band open"
-    )
-    assert band([1.0]) == (None, None)
+    # scipy `beta.ppf(0.025, 20, 1)`, the exact Clopper-Pearson bound; the Wald-t read 0.974.
+    assert band([1.0] * 20, "hit") == pytest.approx((0.831566, 1.0), abs=1e-6)
+    assert band([0.0] * 6, "hit") == pytest.approx((0.0, 0.459258), abs=1e-6)
+    for column in ("hit", "fitness"):
+        covered = 0.0
+        for k in range(21):
+            lo, hi = band([1.0] * k + [0.0] * (20 - k), column)
+            assert lo is not None and hi is not None
+            covered += comb(20, k) * 0.95**k * 0.05 ** (20 - k) * (lo <= 0.95 <= hi)
+        assert covered >= 0.95, (
+            f"{column}: the band covered p = 0.95 at n = 20 {covered:.0%} of the time"
+        )
+    assert band([1.0], "fitness") == (None, None), "one graded cell brackets nothing"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -4499,13 +4496,17 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
     assert (coverage.shared, coverage.scored) == (7, 5), "the pair reads the cells both scored"
     assert (coverage.excluded_faulted, coverage.excluded_unscored) == (1, 1)
     assert coverage.state is CoverageState.PARTIAL
-    t_mean, t_lo, t_hi, t_p, _ = paired_mean_t([1.0, 1.0, 1.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0, 1.0])
+    t_mean, t_lo, t_hi, _, _ = paired_mean_t([1.0, 1.0, 1.0, 0.0, 1.0], [1.0, 0.0, 0.0, 1.0, 1.0])
     assert (lift.rate_a, lift.rate_b) == pytest.approx((0.6, 0.8))
     estimate = lift.estimate
     assert estimate.value == pytest.approx(t_mean), "the lift is the paired mean"
-    assert (estimate.ci_lo, estimate.ci_hi, estimate.p_value) == pytest.approx((t_lo, t_hi, t_p))
-    assert estimate.side == "spans"
-    assert estimate.p_floor == 0.25, "three cells differ, so no exact test can read below 2/2**3"
+    assert (estimate.ci_lo, estimate.ci_hi) == pytest.approx((t_lo, t_hi))
+    assert lift.p_value == 1.0, (
+        "2 gained and 1 lost is the exact sign test's 1.0, never the t's 0.62"
+    )
+
+    assert lift.side == "spans"
+    assert lift.p_floor == 0.25, "three cells differ, so no exact test can read below 2/2**3"
     assert lift.flips is not None
     assert (lift.flips.gained, lift.flips.lost, lift.flips.unchanged) == (2, 1, 2)
     sparse = samples(34, "t", query="w")
@@ -4514,8 +4515,8 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
         member_rows("b", measurements([1.0] * 4 + [0.0] * 30), sparse),
         sparse,
     ).headline
-    assert gained is not None and gained.estimate.ci_lo > 0.0
-    assert (gained.estimate.side, gained.estimate.p_value) == ("spans", 0.125), (
+    assert gained is not None and (gained.estimate.ci_lo or 0.0) > 0.0
+    assert (gained.side, gained.p_value) == ("spans", 0.125), (
         "the floor gates the claim: Student-t's interval clears zero, yet four differing cells cap p"
     )
     composite = Measurand(
@@ -4536,7 +4537,7 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
         bank,
     )
     assert clear.headline is not None
-    p_wide, p_clear = estimate.p_value, clear.headline.estimate.p_value
+    p_wide, p_clear = lift.p_value, clear.headline.p_value
     assert 2 * p_clear < p_wide
     spanning, unheld, tight = as_family(
         [reading, PairedReading.unread(ReadingState.PENDING), clear], "table"
@@ -4576,7 +4577,8 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     fold = fold_cells(cells, "rate")
     assert (fold.total, fold.fitness) == (4, 0.75)
     assert fold.composite_fitness == pytest.approx(sum(worth.values()) / 4)
-    assert level_band(cells, ROW_GRADES["fitness"])[0] == fold.fitness
+    level = level_band(cells, ROW_GRADES["fitness"], "rate")
+    assert level is not None and level.value == fold.fitness
     assert {key: row.grade.fitness for key, row in twice.by_key().items()} == standing
     once = member_rows("once", measurements(list(by_slot.values())), four)
     unmoved = _read_pair(once, twice, four)
@@ -4593,7 +4595,8 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     assert ungraded.sheet.column(ROW_GRADES["fitness"]) == {
         four[sid].key: grade for sid, grade in by_slot.items() if sid < 3
     }
-    assert level_band(ungraded.sheet, ROW_GRADES["fitness"])[0] == pytest.approx(2 / 3)
+    level = level_band(ungraded.sheet, ROW_GRADES["fitness"], "rate")
+    assert level is not None and level.value == pytest.approx(2 / 3)
     short = _read_pair(once, ungraded, four).coverage
     assert short is not None and short.scored == 3, "an unscored cell left the pair"
     with pytest.raises(UngradedCellError):
@@ -5152,7 +5155,7 @@ def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
         lift = contrast.lift
         assert lift is not None and len(contrast.differences) == 6, case
         assert lift.estimate.value == pytest.approx(0.2 if contrast.a is potter_arm else -0.2)
-        assert lift.estimate.side != "spans", case
+        assert lift.side != "spans", case
         assert potter_arm.replicates == ["potter_a"], case
         assert len(capo_arm.replicates) == replicates, f"{case}: one treatment is one arm"
         assert (lift.family is None) is (contrast.guard.state is GuardState.DIFFERS), (
@@ -5291,7 +5294,7 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
             ruler_version=0,
         )
     )
-    pinned = ArmFit(theta=0.31, theta_se=0.2, theta_caveat=ThetaCaveat.FLOOR_PINNED)
+    pinned = ArmFit(theta=0.31, theta_se=0.2, theta_caveat=ThetaCaveat.PRIOR_DOMINATED)
     replicated: dict[str, tuple[float, float, DisplayMetric, ArmFit | None]] = {
         "potter_s1": (0.1, 0.0, "ability", ArmFit(theta=0.42, theta_se=0.1)),
         "potter_s2": (0.2, 0.0, "ability", pinned),
@@ -5355,9 +5358,9 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
         )
     ranked = sorted(
         (c for c in matrix.contrasts if c.lift is not None and c.lift.family is not None),
-        key=lambda c: c.lift.estimate.p_value if c.lift is not None else 1.0,
+        key=lambda c: c.lift.p_value if c.lift is not None else 1.0,
     )
-    p = [c.lift.estimate.p_value for c in ranked if c.lift is not None]
+    p = [c.lift.p_value for c in ranked if c.lift is not None]
     lowest = ranked[0].lift
     assert lowest is not None and lowest.family is not None
     assert lowest.family.p_adjusted == pytest.approx(min(1.0, 3 * p[0]))
@@ -5371,7 +5374,9 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
         "gepa_s1": ("composite", "composite"),
     }, "an ability pick is quoted on θ unless a caveat is served on its θ"
     quoted = elections["potter_s1"]
-    assert quoted is not None and quoted.ability is not None and quoted.ability.theta == 0.42
+    assert quoted is not None and quoted.ability is not None and quoted.ability.theta is not None
+    assert quoted.ability.theta.value == 0.42
+
     assert any(note.startswith("potter_s1, gepa_s1 elected") for note in matrix.notes)
 
 

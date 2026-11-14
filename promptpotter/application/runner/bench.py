@@ -33,7 +33,6 @@ from promptpotter.domain.arms import PointContext, candidate_label
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     COLUMN_GRADE,
-    BandedValue,
     BenchColumn,
     BenchReading,
     BenchScope,
@@ -58,6 +57,7 @@ from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
     CellSetName,
+    Estimate,
     MeasurandUnit,
     MemberAddress,
     PairedReading,
@@ -159,7 +159,7 @@ def _read_pass(
     own = (
         own_level(sheet, scorer.fitness_unit)
         if len(bench_pass.by_dataset()) < 2
-        else OwnLevel(fitness=None, fitness_unit=scorer.fitness_unit, composite=None, n=scored)
+        else OwnLevel(fitness=None, composite=None, n=scored)
     )
     reading = BenchReading.read(
         own,
@@ -278,15 +278,12 @@ def pair_on_bench(
 
 
 def own_level(sheet: CellSheet, fitness_unit: MeasurandUnit) -> OwnLevel:
-    def column(name: BenchColumn) -> BandedValue | None:
-        level, ci_lo, ci_hi = level_band(sheet, ROW_GRADES[COLUMN_GRADE[name]])
-        if level is None:
-            return None
-        return BandedValue(value=level, ci_lo=ci_lo, ci_hi=ci_hi)
+    def column(name: BenchColumn) -> Estimate | None:
+        unit = fitness_unit if name == "fitness" else "score"
+        return level_band(sheet, ROW_GRADES[COLUMN_GRADE[name]], unit)
 
     return OwnLevel(
         fitness=column("fitness"),
-        fitness_unit=fitness_unit,
         composite=column("composite"),
         n=len(sheet.scoreable),
     )

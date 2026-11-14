@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -8,14 +7,15 @@ from typing import Any, NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
+from promptpotter.domain.paired_reading import Estimate
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import (
     CalibrationModel,
     DeltaRuler,
     Ruler,
-    ThetaLift,
     anchor_id_of,
     ruler_entry,
+    theta_lift,
 )
 from promptpotter.domain.scoring import CellSheet, GradedCell, is_hit
 from promptpotter.shared.hashing import stable_hash
@@ -232,25 +232,26 @@ def fit_theta(
     responses: Mapping[str, float],
     delta: Ruler | None,
     *,
-    sigma_theta: float = _INIT_SIGMA_THETA,
+    center: float = 0.0,
 ) -> tuple[float, float] | None:
-    """``delta=None`` is the cold ruler (θ = logit-fitness); a cell off a live ruler enters no fit, never at δ=0."""
+    """``delta=None`` is the cold ruler (θ = logit-fitness); a cell off a live ruler enters no fit, never at δ=0.
+    The prior is N(*center*, 1.5²): centred on a bar, it sits on the lift, never on each side apart."""
     graded = _cell_parameters(responses.keys(), delta)
     rows = [(*graded[key], y) for key, y in responses.items() if key in graded]
-    return _fit_one(rows, sigma_theta=sigma_theta, max_iter=50, tol=1e-4) if rows else None
+    return _fit_one(rows, center=center, max_iter=50, tol=1e-4) if rows else None
 
 
 def _fit_one(
-    rows: Sequence[tuple[float, float, float]], *, sigma_theta: float, max_iter: int, tol: float
+    rows: Sequence[tuple[float, float, float]], *, center: float, max_iter: int, tol: float
 ) -> tuple[float, float]:
-    inv_var = 1.0 / (sigma_theta * sigma_theta)
+    inv_var = 1.0 / (_INIT_SIGMA_THETA * _INIT_SIGMA_THETA)
     d_arr = np.fromiter((d for d, _, _ in rows), dtype=np.float64)
     a_arr = np.fromiter((a for _, a, _ in rows), dtype=np.float64)
     h_arr = np.fromiter((y for _, _, y in rows), dtype=np.float64)
-    theta = 0.0
+    theta = center
     for _ in range(max_iter):
         p = logistic(a_arr * (theta - d_arr))
-        grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * theta
+        grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * (theta - center)
         info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
         step = float(_newton_step(grad, info))
         theta += step
@@ -512,52 +513,25 @@ def candidate_abilities(
     """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows."""
     entries = ruler.entries() if ruler is not None else None
     parent = responses_of(parent_results)
-    whole = fit_theta(parent, entries)
     abilities = RoundAbilities(theta={}, theta_se={}, bar={}, cells={})
     for cid, sheet in results_by_id.items():
-        if (fit := _arm_fit(sheet, parent, whole, entries, ruler)) is None:
+        own = theta_cells(responses_of(sheet), parent, ruler)
+        bar_cells = parent if entries is not None else {k: parent[k] for k in own}
+        # Both sides centred on the parent's own read: the prior sits on the lift, never on each side.
+        center = 0.0 if (first := fit_theta(bar_cells, entries)) is None else first[0]
+        if (read := fit_theta(own, entries, center=center)) is None:
             continue
-        (abilities.theta[cid], abilities.theta_se[cid]), abilities.cells[cid], against = fit
-        if against is not None:
+        (abilities.theta[cid], abilities.theta_se[cid]), abilities.cells[cid] = read, len(own)
+        if (against := fit_theta(bar_cells, entries, center=center)) is not None:
             abilities.bar[cid] = against
     return abilities
 
 
-def _arm_fit(
-    sheet: CellSheet,
-    parent: Mapping[str, float],
-    whole: tuple[float, float] | None,
-    entries: Ruler | None,
-    ruler: DeltaRuler | None,
-) -> tuple[tuple[float, float], int, tuple[float, float] | None] | None:
-    """One arm on the election's fit: its ``(θ, se)``, the cells read, and its bar's ``(θ, se)``."""
-    own = theta_cells(responses_of(sheet), parent, ruler)
-    if (read := fit_theta(own, entries)) is None:
-        return None
-    against = whole if entries is not None else fit_theta({key: parent[key] for key in own}, None)
-    return read, len(own), against
-
-
-def arm_lift(sheet: CellSheet, bar: CellSheet, ruler: DeltaRuler | None) -> ThetaLift | None:
-    """One arm's θ lift over *bar*, on the fit the election takes."""
-    entries = ruler.entries() if ruler is not None else None
-    parent = responses_of(bar)
-    fit = _arm_fit(sheet, parent, fit_theta(parent, entries), entries, ruler)
-    if fit is None:
-        return None
-    (theta, se), _, against = fit
-    if against is None:
-        return None
-    bar_theta, bar_se = against
-    return ThetaLift(theta - bar_theta, math.hypot(se, bar_se))
-
-
-def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> ThetaLift | None:
+def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> Estimate | None:
     bar = abilities.bar.get(candidate_id)
     if bar is None:
         return None
-    theta, se = abilities.theta[candidate_id], abilities.theta_se[candidate_id]
-    return ThetaLift(theta - bar[0], math.hypot(se, bar[1]))
+    return theta_lift(abilities.theta[candidate_id], abilities.theta_se[candidate_id], *bar)
 
 
 def build_round_order(

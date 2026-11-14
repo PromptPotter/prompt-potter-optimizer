@@ -4,6 +4,7 @@ from pydantic import Field
 
 from promptpotter.domain.arms import ArmStateKind
 from promptpotter.domain.cycle_paths import SUBJECT_ARITY, CycleHop, SubjectKind
+from promptpotter.domain.paired_reading import Estimate
 from promptpotter.domain.records.run_records import OPERATOR_ORIGIN_SOURCES
 from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.said import Said
@@ -100,9 +101,7 @@ class WinnerChainPoint(StrictModel):
     candidate_id: str
     round: int
     label: str
-    value: float | None
-    ci_lo: float | None
-    ci_hi: float | None
+    estimate: Estimate | None
     n_cells: int
 
 
@@ -115,7 +114,7 @@ class SubjectReading(StrictModel):
     ``values`` is keyed by the cell's QUERY, the identity that survives across campaigns; a cell the
     metric cannot read is ABSENT from it and named in ``unscorable_cells`` rather than scored — the
     two absences are different facts and a surface renders them as different glyphs.
-    ``ci_lo``/``ci_hi`` are ``None`` below two scored cells — one reading has no spread, and a
+    estimate's bounds are None below two scored cells — one reading has no spread, and a
     bracket drawn from it is a fiction.
     """
 
@@ -171,9 +170,7 @@ class SubjectReading(StrictModel):
         "pass, which only a round's selection has — keyed like `values` and never pooled with "
         "them: two scopes never pair.",
     )
-    value: float | None
-    ci_lo: float | None
-    ci_hi: float | None
+    estimate: Estimate | None
     n_cells: int
     unscorable_cells: list[str]
     levels: dict[str, str] = Field(default_factory=dict)

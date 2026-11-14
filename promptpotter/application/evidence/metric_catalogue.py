@@ -10,11 +10,11 @@ from promptpotter.application.scoring.formula.compiler import (
     cell_channels_of,
     compile_expression,
 )
-from promptpotter.domain.paired_reading import MeasurandUnit
+from promptpotter.domain.paired_reading import Estimate, EstimateForm, MeasurandUnit
 from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import BadRequestError
-from promptpotter.shared.statistics import mean_ci
+from promptpotter.shared.statistics import paired_mean_t
 
 CUSTOM_METRIC_PREFIX = "expr:"
 CUSTOM_METRIC_KEY = "custom"
@@ -82,13 +82,18 @@ def available_channels(
     return frozenset.intersection(*per_campaign) if per_campaign else frozenset()
 
 
-def merge_cells(values: dict[str, float]) -> tuple[float | None, float | None, float | None, int]:
-    """``(value, ci_lo, ci_hi, n_cells)``; no bracket below two cells."""
+def merge_cells(values: dict[str, float], metric: MetricSpec) -> Estimate | None:
+    """No bracket below two cells; ``None`` on none."""
     ordered = [values[c] for c in sorted(values)]
-    bracketed = mean_ci(ordered)
-    if bracketed is not None:
-        return (*bracketed, len(ordered))
-    return (ordered[0] if ordered else None, None, None, len(ordered))
+    if not ordered:
+        return None
+    # Unbounded: a merged metric may be a lift.
+    value, lo, hi, _, _ = paired_mean_t(ordered, [0.0] * len(ordered))
+
+    form: EstimateForm = "lift" if metric.lift else "level"
+    return Estimate(
+        value=value, ci_lo=lo, ci_hi=hi, n=len(ordered), se=None, unit=metric.unit, form=form
+    )
 
 
 _ENTRIES: tuple[MetricSpec, ...] = (

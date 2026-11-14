@@ -545,7 +545,7 @@ def _read_alike(a: _Graded, b: _Graded, scorer: Scorer) -> bool:
         sample_keys=a.sample_keys,
         instrument_id=a.origin.instrument_id,
     ).headline
-    return gap is None or gap.estimate.side == "spans"
+    return gap is None or gap.side == "spans"
 
 
 def _campaign(entry: HeadToHeadEntry) -> Campaign:
@@ -705,7 +705,7 @@ def _contrasts(
             if record is not None and state is GuardState.CONTROLLED
             else "bench",
         )
-        q_values = iter(bh_adjusted([lift.estimate.p_value for lift in lifts if lift is not None]))
+        q_values = iter(bh_adjusted([lift.p_value for lift in lifts if lift is not None]))
         for i, lift in zip(at, lifts, strict=True):
             read[i] = read[i].model_copy(
                 update={"lift": lift, "q_value": None if lift is None else next(q_values)}

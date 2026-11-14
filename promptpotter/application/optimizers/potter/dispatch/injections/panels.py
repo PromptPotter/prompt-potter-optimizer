@@ -46,7 +46,6 @@ from promptpotter.application.optimizers.potter.records import ExplorationBudget
 from promptpotter.application.scoring.evaluators import compute_fitness
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
 from promptpotter.application.scoring.row_diagnostics import judge_readings
-from promptpotter.domain.arm_reading import level_text, lift_interval_text
 from promptpotter.domain.arms import Concluded, Cut, Measured
 from promptpotter.domain.candidate_diff import (
     IDEA_MATCH_MARK,
@@ -61,11 +60,11 @@ from promptpotter.domain.l4.inner_facts import InnerCellFacts
 from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
-from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading
+from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading, level_text
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import evidence_starved_node, ran_to_output_ceiling
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading, ThetaCaveat, ThetaLift
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading, ThetaCaveat, detectable
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import (
     CRITERION_BASE,
@@ -259,11 +258,8 @@ def _evolution(b: PotterView) -> list[Item]:
         + " → ".join(f"{m.arm.label} {level_text(m.rate, m.unit)}" for m in line)
     )
     if (headline := overlap.lead.headline) is not None:
-        est = headline.estimate
         lines.append(
-            f"  standing pick vs C0: lift "
-            f"{lift_interval_text(est.ci_lo, est.ci_hi, headline.measurand.unit)}, "
-            f"{_SIDE_VERDICT[est.side]}"
+            f"  standing pick vs C0: lift {headline.estimate.band}, {_SIDE_VERDICT[headline.side]}"
         )
     if (parent_line := _vs_parent(overlap.vs_parent)) is not None:
         lines.append(parent_line)
@@ -282,14 +278,14 @@ def _vs_parent(reading: PairedReading | None) -> str | None:
     pick, parent = reading.b.address.arm, reading.a.address.arm
     if pick is None or parent is None:
         return None
-    est, flips = lift.estimate, lift.flips
+    flips = lift.flips
     moved = (
-        f"lift {lift_interval_text(est.ci_lo, est.ci_hi, lift.measurand.unit)}"
+        f"lift {lift.estimate.band}"
         if flips is None
         else f"of {flips.gained + flips.lost + flips.unchanged} rows, wins {flips.gained} the "
         f"parent missed and misses {flips.lost} it won"
     )
-    return f"  {pick.label} vs its parent {parent.label}: {moved}, {_SIDE_VERDICT[est.side]}"
+    return f"  {pick.label} vs its parent {parent.label}: {moved}, {_SIDE_VERDICT[lift.side]}"
 
 
 def _critique_is_all_prompt_field(b: PotterView) -> bool:
@@ -909,7 +905,7 @@ class _Edit:
     def verdict(self) -> bool:
         """A lift off the noise on the parent's whole set: what an idea is judged on."""
         whole = None if self.reading is None else self.reading.on_whole_set
-        return whole is not None and whole.estimate.side != "spans"
+        return whole is not None and whole.side != "spans"
 
     def flipped(self) -> FlippedCells[str]:
         reference = self.round.reference_rows(self.key)
@@ -1093,7 +1089,7 @@ def detectable_rows(b: PotterView) -> int | None:
     if a is None or info <= 0.0 or admission is None:
         return None
     # Each side answers the round's rows once: the contrast carries both arms' error.
-    move = ThetaLift(0.0, math.sqrt(2.0 / info)).detectable(admission)
+    move = detectable(math.sqrt(2.0 / info), admission)
     return max(1, round(expected_score_gain(a.theta, move, keys, ruler)))
 
 

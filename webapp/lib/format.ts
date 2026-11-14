@@ -1,5 +1,5 @@
 import {
-  type LiftEstimate,
+  type MeasuredLift,
   type MeasuredUnit,
   type MetricSpec,
   LIFT_SIDE_TONE,
@@ -11,7 +11,7 @@ import {
 } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 
-type LiftSide = LiftEstimate["side"];
+type LiftSide = MeasuredLift["side"];
 
 export const PLACEHOLDER = "—";
 
@@ -117,23 +117,6 @@ export function fmtUnit(unit: MeasurandUnit, v: number | null | undefined): stri
   return `${f.prefix}${numberIn(f, v, f.digits, false)}${f.suffix}`;
 }
 
-export function fmtInterval(
-  unit: MeasurandUnit,
-  lo: number | null | undefined,
-  hi: number | null | undefined,
-): string {
-  if (!finite(lo) || !finite(hi)) return PLACEHOLDER;
-  return `[${fmtUnit(unit, lo)}, ${fmtUnit(unit, hi)}]`;
-}
-
-// A level and its 95% band, the band left off where the served reading carries none.
-export function fmtLevelBand(
-  unit: MeasurandUnit,
-  v: { value: number | null; ci_lo: number | null; ci_hi: number | null },
-): string {
-  const band = fmtInterval(unit, v.ci_lo, v.ci_hi);
-  return band === PLACEHOLDER ? fmtUnit(unit, v.value) : `${fmtUnit(unit, v.value)} ${band}`;
-}
 
 // Ties a value to its word and a bound to its pair, so a narrow line breaks only between them.
 const NBSP = String.fromCharCode(0xa0);
@@ -149,20 +132,6 @@ export function fmtLift(unit: MeasurandUnit, v: number | null | undefined): stri
   return `${signedIn(unit, v)}${NBSP}${UNIT_FORMATS[unit].lift_word}`;
 }
 
-export function fmtLiftInterval(
-  unit: MeasurandUnit,
-  lo: number | null | undefined,
-  hi: number | null | undefined,
-): string {
-  if (!finite(lo) || !finite(hi)) return PLACEHOLDER;
-  return `[${signedIn(unit, lo)},${NBSP}${signedIn(unit, hi)}]`;
-}
-
-type Banded = { value: number; ci_lo: number; ci_hi: number };
-
-export function fmtLiftBand(unit: MeasurandUnit, lift: Banded): string {
-  return `${fmtLift(unit, lift.value)} ${fmtLiftInterval(unit, lift.ci_lo, lift.ci_hi)}`;
-}
 
 export type MetricFormat = Pick<MetricSpec, "unit" | "lift">;
 
@@ -171,13 +140,7 @@ export function fmtMetric(metric: MetricFormat, v: number | null | undefined): s
   return metric.lift ? fmtLift(metric.unit, v) : fmtUnit(metric.unit, v);
 }
 
-export function fmtMetricInterval(
-  metric: MetricFormat,
-  lo: number | null | undefined,
-  hi: number | null | undefined,
-): string {
-  return metric.lift ? fmtLiftInterval(metric.unit, lo, hi) : fmtInterval(metric.unit, lo, hi);
-}
+
 
 // Campaign ids are `{dataset}__{rand6}`; the suffix is what tells two runs of one origin apart.
 export function shortId(campaignId: string): string {
@@ -194,10 +157,6 @@ export function fmtLogits(v: number): string {
   return `${v.toFixed(2)} logits`;
 }
 
-export function fmtThetaSe(v: number | null | undefined, se: number | null | undefined): string {
-  const theta = fmtUnit("theta", v);
-  return theta !== PLACEHOLDER && typeof se === "number" ? `${theta} ± ${se.toFixed(2)}` : theta;
-}
 
 // A side's served ink (`LIFT_SIDE_TONE`); no side reads as a band spanning zero.
 export function sideTone(side: LiftSide | null | undefined): string {

@@ -40,12 +40,7 @@ from promptpotter.application.views.render.primitives import (
     display_tags,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.domain.arm_reading import (
-    ScoreboardRankKey,
-    level_text,
-    lift_text,
-    scoreboard_rank_key,
-)
+from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
 from promptpotter.domain.arms import (
     Concluded,
     Cut,
@@ -59,6 +54,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.narration import NarratedRecord, Narration
+from promptpotter.domain.paired_reading import level_text, lift_text
 from promptpotter.domain.phase_views import (
     InitExitView,
     RoundCompleteView,
@@ -363,8 +359,8 @@ class ReadoutProjection(Projection):
         self._standing_printed_for = current
         hardest_tag, hardest_p = "*self*", record.p_best
         if breakdown:
-            hardest_id, hardest = min(breakdown.items(), key=lambda kv: kv[1].p_better)
-            hardest_tag, hardest_p = hardest_id[:6], hardest.p_better
+            hardest_id, hardest = min(breakdown.items(), key=lambda kv: kv[1])
+            hardest_tag, hardest_p = hardest_id[:6], hardest
         n = len(breakdown)
         self._write(
             f"  {DIM}{record.member}:{RESET} P(best)={record.p_best:.1%} @ q{record.n_samples}  "

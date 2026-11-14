@@ -4,8 +4,8 @@ from typing import Annotated, Literal, get_args
 
 from pydantic import Field
 
-from promptpotter.domain.bench import BandedValue, OwnLevel, PassStop
-from promptpotter.domain.paired_reading import ArmName, PairedReading
+from promptpotter.domain.bench import OwnLevel, PassStop
+from promptpotter.domain.paired_reading import ArmName, Estimate, PairedReading
 from promptpotter.domain.pass_kinds import IndividualWalk
 from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.strict_model import FrozenModel
@@ -90,8 +90,8 @@ class NoiseBand(FrozenModel):
 
     # One composite per rescore, in order.
     raw: list[float]
-    band: BandedValue
-    fresh_fitness: float
+    band: Estimate
+    fresh_fitness: Estimate
     recorded: OwnLevel
 
 

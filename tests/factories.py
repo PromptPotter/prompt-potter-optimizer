@@ -87,7 +87,6 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
-    BandedValue,
     BankPartition,
     BenchScore,
     LiftCost,
@@ -117,6 +116,7 @@ from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
+    Estimate,
     MemberAddress,
     PairedReading,
     ReadingState,
@@ -312,8 +312,9 @@ def score_summary(
         walked=total if walked is None else walked,
         cached=0,
         evaluators={},
-        mean_fitness_ci_lo=None,
-        mean_fitness_ci_hi=None,
+        fitness_band=Estimate(
+            value=fitness, ci_lo=None, ci_hi=None, n=total, se=None, unit="rate", form="level"
+        ),
         tokens=None,
     )
 
@@ -1135,9 +1136,7 @@ def election(
         "ended_on": ArmKey(ended_on) if ended_on else pick or PARENT,
         "electable": int(pick is not None),
         "elects_on": "ability",
-        "bar": None
-        if pick is None
-        else BarRead(statistic="posterior", clears=True, quote="today's bar"),
+        "bar": None if pick is None else BarRead(statistic="posterior", clears=True),
         "ruler": RulerStamp(
             id=flat_ruler_id("acc"),
             version=0,
@@ -1475,9 +1474,10 @@ def cycle_result(
         origin=None
         if origin is None
         else OwnLevel(
-            fitness=BandedValue(value=origin, ci_lo=None, ci_hi=None),
+            fitness=Estimate(
+                value=origin, ci_lo=None, ci_hi=None, n=1, se=None, unit="rate", form="level"
+            ),
             composite=None,
-            fitness_unit="rate",
             n=1,
         ),
         bench=bench,

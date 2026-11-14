@@ -91,7 +91,7 @@ def _answer_space_signature(stores: Stores, closed: RoundStatement, dataset: str
 def _credible_lift(reading: PairedReading | None) -> float | None:
     """Fitness, never the composite: blocks pool across campaigns, each pricing cells its own way."""
     lift = reading.on_whole_set if reading else None
-    if lift is None or lift.estimate.ci_lo <= 0:
+    if lift is None or lift.estimate.ci_lo is None or lift.estimate.ci_lo <= 0:
         return None
     return lift.estimate.value
 

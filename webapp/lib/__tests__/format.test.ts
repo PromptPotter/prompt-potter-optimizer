@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  fmtInterval,
   fmtLift,
-  fmtLiftBand,
   fmtMetric,
   fmtUnit,
   PLACEHOLDER,
@@ -38,12 +36,6 @@ describe("fmtUnit", () => {
   });
 });
 
-describe("fmtInterval", () => {
-  it("brackets both ends in the unit, and an open end is the placeholder", () => {
-    expect(fmtInterval("score", 0.05, 0.1)).toBe("[0.05, 0.10]");
-    expect(fmtInterval("rate", 0.4, null)).toBe(PLACEHOLDER);
-  });
-});
 
 describe("fmtLift", () => {
   it("signs a lift in its unit's word: a rate's in points, never percent", () => {
@@ -52,11 +44,6 @@ describe("fmtLift", () => {
     expect(fmtLift("score", null)).toBe(PLACEHOLDER);
   });
 
-  it("bands a lift with its bounds signed, each pair held together", () => {
-    expect(fmtLiftBand("rate", { value: 0.05, ci_lo: 0.01, ci_hi: 0.09 })).toBe(
-      `+5.0${NBSP}pts [+1.0,${NBSP}+9.0]`,
-    );
-  });
 
   it("signs a metric's value only where it is a lift", () => {
     expect(fmtMetric({ unit: "theta", lift: true }, 0.2)).toBe(`+0.200${NBSP}logits`);

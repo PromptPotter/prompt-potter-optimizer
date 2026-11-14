@@ -245,7 +245,7 @@ class RoundOutcome(FrozenModel):
             return scoreboard_rank_key(
                 None if own is None or own.composite is None else own.composite.value,
                 None if own is None or own.fitness is None else own.fitness.value,
-                ability.theta if on_theta and ability is not None else None,
+                ability.theta.value if on_theta and ability is not None and ability.theta else None,
                 is_leading=reading.arm.key == leading,
                 is_partial=reading.end == "skipped",
             )
@@ -264,7 +264,7 @@ class RoundResult(RoundOutcome):
     at_offset: int | None = None
     # By arm: a reference re-read on the round's cells is an arm, so a held round's head is here.
     cells: dict[ArmKey, CellSheet] = Field(default_factory=dict)
-    # Keyed by the MEASURED individual, outside the arms: the election pools them (`election_rows`).
+    # Keyed by the MEASURED individual, outside the arms: `raced` reads them beside the draw.
     overlap_results: dict[str, CellSheet] = Field(default_factory=dict)
 
     @computed_field  # type: ignore[prop-decorator]
@@ -279,6 +279,11 @@ class RoundResult(RoundOutcome):
 
     def rows(self, key: ArmKey) -> CellSheet:
         return self.cells.get(key, NO_CELLS)
+
+    def raced(self, key: ArmKey) -> CellSheet:
+        """The ONE row set the race, the election and the δ fold read: the draw, then the
+        origin-panel cells it lacks."""
+        return self.rows(key).merged(self.overlap_results.get(key, NO_CELLS))
 
     def reference_rows(self, key: ArmKey) -> CellSheet:
         """The rows of the arm *key* was judged against, re-read on this round's cells."""

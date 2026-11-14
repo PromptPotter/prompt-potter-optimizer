@@ -4,8 +4,7 @@ import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from promptpotter.domain.arm_reading import level_text, lift_interval_text, lift_text
-from promptpotter.domain.bench import BandedValue
+from promptpotter.domain.paired_reading import level_text
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_health import (
     HEALTH_CAUSE_INFO,
@@ -18,15 +17,11 @@ from promptpotter.domain.round_health import (
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import (
     NO_RESULT,
-    ROW_GRADES,
     GradedCell,
     MeasuredCell,
     NodeWarning,
-    constant_answer,
-    enumerable_truth_labels,
 )
 from promptpotter.shared.errors import ErrorCategory
-from promptpotter.shared.statistics import mean_ci
 
 STRUCTURAL_FLAG_RATE: float = 0.30
 DEGRADED_RATE_FLAG: float = 0.20
@@ -496,11 +491,6 @@ def health_reading(round_num: int, health: DegradationHealth) -> HealthReading |
 
 def floor_said(floor: ConstantFloor) -> Said:
     lift = floor.lift
-    band = (
-        None
-        if lift.ci_lo is None or lift.ci_hi is None
-        else lift_interval_text(lift.ci_lo, lift.ci_hi, "score")
-    )
     collapse = floor.rewards_collapse
     verdict = (
         "a candidate is paid for collapsing to that one label."
@@ -511,11 +501,11 @@ def floor_said(floor: ConstantFloor) -> Said:
         key="floor_rewards_collapse" if collapse else "floor_cleared",
         tone="warn" if collapse else "quiet",
         label=f"Origin {'under' if collapse else 'over'} the constant-answer floor",
-        value=lift_text(lift.value, "score"),
-        sub=band,
+        value=lift.point,
+        sub=lift.band,
         detail=f"Answering «{floor.label}» to every cell scores "
         f"{level_text(floor.floor, 'score')}; on the same cells the origin reads "
-        f"{lift_text(lift.value, 'score')} against it, so {verdict}",
+        f"{lift.point} against it, so {verdict}",
     )
 
 
@@ -569,23 +559,6 @@ def _trailing_degraded(prior_healths: Sequence[DegradationHealth]) -> int:
     return count
 
 
-def origin_floor(results: Sequence[GradedCell]) -> ConstantFloor | None:
-    paired = [c for c in results if c.scored and c.facts.ground_truth]
-    truth = enumerable_truth_labels(paired)
-    if truth is None:
-        return None
-    constant = constant_answer(truth)
-    fitness = ROW_GRADES["fitness"].read
-    lifts = [fitness(c) - constant.score(c) for c in paired]
-    band = mean_ci(lifts)
-    lift = (
-        BandedValue(value=lifts[0], ci_lo=None, ci_hi=None)
-        if band is None
-        else BandedValue(value=band[0], ci_lo=band[1], ci_hi=band[2])
-    )
-    return ConstantFloor(label=constant.label, floor=constant.share, lift=lift)
-
-
 def compute_round_health(
     *,
     results: Sequence[GradedCell],
@@ -593,6 +566,7 @@ def compute_round_health(
     # Cells the walk never sent: they have no row in ``results``.
     not_attempted: int,
     is_origin: bool = False,
+    constant_floor: ConstantFloor | None = None,
 ) -> DegradationHealth:
     structural = transient = no_result = holes = 0
     # An errored cell's grade carries no `unscored`: only a measured row can lack a verdict.
@@ -640,7 +614,7 @@ def compute_round_health(
         not_attempted=not_attempted,
         unscored=unscored,
         last_error=last_error,
-        constant_floor=origin_floor(results) if is_origin else None,
+        constant_floor=constant_floor,
         node_failure_rates=node_failure_rates,
         node_warnings=node_warnings,
         is_origin=is_origin,

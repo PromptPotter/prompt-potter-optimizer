@@ -11,18 +11,15 @@ from pathlib import PurePosixPath
 from typing import Any, assert_never
 
 from promptpotter.application.views.render.primitives import bench_readout
-from promptpotter.domain.arm_reading import (
-    level_text,
-    lift_band_text,
-    lift_interval_text,
-    lift_text,
-)
-from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import ExportTier, PromptExport
 from promptpotter.domain.hierarchy import HierarchyCandidate, HierarchyRound, SubtreeCourse
-from promptpotter.domain.paired_reading import READING_STATE_INFO, MeasurandUnit, PairedReading
+from promptpotter.domain.paired_reading import (
+    READING_STATE_INFO,
+    PairedReading,
+    level_text,
+)
 from promptpotter.domain.treatment import Treatment
 from promptpotter.domain.verification import VERIFY_STRATEGY_LABELS
 from promptpotter.shared.errors import ConflictError
@@ -173,12 +170,6 @@ def chat_text(course: SubtreeCourse, unit: MeasuredUnit) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _banded(value: BandedValue, unit: MeasurandUnit) -> str:
-    lo, hi = value.ci_lo, value.ci_hi
-    band = "" if lo is None or hi is None else f" [{level_text(lo, unit)}, {level_text(hi, unit)}]"
-    return f"{level_text(value.value, unit)}{band}"
-
-
 def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUnit) -> list[str]:
     r = c.facts.reading
     parents = [label_of.get(p, p) for p in c.facts.parent_ids]
@@ -201,17 +192,16 @@ def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUn
     fitness = (
         "fitness —"
         if own is None or own.fitness is None
-        else f"fitness {_banded(own.fitness, own.fitness_unit)} n={own.n}"
+        else f"fitness {own.fitness.text} n={own.n}"
     )
     composite = (
-        "" if own is None or own.composite is None else f" · composite {own.composite.value:.2f}"
+        "" if own is None or own.composite is None else f" · composite {own.composite.point}"
     )
     ability = r.ability
     theta = ""
     if ability is not None and ability.theta is not None:
-        se = "" if ability.se is None else f" ± {ability.se:.2f}"
         caveat = f" ({ability.caveat})" if ability.caveat else ""
-        theta = f" · θ {ability.theta:.2f}{se}{caveat}"
+        theta = f" · {ability.theta.text}{caveat}"
     out.append(f"  {walk}{cells} · {fitness}{composite}{theta}")
 
     if r.vs_reference is not None:
@@ -225,13 +215,12 @@ def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUn
 
     extras: list[str] = []
     if (bench := r.bench) is not None:
-        shown = "—" if bench.level is None else _banded(bench.level, bench.level_unit)
+        shown = "—" if bench.level is None else bench.level.text
         extras.append(f"bench {shown} n={bench.n} held out")
     if (verify := r.verify) is not None:
         fresh = verify.fresh
-        level = None if fresh.fitness is None else fresh.fitness.value
         extras.append(
-            f"verify fitness {level_text(level, fresh.fitness_unit)} on "
+            f"verify fitness {'—' if fresh.fitness is None else fresh.fitness.point} on "
             f"{unit_count(fresh.n, unit)} fresh, {VERIFY_STRATEGY_LABELS[verify.strategy]}"
         )
     if (line := r.on_origin_panel) is not None:
@@ -258,7 +247,7 @@ def _pair_line(pair: PairedReading, unit: MeasuredUnit) -> str:
         [
             f"vs {against} {level_text(lift.rate_a, level_unit)} → "
             f"{level_text(lift.rate_b, level_unit)}",
-            f"lift {lift_band_text(estimate, lift.measurand.unit)} {estimate.side}",
+            f"lift {estimate.text} {lift.side}",
             *([f"flips +{flips.gained} -{flips.lost} ={flips.unchanged}"] if flips else []),
             f"on {unit_count(coverage.scored, unit)} both scored",
         ]
@@ -345,8 +334,7 @@ def _bench_readout(export: PromptExport) -> tuple[str, str]:
     lift = reading.headline
     if lift is None:
         return READING_STATE_INFO[reading.state].label, "—"
-    est, unit = lift.estimate, lift.measurand.unit
-    return lift_text(est.value, unit), lift_interval_text(est.ci_lo, est.ci_hi, unit)
+    return lift.estimate.point, lift.estimate.band or "—"
 
 
 def skill_md(export: PromptExport, p: Provenance) -> str:
@@ -370,7 +358,8 @@ def skill_md(export: PromptExport, p: Provenance) -> str:
         "tool_version": export.tool_version,
     }
     fitness = m.own.fitness
-    level = "—" if fitness is None else _banded(fitness, m.own.fitness_unit)
+    level = "—" if fitness is None else fitness.text
+
     run = [
         f"- `{node}`: send `prompts/{node}.md` as its prompt, on "
         f"`{export.tuned_params.get(node, {}).get('model', '—')}`; the rest of its params are "

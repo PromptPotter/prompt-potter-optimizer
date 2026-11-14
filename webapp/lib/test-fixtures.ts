@@ -1,4 +1,5 @@
 import type {
+  Estimate,
   AccountKey,
   CouponStatus,
   LifetimeSpend,
@@ -136,6 +137,29 @@ export function hierarchyStep(parent: string, facts: StepFacts): HierarchyStep {
   };
 }
 
+// An `Estimate` as served: its words are the server's, so a fixture spells plain ones.
+export function estimate(
+  value: number,
+  [lo, hi]: [number | null, number | null] = [null, null],
+  over: Partial<Estimate> = {},
+): Estimate {
+  const band = lo === null || hi === null ? null : `[${lo}, ${hi}]`;
+  const point = String(value);
+  return {
+    value,
+    ci_lo: lo,
+    ci_hi: hi,
+    n: null,
+    se: null,
+    unit: "rate",
+    form: "level",
+    point,
+    band,
+    text: band === null ? point : `${point} ${band}`,
+    ...over,
+  };
+}
+
 export function pairedReading(
   lift: number,
   [lo, hi]: [number, number],
@@ -146,14 +170,10 @@ export function pairedReading(
     measurand: { kind: "grade", key, scorer_id: "s", binary: false, unit },
     rate_a: rateA,
     rate_b: rateA + lift,
-    estimate: {
-      value: lift,
-      ci_lo: lo,
-      ci_hi: hi,
-      side: lo > 0 ? "above" : hi < 0 ? "below" : "spans",
-      p_value: 0.5,
-      p_floor: 0.5,
-    },
+    estimate: estimate(lift, [lo, hi], { unit, form: "lift" }),
+    side: lo > 0 ? "above" : hi < 0 ? "below" : "spans",
+    p_value: 0.5,
+    p_floor: 0.5,
     flips: null,
     family: null,
   });
@@ -169,7 +189,7 @@ export function pairedReading(
     cell_set: { name: "reference_cells", basis: "declared", id: "set", dataset_hash: null, size: 10 },
     instrument_id: "i",
     scope: "decision",
-    spec: { alpha: 0.05, null_value: 0 },
+    spec: { alpha: 0.05 },
     coverage: {
       state: over.coverage ?? "complete",
       shared: 10,
@@ -192,7 +212,7 @@ export function unreadOverlap(over: Partial<OverlapReading> = {}): OverlapReadin
       cell_set: null,
       instrument_id: null,
       scope: "report",
-      spec: { alpha: 0.05, null_value: 0 },
+      spec: { alpha: 0.05 },
       coverage: null,
       headline: null,
       beside: [],
@@ -297,8 +317,8 @@ export function armReading(
 }
 
 export function ownLevel(fitness: number, n = 0): NonNullable<ArmReading["own"]> {
-  const banded = { value: fitness, ci_lo: null, ci_hi: null };
-  return { fitness: banded, composite: banded, fitness_unit: "rate", n };
+  return { fitness: estimate(fitness), composite: estimate(fitness, [null, null], { unit: "score" }), n };
+
 }
 
 // A candidate as the subtree read serves it, at `{course}/r{round}/{key}`; its label is its arm's.

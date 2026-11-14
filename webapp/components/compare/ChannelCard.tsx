@@ -74,7 +74,7 @@ function ChannelIdRow({
 }) {
   const { remove } = useCompareSelection();
   const subject = channel.subject;
-  const level = channelLevel(reading, withdrawn, spec);
+  const level = channelLevel(reading, withdrawn);
   const lead = benchLead(headline);
   return (
     <div className="cmp-channel-row">

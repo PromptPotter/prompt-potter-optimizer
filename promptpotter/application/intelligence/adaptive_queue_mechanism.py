@@ -5,12 +5,10 @@ from __future__ import annotations
 import math
 from collections.abc import Iterable, Sequence
 
+from promptpotter.domain.ruler import PROBIT_SCALE
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import ROW_GRADES, GradedCell
 from promptpotter.shared.statistics import logistic
-
-# Probit scale for ``E[σ(N(m, v))] ≈ σ(m / √(1 + π·v/8))``.
-_PROBIT_SCALE = math.pi / 8.0
 
 
 def _normal_cdf(x: float) -> float:
@@ -31,14 +29,14 @@ def marginal_hit_probability(
     se_delta_s: float,
 ) -> float:
     v = var_c + se_delta_s * se_delta_s
-    return logistic((mu_c - delta_s) / math.sqrt(1.0 + _PROBIT_SCALE * v))
+    return logistic((mu_c - delta_s) / math.sqrt(1.0 + PROBIT_SCALE * v))
 
 
 def update_theta_posterior(
     mu: float, var: float, delta_s: float, se_delta_s: float, hit: bool
 ) -> tuple[float, float]:
     """One Newton step on a 1PL likelihood marginalized over δ_s via probit, not a full fit."""
-    scale = math.sqrt(1.0 + _PROBIT_SCALE * se_delta_s * se_delta_s)
+    scale = math.sqrt(1.0 + PROBIT_SCALE * se_delta_s * se_delta_s)
     p = logistic((mu - delta_s) / scale)
     score = ((1.0 if hit else 0.0) - p) / scale
     info = 1.0 / var + p * (1.0 - p) / (scale * scale)
@@ -62,7 +60,7 @@ def decision_information_gain(
     p_miss = _normal_cdf((mu_miss - mu_s) / math.sqrt(var_miss + var_s))
     m = mu_c - delta_s
     v = var_c + se_delta_s * se_delta_s
-    p_bar = logistic(m / math.sqrt(1.0 + _PROBIT_SCALE * v))
+    p_bar = logistic(m / math.sqrt(1.0 + PROBIT_SCALE * v))
     return _binary_entropy(p0) - (
         p_bar * _binary_entropy(p_hit) + (1.0 - p_bar) * _binary_entropy(p_miss)
     )
@@ -75,7 +73,7 @@ def delta_learning_gain(
     se_delta_s: float,
 ) -> float:
     p = marginal_hit_probability(mu_c=mu_c, var_c=var_c, delta_s=delta_s, se_delta_s=se_delta_s)
-    scale_sq = 1.0 + _PROBIT_SCALE * se_delta_s * se_delta_s
+    scale_sq = 1.0 + PROBIT_SCALE * se_delta_s * se_delta_s
     se_sq = se_delta_s * se_delta_s
     return 0.5 * math.log1p(se_sq * p * (1.0 - p) / scale_sq)
 

@@ -3,6 +3,7 @@ import {
   armReading,
   currentRound,
   dash as dashboard,
+  estimate,
   liveRow,
   ownLevel,
   servedLabel,
@@ -23,7 +24,7 @@ function l2Terminal() {
           reading: armReading({
             arm: { round, label, key: `sp_${round}_${idx}` },
             election: { held: true, selected: label === crowned },
-            ability: { theta: 0.1 * (idx - 1), se: 0.3, ci_lo: null, ci_hi: null, caveat: null },
+            ability: { theta: estimate(0.1 * (idx - 1), [null, null], { unit: "theta", se: 0.3 }), caveat: null },
             panel: { scored: 20, expected: 20 },
           }),
         });
@@ -121,7 +122,7 @@ describe("roundCandidates — the in-flight round", () => {
     reading: armReading({
       // A FINISHED live row: the score report's lineage id has landed on it.
       arm: { round: 2, label: "C2.1", key: "9f2c1b7e-4a80-4d55-9c31-0b6ad2f11e03" },
-      own: { ...ownLevel(0.6, 8), fitness: { value: 0.6, ci_lo: 0.41, ci_hi: 0.69 } },
+      own: { ...ownLevel(0.6, 8), fitness: estimate(0.6, [0.41, 0.69]) },
       panel: { scored: 8, expected: 20 },
     }),
   });
