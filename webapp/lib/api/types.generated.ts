@@ -546,7 +546,7 @@ export interface RunStatus {
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** Null while the run has not stopped. */
   stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
-  mark: 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+  mark: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'success' | 'halted' | 'failed' | 'archived' | 'unknown';
 }
 
 /** Why a cycle reads paused: its declaration, or an accepted pause the loop has
@@ -1544,13 +1544,10 @@ export interface VerifyReading {
    * `same_individual` on the origin itself. */
   vs_origin: PairedReading;
   /** Whether the fresh cells leave the recorded hit rate standing: its level sits
-   * at or below the fresh band's upper bound. `None` exactly where
-   * `held_absent` says why. */
+   * at or below the fresh band's upper bound. `None`: `hard` picks sit below
+   * the level whatever the candidate is worth, and under two fresh cells have
+   * no band; read `vs_origin` there. */
   held: boolean | null;
-  /** Why the fresh cells make no held / dropped call: `hard_picks` sit below the
-   * level whatever the candidate is worth, and `under_two_fresh` cells have
-   * no band. Read `vs_origin` there. */
-  held_absent: 'hard_picks' | 'under_two_fresh' | null;
 }
 
 /** One member of the best-so-far line as an overlap reading holds it. */
@@ -1604,7 +1601,6 @@ export interface ServedDashboard {
   at_offset: number;
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
   optimizer_step: string | null;
-  state_since: string;
   stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   measuring_arm: ArmName | null;
@@ -1620,10 +1616,8 @@ export interface ServedDashboard {
   recent_backend_warnings: BackendWarning[];
   total_backend_calls: number;
   current_query_payload: string | null;
-  open_positions: number[];
   backpressure: ServedBackpressure | null;
   measured_unit: 'sample' | 'cell';
-  at_time: string;
   round_cells_ceiling: number;
   /** Set where the bench defaults or the treatment the campaign's declaration is a
    * delta over moved since it was declared, under an unchanged origin: this
@@ -2149,7 +2143,6 @@ export interface NodeOutput {
 /** The round's standing in its eliminator ``member``'s race. */
 export interface RacingBlock {
   member: string;
-  current_id: string;
   n_samples: number;
   top: Record<string, unknown>[];
 }
@@ -2444,7 +2437,7 @@ export interface LoopWarning {
  * signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'hold' | 'intervention' | 'launch_clock' | 'left_comparison' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -2722,7 +2715,6 @@ export interface Arm {
  * quantity. It LABELS a comparison and refuses none: a pair that differs is
  * still read, and says on what. */
 export interface PairGuard {
-  state: 'controlled' | 'uncontrolled' | 'differs';
   /** `state` in words, with what differs behind it. */
   sentence: string;
   /** The declared head-to-head the headlines were read against; `None` where no
@@ -2731,6 +2723,7 @@ export interface PairGuard {
   /** Every campaign it is taken over is an arm of that head-to-head. */
   controlled: boolean;
   differs_on: ('instrument_id' | 'dataset_hash' | 'split' | 'bench_rows' | 'scorer_id' | 'models' | 'origin' | 'budget' | 'defaults' | 'optimizer_models' | 'human_intervened' | 'origin_reading')[];
+  state: 'controlled' | 'uncontrolled' | 'differs';
 }
 
 /** What stops a run short of its budget, so no arm outlasts another on a stall
@@ -4363,12 +4356,9 @@ export interface CellsResponse {
   unmeasured_samples: number;
 }
 
-/** Whether a scope has a δ ruler, and which one. */
+/** Whether a scope has a δ ruler, and on what model. */
 export interface RulerStanding {
   state: 'fitted' | 'not_fitted';
-  /** The scale every θ and δ of this scope is read on (`RulerStamp.id`). Null while
-   * not fitted. */
-  ruler_id: string | null;
   /** Null while not fitted. */
   calibration_model: '1PL' | '2PL' | null;
 }
@@ -4570,7 +4560,7 @@ export interface LaunchAnswer {
  * ``None`` exactly where ``state`` is not ``read``. */
 export interface VerificationGradedView {
   kind: 'verification_graded';
-  verification: VerificationPass;
+  verification: VerifyPass | BenchPass | NoiseFloorPass;
   subject: 'origin' | 'selected' | null;
   tolerance: number | null;
   reserve_usd: number | null;
@@ -4580,20 +4570,40 @@ export interface VerificationGradedView {
   refusal: string | null;
 }
 
-/** One individual's held-out pass, as the facts it banked — never a grade of
- * them. */
-export interface VerificationPass {
-  kind: 'origin' | 'panel' | 'backfill' | 'parent' | 'repair' | 'overlap' | 'verify' | 'bench' | 'noise_floor';
+export interface VerifyPass {
   arm: ArmName;
   sp_hash: string;
   cells: [string, string, boolean][];
   sample_keys: string[];
   stop: PassStop | null;
   scorer_id: string;
-  strategy: 'random' | 'hard' | null;
-  seed: number | null;
-  reads_before: number | null;
   measured_datasets: Record<string, string>;
+  kind: 'verify';
+  strategy: 'random' | 'hard';
+  seed: number | null;
+}
+
+export interface BenchPass {
+  arm: ArmName;
+  sp_hash: string;
+  cells: [string, string, boolean][];
+  sample_keys: string[];
+  stop: PassStop | null;
+  scorer_id: string;
+  measured_datasets: Record<string, string>;
+  kind: 'bench';
+  reads_before: number;
+}
+
+export interface NoiseFloorPass {
+  arm: ArmName;
+  sp_hash: string;
+  cells: [string, string, boolean][];
+  sample_keys: string[];
+  stop: PassStop | null;
+  scorer_id: string;
+  measured_datasets: Record<string, string>;
+  kind: 'noise_floor';
 }
 
 /** A noise-floor pass's reading: its fresh composites beside the recorded level,
@@ -5429,7 +5439,7 @@ export type HitSpread = 'unmeasured' | 'never' | 'partly' | 'always';
 export type ArchiveMode = 'compact' | 'restore' | 'purge-cold';
 
 // promptpotter.domain.cycle_index::StatusMark
-export type StatusMark = 'archived' | 'running' | 'scoring' | 'starting' | 'queued' | 'gate' | 'paused' | 'detached' | 'success' | 'halted' | 'failed' | 'unknown';
+export type StatusMark = 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'success' | 'halted' | 'failed' | 'archived' | 'unknown';
 
 // promptpotter.domain.dataset_start::StartBlock
 export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unreadable' | 'backend_unreachable';

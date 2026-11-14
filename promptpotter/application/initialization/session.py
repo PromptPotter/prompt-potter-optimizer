@@ -17,8 +17,8 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
+    ArmAct,
     BackendRevision,
-    InterventionRecord,
     PipelineRead,
 )
 from promptpotter.domain.sample import Bank
@@ -70,7 +70,7 @@ class LaunchState:
     resumed_from_round: int = 1
     # Seated once, before any cell is read: by run init (`runner/mint.py`) or a pass's opener.
     scoring: ScorerSetup = field(init=False)
-    # Seeded off the cycle's index at init; afterwards written only by `record_intervention`.
+    # Seeded off the cycle's index at init; afterwards written only by `act`.
     human_intervened: bool = False
     control: RunControl = field(default_factory=RunControl)
     flight: FlightGauge | None = None
@@ -128,10 +128,10 @@ class Session:
             model_capabilities=self.pipeline_schema.model_capabilities,
         )
 
-    def record_intervention(self, kind: str) -> None:
+    def act(self, act: ArmAct) -> None:
         """decisions.md § 0005: the act is banked on the cycle, and every run it scores after grades C."""
-        self.store.campaigns.append(self.hop, InterventionRecord(kind=kind))
-        self.state.human_intervened = True
+        self.store.campaigns.act(self.hop, act)
+        self.state.human_intervened |= act.babysits
 
     def bound(self, hop: CycleHop, *, purpose: Purpose) -> Session:
         """*purpose* is the campaign's declaration's; the bank and partition are what *hop*'s chain drew."""

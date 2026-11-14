@@ -67,12 +67,16 @@ from promptpotter.domain.phase_views import (
 )
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
+    ArmsGate,
     ElectionRecord,
+    Ended,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
+    Paused,
     PhaseRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
@@ -206,22 +210,24 @@ class ReadoutProjection(Projection):
         self._narration.read(self.at_offset, record)
         if record.spend is not None:
             self._write(render_run_spend(record.spend))
-        if record.stop_reason is not None:
+        state = record.state
+        if isinstance(state, Paused | Ended):
             # Every entry point's readout ends on why, so no completion box repeats it.
-            head, *rest = stop_lines(record.stop_reason, detail=record.detail)
-            ink = DIM if stop_reason_outcome(record.stop_reason) is StopOutcome.SUCCESS else YELLOW
+            detail = state.detail if isinstance(state, Paused) else ""
+            head, *rest = stop_lines(state.stop_reason, detail=detail)
+            ink = DIM if stop_reason_outcome(state.stop_reason) is StopOutcome.SUCCESS else YELLOW
             self._write(f"\n  {ink}■ {head}{RESET}")
             for line in rest:
                 self._write(f"    {line}")
-        if record.gate == "arms":
+        if isinstance(state, ArmsGate):
             # ASCII-only: a cp1252 console is one of this line's sinks.
             n = self._round_num
             self._write(f"\n  [ARM GATE] round {n} holds for the operator's arms")
-            for idx, draft in enumerate(record.drafts):
+            for idx, draft in enumerate(state.drafts):
                 lineage = draft.individual.lineage
                 said = lineage.changes_description.encode("ascii", "replace").decode()
                 self._write(f"    draft {idx} ({lineage.source or 'unsourced'}): {said or '-'}")
-            if not record.drafts:
+            if not state.drafts:
                 self._write("    no proposer ran: every arm this round measures is the operator's")
             self._write("    answer: python -m promptpotter submit-arms --arms <arms.yaml>")
 
@@ -272,6 +278,9 @@ class ReadoutProjection(Projection):
         self._say(record)
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
+        self._say(record)
+
+    def _handle_cell_beat(self, record: CellBeatRecord) -> None:
         self._say(record)
 
     def _handle_round_warning(self, record: RoundWarningRecord) -> None:

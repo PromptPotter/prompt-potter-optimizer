@@ -403,9 +403,7 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
                 continue
             stores = tenant_stores(projects_root, WorkspaceDir(mint.path.parent.parent))
             with destroying(stores, registry, mint.path.name):
-                stores.campaigns.delete_campaign(
-                    mint.path.name, keep_results=False, changed_at=utcnow_iso()
-                )
+                stores.campaigns.delete_campaign(mint.path.name, keep_results=False)
             torn.append(mint)
     applied = landing._replace(runs=tuple(runs), torn=tuple(torn), kept=tuple(kept))
     stamp = LandedStamp(key=None if kept else landing_key(), at=utcnow_iso(), said=applied.said)

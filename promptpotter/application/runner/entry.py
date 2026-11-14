@@ -229,11 +229,6 @@ def _finalize_run(
                         cycle_result.rounds, fitness_ceiling=config.fitness_ceiling
                     )._asdict(),
                     prompt_hashes=selected.prompt_hashes(),
-                    origin_composite_fitness=(
-                        None
-                        if (origin := cycle_result.origin) is None or origin.composite is None
-                        else origin.composite.value
-                    ),
                     scorer_id=session.state.scoring.scorer.id,
                     result_round=cycle_result.result_round,
                     result_prompt_fields=cycle_result.result_prompt_fields,

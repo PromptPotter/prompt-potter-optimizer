@@ -20,7 +20,7 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
+from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat, silence_detail
 from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
     try_parse_json,
@@ -239,7 +239,6 @@ def _announce(call: _Call) -> None:
         round=context.round_num,
         candidate_idx=context.candidate_idx,
         model=call.merged.model,
-        started_at_ms=int(time.time() * 1000),
         prompt_chars=prompt_chars,
         injection_chars=dict(injections.chars),
         injection_dropped=dict(injections.dropped),
@@ -282,8 +281,7 @@ async def _provider_reply(call: _Call) -> LLMResponse:
     heartbeat_task: asyncio.Task[None] = asyncio.create_task(
         heartbeat(
             context.ledger,
-            call_id=call.call_id,
-            node=label,
+            CallBeat(call.call_id, label),
             round_num=context.round_num,
             start_monotonic=call.started,
             detail_fn=lambda: silence_detail(call.client, merged.model, role="provider"),

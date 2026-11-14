@@ -10,7 +10,7 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.scoring.closed_rounds import closed_rounds
-from promptpotter.domain.records.run_records import ComparisonExit, ForkTrigger
+from promptpotter.domain.records.run_records import ArmAct, ForkTrigger
 from promptpotter.domain.results import RoundResult, round_document_digest
 from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
@@ -89,9 +89,9 @@ async def resume_with_divergence_check(
         )
     if rewind is not None:
         campaign_store.rewind_to_round(hop, rewind)
-        campaign_store.leave_comparison(hop, ComparisonExit.REWIND)
+        campaign_store.act(hop, ArmAct.REWIND)
     if accept:
-        campaign_store.leave_comparison(hop, ComparisonExit.NO_DIVERGENCE_CHECK)
+        campaign_store.act(hop, ArmAct.NO_DIVERGENCE_CHECK)
 
     fork = await apply_correction(cycle, prior, dataset)
     if fork is None and found is not None:
@@ -116,7 +116,7 @@ def _branch(
     )
     if not self_inflicted:
         # The operator's flag ran the line past a divergence it halts on.
-        session.store.campaigns.leave_comparison(fork.child, ComparisonExit.FORK_ON_DIVERGENCE)
+        session.store.campaigns.act(fork.parent, ArmAct.FORK_ON_DIVERGENCE)
     if div.round_num == 0:
         cycle.reopen_origin()
     else:

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Literal, Self, get_args
+from typing import Annotated, Literal, get_args
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from promptpotter.domain.bench import BandedValue, OwnLevel, PassStop
 from promptpotter.domain.paired_reading import ArmName, PairedReading
-from promptpotter.domain.pass_kinds import PASSES, IndividualWalk
+from promptpotter.domain.pass_kinds import IndividualWalk
 from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -23,14 +23,11 @@ VERIFY_STRATEGY_LABELS: Worded[VerifyStrategy, str] = Worded(
 if set(VERIFY_STRATEGY_LABELS) != set(get_args(VerifyStrategy)):
     raise RuntimeError("VERIFY_STRATEGY_LABELS is out of step with VerifyStrategy")
 
-VerifyHeldAbsent = Literal["hard_picks", "under_two_fresh"]
 
+class HeldOutPass(FrozenModel):
+    """One individual's held-out pass, as the facts it banked — never a grade of them; its kind
+    is one whose `Pass` row brackets it on the ledger."""
 
-class VerificationPass(FrozenModel):
-    """One individual's held-out pass, as the facts it banked — never a grade of them."""
-
-    # A kind whose `Pass` row brackets it on the ledger.
-    kind: MeasurementRole
     arm: ArmName
     sp_hash: str
     # In walk order; a row the pass never reached is absent.
@@ -41,23 +38,10 @@ class VerificationPass(FrozenModel):
     stop: PassStop | None
     # The grader that stamped its live reading; a reader re-grades under its own.
     scorer_id: str
-    # `verify` alone: how its fresh rows were drawn, and the draw's seed.
-    strategy: VerifyStrategy | None
-    seed: int | None
-    # `bench` alone: individuals already graded on these rows when it was sent; a high count reads the headline optimistic.
-    reads_before: int | None
     # By `Sample.key`, each row measuring another dataset than the one the cycle is filed under.
     measured_datasets: dict[str, str] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def _kind_fields(self) -> Self:
-        if PASSES[self.kind].phase is None:
-            raise ValueError(f"a {self.kind} pass is no held-out pass")
-        if (self.strategy is None) is (self.kind == MeasurementRole.VERIFY):
-            raise ValueError("a verify pass names its draw, and only a verify pass")
-        if (self.reads_before is None) is (self.kind == MeasurementRole.BENCH):
-            raise ValueError("a bench pass counts its reads before, and only a bench pass")
-        return self
+    kind: MeasurementRole
 
     def walk(self) -> IndividualWalk[WalkedCell]:
         return IndividualWalk(self.arm.key, frozenset({self.kind}), self.cells)
@@ -78,6 +62,28 @@ class VerificationPass(FrozenModel):
         return out
 
 
+class VerifyPass(HeldOutPass):
+    kind: Literal[MeasurementRole.VERIFY] = MeasurementRole.VERIFY
+    # How its fresh rows were drawn, and the draw's seed.
+    strategy: VerifyStrategy
+    seed: int | None
+
+
+class BenchPass(HeldOutPass):
+    kind: Literal[MeasurementRole.BENCH] = MeasurementRole.BENCH
+    # Individuals already graded on these rows when it was sent; a high count reads the headline optimistic.
+    reads_before: int
+
+
+class NoiseFloorPass(HeldOutPass):
+    kind: Literal[MeasurementRole.NOISE_FLOOR] = MeasurementRole.NOISE_FLOOR
+
+
+type VerificationPass = Annotated[
+    VerifyPass | BenchPass | NoiseFloorPass, Field(discriminator="kind")
+]
+
+
 class NoiseBand(FrozenModel):
     """A noise-floor pass's reading: its fresh composites beside the recorded level, both over
     exactly the pass's rows (bl3.B2)."""
@@ -93,15 +99,15 @@ class BenchPasses(FrozenModel):
     """``runner/bench.py::read_bench`` is the one reading of these passes."""
 
     tolerance: int
-    origin: VerificationPass
+    origin: BenchPass
     # Set aside so the selection's pass fits under the search's ceiling (``runner/bench.py::reserve_selection_pass``).
     reserve_usd: float
     reserve_tokens: int
     # The latest pass of each individual the line selected, by its id: a pass measures an
     # individual, so a rewind displaces none.
-    selections: dict[str, VerificationPass]
+    selections: dict[str, BenchPass]
 
-    def pass_of(self, individual_id: str) -> VerificationPass | None:
+    def pass_of(self, individual_id: str) -> BenchPass | None:
         if individual_id == self.origin.arm.key:
             return self.origin
         return self.selections.get(individual_id)
@@ -136,16 +142,6 @@ class VerifyReading(FrozenModel):
     )
     held: bool | None = Field(
         description="Whether the fresh cells leave the recorded hit rate standing: its level sits "
-        "at or below the fresh band's upper bound. `None` exactly where `held_absent` says why."
+        "at or below the fresh band's upper bound. `None`: `hard` picks sit below the level whatever "
+        "the candidate is worth, and under two fresh cells have no band; read `vs_origin` there."
     )
-    held_absent: VerifyHeldAbsent | None = Field(
-        description="Why the fresh cells make no held / dropped call: `hard_picks` sit below the "
-        "level whatever the candidate is worth, and `under_two_fresh` cells have no band. Read "
-        "`vs_origin` there."
-    )
-
-    @model_validator(mode="after")
-    def _held_or_why_not(self) -> Self:
-        if (self.held is None) is (self.held_absent is None):
-            raise ValueError("a verify reading makes its held call, or says why it makes none")
-        return self

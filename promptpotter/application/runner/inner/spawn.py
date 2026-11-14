@@ -75,7 +75,6 @@ from promptpotter.infrastructure.store.layout import (
     sandbox_owner_path,
 )
 from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
     CellSendRefusedError,
     CellUnscoreableError,
@@ -350,7 +349,7 @@ def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
         return
     store = sandbox_stores(cell.ctx).campaigns
     if store.holder(hop) is None:
-        store.delete_campaign(cell.campaign_id, keep_results=False, changed_at=utcnow_iso())
+        store.delete_campaign(cell.campaign_id, keep_results=False)
 
 
 async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, Any]:

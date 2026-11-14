@@ -24,7 +24,7 @@ from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, MeasuredCell, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
-from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.infrastructure.llm.heartbeat import CellBeat, heartbeat
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, current_round
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.io import HeldLock
@@ -157,8 +157,7 @@ async def _claim_cell(
                 waiting = asyncio.create_task(
                     heartbeat(
                         active_cycle_ledger(),
-                        call_id=f"scoring:{sample.id}",
-                        node="backend_scoring",
+                        CellBeat(sample.id),
                         round_num=current_round(),
                         start_monotonic=time.monotonic(),
                         detail_fn=lambda: "another run is measuring this cell",

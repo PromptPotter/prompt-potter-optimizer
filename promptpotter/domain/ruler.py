@@ -286,22 +286,16 @@ if _missing_delta_labels:
 
 
 class RulerStanding(FrozenModel):
-    """Whether a scope has a δ ruler, and which one."""
+    """Whether a scope has a δ ruler, and on what model."""
 
     state: Literal["fitted", "not_fitted"]
-    ruler_id: str | None = Field(
-        description="The scale every θ and δ of this scope is read on (`RulerStamp.id`). "
-        "Null while not fitted."
-    )
     calibration_model: CalibrationModel | None = Field(description="Null while not fitted.")
 
     @classmethod
     def of(cls, ruler: DeltaRuler | None) -> RulerStanding:
         if ruler is None:
-            return cls(state="not_fitted", ruler_id=None, calibration_model=None)
-        return cls(
-            state="fitted", ruler_id=ruler.anchor_id, calibration_model=ruler.calibration_model
-        )
+            return cls(state="not_fitted", calibration_model=None)
+        return cls(state="fitted", calibration_model=ruler.calibration_model)
 
     @property
     def label(self) -> str | None:

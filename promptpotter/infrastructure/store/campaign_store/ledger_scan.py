@@ -9,6 +9,7 @@ from typing import Any, ClassVar, NamedTuple, assert_never, cast, get_args
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.cycle_index import Intervention
 from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import IndividualWalk
@@ -18,28 +19,30 @@ from promptpotter.domain.phase_views import (
     InitExitView,
     VerificationGradedView,
 )
-from promptpotter.domain.phases import CampaignPhase, RunPhase, StopReason
+from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     BABYSAT,
+    ArmAct,
+    ArmActRecord,
     ArmRecord,
+    ArmsGate,
     CampaignCeilingRecord,
-    ComparisonExit,
     CycleFinalRecord,
     CycleMintedRecord,
     CycleShareRecord,
     CycleSupersededRecord,
     ElectionRecord,
+    Ended,
     ForkDirection,
     ForkGradedRecord,
     ForkSpec,
     Hold,
-    InterventionRecord,
     LaunchClockRecord,
-    LeftComparisonRecord,
+    Paused,
     PhaseRecord,
     PipelineRead,
     PricedKeyRecord,
@@ -73,6 +76,7 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import (
+    BenchPass,
     BenchPasses,
     VerificationPass,
     VerifyReading,
@@ -105,7 +109,10 @@ class _Last:
 
 @cache
 def _last(record: type[StrictModel]) -> type[_Last]:
-    return type(f"_Last{record.__name__}", (_Last,), {"records": (record,)})
+    """Held by its name here, as a fold snapshot pickles it."""
+    made = type(f"_Last{record.__name__}", (_Last,), {"records": (record,)})
+    globals()[made.__name__] = made
+    return made
 
 
 @dataclass(frozen=True)
@@ -143,16 +150,16 @@ class _ResolvedRun:
         return self._found
 
 
-class _LeftComparison:
-    records: ClassVar[RecordClasses] = (LeftComparisonRecord,)
+class _ArmActs:
+    records: ClassVar[RecordClasses] = (ArmActRecord,)
 
     def __init__(self) -> None:
-        self._found: list[ComparisonExit] = []
+        self._found: list[ArmAct] = []
 
-    def feed(self, record: LeftComparisonRecord) -> None:
+    def feed(self, record: ArmActRecord) -> None:
         self._found.append(record.act)
 
-    def value(self) -> list[ComparisonExit]:
+    def value(self) -> list[ArmAct]:
         return list(self._found)
 
 
@@ -171,15 +178,15 @@ class _LaunchClocks:
 
 class CycleFacts(NamedTuple):
     minted: CycleMintedRecord | None = None
-    ended: RunPhaseRecord | None = None
-    paused: RunPhaseRecord | None = None
+    ended: Ended | None = None
+    ended_at: str | None = None
     # The ending the standing launch retired; a pause or an ending of its own clears it.
     resumed_ending: StopReason | None = None
     final: CycleFinalRecord | None = None
     superseded_by: str | None = None
     error: ErrorRecord | None = None
     direction: ForkDirection | None = None
-    interventions: tuple[InterventionRecord, ...] = ()
+    interventions: tuple[Intervention, ...] = ()
     spawned_by: SpawnedBy | None = None
     formula: str | None = None
     updated_at: str = ""
@@ -197,7 +204,7 @@ _CycleFact = (
     | CycleFinalRecord
     | CycleSupersededRecord
     | ForkGradedRecord
-    | InterventionRecord
+    | ArmActRecord
     | SpawnedRecord
     | RunPhaseRecord
     | PhaseRecord
@@ -228,18 +235,18 @@ class _CycleFacts:
         match record:
             case CycleMintedRecord():
                 # The babysat stamp is the mint's own: an intervention, never a second append.
-                stamped = (InterventionRecord(kind=BABYSAT, timestamp=record.timestamp),)
+                stamped = (Intervention(kind=BABYSAT, at=record.timestamp),)
                 held = held._replace(
                     minted=record,
                     interventions=(*held.interventions, *(stamped if record.babysat else ())),
                 )
-            case RunPhaseRecord(run_phase=RunPhase.TERMINAL):
-                held = held._replace(ended=record, paused=None, resumed_ending=None)
+            case RunPhaseRecord(state=Ended() as ended):
+                held = held._replace(ended=ended, ended_at=record.timestamp, resumed_ending=None)
             case RunPhaseRecord():
-                paused = record.run_phase is RunPhase.PAUSED
+                paused = isinstance(record.state, Paused)
                 held = held._replace(
                     ended=None,
-                    paused=record if paused else None,
+                    ended_at=None,
                     resumed_ending=None
                     if paused
                     else held.ended.stop_reason
@@ -258,8 +265,11 @@ class _CycleFacts:
                 held = held._replace(superseded_by=record.successor_cycle_id)
             case ForkGradedRecord():
                 held = held._replace(direction=record.direction)
-            case InterventionRecord():
-                held = held._replace(interventions=(*held.interventions, record))
+            case ArmActRecord():
+                if not record.act.babysits:
+                    return
+                act = Intervention(kind=record.act.value, at=record.timestamp)
+                held = held._replace(interventions=(*held.interventions, act))
             case SpawnedRecord():
                 held = held._replace(spawned_by=record.spawned_by)
             case PhaseRecord():
@@ -315,7 +325,7 @@ class _Progress:
     def feed(self, line: dict[str, Any]) -> None:
         kind = line.get("record_type")
         # A heartbeat proves the process alive, not that it progressed.
-        if kind == "llm_call_progress":
+        if kind in ("llm_call_progress", "cell_beat"):
             return
         held = self._held
         if kind == "flight":
@@ -730,7 +740,7 @@ class _Timeline:
             case PhaseRecord():
                 held.phases.append((at, record.phase, record.round, record.event))
             case RunPhaseRecord():
-                held.gates.append((at, record.run_phase is RunPhase.GATE))
+                held.gates.append((at, isinstance(record.state, ArmsGate)))
             case RoundClosedRecord():
                 held.closes.append((at, record.round))
             case TokenUsageRecord() if record.bill is not None:
@@ -770,7 +780,7 @@ LedgerIndex.readers(
         ),
     ),
     _ResolvedRun,
-    _LeftComparison,
+    _ArmActs,
     _LaunchClocks,
     _CycleFacts,
     _CycleHold,
@@ -814,11 +824,9 @@ def scan_resolved_run(spans: Iterable[LedgerSpan]) -> ResolvedRun:
     return resolved
 
 
-def scan_left_comparison(spans: Iterable[LedgerSpan]) -> list[ComparisonExit]:
+def scan_arm_acts(spans: Iterable[LedgerSpan]) -> list[ArmAct]:
     """Every act that ran the line off its declared comparison, oldest first."""
-    return [
-        act for span in spans for act in LedgerIndex.of(span.path).view(_LeftComparison, span.until)
-    ]
+    return [act for span in spans for act in LedgerIndex.of(span.path).view(_ArmActs, span.until)]
 
 
 def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
@@ -842,7 +850,8 @@ def scan_cycle_hold(ledger_path: Path) -> CycleHold | None:
 def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
     held: BenchPasses | None = None
     for view in _graded(spans, MeasurementRole.BENCH):
-        taken = view.verification
+        if not isinstance(taken := view.verification, BenchPass):
+            continue
         if view.subject == "selected":
             if held is not None:
                 held = held.model_copy(

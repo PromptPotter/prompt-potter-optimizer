@@ -15,7 +15,13 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.records.run_records import RunPhaseRecord
+from promptpotter.domain.records.run_records import (
+    ArmsGate,
+    Ended,
+    Paused,
+    Running,
+    RunPhaseRecord,
+)
 from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
@@ -60,7 +66,7 @@ def read_run_state(
     launch's claim, the pause asked) and the two locks' liveness alone. *graded* is a held
     producer's clock grade (`_graded`): the clocks only grade attachment, so a quiet producer
     reads WEDGED, still attached; ``None`` where no producer holds the cycle."""
-    declared = None if last is None else last.run_phase
+    declared = None if last is None else last.state.run_phase
     terminal = declared is RunPhase.TERMINAL
     scoring = cycle_held and pass_held
     # A pause is asked of a producer: with none holding the cycle, a RUNNING one is owed (SILENT).
@@ -77,28 +83,30 @@ def read_run_state(
     # Before the lifecycle: a pass scores ended cycles too, and a pause asked of it is standing.
     if scoring:
         run = RunState(RunPhase.PAUSED if asked is not None else RunPhase.SCORING, producer)
-    elif terminal:
-        return RunState(
-            RunPhase.TERMINAL, producer, ended=None if last is None else last.stop_reason
-        )
+    elif last is not None and isinstance(last.state, Ended):
+        return RunState(RunPhase.TERMINAL, producer, ended=last.state.stop_reason)
     elif asked is not None or declared is RunPhase.PAUSED:
         run = RunState(RunPhase.PAUSED, producer)
-    elif producer.state is ProducerState.HELD:
-        assert last is not None, "a gate is declared"
-        return RunState(RunPhase.GATE, producer, gate=last.gate, drafts=len(last.drafts))
+    elif (
+        producer.state is ProducerState.HELD
+        and last is not None
+        and isinstance(last.state, ArmsGate)
+    ):
+        return RunState(
+            RunPhase.GATE, producer, gate=last.state.gate, drafts=len(last.state.drafts)
+        )
     else:
         return RunState(RunPhase.RUNNING if producer.attached else RunPhase.DETACHED, producer)
     if run.run_phase is not RunPhase.PAUSED:
         return run
     # A pass declares no stop: the pause it reads as is the one asked of it.
-    stood = last if not scoring and last is not None and declared is RunPhase.PAUSED else None
-    if stood is not None and stood.stop_reason is not None and stood.cause is not None:
+    if not scoring and last is not None and isinstance(last.state, Paused):
         return run._replace(
             pause=PauseReading(
-                stop_reason=stood.stop_reason,
-                cause=stood.cause,
-                detail=stood.detail,
-                at=stood.timestamp,
+                stop_reason=last.state.stop_reason,
+                cause=last.state.cause,
+                detail=last.state.detail,
+                at=last.timestamp,
             )
         )
     if asked is None:
@@ -155,7 +163,7 @@ def run_owed(cycle_dir: Path, jobs_dir: Path) -> bool:
     """`SILENT`'s fact without its lock read: the run declared RUNNING, no live launch claiming it.
     Read under the producer lock, where `derive_run_state` would see its reader's own hold."""
     last = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], RunPhaseRecord)
-    owed = last is not None and last.run_phase is RunPhase.RUNNING
+    owed = last is not None and isinstance(last.state, Running)
     return owed and _claimed(cycle_dir, jobs_dir) is None
 
 

@@ -126,7 +126,6 @@ class HardSamples(StrictModel):
     # The samples this scope measured: δ descending, then the ones off the ruler; ties by row.
     sample_order: list[str]
     samples: dict[str, SampleDifficulty]
-    round_order: list[str]
     cells: list[HardSampleCell]
 
     def difficulty(self, key: str) -> SampleDifficulty:

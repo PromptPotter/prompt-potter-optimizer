@@ -50,7 +50,6 @@ class InitExitView(FrozenModel):
     cycle_id_short: str
     samples: int
     bench_samples: int
-    origin_samples: int = 0
     resumed_from_round: int = 1
     cached_rounds_count: int = 0
     task_context_keys: int = 0

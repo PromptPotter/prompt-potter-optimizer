@@ -33,7 +33,6 @@ from promptpotter.infrastructure.store.read_model import (
     read_file,
     read_rows,
 )
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import FileKind, FileUnreadableError
 
 logger = logging.getLogger(__name__)
@@ -52,11 +51,10 @@ TASK_CONTEXT_DIR = "task-context"
 
 
 class BankLabel(FrozenModel):
-    """A line of `labels.jsonl`: from ``labelled_at`` on, *label* names the bank *dataset_hash*."""
+    """A line of `labels.jsonl`: *label* names the bank *dataset_hash*."""
 
     label: str
     dataset_hash: str
-    labelled_at: str
 
 
 class BankCut(FrozenModel):
@@ -109,7 +107,7 @@ class TenantDatasetStore:
         """A label moves; no bank and no measurement filed under either hash is rewritten."""
         validate_dataset_name(label)
         if self.hash_of(label) != digest:
-            moved = BankLabel(label=label, dataset_hash=digest, labelled_at=utcnow_iso())
+            moved = BankLabel(label=label, dataset_hash=digest)
             append_jsonl(self._labels_path(), moved.model_dump())
 
     def labels(self) -> dict[str, str]:

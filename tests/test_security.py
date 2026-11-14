@@ -197,6 +197,7 @@ from promptpotter.domain.prompt_block import (
 )
 from promptpotter.domain.records.run_records import (
     Bill,
+    Ended,
     ForkDirection,
     ForkSpec,
     ForkTrigger,
@@ -204,6 +205,8 @@ from promptpotter.domain.records.run_records import (
     Lapse,
     LaunchedEffect,
     LaunchedJob,
+    Paused,
+    Running,
     RunPhaseRecord,
     RunWiringRecord,
     StandingEffect,
@@ -709,7 +712,15 @@ def poisoned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Poisoned:
                 update={"reason": Broken(failure=runtime_failure, degradation={})}
             ),
         },
-        diagnostics=RoundDiagnostics(n_valid=1, samples=[sample]),
+        diagnostics=RoundDiagnostics(
+            rank_buckets={},
+            top_k_accuracy={},
+            near_misses=[],
+            n_valid=1,
+            error_rate=0.0,
+            warning_rate=0.0,
+            samples=[sample],
+        ),
         cells={},
     )
     # Off the L4 recursion: no inner cells measure this run's arms.
@@ -1967,7 +1978,6 @@ async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_
         stores.campaigns.delete_campaign(
             trail_hop.campaign_id,
             keep_results=keep_results,
-            changed_at="",
             inner_sandbox_root=sandbox.parent,
         )
         assert account.tenant_trail(stores).lines == trail.lines, (
@@ -2137,7 +2147,7 @@ def held_cycle(built_stores: Stores) -> _HeldCycle:
 def _running(cycle_dir: Path) -> Path:
     """A producer holding *cycle_dir* that banked its RUNNING phase; the cycle's ledger."""
     running = CycleEventLog.open(CycleDir(cycle_dir))
-    running.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    running.append(RunPhaseRecord(state=Running()))
     running.append(
         RunWiringRecord(
             round_cells_ceiling=1,
@@ -2149,7 +2159,6 @@ def _running(cycle_dir: Path) -> Path:
             run_limits=RunLimits(),
             defaults_drift=None,
             backend_revision=None,
-            tree_hash="tree",
         )
     )
     ledger = CycleLayout(cycle_dir).ledger
@@ -2177,7 +2186,7 @@ def test_an_archived_campaigns_launch_and_pass_are_refused_at_the_slot_door_befo
     # Under the admission gate, on a full box or a free one: nothing queues, claims its cycle,
     # writes a job or spends the asker's rate token.
     campaigns, hop = built_stores.campaigns, held_cycle.hop
-    campaigns.archive_campaign(hop.campaign_id, changed_at="2026-01-01T00:00:00Z")
+    campaigns.archive_campaign(hop.campaign_id)
     asker = dataclasses.replace(
         built_stores,
         identity=dataclasses.replace(
@@ -2502,10 +2511,10 @@ async def test_the_reaper_takes_a_producer_only_once_it_no_longer_holds_its_cycl
         campaigns.append(hop, RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.COMMAND))
         assert built_stores.mark_producer_vanished(hop) is False
     raced = campaigns.last(hop, RunPhaseRecord)
-    assert raced is not None and raced.run_phase is RunPhase.PAUSED, (
+    assert raced is not None and isinstance(raced.state, Paused), (
         "a pause landed after the reaper's read was ended vanished"
     )
-    campaigns.append(hop, RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    campaigns.append(hop, RunPhaseRecord(state=Running()))
     assert await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root) == 1
     swept = campaigns.load(hop, moment=None)
     assert swept is not None and swept.stop_reason is StopReason.PRODUCER_VANISHED
@@ -2558,13 +2567,12 @@ def test_two_campaigns_on_one_origin_share_no_sandbox_so_deleting_one_spares_the
     campaigns.mint_cycle(finished)
     # Finished, so the delete guard is about the sandbox key and not about liveness.
     CycleEventLog.open(CycleDir(campaigns.cycle_dir(finished))).append(
-        RunPhaseRecord(run_phase=RunPhase.TERMINAL, stop_reason=StopReason.ROUNDS_BUDGET)
+        RunPhaseRecord(state=Ended(stop_reason=StopReason.ROUNDS_BUDGET))
     )
     campaigns.create_campaign(minted_campaign(finished, dataset_name="ppself"))
     assert campaigns.delete_campaign(
         "ppself__aaaaaa",
         keep_results=False,
-        changed_at="2026-01-01T00:00:00Z",
         inner_sandbox_root=inner_sandboxes_dir(built_stores.shared_root),
     )
     assert not a.exists() and (b / "tenant").is_dir(), (
@@ -3530,7 +3538,7 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     inner.campaigns.mint_cycle(leaf)
     leaf_dir = inner.campaigns.cycle_dir(leaf)
     into_leaf = Subject.of((acts_hop, leaf)).command_fields
-    CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(state=Running()))
     await asyncio.to_thread(hold_cycle, leaf_dir)
     controls["inner, its own loop running"] = inner.run_state(leaf).admission.refusal
     paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run", door=Door.HOST)
@@ -3612,14 +3620,14 @@ async def test_a_loop_command_accepted_by_its_act_is_taken_by_its_loop_or_voided
     stores.campaigns.create_campaign(minted_campaign(ended_hop))
     stores.campaigns.mint_cycle(ended_hop)
     ended_dir = stores.campaigns.cycle_dir(ended_hop)
-    CycleEventLog.open(CycleDir(ended_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    CycleEventLog.open(CycleDir(ended_dir)).append(RunPhaseRecord(state=Running()))
     await asyncio.to_thread(hold_cycle, ended_dir)
     release_cycle(ended_dir)
     looped = CycleHop(campaign_id="looped", cycle_id="cycle_looped")
     stores.campaigns.create_campaign(minted_campaign(looped))
     stores.campaigns.mint_cycle(looped)
     looped_dir = stores.campaigns.cycle_dir(looped)
-    CycleEventLog.open(CycleDir(looped_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    CycleEventLog.open(CycleDir(looped_dir)).append(RunPhaseRecord(state=Running()))
     await asyncio.to_thread(hold_cycle, looped_dir)
     asked = CommandCall(
         PauseCyclePayload(campaign_id="looped", cycle_id="cycle_looped", reason="stop"),
@@ -4055,7 +4063,7 @@ def test_every_jobs_cancel_is_resolved_before_any_is_dispatched(
     run_dir.mkdir(parents=True)
     with pytest.raises(TaskUncancellableError):
         launch_cancels([queued, running], caller.stores, Door.HOST)
-    CycleEventLog.open(CycleDir(run_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    CycleEventLog.open(CycleDir(run_dir)).append(RunPhaseRecord(state=Running()))
     hold_cycle(run_dir)
     acts = launch_cancels([queued, running], caller.stores, Door.HOST)
     release_cycle(run_dir)

@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from promptpotter.application.bench.resume_and_fork.decisions import record_decision
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
@@ -27,7 +28,6 @@ from promptpotter.domain.records.run_records import (
     ForkDirection,
     ForkSpec,
     ForkTrigger,
-    ResumeCheckpointRecord,
     parent_address,
 )
 from promptpotter.domain.run_standing import line_reference
@@ -72,13 +72,11 @@ def _fork_sibling_setup(
     new_dir.mkdir(parents=True)
 
     # The FORK_CUT's own offset: a parent still running appends past it, never into the fork.
-    cut = CycleEventLog.open(CycleDir(parent_dir)).append(
-        ResumeCheckpointRecord(
-            kind=ForkCutFrom.kind,
-            node=None,
-            inputs_ref=ForkCutFrom(from_round=from_round, fork=payload),
-            outcome=child.cycle_id,
-        )
+    cut = record_decision(
+        CycleEventLog.open(CycleDir(parent_dir)),
+        ForkCutFrom(from_round=from_round, fork=payload),
+        child.cycle_id,
+        node=None,
     )
     logger.info(
         "Forked %s → %s at round %d [trigger=%s]",

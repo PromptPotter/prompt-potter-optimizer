@@ -62,8 +62,8 @@ from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import (
     BenchPasses,
     NoiseBand,
-    VerificationPass,
-    VerifyHeldAbsent,
+    NoiseFloorPass,
+    VerifyPass,
     VerifyReading,
     VerifyStrategy,
 )
@@ -140,13 +140,13 @@ def pick_fresh(
 
 def _held(
     strategy: VerifyStrategy, n_fresh: int, fresh: BandedValue | None, recorded: BandedValue | None
-) -> tuple[bool | None, VerifyHeldAbsent | None]:
+) -> bool | None:
     if strategy != "random":
-        return None, "hard_picks"
+        return None
     if n_fresh < 2 or fresh is None or recorded is None or fresh.ci_hi is None:
-        return None, "under_two_fresh"
+        return None
     # The tolerance absorbs the float error of two means taken over different row counts.
-    return fresh.ci_hi + 1e-9 >= recorded.value, None
+    return fresh.ci_hi + 1e-9 >= recorded.value
 
 
 def verify_member(
@@ -176,7 +176,7 @@ def verify_member(
 
 
 def verify_reading(
-    banked: VerificationPass,
+    banked: VerifyPass,
     *,
     scorer: Scorer,
     fresh: CellSheet,
@@ -192,8 +192,6 @@ def verify_reading(
         return None if a is None or b is None else a.value - b.value
 
     strategy = banked.strategy
-    assert strategy is not None, "a verify pass names its draw"
-    held, held_absent = _held(strategy, fresh_level.n, fresh_level.fitness, recorded_level.fitness)
     return VerifyReading(
         label=banked.arm.label,
         scorer_id=scorer.id,
@@ -214,14 +212,11 @@ def verify_reading(
             scope=RoleScope.REPORT,
             instrument_id=measured.instrument_id,
         ),
-        held=held,
-        held_absent=held_absent,
+        held=_held(strategy, fresh_level.n, fresh_level.fitness, recorded_level.fitness),
     )
 
 
-def read_verify(
-    stores: Stores, hop: CycleHop, banked: VerificationPass, scorer: Scorer
-) -> VerifyReading:
+def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Scorer) -> VerifyReading:
     chain = ledger_chain(CycleDir(stores.campaigns.cycle_dir(hop)), moment=None)
     # A pass is read before it is banked, so it joins the walks whether or not the ledger holds it.
     walks = [*scan_ledger_walks(chain), banked.walk()]
@@ -386,8 +381,7 @@ async def verify_candidate(
                     raise DiagnosticError(
                         f"the verify pass of {label!r} was paused before it measured a cell."
                     ) from None
-            banked = VerificationPass(
-                kind=MeasurementRole.VERIFY,
+            banked = VerifyPass(
                 arm=arm,
                 sp_hash=sp_hash,
                 cells=cells,
@@ -396,7 +390,6 @@ async def verify_candidate(
                 scorer_id=session.state.scoring.scorer.id,
                 strategy=strategy,
                 seed=seed,
-                reads_before=None,
             )
             reading = read_verify(stores, hop, banked, session.state.scoring.scorer)
             if reading.fresh.fitness is None:
@@ -448,8 +441,7 @@ async def verify_on_saturation(
             seed=seed,
         )
     except (DiagnosticError, BankedSearchPointError) as exc:
-        refused = VerificationPass(
-            kind=MeasurementRole.VERIFY,
+        refused = VerifyPass(
             # No round may name the winner here, so its id is its label.
             arm=ArmName(key=ArmKey(winner_id), round=round_num, label=winner_id),
             sp_hash="",
@@ -459,7 +451,6 @@ async def verify_on_saturation(
             scorer_id="",
             strategy="random",
             seed=seed,
-            reads_before=None,
         )
         _graded(
             ledger,
@@ -521,17 +512,13 @@ async def measure_noise_floor(
         band = mean_ci(composites) if len(composites) == k else None
         unread = band is None or recorded.composite is None
         graded = VerificationGradedView(
-            verification=VerificationPass(
-                kind=MeasurementRole.NOISE_FLOOR,
+            verification=NoiseFloorPass(
                 arm=arm,
                 sp_hash=sp_hash,
                 cells=cells,
                 sample_keys=[s.key for s in scoring_set],
                 stop=None,
                 scorer_id=scorer.id,
-                strategy=None,
-                seed=None,
-                reads_before=None,
             ),
             subject=None,
             tolerance=None,

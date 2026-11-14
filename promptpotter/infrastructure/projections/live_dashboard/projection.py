@@ -19,14 +19,16 @@ from promptpotter.domain.phase_views import (
     VerificationEnterView,
     VerificationGradedView,
 )
-from promptpotter.domain.phases import CampaignPhase, DashboardState, RunPhase
+from promptpotter.domain.phases import CampaignPhase, DashboardState
 from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     BackendWarningRecord,
     CycleMintedRecord,
     ElectionRecord,
+    Ended,
     FlightRecord,
     LLMCallProgressRecord,
     LLMCallRecord,
@@ -119,7 +121,6 @@ class LiveDashboardProjection(Projection):
         self._unwired: list[CycleRecord] | None = []
         self.state: LiveDashboardState
         self._measurement_node: str
-        self._at = ""
         self._standings: dict[int, tuple[LevelSeries | None, RunStanding | None]] = {}
         self._sticky_llm_calls: dict[str, tuple[int, NodeBlock]] = {}
         self._launch()
@@ -158,17 +159,12 @@ class LiveDashboardProjection(Projection):
             # Folded under the state it opens: a check-in bills its cycle before Start.
             unwired, self._unwired = self._unwired, None
             for held in unwired:
-                self._fold(held)
-        self._fold(record)
-
-    def _fold(self, record: CycleRecord) -> None:
-        self._at = record.timestamp
+                super().feed(held)
         super().feed(record)
 
     def _set_state(self, name: DashboardState, *, step: str | None = None) -> None:
         self.state.state = name
         self.state.optimizer_step = step
-        self.state.state_since = self._at
 
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
         for name, value in LiveDashboardState.launched(record).items():
@@ -178,11 +174,11 @@ class LiveDashboardProjection(Projection):
         self._measurement_node = record.measurement_node
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
-        if self.state.declared_phase == record.run_phase:
+        if self.state.declared_phase == record.state.run_phase:
             return
-        self.state.declared_phase = record.run_phase
-        if record.run_phase == RunPhase.TERMINAL:
-            self.state.stop_reason = record.stop_reason
+        self.state.declared_phase = record.state.run_phase
+        if isinstance(record.state, Ended):
+            self.state.stop_reason = record.state.stop_reason
             self._set_state(DashboardState.STOPPED)
             self.state.measuring_arm = None
         else:
@@ -420,12 +416,10 @@ class LiveDashboardProjection(Projection):
         if not self._open_samples:
             s.current_query_payload = None
             s.current_position = None
-            s.open_positions = []
             return
         sid, (query_text, arm, _depth) = next(iter(self._open_samples.items()))
         s.current_query_payload = query_text
         s.current_position = sid
-        s.open_positions = list(self._open_samples)
         s.measuring_arm = None if arm is None else self._buffer.name(arm)
 
     def _absorb_sample_scored(self, facts: MeasuredCell, *, last_in_candidate: bool) -> None:
@@ -463,6 +457,10 @@ class LiveDashboardProjection(Projection):
         self._in_flight = (record.call_id, record.node)
 
     def _handle_llm_call_progress(self, record: LLMCallProgressRecord) -> None:
+        if record.inner is not None:
+            self._inner = record.inner
+
+    def _handle_cell_beat(self, record: CellBeatRecord) -> None:
         if record.inner is not None:
             self._inner = record.inner
 
@@ -550,7 +548,6 @@ class LiveDashboardProjection(Projection):
                 "waiting_on": waiting_on,
                 "waiting_since": waiting_since,
                 "backpressure": None if held is None else held.reading,
-                "at_time": self._at,
             }
         )
 

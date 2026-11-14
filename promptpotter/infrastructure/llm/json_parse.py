@@ -45,11 +45,11 @@ class OptimizerPromptParseError(RuntimeError):
         self.model = model
         self.finish_reason = finish_reason
         # BILLED across every round-trip: `bench/llm_call.py` meters the burned spend off it.
-        self.usage = usage or TokenAccount()
+        self.usage = usage
         self.reasoning_chars = reasoning_chars
         self.first_finish_reason = first_finish_reason
         self.first_content_chars = first_content_chars
-        self.first = first or TokenAccount()
+        self.first = first
         self.retry_kind = retry_kind
 
     @property
@@ -83,26 +83,24 @@ class OptimizerPromptParseError(RuntimeError):
             "reproduced": self.reproduced if self.retry_kind == RETRY_CLEAN_REASK else None,
             "first_finish_reason": self.first_finish_reason,
             "first_content_chars": self.first_content_chars,
-            "first_completion_tokens": self.first.output,
-            "first_reasoning_tokens": self.first.reasoning,
+            "first_completion_tokens": None if self.first is None else self.first.output,
+            "first_reasoning_tokens": None if self.first is None else self.first.reasoning,
             "finish_reason": self.finish_reason,
             "reasoning_chars": self.reasoning_chars,
             "raw_chars": self.raw_chars,
-            "billed_reasoning_tokens": self.usage.reasoning,
-            "billed_completion_tokens": self.usage.output,
+            "billed_reasoning_tokens": None if self.usage is None else self.usage.reasoning,
+            "billed_completion_tokens": None if self.usage is None else self.usage.output,
         }
 
     def diagnosis(self) -> str:
         return (
             f"attempt1(finish={self.first_finish_reason} chars={self.first_content_chars} "
-            f"completion_tokens={self.first.output} "
-            f"reasoning_tokens={self.first.reasoning}) "
+            f"tokens={self.first}) "
             f"retry={self.retry_kind or 'none'} "
             f"attempt2(finish={self.finish_reason} chars={self.raw_chars} "
             f"reasoning_chars={self.reasoning_chars}) "
             f"reproduced={self.reproduced if self.retry_kind == RETRY_CLEAN_REASK else 'n/a'} "
-            f"billed_completion_tokens={self.usage.output} "
-            f"billed_reasoning_tokens={self.usage.reasoning} model={self.model}"
+            f"billed={self.usage} model={self.model}"
         )
 
 

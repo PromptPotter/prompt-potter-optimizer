@@ -11,13 +11,14 @@ from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     StopOutcome,
-    StopReason,
     stop_reason_outcome,
 )
 from promptpotter.domain.records.run_records import (
     AccountEventRecord,
     BankedStop,
     Device,
+    Ended,
+    Paused,
     RunPhaseRecord,
     TrailTombstoneRecord,
 )
@@ -68,15 +69,16 @@ class _Trail:
 
     def feed(self, record: AccountEventRecord | RunPhaseRecord | TrailTombstoneRecord) -> None:
         match record:
-            case RunPhaseRecord(stop_reason=StopReason() as reason) if (
-                stop_reason_outcome(reason) is not StopOutcome.SUCCESS
+            case RunPhaseRecord(state=Paused() | Ended() as stop) if (
+                stop_reason_outcome(stop.stop_reason) is not StopOutcome.SUCCESS
             ):
-                said = STOP_REASON_INFO[reason].label
+                said = STOP_REASON_INFO[stop.stop_reason].label
+                detail = stop.detail if isinstance(stop, Paused) else ""
                 self._found.append(
                     TrailLine(
                         record.timestamp,
                         RUN_STOPPED,
-                        f"{said} ({record.detail})" if record.detail else said,
+                        f"{said} ({detail})" if detail else said,
                         "",
                         "",
                     )

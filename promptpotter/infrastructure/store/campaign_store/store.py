@@ -12,10 +12,8 @@ from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import (
     Campaign,
     CampaignEdit,
-    Compare,
     HeadToHeadRecord,
     LifecycleFilter,
-    LifecycleStatus,
     ceiling_meter,
 )
 from promptpotter.domain.campaign_config import LaidSpan
@@ -26,9 +24,9 @@ from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import (
-    ComparisonExit,
+    ArmAct,
+    ArmActRecord,
     CycleMintedRecord,
-    LeftComparisonRecord,
     PipelineRead,
     ResolvedRunRecord,
     RoundEnteredRecord,
@@ -37,7 +35,6 @@ from promptpotter.domain.records.run_records import (
     StandingBudgetRecord,
 )
 from promptpotter.domain.spend import NOTHING_METERED, Budget, CeilingMeter
-from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import ValueLeaf
 from promptpotter.infrastructure.holders import CycleHolder, holder_of
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
@@ -59,12 +56,12 @@ from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
     StandingRounds,
+    scan_arm_acts,
     scan_campaign_ceiling,
     scan_cycle_facts,
     scan_each_last,
     scan_last,
     scan_ledger_metered,
-    scan_left_comparison,
     scan_resolved_run,
     scan_standing_rounds,
 )
@@ -400,29 +397,19 @@ class CampaignStore:
         if active is not None and active.campaign_id == campaign_id:
             clear_active_pointer(self._base_dir)
 
-    def _set_lifecycle(
-        self, campaign_id: str, status: LifecycleStatus, changed_at: str, reason: str
-    ) -> None:
-        self.update_campaign(
-            campaign_id,
-            lifecycle_status=status,
-            lifecycle_changed_at=changed_at,
-            lifecycle_reason=reason,
-        )
-
-    def archive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
+    def archive_campaign(self, campaign_id: str) -> bool:
         if self.load_campaign(campaign_id) is None:
             return False
         self._release_pointer(campaign_id)
-        self._set_lifecycle(campaign_id, "archived", changed_at, reason)
+        self.update_campaign(campaign_id, lifecycle_status="archived")
         return True
 
-    def unarchive_campaign(self, campaign_id: str, *, changed_at: str, reason: str = "") -> bool:
+    def unarchive_campaign(self, campaign_id: str) -> bool:
         campaign = self.load_campaign(campaign_id)
         # Never a `deleted` one: its spend is already banked, so what it spent next reaches no ledger.
         if campaign is None or campaign.lifecycle_status != "archived":
             return False
-        self._set_lifecycle(campaign_id, "active", changed_at, reason)
+        self.update_campaign(campaign_id, lifecycle_status="active")
         return True
 
     def _bank(
@@ -453,8 +440,6 @@ class CampaignStore:
         campaign_id: str,
         *,
         keep_results: bool,
-        changed_at: str,
-        reason: str = "",
         inner_sandbox_root: Path | None = None,
     ) -> bool:
         campaign_dir = self.campaign_root_dir(campaign_id)
@@ -475,7 +460,7 @@ class CampaignStore:
                 ):
                     self.delete_inner_sandbox(sandbox, campaign_id=campaign_id)
         if keepsake:
-            self._set_lifecycle(campaign_id, "deleted", changed_at, reason)
+            self.update_campaign(campaign_id, lifecycle_status="deleted")
             _strip_to_keepsake(campaign_dir)
         else:
             rmtree_robust(campaign_dir)
@@ -510,17 +495,13 @@ class CampaignStore:
                 code="cycle_minted_otherwise",
             )
 
-    def leave_comparison(self, hop: CycleHop, act: ComparisonExit) -> None:
-        """decisions.md § 0009: every act on an arm is admitted, and this is the event it leaves by."""
-        campaign = self.load_campaign(hop.campaign_id)
-        if campaign is None:
-            raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-        if isinstance(campaign.declaration.purpose, Compare):
-            self.append(hop, LeftComparisonRecord(act=act))
+    def act(self, hop: CycleHop, act: ArmAct) -> None:
+        """decisions.md § 0009: every act on an arm is admitted; *hop* is the arm's own line."""
+        self.append(hop, ArmActRecord(act=act))
 
-    def left_comparison(self, campaign_id: str) -> list[ComparisonExit]:
+    def arm_acts(self, campaign_id: str) -> list[ArmAct]:
         """Off every cycle of the campaign: the arm is the campaign, whichever line an act ran on."""
-        return scan_left_comparison(
+        return scan_arm_acts(
             LedgerSpan(ledger) for ledger in self.campaign_cycle_ledgers(campaign_id)
         )
 
@@ -643,10 +624,10 @@ class CampaignStore:
         rmtree_robust(cycle_dir)
         return True, ""
 
-    def last[R: StrictModel](self, hop: CycleHop, record: type[R]) -> R | None:
+    def last[R: CycleRecord](self, hop: CycleHop, record: type[R]) -> R | None:
         """The chain's last *record*, or the cycle's OWN where the record says a fork never inherits it."""
-        inherited = getattr(record, "forks_inherit", True)
-        return scan_last(self.chain(hop) if inherited else [LedgerSpan(self.ledger(hop))], record)
+        spans = self.chain(hop) if record.forks_inherit else [LedgerSpan(self.ledger(hop))]
+        return scan_last(spans, record)
 
     def read_laid_spans(self, hop: CycleHop) -> list[LaidSpan]:
         """One per ledger of *hop*'s chain, its root's first: a child's lays over its parent's."""

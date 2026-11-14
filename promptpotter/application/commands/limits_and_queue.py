@@ -16,7 +16,7 @@ from promptpotter.domain.command_kinds import (
     SetConcurrentCyclesPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.records.run_records import ComparisonExit
+from promptpotter.domain.records.run_records import ArmAct
 from promptpotter.domain.spend import MONEY_AXES
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal
@@ -53,9 +53,7 @@ async def _apply_change_run_limits(
     restating the ceilings it stands under leaves the arm in its comparison."""
     moved = await asyncio.to_thread(_change_budget, dispatcher, hop, change)
     if moved:
-        await asyncio.to_thread(
-            dispatcher.stores.campaigns.leave_comparison, hop, ComparisonExit.SET_LIMITS
-        )
+        await asyncio.to_thread(dispatcher.stores.campaigns.act, hop, ArmAct.SET_LIMITS)
 
 
 async def set_concurrent_cycles(

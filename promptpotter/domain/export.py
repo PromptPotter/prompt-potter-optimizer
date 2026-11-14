@@ -16,11 +16,12 @@ from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.ruler import SeriesReading
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition, strip_rendered_prompt
+from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.worded import Worded
 
-EXPORT_ARTIFACT_VERSION = 8
+EXPORT_ARTIFACT_VERSION = 9
 """Bumped only when a reader of the old shape would MISREAD the new one, never for an added field."""
 
 type ExportTier = Literal["chat", "report", "notebook", "deploy", "package"]
@@ -137,6 +138,8 @@ class PromptExport(_ProvModel):
     measurement: ExportMeasurement
     # The deployment estimate: the same prompt on a bench set no optimizer node read.
     bench: BenchScore
+    # What the optimization spent finding it, its tokens among it: a reader amortizes it over use.
+    spend: SpendRollup
     # Every candidate the cycle proposed, origin first: the prompts stated once, then deltas.
     lineage: list[LineageEntity]
 
@@ -179,6 +182,7 @@ def build_prompt_export(
     framing: TaskDecomposition,
     demo: Sequence[Sample],
     bench: BenchScore,
+    spend: SpendRollup,
 ) -> PromptExport:
     """*winner* may be the origin round: a campaign that never selected past it exports round 0."""
     election, head = winner.election, winner.head
@@ -210,6 +214,7 @@ def build_prompt_export(
             ability=level,
         ),
         bench=bench,
+        spend=spend,
         lineage=export_lineage(rounds),
     )
 

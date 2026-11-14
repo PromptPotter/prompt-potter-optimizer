@@ -83,7 +83,7 @@ from promptpotter.domain.run_standing import LineOutlay, declared_selection
 from promptpotter.domain.scoring import ROW_GRADES, CellSheet, Scorer, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import Budget, SpendRollup
-from promptpotter.domain.verification import BenchPasses, VerificationPass
+from promptpotter.domain.verification import BenchPass, BenchPasses
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.store.archive_queries import bench_reads
@@ -108,7 +108,7 @@ _BRACKET = PASSES[MeasurementRole.BENCH].bracket
 
 
 class _PassReading(NamedTuple):
-    bench_pass: VerificationPass
+    bench_pass: BenchPass
     # `None` where the pass read nothing; `outcome.state` then says why.
     reading: BenchReading | None
     outcome: PassOutcome
@@ -139,7 +139,7 @@ class _Graded(NamedTuple):
 
 
 def _read_pass(
-    stores: Stores, bench_pass: VerificationPass, scorer: Scorer, *, tolerance: int
+    stores: Stores, bench_pass: BenchPass, scorer: Scorer, *, tolerance: int
 ) -> _PassReading:
     """A pass stopped short, or past *tolerance* unscored rows, reads NOTHING, never a level over fewer rows."""
     expected = len(bench_pass.sample_keys)
@@ -179,7 +179,7 @@ def bench_series(
         return None, []
     read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
 
-    def headline(bench_pass: VerificationPass) -> float | None:
+    def headline(bench_pass: BenchPass) -> float | None:
         reading = read(bench_pass).reading
         return None if reading is None or reading.level is None else reading.level.value
 
@@ -387,7 +387,7 @@ def bench_members(
     return _grade_bench(stores, passes, scorer, line).members
 
 
-def _standing_pass(passes: BenchPasses, run: LineRun) -> VerificationPass | None:
+def _standing_pass(passes: BenchPasses, run: LineRun) -> BenchPass | None:
     if run.selection is None or not run.rounds_closed:
         return None
     return passes.pass_of(run.selection.key)
@@ -431,7 +431,7 @@ async def score_on_bench(
     label: str,
     round_num: int,
     ledger: CycleEventLog,
-) -> VerificationPass:
+) -> BenchPass:
     """A run stop escapes once the pass it cut is graded on the cells it held."""
     taken, stop = await _send_on_bench(
         session,
@@ -452,7 +452,7 @@ async def _send_on_bench(
     arm: ArmName,
     subject: BenchSubject,
     ledger: CycleEventLog,
-) -> tuple[VerificationPass, BaseException | None]:
+) -> tuple[BenchPass, BaseException | None]:
     """The pass, and the run stop that cut it: a stopped pass is graded here, a whole one by its caller."""
     # No `round=` on the bracket: it would move the dashboard's round back to the one being graded.
     ledger.append(
@@ -511,18 +511,15 @@ def _bench_pass(
     cells: list[WalkedCell],
     stop: PassStop | None,
     reads_before: int,
-) -> VerificationPass:
+) -> BenchPass:
     bench = session.state.scoring.partition.bench
-    return VerificationPass(
-        kind=MeasurementRole.BENCH,
+    return BenchPass(
         arm=arm,
         sp_hash=search_point.sp_hash(session.pipeline_schema),
         cells=cells,
         sample_keys=[s.key for s in bench],
         stop=stop,
         scorer_id=session.state.scoring.scorer.id,
-        strategy=None,
-        seed=None,
         reads_before=reads_before,
         measured_datasets={s.key: s.measured_dataset for s in bench if s.measured_dataset},
     )
@@ -536,7 +533,7 @@ def _tolerance(session: Session) -> int:
 def graded(
     ledger: CycleEventLog,
     session: Session,
-    bench_pass: VerificationPass,
+    bench_pass: BenchPass,
     *,
     subject: BenchSubject,
     reserve: Budget | None = None,
@@ -562,7 +559,7 @@ def graded(
     )
 
 
-def _with_selection(passes: BenchPasses, taken: VerificationPass) -> BenchPasses:
+def _with_selection(passes: BenchPasses, taken: BenchPass) -> BenchPasses:
     return passes.model_copy(update={"selections": {**passes.selections, taken.arm.key: taken}})
 
 

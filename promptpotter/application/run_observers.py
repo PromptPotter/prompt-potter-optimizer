@@ -7,7 +7,6 @@ from dataclasses import dataclass
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers.nodes import tree_hash
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
 from promptpotter.application.runner.output import RunArtifacts
@@ -20,13 +19,14 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
     PauseCause,
-    RunPhase,
     StopOutcome,
     StopReason,
     stop_reason_outcome,
 )
 from promptpotter.domain.records.run_records import (
+    ArmsGate,
     CycleShareRecord,
+    Running,
     RunPhaseRecord,
     RunWiringRecord,
 )
@@ -103,7 +103,6 @@ def declare_run_wiring(
                 ),
             ),
             backend_revision=session.backend_revision,
-            tree_hash=tree_hash(),
         )
     )
 
@@ -171,10 +170,10 @@ def build_run_observers(
             readout_sink=readout_sink,
         )
         # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
-        observers.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+        observers.ledger.append(RunPhaseRecord(state=Running()))
         # A launch is a run boundary, sparing what was asked of its own hold, a QUEUED claim's
         # included; the run a gate held resumes, what it was asked standing.
-        if prior is None or prior.run_phase is not RunPhase.GATE:
+        if prior is None or not isinstance(prior.state, ArmsGate):
             session.store.void_inbox(session.hop, sparing=hold.control.hold)
         # The latest launch is the latest run held: a mint, a fork or a resume, from every door.
         save_active_pointer(session.store.base_dir, session.hop)

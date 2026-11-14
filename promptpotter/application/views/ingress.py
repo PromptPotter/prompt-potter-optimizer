@@ -88,7 +88,6 @@ def init_exit(ctx: ViewContext, *, cycle: Cycle, session: Session) -> InitExitVi
         cycle_id_short=session.cycle_id[:12],
         samples=len(partition.search),
         bench_samples=len(partition.bench),
-        origin_samples=len(cycle.origin_round.results),
         resumed_from_round=session.state.resumed_from_round,
         # Round 0 is built fresh by `Cycle.start`, so only later rounds count as cached.
         cached_rounds_count=sum(1 for rr in cycle.rounds if rr.round > 0),

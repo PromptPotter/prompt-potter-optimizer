@@ -4,7 +4,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from pydantic import ConfigDict, JsonValue
+from pydantic import ConfigDict, JsonValue, PrivateAttr
 
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.scoring import MeasuredCell
@@ -34,14 +34,20 @@ class Sample(StrictModel):
     # The dataset this cell measures where it is not the one it is filed under. Out of `key`.
     measured_dataset: str | None = None
 
-    @property
-    def key(self) -> str:
-        return sample_key(
+    # Hashed once, at validation: every read of a cell's address takes it.
+    _key: str = PrivateAttr()
+
+    def model_post_init(self, _ctx: object) -> None:
+        self._key = sample_key(
             query=self.query,
             ground_truth=self.ground_truth,
             question=self.question,
             source_pin=self.source_pin,
         )
+
+    @property
+    def key(self) -> str:
+        return self._key
 
     def banked(self) -> dict[str, JsonValue]:
         return self.model_dump(mode="json", exclude={"id"}, exclude_defaults=True)

@@ -916,17 +916,6 @@ def graded_answer(facts: MeasuredCell, grade: Grade) -> str | None:
     return None if said in ("", NO_RESULT) else said
 
 
-def modal_answer_share(cells: Sequence[GradedCell]) -> float | None:
-    """Over PREDICTIONS; reports and never gates — below 1.0 it measures hedging."""
-    if enumerable_truth_labels(cells) is None:
-        return None
-    said = Counter(a for c in cells if (a := graded_answer(c.facts, c.grade)) is not None)
-    total = sum(said.values())
-    if total == 0:
-        return None
-    return said.most_common(1)[0][1] / total
-
-
 def is_answer_collapsed(cells: Sequence[GradedCell], parent: CellSheet) -> bool:
     """The ABSENCE of a measurement, not a low score: one answer where the parent, on the same
     cells, answered apart. A parent alike there makes it the panel's draw, which θ reads."""

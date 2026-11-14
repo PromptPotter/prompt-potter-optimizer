@@ -84,7 +84,7 @@ from promptpotter.domain.phases import INNER_PAUSE_REFUSAL
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineSchema, narrowing_of
 from promptpotter.domain.records.run_records import (
-    ComparisonExit,
+    ArmAct,
     CycleSeed,
     LaunchedEffect,
     LaunchedJob,
@@ -346,7 +346,7 @@ async def _launch_fork(
         try:
             held = await admitted.held()
             # It spends the arm's ceiling and moves its parent, so the campaign leaves.
-            stores.campaigns.leave_comparison(cut.child, ComparisonExit.FORK)
+            stores.campaigns.act(cut.parent, ArmAct.FORK)
             await _leave_parent(dispatcher, cut, dispatched.door)
             await asyncio.to_thread(cut.take, stores)
         except BaseException as exc:

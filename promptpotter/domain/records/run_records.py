@@ -39,7 +39,6 @@ from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
-    GateKind,
     PauseCause,
     RunPhase,
     StopOutcome,
@@ -117,34 +116,42 @@ class PhaseRecord(CycleRecord):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
+class Running(FrozenModel):
+    run_phase: Literal[RunPhase.RUNNING] = RunPhase.RUNNING
+
+
+class Paused(FrozenModel):
+    run_phase: Literal[RunPhase.PAUSED] = RunPhase.PAUSED
+    stop_reason: StopReason
+    cause: PauseCause
+    detail: str = ""
+
+
+class Ended(FrozenModel):
+    run_phase: Literal[RunPhase.TERMINAL] = RunPhase.TERMINAL
+    stop_reason: StopReason
+
+
+class ArmsGate(FrozenModel):
+    run_phase: Literal[RunPhase.GATE] = RunPhase.GATE
+    gate: Literal["arms"] = "arms"
+    # What the hold offers to keep, in the order `submit-arms --keep` indexes.
+    drafts: list[Proposal] = Field(default_factory=list)
+
+
+type DeclaredPhase = Annotated[
+    Running | Paused | Ended | ArmsGate, Field(discriminator="run_phase")
+]
+
+
 class RunPhaseRecord(CycleRecord):
     """The runner's own declaration: every other phase is derived off the last one, never said."""
 
     forks_inherit: ClassVar[bool] = False
     record_type: Literal["run_phase"] = "run_phase"
-    run_phase: RunPhase
-    stop_reason: StopReason | None = None
-    cause: PauseCause | None = None
-    detail: str = ""
+    state: DeclaredPhase
     spend: RunSpendView | None = None
-    gate: GateKind | None = None
-    # What an ``arms`` hold offers to keep, in the order `submit-arms --keep` indexes.
-    drafts: list[Proposal] = Field(default_factory=list)
     timestamp: str = Field(default_factory=utcnow_iso)
-
-    @model_validator(mode="after")
-    def _paused_says_why(self) -> RunPhaseRecord:
-        if self.run_phase is RunPhase.PAUSED and (self.stop_reason is None or self.cause is None):
-            raise ValueError("a paused declaration names its stop reason and its cause")
-        return self
-
-    @model_validator(mode="after")
-    def _gate_says_which(self) -> RunPhaseRecord:
-        if (self.run_phase is RunPhase.GATE) != (self.gate is not None):
-            raise ValueError("a gate declaration, and only one, names what it holds for")
-        if self.drafts and self.gate != "arms":
-            raise ValueError("only a hold for a round's arms offers drafts")
-        return self
 
     @classmethod
     def stop(
@@ -156,16 +163,10 @@ class RunPhaseRecord(CycleRecord):
         spend: RunSpendView | None = None,
     ) -> RunPhaseRecord:
         if STOP_REASON_INFO[stop_reason].outcome is not StopOutcome.PAUSED:
-            return cls(run_phase=RunPhase.TERMINAL, stop_reason=stop_reason, spend=spend)
+            return cls(state=Ended(stop_reason=stop_reason), spend=spend)
         if cause is None:
             raise ValueError(f"a {stop_reason.value} stop pauses the cycle and names no cause")
-        return cls(
-            run_phase=RunPhase.PAUSED,
-            stop_reason=stop_reason,
-            cause=cause,
-            detail=detail,
-            spend=spend,
-        )
+        return cls(state=Paused(stop_reason=stop_reason, cause=cause, detail=detail), spend=spend)
 
 
 class BackendWarningRecord(CycleRecord):
@@ -652,7 +653,6 @@ class LLMCallStartRecord(CycleRecord):
     round: int | None = None
     candidate_idx: int | None = None
     model: str | None = None
-    started_at_ms: int
     prompt_chars: int = 0
     # Injection name → rendered chars. Empty for a node composing no layout and on a cache replay.
     injection_chars: dict[str, int] = Field(default_factory=dict)
@@ -1011,8 +1011,6 @@ class CycleFinal(FrozenModel):
     rounds_to_ceiling: int | None
     fitness_ceiling: float | None
     prompt_hashes: dict[str, str]
-    # On the origin's OWN samples — never round 1's matched floor, a different sample basis.
-    origin_composite_fitness: float | None
     scorer_id: str
     # The round the optimizer's DECLARED pick was selected in.
     result_round: int
@@ -1131,8 +1129,6 @@ class RunWiringRecord(CycleRecord):
     defaults_drift: DefaultsDrift | None
     # `None` where the connector checks no revision; a drift is served, never refused (`wiring.py`).
     backend_revision: BackendRevision | None
-    # The whole package's code this run executed (`nodes.py::tree_hash`): recorded, never keyed on.
-    tree_hash: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1311,21 +1307,13 @@ class ForkGradedRecord(CycleRecord):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class InterventionRecord(CycleRecord):
-    """One is enough to make the cycle babysat for good; appended the moment it happens."""
-
-    record_type: Literal["intervention"] = "intervention"
-    kind: str
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-
 # The act a babysat mint (`CycleMintedRecord.babysat`) reads as.
 BABYSAT = "disallowed_model_override"
 
 
-class ComparisonExit(enum.StrEnum):
-    """An act that runs an arm off the comparison its head-to-head declared: admitted like on any
-    campaign, its event is the arm's exit (decisions.md § 0009)."""
+class ArmAct(enum.StrEnum):
+    """An act on an arm, admitted like on any campaign; on a head-to-head's arm it is the arm's
+    exit, from which its line reads uncontrolled (decisions.md § 0009)."""
 
     REWIND = "rewind"
     FORK_ON_DIVERGENCE = "fork_on_divergence"
@@ -1335,12 +1323,18 @@ class ComparisonExit(enum.StrEnum):
     SKIP = "skip"
     SET_LIMITS = "set_limits"
 
+    @property
+    def babysits(self) -> bool:
+        """decisions.md § 0005: an act inside the loop makes the cycle babysat for good."""
+        return self in (ArmAct.SUBMIT_ARMS, ArmAct.SKIP)
 
-class LeftComparisonRecord(CycleRecord):
-    """Appended on an arm's cycle as the act runs: from it on, the arm's line reads uncontrolled."""
 
-    record_type: Literal["left_comparison"] = "left_comparison"
-    act: ComparisonExit
+class ArmActRecord(CycleRecord):
+    """ONE record per act, on the arm's own line and never a fork's, so deleting the fork leaves
+    it standing: the arm's exit and, where the act `babysits`, the cycle's intervention."""
+
+    record_type: Literal["arm_act"] = "arm_act"
+    act: ArmAct
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

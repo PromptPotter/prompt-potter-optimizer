@@ -25,11 +25,12 @@ class LLMResponse(StrictModel):
         ),
     )
     model: str = Field(..., description="Model used")
-    usage: TokenAccount = Field(
+    usage: TokenAccount | None = Field(
         default_factory=TokenAccount,
         description=(
             "What this call consumed. A provider's own spelling stops at the client that "
-            "parses it: every client normalizes to this account, and no consumer converts."
+            "parses it: every client normalizes to this account, and no consumer converts. "
+            "``None``: the provider reported no count, never a 0 nor an estimate."
         ),
     )
     cost_usd: float | None = Field(

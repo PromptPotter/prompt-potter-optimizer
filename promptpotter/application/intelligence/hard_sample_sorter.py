@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 
 from promptpotter.application.intelligence.adaptive_queue_mechanism import pick_value
-from promptpotter.application.intelligence.rasch import Observation, build_round_order
+from promptpotter.application.intelligence.rasch import Observation
 from promptpotter.domain.cells import (
     HardSampleCell,
     HardSampleOrder,
@@ -33,9 +33,7 @@ def build_hard_samples(
     *,
     frontier: tuple[float, float] | None,
     arm_theta: Mapping[str, float],
-    parent_grades: Mapping[str, float],
     slots: Mapping[str, int],
-    n_min: int,
     cycle_id: str | None,
 ) -> HardSamples:
     """*slots* places each ``Sample.key`` at its row in the dataset served: a cell no row holds is not drawn."""
@@ -66,7 +64,6 @@ def build_hard_samples(
 
     candidate_order = sorted({o.candidate_id for o in observations}, key=candidate_key)
     held = sorted({*carried, *measured}, key=slots.__getitem__)
-    key_at = {slots[key]: key for key in measured}
     return HardSamples(
         cycle_id=cycle_id,
         generated_at=utcnow_iso(),
@@ -76,9 +73,6 @@ def build_hard_samples(
         positions={key: slots[key] for key in held},
         sample_order=sorted(measured, key=rank),
         samples={key: difficulty(key) for key in held},
-        round_order=[
-            key_at[sid] for sid in build_round_order(parent_grades, ruler, key_at, n_min=n_min)
-        ],
         cells=[
             HardSampleCell(candidate=o.candidate_id, sample_key=o.key, fitness=o.response)
             for o in observations

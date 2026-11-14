@@ -98,7 +98,6 @@ async def ingest_draft(
         n_samples=len(table.rows),
         sample_preview=preview,
         headers=list(table.headers),
-        source_file=filename or "",
         column_label_sets=_column_label_sets(list(table.headers), list(table.rows)),
         first_blank_row=_first_blank_rows(list(table.headers), list(table.rows)),
     )

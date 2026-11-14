@@ -107,9 +107,7 @@ class ActivityFeed:
         return ActivityState(
             status=None if status is None or not narration.lives(status) else status.said,
             notices=[n.said for n in self._notices if narration.lives(n)],
-            decision=_arms_gate(narration.round, drafts)
-            if gate is not None and gate.gate == "arms"
-            else None,
+            decision=None if gate is None else _arms_gate(narration.round, drafts),
         )
 
     def feed(self, record: NarratedRecord) -> None:

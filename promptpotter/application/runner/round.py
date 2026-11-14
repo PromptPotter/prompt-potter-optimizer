@@ -107,15 +107,17 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.phase_views import MeasureEnterView
-from promptpotter.domain.phases import CampaignPhase, RunPhase, StopReason
+from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION
 from promptpotter.domain.records.run_records import (
+    ArmAct,
     ArmRecord,
-    ComparisonExit,
+    ArmsGate,
     ElectionRecord,
     PanelCoverage,
     PhaseRecord,
     RoundClosedRecord,
+    Running,
     RunPhaseRecord,
     StopLoop,
 )
@@ -133,7 +135,7 @@ from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
 from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint
 from promptpotter.domain.wounds import ValidationFailure, collapse_counts
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.shared.errors import SendRefusedError, graceful
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
@@ -165,8 +167,7 @@ async def hold_for_operator[T](
     beat = asyncio.create_task(
         heartbeat(
             active_cycle_ledger(),
-            call_id=f"{node}:{session.cycle_id}",
-            node=node,
+            CallBeat(f"{node}:{session.cycle_id}", node),
             round_num=round_num,
             start_monotonic=time.monotonic(),
         )
@@ -219,7 +220,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
         ctx.round_num,
         len(drafts),
     )
-    ctx.ledger.append(RunPhaseRecord(run_phase=RunPhase.GATE, gate="arms", drafts=list(drafts)))
+    ctx.ledger.append(RunPhaseRecord(state=ArmsGate(drafts=list(drafts))))
 
     def _take() -> list[Proposal] | None:
         standing = session.state.control.standing_submission()
@@ -231,8 +232,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
             *(author_arm(ctx, ctx.cycle.parent, arm) for arm in asked.arms),
         ]
         # Recorded and banked BEFORE the ack: a producer lost between them re-reads the answer.
-        session.record_intervention("submit-arms")
-        session.store.campaigns.leave_comparison(session.hop, ComparisonExit.SUBMIT_ARMS)
+        session.act(ArmAct.SUBMIT_ARMS)
         bank_proposals(ctx, arms, submitted=True)
         session.state.control.take_submission(command_id)
         return arms
@@ -240,7 +240,7 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
     arms = await hold_for_operator(session, _take, node=OPERATOR_SEAT.name, round_num=ctx.round_num)
     if arms is None:
         raise StopLoop(StopReason.PAUSED)
-    ctx.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    ctx.ledger.append(RunPhaseRecord(state=Running()))
     return arms
 
 

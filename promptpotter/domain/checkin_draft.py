@@ -113,7 +113,6 @@ class DraftFile(FrozenModel):
     # Per header, the first row (1-based, file order) whose cell is blank: that column cuts no bank.
     first_blank_row: dict[str, int]
     field_provenance: dict[str, Provenance]
-    source_file: str
     origin_prompts: dict[str, dict[str, str]]
     decomposed_task_context: dict[str, Any]
     candidate_library: tuple[str, ...]

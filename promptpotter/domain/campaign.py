@@ -312,8 +312,6 @@ class CampaignEdit(TypedDict, total=False):
     label: str
     dataset_name: str
     lifecycle_status: LifecycleStatus
-    lifecycle_changed_at: str
-    lifecycle_reason: str
 
 
 class Campaign(FrozenModel):
@@ -329,8 +327,6 @@ class Campaign(FrozenModel):
     treatment: Treatment
     declaration: RunDeclaration
     lifecycle_status: LifecycleStatus = "active"
-    lifecycle_changed_at: str = ""
-    lifecycle_reason: str = ""
 
     @property
     def root_hop(self) -> CycleHop:

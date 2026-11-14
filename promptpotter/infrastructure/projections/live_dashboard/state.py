@@ -63,7 +63,6 @@ class RacingBlock(StrictModel):
     """The round's standing in its eliminator ``member``'s race."""
 
     member: str
-    current_id: str
     n_samples: int
     top: list[dict[str, Any]]
 
@@ -95,7 +94,6 @@ class DashboardFacts(StrictModel):
 
     state: DashboardState = DashboardState.INIT
     optimizer_step: str | None = None
-    state_since: str
 
     stop_reason: StopReason | None = None
 
@@ -122,13 +120,9 @@ class DashboardFacts(StrictModel):
     total_backend_calls: int = 0
 
     current_query_payload: str | None = None
-    open_positions: list[int] = Field(default_factory=list)
 
     backpressure: BackpressureReading | None = None
     measured_unit: MeasuredUnit
-
-    # The timestamp of the last record the state took, which `at_offset` may stand past.
-    at_time: str
 
     round_cells_ceiling: int
 
@@ -199,7 +193,6 @@ class LiveDashboardState(DashboardFacts):
     @classmethod
     def declared(cls, wiring: RunWiringRecord) -> LiveDashboardState:
         return cls(
-            at_time=wiring.timestamp,
             current_round=CurrentRound(measurement_node=wiring.measurement_node),
             **cls.launched(wiring),
         )
@@ -218,11 +211,9 @@ class LiveDashboardState(DashboardFacts):
             "state": DashboardState.INIT,
             "optimizer_step": None,
             "measuring_arm": None,
-            "state_since": wiring.timestamp,
             "stop_reason": None,
             "error": None,
             "current_query_payload": None,
             "current_position": None,
-            "open_positions": [],
             "declared_sample_order": [],
         }

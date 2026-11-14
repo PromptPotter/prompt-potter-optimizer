@@ -728,7 +728,8 @@ def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
     rebased = [
         r
         for r in _jsonl(layout.ledger)
-        if r.get("record_type") == "run_phase" and r.get("stop_reason") == StopReason.REBASED
+        if r.get("record_type") == "run_phase"
+        and r["state"].get("stop_reason") == StopReason.REBASED
     ]
     if [r["spend"] is not None for r in rebased] != [True]:
         raise SystemExit(f"offline run: the parent ended on {rebased}, not one REBASED with spend")
@@ -1577,6 +1578,8 @@ def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
                     }
                 )
             )
+        if kind == "run_phase":
+            entry = {k: r["state"].get(k) for k in keys}
         if kind == "llm_call":
             entry["repairs"] = len((r.get("payload") or {}).get("schema_repair_errors") or [])
         out[name].append(_as_sets(canon(entry)) if kind == "decision" else canon(entry))
@@ -1609,10 +1612,15 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
             k: final.get(k)
             for k in (
                 "rounds_to_separable", "rounds_to_improved", "rounds_to_ceiling",
-                "origin_composite_fitness", "mode", "result_prompt_fields",
+                "mode", "result_prompt_fields",
                 "result_pipeline_params",
             )
         },
+        # The origin round's one fold, on the origin's own samples.
+        "origin_composite_fitness": next(
+            (f["composite_fitness"] for r in rounds[:1] if r["round"] == 0 for f in r["folds"].values()),
+            None,
+        ),
         "bench": None if bench is None else bench.model_dump(mode="json"),
         "round_index": index["rounds"],
     }  # fmt: skip
@@ -2030,7 +2038,7 @@ def paused_at(workspace: Path) -> tuple[int, bool]:
                 entered = record["round"]
             case "round_closed":
                 closed = record["round"]
-            case "run_phase" if record.get("stop_reason") == StopReason.PAUSED:
+            case "run_phase" if record["state"].get("stop_reason") == StopReason.PAUSED:
                 return entered, closed != entered
     raise SystemExit(f"offline run: {workspace} declares no pause")
 

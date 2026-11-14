@@ -11,7 +11,7 @@ import httpx
 
 from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
-from promptpotter.infrastructure.llm.heartbeat import heartbeat, silence_detail
+from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat, silence_detail
 from promptpotter.infrastructure.llm.request import ChatRequest
 from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget
@@ -134,8 +134,7 @@ async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float)
     beat = asyncio.create_task(
         heartbeat(
             active_cycle_ledger(),
-            call_id=uuid.uuid4().hex,
-            node=label,
+            CallBeat(uuid.uuid4().hex, label),
             round_num=current_round(),
             start_monotonic=started,
             detail_fn=lambda: silence_detail(client, stage.model, role="grader"),

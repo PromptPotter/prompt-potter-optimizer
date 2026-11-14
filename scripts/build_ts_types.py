@@ -255,6 +255,16 @@ def _declared_type(module: str, name: str, annotation: object) -> typing.Any:
     return typing.get_type_hints(holder)[name]
 
 
+def _key_members(key_type: object) -> set[object]:
+    """Every member a key type admits, through aliases, unions and literals of enum members."""
+    if isinstance(key_type, type) and issubclass(key_type, enum.Enum):
+        return set(key_type)
+    args = typing.get_args(getattr(key_type, "__value__", key_type))
+    if typing.get_origin(key_type) is typing.Literal:
+        return set(args)
+    return {m for arg in args for m in _key_members(arg)}
+
+
 def _word_tables() -> list[_Declared]:
     """Every registered `Worded`, under the annotated module binding that declares it.
 
@@ -357,11 +367,7 @@ def _emit_word_tables(emitted: set[str]) -> str:
         body = "\n".join(f"  {json.dumps(str(_wire(k)))}: {literal(v)}," for k, v in table.items())
         owner = module.removeprefix("promptpotter.").replace(".", "/")
         # A table over a subset of its key set is partial: a reader handles the member it lacks.
-        domain = (
-            len(key_type)
-            if isinstance(key_type, type) and issubclass(key_type, enum.Enum)
-            else len(typing.get_args(getattr(key_type, "__value__", key_type))) or len(table)
-        )
+        domain = len(_key_members(key_type)) or len(table)
         record = f"Record<{keys}, {row}>"
         tables.append(
             f"// Mirror of {owner}.py::{name}, in display order.\nexport const {name}: "

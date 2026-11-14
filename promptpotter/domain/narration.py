@@ -9,10 +9,12 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit
 from promptpotter.domain.phase_views import VerificationEnterView
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, RunPhase
+from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase
+from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
+    ArmsGate,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -23,6 +25,7 @@ from promptpotter.domain.records.run_records import (
     RoundEnteredRecord,
     RoundStatement,
     RoundWarningRecord,
+    Running,
     RunPhaseRecord,
     SampleScoredRecord,
 )
@@ -36,6 +39,7 @@ NarratedRecord = (
     LLMCallStartRecord
     | LLMCallRecord
     | LLMCallProgressRecord
+    | CellBeatRecord
     | ArmRecord
     | SampleScoredRecord
     | PhaseRecord
@@ -115,7 +119,7 @@ class Narration:
 
     def __init__(self) -> None:
         self.round: int | None = None
-        self.gate: RunPhaseRecord | None = None
+        self.gate: ArmsGate | None = None
         self._arms: dict[tuple[int, ArmKey], _Announced] = {}
         # Each arm's label by its key, off its records: a sample names its individual alone.
         self._labels: dict[ArmKey, str] = {}
@@ -142,7 +146,10 @@ class Narration:
             case LLMCallRecord():
                 return self._call(record)
             case LLMCallProgressRecord():
-                return self._progress(record)
+                return self._progress(record, _node_label(record.node, record.round))
+            case CellBeatRecord():
+                who = None if record.arm is None else self._labels.get(record.arm)
+                return self._progress(record, f"{who or 'scoring'} · row {record.position}")
             case ArmRecord():
                 return self._arm(record)
             case SampleScoredRecord():
@@ -240,8 +247,8 @@ class Narration:
     def _run_phase(self, record: RunPhaseRecord) -> None:
         # A declaration starts or stops the sends a hold describes; the hold lasts to the next.
         self._declared += 1
-        self.gate = record if record.gate is not None else None
-        if record.run_phase == RunPhase.RUNNING:
+        self.gate = record.state if isinstance(record.state, ArmsGate) else None
+        if isinstance(record.state, Running):
             self._launched += 1
         self._held.clear()
 
@@ -287,12 +294,12 @@ class Narration:
             "warn" if flags else "success", label, _joined([*bits, *flags]), round=record.round
         )
 
-    def _progress(self, record: LLMCallProgressRecord) -> _Line:
+    def _progress(self, record: LLMCallProgressRecord | CellBeatRecord, who: str) -> _Line:
         """``detail`` is said VERBATIM: a bare tick proves only liveness, and a healthy inner campaign reads as frozen."""
         inner = record.inner
         inner_at = None if inner is None else f"inner {inner.campaign_id}/{inner.cycle_id}"
         detail = _joined([duration_words(record.elapsed_s), record.detail, inner_at])
-        label = f"{_node_label(record.node, record.round)} still waiting"
+        label = f"{who} still waiting"
         lifetime: Lifetime = "status" if record.detail or inner is not None else "tick"
         return _Line("quiet", label, detail, lifetime, record.round)
 

@@ -2993,8 +2993,15 @@
             "type": "array"
           },
           "usage": {
-            "$ref": "#/$defs/TokenAccount",
-            "description": "What this call consumed. A provider's own spelling stops at the client that parses it: every client normalizes to this account, and no consumer converts."
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TokenAccount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What this call consumed. A provider's own spelling stops at the client that parses it: every client normalizes to this account, and no consumer converts. ``None``: the provider reported no count, never a 0 nor an estimate."
           }
         },
         "required": [
@@ -3004,6 +3011,13 @@
         "title": "LLMResponse",
         "type": "object"
       }
+    },
+    "ledger fold snapshot": {
+      "fate": "CACHE",
+      "patterns": [
+        ".cache/ledger-folds/*.pickle"
+      ],
+      "shape": null
     },
     "live-jobs index": {
       "fate": "SURVIVOR",
@@ -3475,8 +3489,15 @@
             "type": "array"
           },
           "usage": {
-            "$ref": "#/$defs/TokenAccount",
-            "description": "What this call consumed. A provider's own spelling stops at the client that parses it: every client normalizes to this account, and no consumer converts."
+            "anyOf": [
+              {
+                "$ref": "#/$defs/TokenAccount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What this call consumed. A provider's own spelling stops at the client that parses it: every client normalizes to this account, and no consumer converts. ``None``: the provider reported no count, never a 0 nor an estimate."
           }
         },
         "required": [

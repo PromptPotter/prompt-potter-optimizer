@@ -27,7 +27,6 @@ class RoundBuffer:
     samples: dict[ArmKey, list[WalkedSample]] = field(default_factory=dict)
     race_standings: dict[str, float] = field(default_factory=dict)
     race_member: str = ""
-    race_current_id: str = ""
     race_n_samples: int = 0
     # ``None`` until the election is held.
     election: Election | None = None
@@ -38,7 +37,6 @@ class RoundBuffer:
         self.election = None
         self.race_standings = {}
         self.race_member = ""
-        self.race_current_id = ""
         self.race_n_samples = 0
 
     def enter(self, round_num: int) -> None:
@@ -77,5 +75,4 @@ class RoundBuffer:
     ) -> None:
         self.race_standings[current_id] = p_best
         self.race_member = member
-        self.race_current_id = current_id
         self.race_n_samples = n_samples

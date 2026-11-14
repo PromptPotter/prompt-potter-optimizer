@@ -4,7 +4,7 @@ from collections.abc import Callable, Collection, Sequence
 from enum import StrEnum
 from typing import NamedTuple, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, computed_field, model_validator
 
 from promptpotter.application.datasets.authored import defaults_config, scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
@@ -49,7 +49,7 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.records.partition import PartitionRecord
-from promptpotter.domain.records.run_records import ComparisonExit
+from promptpotter.domain.records.run_records import ArmAct
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -158,7 +158,6 @@ class PairGuard(FrozenModel):
     against the table's standard, the whole table's — are one quantity. It LABELS a comparison
     and refuses none: a pair that differs is still read, and says on what."""
 
-    state: GuardState
     sentence: str = Field(description="`state` in words, with what differs behind it.")
     head_to_head_id: str | None = Field(
         description="The declared head-to-head the headlines were read against; `None` where no "
@@ -169,18 +168,16 @@ class PairGuard(FrozenModel):
     )
     differs_on: list[GuardDifference]
 
-    @model_validator(mode="after")
-    def _state_fits(self) -> Self:
-        expected = (
-            GuardState.DIFFERS
-            if self.differs_on
-            else GuardState.CONTROLLED
-            if self.controlled
-            else GuardState.UNCONTROLLED
-        )
-        if self.state is not expected:
-            raise ValueError(f"a guard that reads {expected.value} cannot say {self.state.value}")
-        return self
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def state(self) -> GuardState:
+        return _guard_state(self.differs_on, controlled=self.controlled)
+
+
+def _guard_state(differs_on: list[GuardDifference], *, controlled: bool) -> GuardState:
+    if differs_on:
+        return GuardState.DIFFERS
+    return GuardState.CONTROLLED if controlled else GuardState.UNCONTROLLED
 
 
 class GuardMember(NamedTuple):
@@ -194,8 +191,8 @@ class GuardMember(NamedTuple):
     bench_defaults_pin: str
     optimizer_models: tuple[str, ...]
     human_intervened: bool
-    # The campaign's `LeftComparisonRecord` acts, on any line: an arm with any stands outside its head-to-head.
-    left_comparison: tuple[ComparisonExit, ...]
+    # The campaign's `ArmActRecord` acts, on any line: an arm with any stands outside its head-to-head.
+    left_comparison: tuple[ArmAct, ...]
 
 
 def _joins(member: GuardMember, record: HeadToHeadRecord) -> bool:
@@ -242,20 +239,12 @@ def pair_guard(
     if origin_read_apart:
         differs_on.append(GuardDifference.ORIGIN_READING)
     controlled = bool(members) and record is not None and all(_joins(m, record) for m in members)
-    state = (
-        GuardState.DIFFERS
-        if differs_on
-        else GuardState.CONTROLLED
-        if controlled
-        else GuardState.UNCONTROLLED
-    )
-    sentence = GUARD_STATE_INFO[state].sentence
+    sentence = GUARD_STATE_INFO[_guard_state(differs_on, controlled=controlled)].sentence
     if differs_on:
         sentence += f" Differs on: {', '.join(d.value for d in differs_on)}."
     if left := sorted({act.value for m in members for act in m.left_comparison}):
         sentence += f" Left its comparison by: {', '.join(left)}."
     return PairGuard(
-        state=state,
         sentence=sentence,
         head_to_head_id=None if record is None else record.head_to_head_id,
         controlled=controlled,
@@ -646,7 +635,7 @@ def _read(
         bench_defaults_pin=campaign.declaration.bench_defaults_pin,
         optimizer_models=tuple(optimizer_models),
         human_intervened=reading.human_intervened,
-        left_comparison=tuple(stores.campaigns.left_comparison(hop.campaign_id)),
+        left_comparison=tuple(stores.campaigns.arm_acts(hop.campaign_id)),
     )
     return _Graded(
         row=HeadToHeadRow(

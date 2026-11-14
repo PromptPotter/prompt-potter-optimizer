@@ -1621,6 +1621,87 @@
         "title": "BarRead",
         "type": "object"
       },
+      "BenchPass": {
+        "additionalProperties": false,
+        "properties": {
+          "arm": {
+            "$ref": "#/components/schemas/ArmName"
+          },
+          "cells": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "kind": {
+            "const": "bench",
+            "default": "bench",
+            "title": "Kind",
+            "type": "string"
+          },
+          "measured_datasets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Measured Datasets",
+            "type": "object"
+          },
+          "reads_before": {
+            "title": "Reads Before",
+            "type": "integer"
+          },
+          "sample_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sample Keys",
+            "type": "array"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PassStop"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "arm",
+          "sp_hash",
+          "cells",
+          "sample_keys",
+          "stop",
+          "scorer_id",
+          "reads_before"
+        ],
+        "title": "BenchPass",
+        "type": "object"
+      },
       "BenchReading": {
         "additionalProperties": false,
         "description": "One individual's bench pass, read under a named scorer.",
@@ -11399,6 +11480,82 @@
         "title": "NoiseBand",
         "type": "object"
       },
+      "NoiseFloorPass": {
+        "additionalProperties": false,
+        "properties": {
+          "arm": {
+            "$ref": "#/components/schemas/ArmName"
+          },
+          "cells": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "kind": {
+            "const": "noise_floor",
+            "default": "noise_floor",
+            "title": "Kind",
+            "type": "string"
+          },
+          "measured_datasets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Measured Datasets",
+            "type": "object"
+          },
+          "sample_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sample Keys",
+            "type": "array"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PassStop"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "arm",
+          "sp_hash",
+          "cells",
+          "sample_keys",
+          "stop",
+          "scorer_id"
+        ],
+        "title": "NoiseFloorPass",
+        "type": "object"
+      },
       "OnDivergence": {
         "description": "What a resume does where its replay departs the record: ONE answer, never two flags.",
         "enum": [
@@ -12656,15 +12813,16 @@
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/GuardState"
+            "$ref": "#/components/schemas/GuardState",
+            "readOnly": true
           }
         },
         "required": [
-          "state",
           "sentence",
           "head_to_head_id",
           "controlled",
-          "differs_on"
+          "differs_on",
+          "state"
         ],
         "title": "PairGuard",
         "type": "object"
@@ -13512,9 +13670,11 @@
             "enum": [
               "account_event",
               "arm",
+              "arm_act",
               "backend_warning",
               "bank_partition",
               "campaign_ceiling",
+              "cell_beat",
               "cycle_final",
               "cycle_minted",
               "cycle_share",
@@ -13526,9 +13686,7 @@
               "fork_graded",
               "health",
               "hold",
-              "intervention",
               "launch_clock",
-              "left_comparison",
               "llm_call",
               "llm_call_progress",
               "llm_call_start",
@@ -13732,10 +13890,6 @@
         "additionalProperties": false,
         "description": "The round's standing in its eliminator ``member``'s race.",
         "properties": {
-          "current_id": {
-            "title": "Current Id",
-            "type": "string"
-          },
           "member": {
             "title": "Member",
             "type": "string"
@@ -13755,7 +13909,6 @@
         },
         "required": [
           "member",
-          "current_id",
           "n_samples",
           "top"
         ],
@@ -14371,7 +14524,7 @@
       },
       "RulerStanding": {
         "additionalProperties": false,
-        "description": "Whether a scope has a δ ruler, and which one.",
+        "description": "Whether a scope has a δ ruler, and on what model.",
         "properties": {
           "calibration_model": {
             "anyOf": [
@@ -14389,18 +14542,6 @@
             "description": "Null while not fitted.",
             "title": "Calibration Model"
           },
-          "ruler_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The scale every θ and δ of this scope is read on (`RulerStamp.id`). Null while not fitted.",
-            "title": "Ruler Id"
-          },
           "state": {
             "enum": [
               "fitted",
@@ -14412,7 +14553,6 @@
         },
         "required": [
           "state",
-          "ruler_id",
           "calibration_model"
         ],
         "title": "RulerStanding",
@@ -15191,10 +15331,6 @@
             "title": "At Offset",
             "type": "integer"
           },
-          "at_time": {
-            "title": "At Time",
-            "type": "string"
-          },
           "backend_retry_count": {
             "default": 0,
             "title": "Backend Retry Count",
@@ -15389,13 +15525,6 @@
             ],
             "description": "The arm a surface following the run shows (`_observed`); null before any arm exists."
           },
-          "open_positions": {
-            "items": {
-              "type": "integer"
-            },
-            "title": "Open Positions",
-            "type": "array"
-          },
           "optimizer_step": {
             "anyOf": [
               {
@@ -15535,10 +15664,6 @@
             "$ref": "#/components/schemas/DashboardState",
             "default": "init"
           },
-          "state_since": {
-            "title": "State Since",
-            "type": "string"
-          },
           "stop_reason": {
             "anyOf": [
               {
@@ -15575,12 +15700,10 @@
           }
         },
         "required": [
-          "state_since",
           "rounds",
           "display_metric",
           "backpressure",
           "measured_unit",
-          "at_time",
           "round_cells_ceiling",
           "current_round",
           "sample_coverage",
@@ -16181,21 +16304,35 @@
         "type": "object"
       },
       "StatusMark": {
-        "enum": [
-          "archived",
-          "running",
-          "scoring",
-          "starting",
-          "queued",
-          "gate",
-          "paused",
-          "detached",
-          "success",
-          "halted",
-          "failed",
-          "unknown"
-        ],
-        "type": "string"
+        "anyOf": [
+          {
+            "enum": [
+              "queued",
+              "starting",
+              "running",
+              "scoring",
+              "paused",
+              "gate",
+              "detached"
+            ],
+            "type": "string"
+          },
+          {
+            "enum": [
+              "success",
+              "halted",
+              "failed"
+            ],
+            "type": "string"
+          },
+          {
+            "enum": [
+              "archived",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        ]
       },
       "StepFacts": {
         "additionalProperties": false,
@@ -17802,119 +17939,25 @@
         "type": "object"
       },
       "VerificationPass": {
-        "additionalProperties": false,
-        "description": "One individual's held-out pass, as the facts it banked — never a grade of them.",
-        "properties": {
-          "arm": {
-            "$ref": "#/components/schemas/ArmName"
+        "discriminator": {
+          "mapping": {
+            "bench": "#/components/schemas/BenchPass",
+            "noise_floor": "#/components/schemas/NoiseFloorPass",
+            "verify": "#/components/schemas/VerifyPass"
           },
-          "cells": {
-            "items": {
-              "maxItems": 3,
-              "minItems": 3,
-              "prefixItems": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "boolean"
-                }
-              ],
-              "type": "array"
-            },
-            "title": "Cells",
-            "type": "array"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/MeasurementRole"
-          },
-          "measured_datasets": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Measured Datasets",
-            "type": "object"
-          },
-          "reads_before": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reads Before"
-          },
-          "sample_keys": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Sample Keys",
-            "type": "array"
-          },
-          "scorer_id": {
-            "title": "Scorer Id",
-            "type": "string"
-          },
-          "seed": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Seed"
-          },
-          "sp_hash": {
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "stop": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PassStop"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "strategy": {
-            "anyOf": [
-              {
-                "enum": [
-                  "random",
-                  "hard"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strategy"
-          }
+          "propertyName": "kind"
         },
-        "required": [
-          "kind",
-          "arm",
-          "sp_hash",
-          "cells",
-          "sample_keys",
-          "stop",
-          "scorer_id",
-          "strategy",
-          "seed",
-          "reads_before"
-        ],
-        "title": "VerificationPass",
-        "type": "object"
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/VerifyPass"
+          },
+          {
+            "$ref": "#/components/schemas/BenchPass"
+          },
+          {
+            "$ref": "#/components/schemas/NoiseFloorPass"
+          }
+        ]
       },
       "VerifyCandidatePayload": {
         "additionalProperties": false,
@@ -17993,6 +18036,103 @@
         "title": "VerifyCandidatePayload",
         "type": "object"
       },
+      "VerifyPass": {
+        "additionalProperties": false,
+        "properties": {
+          "arm": {
+            "$ref": "#/components/schemas/ArmName"
+          },
+          "cells": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "boolean"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "kind": {
+            "const": "verify",
+            "default": "verify",
+            "title": "Kind",
+            "type": "string"
+          },
+          "measured_datasets": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Measured Datasets",
+            "type": "object"
+          },
+          "sample_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Sample Keys",
+            "type": "array"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "stop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PassStop"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "strategy": {
+            "enum": [
+              "random",
+              "hard"
+            ],
+            "title": "Strategy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "arm",
+          "sp_hash",
+          "cells",
+          "sample_keys",
+          "stop",
+          "scorer_id",
+          "strategy",
+          "seed"
+        ],
+        "title": "VerifyPass",
+        "type": "object"
+      },
       "VerifyReading": {
         "additionalProperties": false,
         "description": "A verify pass under a named scorer: the candidate on fresh cells, beside its decided ones.",
@@ -18033,24 +18173,8 @@
                 "type": "null"
               }
             ],
-            "description": "Whether the fresh cells leave the recorded hit rate standing: its level sits at or below the fresh band's upper bound. `None` exactly where `held_absent` says why.",
+            "description": "Whether the fresh cells leave the recorded hit rate standing: its level sits at or below the fresh band's upper bound. `None`: `hard` picks sit below the level whatever the candidate is worth, and under two fresh cells have no band; read `vs_origin` there.",
             "title": "Held"
-          },
-          "held_absent": {
-            "anyOf": [
-              {
-                "enum": [
-                  "hard_picks",
-                  "under_two_fresh"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Why the fresh cells make no held / dropped call: `hard_picks` sit below the level whatever the candidate is worth, and `under_two_fresh` cells have no band. Read `vs_origin` there.",
-            "title": "Held Absent"
           },
           "label": {
             "title": "Label",
@@ -18088,8 +18212,7 @@
           "fitness_increment",
           "composite_increment",
           "vs_origin",
-          "held",
-          "held_absent"
+          "held"
         ],
         "title": "VerifyReading",
         "type": "object"

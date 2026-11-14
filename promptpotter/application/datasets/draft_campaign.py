@@ -100,7 +100,6 @@ def new_draft(
     n_samples: int,
     sample_preview: list[dict[str, str]],
     headers: list[str],
-    source_file: str = "",
     column_label_sets: dict[str, tuple[str, ...]] | None = None,
     first_blank_row: dict[str, int] | None = None,
 ) -> DraftFile:
@@ -121,7 +120,6 @@ def new_draft(
         column_label_sets=dict(column_label_sets or {}),
         first_blank_row=dict(first_blank_row or {}),
         field_provenance=provenance,
-        source_file=source_file,
         origin_prompts={},
         decomposed_task_context={},
         candidate_library=(),

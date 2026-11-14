@@ -659,6 +659,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
   and filed every banked L4 cell under an id no read finds, while `behaviour_keys.json` held. Root: the
   estimator is keyed by its behaviour key, as the treatments are since bkeys. **Rides with:** bkeys-2.
   **Re-test:** a rename in `runner/inner/tasks.py` leaves the estimator id unchanged.
+- **The trace hashes a display field** (rec's landing, reported): `MemberAddress.pass_role` has no
+  reader but rides the round-file readings the trace hashes, so deleting it moves the behaviour keys.
+  Root: the behaviour key reads the decisions, not the display fields. **Rides with:** bkeys-2.
+  **Re-test:** deleting `pass_role` leaves `behaviour_keys.json` unchanged.
 
 - **An L4 cell's instrument hashes a hand-picked subset, not what its session loads** (✓): the pin's
   `InnerTaskSpec.instrument` (`runner/inner/tasks.py::InnerTasks`: node config, campaign identity,
@@ -792,68 +796,28 @@ Toolbar, and the phone walk's back step. Left:
 
 ### batch/27 · rec
 
-- **Tagged unions spelled as optional fields and a validator**: the engine holds 46
-  `model_validator(mode="after")`, many guarding "field X is set exactly when the state is Y"
-  (`RunPhaseRecord`'s `_paused_says_why` and `VerificationGradedView`'s `_refused_reads_nothing`, read in
-  code; `_gate_says_which`, `_state_fits`, `_verdict_or_why_not`, `_held_or_why_not`, `_refusal_fits`,
-  `_a_floor_measured_no_lift`, `_only_a_parent_is_unwalked` by name), and every reader re-checks None.
-  Action: a census first; then a discriminated union per such record, deleting the validator and the
-  readers' None branches, so the illegal state cannot be written. A renamed record field wipes run
-  data, the landing's normal path. **Rides with:** rec. **Re-test:** the census's records carry no
-  state-fitting `model_validator`.
-- **Fields written, never read**: no engine, webapp or test code reads `Campaign.lifecycle_changed_at`
-  / `lifecycle_reason` (written by `jobs/mint.py` and `campaign_store/store.py`),
-  `PriorStanding.n_paired` / `n_discordant` (every reader takes `p_better` alone), `CycleIndex.open_rounds`,
-  `HardSamples.round_order`, `InitExitView.origin_samples`, `round_health.py`'s `transient_count` /
-  `output_ceiling_count`, `DraftFile.source_file`, `BankLabel.labelled_at` or
-  `InnerCellFacts.origin_headroom` (unless a panel dumps the object). Found by name, so a
-  `case X(field=…)` read escapes it: confirm each before deleting. Action: they go, and a gate check
-  holds every declared field to a reader, with an allowlist for timestamp stamps and a baseline that
-  only falls. **Rides with:** rec. **Re-test:** the check's baseline is 0.
-- **An absent round fitness reads as zero**: `domain/round_diagnostics.py::RoundDiagnostics`'s
-  `fitness` defaults to `0.0`, against `docs/developer/conventions.md`'s "Absent is not zero"; `domain/CLAUDE.md`
-  licenses it ("reporting … every field defaulted", so a file written before a rename still reads),
-  which is a reader of two shapes the no-backcompat rule already forbids, since a rename wipes run data.
-  Action: the reporting fields are required or `None` where absent, and the license line goes. **Rides
-  with:** rec. **Re-test:** `git grep -cE ": float = 0\.0" -- promptpotter/domain/round_diagnostics.py` is 0.
-- **One act on an arm writes two records**: `runner/round.py` and `scoring/query_loop.py` append an
-  `InterventionRecord` and a `LeftComparisonRecord` for one act. Action: one act record both reads derive
-  from. **Rides with:** rec 1. **Re-test:** `git grep -n "LeftComparisonRecord(" -- promptpotter`.
-- **A deleted fork takes its `LeftComparisonRecord` with it**, so its arm reads `controlled` again while
-  the fork's spend stays banked. Action: the exit outlives the fork. **Rides with:** rec 1. **Re-test:**
-  delete a fork off an arm, then read the arm's `evidence`.
-- **`record_decision` discards its offset**: `bench/resume_and_fork/decisions.py::record_decision`
-  returns the outcome, so the fork's cut appends its own record. Action: it returns the offset the cut
-  takes. **Rides with:** rec 1. **Re-test:**
-  `git grep -c "ResumeCheckpointRecord(" -- promptpotter/application/bench/resume_and_fork/fork_siblings.py` is 0.
-- **`domain/cycle_index.py::RunStatus.of` builds `mark: str` and asserts it a `StatusMark`.** Action:
-  `StatusMark` typed off `RunPhase` and `StopOutcome`. **Rides with:** rec 2. **Re-test:**
-  `git grep -n "mark: str" -- promptpotter/domain/cycle_index.py`.
-- **`last` reads `forks_inherit` by `getattr` with a default**: three records declare it as a `ClassVar`,
-  no record base does. Action: the ledger-record base declares it. **Rides with:** rec 2. **Re-test:**
-  `git grep -n "getattr(record, \"forks_inherit\"" -- promptpotter` is empty.
-- **`SampleScoredRecord.running` stamps a running fold on every cell** (9.3 % of a 1.5 MB ledger). Action:
-  a fold beside `AnnouncedArms`, and the field goes (run data wiped). **Rides with:** rec 2.
-- **A scoring cell beats as an LLM call**: `scoring/sample_measurement.py::_send_cell` and
-  `search_point_scorer.py::_claim_cell` append `LLMCallProgressRecord`s with `node="backend_scoring"`,
-  naming no arm. Action: a cell beat is its own record, keyed (arm, sample), with no node. **Rides
-  with:** rec 2. **Re-test:** `git grep -n '"backend_scoring"' -- promptpotter` is empty.
-- **`TokenUsageRecord.cached` and `key_source is None` are two spellings of one fact** (a replay no
-  wallet paid). Action: one field. **Rides with:** rec 2. **Re-test:** `git grep -n "key_source=None" -- promptpotter`.
-- **`domain/export.py` carries no optimization spend or tokens**, so a reader cannot compute amortized
-  lifetime cost ([`../research/external-constraints.md`](../research/external-constraints.md) § Cost
-  reporting). **Rides with:** rec 2. **Re-test:** `grep -n "spend\|token" promptpotter/domain/export.py`.
-- **`Sample.key` re-hashes on every read** (16,781 calls per potter leg, `domain/sample.py::Sample.key`).
-  Action: computed once at validation. **Rides with:** rec 2.
-- **`infrastructure/llm/openai_compat.py::OpenAICompatibleClient._refused_generation` banks a missing
-  count as an empty account.** Never estimate from content length. Action: `TokenUsageRecord` carries an unknown count.
-  **Rides with:** rec 3. **Re-test:** a `provider: groq` in any dataset pipeline.
-- **A cold server folds every ledger before the first page answers**: the first `GET /hierarchy?depth=1`
-  waits on a full `LEDGER_FOLDS` pass (37 µs a line cold, 2026-11-07); the boot sweep no longer runs
-  beside it. Root: pydantic validates each screened line on every cold start; a fold snapshot keyed by
-  `file_sig` makes a restart pay only the tail. **Rides with:** rec 4, the records' fold; its Owns gain
-  `store/read_model.py::LedgerIndex` (the snapshot) and `store/data_root.py` (its `CACHE` row).
-  **Re-test:** time a cold `GET /hierarchy?depth=1` on the desk's data root.
+- **`PairedReading` is a tagged union spelled as optional fields and a validator**:
+  `domain/paired_reading.py::PairedReading`'s `_state_fits_content` guards "a lift, its members,
+  cell set and coverage exist exactly where `state` is `read`", and 138 reads across 27 files re-check
+  `headline` / `coverage` for None. Action: a read arm and an unread arm discriminated on `state`, the
+  validator and the readers' None branches deleted. A reshape wipes run data. **Re-test:**
+  `git grep -c "_state_fits_content" -- promptpotter/domain/paired_reading.py` is 0.
+- **Fields written, never read: 30 left** (`scripts/complexity_ledger.py::_unread_fields`, the
+  `p_unread_fields` ceiling). `PriorStanding.n_paired` / `n_discordant` are written in the capo and potter
+  packages, so deleting them re-keys behaviour; `InnerCellFacts.origin_headroom` sits in the hashed
+  `l4/proxies.py`. Action: each goes, or names its reader. **Re-test:** the ceiling is 0.
+- **`SampleScoredRecord.running` stamps a running fold on every cell** (9.3 % of a 1.5 MB ledger). Its
+  readers (`Narration.fold`, `StandingArm.fold`, the live board's rows) need the scorer's evaluators,
+  which no domain fold holds. Action: the readers fold `StandingArm.cells` through
+  `metrics.py::compute_composite_fitness` in `application/`, and the field goes (run data wiped).
+- **Generated `last` record classes live in module globals so a snapshot can pickle them** (rec's
+  landing): `store/campaign_store/ledger_scan.py::_last` builds a class at runtime and registers it with
+  `globals()[made.__name__] = made`. Action: the last-wins records become declared classes, and the
+  registration goes. **Re-test:** `git grep -c "globals()\[" -- promptpotter/infrastructure/store/campaign_store/ledger_scan.py` is 0.
+- **An empty round's error rate reads 0.0** (rec's landing, reported):
+  `domain/round_diagnostics.py::RoundDiagnostics.error_rate` stays a `float` where no cell ran, the
+  absent-as-zero shape rec closed for a round's fitness. Action: `None` where no cells ran.
+  **Re-test:** a round with no scored cell serves `error_rate: null`.
 
 ### batch/27 · la
 

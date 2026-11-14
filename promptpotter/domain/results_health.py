@@ -24,7 +24,6 @@ from promptpotter.domain.scoring import (
     NodeWarning,
     constant_answer,
     enumerable_truth_labels,
-    modal_answer_share,
 )
 from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.statistics import mean_ci
@@ -246,10 +245,8 @@ def compute_degradation_health(
     hole_count: int,
     not_attempted: int,
     unscored: int,
-    output_ceiling_count: int,
     dominant_node: str | None = None,
     last_error: str | None = None,
-    answer_modal_share: float | None = None,
     constant_floor: ConstantFloor | None = None,
     node_failure_rates: dict[str, float] | None = None,
     node_warnings: dict[str, list[str]] | None = None,
@@ -277,12 +274,10 @@ def compute_degradation_health(
             cause="origin_unmeasured" if is_origin else None,
             samples=attempted,
             structural_count=structural_count,
-            transient_count=transient_count,
             hole_count=hole_count,
             no_result_count=no_result_count,
             not_attempted=not_attempted,
             unscored=unscored,
-            output_ceiling_count=output_ceiling_count,
             last_error=last_error,
             degraded_rate=0.0,
             consecutive_degraded_rounds=0,
@@ -298,13 +293,10 @@ def compute_degradation_health(
         samples=attempted,
         not_attempted=not_attempted,
         unscored=unscored,
-        output_ceiling_count=output_ceiling_count,
         last_error=last_error,
         structural_count=structural_count,
-        transient_count=transient_count,
         hole_count=hole_count,
         no_result_count=no_result_count,
-        answer_modal_share=answer_modal_share,
         constant_floor=constant_floor,
         degraded_rate=counts.degraded_rate,
         consecutive_degraded_rounds=consecutive_degraded_rounds,
@@ -603,7 +595,6 @@ def compute_round_health(
     is_origin: bool = False,
 ) -> DegradationHealth:
     structural = transient = no_result = holes = 0
-    ceiling = sum(1 for r in results if ran_to_output_ceiling(r.facts))
     # An errored cell's grade carries no `unscored`: only a measured row can lack a verdict.
     unscored = sum(1 for r in results if r.grade.unscored is not None)
     structural_nodes: dict[str, int] = {}
@@ -648,10 +639,7 @@ def compute_round_health(
         hole_count=holes,
         not_attempted=not_attempted,
         unscored=unscored,
-        output_ceiling_count=ceiling,
         last_error=last_error,
-        # Over every attempted row: hedging IS how a round produces unscoreable rows.
-        answer_modal_share=modal_answer_share(results),
         constant_floor=origin_floor(results) if is_origin else None,
         node_failure_rates=node_failure_rates,
         node_warnings=node_warnings,

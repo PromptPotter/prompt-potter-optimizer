@@ -5,7 +5,9 @@ from typing import ClassVar
 
 from promptpotter.domain.phases import STOP_REASON_INFO, RunPhase
 from promptpotter.domain.records.run_records import (
+    Ended,
     LLMCallRecord,
+    Paused,
     RoundClosedRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
@@ -94,8 +96,8 @@ class RoundAudits:
             self._settle(interrupted=False)
             return
         if isinstance(record, RunPhaseRecord):
-            if record.run_phase in _STOPS and record.stop_reason is not None:
-                cuts = STOP_REASON_INFO[record.stop_reason].halts_mid_round
+            if isinstance(record.state, Paused | Ended):
+                cuts = STOP_REASON_INFO[record.state.stop_reason].halts_mid_round
                 self._settle(interrupted=cuts and not self._closed)
             return
         if isinstance(record, LLMCallRecord):

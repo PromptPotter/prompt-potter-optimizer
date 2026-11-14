@@ -1,44 +1,44 @@
-"""Reporting rows: every field defaults (`domain/CLAUDE.md` § Tolerance is scoped by what a payload is FOR)."""
+"""Reporting rows: every field required, ``None`` where the round holds no answer to it."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class NearMiss:
     """A query whose ground truth landed in candidates rank 2-10."""
 
-    query: str = ""
-    ground_truth: str = ""
-    rank: int = 0
-    predicted: str = ""
+    query: str
+    ground_truth: str
+    rank: int
+    predicted: str
 
 
 @dataclass(frozen=True)
 class SampleDiag:
-    query: str = ""
-    ground_truth: str = ""
-    predicted: str = ""
-    rank: int | None = None
-    terminal_node: str = ""
-    gt_in_source: bool | None = None
-    gt_in_ranked: bool | None = None
-    warnings: list[str] = field(default_factory=list)
-    fitness: float = 0.0
+    query: str
+    ground_truth: str
+    predicted: str
+    rank: int | None
+    terminal_node: str
+    gt_in_source: bool | None
+    gt_in_ranked: bool | None
+    warnings: list[str]
+    fitness: float
 
 
 @dataclass(frozen=True)
 class RoundDiagnostics:
     """One round's post-scoring diagnostics, computed once and read by every renderer."""
 
-    rank_buckets: dict[str, int] = field(default_factory=dict)
-    top_k_accuracy: dict[int, float] = field(default_factory=dict)
-    near_misses: list[NearMiss] = field(default_factory=list)
-    n_valid: int = 0
+    rank_buckets: dict[str, int]
+    top_k_accuracy: dict[int, float]
+    near_misses: list[NearMiss]
+    n_valid: int
 
     # No `terminal_node` tally: the deepest node REACHED reads as that node failing en masse.
-    error_rate: float = 0.0
-    warning_rate: float = 0.0
+    error_rate: float
+    warning_rate: float
 
-    samples: list[SampleDiag] = field(default_factory=list)
+    samples: list[SampleDiag]

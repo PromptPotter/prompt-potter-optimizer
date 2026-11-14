@@ -770,6 +770,7 @@ def _render_export(session: Session, config: CampaignConfig) -> None:
         framing=campaign_framing(session.store, config, session.dataset),
         demo=session.state.scoring.partition.demo,
         bench=bench,
+        spend=scan_ledger_spend(ledger_chain(CycleDir(store.cycle_dir(hop)), moment=None)).spend,
     )
     store.write_export(hop, export)
 

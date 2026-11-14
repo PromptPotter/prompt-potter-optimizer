@@ -133,7 +133,6 @@ class DegradationHealth(FrozenModel):
     cause: HealthCause | None = None
     samples: int
     structural_count: int
-    transient_count: int
     # Attempted cells that reported nothing (re-run).
     hole_count: int
     # Attempted cells whose answer carried no extractable label: in ``samples``.
@@ -142,10 +141,6 @@ class DegradationHealth(FrozenModel):
     not_attempted: int
     # Sent and measured, no verdict (the formula named a term the row lacks): in ``samples``, no rate.
     unscored: int
-    # Answers cut at the output-token ceiling, scored as written. REPORTED, never graded.
-    output_ceiling_count: int
-    # ``None`` where the answer space makes collapse meaningless. REPORTED, never graded.
-    answer_modal_share: float | None = None
     # The origin round's alone; ``None`` on every other and where collapse is no question.
     constant_floor: ConstantFloor | None = None
     degraded_rate: float

@@ -22,6 +22,7 @@ from promptpotter.config.paths import (
     JOBS_DIR,
     JUDGE_REUSE_DIR,
     LANDING_FILE,
+    LEDGER_FOLDS_DIR,
     LIVE_JOBS_INDEX,
     MACHINE_DIR,
     MEASUREMENTS_DIR,
@@ -184,6 +185,7 @@ _AUDIT = Opaque("an audit trail its writer appends and no reader parses")
 _TREE = Opaque("a file of a tree another tool owns, read by that tool alone")
 _WALKED = Opaque("its reader walks a dict, so no model holds its shape yet")
 _FOR_A_PERSON = Opaque("written for a person to read, never read back")
+_PICKLED = Opaque("folds this process pickled, by their ledger's file_sig and code")
 
 
 @functools.cache
@@ -290,6 +292,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("route ceilings", _INSTALL, f"{ROUTE_ANSWERS_DIR}/*.json", Fate.CACHE, ROUTE_ANSWER),
     # `HF_HOME`, set by `deploy-linux/install-service.sh`: the only path its unit may write.
     Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE, _TREE),
+    Kind("ledger fold snapshot", _INSTALL, f"{LEDGER_FOLDS_DIR}/*.pickle", Fate.CACHE, _PICKLED),
     # Today's launches are what the daily quota counts, so a reset keeps them.
     Kind("job", _INSTALL, f"{JOBS_DIR}/*.json", _SURVIVOR, JOB_ADAPTER),
     Kind("live-jobs index", _INSTALL, f"{JOBS_DIR}/{LIVE_JOBS_INDEX}", _SURVIVOR, LIVE_JOB_IDS),

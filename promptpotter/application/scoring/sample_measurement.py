@@ -45,7 +45,7 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.spend import CellPrice, StepUsage, TokenAccount
 from promptpotter.infrastructure.backend import CellBilling
 from promptpotter.infrastructure.llm.base import hold_ceiling
-from promptpotter.infrastructure.llm.heartbeat import heartbeat
+from promptpotter.infrastructure.llm.heartbeat import CellBeat, heartbeat
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.spend_book import (
     FRAMING_TOKENS,
@@ -613,8 +613,7 @@ async def _send_cell(
     heartbeat_task = asyncio.create_task(
         heartbeat(
             active_cycle_ledger(),
-            call_id=f"scoring:{sample.id}",
-            node="backend_scoring",
+            CellBeat(sample.id),
             round_num=current_round(),
             start_monotonic=time.monotonic(),
             inner_fn=None if cell_hop is None else functools.partial(cell_hop, sample, wire_params),

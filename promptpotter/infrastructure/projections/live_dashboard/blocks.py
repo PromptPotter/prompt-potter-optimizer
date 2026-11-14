@@ -100,7 +100,6 @@ def build_racing_block(buffer: RoundBuffer) -> RacingBlock | None:
     ranked = sorted(buffer.race_standings.items(), key=lambda kv: -kv[1])
     return RacingBlock(
         member=buffer.race_member,
-        current_id=buffer.race_current_id,
         n_samples=buffer.race_n_samples,
         top=[{"id": cid, "p_best": p} for cid, p in ranked[:5]],
     )

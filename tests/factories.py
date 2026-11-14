@@ -123,7 +123,7 @@ from promptpotter.domain.paired_reading import (
     RoundArm,
 )
 from promptpotter.domain.phase_views import ViewAnchors
-from promptpotter.domain.phases import RunPhase, StopReason
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import (
     NodePromptInfo,
@@ -144,6 +144,7 @@ from promptpotter.domain.records.run_records import (
     PipelineRead,
     RoundClosedRecord,
     RoundEnteredRecord,
+    Running,
     RunPhaseRecord,
     RunWiringRecord,
     SampleScoredRecord,
@@ -177,7 +178,7 @@ from promptpotter.domain.spend import (
     SpendRollup,
     TokenUsageKind,
 )
-from promptpotter.domain.verification import BenchPasses, VerificationPass
+from promptpotter.domain.verification import BenchPass, BenchPasses
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -865,7 +866,6 @@ def run_wiring() -> RunWiringRecord:
         run_limits=RunLimits(),
         defaults_drift=None,
         backend_revision=None,
-        tree_hash="tree",
     )
 
 
@@ -902,7 +902,7 @@ def walking_cycle(stores: Stores) -> tuple[CycleHop, Path]:
     stores.campaigns.create_campaign(minted_campaign(hop))
     stores.campaigns.mint_cycle(hop)
     cycle_dir = stores.campaigns.cycle_dir(hop)
-    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(state=Running()))
     hold_cycle(cycle_dir)
     return hop, cycle_dir
 
@@ -1098,12 +1098,10 @@ def degradation_health(
         grade="healthy" if degraded_rate == 0.0 and not no_result else "degraded",
         samples=samples,
         structural_count=0,
-        transient_count=0,
         hole_count=0,
         no_result_count=no_result,
         not_attempted=0,
         unscored=0,
-        output_ceiling_count=0,
         degraded_rate=degraded_rate,
         consecutive_degraded_rounds=0,
         prior_clean_rounds=0,
@@ -1306,33 +1304,28 @@ def bench_pass(
     *,
     filed_as: str | None = None,
     **bend: Any,
-) -> VerificationPass:
+) -> BenchPass:
     """*individual*'s held-out pass, *rows* filed as its bench cells; *filed_as* parts two
     campaigns that send one individual."""
     round_num = int(individual != "origin")
     fields: dict[str, Any] = {
-        "kind": "bench",
         "arm": ArmName(key=ArmKey(individual), round=round_num, label=f"C{round_num}"),
         "sp_hash": individual,
         "stop": None,
         "scorer_id": "",
-        "strategy": None,
-        "seed": None,
         "reads_before": 0,
     } | bend
     under = filed_under(
         [("", {"individual": filed_as or f"bench_{individual}"})], prompt_fields_id=individual
     )
-    return VerificationPass(
+    return BenchPass(
         cells=filed(stores.archive, [row.facts for row in rows], under, role=MeasurementRole.BENCH),
         sample_keys=list(sample_keys),
         **fields,
     )
 
 
-def bench_passes(
-    origin: VerificationPass, *held: VerificationPass, tolerance: int = 0
-) -> BenchPasses:
+def bench_passes(origin: BenchPass, *held: BenchPass, tolerance: int = 0) -> BenchPasses:
     return BenchPasses(
         tolerance=tolerance,
         origin=origin,

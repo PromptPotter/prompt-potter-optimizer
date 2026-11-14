@@ -511,7 +511,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     at_offset: -1,
     state: "init",
     optimizer_step: null,
-    state_since: "",
     run_phase: "running",
     stop_reason: null,
     round: 0,
@@ -531,7 +530,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     recent_backend_warnings: [],
     total_backend_calls: 0,
     current_query_payload: null,
-    open_positions: [],
     lookahead: {
       depth: 1,
       auto: false,
@@ -558,7 +556,6 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     },
     backpressure: null,
     measured_unit: "sample",
-    at_time: "",
     round_cells_ceiling: 0,
     run_limits: { budget: {}, overshoot: false, optimizer: [] },
     defaults_drift: null,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from promptpotter.domain.cycle_index import CycleIndex, IndexRound, Intervention
+from promptpotter.domain.cycle_index import CycleIndex, IndexRound
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.records import CycleRecord
@@ -39,11 +39,9 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
         fork=facts.fork,
         spawned_by=facts.spawned_by,
         scorer_cell_formula=scan_cell_formula(chain),
-        interventions=[
-            Intervention(kind=act.kind, at=act.timestamp) for act in facts.interventions
-        ],
+        interventions=list(facts.interventions),
         stop_reason=None if ended is None else ended.stop_reason,
-        finished_at=None if ended is None else ended.timestamp,
+        finished_at=facts.ended_at,
         interrupted_round=None if final is None else final.interrupted_round,
         error=facts.error,
         final=None if final is None else final.final,
@@ -56,7 +54,6 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
             )
             for n, held in standing.rounds.items()
         ],
-        open_rounds=sorted({rnd for rnd, _ in standing.arms} - set(standing.rounds)),
         elects_on=standing.elections[max(standing.elections)].elects_on
         if standing.elections
         else None,

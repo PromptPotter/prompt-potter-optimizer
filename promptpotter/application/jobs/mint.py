@@ -571,7 +571,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
         treatment=plan.treatment,
         declaration=declaration,
         lifecycle_status="active",
-        lifecycle_changed_at=now,
     )
     ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
     declare_run_wiring(

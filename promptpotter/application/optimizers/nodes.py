@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import functools
-import hashlib
 import pkgutil
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -47,7 +45,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
-from promptpotter.shared.hashing import ID_HEX, normalized_module, stable_hash
+from promptpotter.shared.hashing import normalized_module, stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
@@ -379,17 +377,6 @@ def behaviour_key(name: str, members: Iterable[NodeMember], manifests: Sequence[
             "world": keys.world,
         }
     )
-
-
-@functools.cache
-def tree_hash() -> str:
-    """The whole package's code as this process loaded it: recorded beside the key, never keyed on."""
-    return hashlib.sha256(
-        b"".join(
-            path.relative_to(PACKAGE_ROOT).as_posix().encode() + b"\0" + path.read_bytes()
-            for path in sorted(PACKAGE_ROOT.rglob("*.py"))
-        )
-    ).hexdigest()[:ID_HEX]
 
 
 @dataclass(frozen=True)

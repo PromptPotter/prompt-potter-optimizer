@@ -13,7 +13,6 @@ from promptpotter.application.datasets.authored import (
     load_dataset_campaign_config,
 )
 from promptpotter.application.datasets.loaders import held_bank
-from promptpotter.application.intelligence.adaptive_queue_mechanism import parent_grades
 from promptpotter.application.intelligence.hard_sample_sorter import (
     arm_thetas,
     build_hard_samples,
@@ -366,9 +365,7 @@ def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
         None if judging is None else judging.ruler,
         frontier=None if frontier is None else (frontier.theta, frontier.se),
         arm_theta=arm_thetas(rounds),
-        parent_grades=parent_grades(cells),
         slots=bank.slot_of,
-        n_min=knobs.elimination_n_min,
         cycle_id=hop.cycle_id,
     )
 
@@ -402,9 +399,7 @@ def _dataset_view(stores: Stores, name: str, bank: Bank) -> HardSamples:
             judging.ruler,
             frontier=None,
             arm_theta={},
-            parent_grades={},
             slots=bank.slot_of,
-            n_min=n_min,
             cycle_id=None,
         )
 

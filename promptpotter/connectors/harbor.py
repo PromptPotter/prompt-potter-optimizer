@@ -1156,7 +1156,7 @@ class _AgentModel:
             )
         self._client = keyed_client(provider)
         self._call, self._model, self._provider, self._window = call, model, provider, window
-        self.usage = TokenAccount()
+        self.usage: TokenAccount | None = TokenAccount()
         self._answered = 0
         self._cost: float | None = 0.0
         # A refusal is raised again on every later call: terminus-2 retries a failed query, and
@@ -1208,7 +1208,7 @@ class _AgentModel:
             raise
         self._fault = None
         self._answered += 1
-        self.usage += reply.usage
+        self.usage = None if self.usage is None or reply.usage is None else self.usage + reply.usage
         if self._cost is not None:
             self._cost = None if reply.cost_usd is None else self._cost + reply.cost_usd
         if reply.finish_reason == "length":
@@ -1221,9 +1221,9 @@ class _AgentModel:
             model_name=reply.model,
             # Harbor's own tally, which no bill reads: an unreported cost is its zero.
             usage=UsageInfo(
-                prompt_tokens=reply.usage.input,
-                completion_tokens=reply.usage.output,
-                cache_tokens=reply.usage.cache_read or 0,
+                prompt_tokens=(usage := reply.usage or TokenAccount()).input,
+                completion_tokens=usage.output,
+                cache_tokens=usage.cache_read or 0,
                 cost_usd=reply.cost_usd or 0.0,
             ),
         )

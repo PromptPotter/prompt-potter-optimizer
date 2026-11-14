@@ -709,13 +709,14 @@ class Replay(CycleRead):
 
     def decide(self, inputs: CheckpointInputs, outcome: Any) -> Any:
         """A resume re-derives it only where *inputs* is ``Replayed``; else it is archived."""
-        return record_decision(
+        record_decision(
             self._cycle.pending_decisions,
             inputs,
             outcome,
             node=self._member.name,
             round=self._round.round_num,
         )
+        return outcome
 
 
 class Progress(CycleRead):

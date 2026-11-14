@@ -317,15 +317,15 @@ from promptpotter.domain.pipeline_schema import (
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
+    ArmAct,
     ArmRecord,
     CampaignCeilingRecord,
-    ComparisonExit,
     ForkSpec,
     ForkTrigger,
-    InterventionRecord,
     PhaseRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
+    Running,
     RunPhaseRecord,
     RunWiringRecord,
     StopLoop,
@@ -360,9 +360,10 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget, SpendRollup, TokenUsageKind
 from promptpotter.domain.verification import (
+    BenchPass,
     BenchPasses,
     NoiseBand,
-    VerificationPass,
+    VerifyPass,
     VerifyStrategy,
 )
 from promptpotter.domain.wounds import fatal_validation_failures
@@ -384,6 +385,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
 from promptpotter.infrastructure.store.read_model import LedgerIndex
+from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
@@ -1390,7 +1392,7 @@ def _potter_says(*instructions: str) -> Callable[[dict[str, Any]], str]:
 
 def _bench_pass(
     stores: Stores, individual: str, reward: float, *, cells: int = 4, stop: PassStop | None = None
-) -> VerificationPass:
+) -> BenchPass:
     held_out = samples(4, query="b")
     rows = [
         measurement(
@@ -2105,7 +2107,7 @@ class _Bench(NamedTuple):
     picked: RoundResult
     head: Cut | Measured
     fold: ScoreSummary
-    origin_pass: VerificationPass
+    origin_pass: BenchPass
     graded: Callable[..., BenchPasses]
 
 
@@ -2169,7 +2171,7 @@ def _bench_cycle(
             )
         )
 
-        def graded(*held: VerificationPass) -> BenchPasses:
+        def graded(*held: BenchPass) -> BenchPasses:
             banked = bench_passes(origin_pass, *held)
             return asyncio.run(
                 bench_selection(
@@ -2655,7 +2657,6 @@ def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
                 run_limits=RunLimits(),
                 defaults_drift=None,
                 backend_revision=None,
-                tree_hash="tree",
             )
         )
         for at, record in enumerate(ledger_records(ledger)):
@@ -4158,7 +4159,7 @@ def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_drop
         assert acks(untaken) == ["accepted"], "a press was acked as a cut"
         assert not intervened(), "the press alone marked the cycle babysat"
         # A second RUNNING record is a new launch: the press the last one never reached is not its.
-        commands.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+        commands.append(RunPhaseRecord(state=Running()))
         commanded.void_inbox(command_hop)
         assert commanded.inbox(command_hop).skips == ()
         with scoped(ledger=commands):
@@ -4343,8 +4344,8 @@ def _evidence_campaign(
             cycle=seat(stores, bank=_H2H_BANK).cycle,
         )
     if steered:
-        stores.campaigns.append(hop, InterventionRecord(kind="skip"))
-    passes: dict[str, VerificationPass] = {}
+        stores.campaigns.act(hop, ArmAct.SKIP)
+    passes: dict[str, BenchPass] = {}
     for role, level in (("origin", origin), ("selected", selected))[: 1 + graded]:
         # The origin is ONE individual every campaign sends; each pick is its own.
         individual = role if role == "origin" else f"{cid}:{role}"
@@ -4745,9 +4746,8 @@ def test_c0_is_topped_up_on_a_scope_the_line_drew_never_paired_on_its_own_scope_
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin() -> None:
-    def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerificationPass:
-        return VerificationPass(
-            kind=MeasurementRole.VERIFY,
+    def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerifyPass:
+        return VerifyPass(
             arm=ArmName(key=ArmKey("c"), round=round_num, label="C3.1"),
             sp_hash="h",
             cells=[(f"k{sid}", f"r.{sid}", False) for sid in range(100, 110)],
@@ -4756,7 +4756,6 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
             scorer_id="s",
             strategy=strategy,
             seed=1,
-            reads_before=None,
         )
 
     def keyed(rows: list[GradedCell]) -> CellSheet:
@@ -4769,7 +4768,7 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     c0 = ArmName(key=ArmKey("c0"), round=0, label="C0")
 
-    def verified(pass_: VerificationPass, fresh_rows: CellSheet = fresh) -> Any:
+    def verified(pass_: VerifyPass, fresh_rows: CellSheet = fresh) -> Any:
         arm = c0 if pass_.arm.round == 0 else pass_.arm
         return verify_reading(
             pass_,
@@ -4793,12 +4792,12 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     assert pair.headline.estimate.value == pytest.approx(0.5), (
         "paired per cell both scored, never the difference of two rates over different cells"
     )
-    assert (verify.held, verify.held_absent) == (False, None), (
+    assert verify.held is False, (
         "the recorded level sits above the fresh band, so the round's claim did not survive"
     )
     assert verified(banked(), keyed(measurements([1.0] * 10, range(100, 110)))).held is True
     hard = verified(banked("hard"))
-    assert (hard.held, hard.held_absent) == (None, "hard_picks"), (
+    assert hard.held is None, (
         "hard picks sit below the level whatever the candidate is worth: no verdict from the level"
     )
     at_origin = verified(banked(round_num=0))
@@ -5230,8 +5229,8 @@ def test_the_arms_of_one_declared_head_to_head_are_controlled_only_on_their_reco
         if "rewound" in arms:
             rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
             assert rewound is not None
-            h2h_stores.campaigns.leave_comparison(
-                h2h_stores.campaigns.line_holder(rewound.root_hop), ComparisonExit.REWIND
+            h2h_stores.campaigns.act(
+                h2h_stores.campaigns.line_holder(rewound.root_hop), ArmAct.REWIND
             )
         if "forked" in arms:
             forked = h2h_stores.campaigns.load_campaign(f"capo_forked_{h2h_id}")
@@ -5252,7 +5251,10 @@ def test_the_arms_of_one_declared_head_to_head_are_controlled_only_on_their_reco
                 cut=CycleEventLog.open(CycleDir(parent)).next_offset,
                 cut_round=1,
             )
-            h2h_stores.campaigns.leave_comparison(fork, ComparisonExit.FORK)
+            h2h_stores.campaigns.act(line, ArmAct.FORK)
+            # The exit is the arm's, not the fork's: deleting the fork leaves it standing.
+            deleted, why = cleanup_stub_fork_if_empty(campaign_store=h2h_stores.campaigns, hop=fork)
+            assert deleted, why
         h2h = subject_evidence(h2h_stores, arm_subjects).head_to_head
         assert h2h is not None and h2h.guard.head_to_head_id == h2h_id, case
         assert [r.guard.state.value for r in h2h.rows] == guards, (

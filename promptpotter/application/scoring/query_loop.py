@@ -29,7 +29,7 @@ from promptpotter.domain.phases import (
     WalkEnd,
 )
 from promptpotter.domain.records.run_records import (
-    ComparisonExit,
+    ArmAct,
     RaceCatchUpRecord,
     SampleScoredRecord,
     SampleStartedRecord,
@@ -776,8 +776,7 @@ class _ScoringPhase[K: Hashable]:
             session = self.session
             if session.state.control.spend_skip():
                 # Stamped where a searchpoint is actually cut, never at the press.
-                session.record_intervention("skip")
-                session.store.campaigns.leave_comparison(session.hop, ComparisonExit.SKIP)
+                session.act(ArmAct.SKIP)
             logger.info(
                 "Operator skip after query %d/%d; accepting partial searchpoint.",
                 len(walk.results),

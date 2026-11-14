@@ -126,17 +126,17 @@ class ChatReply(BaseModel):
     served_by: str | None = Field(None, validation_alias="provider")
 
     @property
-    def tokens(self) -> TokenAccount:
-        return TokenAccount() if self.usage is None else self.usage.tokens
+    def tokens(self) -> TokenAccount | None:
+        """``None``: the provider reported no count (a refusal's repaired generation), never 0."""
+        return None if self.usage is None or self.usage.prompt_tokens is None else self.usage.tokens
 
     @property
     def cost(self) -> float | None:
         return None if self.usage is None else self.usage.cost
 
     def bill(self) -> Billed | None:
-        if self.usage is None or self.usage.prompt_tokens is None:
-            return None
-        return Billed(self.tokens, self.cost, self.served_by, self.model)
+        tokens = self.tokens
+        return None if tokens is None else Billed(tokens, self.cost, self.served_by, self.model)
 
     @property
     def finish_reason(self) -> str | None:
@@ -178,11 +178,16 @@ def billed_cost(first: float | None, second: float | None) -> float | None:
     return (first or 0.0) + (second or 0.0)
 
 
-def _failure_diagnostics(response: ChatReply, first: TokenAccount) -> dict[str, Any]:
+def _plus(a: TokenAccount | None, b: TokenAccount | None) -> TokenAccount | None:
+    """An unknown part leaves the sum unknown."""
+    return None if a is None or b is None else a + b
+
+
+def _failure_diagnostics(response: ChatReply, first: TokenAccount | None) -> dict[str, Any]:
     return {
         "model": response.model,
         "finish_reason": response.finish_reason,
-        "usage": response.tokens + first,
+        "usage": _plus(response.tokens, first),
         "reasoning_chars": len(response.choices[0].reasoning or ""),
     }
 
@@ -300,7 +305,7 @@ class _ParsedReply:
     content: str
     parsed: Any
     # What the rungs before *response* billed.
-    earlier: TokenAccount = field(default_factory=TokenAccount)
+    earlier: TokenAccount | None = field(default_factory=TokenAccount)
     earlier_cost: float | None = None
     repair_errors: list[str] = field(default_factory=list)
 
@@ -347,7 +352,7 @@ def _llm_response(landed: _ParsedReply, provider_name: str) -> LLMResponse:
         reasoning=choice.reasoning or "",
         tool_calls=[call.parsed(provider_name) for call in choice.tool_calls or ()],
         model=response.model,
-        usage=response.tokens + landed.earlier,
+        usage=_plus(response.tokens, landed.earlier),
         cost_usd=billed_cost(landed.earlier_cost, response.cost),
         served_by=response.served_by,
         finish_reason=response.finish_reason,
@@ -655,7 +660,7 @@ class OpenAICompatibleClient:
                     err.diagnosis(),
                 )
                 raise err from validation_err
-            earlier = earlier + response.tokens
+            earlier = _plus(earlier, response.tokens)
             earlier_cost = billed_cost(earlier_cost, response.cost)
         return _ParsedReply(response, content, parsed, earlier, earlier_cost, repair_errors)
 

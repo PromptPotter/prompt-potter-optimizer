@@ -128,14 +128,15 @@ class LLMReuseCache:
                     response, replayed=False, duration_s=round(time.monotonic() - started, 2)
                 )
         duration_s = round(time.monotonic() - started, 2)
-        if claim_call_price(key):
+        # A reply that reported no count replays none, as its send filed none.
+        if claim_call_price(key) and (usage := banked.usage) is not None:
             emit_replay_usage(
                 node=node,
-                usage=banked.usage,
+                usage=usage,
                 duration_s=duration_s,
                 price=call_price(
                     kind,
-                    banked.usage,
+                    usage,
                     model=banked.model or model,
                     provider=provider,
                     cost_usd=banked.cost_usd,

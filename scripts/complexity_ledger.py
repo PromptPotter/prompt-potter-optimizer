@@ -66,7 +66,9 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 33,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 193,
+    "p_served": 198,
+    # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
+    "p_unread_fields": 30,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.
@@ -304,6 +306,73 @@ def _read_names(sites: dict[Path, str]) -> set[str]:
             continue
         read.update(name for match in _READ.findall(code) for name in match if name)
     return read
+
+
+# A stamp says when a line or a file landed: read by a person off the file, never by code.
+_STAMPS = frozenset({"timestamp", "at", "created_at", "updated_at"})
+# A class pattern's keyword is a read: `case X(field=…)`.
+_PATTERN_KEYWORD = re.compile(r"^\s*case\s.*", re.MULTILINE)
+
+
+def _declared_fields(recorded: list[object]) -> set[tuple[str, str]]:
+    """Every field of a served model (a contract schema) or a recorded one (a ledger arm and
+    every model nested in it), as (model, field)."""
+    import pydantic
+
+    declared: set[tuple[str, str]] = set()
+    schemas = json.loads(_CONTRACT.read_text(encoding="utf-8"))["components"]["schemas"]
+    declared.update((name, prop) for name, s in schemas.items() for prop in s.get("properties", {}))
+    seen: set[type] = set()
+    stack: list[object] = list(recorded)
+    while stack:
+        held = stack.pop()
+        if isinstance(held, type) and issubclass(held, pydantic.BaseModel):
+            if held in seen:
+                continue
+            seen.add(held)
+            for name, info in held.model_fields.items():
+                declared.add((held.__name__, name))
+                stack.append(info.annotation)
+        else:
+            stack.extend(typing.get_args(getattr(held, "__value__", held)))
+    return declared
+
+
+def _recorded_models() -> list[object]:
+    """What lands on disk: every data-root row's model, a ledger's arms among them."""
+    from pydantic import TypeAdapter
+
+    from promptpotter.domain.kinds import KindTable
+    from promptpotter.infrastructure.store.data_root import KINDS, Folded, Parsed
+
+    models: list[object] = []
+    for kind in KINDS:
+        match kind.shape:
+            case TypeAdapter():
+                models.append(kind.shape._type)
+            case Parsed(model=KindTable() as table) | Folded(model=KindTable() as table):
+                models.extend(table.registered().values())
+            case Parsed(model=model) | Folded(model=model):
+                models.append(model)
+    return models
+
+
+def _unread_fields(sites: dict[Path, str], recorded: list[object]) -> list[tuple[str, str]]:
+    """A declared field no production code reads by name (`.field`, `["field"]`, a destructured
+    binding, a class pattern's keyword) and no stamp: written and never read."""
+    read: set[str] = set()
+    for text in sites.values():
+        code = _without_types(text)
+        read.update(name for match in _READ.findall(code) for name in match if name)
+        for groups in _DESTRUCTURED.findall(code):
+            read.update(m[1] for e in "".join(groups).split(",") if (m := re.match(r"\s*(\w+)", e)))
+        for line in _PATTERN_KEYWORD.findall(text):
+            read.update(re.findall(r"(\w+)=", line))
+    return sorted(
+        (model, name)
+        for model, name in _declared_fields(recorded)
+        if name not in read and name not in _STAMPS
+    )
 
 
 def _package_files(pattern: str) -> list[Path]:
@@ -566,6 +635,7 @@ def compute_ledger() -> dict[str, int]:
         "p_record": records,
         "p_record_drift": records_left_out,
         "p_served": sum(prop not in read for prop in _served_properties()),
+        "p_unread_fields": len(_unread_fields(sites, _recorded_models())),
         "p_command": commands,
         "p_command_drift": commands_left_out,
         "p_member": _count_handed(NodeContext),

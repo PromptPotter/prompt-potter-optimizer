@@ -3,13 +3,17 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.pass_kinds import PASSES
+from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 from promptpotter.shared.errors import FileUnreadableError
+from promptpotter.shared.measurement_context import measured_pass
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
@@ -31,11 +35,21 @@ counted in beats; `webapp/lib/format.ts::fmtGap` reads the served `RECENT_STEP_S
 assert SUSPEND_GRACE_S > HEARTBEAT_INTERVAL_S, "a late tick would read as a suspend"
 
 
+class CallBeat(NamedTuple):
+    call_id: str
+    node: str
+
+
+class CellBeat(NamedTuple):
+    """A scoring cell's wait, by its bank row; its arm is the pass it is measured in."""
+
+    position: int
+
+
 async def heartbeat(
     ledger: CycleEventLog | None,
+    beat: CallBeat | CellBeat,
     *,
-    call_id: str,
-    node: str,
     round_num: int | None,
     start_monotonic: float,
     detail_fn: Callable[[], str | None] | None = None,
@@ -49,18 +63,39 @@ async def heartbeat(
             if on_suspend is not None and overshoot > SUSPEND_GRACE_S:
                 on_suspend(overshoot)
             if ledger is not None:
-                ledger.append(
-                    LLMCallProgressRecord(
-                        call_id=call_id,
-                        node=node,
-                        round=round_num,
-                        elapsed_s=time.monotonic() - start_monotonic,
-                        detail=_safe_read(detail_fn),
-                        inner=_safe_read(inner_fn),
-                    )
-                )
+                elapsed_s = time.monotonic() - start_monotonic
+                detail, inner = _safe_read(detail_fn), _safe_read(inner_fn)
+                match beat:
+                    case CallBeat(call_id, node):
+                        ledger.append(
+                            LLMCallProgressRecord(
+                                call_id=call_id,
+                                node=node,
+                                round=round_num,
+                                elapsed_s=elapsed_s,
+                                detail=detail,
+                                inner=inner,
+                            )
+                        )
+                    case CellBeat(position):
+                        walked = measured_pass()
+                        arm = (
+                            None
+                            if walked is None or not PASSES[walked.role].arm
+                            else ArmKey(walked.individual_id)
+                        )
+                        ledger.append(
+                            CellBeatRecord(
+                                round=round_num,
+                                arm=arm,
+                                position=position,
+                                elapsed_s=elapsed_s,
+                                detail=detail,
+                                inner=inner,
+                            )
+                        )
         except (OSError, FileUnreadableError):
-            logger.exception("heartbeat of %s (call %s) failed a beat", node, call_id)
+            logger.exception("heartbeat %s failed a beat", beat)
 
 
 def _safe_read[T](read: Callable[[], T | None] | None) -> T | None:

@@ -35,7 +35,6 @@ from promptpotter.domain.records.run_records import DraftOpenedEffect
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import FileKind, FileUnreadableError
 
 
@@ -55,19 +54,16 @@ async def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applie
 
 
 def _lifecycle(stores: Stores, payload: LifecyclePayload) -> None:
-    changed_at = utcnow_iso()
     campaigns = stores.campaigns
-    campaign_id, reason = payload.campaign_id, payload.reason
+    campaign_id = payload.campaign_id
     if isinstance(payload, ArchiveCampaignPayload):
-        campaigns.archive_campaign(campaign_id, changed_at=changed_at, reason=reason)
+        campaigns.archive_campaign(campaign_id)
     elif isinstance(payload, UnarchiveCampaignPayload):
-        campaigns.unarchive_campaign(campaign_id, changed_at=changed_at, reason=reason)
+        campaigns.unarchive_campaign(campaign_id)
     elif isinstance(payload, DeleteCampaignPayload):
         campaigns.delete_campaign(
             campaign_id,
             keep_results=payload.keep_results,
-            changed_at=changed_at,
-            reason=reason,
             inner_sandbox_root=inner_sandboxes_dir(stores.shared_root),
         )
     else:

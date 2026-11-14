@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import logging
+import pickle
 import re
+import sys
 import threading
 from abc import ABC, abstractmethod
 from bisect import bisect_right
 from collections import OrderedDict, deque
 from collections.abc import Callable, Hashable, Iterable, Sequence
-from functools import partial
+from functools import cache, partial
 from io import BytesIO
 from itertools import islice
 from pathlib import Path
@@ -25,6 +29,7 @@ from typing import (
 
 from pydantic import TypeAdapter, ValidationError
 
+from promptpotter.config.paths import LEDGER_FOLDS_DIR, user_data_root
 from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import (
@@ -57,6 +62,7 @@ from promptpotter.infrastructure.store.io import (
     complete_lines,
     read_bytes_optional,
     read_tail,
+    write_bytes,
 )
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason
@@ -211,7 +217,12 @@ class LedgerSpan(NamedTuple):
     until: int | None = None
 
 
+logger = logging.getLogger(__name__)
+
 LEDGER_INDEX_MAX = 256
+# A cold process refolds every ledger it serves; the screened folds of one this long are pickled
+# by its `file_sig` and their code, so a restart folds no unchanged one.
+SNAPSHOT_MIN_LINES = 500
 PREFIXES_MAX = 16
 DERIVED_MAX = 4096
 
@@ -614,14 +625,27 @@ class LedgerIndex(_LedgerTail):
             return
         if not joining:
             return
-        # A fold joins at the line the others stand at, so none of them refolds for it.
-        joiner = _Feeder(self._path, joining)
-        _fold_lines(self._path, joiner, self._lines)
-        refused = self._feeder.refused | joiner.refused
+        snapshot = self._snapshot() if fold in self._screened else None
+        restored = None if snapshot is None else _restored(snapshot, joining)
+        if restored is None:
+            # A fold joins at the line the others stand at, so none of them refolds for it.
+            joiner = _Feeder(self._path, joining)
+            _fold_lines(self._path, joiner, self._lines)
+            restored = joining, joiner.refused
+            if snapshot is not None:
+                _stash(snapshot, restored)
+        joining, joined_refused = restored
+        refused = self._feeder.refused | joined_refused
         self._feeder = _Feeder(self._path, held | joining)
         self._feeder.refused = refused
         for stale in [key for key in self._prefixes if key[0] in joining]:
             del self._prefixes[stale]
+
+    def _snapshot(self) -> Path | None:
+        if self._sig is None or self._lines < SNAPSHOT_MIN_LINES:
+            return None
+        key = hashlib.sha256(f"{self._path.resolve()}|{self._sig}|{_fold_code()}".encode())
+        return user_data_root() / LEDGER_FOLDS_DIR / f"{key.hexdigest()[:32]}.pickle"
 
     def _prefix(self, fold: _Make, until: int) -> LedgerFold[Any, Any]:
         held = self._prefixes.pop((fold, until), None)
@@ -636,6 +660,37 @@ class LedgerIndex(_LedgerTail):
         self._feeder.line(self._lines, raw)
         if self._held:
             self._queue.append((self._lines, raw, [held for held, _ in self._held.values()], None))
+
+
+type _Joined = tuple[dict[_Make, LedgerFold[Any, Any]], dict[Any, FileUnreadableError]]
+
+
+@cache
+def _fold_code() -> str:
+    """The screened folds' and the records' source: a snapshot of other code is another key."""
+    held = {*LedgerIndex._screened, *_ARM_MODELS.values()}
+    files = sorted({sys.modules[made.__module__].__file__ or "" for made in held})
+    return hashlib.sha256(b"".join(Path(f).read_bytes() for f in files)).hexdigest()
+
+
+def _restored(snapshot: Path, joining: dict[_Make, LedgerFold[Any, Any]]) -> _Joined | None:
+    """Only this process writes the data home's cache, so its pickle is trusted; one that does not
+    load, or holds another roster, is refolded."""
+    try:
+        folds, refused = pickle.loads(snapshot.read_bytes())
+    except FileNotFoundError:
+        return None
+    except Exception:  # noqa: BLE001 -- a cache that does not load is refolded
+        logger.warning("fold snapshot %s does not load; refolding", snapshot, exc_info=True)
+        return None
+    return (folds, refused) if folds.keys() == joining.keys() else None
+
+
+def _stash(snapshot: Path, joined: _Joined) -> None:
+    try:
+        write_bytes(snapshot, pickle.dumps(joined))
+    except (OSError, pickle.PicklingError, TypeError, AttributeError) as exc:
+        logger.warning("fold snapshot %s not written: %s", snapshot, exc)
 
 
 class LineIndex(_LedgerTail):

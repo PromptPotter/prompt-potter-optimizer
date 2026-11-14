@@ -285,10 +285,11 @@ from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
+    ArmAct,
+    ArmActRecord,
     ConfigOverrides,
     CycleMintedRecord,
     CycleSeed,
-    InterventionRecord,
     PipelineRead,
     RoundWarningRecord,
     ScoringLockedRecord,
@@ -3056,9 +3057,9 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
             "a second holder folded a dashboard beside the run's, each writing its own file"
         )
     # A store-door append during the run lands through the run's own `index.json` writer, at once.
-    stores.campaigns.append(held_campaign.root_hop, InterventionRecord(kind="steered"))
+    stores.campaigns.append(held_campaign.root_hop, ArmActRecord(act=ArmAct.SKIP))
     manifest = CycleLayout(root_dir).manifest
-    assert LedgerIndex.of(wired_ledger.path).pinned and "steered" in manifest.read_text(), (
+    assert LedgerIndex.of(wired_ledger.path).pinned and ArmAct.SKIP in manifest.read_text(), (
         "a store-door append let go of the run's projections, or left its index.json stale"
     )
     # A pause filed between the stop's declaration and the drain dies at the release (B16): only a
@@ -3076,7 +3077,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     )
     assert acked(late) == "voided", "a release took a pause no producer stopped on"
     # Outside a run, the store door holds its one-shot only while its line lands.
-    stores.campaigns.append(held_campaign.root_hop, InterventionRecord(kind="steered"))
+    stores.campaigns.append(held_campaign.root_hop, ArmActRecord(act=ArmAct.SKIP))
     assert not LedgerIndex.of(wired_ledger.path).pinned, (
         "a store-door append pinned its ledger's index past its own line"
     )

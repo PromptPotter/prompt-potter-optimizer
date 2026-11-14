@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, TypeIs, get_args
+from typing import Literal, NamedTuple
 
 from pydantic import Field
 
@@ -64,7 +64,6 @@ class CycleIndex(FrozenModel):
     superseded_by: str | None = None
     rounds: list[IndexRound] = Field(default_factory=list)
     # Rounds an arm walked in that no close stands for yet.
-    open_rounds: list[int] = Field(default_factory=list)
     # How the newest election elected; ``None`` before the first.
     elects_on: DisplayMetric | None = None
     standing: RunStanding | None = None
@@ -84,20 +83,21 @@ class CycleIndex(FrozenModel):
         return closed_after_origin([r.round for r in self.rounds])
 
 
-type StatusMark = Literal[
-    "archived",
-    "running",
-    "scoring",
-    "starting",
-    "queued",
-    "gate",
-    "paused",
-    "detached",
-    "success",
-    "halted",
-    "failed",
-    "unknown",
-]
+# A live phase and a stop outcome ARE their marks: one spelling, the enum's.
+type StatusMark = (
+    Literal[
+        RunPhase.QUEUED,
+        RunPhase.STARTING,
+        RunPhase.RUNNING,
+        RunPhase.SCORING,
+        RunPhase.PAUSED,
+        RunPhase.GATE,
+        RunPhase.DETACHED,
+    ]
+    # A terminal run's outcome; `StopOutcome.PAUSED` is `RunPhase.PAUSED`'s mark.
+    | Literal[StopOutcome.SUCCESS, StopOutcome.HALTED, StopOutcome.FAILED]
+    | Literal["archived", "unknown"]
+)
 
 
 class StatusMarkInfo(NamedTuple):
@@ -107,32 +107,20 @@ class StatusMarkInfo(NamedTuple):
 
 STATUS_MARK_INFO: Worded[StatusMark, StatusMarkInfo] = Worded(
     {
-        "running": StatusMarkInfo("●", "live"),
-        "scoring": StatusMarkInfo("◐", "live"),
-        "starting": StatusMarkInfo("◌", "live"),
-        "queued": StatusMarkInfo("…", "quiet"),
-        "gate": StatusMarkInfo("◆", "attention"),
-        "paused": StatusMarkInfo("‖", "quiet"),
-        "detached": StatusMarkInfo("⊘", "warn"),
-        "success": StatusMarkInfo("✓", "success"),
-        "halted": StatusMarkInfo("■", "warn"),
-        "failed": StatusMarkInfo("✕", "danger"),
+        RunPhase.RUNNING: StatusMarkInfo("●", "live"),
+        RunPhase.SCORING: StatusMarkInfo("◐", "live"),
+        RunPhase.STARTING: StatusMarkInfo("◌", "live"),
+        RunPhase.QUEUED: StatusMarkInfo("…", "quiet"),
+        RunPhase.GATE: StatusMarkInfo("◆", "attention"),
+        RunPhase.PAUSED: StatusMarkInfo("‖", "quiet"),
+        RunPhase.DETACHED: StatusMarkInfo("⊘", "warn"),
+        StopOutcome.SUCCESS: StatusMarkInfo("✓", "success"),
+        StopOutcome.HALTED: StatusMarkInfo("■", "warn"),
+        StopOutcome.FAILED: StatusMarkInfo("✕", "danger"),
         "archived": StatusMarkInfo("▫", "quiet"),
         "unknown": StatusMarkInfo("?", "quiet"),
     }
 )
-
-
-_STATUS_MARKS = frozenset(get_args(StatusMark.__value__))
-
-
-def _is_mark(value: str) -> TypeIs[StatusMark]:
-    return value in _STATUS_MARKS
-
-
-# A live phase and a stop outcome ARE their marks: one spelling, the enum's.
-assert all(_is_mark(p.value) for p in RunPhase if p is not RunPhase.TERMINAL)
-assert all(_is_mark(o.value) for o in StopOutcome)
 
 
 class RunStatus(FrozenModel):
@@ -150,14 +138,16 @@ class RunStatus(FrozenModel):
         *,
         lifecycle: LifecycleStatus,
     ) -> RunStatus:
-        mark: str = "unknown"
+        mark: StatusMark = "unknown"
         if lifecycle == "archived":
             mark = "archived"
         elif run_phase is not RunPhase.TERMINAL:
-            mark = run_phase.value
-        elif stop_reason is not None:
-            mark = STOP_REASON_INFO[stop_reason].outcome.value
-        assert _is_mark(mark)
+            mark = run_phase
+        elif (
+            stop_reason is not None
+            and (outcome := STOP_REASON_INFO[stop_reason].outcome) is not StopOutcome.PAUSED
+        ):
+            mark = outcome
         return cls(run_phase=run_phase, stop_reason=stop_reason, mark=mark)
 
     @property

@@ -182,7 +182,6 @@ from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     CampaignPhase,
     PauseCause,
-    RunPhase,
     StopReason,
     WalkEnd,
 )
@@ -212,6 +211,7 @@ from promptpotter.domain.records.run_records import (
     Release,
     RoundEnteredRecord,
     RoundWarningRecord,
+    Running,
     RunPhaseRecord,
     SampleScoredRecord,
     SampleStartedRecord,
@@ -1748,7 +1748,7 @@ def test_a_mid_run_ceiling_reaches_the_running_book_and_the_loop(
     )
     declare(Budget(usd=0.50))
     assert budget_stop(book) == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no book"
-    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(state=Running()))
     assert budget_stop(book) == StopReason.SPEND_BUDGET, "a launch swept the ceiling"
     declare(Budget(tokens=5_000))
     assert budget_stop(book) == StopReason.TOKEN_BUDGET, "a token ceiling bound nothing"
@@ -4783,7 +4783,6 @@ def test_a_delete_torn_at_its_tree_commits_at_its_tombstone_and_admits_nothing_a
             stores.campaigns.delete_campaign(
                 "camp-2",
                 keep_results=False,
-                changed_at="2026-01-02T00:00:00Z",
                 inner_sandbox_root=owned_sandbox.parent,
             )
     assert camp_dir.is_dir() and not owned_sandbox.exists(), (
@@ -4827,9 +4826,7 @@ def test_a_delete_torn_at_its_tree_commits_at_its_tombstone_and_admits_nothing_a
     )
     # A campaign whose manifest is gone still deletes, and banks: nothing reads its rows as one.
     CampaignLayout(camp_dir).manifest.unlink()
-    assert stores.campaigns.delete_campaign(
-        "camp-2", keep_results=True, changed_at="2026-01-02T00:00:00Z"
-    )
+    assert stores.campaigns.delete_campaign("camp-2", keep_results=True)
     assert not camp_dir.exists(), "a manifest-less campaign kept rows nothing marks deleted"
     assert account_usd() == pytest.approx(before), (
         "banked by the destroyer itself, under BOTH `keep_results` arms, so no caller can skip it"
@@ -5144,9 +5141,7 @@ def test_a_campaign_id_is_drawn_again_over_a_live_dir_a_tombstone_and_a_charged_
     (live / "mark").write_text("live", encoding="utf-8")
     gone = CycleHop(campaign_id=f"{prefix}__bbbbbb", cycle_id="cycle-0")
     CycleEventLog.open(CycleDir(campaigns.cycle_dir(gone))).append(billed_call(0.1))
-    assert campaigns.delete_campaign(
-        f"{prefix}__bbbbbb", keep_results=True, changed_at="2026-01-01T00:00:00Z"
-    )
+    assert campaigns.delete_campaign(f"{prefix}__bbbbbb", keep_results=True)
     wiped = CycleHop(campaign_id=f"{prefix}__dddddd", cycle_id="cycle-0")
     built_stores.charges.append(
         Hold(
@@ -5185,15 +5180,11 @@ def test_a_delete_that_spent_nothing_commits_at_its_tombstone_and_its_id_is_neve
 
         patched.setattr(campaign_store_module, "rmtree_robust", torn)
         with pytest.raises(OSError):
-            campaigns.delete_campaign(
-                hop.campaign_id, keep_results=False, changed_at="2026-01-01T00:00:00Z"
-            )
+            campaigns.delete_campaign(hop.campaign_id, keep_results=False)
     assert workspace_bank(campaigns.workspace).deleted(hop.campaign_id), (
         "a zero-spend delete torn at its tree read as live: it wrote no tombstone"
     )
-    assert campaigns.delete_campaign(
-        hop.campaign_id, keep_results=False, changed_at="2026-01-01T00:00:00Z"
-    )
+    assert campaigns.delete_campaign(hop.campaign_id, keep_results=False)
     drawn = iter(["aaaaaa", "cccccc"])
     monkeypatch.setattr("secrets.token_hex", lambda _n: next(drawn))
     assert campaigns.claim_campaign_id("ds1", built_stores.charges) == f"{prefix}__cccccc", (

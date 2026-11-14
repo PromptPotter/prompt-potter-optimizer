@@ -147,7 +147,7 @@ from promptpotter.domain.narration import Narration
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
-from promptpotter.domain.phases import PauseCause, RunPhase, StopReason
+from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.records.partition import PartitionRecord
@@ -165,6 +165,7 @@ from promptpotter.domain.records.run_records import (
     ResumeCheckpointRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
+    Running,
     RunPhaseRecord,
     SpawnedBy,
     SpawnedRecord,
@@ -2463,7 +2464,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
         cycle, session = ctx.cycle, ctx.cycle.session
         session.state.clock = LaunchClock.now()
         rescope(spawn=inner_spawn_of(session))
-        ctx.ledger.append(RunPhaseRecord(run_phase=RunPhase.RUNNING))
+        ctx.ledger.append(RunPhaseRecord(state=Running()))
         if replayed:
             # The origin a resume replays stands on its close (`closed_rounds.py::closed_rounds`).
             closed = stores.campaigns.standing_rounds(hop, moment=None).rounds[0]
