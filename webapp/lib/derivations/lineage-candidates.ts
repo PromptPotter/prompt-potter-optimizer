@@ -148,7 +148,7 @@ export function mainLineOf(index: LineageIndex, head: HierarchyCandidate): LineS
   });
 }
 
-interface Descent {
+export interface Descent {
   // The address of its main, the candidate it descends from: the one edge every lineage drawing draws.
   parent: string | null;
   // The address of its declared donor, of any round, and the loci it gave.

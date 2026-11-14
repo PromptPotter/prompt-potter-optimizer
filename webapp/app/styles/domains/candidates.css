@@ -1,6 +1,4 @@
 .box-grid > .forest-card{grid-column:1 / -1}
-.forest-close{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:var(--text-xl);line-height:1;padding:0 var(--space-4)}
-.forest-close:hover{color:var(--color-text-primary)}
 .cand-card > .card-title{display:block;margin-bottom:10px}
 .cand-title{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);white-space:nowrap;flex:0 0 auto}
 .cand-crumb{background:none;border:0;font:inherit;cursor:pointer;padding:0;

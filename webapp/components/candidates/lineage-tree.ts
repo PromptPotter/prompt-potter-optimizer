@@ -8,9 +8,170 @@ import type {
   SubtreeCampaign,
   SubtreeCourse,
 } from "@/lib/api/types";
-import { candidatesOf, descentOf, tagValue } from "@/lib/derivations";
+import { candidatesOf, descentOf, tagValue, type Descent } from "@/lib/derivations";
 import { type CyclePath, pathOfAddress } from "@/lib/ids";
 import { fmtUnit } from "@/lib/format";
+import type { CandidateBar } from "@/lib/types";
+
+// The lineage tree, laid out two ways: PAIRED under the candidates bar chart, x-aligned on the bars
+// whose order it is (`DendrogramStrip`), and FREED as the stand-alone forest of lanes (`Forest`).
+// Both draw one derivation, `descentLinks`: what each drawn individual descends from, among the drawn.
+
+// `chain`: a main to what descends from it. `donor`: a declared donor to the child it gave loci.
+// `gene`: a source to the child whose locus, which no declared parent explains, resembles it.
+type DescentVariant = "chain" | "donor" | "gene";
+
+interface DescentLink<N> {
+  from: N;
+  variant: DescentVariant;
+  // What a donor or gene link says on hover.
+  note: string | null;
+}
+
+function descentLinks<N extends { label: string }>(
+  descent: Descent,
+  nodeAt: (address: string) => N | undefined,
+): DescentLink<N>[] {
+  const { parent, donor, donated, genes } = descent;
+  const from = parent === null ? undefined : nodeAt(parent);
+  const links: DescentLink<N>[] = from ? [{ from, variant: "chain", note: null }] : [];
+  const giver = donor === null ? undefined : nodeAt(donor);
+  if (giver && giver !== from) {
+    const gave = donated.length > 0 ? donated.join(", ") : "no locus verbatim";
+    links.push({ from: giver, variant: "donor", note: `donor ${giver.label} gave ${gave}` });
+  }
+  for (const gene of genes) {
+    const source = nodeAt(gene.source);
+    if (source && source !== from && source !== giver) {
+      const alike = fmtUnit("rate", gene.similarity);
+      const note = `${gene.locus} resembles ${source.label} (${alike} alike)`;
+      links.push({ from: source, variant: "gene", note });
+    }
+  }
+  return links;
+}
+
+// ---- PAIRED: one node per bar, on its category center (a fraction of the plot's width).
+
+export const NODE_ROW_Y = 7;
+const PAIRED_NODE_R = 3;
+export const FIRST_ROW_Y = 16;
+export const ROW_H = 9;
+export const BOTTOM_PAD = 4;
+const FLOOR_H = NODE_ROW_Y + PAIRED_NODE_R + BOTTOM_PAD;
+
+// No live value here: the caller content-stabilizes it so a per-sample tick does not re-run packing.
+export interface PairedRow {
+  key: string;
+  round: number;
+  label: string;
+  address: string;
+  is_selected: boolean;
+  crown: ArmElection["crown"];
+  descent: Descent;
+}
+
+export function barRound(bar: CandidateBar): number {
+  return bar.reading?.arm.round ?? 0;
+}
+
+export function pairedRow(bar: CandidateBar): PairedRow {
+  return {
+    key: bar.key,
+    round: barRound(bar),
+    label: bar.label,
+    address: bar.node.address,
+    is_selected: bar.reading?.election.selected ?? false,
+    crown: bar.reading?.election.crown ?? null,
+    descent: descentOf(bar.node),
+  };
+}
+
+interface PairedNode extends PairedRow {
+  xf: number;
+  y: number;
+}
+
+interface PairedStub {
+  xf: number;
+  y1: number;
+  y2: number;
+  variant: DescentVariant;
+}
+
+interface PairedBeam {
+  key: string;
+  x1f: number;
+  x2f: number;
+  y: number;
+  variant: DescentVariant;
+}
+
+interface PairedLayout {
+  nodes: PairedNode[];
+  stubs: PairedStub[];
+  beams: PairedBeam[];
+  height: number;
+}
+
+function paired(rows: readonly PairedRow[], centers: readonly number[]): PairedLayout {
+  const nodes: PairedNode[] = [];
+  const stubs: PairedStub[] = [];
+  const beams: PairedBeam[] = [];
+
+  // react-chartjs-2 updates in an effect, so rows can lead the chart's centers by a frame.
+  if (rows.length === 0 || rows.length !== centers.length) {
+    return { nodes, stubs, beams, height: FLOOR_H };
+  }
+  rows.forEach((r, i) => nodes.push({ ...r, xf: centers[i]!, y: NODE_ROW_Y }));
+
+  // A repair re-measures without re-minting, so an address may repeat: the first bar draws it.
+  const byAddress = new Map<string, PairedNode>();
+  for (const n of nodes) if (!byAddress.has(n.address)) byAddress.set(n.address, n);
+
+  // Strict `<`: a beam touching the row's right edge would render as one merged beam.
+  const rowRight: number[] = [];
+  const place = (x1f: number, x2f: number): number => {
+    for (let d = 0; d < rowRight.length; d++) {
+      if (rowRight[d]! < x1f) {
+        rowRight[d] = x2f;
+        return d;
+      }
+    }
+    rowRight.push(x2f);
+    return rowRight.length - 1;
+  };
+
+  // One beam per main and round, over the kids served as descending from it; one per donor or gene link.
+  const families = new Map<string, { from: PairedNode; kids: PairedNode[]; variant: DescentVariant }>();
+  for (const kid of nodes) {
+    for (const { from, variant } of descentLinks(kid.descent, (a) => byAddress.get(a))) {
+      const key = variant === "chain" ? `c|${kid.round}|${from.key}` : `${variant}|${kid.key}|${from.key}`;
+      const family = families.get(key);
+      if (family) family.kids.push(kid);
+      else families.set(key, { from, kids: [kid], variant });
+    }
+  }
+  for (const [key, { from, kids, variant }] of families) {
+    const xs = [from.xf, ...kids.map((k) => k.xf)];
+    const x1f = Math.min(...xs);
+    const x2f = Math.max(...xs);
+    const y = FIRST_ROW_Y + place(x1f, x2f) * ROW_H;
+    beams.push({ key, x1f, x2f, y, variant });
+    stubs.push({ xf: from.xf, y1: NODE_ROW_Y, y2: y, variant });
+    for (const k of kids) stubs.push({ xf: k.xf, y1: y, y2: NODE_ROW_Y, variant });
+  }
+
+  const depth = rowRight.length;
+  return {
+    nodes,
+    stubs,
+    beams,
+    height: depth === 0 ? FLOOR_H : FIRST_ROW_Y + (depth - 1) * ROW_H + BOTTOM_PAD,
+  };
+}
+
+// ---- FREED: one lane per course, one column per round, in pixels.
 
 export interface Density {
   colW: number;
@@ -168,10 +329,10 @@ const holdsKept = (course: SubtreeCourse, keep: ReadonlySet<string>): boolean =>
   campaignsIn(course).some((inner) => inner.children.some((c) => holdsKept(c, keep)));
 
 // Lanes key on the course address, never a cycle id: inner cycle ids repeat across `.inner/` sandboxes.
-export function layout(
+function lanes(
   root: SubtreeCampaign,
   expanded: ReadonlySet<string>,
-  keep: ReadonlySet<string> | null = null,
+  keep: ReadonlySet<string> | null,
 ): {
   laneByKey: Map<string, LaneLayout>;
   totalLaneRows: number;
@@ -246,7 +407,8 @@ export interface RoundNodePos {
   col: number;
   x: number;
   y: number;
-  candidateLabel: string;
+  // The candidate's label; a collapsed round's, its winner's or none.
+  label: string;
   node: HierarchyCandidate;
   // The candidate's address.
   candKey: string;
@@ -264,16 +426,15 @@ export interface RoundNodePos {
   // The column the candidate's round elected on.
   electsOn: RoundFacts["elects_on"];
 }
+
 interface BranchSeg {
   x1: number;
   y1: number;
   x2: number;
   y2: number;
-  // `chain`: the main it descends from. `donor`: the declared donor that gave it loci. `gene`:
-  // where a locus no declared parent explains may have come from.
-  variant: "chain" | "fork" | "donor" | "gene";
-  // What a donor or gene link says on hover.
-  note?: string;
+  // `fork`: a lane to the candidate or course it hangs from; else a descent link.
+  variant: DescentVariant | "fork";
+  note: string | null;
 }
 
 function bandCenterY(l: LaneLayout): number {
@@ -303,7 +464,7 @@ function placedNode(
     col: l.baseCol + round,
     x,
     y,
-    candidateLabel: label,
+    label,
     node: cand,
     candKey: cand.address,
     candidateId: cand.facts.individual,
@@ -320,17 +481,32 @@ function placedNode(
   };
 }
 
-export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
+interface FreedLayout {
+  laneByKey: Map<string, LaneLayout>;
+  totalLaneRows: number;
+  maxCol: number;
+  d: Density;
   nodes: RoundNodePos[];
   segs: BranchSeg[];
   spineByKeyRound: Map<string, RoundNodePos>;
-} {
+}
+
+function freed(
+  root: SubtreeCampaign,
+  expanded: ReadonlySet<string>,
+  keep: ReadonlySet<string> | null,
+  boxW: number | null,
+): FreedLayout {
+  const { laneByKey, totalLaneRows, maxCol } = lanes(root, expanded, keep);
+  const d = densityFor(maxCol, boxW);
   const nodes: RoundNodePos[] = [];
   const segs: BranchSeg[] = [];
   const spineByKeyRound = new Map<string, RoundNodePos>();
   const nodeByCandidate = new Map<string, RoundNodePos>();
+  const seg = (x1: number, y1: number, x2: number, y2: number, variant: BranchSeg["variant"]) =>
+    segs.push({ x1, y1, x2, y2, variant, note: null });
 
-  for (const [laneKey, l] of layouts) {
+  for (const [laneKey, l] of laneByKey) {
     const rounds = [...groupRounds(l.candidates).entries()].sort((a, b) => a[0] - b[0]);
     const lastRound = rounds.at(-1)?.[0] ?? 0;
     const colX = (round: number): number => d.leftPad + (l.baseCol + round) * d.colW;
@@ -349,8 +525,8 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
         for (const c of cands) nodeByCandidate.set(c.address, node);
         if (round === lastRound) node.isLastInLane = true;
         if (prev) {
-          segs.push({ x1: prev.x, y1: prev.y, x2: node.x - d.stub, y2: node.y, variant: "chain" });
-          segs.push({ x1: node.x - d.stub, y1: node.y, x2: node.x, y2: node.y, variant: "chain" });
+          seg(prev.x, prev.y, node.x - d.stub, node.y, "chain");
+          seg(node.x - d.stub, node.y, node.x, node.y, "chain");
         }
         prev = node;
       }
@@ -388,28 +564,14 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
   // itself is drawn by the node group, so each edge is only the slant to it.
   for (const n of nodes) {
     if (!n.isExpanded) continue;
-    const { parent, donor, donated, genes } = descentOf(n.node);
-    const from = parent === null ? undefined : nodeByCandidate.get(parent);
-    const to = { x2: n.x - d.candStub, y2: n.y };
-    if (from) segs.push({ x1: from.x, y1: from.y, ...to, variant: "chain" });
-    const giver = donor === null ? undefined : nodeByCandidate.get(donor);
-    if (giver && giver !== from) {
-      const gave = donated.length > 0 ? donated.join(", ") : "no locus verbatim";
-      const note = `donor ${giver.candidateLabel} gave ${gave}`;
-      segs.push({ x1: giver.x, y1: giver.y, ...to, variant: "donor", note });
-    }
-    for (const gene of genes) {
-      const source = nodeByCandidate.get(gene.source);
-      if (source && source !== from && source !== giver) {
-        const note = `${gene.locus} resembles ${source.candidateLabel} (${fmtUnit("rate", gene.similarity)} alike)`;
-        segs.push({ x1: source.x, y1: source.y, ...to, variant: "gene", note });
-      }
+    for (const { from, variant, note } of descentLinks(descentOf(n.node), (a) => nodeByCandidate.get(a))) {
+      segs.push({ x1: from.x, y1: from.y, x2: n.x - d.candStub, y2: n.y, variant, note });
     }
   }
 
-  for (const [laneKey, l] of layouts) {
+  for (const [laneKey, l] of laneByKey) {
     if (!l.parentKey) continue;
-    const parentLayout = layouts.get(l.parentKey);
+    const parentLayout = laneByKey.get(l.parentKey);
     if (!parentLayout) continue;
     const anchorNode = l.anchor ? nodeByCandidate.get(l.anchor) : undefined;
     const anchorX = anchorNode?.x ?? bandLeftX(parentLayout, d);
@@ -427,9 +589,29 @@ export function placeNodes(layouts: Map<string, LaneLayout>, d: Density): {
       if (firstNode) childX = firstNode.x;
     }
     if (childX < minChildX) childX = minChildX;
-    segs.push({ x1: anchorX, y1: anchorY, x2: childX - d.stub, y2: childBandY, variant: "fork" });
-    segs.push({ x1: childX - d.stub, y1: childBandY, x2: childX, y2: childBandY, variant: "fork" });
+    seg(anchorX, anchorY, childX - d.stub, childBandY, "fork");
+    seg(childX - d.stub, childBandY, childX, childBandY, "fork");
   }
 
-  return { nodes, segs, spineByKeyRound };
+  return { laneByKey, totalLaneRows, maxCol, d, nodes, segs, spineByKeyRound };
+}
+
+// ---- The one entry: a placement names the layout, and the layout answers in its own shape.
+
+export type TreePlacement =
+  | { paired: readonly PairedRow[]; centers: readonly number[] }
+  | {
+      freed: SubtreeCampaign;
+      expanded: ReadonlySet<string>;
+      keep: ReadonlySet<string> | null;
+      boxW: number | null;
+    };
+
+type LayoutOf<P extends TreePlacement> = P extends { paired: readonly PairedRow[] }
+  ? PairedLayout
+  : FreedLayout;
+
+export function layout<P extends TreePlacement>(p: P): LayoutOf<P> {
+  const out = "paired" in p ? paired(p.paired, p.centers) : freed(p.freed, p.expanded, p.keep, p.boxW);
+  return out as LayoutOf<P>;
 }

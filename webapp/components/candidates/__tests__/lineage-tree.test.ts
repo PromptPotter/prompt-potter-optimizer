@@ -17,8 +17,12 @@ import {
   expandedLaneSpan,
   forestWidth,
   layout,
-  placeNodes,
-} from "../forest-layout";
+  BOTTOM_PAD,
+  FIRST_ROW_Y,
+  NODE_ROW_Y,
+  ROW_H,
+  type PairedRow,
+} from "../lineage-tree";
 import { candidatesOf } from "@/lib/derivations";
 import { decodeCyclePath, encodeCyclePath } from "@/lib/ids";
 import {
@@ -141,6 +145,13 @@ function hangOffWinner(
 
 const ids = (cs: readonly HierarchyCandidate[]) => cs.map((c) => c.facts.individual);
 
+// An unbounded box: the labelled (ROOMY) drawing always fits.
+const freed = (
+  tree: SubtreeCampaign,
+  expanded: ReadonlySet<string>,
+  keep: ReadonlySet<string> | null = null,
+) => layout({ freed: tree, expanded, keep, boxW: Infinity });
+
 describe("densityFor", () => {
   it("labels the drawing where it fits the box, and drops the labels where it would not", () => {
     const fits = forestWidth(ROOMY, 3);
@@ -158,10 +169,10 @@ describe("expandedLaneSpan", () => {
   });
 });
 
-describe("layout", () => {
+describe("layout, freed: lanes", () => {
   it("collapsed: one row per course", () => {
     const a = course(A, [2, 2]);
-    const { totalLaneRows, laneByKey } = layout(campaign("camp", [a, forkAt(a, 1, [1])]), new Set());
+    const { totalLaneRows, laneByKey } = freed(campaign("camp", [a, forkAt(a, 1, [1])]), new Set());
     expect(totalLaneRows).toBe(2);
     expect(laneByKey.get(A)!.laneSpan).toBe(1);
     expect(laneByKey.get(A)!.laneOffset).toBe(0);
@@ -176,7 +187,7 @@ describe("layout", () => {
       hangOffWinner(a, 1, inA.campaign),
       hangOffWinner(forkAt(a, 1, [1]), 2, inB.campaign),
     ]);
-    const { totalLaneRows, laneByKey } = layout(tree, new Set());
+    const { totalLaneRows, laneByKey } = freed(tree, new Set());
     expect(totalLaneRows).toBe(4);
     expect(laneByKey.size).toBe(4);
     expect(inA.run.address).not.toBe(inB.run.address);
@@ -188,7 +199,7 @@ describe("layout", () => {
   it("expanded course reserves its span and pushes lanes below it down", () => {
     const a = course(A, [3, 2, 4]);
     const tree = campaign("camp", [a, forkAt(a, 1, [1])]);
-    const { totalLaneRows, laneByKey } = layout(tree, new Set([A]));
+    const { totalLaneRows, laneByKey } = freed(tree, new Set([A]));
     expect(laneByKey.get(A)!.laneSpan).toBe(4);
     expect(laneByKey.get(A)!.laneOffset).toBe(0);
     expect(laneByKey.get(B)!.laneOffset).toBe(4);
@@ -198,7 +209,7 @@ describe("layout", () => {
   it("an inner run starts one column right of its spawner; a fork shares its parent's axis", () => {
     const seed = inner(A, "inner_camp", "cycle_seed", [1]);
     const a = hangOffWinner(course(A, [2, 2]), 2, seed.campaign);
-    const { laneByKey } = layout(campaign("camp", [a, forkAt(a, 2, [1])]), new Set());
+    const { laneByKey } = freed(campaign("camp", [a, forkAt(a, 2, [1])]), new Set());
     expect(laneByKey.get(A)!.baseCol).toBe(0);
     // Hung off round 2 (column 2) ⇒ the run's round 0 is column 3.
     expect(laneByKey.get(seed.run.address)!.baseCol).toBe(3);
@@ -209,18 +220,18 @@ describe("layout", () => {
     const a = course(A, [2, 2, 2]);
     const tree = campaign("camp", [a, forkAt(a, 3, [1])]);
     const keep = extentKeys(tree, { coursePathKey: A, candidateId: "c2_0" })!;
-    const cut = layout(tree, new Set([A]), keep);
+    const cut = freed(tree, new Set([A]), keep);
     expect(cut.laneByKey.size).toBe(1);
     expect(cut.maxCol).toBe(2);
     expect(ids(cut.laneByKey.get(A)!.candidates)).toEqual(["c1_1", "c2_0"]);
-    expect(layout(tree, new Set()).laneByKey.size).toBe(2);
+    expect(freed(tree, new Set()).laneByKey.size).toBe(2);
   });
 
   it("a fork keeps its parent's line up to the candidate it hangs from", () => {
     const a = course(A, [2, 2, 2]);
     const tree = campaign("camp", [a, forkAt(a, 2, [1, 1])]);
     const keep = extentKeys(tree, { coursePathKey: B, candidateId: "c3_0" })!;
-    const { laneByKey } = layout(tree, new Set([A]), keep);
+    const { laneByKey } = freed(tree, new Set([A]), keep);
     expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_1", "c2_1"]);
     expect(ids(laneByKey.get(B)!.candidates)).toEqual(["c3_0"]);
   });
@@ -244,7 +255,7 @@ describe("layout", () => {
       { ...steered, facts: { ...steered.facts, from_candidate: from.address } },
     ]);
     const keep = extentKeys(tree, { coursePathKey: C, candidateId: "c0_0" })!;
-    const { laneByKey } = layout(tree, new Set([A]), keep);
+    const { laneByKey } = freed(tree, new Set([A]), keep);
     expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_1"]);
     expect(laneByKey.has(B)).toBe(false);
   });
@@ -254,7 +265,7 @@ describe("layout", () => {
     const a = hangOffWinner(course(A, [1, 1]), 1, measured.campaign);
     const tree = campaign("camp", [a, forkAt(a, 1, [1])]);
     const keep = extentKeys(tree, { coursePathKey: A, candidateId: "c1_0" })!;
-    const { laneByKey } = layout(tree, new Set(), keep);
+    const { laneByKey } = freed(tree, new Set(), keep);
     const seedLane = laneByKey.get(measured.run.address)!;
     expect(seedLane.candidates.length).toBe(2);
     expect(seedLane.baseCol).toBeGreaterThan(laneByKey.get(A)!.baseCol);
@@ -268,7 +279,7 @@ describe("layout", () => {
     const a = hangOffWinner(hangOffWinner(host, 1, mine.campaign), 1, sibling.campaign);
     const tree = campaign("camp", [a]);
     const keep = extentKeys(tree, { coursePathKey: mine.run.address, candidateId: "c2_0" })!;
-    const { laneByKey } = layout(tree, new Set(), keep);
+    const { laneByKey } = freed(tree, new Set(), keep);
     expect(ids(laneByKey.get(mine.run.address)!.candidates)).toEqual(["c1_0", "c2_0"]);
     expect(laneByKey.has(sibling.run.address)).toBe(false);
     expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_0"]);
@@ -279,7 +290,7 @@ describe("layout", () => {
     const host = course(A, [1, 1]);
     const tree = campaign("camp", [{ ...host, children: [...host.children, loose.campaign] }]);
     const keep = extentKeys(tree, { coursePathKey: loose.run.address, candidateId: "c2_0" })!;
-    const { laneByKey } = layout(tree, new Set(), keep);
+    const { laneByKey } = freed(tree, new Set(), keep);
     expect(ids(laneByKey.get(loose.run.address)!.candidates)).toEqual(["c1_0", "c2_0"]);
     expect(ids(laneByKey.get(A)!.candidates)).toEqual([]);
   });
@@ -291,12 +302,11 @@ describe("layout", () => {
   });
 });
 
-describe("placeNodes", () => {
+describe("layout, freed: placed", () => {
   const one = (rounds: Rounds) => campaign("camp", [course(A, rounds)]);
 
   it("collapsed: one summary node per round, chained", () => {
-    const { laneByKey } = layout(one([2, 3]), new Set());
-    const { nodes } = placeNodes(laneByKey, ROOMY);
+    const { nodes } = freed(one([2, 3]), new Set());
     const summary = nodes.filter((n) => !n.isExpanded);
     expect(summary).toHaveLength(2);
     expect(summary.map((n) => n.round)).toEqual([1, 2]);
@@ -304,8 +314,7 @@ describe("placeNodes", () => {
   });
 
   it("expanded: one node per candidate per round + winner→child chain segs", () => {
-    const { laneByKey } = layout(one([3, 2]), new Set([A]));
-    const { nodes, segs, spineByKeyRound } = placeNodes(laneByKey, ROOMY);
+    const { nodes, segs, spineByKeyRound } = freed(one([3, 2]), new Set([A]));
     const placed = nodes.filter((n) => n.isExpanded && n.round > 0);
     expect(placed).toHaveLength(5);
     expect(placed.filter((n) => n.round === 1 && n.isWinner)).toHaveLength(1);
@@ -354,7 +363,7 @@ describe("placeNodes", () => {
         ),
       },
     ]);
-    const { nodes, segs } = placeNodes(layout(tree, new Set([A])).laneByKey, ROOMY);
+    const { nodes, segs } = freed(tree, new Set([A]));
     const at = (address: string) => nodes.find((n) => n.candKey === address)!;
     const child = nodes.find((n) => n.round === 3)!;
     const into = segs.filter((s) => s.y2 === child.y && s.x2 === child.x - ROOMY.candStub);
@@ -368,8 +377,7 @@ describe("placeNodes", () => {
 
   it("a fork's stem anchors to the exact candidate it was cut from", () => {
     const a = course(A, [2, 3]);
-    const { laneByKey } = layout(campaign("camp", [a, forkAt(a, 2, [1])]), new Set([A]));
-    const { segs, spineByKeyRound } = placeNodes(laneByKey, ROOMY);
+    const { segs, spineByKeyRound } = freed(campaign("camp", [a, forkAt(a, 2, [1])]), new Set([A]));
     const parentR2Winner = spineByKeyRound.get(`${A}::r2`)!;
     const forkStem = segs.find(
       (s) => s.variant === "fork" && s.x1 === parentR2Winner.x && s.y1 === parentR2Winner.y,
@@ -378,8 +386,7 @@ describe("placeNodes", () => {
   });
 
   it("expanded: a held round advances nothing; the next round chains from the last winner", () => {
-    const { laneByKey } = layout(one([{ n: 2 }, { n: 2, held: true }, { n: 2 }]), new Set([A]));
-    const { nodes, segs, spineByKeyRound } = placeNodes(laneByKey, ROOMY);
+    const { nodes, segs, spineByKeyRound } = freed(one([{ n: 2 }, { n: 2, held: true }, { n: 2 }]), new Set([A]));
 
     const r1winner = spineByKeyRound.get(`${A}::r1`)!;
     // A held round's spine entry is the retained parent, so a course cut there still anchors.
@@ -404,23 +411,20 @@ describe("placeNodes", () => {
   });
 
   it("collapsed: a held round's summary node is marked not-won", () => {
-    const { laneByKey } = layout(one([{ n: 2 }, { n: 2, held: true }]), new Set());
-    const { nodes } = placeNodes(laneByKey, ROOMY);
+    const { nodes } = freed(one([{ n: 2 }, { n: 2, held: true }]), new Set());
     const summary = nodes.filter((n) => !n.isExpanded);
     expect(summary.find((n) => n.round === 1)!.isWinner).toBe(true);
     expect(summary.find((n) => n.round === 2)!.isWinner).toBe(false);
   });
 
   it("a lone candidate in a round that crowned nobody is not promoted", () => {
-    const { laneByKey } = layout(one([{ n: 1 }, { n: 1, held: true }]), new Set([A]));
-    const { nodes } = placeNodes(laneByKey, ROOMY);
+    const { nodes } = freed(one([{ n: 1 }, { n: 1, held: true }]), new Set([A]));
     expect(nodes.find((n) => n.round === 2)!.isWinner).toBe(false);
     expect(nodes.find((n) => n.round === 1)!.isWinner).toBe(true);
   });
 
   it("single expanded course reproduces the intraloop spine (the 'cool one')", () => {
-    const { laneByKey, maxCol } = layout(one([2, 2, 1]), new Set([A]));
-    const { nodes, spineByKeyRound } = placeNodes(laneByKey, ROOMY);
+    const { maxCol, nodes, spineByKeyRound } = freed(one([2, 2, 1]), new Set([A]));
     expect(nodes).toHaveLength(5);
     expect(spineByKeyRound.get(`${A}::r1`)!.x).toBe(ROOMY.leftPad + 1 * ROOMY.colW);
     expect(spineByKeyRound.get(`${A}::r3`)!.x).toBe(ROOMY.leftPad + 3 * ROOMY.colW);
@@ -428,5 +432,189 @@ describe("placeNodes", () => {
     const r1 = nodes.filter((n) => n.round === 1).sort((a, b) => a.y - b.y);
     expect(r1[1]!.y - r1[0]!.y).toBe(LANE_H);
     expect(TOP_PAD).toBeGreaterThan(0);
+  });
+});
+
+// ---- PAIRED
+
+const NO_DESCENT = { parent: null, donor: null, donated: [], genes: [] };
+const gene = (source: string) => ({ locus: `n.${source}`, source, similarity: 0.5 });
+
+// Each candidate is served as descending from the newest crown before it, as a mutation of the line.
+function spine(rounds: { round: number; n: number; winner: number | null }[]): PairedRow[] {
+  const rows: PairedRow[] = [];
+  let crown: string | null = null;
+  for (const r of rounds) {
+    const from = crown;
+    for (let i = 0; i < r.n; i++) {
+      const address = `r${r.round}_${i}`;
+      rows.push({
+        key: `R${r.round}.${i}`,
+        round: r.round,
+        label: r.round === 0 ? "C0" : `C${r.round}.${i + 1}`,
+        address,
+        is_selected: r.winner === i,
+        crown: r.winner !== i ? null : r.n > 1 ? "elected" : "uncontested",
+        descent: { ...NO_DESCENT, parent: from },
+      });
+      if (r.winner === i) crown = address;
+    }
+  }
+  return rows;
+}
+
+// As chart.js's `offset:true` category scale produces them.
+const centers = (n: number): number[] => Array.from({ length: n }, (_, i) => (i + 0.5) / n);
+const paired = (rows: readonly PairedRow[], cs = centers(rows.length)) =>
+  layout({ paired: rows, centers: cs });
+const depthRows = (ys: number[]) => new Set(ys).size;
+
+describe("layout, paired under the bars", () => {
+  it("packs into exactly two depth rows while every round advances", () => {
+    // Beam r overlaps beam r+1 but never r+2, so greedy packing alternates two rows.
+    const rows = spine([
+      { round: 0, n: 1, winner: 0 },
+      { round: 1, n: 2, winner: 1 },
+      { round: 2, n: 2, winner: 0 },
+      { round: 3, n: 2, winner: 1 },
+      { round: 4, n: 2, winner: 0 },
+      { round: 5, n: 2, winner: 1 },
+    ]);
+    const g = paired(rows);
+
+    expect(g.beams).toHaveLength(5);
+    expect(depthRows(g.beams.map((b) => b.y))).toBe(2);
+    expect(g.height).toBe(FIRST_ROW_Y + ROW_H + BOTTOM_PAD);
+  });
+
+  it("hangs each candidate from the parent it is served as descending from, one beam per parent", () => {
+    const rows = spine([
+      { round: 0, n: 1, winner: 0 },
+      { round: 1, n: 2, winner: 1 },
+    ]);
+    // A loser of round 1 is the measured parent of a crossover child in round 2.
+    const kid = (address: string, parent: string): PairedRow => ({
+      ...rows[2]!,
+      key: address.toUpperCase(),
+      round: 2,
+      address,
+      descent: { ...NO_DESCENT, parent },
+    });
+    rows.push(kid("r2_0", "r1_0"), kid("r2_1", "r1_1"));
+    const g = paired(rows);
+    const chains = g.beams.filter((b) => b.variant === "chain");
+
+    expect(chains).toHaveLength(3);
+    const xOf = (address: string) => g.nodes.find((n) => n.address === address)!.xf;
+    for (const k of ["r2_0", "r2_1"]) {
+      const parent = rows.find((r) => r.address === k)!.descent.parent!;
+      const [lo, hi] = [xOf(parent), xOf(k)].sort((a, b) => a - b);
+      expect(chains.some((b) => b.x1f === lo && b.x2f === hi)).toBe(true);
+    }
+  });
+
+  it("links a gene source to its child, dotted, never twice over the parent edge", () => {
+    const rows = spine([
+      { round: 0, n: 1, winner: 0 },
+      { round: 1, n: 2, winner: 1 },
+      { round: 2, n: 1, winner: 0 },
+    ]);
+    const child = rows.find((r) => r.address === "r2_0")!;
+    child.descent = { ...child.descent, genes: [gene("r1_0"), gene("r1_1")] };
+    const g = paired(rows);
+    const genes = g.beams.filter((b) => b.variant === "gene");
+
+    expect(genes).toHaveLength(1);
+    const xOf = (address: string) => g.nodes.find((n) => n.address === address)!.xf;
+    expect([genes[0]!.x1f, genes[0]!.x2f]).toEqual([xOf("r1_0"), xOf("r2_0")]);
+  });
+
+  it("links the served donor from any earlier round, apart from the main and any gene guess", () => {
+    const rows = spine([
+      { round: 0, n: 1, winner: 0 },
+      { round: 1, n: 2, winner: 1 },
+      { round: 2, n: 1, winner: 0 },
+      { round: 3, n: 1, winner: 0 },
+    ]);
+    const child = rows.find((r) => r.address === "r3_0")!;
+    child.descent = { ...child.descent, donor: "r0_0", genes: [gene("r0_0"), gene("r1_0")] };
+    const g = paired(rows);
+    const xOf = (address: string) => g.nodes.find((n) => n.address === address)!.xf;
+    const span = (variant: string) =>
+      g.beams.filter((b) => b.variant === variant).map((b) => [b.x1f, b.x2f]);
+
+    expect(span("donor")).toEqual([[xOf("r0_0"), xOf("r3_0")]]);
+    expect(span("gene")).toEqual([[xOf("r1_0"), xOf("r3_0")]]);
+  });
+
+  it("anchors every node on its own bar's category center", () => {
+    const rows = spine([
+      { round: 0, n: 1, winner: 0 },
+      { round: 1, n: 3, winner: 2 },
+    ]);
+    const cs = centers(rows.length);
+    const g = paired(rows, cs);
+
+    expect(g.nodes.map((n) => n.key)).toEqual(rows.map((r) => r.key));
+    expect(g.nodes.map((n) => n.xf)).toEqual(cs);
+  });
+
+  it("refuses to draw when the rows and the bar categories disagree", () => {
+    const rows = spine([
+      { round: 0, n: 1, winner: 0 },
+      { round: 1, n: 2, winner: 0 },
+    ]);
+    const g = paired(rows, centers(rows.length - 1));
+
+    expect(g.nodes).toEqual([]);
+    expect(g.beams).toEqual([]);
+    expect(g.stubs).toEqual([]);
+    expect(g.height).toBe(NODE_ROW_Y + 3 + BOTTOM_PAD);
+  });
+
+  it("draws no edge from a parent the strip does not hold", () => {
+    const rows = spine([{ round: 1, n: 2, winner: 0 }]).map((r) => ({
+      ...r,
+      descent: { ...NO_DESCENT, parent: "elsewhere" },
+    }));
+    expect(paired(rows).beams).toEqual([]);
+  });
+});
+
+describe("layout, one tree two ways", () => {
+  it("links each kid to the same served parent, paired and freed", () => {
+    const tree = campaign("camp", [course(A, [2, 2, 2])]);
+    const cands = candidatesOf(tree.children[0]!);
+    const rows: PairedRow[] = cands.map((c) => ({
+      key: c.address,
+      round: c.facts.reading.arm.round,
+      label: c.label,
+      address: c.address,
+      is_selected: c.facts.reading.election.selected,
+      crown: c.facts.reading.election.crown,
+      descent: { ...NO_DESCENT, parent: c.facts.descends_from },
+    }));
+    const p = paired(rows);
+    const f = freed(tree, new Set([A]));
+    const xf = new Map(p.nodes.map((n) => [n.xf, n.address]));
+    const pairedEdges = p.beams
+      .filter((b) => b.variant === "chain")
+      .flatMap((b) => {
+        const from = b.key.split("|").at(-1)!;
+        const kids = p.stubs.filter(
+          (s) => s.y1 === b.y && s.variant === "chain" && xf.get(s.xf) !== from,
+        );
+        return kids.map((s) => `${from}>${xf.get(s.xf)}`);
+      });
+    const at = new Map(f.nodes.map((n) => [`${n.x},${n.y}`, n.candKey]));
+    const freedEdges = f.segs
+      .filter((s) => s.variant === "chain")
+      .flatMap((s) => {
+        const kid = f.nodes.find((n) => n.y === s.y2 && n.x - ROOMY.candStub === s.x2);
+        const from = at.get(`${s.x1},${s.y1}`);
+        return kid && from ? [`${from}>${kid.candKey}`] : [];
+      });
+    expect(pairedEdges.length).toBeGreaterThan(0);
+    expect([...pairedEdges].sort()).toEqual([...freedEdges].sort());
   });
 });

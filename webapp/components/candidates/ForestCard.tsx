@@ -17,6 +17,7 @@ import { useWorkspace } from "@/lib/state/workspace";
 import { pickOf } from "@/lib/derivations";
 import { shortFamilyTail } from "@/lib/ids";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
+import { TreePairing } from "./CandidatesCard";
 import { Forest, type CladogramCtx } from "./Forest";
 import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useViewedCourse } from "@/lib/state/lineage";
@@ -46,7 +47,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
     metric,
     expanded,
     onLaneActivate,
-    setShowForest,
+    setTreeFreed,
     totalDescendants,
     viewedHasRounds,
     isInheritedSibling,
@@ -97,15 +98,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
             </Chip>
           )}
           <CopyButton data={tree} title="Copy the lineage as JSON" />
-          <button
-            type="button"
-            className="forest-close"
-            aria-label="Close the lineage forest"
-            title="Close"
-            onClick={() => setShowForest(false)}
-          >
-            ×
-          </button>
+          <TreePairing freed setFreed={setTreeFreed} descendants={totalDescendants} />
         </Toolbar>
       }
     >

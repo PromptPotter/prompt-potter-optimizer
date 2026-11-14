@@ -54,9 +54,9 @@ for (const vp of WIDTHS) {
       expect(box.y + box.height, "the card ends below the viewport").toBeLessThanOrEqual(vp.height);
     });
 
-    test("the lineage forest fits its viewport", async ({ page, rich }) => {
+    test("the freed lineage tree fits its viewport", async ({ page, rich }) => {
       await open(page, `${rich.addr}/candidates`);
-      await page.getByRole("button", { name: /the lineage forest/i }).click();
+      await page.getByRole("button", { name: /Free the lineage tree/i }).click();
       const cladogram = page.getByRole("img", { name: "Session lineage cladogram" });
       await expect(cladogram).toBeVisible();
       await noSidewaysScroll(page);

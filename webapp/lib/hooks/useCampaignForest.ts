@@ -34,8 +34,9 @@ interface CampaignForest {
   forkedFrom: ReadonlyMap<string, HierarchyCourse>;
   expanded: ReadonlySet<string>;
   onLaneActivate: (courseKey: string) => void;
-  showForest: boolean;
-  setShowForest: (open: boolean) => void;
+  // The lineage tree detached from the candidates bars into its own card; else paired under them.
+  treeFreed: boolean;
+  setTreeFreed: (freed: boolean) => void;
   revealLane: (courseKey: string) => void;
   totalDescendants: number;
   viewedHasRounds: boolean;
@@ -48,7 +49,7 @@ interface CampaignForest {
   deleteFailure: CommandFailure | null;
 }
 
-// The campaign's forest: its lanes and `showForest` are view memory's alone (`CampaignView`).
+// The campaign's forest: its lanes and `treeFreed` are view memory's alone (`CampaignView`).
 export function useCampaignForest({
   campaignId,
   cycleId,
@@ -62,7 +63,7 @@ export function useCampaignForest({
 }): CampaignForest {
   const { tree, index } = useViewedLineage();
   const { viewFor, recordView } = useViewMemory();
-  const { showForest, expandedLanes, expandedForLane } = viewFor(campaignId);
+  const { treeFreed, expandedLanes, expandedForLane } = viewFor(campaignId);
   const metric = primaryMetric(useMetrics(cycleId, displayMetric), displayMetric);
 
   const viewedLaneKey = useMemo(() => courseAt(index, path)?.address ?? null, [index, path]);
@@ -86,15 +87,15 @@ export function useCampaignForest({
     [expanded, campaignId, recordView],
   );
 
-  const setShowForest = useCallback(
-    (open: boolean) => recordView(campaignId, { showForest: open }),
+  const setTreeFreed = useCallback(
+    (freed: boolean) => recordView(campaignId, { treeFreed: freed }),
     [campaignId, recordView],
   );
 
   // Takes a LANE KEY (a course address); a raw cycle id silently never matches the layout.
   const revealLane = useCallback(
     (courseKey: string) =>
-      recordView(campaignId, { showForest: true, expandedLanes: [...new Set(expanded).add(courseKey)] }),
+      recordView(campaignId, { treeFreed: true, expandedLanes: [...new Set(expanded).add(courseKey)] }),
     [expanded, campaignId, recordView],
   );
 
@@ -151,8 +152,8 @@ export function useCampaignForest({
     forkedFrom,
     expanded,
     onLaneActivate,
-    showForest,
-    setShowForest,
+    treeFreed,
+    setTreeFreed,
     revealLane,
     totalDescendants: Math.max(index.courses.length - 1, 0),
     viewedHasRounds,

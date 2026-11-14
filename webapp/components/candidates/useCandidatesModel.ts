@@ -27,7 +27,7 @@ import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { useViewedCourse, useViewedLineage } from "@/lib/state/lineage";
 import type { CandidateBar } from "@/lib/types";
-import { barRound } from "./dendrogram";
+import { barRound } from "./lineage-tree";
 
 export type CandidatesModel = ReturnType<typeof useCandidatesModel>;
 
@@ -62,7 +62,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
         })
       : null;
 
-  const { metric, forkedFrom, revealLane, showForest, setShowForest, totalDescendants } =
+  const { metric, forkedFrom, revealLane, treeFreed, setTreeFreed, totalDescendants } =
     useCampaignForest({
     campaignId,
     cycleId,
@@ -202,8 +202,8 @@ export function useCandidatesModel(dash: ServedDashboard) {
     toggleMetric: (m: DisplayMetric) => toggleMetric(m, cycleId, metrics),
     showCache,
     cacheHitCount,
-    showForest,
-    setShowForest,
+    treeFreed,
+    setTreeFreed,
     totalDescendants,
     metric,
     forkedFrom,

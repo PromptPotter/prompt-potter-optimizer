@@ -980,6 +980,12 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `_MAX_ATTEMPTS` reads closed after that merge while the relay still resends; count the relay's
   resends for one 5xx instead (`grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
   on master, `max_attempts` in `pipeline.json` on `xconn`).
+- **An L4 launch never probes the connectors its inner cells name** (the C0 re-measure at landing 72
+  halted on `TERMNORM_ENDPOINTS is unset` after its mint): `admission.py::probe_backend` probes the outer
+  backend alone, so an inner cell's connector fails per cell inside `runner/inner/spawn.py`, once the
+  cycle is minted and billed. Root: the outer preflight probes every connector its inner cells
+  resolve. **Rides with:** xconn 3, the probe's link. **Re-test:** an L4 launch with an inner
+  connector's endpoints unset is refused before its mint, naming the connector.
 
 ### batch/29 · mkey
 
@@ -1073,15 +1079,11 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 
 ### batch/30 · ws
 
-- **`EvidenceCharts` and `CostStrip` lost their hover readouts** with the tooltip (d36f9af7e).
-  Action: a DOM reading under each chart, since `webapp/components/CLAUDE.md:8` forbids painting detail
-  over a canvas's own marks. **Rides with:** ws 1.
-- **Two lineage layouts are derived side by side**: `webapp/components/candidates/dendrogram.ts::dendrogram`
-  lays `DendrogramStrip`, and `webapp/components/candidates/forest-layout.ts::layout` lays `Forest`. The
-  strip stays (operator, 2026-11-10). Action: one tree, two layouts, PAIRED and FREED, one button
-  detaching and re-pairing it; one pick keyed on its `address` (`workspace.tsx::pick`) highlights both.
-  **Rides with:** ws 2. **Re-test:** `git grep -hE "^export function (dendrogram|layout)\(" -- webapp/components/candidates`
-  prints one line.
+- **A painted chart has no keyboard path** (ws 1's landing): `compare/EvidenceCharts.tsx:83` and
+  `dashboard/scoring/CostStrip.tsx:50` answer the pointer alone, against `webapp/components/CLAUDE.md:9`
+  ("a painted surface is a control"). Root: `ui/ChartReading`'s hook steps its column on the arrow keys,
+  so every chart that reads through it gains the path at once. **Rides with:** the next ws link.
+  **Re-test:** focusing either chart and pressing → moves its reading line one column.
 - **Compare cards are laid out for few wide columns**, not five thin stripes on a 16:9 display (the
   column rule is `webapp/app/styles/domains/compare.css:40-42`). **Rides with:** ws 3. **Re-test:** five
   candidates at 1920×1080 sit in a row, each card at its full content (a wrapped second row fails).

@@ -6,14 +6,15 @@ import { cssPct, PLACEHOLDER } from "@/lib/format";
 import { useStableContent } from "@/lib/stable";
 import { pressable } from "@/components/ui";
 import type { CandidateBar } from "@/lib/types";
-import { dendroRow, dendrogram, type DendroRow } from "./dendrogram";
+import { layout, pairedRow, type PairedRow } from "./lineage-tree";
 import type { PlotGeometry } from "./FitnessChart";
 
 interface Props {
   views: CandidateBar[];
   plot: PlotGeometry | null;
   metric: DisplayMetric;
-  selectedKey: string | null;
+  // The pick's address (`workspace.tsx::pick`): the one pick the freed tree lights too.
+  pickedAddress: string | null;
   onSelect: (view: CandidateBar | null) => void;
   forkedFrom: ReadonlyMap<string, HierarchyCourse>;
   onFreeHierarchy: (course: HierarchyCourse) => void;
@@ -23,13 +24,13 @@ export const DendrogramStrip = memo(function DendrogramStrip({
   views,
   plot,
   metric,
-  selectedKey,
+  pickedAddress,
   onSelect,
   forkedFrom,
   onFreeHierarchy,
 }: Props) {
-  const rows = useStableContent(useMemo<DendroRow[]>(() => views.map(dendroRow), [views]));
-  const geo = useMemo(() => dendrogram(rows, plot?.centers ?? []), [rows, plot]);
+  const rows = useStableContent(useMemo<PairedRow[]>(() => views.map(pairedRow), [views]));
+  const geo = useMemo(() => layout({ paired: rows, centers: plot?.centers ?? [] }), [rows, plot]);
   const byKey = useMemo(() => new Map(views.map((v) => [v.key, v])), [views]);
 
   if (!plot) return null;
@@ -46,7 +47,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
         role="group"
         aria-label="Candidate genealogy — each candidate hangs from the main it continues; a dashed link reaches the donor that gave it parts, a dotted one where another part may have come from"
       >
-        {geo.brackets.map((b) => (
+        {geo.beams.map((b) => (
           <line
             key={b.key}
             className={cx("cand-dendro-beam", b.variant !== "chain" && b.variant)}
@@ -69,7 +70,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
         {/* Index in the key: a repair re-measures without re-minting, so two bars can share an address. */}
         {geo.nodes.map((n, i) => {
           const view = byKey.get(n.key);
-          const selected = n.key === selectedKey;
+          const selected = n.address === pickedAddress;
           const forkCycle = forkedFrom.get(n.address);
           const value = view ? barValueLabel(metric, view) : PLACEHOLDER;
           return (
@@ -86,14 +87,14 @@ export const DendrogramStrip = memo(function DendrogramStrip({
                     ? " · round winner (the parent this round elected)"
                     : n.crown === "uncontested"
                       ? " · the round's only arm — it advances without an election"
-                      : n.isWinner
+                      : n.is_selected
                         ? " · selected — its round has not closed yet"
                         : " · eliminated"}
                 </title>
                 {/* Centred on the dot: a full-height stub would take the hit test off every node it crosses. */}
                 <circle cx={cssPct(n.xf)} cy={n.y} r={8} className="cand-dendro-hitarea" />
                 <circle
-                  className={cx("cand-dendro-dot", n.isWinner ? "winner" : "eliminated")}
+                  className={cx("cand-dendro-dot", n.is_selected ? "winner" : "eliminated")}
                   cx={cssPct(n.xf)}
                   cy={n.y}
                   r={3}
@@ -102,10 +103,10 @@ export const DendrogramStrip = memo(function DendrogramStrip({
               {forkCycle && (
                 <g
                   {...pressable(() => onFreeHierarchy(forkCycle))}
-                  aria-label={`A sibling cycle was forked from ${n.label} — open the forest view on it`}
+                  aria-label={`A sibling cycle was forked from ${n.label} — free the lineage tree on it`}
                   className="cand-dendro-fork"
                 >
-                  <title>Forked here — open the forest view on the sibling cycle</title>
+                  <title>Forked here — free the lineage tree on the sibling cycle</title>
                   <text className="cand-dendro-fork-glyph" x={cssPct(n.xf)} y={n.y - 6}>
                     ⑂
                   </text>

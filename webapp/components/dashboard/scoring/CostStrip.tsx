@@ -1,8 +1,9 @@
 import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { barChartDefaults, ensureChartRegistered } from "@/lib/chart";
+import { fmtUsd } from "@/lib/format";
 import { seriesColor, useThemeVersion } from "@/lib/theme";
-import { CardFrame } from "@/components/ui";
+import { CardFrame, ChartReading, useChartReading } from "@/components/ui";
 import { costSeries, roundCosts } from "@/lib/derivations";
 import { useViewedDashboard } from "@/lib/state/poll";
 
@@ -12,11 +13,13 @@ ensureChartRegistered();
 export const CostStrip = memo(function CostStrip() {
   const { dash } = useViewedDashboard();
   useThemeVersion();
+  const { at, events } = useChartReading();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rounds = useMemo(() => roundCosts(dash), [dash?.spend_metered_by_round]);
 
   const labels = rounds.map((r) => String(r.round));
-  const datasets = costSeries(rounds).map((s) => ({
+  const series = costSeries(rounds);
+  const datasets = series.map((s) => ({
     label: s.label,
     data: s.data,
     backgroundColor: seriesColor(s.ink),
@@ -24,6 +27,7 @@ export const CostStrip = memo(function CostStrip() {
   }));
 
   const options = barChartDefaults({
+    ...events,
     plugins: {
       legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } },
     },
@@ -32,6 +36,15 @@ export const CostStrip = memo(function CostStrip() {
       y: { stacked: true, ticks: { font: { size: 9 } } },
     },
   });
+
+  const round = at === null ? undefined : rounds[at];
+  const billed =
+    at === null
+      ? []
+      : series.flatMap((s) => {
+          const usd = s.data[at];
+          return usd == null ? [] : [`${s.label.toLowerCase()} ${fmtUsd(usd)}`];
+        });
 
   return (
     <CardFrame title={<span>Spend by round</span>}>
@@ -54,6 +67,13 @@ export const CostStrip = memo(function CostStrip() {
           />
         )}
       </div>
+      {rounds.length > 0 && (
+        <ChartReading hint="Hover or tap a round to read its bill.">
+          {round === undefined
+            ? null
+            : `round ${round.round} · ${billed.join(" · ") || "nothing billed"}`}
+        </ChartReading>
+      )}
     </CardFrame>
   );
 });

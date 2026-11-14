@@ -4,7 +4,7 @@ import { STORAGE_KEYS } from "@/lib/storage-keys";
 import { ownerOfAddress } from "@/lib/ids";
 
 // Bumping this DROPS every stored record rather than migrating it.
-const RECORD_VERSION = 4;
+const RECORD_VERSION = 5;
 
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -21,8 +21,8 @@ export interface CampaignView {
   viewedPath: string | null;
   // `address.ts::formatPick`'s spelling.
   viewedPick: string | null;
-  showForest: boolean;
-  // Lane keys (course addresses), the same space `forest-layout::layout` matches.
+  treeFreed: boolean;
+  // Lane keys (course addresses), the same space `lineage-tree.ts::layout` matches.
   expandedLanes: string[];
   // The viewed lane last opened for its visit: a manual collapse is not undone.
   expandedForLane: string | null;
@@ -40,7 +40,7 @@ export function emptyView(): CampaignView {
     autoExpandedFor: null,
     viewedPath: null,
     viewedPick: null,
-    showForest: false,
+    treeFreed: false,
     expandedLanes: [],
     expandedForLane: null,
   };

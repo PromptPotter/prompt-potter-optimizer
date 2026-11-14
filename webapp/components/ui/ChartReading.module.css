@@ -1,0 +1,14 @@
+@layer ui {
+.reading {
+  margin: var(--space-4) 0 0;
+  min-height: 1.4em;
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.hint {
+  opacity: 0.7;
+}
+}

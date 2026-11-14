@@ -156,6 +156,10 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 72, readings:** one `Estimate` is every level's and lift's reading, a θ lift among them.
   The race and the election read one ruler and row set, which moves potter's election. Level bands
   are bounded, a binary lift reads exact McNemar, and θ's prior centres on the lift.
+- **landed 73, xconn 1–2:** a backend's served wire keys bound what a send carries, and each
+  connector names its endpoints (`TERMNORM_ENDPOINTS`, `N8N_HARNESS_ENDPOINTS`).
+- **landed 74, ws 1–2:** a DOM reading line under each painted chart; one lineage tree, paired under
+  the bars or freed, one button between. ws 3 (the 16:9 compare row) waits on the phone layout.
 - **then:** narr-2 (the stored dashboard views go, renderers read the records, one way to the
   ledger), faults-1 (a refusal names its next acts), ren (classes defined twice, a gate refusing
   another).

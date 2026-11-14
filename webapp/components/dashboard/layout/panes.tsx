@@ -85,11 +85,11 @@ export function LeaderPane() {
 export function CandidatesPane() {
   const picked = usePickedCandidate();
   const { viewed, pickCandidate } = useWorkspace();
-  const { showForest } = useViewMemory().viewFor(viewed?.root.campaignId ?? null);
+  const { treeFreed } = useViewMemory().viewFor(viewed?.root.campaignId ?? null);
   return (
     <>
       <CandidatesCard />
-      {showForest && <ForestCard />}
+      {treeFreed && <ForestCard />}
       {picked && (
         <div className="card card-full inspector-card">
           <ScoringInspector selected={picked} onClose={() => pickCandidate(null)} />

@@ -21,16 +21,14 @@ import {
   LANE_H,
   NODE_R,
   TOP_PAD,
-  densityFor,
   extentKeys,
   forestWidth,
   layout,
-  placeNodes,
   type CladogramAnchor,
   type Density,
   type LaneLayout,
   type RoundNodePos,
-} from "./forest-layout";
+} from "./lineage-tree";
 
 export interface CladogramChannel extends CladogramAnchor {
   // A `var()` reference (`theme.ts::seriesVar`), never a resolved value.
@@ -105,11 +103,11 @@ const CandidateNode = memo(function CandidateNode({
       )}
       {...pressable(() => onPick(n))}
       aria-pressed={selected}
-      aria-label={`Round ${n.round} candidate ${n.candidateLabel}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${DISPLAY_METRIC_INFO[metric].label} ${fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
+      aria-label={`Round ${n.round} candidate ${n.label}, ${invalidated ? "unknown — a setting was changed at or above this point" : `${DISPLAY_METRIC_INFO[metric].label} ${fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}`}${n.crown === "elected" ? ", round winner" : ""}${ink ? ", a channel of the comparison" : ""}${retiredBy ? ", retired — the run branched away and continued elsewhere" : ""}${divergence ? ", divergence point under the lens" : ""}${alt ? ", would be elected under the scoring lens" : ""}${dimmed ? ", counterfactual under the scoring lens" : ""}`}
       style={{ cursor: "pointer" }}
     >
       <title>
-        {n.candidateLabel} ·{" "}
+        {n.label} ·{" "}
         {invalidated
           ? "unknown"
           : fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}
@@ -162,7 +160,7 @@ const CandidateNode = memo(function CandidateNode({
           className={cx("lineage-label", n.isWinner && "winner", selected && "selected")}
           style={ink ? { fill: ink } : undefined}
         >
-          {n.candidateLabel} {invalidated ? "?" : fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}
+          {n.label} {invalidated ? "?" : fmtUnit(DISPLAY_METRIC_INFO[metric].unit,level)}
         </text>
       )}
       <rect
@@ -200,12 +198,10 @@ export function Forest({
     valueByKey.get(n.candKey) ?? null;
   const thetaOf = (n: RoundNodePos): number | null =>
     thetaByKey.get(n.candKey) ?? null;
-  const { laneByKey, totalLaneRows, maxCol } = useMemo(
-    () => layout(tree, expanded, clip && extentKeys(tree, clip)),
-    [tree, expanded, clip],
+  const { laneByKey, totalLaneRows, maxCol, d, nodes, segs } = useMemo(
+    () => layout({ freed: tree, expanded, keep: clip && extentKeys(tree, clip), boxW }),
+    [tree, expanded, clip, boxW],
   );
-  const d = densityFor(maxCol, boxW);
-  const { nodes, segs } = useMemo(() => placeNodes(laneByKey, d), [laneByKey, d]);
   const extents = useMemo(
     () =>
       channels
@@ -413,7 +409,7 @@ export function Forest({
                     {metric !== "ability" && typeof thetaOf(n) === "number"
                       ? ` · ${fmtUnit(DISPLAY_METRIC_INFO.ability.unit, thetaOf(n))}`
                       : ""}
-                    {n.candidateLabel ? `\n${n.candidateLabel}` : ""}
+                    {n.label ? `\n${n.label}` : ""}
                     {isDivergence ? "\ndivergence under the scoring lens" : ""}
                     {isDivergent ? "\ncounterfactual under the scoring lens" : ""}
                     {ink ? "\na channel of the comparison — expand the lane to reach it" : ""}

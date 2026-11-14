@@ -15,23 +15,31 @@ import { cx } from "@/lib/cx";
 import { useViewedLineage } from "@/lib/state/lineage";
 import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/state/poll";
 
-function ForestToggle({ model: m }: { model: CandidatesModel }) {
-  const { showForest, totalDescendants } = m;
+// The one button between the tree's two layouts: paired under the bars, or freed as its own card.
+export function TreePairing({
+  freed,
+  setFreed,
+  descendants,
+}: {
+  freed: boolean;
+  setFreed: (freed: boolean) => void;
+  descendants: number;
+}) {
   return (
     <Chip
-      icon={totalDescendants === 0}
-      on={showForest}
+      icon={descendants === 0}
+      on={freed}
       ariaLabel={
-        showForest
-          ? "Hide the lineage forest"
-          : `Show the lineage forest — the full campaign tree, ${totalDescendants} descendant${totalDescendants === 1 ? "" : "s"}`
+        freed
+          ? "Pair the lineage tree under the bars"
+          : `Free the lineage tree from the bars — the full campaign tree, ${descendants} descendant${descendants === 1 ? "" : "s"}`
       }
-      title={`${showForest ? "Hide" : "Show"} the campaign tree`}
-      onClick={() => m.setShowForest(!showForest)}
+      title={freed ? "Pair the tree under the bars" : "Free the tree from the bars"}
+      onClick={() => setFreed(!freed)}
     >
       <span className="cand-forest-toggle">
         <IconTree />
-        {totalDescendants > 0 && <span className="cand-view-count">{totalDescendants}</span>}
+        {descendants > 0 && <span className="cand-view-count">{descendants}</span>}
       </span>
     </Chip>
   );
@@ -121,18 +129,22 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
             onGeometry={m.onGeometry}
           />
           <div className="cand-tree-row">
-            {!drilled && (
+            {!drilled && !m.treeFreed && (
               <DendrogramStrip
                 views={views}
                 plot={m.plot}
                 metric={m.metric}
-                selectedKey={m.selectedKey}
+                pickedAddress={m.selectedKey}
                 onSelect={m.onSelect}
                 forkedFrom={m.forkedFrom}
                 onFreeHierarchy={m.onFreeHierarchy}
               />
             )}
-            <ForestToggle model={m} />
+            <TreePairing
+              freed={m.treeFreed}
+              setFreed={m.setTreeFreed}
+              descendants={m.totalDescendants}
+            />
           </div>
           {!m.areCourses && m.wonOnTheta && (
             <div className="fitness-notes">

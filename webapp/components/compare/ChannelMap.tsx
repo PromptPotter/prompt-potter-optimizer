@@ -6,7 +6,7 @@ import {
   type CladogramChannel,
   type CladogramCtx,
 } from "@/components/candidates/Forest";
-import type { RoundNodePos } from "@/components/candidates/forest-layout";
+import type { RoundNodePos } from "@/components/candidates/lineage-tree";
 import { Empty, ReadState } from "@/components/ui";
 import { shownData } from "@/lib/hooks/useRead";
 import { useSeededOnce } from "@/lib/hooks/useSeededOnce";

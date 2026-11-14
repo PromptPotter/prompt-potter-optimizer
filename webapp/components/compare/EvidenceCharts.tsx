@@ -3,15 +3,17 @@ import { Bar, Line } from "react-chartjs-2";
 import type { Estimate, Evidence, SubjectReading, WinnerChainPoint } from "@/lib/api/types";
 import { maskedSubject } from "@/lib/api/reads";
 import {
+  ChartReading,
   DataTable,
   Empty,
   IntervalRow,
   intervalDomain,
   type Column,
   type IntervalDomain,
+  useChartReading,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { PLACEHOLDER, shortId } from "@/lib/format";
+import { fmtMetric, PLACEHOLDER, shortId } from "@/lib/format";
 
 import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
 import { getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
@@ -53,6 +55,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   const cells = evidence.metric.covered_cells;
   const series = evidence.subjects;
   const axis = evidence.metric.spec.axis_label;
+  const { at, events } = useChartReading();
 
   // Merged before the empty guard: it needs no shared cell.
   if (view === "merged") {
@@ -76,33 +79,51 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   }));
 
   const labels = cells.map((c) => c.split("/").pop() ?? c);
+  const cell = at === null ? undefined : cells[at];
+  const reading = (
+    <ChartReading hint="Hover or tap a cell to read it.">
+      {cell === undefined
+        ? null
+        : `${cell} · ${series
+            .map((s) => `${seriesLabel(s)} ${fmtMetric(evidence.metric.spec, s.values[cell])}`)
+            .join(" · ")}`}
+    </ChartReading>
+  );
 
   if (view === "lines") {
     return (
-      <div className="cmp-canvas">
-        <Line
-          aria-label={`${axis} across ${cells.length} cells, one line per subject`}
-          data={{ labels, datasets }}
-          options={lineChartDefaults({
-            plugins: { legend: { display: false } },
-            scales: axisScales(axis, false),
-          })}
-        />
-      </div>
+      <>
+        <div className="cmp-canvas">
+          <Line
+            aria-label={`${axis} across ${cells.length} cells, one line per subject`}
+            data={{ labels, datasets }}
+            options={lineChartDefaults({
+              ...events,
+              plugins: { legend: { display: false } },
+              scales: axisScales(axis, false),
+            })}
+          />
+        </div>
+        {reading}
+      </>
     );
   }
 
   return (
-    <div className="cmp-canvas">
-      <Bar
-        aria-label={`${axis} across ${cells.length} cells, one bar per subject`}
-        data={{ labels, datasets }}
-        options={barChartDefaults({
-          plugins: { legend: { display: false } },
-          scales: axisScales(axis, view === "overlaid"),
-        })}
-      />
-    </div>
+    <>
+      <div className="cmp-canvas">
+        <Bar
+          aria-label={`${axis} across ${cells.length} cells, one bar per subject`}
+          data={{ labels, datasets }}
+          options={barChartDefaults({
+            ...events,
+            plugins: { legend: { display: false } },
+            scales: axisScales(axis, view === "overlaid"),
+          })}
+        />
+      </div>
+      {reading}
+    </>
   );
 });
 
