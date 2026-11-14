@@ -1,3 +1,5 @@
+> **STOP CHECK, first:** if your task fired at 07:30 UTC on 2026-11-14 or later (your first message says when), you are a duplicate run. Stop at once: change nothing, push nothing, and end your turn. Only the run fired at 07:13 UTC works this brief.
+
 # small-1: one shape of a budget's remainder, one name check, fixed-width stamps, three torn writes (Opus, cloud)
 
 Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chain id `small-1`, arc `arc/small-1`.
