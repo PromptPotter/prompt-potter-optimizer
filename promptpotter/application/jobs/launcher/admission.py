@@ -67,6 +67,7 @@ from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.account_spend import unreported_under
 from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_READ_ERRORS,
     definition_version,
     resolve_dataset,
     runnable_definition,
@@ -76,11 +77,8 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
-    DatasetAccessError,
-    FileUnreadableError,
     MachineBusyError,
     NotFoundError,
-    PayloadInvalidError,
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
@@ -166,13 +164,18 @@ class RunStart:
             logger.exception("failed to record launch stop for job %s", self.job_id)
 
 
-async def probe_backend(backend_type: str) -> BackendUnreachableError | MissingExtraError | None:
-    connector = connectors.CONNECTORS.get(backend_type)
+async def probe_backend(name: str) -> BackendUnreachableError | MissingExtraError | None:
+    connector = connectors.CONNECTORS.get(name)
     if connector.extra is not None and (absent := missing(connector.extra)):
         return MissingExtraError(connector.extra, absent)
     if (down := await connector.unreachable()) is not None:
         return BackendUnreachableError(connector.name, connector.base_url(), down)
     return None
+
+
+async def refuse_unreachable(name: str) -> None:
+    if (down := await probe_backend(name)) is not None:
+        raise down
 
 
 class _DefinitionRead(NamedTuple):
@@ -188,8 +191,8 @@ def _definition_read(stores: Stores, name: str) -> _DefinitionRead:
 
     def read() -> _DefinitionRead:
         try:
-            named = runnable_definition(resolve_dataset(stores, name)).backend_type
-        except (DatasetAccessError, FileUnreadableError, PayloadInvalidError) as unread:
+            named = runnable_definition(resolve_dataset(stores, name)).connector
+        except DEFINITION_READ_ERRORS as unread:
             return _DefinitionRead("", str(unread))
         return _DefinitionRead(named, None)
 
@@ -382,8 +385,7 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
             refuse_campaign(stores, campaign_at(stores, hop))
 
     t0 = time.perf_counter()
-    if (down := await probe_backend(request.backend_type(stores))) is not None:
-        raise down
+    await refuse_unreachable(request.connector(stores))
     t_probe = time.perf_counter()
     declared, asked = declare_run_budget(
         request.declared_budget(stores), stores=stores, hop=hop, requested=request.budget

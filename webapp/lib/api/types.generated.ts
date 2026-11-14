@@ -446,7 +446,7 @@ export interface Refusal {
 }
 
 export interface BackendResponse {
-  /** The connector's name, as `dataset.yaml::pipeline.backend_type` names it */
+  /** The connector's name, as `dataset.yaml::pipeline.connector` names it */
   id: string;
   /** Its wire kind: only a `remote_http` one has a connection to secure */
   execution: 'remote_http' | 'in_process';
@@ -3590,8 +3590,8 @@ export interface CampaignPipelineResponse {
   campaign_id: string;
   cycle_id: string;
   dataset_name: string;
-  /** The connector the course runs on, as `dataset.yaml::pipeline.backend_type`
-   * names it: the id `GET /backends` lists */
+  /** The connector the course runs on, as `dataset.yaml::pipeline.connector` names
+   * it: the id `GET /backends` lists */
   connector: string;
   /** This campaign optimizes the optimizer itself (L4): its connector is
    * `promptpotter`, and one measured row is a whole inner campaign, so it has

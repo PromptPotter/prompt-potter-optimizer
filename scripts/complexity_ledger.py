@@ -34,8 +34,9 @@ from processes import REPO, clone_cache, git, replace_changed, run
 
 # The ceiling each row's last raise declared; a row that never rose past it in this branch ignores it.
 BASELINE = {
-    # Lines of the package's own Python: a change removes more than it adds (operator, 2026-11-13).
-    "package_lines": 112081,
+    # Lines of the package's own Python: a change removes more than it adds (operator, 2026-11-13),
+    # judged, not counted (2026-11-14): a raise names the substance its lines carry.
+    "package_lines": 110339,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.

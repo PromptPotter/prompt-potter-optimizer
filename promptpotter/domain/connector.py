@@ -33,17 +33,14 @@ class BackendUnreachableError(PotterError):
     http_status = 503
     code = "backend_unreachable"
 
-    def __init__(self, backend_type: str, backend_url: str, detail: str = "") -> None:
-        self.backend_type = backend_type
-        self.backend_url = backend_url
-        self.detail = detail
+    def __init__(self, connector: str, backend_url: str, detail: str = "") -> None:
         # A connector that DIAGNOSED the fault leads with it; the URL names a port nothing serves for an in-process one.
         super().__init__(
-            f"Backend '{backend_type}' is not ready: {detail}"
+            f"Backend '{connector}' is not ready: {detail}"
             if detail
-            else f"Backend '{backend_type}' at {backend_url} is not reachable. "
+            else f"Backend '{connector}' at {backend_url} is not reachable. "
             f"Start the backend and try again.",
-            details={"backend_type": backend_type, "backend_url": backend_url},
+            details={"connector": connector, "backend_url": backend_url},
         )
 
 

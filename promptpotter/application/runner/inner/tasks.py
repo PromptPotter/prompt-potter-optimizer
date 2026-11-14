@@ -335,8 +335,8 @@ def seat_draw(samples: Sequence[Sample], spec: InnerTaskSpec) -> tuple[list[Samp
     return search, bench
 
 
-def is_self_optimization(backend_type: str) -> bool:
-    return (c := connectors.CONNECTORS.table.get(backend_type)) is not None and c.self_optimization
+def is_self_optimization(connector: str) -> bool:
+    return (c := connectors.CONNECTORS.table.get(connector)) is not None and c.self_optimization
 
 
 INNER_ARM_GATE: ArmGateMode = "off"

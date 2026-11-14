@@ -66,7 +66,7 @@ source:
   - query: '{"from": "billing@example.com", "subject": "Your plan renewed", "body": "No action needed."}'
     ground_truth: "false"
 pipeline:
-  backend_type: n8n
+  connector: n8n
 campaign:
   scoring: label_match(predicted, ground_truth)
 ```
@@ -79,7 +79,7 @@ A node emits `diagnostics.warnings[]`; PromptPotter synthesizes a `RuntimeFailur
 
 Three mechanisms, none changing measurement identity:
 
-1. **Fetch once per machine** — one cache container, `promptpotter-package-cache` (`apt-cacher-ng` on port 3142), reached at `host.docker.internal:3142` (on Linux the compose overlay maps it with `host-gateway`; firewalld must let bridge traffic reach the port). `docker logs promptpotter-package-cache` shows hits; `docker rm -f` stops it; `docker volume rm` drops the downloads. apt only; pip and npm are HTTPS-only.
+1. **Fetch once per machine** — one cache container, `promptpotter-package-cache` (`apt-cacher-ng` on port 3142), reached at `host.docker.internal:3142` (on Linux every cell carries `infrastructure/docker_host.py::HOST_ROUTE`; firewalld must let bridge traffic reach the port). `docker logs promptpotter-package-cache` shows hits; `docker rm -f` stops it; `docker volume rm` drops the downloads. apt only; pip and npm are HTTPS-only.
 2. **An infrastructure failure is never a measurement.** A registry, mirror or DNS failure, or a setup or verifier out of clock, is retried with bounded backoff, then banks as `ErrorCategory.CONNECTION` (carrying every attempt's spend) and halts the walk `BACKEND_UNREACHABLE`; a provider out of credit is not retried (`PROVIDER_CREDIT`). Either is a hole `resume` re-measures.
 3. **No registry call once a task image exists** — a kept `hb__<hash>` tag starts as a prebuilt image.
 

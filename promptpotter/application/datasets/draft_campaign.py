@@ -44,7 +44,7 @@ def upload_pipeline_json(upload: UploadBasis, overlay: Mapping[str, NodeCall]) -
     assert uploads is not None, "`draft_patch.py` and ingest name only a connector serving uploads"
     declared = {node: {"config": call.laid_keys()} for node, call in overlay.items()}
     return {
-        "backend_type": connector.name,
+        "connector": connector.name,
         "nodes": merge_node_blocks({node: {} for node in uploads.chain}, declared),
         "pipelines": {DEFAULT_PIPELINE: list(uploads.chain)},
         "available_models": list(uploads.available_models),

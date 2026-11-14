@@ -9,7 +9,7 @@ services:
     # Where a verifier reaches the machine's package cache (`infrastructure/docker_host.py::PACKAGE_CACHE`). Docker
     # Desktop resolves the name already; Linux needs the mapping.
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "${PROMPTPOTTER_HOST_ROUTE}"
     # Which process started this container (`infrastructure/producer_lock.py::this_producer`), so the next run can tell a
     # sibling's live cell from what a killed one left behind.
     labels:

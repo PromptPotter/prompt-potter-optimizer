@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.pipeline_overlay import normalize_model_id
-from promptpotter.domain.pipeline_schema import CapabilityMenu, ModelCapability, PipelineSchema
+from promptpotter.domain.pipeline_schema import (
+    CapabilityMenu,
+    LLMSpendBound,
+    ModelCapability,
+    PipelineSchema,
+)
 from promptpotter.infrastructure.llm.openai_compat import PROVIDER_REQUEST_PARAMS
 from promptpotter.infrastructure.llm.pricing import lookup_rate
 from promptpotter.infrastructure.llm.registry import model_profile
@@ -160,6 +165,40 @@ def resolve_model_capabilities(model: str, provider: str, *, workspace: Path) ->
         source="openrouter",
         unsupported_params=unsupported,
         **_card(record, str(cached.get("fetched_at") or "")),
+    )
+
+
+def context_window(
+    model: str | None, provider: str | None, *, workspace: Path | None
+) -> int | None:
+    """The model's input window, off its card; ``None`` where no card holds one."""
+    if not (model and provider and workspace):
+        return None
+    return resolve_model_capabilities(model, provider, workspace=workspace).context_length
+
+
+def sent_llm_bound(
+    where: str,
+    route: tuple[str | None, str | None],
+    max_tokens: int | None,
+    *,
+    workspace: Path | None,
+    attempts: int,
+    hosts: tuple[str, ...] | None = None,
+) -> LLMSpendBound:
+    """What a node's sends bill at most: *attempts*, each reading *route*'s whole window off its
+    card and answering ``max_tokens``. An unknown of either refuses, before a cell is bought."""
+    model, provider = route
+    window = context_window(model, provider, workspace=workspace)
+    if max_tokens is None or window is None:
+        raise ValueError(
+            f"{where} declares no `max_tokens`"
+            if max_tokens is None
+            else f"{where}: no catalogue card gives {model!r} on {provider!r} a context window, "
+            "so its sends have no bound"
+        )
+    return LLMSpendBound(
+        kind="llm", attempts=attempts, input_tokens=window, max_tokens=max_tokens, hosts=hosts
     )
 
 

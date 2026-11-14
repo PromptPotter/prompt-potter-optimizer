@@ -18,6 +18,8 @@ def _validate(c: object, origin: str) -> Connector:
     if not isinstance(c, Connector):
         raise RuntimeError(f"[{origin}] resolved to {type(c).__name__}, not a Connector.")
     where = f"connector {c.name!r} [{origin}]"
+    if c.name != c.name.lower():
+        raise RuntimeError(f"{where}: a connector's name is lowercase.")
     hooks = {
         "wire_adapter": c.wire_adapter,
         "session_factory": c.session_factory,

@@ -1023,7 +1023,7 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
             stores.tenant_datasets.dataset_dir("observed") / DEFINITION_FILE,
             {
                 "pipeline": {
-                    "backend_type": "reporting",
+                    "connector": "reporting",
                     "nodes": {"llm_only": {"optimizer": {"observation_mappings": mapping}}},
                 }
             },

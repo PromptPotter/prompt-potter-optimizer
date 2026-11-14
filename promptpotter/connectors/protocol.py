@@ -38,9 +38,13 @@ class InProcessWorkload:
     # Where `experiment` was read: a local path a panel names resolves against it.
     experiment_dir: Path | None
     program: object | None
+    # The tenant tree whose catalogue snapshot holds each model's card.
+    workspace: Path | None
 
 
-PROBE_WORKLOAD = InProcessWorkload(experiment=None, experiment_dir=None, program=None)
+PROBE_WORKLOAD = InProcessWorkload(
+    experiment=None, experiment_dir=None, program=None, workspace=None
+)
 
 
 class NoopSession:
@@ -89,8 +93,9 @@ class Endpoint:
     read: Callable[[], str]
 
 
-# `(node name, node config, the run's experiment) -> what one run of that node can bill`.
-SentSpendBound = Callable[[str, NodeCall, Mapping[str, Any] | None], NodeSpendBound | None]
+# `(node name, node config, the run's workload) -> what one run of that node can bill`; an LLM
+# node's is `capabilities.py::sent_llm_bound`'s.
+SentSpendBound = Callable[[str, NodeCall, InProcessWorkload], NodeSpendBound | None]
 
 # `pipeline_params -> Delivery`, resolved from the params a run hashes.
 PromptDelivery = Callable[["PipelineParams"], Delivery]
@@ -125,7 +130,7 @@ PACKAGE_CACHE_KEY = "package_cache"
 @dataclass(frozen=True)
 class Connector:
     name: str
-    """Lowercase; matches ``dataset.yaml::pipeline.backend_type``."""
+    """Lowercase; matches ``dataset.yaml::pipeline.connector``."""
 
     wire_adapter: WireAdapter
 

@@ -654,6 +654,12 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### bkeys-2 (what bkeys left at its landing)
 
+- **A rename re-keys every banked L4 cell**: the estimator id hashes its modules' source, so rn-conn's
+  `is_self_optimization(connector)` rename in `runner/inner/tasks.py` moved it `ff29c7fc` → `75e905b2`
+  and filed every banked L4 cell under an id no read finds, while `behaviour_keys.json` held. Root: the
+  estimator is keyed by its behaviour key, as the treatments are since bkeys. **Rides with:** bkeys-2.
+  **Re-test:** a rename in `runner/inner/tasks.py` leaves the estimator id unchanged.
+
 - **An L4 cell's instrument hashes a hand-picked subset, not what its session loads** (✓): the pin's
   `InnerTaskSpec.instrument` (`runner/inner/tasks.py::InnerTasks`: node config, campaign identity,
   estimator) skips what the inner session loads live (`wiring.py:228-307`: `origin.yaml`, the `source:`
@@ -725,57 +731,21 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/26 · rn-conn
 
-- **One fact, two words: `backend_type` and `connector`**: the definition key `pipeline.backend_type`,
-  `pipeline_resolve.py::draft_backend_type` and `DraftPipeline.backend_type` name what
-  `Campaign.connector` names. Action: one word, `connector`, the definition key included; tenant
-  definitions rewritten by a one-shot migration. **Rides with:** rn-conn 1. **Re-test:**
-  `git grep -nw backend_type -- promptpotter` is empty.
-- **An unregistered `backend_type` is a bare `KeyError` at thirteen `CONNECTORS.get` sites**; only
-  `dataset_access.py::dataset_connector` refuses it typed, and lowercase is documented on
-  `Connector.name`, enforced nowhere. Action: `Registry.get` refuses typed, naming the registered set (a `CONNECTORS.resolve` wrapper would be a second door), `_validate` refuses
-  a non-lowercase name, and callers take the Connector. **Rides with:** rn-conn 1; its Owns (every `backend_type` holder, the `CONNECTORS.get` lines
-  of conn's nine holders among them: `datasets/draft_campaign.py`, `free_tier.py`, `health.py`,
-  `initialization/wiring.py`, `jobs/launcher/admission.py`, `jobs/quota.py`, `pipeline_resolve.py`,
-  `scoring/formula/compiler.py`, `cli/commands/launch.py`) gain `shared/plugin_registry.py`.
-  **Re-test:** a dataset naming `backend_type: nope` answers 422 on `new`, `start-run` and the pipeline
-  read.
-- **What a definition's read raises is spelled three times**: `jobs/launcher/admission.py::_definition_read`
-  catches `(DatasetAccessError, FileUnreadableError, PayloadInvalidError)`,
-  `pipeline_resolve.py::_ROOT_UNRESOLVED` a superset and `datasets/startability.py::_connector_extra` a
-  pair, each around `runnable_definition`. Action: `dataset_access.py` names the set beside
-  `runnable_definition`, and each site reads it. **Rides with:** rn-conn 1 (every `backend_type`
-  holder, these four files among them); its Owns gain `pipeline_resolve.py::_ROOT_UNRESOLVED`.
-  **Re-test:** `git grep -n "FileUnreadableError, PayloadInvalidError)" -- promptpotter/application` is empty.
-- **The pipeline carrier is typed only at its door**: `NodeCall`'s readers go back through
-  `.laid_keys()` (21 sites) and `.laid_nodes` (26) and read its own fields by string, among them
-  `connectors/dbllmbench.py:158-249` and `connectors/harbor.py:431-437`. Action: read `NodeCall`'s
-  fields. **Rides with:** rn-conn 2: the reads span 14 files in seven chains' Owns, hashed units among
-  them, so they move at once, alone on the assembled tip, in the re-key window; its Owns gain the string
-  reads of the 14 files the re-test names (`connectors/dbllmbench.py`, `infrastructure/llm/openai_compat.py`
-  and `projections/audit_trail.py` among them). **Re-test:**
-  `git grep -cE "\.get\(\"(model|provider|route_order|temperature|max_tokens|reasoning_effort|top_p|seed)\"" -- promptpotter`.
-- **A model's context window is node config, refused or dropped three ways**: three connectors'
-  `_sent_spend_bound` hooks demand `max_input_tokens` from the node overlay, though
-  `infrastructure/llm/capabilities.py::_card` serves the model's `context_length`; `harbor.py:474`
-  refuses its absence, while `dbllmbench.py:145` and `dspy_module.py:323` return None, so
-  `sample_measurement.py::_calls_bound` serves no bound and the cell's spend runs unbounded. Beside it,
-  `--add-host host.docker.internal:host-gateway` is spelled at `dbllmbench.py:423`, `harbor.py:620` and
-  `resources/harbor-docker-compose.yaml:12`, though `infrastructure/docker_host.py` owns the docker call.
-  The two connectors co-change 82% of the time with no import between them. The bound and the send
-  also disagree on one absent value: `dbllmbench.py:143` returns no bound without `max_tokens`, while
-  its send (`:163`) takes `cfg.get("max_tokens") or 8192`; more code defaults sit on node config
-  (`db or "typedb"` `:209`, `examples or 0` `:225`, harbor's `environment or "docker"` `:1112`, and the
-  default DB credentials, `dbllmbench.py:217-221`: `_DB_DEFAULT_USERS` and `password or "password"`,
-  beside `_DB_DEFAULT_URLS`), against
-  §0.5's "a default goes in the dataset's file, never code" and "an unreported call binds at the most it
-  may cost". Action: the window is read off the model card, one `LLMSpendBound` builder serves the three
-  hooks, and `max_input_tokens` leaves `harbor.py::_SEND_KEYS`; a missing node value refuses at
-  validation, as harbor's does now; the gateway route moves into `docker_host.py::run_cell_container`.
-  **Rides with:** rn-conn 2 (its Owns hold both connectors' string reads); its Owns gain
-  `dspy_module.py`, `docker_host.py` and the compose file. **Re-test:** `git grep -c max_input_tokens --
-  promptpotter` is 0, `git grep -c host-gateway -- promptpotter` is 1, and
-  `git grep -cE "cfg\.get\(\"[a-z_]+\"\) or " -- promptpotter/connectors` is 0, and
-  `git grep -c "_DB_DEFAULT_USERS" -- promptpotter/connectors` is 0.
+- **The pipeline carrier is typed only at its door**: both connectors now read `NodeCall`'s fields,
+  but `PipelineNode.current_config` is a `dict` (`domain/pipeline_parsing.py:381` builds it from the
+  validated call), so `pipeline_schema.py` (7 reads), `pipeline_resolve.py:297` and `free_tier.py:137`
+  read the model by string; `measurement_log.py::_span` and `wounds.py:184` read a laid dump the same
+  way. The re-test also counts carriers that are no `NodeCall` (an OpenAI request body in
+  `openai_compat.py`, a record payload in `audit_trail.py`, a model menu, dspy's `LM.kwargs`), which
+  the action leaves alone. Action: type `current_config` as `NodeCall` and read its fields.
+  **Re-test:** `git grep -cE "current_config\.get\(" -- promptpotter` is 0.
+- **Two connectors still default in code** (rn-conn's landing): `connectors/dbllmbench.py::_DB_DEFAULT_URLS`
+  maps a database to upstream's compose address when `DBLLMBENCH_DB_URL` is unset, and
+  `connectors/harbor.py:229` defaults `skill_delivery` to `agent_skill`, against §0.5. Deleting the map
+  breaks a TypeQL run on an `.env` without the URL, so the address's home is the decision. Action: the
+  address is operator config (the install's `.env.example` names it) and `skill_delivery` sits in the
+  dataset's file; both refuse when absent. **Rides with:** xconn 2 (named endpoints per connector).
+  **Re-test:** `git grep -cE "_DB_DEFAULT_URLS|skill_delivery.*or " -- promptpotter/connectors` is 0.
 
 ### mob-3 (what mob 2 left at landing 53)
 

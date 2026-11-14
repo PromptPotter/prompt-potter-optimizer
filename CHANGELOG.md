@@ -6,6 +6,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **A definition names its connector `pipeline.connector`** (was `pipeline.backend_type`); an account's own definition naming the old key no longer resolves until its key is renamed. An unregistered name answers a 422 naming the registered set, never a 500.
+
 ### Removed
 
 - The `jupyter` extra and its one renderer, `presentation/terminal/completion.py`; the BBEH notebook's runner (`paper/bbeh-comparison/bbeh_potter_runner.py`) runs against `promptpotter==0.8.20`.

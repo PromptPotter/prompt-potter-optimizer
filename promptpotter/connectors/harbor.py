@@ -48,6 +48,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.infrastructure.docker_host import (
+    HOST_ROUTE,
     PACKAGE_CACHE_PROXY,
     docker,
     docker_daemon_fault,
@@ -57,6 +58,7 @@ from promptpotter.infrastructure.docker_host import (
     machine_step,
     producer_scratch,
 )
+from promptpotter.infrastructure.llm.capabilities import context_window, sent_llm_bound
 from promptpotter.infrastructure.llm.registry import openai_compat_spec, providers
 from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
@@ -111,7 +113,7 @@ SKILL_KEY = "skill_opened"
 INSTRUMENT_KEY = "harbor_instrument"
 
 # What the agent's model is SENT, by our client (`_AgentModel`): never terminus-2's own sender.
-_SEND_KEYS = ("temperature", "top_p", "reasoning_effort", "max_tokens", "max_input_tokens")
+_SEND_KEYS = ("temperature", "top_p", "reasoning_effort", "max_tokens")
 # What terminus-2 itself reads.
 _TERMINUS_KEYS = ("max_turns", "parser_name", "enable_summarize", "store_all_messages")
 # Owned by `nodes.agent.config`, so a panel's `agent.kwargs` may set none of them.
@@ -133,6 +135,8 @@ _DISCARDED_SENDER_KEYS = frozenset(
 
 # Read by the compose overlay, which interpolates it into the producer label.
 _PRODUCER_ENV = "PROMPTPOTTER_HARBOR_PRODUCER"
+# And into `extra_hosts`: the route is `docker_host.py::HOST_ROUTE`'s.
+_HOST_ROUTE_ENV = "PROMPTPOTTER_HOST_ROUTE"
 
 _DOCKER_OVERLAY = Path(__file__).parent / "resources" / "harbor-docker-compose.yaml"
 
@@ -377,6 +381,8 @@ def _resolve_tasks(panel: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, Any]]:
+    if not (experiment_data.get("agent") or {}).get("environment"):
+        raise ValueError("harbor connector: the panel's `agent` declares no `environment`.")
     tasks = [t for t in experiment_data["tasks"] if t.get("id")]
     labelled = [t for t in tasks if str(t.get("answer") or "").strip()]
     if labelled and len(labelled) != len(tasks):
@@ -412,32 +418,8 @@ def _refuse_discarded(cfg: Mapping[str, Any]) -> None:
         )
 
 
-def _agent_fields(cfg: dict[str, Any]) -> dict[str, Any]:
-    _refuse_discarded(cfg)
-    fields: dict[str, Any] = {SKILL_DELIVERY_KEY: _skill_delivery(cfg)}
-    if prompt := cfg.get("prompt"):
-        fields["prompt"] = prompt
-    if model := cfg.get("model"):
-        fields["model"] = model
-    if provider := cfg.get("provider"):
-        fields["provider"] = provider
-    if send := {k: cfg[k] for k in _SEND_KEYS if cfg.get(k) is not None}:
-        fields["send"] = send
-    if route := cfg.get("route_order"):
-        fields.setdefault("send", {})["route_order"] = list(route)
-    if kwargs := {k: cfg[k] for k in _TERMINUS_KEYS if k in cfg}:
-        fields["agent_kwargs"] = kwargs
-    return fields
-
-
-def harbor_wire_adapter(
-    sample: Sample,
-    pipeline_params: PipelineParams,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {"query": sample.query}
-    if (cfg := pipeline_params.nodes.get(AGENT_NODE)) is not None:
-        payload.update(_agent_fields(cfg.laid_keys()))
-    return payload
+def harbor_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> dict[str, Any]:
+    return {"query": sample.query, "config": pipeline_params.node(AGENT_NODE).laid_keys()}
 
 
 def _refuse_send_faults(agent_name: str, cfg: NodeCall) -> None:
@@ -460,11 +442,6 @@ def _refuse_send_faults(agent_name: str, cfg: NodeCall) -> None:
         )
     if provider not in providers():
         raise ValueError(f"{where}: no LLM provider {provider!r}; have {sorted(providers())}.")
-    if backend.get("max_input_tokens") is None:
-        raise ValueError(
-            f"{where} declares no `max_input_tokens`: terminus-2 summarizes against it, and "
-            "nothing else tells it the model's window."
-        )
     spec = openai_compat_spec(provider)
     if cfg.route_order and (spec is None or not spec.gateway):
         raise ValueError(
@@ -474,29 +451,24 @@ def _refuse_send_faults(agent_name: str, cfg: NodeCall) -> None:
 
 
 def _sent_spend_bound(
-    node: str, cfg: NodeCall, experiment: Mapping[str, Any] | None
+    node: str, cfg: NodeCall, workload: InProcessWorkload
 ) -> LLMSpendBound | None:
     if node != AGENT_NODE:
         return None
     # What the adapter SENDS, retries excluded: each of those is admitted at its own bound.
     backend = cfg.model_extra or {}
-    _refuse_send_faults(_agent_name(experiment), cfg)
-    turns, reply, context = (
-        backend.get("max_turns"),
-        cfg.max_tokens,
-        backend.get("max_input_tokens"),
-    )
-    if turns is None or reply is None or context is None:
+    _refuse_send_faults(_agent_name(workload.experiment), cfg)
+    if not cfg.model:  # an agent with no model seam sends nothing of ours
         return None
+    where = f"harbor connector: `nodes.{AGENT_NODE}.config`"
+    if (turns := backend.get("max_turns")) is None:
+        raise ValueError(f"{where} declares no `max_turns`, so its sends have no bound")
     summarized = _TERMINUS_SUMMARY_CALLS if backend.get("enable_summarize", True) else 0
     # Our client holds each send at the dearest host: its gateway route falls back, capped.
-    return LLMSpendBound(
-        kind="llm",
-        attempts=int(turns) * (1 + summarized),
-        input_tokens=int(context),
-        max_tokens=int(reply),
-        hosts=None,
-    )
+    return sent_llm_bound(
+        where, (cfg.model, cfg.provider), cfg.max_tokens,
+        workspace=workload.workspace, attempts=int(turns) * (1 + summarized),
+    )  # fmt: skip
 
 
 def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
@@ -606,7 +578,7 @@ async def _reuse_task_image(
             # A build argument never reaches the image's environment, where the agent would see it.
             proxy = ("--build-arg", f"http_proxy={PACKAGE_CACHE_PROXY}") if proxied else ()
             code, out = await docker(
-                "build", "--tag", ready, "--add-host", "host.docker.internal:host-gateway",
+                "build", "--tag", ready, "--add-host", HOST_ROUTE,
                 *proxy, "-",
                 stdin=dockerfile.encode(),
                 timeout=600,
@@ -983,6 +955,7 @@ def _step_tokens(
     if usage is None and cost_usd is None:
         return {}
     usage = usage or TokenAccount()
+    model, provider = episode.call.model, episode.call.provider
     return {
         AGENT_NODE: StepUsage(
             input=usage.input,
@@ -990,10 +963,10 @@ def _step_tokens(
             cache_read=usage.cache_read,
             cost_usd=cost_usd,
             rate_priced_usd=rate_priced_usd(
-                usage, model=episode.model, provider=episode.provider, cost_usd=cost_usd
+                usage, model=model, provider=provider, cost_usd=cost_usd
             ),
-            model=episode.model,
-            provider=episode.provider,
+            model=model,
+            provider=provider,
         )
     }
 
@@ -1048,10 +1021,10 @@ class _Episode:
     reward_key: str
     agent_name: str
     agent_kwargs: dict[str, Any]
-    model: str | None
-    provider: str | None
-    # What `_AgentModel` puts on each send (`_SEND_KEYS`, `route_order`).
-    send: dict[str, Any]
+    # The agent node's config: what `_AgentModel` sends on.
+    call: NodeCall
+    # The model's input window off its card, which terminus-2 summarizes against.
+    window: int | None
     declared: _AgentDeclares | None
     environment: str
     cached: bool
@@ -1063,9 +1036,10 @@ class _Episode:
     @property
     def harbor_model_name(self) -> str | None:
         # Harbor reads the model's PREFIX as the provider: ours sent raw asks the wrong host.
-        if self.model and self.provider and not self.model.startswith(f"{self.provider}/"):
-            return f"{self.provider}/{self.model}"
-        return self.model
+        model, provider = self.call.model, self.call.provider
+        if model and provider and not model.startswith(f"{provider}/"):
+            return f"{provider}/{model}"
+        return model
 
 
 def _panel_dir(workload: InProcessWorkload) -> Path:
@@ -1083,8 +1057,13 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         )
     panel = workload.experiment or {}
     agent_cfg = panel.get("agent") or {}
-    agent_kwargs = dict(agent_cfg.get("kwargs") or {})
-    agent_kwargs.update(payload.get("agent_kwargs") or {})
+    # From the node config, never the panel's agent block (`datasets/CLAUDE.md`).
+    call = NodeCall.model_validate(payload["config"])
+    backend = call.model_extra or {}
+    agent_kwargs = {
+        **agent_cfg.get("kwargs", {}),
+        **{k: backend[k] for k in _TERMINUS_KEYS if k in backend},
+    }
     agent_name = _agent_name(panel)
     declared = _AGENTS.get(agent_name)
     tools, logs = (declared or _UNDECLARED).tools, (declared or _UNDECLARED).logs
@@ -1095,15 +1074,13 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         reward_key=panel.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
         agent_name=agent_name,
         agent_kwargs=agent_kwargs,
-        # From the node config, never the panel's agent block (`datasets/CLAUDE.md`).
-        model=payload.get("model"),
-        provider=payload.get("provider"),
-        send=dict(payload.get("send") or {}),
+        call=call,
+        window=context_window(call.model, call.provider, workspace=workload.workspace),
         declared=declared,
-        environment=agent_cfg.get("environment") or "docker",
+        environment=agent_cfg["environment"],
         cached=panel.get(PACKAGE_CACHE_KEY) in PACKAGE_CACHE_SCOPES,
-        prompt=payload.get("prompt"),
-        in_system_prompt=payload[SKILL_DELIVERY_KEY] == "system_prompt",
+        prompt=backend.get("prompt") or None,
+        in_system_prompt=_skill_delivery(backend) == "system_prompt",
         # terminus-2 installs asciinema only while it records; baking it otherwise adds a tool.
         tools=tuple(
             (tool, probe)
@@ -1118,6 +1095,7 @@ def _trial_config(episode: _Episode, skills: list[str]) -> Any:
     from harbor.models.trial import config as harbor_config
 
     os.environ[_PRODUCER_ENV] = machine_producer()
+    os.environ[_HOST_ROUTE_ENV] = HOST_ROUTE
     return harbor_config.TrialConfig(
         task=_task_config(episode.task, episode.task_root, harbor_config),
         trials_dir=producer_scratch(),
@@ -1168,14 +1146,16 @@ class _AgentModel:
     """terminus-2's model (``agent._llm``): each of its sends goes out on the wallet door's client
     (`keyed_client`), admitted, paced and billed there, on the account's own key first."""
 
-    def __init__(self, model: str | None, provider: str | None, send: Mapping[str, Any]) -> None:
-        if not model or not provider:
+    def __init__(self, call: NodeCall, window: int | None) -> None:
+        model, provider = call.model, call.provider
+        if not model or not provider or window is None:
             raise RuntimeError(
                 f"harbor connector: a trial reached its agent naming model {model!r} on provider "
-                f"{provider!r}, which `_refuse_send_faults` refuses before a cell is bought."
+                f"{provider!r} with window {window!r}, which `_sent_spend_bound` refuses before a "
+                "cell is bought."
             )
         self._client = keyed_client(provider)
-        self._model, self._provider, self._send = model, provider, dict(send)
+        self._call, self._model, self._provider, self._window = call, model, provider, window
         self.usage = TokenAccount()
         self._answered = 0
         self._cost: float | None = 0.0
@@ -1203,15 +1183,15 @@ class _AgentModel:
 
         if self._ended is not None:
             raise self._ended
-        send = self._send
+        call = self._call
         request = ChatRequest(
             [*map(_chat_message, message_history), {"role": "user", "content": prompt}],
             self._model,
-            temperature=send.get("temperature"),
-            max_tokens=send.get("max_tokens"),
-            reasoning_effort=send.get("reasoning_effort"),
-            top_p=send.get("top_p"),
-            route_order=send.get("route_order"),
+            temperature=call.temperature,
+            max_tokens=call.max_tokens,
+            reasoning_effort=call.reasoning_effort,
+            top_p=call.top_p,
+            route_order=call.route_order or None,
         )
         try:
             reply = await self._client.chat(request, label=_AGENT_SEND)
@@ -1249,11 +1229,10 @@ class _AgentModel:
         )
 
     def get_model_context_limit(self) -> int:
-        return int(self._send["max_input_tokens"])
+        return self._window
 
     def get_model_output_limit(self) -> int | None:
-        reply = self._send.get("max_tokens")
-        return None if reply is None else int(reply)
+        return self._call.max_tokens
 
     @property
     def spent(self) -> TokenAccount | None:
@@ -1287,7 +1266,7 @@ class _AgentModel:
 
 async def _installed_run(trial: Trial, episode: _Episode) -> TrialResult:
     """An installed agent sends from its container: one send here, settled on Harbor's token read."""
-    model, provider = episode.model, episode.provider
+    model, provider = episode.call.model, episode.call.provider
     with admitted(
         _AGENT_SEND,
         reservation_left(),
@@ -1322,7 +1301,7 @@ async def _attempt(episode: _Episode) -> _Ran:
 
     prompt, in_system_prompt = episode.prompt, episode.in_system_prompt
     seamed = episode.declared is not None and episode.declared.model_seam
-    model = _AgentModel(episode.model, episode.provider, episode.send) if seamed else None
+    model = _AgentModel(episode.call, episode.window) if seamed else None
     if episode.cached:
         with machine_step():
             await ensure_package_cache()

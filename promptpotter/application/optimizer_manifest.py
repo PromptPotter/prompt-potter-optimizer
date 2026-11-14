@@ -710,7 +710,7 @@ def _carrying_knobs(schema: PipelineSchema, declared: PipelineManifest) -> Pipel
 def _located(name: str) -> tuple[Path, PipelineManifest | ManifestSwitch]:
     try:
         shipped = optimizers.MANIFESTS.get(name).directory
-    except KeyError as exc:
+    except PayloadInvalidError as exc:
         raise NotFoundError(f"No optimizer named {name!r}", code="optimizer_unknown") from exc
     return shipped, authored_manifest(optimizer_manifest_path(shipped))
 

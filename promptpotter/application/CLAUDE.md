@@ -18,7 +18,7 @@
 - **A served read is a `ReadKind` row plus its `read_params.py::ReadParams` model**, a GET unless the model names `method="POST"`; `api/routers/reads.py` mounts it, so no route is written. Address it by the id of the entity it is a fact ABOUT, resolve it here, never in the router, serve the provenance a client would otherwise diff, and give it its row in [`webapp/lib/CLAUDE.md`](../../webapp/lib/CLAUDE.md) § Display-data sources.
 - **`commands/dispatcher.py` is the sole filer of a `CommandRecord`** <!-- probe: git grep -cE "CommandRecord\(" -- promptpotter/application/*.py == 1 --> **and imports no handler** <!-- probe: git grep -cE "^from promptpotter\.application\.commands\." -- promptpotter/application/commands/dispatcher.py == 0 -->: a `CommandKind` row names its `module:handler`, imported at dispatch.
 - **Every ingress edits an origin through an `EditDraftPatch`, applied in `datasets/draft_patch.py`**, never in `api/routers/`. A projection reading the draft's connector or criterion lives in `datasets/draft_campaign.py`, never in `jobs/launcher/` (an import cycle through `pipeline_resolve`). A draft is kept only once its response is built.
-- **A schemaless pipeline (no `backend_type`, no nodes) is a typed 422**, never a 500, which reads as `transient` and the webapp retries.
+- **A schemaless pipeline (no `connector`, no nodes) is a typed 422**, never a 500, which reads as `transient` and the webapp retries.
 
 ## The bench
 

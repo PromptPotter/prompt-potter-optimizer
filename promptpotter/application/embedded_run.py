@@ -16,8 +16,8 @@ from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_slotless,
     campaign_at,
-    probe_backend,
     refuse_campaign,
+    refuse_unreachable,
 )
 from promptpotter.application.jobs.launcher.head_to_head import (
     DatasetArms,
@@ -88,11 +88,7 @@ async def _dataset_session(
 ) -> AsyncIterator[Session]:
     """Raises what ``probe_backend`` refuses a launch on; *rows* replace the definition's bank,
     which the mint labels."""
-    down = await probe_backend(
-        runnable_definition(resolve_dataset(stores, dataset_name)).backend_type
-    )
-    if down is not None:
-        raise down
+    await refuse_unreachable(runnable_definition(resolve_dataset(stores, dataset_name)).connector)
     async with init_services(
         dataset_name=dataset_name, identity=stores.identity, stores=stores, program=program
     ) as session:

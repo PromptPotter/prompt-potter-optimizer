@@ -384,7 +384,7 @@ def _connector_config(**fields: Any) -> CampaignConfig:
 _CAPO_MUTATED = {
     "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
 }
-_TERMNORM = {"pipeline": {"backend_type": "termnorm"}}
+_TERMNORM = {"pipeline": {"connector": "termnorm"}}
 
 
 def _unranked() -> PipelineSchema:
@@ -1072,7 +1072,7 @@ def test_a_harbor_panel_reads_its_pinned_roster_and_never_dials_out(
             built_stores.tenant_datasets.dataset_dir(harbor_dataset) / DEFINITION_FILE,
             {
                 "pipeline": {
-                    "backend_type": "harbor",
+                    "connector": "harbor",
                     "nodes": {"agent": {"type": "agent", "config": {"model": "m"}}},
                 },
                 "panel": {
@@ -1131,7 +1131,7 @@ def test_a_held_cut_is_keyed_on_its_recipe_and_opens_without_its_extra(
                 "query": "q",
                 "truth": "t",
             },
-            "pipeline": {"backend_type": "termnorm"},
+            "pipeline": {"connector": "termnorm"},
         },
     )
     hubcut = resolve_dataset(built_stores, "hubcut")
@@ -1156,7 +1156,7 @@ def test_a_held_cut_is_keyed_on_its_recipe_and_opens_without_its_extra(
                 "query": "q",
                 "truth": "t",
             },
-            "pipeline": {"backend_type": "termnorm"},
+            "pipeline": {"connector": "termnorm"},
         },
     )
     with monkeypatch.context() as uninstalled:
@@ -1180,7 +1180,7 @@ def tiered(tmp_path: Path) -> Stores:
     install_root, research_root = tmp_path / "install", tmp_path / "research"
     for root, name, definition in (
         (install_root, "twin", _TERMNORM),
-        (research_root, "twin", {"pipeline": {"backend_type": "promptpotter"}}),
+        (research_root, "twin", {"pipeline": {"connector": "promptpotter"}}),
         (research_root, "solo", _TERMNORM),
         (install_root, "carded", {**_TERMNORM, "card": {"title": "T", "summary": "Two  words."}}),
         (install_root, "miscarded", {**_TERMNORM, "card": {"title": "T"}}),
@@ -1210,7 +1210,7 @@ def test_a_name_reads_from_the_first_tier_holding_it(tiered: Stores) -> None:
         "carded": "yours",
         "solo": "research",
     }, "a name was read from another tier than the first holding it"
-    assert runnable_definition(resolve_dataset(tiered, "twin")).backend_type == "termnorm", (
+    assert runnable_definition(resolve_dataset(tiered, "twin")).connector == "termnorm", (
         "a shadowed tier answered"
     )
 
@@ -1647,7 +1647,7 @@ def ds_draft(built_stores: Stores) -> DraftFile:
         built_stores.tenant_datasets.dataset_dir("ds") / DEFINITION_FILE,
         {
             "pipeline": {
-                "backend_type": upload_connector().name,
+                "connector": upload_connector().name,
                 "pipelines": dict(_chain_schema().pipelines),
             },
             "campaign": {
@@ -1785,7 +1785,7 @@ def test_a_switch_drops_the_knobs_the_old_optimizer_was_edited_on(
         built_stores.tenant_datasets.dataset_dir("cap") / DEFINITION_FILE,
         {
             "pipeline": {
-                "backend_type": upload_connector().name,
+                "connector": upload_connector().name,
                 "pipelines": dict(schema.pipelines),
             },
             "campaign": {"optimization": {**optimization, "optimizer": "capo"}, "scoring": pinned},
@@ -1817,7 +1817,7 @@ def frozen(built_stores: Stores) -> Callable[..., Any]:
     write_yaml(
         reused / DEFINITION_FILE,
         {
-            "pipeline": {"backend_type": "termnorm", "nodes": {"llm_only": _DECLARED_NODE}},
+            "pipeline": {"connector": "termnorm", "nodes": {"llm_only": _DECLARED_NODE}},
             "campaign": _connector_config().model_dump(mode="json"),
         },
     )
@@ -1880,7 +1880,7 @@ def test_a_reused_datasets_own_contract_reopens_no_axis(built_stores: Stores) ->
         built_stores.tenant_datasets.dataset_dir("dj") / DEFINITION_FILE,
         {
             "pipeline": {
-                "backend_type": "termnorm",
+                "connector": "termnorm",
                 "nodes": {"llm_only": {**_DECLARED_NODE, "config": contracted}},
             },
             "campaign": _connector_config().model_dump(mode="json"),
@@ -2291,7 +2291,7 @@ def _declaring(rungs: list[str]) -> dict[str, Any]:
 def _fk_dataset(stores: Stores) -> None:
     write_yaml(
         stores.tenant_datasets.dataset_dir("fk") / DEFINITION_FILE,
-        {"pipeline": {"backend_type": "termnorm"}},
+        {"pipeline": {"connector": "termnorm"}},
     )
 
 
@@ -2506,7 +2506,7 @@ def decl(built_stores: Stores) -> _Declared:
     write_yaml(
         stores.tenant_datasets.dataset_dir("decl") / DEFINITION_FILE,
         {
-            "pipeline": {"backend_type": "termnorm"},
+            "pipeline": {"connector": "termnorm"},
             "campaign": {"optimization": {"degradation_threshold": 0.4}},
         },
     )
@@ -2900,10 +2900,10 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     held_campaign = held.campaign
     decl_definition = stores.tenant_datasets.dataset_dir("decl") / DEFINITION_FILE
     as_minted = {
-        "pipeline": {"backend_type": "termnorm"},
+        "pipeline": {"connector": "termnorm"},
         "campaign": {"optimization": {"degradation_threshold": 0.4}},
     }
-    write_yaml(decl_definition, {**as_minted, "pipeline": {"backend_type": "n8n"}})
+    write_yaml(decl_definition, {**as_minted, "pipeline": {"connector": "n8n"}})
     asked = (len(offline.backend.asked), len(offline.harness.asked))
     with monkeypatch.context() as cli:
         cli.setenv("PROMPTPOTTER_HOME", str(tmp_path))
@@ -3339,7 +3339,7 @@ def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrot
             write_yaml(
                 outer_stores.tenant_datasets.dataset_dir(seated) / DEFINITION_FILE,
                 {
-                    "pipeline": {"backend_type": "termnorm"},
+                    "pipeline": {"connector": "termnorm"},
                     "campaign": {"optimization": {"degradation_threshold": 0.4}},
                 },
             )
@@ -3936,13 +3936,13 @@ def test_a_bank_whose_rows_declare_another_field_is_refused_by_its_path(
     ):
         write_yaml(
             built_stores.tenant_datasets.dataset_dir(name) / DEFINITION_FILE,
-            {"pipeline": {"backend_type": "termnorm"}},
+            {"pipeline": {"connector": "termnorm"}},
         )
         built_stores.tenant_datasets.relabel(name, held_hash)
     # A materialized panel this build cannot read is the store's one refusal too.
     write_yaml(
         built_stores.tenant_datasets.dataset_dir("brokenpanel") / DEFINITION_FILE,
-        {"pipeline": {"backend_type": "promptpotter"}},
+        {"pipeline": {"connector": "promptpotter"}},
     )
     panel_file = built_stores.tenant_datasets.materialized_panel_dir("brokenpanel") / "panel.yaml"
     panel_file.parent.mkdir(parents=True)
@@ -4009,7 +4009,7 @@ def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_chec
     dataset_dir = built_stores.tenant_datasets.dataset_dir("heldout")
     dataset_dir.mkdir(parents=True)
     (dataset_dir / DEFINITION_FILE).write_text(
-        "pipeline:\n  backend_type: termnorm\ncampaign:\n  scoring: label_match(predicted, ground_truth)\n"
+        "pipeline:\n  connector: termnorm\ncampaign:\n  scoring: label_match(predicted, ground_truth)\n"
         "  dataset_split:\n    bench: 30\n  optimization:\n    degradation_threshold: 0.4\n",
         encoding="utf-8",
     )
@@ -4072,7 +4072,7 @@ def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
     # behind: no cut, no bank, no definition.
     write_yaml(
         built_stores.install_datasets_root / "email-tagging" / DEFINITION_FILE,
-        {"pipeline": {"backend_type": "termnorm"}},
+        {"pipeline": {"connector": "termnorm"}},
     )
     built_stores.drafts.write_draft(
         owned_draft(built_stores, uploaded.draft_id).patch(slug="email-tagging")

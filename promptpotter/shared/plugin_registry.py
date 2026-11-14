@@ -6,6 +6,8 @@ from importlib.metadata import EntryPoints, entry_points
 from types import MappingProxyType
 from typing import Protocol
 
+from promptpotter.shared.errors import PayloadInvalidError
+
 BUILT_IN = "built-in"
 
 
@@ -95,8 +97,9 @@ class Registry[M: _Named]:
         return self._loaded[1]
 
     def get(self, name: str) -> M:
+        """A name an author wrote: one not registered refuses typed (a 422), naming the set."""
         table, origins = self._loaded
         if name not in table:
             known = ", ".join(f"{k} [{origins[k]}]" for k in sorted(table)) or "(none)"
-            raise KeyError(f"{name!r} is not registered in {self.group}. Known: {known}")
+            raise PayloadInvalidError(f"{name!r} is not registered in {self.group}. Known: {known}")
         return table[name]

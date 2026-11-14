@@ -148,7 +148,7 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     heads = plan.heads()
     dataset = offered_dataset(stores, plan.dataset_name)
     definition = runnable_definition(dataset)
-    connector = connectors.CONNECTORS.get(definition.backend_type)
+    connector = connectors.CONNECTORS.get(definition.connector)
     panel = dataset_experiment(stores, dataset, connector)
     experiment = None if panel is None else panel.experiment
     served = await served_pipeline(stores, connector, experiment=experiment)

@@ -214,7 +214,7 @@ def declare(
         campaign_config,
         purpose=purpose,
         dataset_hash=session.bank.dataset_hash,
-        connector=runnable_definition(session.dataset).backend_type,
+        connector=runnable_definition(session.dataset).connector,
         bench_defaults_pin=bench_defaults_pin(),
     )
 

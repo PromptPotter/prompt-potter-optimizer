@@ -13,7 +13,11 @@ from typing import assert_never
 from promptpotter.application.datasets.authored import ConfigLayers, effective_config
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import RunStart, admit_arms, probe_backend
+from promptpotter.application.jobs.launcher.admission import (
+    RunStart,
+    admit_arms,
+    refuse_unreachable,
+)
 from promptpotter.application.jobs.launcher.checkin import OpenedCheckin, open_checkin
 from promptpotter.application.jobs.launcher.launch import LaunchOutcome
 from promptpotter.application.jobs.launcher.run_job import HeldRun
@@ -77,13 +81,8 @@ class CheckinArms:
 type ArmSource = DatasetArms | CheckinArms
 
 
-async def _probe(backend_type: str) -> None:
-    if (down := await probe_backend(backend_type)) is not None:
-        raise down
-
-
 async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
-    await _probe(runnable_definition(dataset).backend_type)
+    await refuse_unreachable(runnable_definition(dataset).connector)
     closing = AsyncExitStack()
     session = await closing.enter_async_context(
         init_services(dataset_name=dataset.name, identity=stores.identity, stores=stores)
@@ -94,7 +93,7 @@ async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
 async def checkin_arms(
     stores: Stores, claim: DraftClaim, request: HeadToHeadRequest, served: ServedPipeline
 ) -> CheckinArms:
-    await _probe(served.connector)
+    await refuse_unreachable(served.connector)
     overlays = [request.declared_optimization(arm) for arm in request.arms]
     closing = AsyncExitStack()
     opened = await closing.enter_async_context(

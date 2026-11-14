@@ -24,7 +24,7 @@ What the signatures do not say:
 
 - `compile()` returns a **copy** of your program with the winning prompt applied; the original is never mutated, during scoring either. The winner's provenance is on `optimizer.export` ([`stable-api.md`](stable-api.md) § 5c).
 - **`valset` is accepted and unused**: PromptPotter holds out nothing of its own; evaluate the returned program however you already do.
-- **Your program's spend is counted, call by call**: each candidate runs on a copy of your LM whose every call is admitted against the campaign's ceiling before it leaves and billed with the usage DSPy records, a call that raised included. On that copy DSPy's own retries and reply cache are off — PromptPotter's measurement cache is the one replay. `max_calls`, `max_input_tokens` and `max_tokens` in `Node.extra` run it under a ceiling.
+- **Your program's spend is counted, call by call**: each candidate runs on a copy of your LM whose every call is admitted against the campaign's ceiling before it leaves and billed with the usage DSPy records, a call that raised included. On that copy DSPy's own retries and reply cache are off — PromptPotter's measurement cache is the one replay. `max_calls` and `max_tokens` in `Node.extra` run it under a ceiling, each call reading the model's window off its catalogue card.
 - **Your metric is the scorer**; its float is what the campaign optimizes. `dspy.settings` is carried across the async boundary intact: a module with only `forward` goes through `dspy.asyncify`, never a bare worker thread.
 - **In a running event loop, `await optimizer.acompile(…)`**: `compile()` works there by moving the run onto its own thread, but a thread never receives SIGINT, so Ctrl+C stops pausing the campaign; `acompile()` keeps the interrupt.
 

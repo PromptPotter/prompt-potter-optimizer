@@ -85,20 +85,20 @@ class FreshMint:
     def holder(self) -> CampaignLaunch:
         return CampaignLaunch(self.dataset_name)
 
-    def backend_type(self, _stores: Stores) -> str:
-        return runnable_definition(self.dataset).backend_type
+    def connector(self, _stores: Stores) -> str:
+        return runnable_definition(self.dataset).connector
 
     def campaign_config(self, stores: Stores) -> CampaignConfig:
         """Bound to no node: what the mint admits and sends reads no pipeline."""
         return laid_config(
-            stores, self.layers, connector=self.backend_type(stores), schema=None
+            stores, self.layers, connector=self.connector(stores), schema=None
         ).config
 
     def declared_budget(self, stores: Stores) -> Budget:
         return self.campaign_config(stores).optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return sends_on(stores, self.campaign_config(stores), self.backend_type(stores))
+        return sends_on(stores, self.campaign_config(stores), self.connector(stores))
 
     @asynccontextmanager
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
@@ -134,7 +134,7 @@ class ExistingCycle:
     def holder(self) -> CampaignLaunch:
         return CampaignLaunch(self.dataset_name)
 
-    def backend_type(self, _stores: Stores) -> str:
+    def connector(self, _stores: Stores) -> str:
         return self.campaign.connector
 
     def declared_budget(self, stores: Stores) -> Budget:

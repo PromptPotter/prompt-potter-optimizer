@@ -182,7 +182,7 @@ class CampaignPipelineResponse(StrictModel):
     cycle_id: str
     dataset_name: str
     connector: str = Field(
-        description="The connector the course runs on, as `dataset.yaml::pipeline.backend_type` "
+        description="The connector the course runs on, as `dataset.yaml::pipeline.connector` "
         "names it: the id `GET /backends` lists"
     )
     self_optimization: bool = Field(

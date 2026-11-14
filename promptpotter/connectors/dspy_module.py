@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Awaitable, Callable, Coroutine, Mapping
+from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,6 +16,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
+from promptpotter.infrastructure.llm.capabilities import sent_llm_bound
 from promptpotter.infrastructure.llm.openai_compat import ReportedUsage
 from promptpotter.infrastructure.llm.pricing import priced_pair
 from promptpotter.infrastructure.llm.send_failure import failed_send
@@ -317,19 +318,17 @@ def _metered(lm: Any, sends: _CellSends, changed: dict[str, Any]) -> Any:
 
 
 def _sent_spend_bound(
-    node: str, cfg: NodeCall, _experiment: Mapping[str, Any] | None
+    node: str, cfg: NodeCall, workload: InProcessWorkload
 ) -> LLMSpendBound | None:
-    backend = cfg.model_extra or {}
-    if node != PROGRAM_NODE or cfg.max_tokens is None:
+    # `max_calls` is the program's opt-in ceiling: without it each call is admitted on its own.
+    if node != PROGRAM_NODE or (calls := (cfg.model_extra or {}).get("max_calls")) is None:
         return None
-    calls, context = backend.get("max_calls"), backend.get("max_input_tokens")
-    if calls is None or context is None:
-        return None
-    return LLMSpendBound(
-        kind="llm",
+    return sent_llm_bound(
+        f"dspy connector: `nodes.{PROGRAM_NODE}.config`",
+        priced_pair(cfg.model, cfg.provider, names_provider=CONNECTOR.model_names_provider),
+        cfg.max_tokens,
+        workspace=workload.workspace,
         attempts=int(calls),
-        input_tokens=int(context),
-        max_tokens=cfg.max_tokens,
     )
 
 
@@ -358,17 +357,13 @@ async def _in_process_run(
     import dspy
 
     params: dict[str, Any] = payload.get("params") or {}
-    calls = params.get("max_calls")
+    cfg = NodeCall.model_validate(params)
+    calls = (cfg.model_extra or {}).get("max_calls")
     lm_kwargs = {k: v for k, v in params.items() if k in _LM_KEYS}
-    model = lm_kwargs.get("model")
     sends = _CellSends(
         sample.id,
         None if calls is None else int(calls),
-        priced_pair(
-            model if isinstance(model, str) else None,
-            params.get("provider"),
-            names_provider=CONNECTOR.model_names_provider,
-        ),
+        priced_pair(cfg.model, cfg.provider, names_provider=CONNECTOR.model_names_provider),
     )
     student = _configured(program.student, payload.get("prompt"), lm_kwargs, sends)
     # Metered too, so a call naming no LM runs the model the cell is priced as.
@@ -441,7 +436,6 @@ def dataset_pipeline(
         },
     }
     return {
-        "backend_type": "dspy",
         "available_models": sorted({model, *allowed.get("model", [])}),
         "nodes": {PROGRAM_NODE: node},
         "pipelines": {DEFAULT_PIPELINE: [PROGRAM_NODE]},

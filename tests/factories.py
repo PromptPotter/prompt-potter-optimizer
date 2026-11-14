@@ -874,7 +874,7 @@ def minted_dataset(stores: Stores, campaign: Campaign) -> None:
     pass on it reads it first (`admission.py::refuse_campaign`)."""
     write_yaml(
         stores.tenant_datasets.dataset_dir(campaign.dataset_name) / DEFINITION_FILE,
-        {"pipeline": {"backend_type": campaign.connector}},
+        {"pipeline": {"connector": campaign.connector}},
     )
 
 

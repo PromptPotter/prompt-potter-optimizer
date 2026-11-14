@@ -17,7 +17,7 @@ source:
 pipeline:
   # JustLogic (Chen 2025): a synthetic, knowledge-independent deductive benchmark, routed through
   # TermNorm /matches with the llm_only pipeline.
-  backend_type: termnorm
+  connector: termnorm
   # One model under two ROUTES (`:nitro` and plain), and the `model` axis stays closed on it: this is
   # the L4 inner instrument, and opening the axis would let L1 flip the host while reporting a prompt,
   # which is the confound `route_order` is forbidden for, wearing a model name.

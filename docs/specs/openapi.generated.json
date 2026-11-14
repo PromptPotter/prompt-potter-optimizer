@@ -1360,7 +1360,7 @@
             "type": "string"
           },
           "id": {
-            "description": "The connector's name, as `dataset.yaml::pipeline.backend_type` names it",
+            "description": "The connector's name, as `dataset.yaml::pipeline.connector` names it",
             "title": "Id",
             "type": "string"
           }
@@ -2594,7 +2594,7 @@
             "type": "array"
           },
           "connector": {
-            "description": "The connector the course runs on, as `dataset.yaml::pipeline.backend_type` names it: the id `GET /backends` lists",
+            "description": "The connector the course runs on, as `dataset.yaml::pipeline.connector` names it: the id `GET /backends` lists",
             "title": "Connector",
             "type": "string"
           },

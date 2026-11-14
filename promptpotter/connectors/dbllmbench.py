@@ -32,6 +32,7 @@ from promptpotter.infrastructure.docker_host import (
     producer_scratch,
     run_cell_container,
 )
+from promptpotter.infrastructure.llm.capabilities import sent_llm_bound
 from promptpotter.infrastructure.llm.openai_compat import cell_gateway_body, sent_effort
 from promptpotter.infrastructure.llm.registry import openai_compat_spec
 from promptpotter.infrastructure.store.io import rmtree_robust
@@ -46,20 +47,28 @@ from promptpotter.shared.errors import (
 
 WRITER_NODE = "query_writer"
 
-RETRY_LEVELS = (0, 2, 4)
 
-
-def retry_levels(cfg: Mapping[str, Any]) -> tuple[int, ...]:
-    return tuple(sorted({0, *(int(level) for level in cfg.get("retry_levels") or RETRY_LEVELS)}))
+def retry_levels(cfg: NodeCall) -> tuple[int, ...]:
+    return tuple(sorted({0, *(int(level) for level in _backend(cfg)["retry_levels"])}))
 
 
 # Upstream's hardcoded count (`src/runner/src/lib.rs::REPETITIONS`).
 REPETITIONS = 3
 
 
-def repetitions(cfg: Mapping[str, Any]) -> int:
+def repetitions(cfg: NodeCall) -> int:
     # Fewer needs an image built with `resources/dbllmbench-repetitions.patch`: upstream runs three.
-    return int(cfg.get("repetitions") or REPETITIONS)
+    return int(_backend(cfg)["repetitions"])
+
+
+def _backend(cfg: NodeCall) -> dict[str, Any]:
+    return cfg.model_extra or {}
+
+
+# Every value its dataset's file names (§0.5: a default is the dataset's, never this code's).
+_DECLARED_KEYS = frozenset(
+    {"runner_image", "template", "schema", "db", "examples", "retry_levels", "repetitions"}
+)
 
 
 ANSWER_KEY = "generated_query"
@@ -82,7 +91,6 @@ _DB_DEFAULT_URLS = {
     "typedb": "http://host.docker.internal:1729",
     "neo4j": "bolt://host.docker.internal:7687",
 }
-_DB_DEFAULT_USERS = {"typedb": "admin", "neo4j": "neo4j"}
 
 _CELL_ENVELOPE_S = 3600.0
 _NOTE_CAP = 300
@@ -131,36 +139,32 @@ def dbllmbench_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> 
 
 
 def _sent_spend_bound(
-    node: str, cfg: NodeCall, _experiment: Mapping[str, Any] | None
+    node: str, cfg: NodeCall, workload: InProcessWorkload
 ) -> LLMSpendBound | None:
-    backend = cfg.model_extra or {}
-    if node != WRITER_NODE or cfg.max_tokens is None:
+    if node != WRITER_NODE:
         return None
-    if (context := backend.get("max_input_tokens")) is None:
-        return None
-    return LLMSpendBound(
-        kind="llm",
-        attempts=repetitions(backend) * (max(retry_levels(backend)) + 1),
-        input_tokens=int(context),
-        max_tokens=cfg.max_tokens,
+    where = f"dbllmbench connector: `nodes.{WRITER_NODE}.config`"
+    if absent := sorted(_DECLARED_KEYS - _backend(cfg).keys()) + [
+        key for key in ("model", "provider") if getattr(cfg, key) is None
+    ]:
+        raise ValueError(f"{where} declares no {absent}: its dataset's file names each value.")
+    return sent_llm_bound(
+        where,
+        (cfg.model, cfg.provider),
+        cfg.max_tokens,
+        workspace=workload.workspace,
+        attempts=repetitions(cfg) * (max(retry_levels(cfg)) + 1),
         hosts=tuple(cfg.route_order) if cfg.route_order else None,
     )
 
 
-def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]]:
+def _model_entry(cfg: NodeCall) -> tuple[dict[str, Any], dict[str, str]]:
     # The key rides the container's environment, never the config file: that is scratch on disk.
-    model, provider = cfg.get("model"), cfg.get("provider")
-    if not isinstance(model, str) or not isinstance(provider, str):
-        raise RuntimeError(
-            f"dbllmbench connector: nodes.{WRITER_NODE}.config must name a `model` and a "
-            "`provider`."
-        )
-    reply = int(cfg.get("max_tokens") or 8192)
-    effort = sent_effort(cfg.get("reasoning_effort"))
+    model, provider, reply = cfg.model, cfg.provider, cfg.max_tokens
+    assert model and provider and reply, "`_sent_spend_bound` refuses a call naming none"
+    effort = sent_effort(cfg.reasoning_effort)
     spec = openai_compat_spec(provider)
-    body = cell_gateway_body(
-        spec, provider, route_order=cfg.get("route_order"), reasoning_effort=effort
-    )
+    body = cell_gateway_body(spec, provider, route_order=cfg.route_order, reasoning_effort=effort)
     if provider == _ANTHROPIC:
         claude: dict[str, Any] = {"model": model, "max_tokens": reply}
         if effort is not None:
@@ -174,8 +178,8 @@ def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]
             "OpenAI-compatible gateway this install knows."
         )
     extra: dict[str, Any] = {}
-    if (temperature := cfg.get("temperature")) is not None:
-        extra["temperature"] = temperature
+    if cfg.temperature is not None:
+        extra["temperature"] = cfg.temperature
     if body is not None:
         extra |= body
     elif effort is not None:
@@ -193,31 +197,33 @@ def _model_entry(cfg: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, str]
     }
 
 
-def _asset(cfg: Mapping[str, Any], key: str) -> str:
-    path = cfg.get(key)
+def _asset(cfg: NodeCall, key: str) -> str:
+    path = _backend(cfg).get(key)
     if not isinstance(path, str) or not path:
         raise RuntimeError(f"dbllmbench connector: nodes.{WRITER_NODE}.config names no `{key}`.")
     return f"{_DATA_ROOT}/{path}"
 
 
-def harness_config(cfg: Mapping[str, Any], prompt: str) -> tuple[dict[str, Any], dict[str, str]]:
-    db = str(cfg.get("db") or "typedb")
+def harness_config(cfg: NodeCall, prompt: str) -> tuple[dict[str, Any], dict[str, str]]:
+    backend = _backend(cfg)
+    db = str(backend["db"])
     entry: dict[str, Any] = {
         "prompts": f"{_WORK}/template.txt",
         "url": settings.DBLLMBENCH_DB_URL or _DB_DEFAULT_URLS.get(db) or "",
         "schema": _asset(cfg, "schema"),
     }
-    if database := cfg.get("database"):
+    if database := backend.get("database"):
         entry["database"] = database
-    if db in _DB_DEFAULT_USERS:
+    # The database's account is the operator's (`DBLLMBENCH_DB_*`): none set sends none.
+    if settings.DBLLMBENCH_DB_USERNAME:
         auth: dict[str, Any] = {
-            "username": settings.DBLLMBENCH_DB_USERNAME or _DB_DEFAULT_USERS[db],
-            "password": settings.DBLLMBENCH_DB_PASSWORD.get_secret_value() or "password",
+            "username": settings.DBLLMBENCH_DB_USERNAME,
+            "password": settings.DBLLMBENCH_DB_PASSWORD.get_secret_value(),
         }
         if db == "typedb":
             auth["tls"] = settings.DBLLMBENCH_DB_TLS
         entry["auth"] = auth
-    n_examples = int(cfg.get("examples") or 0)
+    n_examples = int(backend["examples"])
     if n_examples:
         entry["examples"] = _asset(cfg, "examples_dir")
     if prompt:
@@ -236,11 +242,10 @@ def harness_config(cfg: Mapping[str, Any], prompt: str) -> tuple[dict[str, Any],
     }, env
 
 
-def _spent(records: list[dict[str, Any]], cfg: Mapping[str, Any]) -> dict[str, dict[str, object]]:
+def _spent(records: list[dict[str, Any]], cfg: NodeCall) -> dict[str, dict[str, object]]:
     if not records:
         return {}
     tokens = [r.get("tokens") or {} for r in records]
-    model = cfg.get("model")
     entry = StepUsage(
         input=sum(int(t.get("input") or 0) for t in tokens),
         output=sum(int(t.get("output") or 0) for t in tokens),
@@ -250,7 +255,7 @@ def _spent(records: list[dict[str, Any]], cfg: Mapping[str, Any]) -> dict[str, d
             if all("cached" in t for t in tokens)
             else None
         ),
-        model=model if isinstance(model, str) else None,
+        model=cfg.model,
     )
     return {WRITER_NODE: entry.wire()}
 
@@ -380,13 +385,9 @@ async def _in_process_run(
 ) -> dict[str, Any]:
     query = sample.query
     question = _upstream_question(workload, sample)
-    cfg: dict[str, Any] = payload.get("config") or {}
+    cfg = NodeCall.model_validate(payload.get("config") or {})
     prompt = str(payload.get("prompt") or "")
-    image = cfg.get("runner_image")
-    if not image:
-        raise RuntimeError(
-            f"dbllmbench connector: nodes.{WRITER_NODE}.config names no `runner_image`."
-        )
+    image = _backend(cfg)["runner_image"]
     config, env = harness_config(cfg, prompt)
     db = next(iter(config["dbs"][0]))
     template = _asset(cfg, "template")
@@ -411,7 +412,7 @@ async def _in_process_run(
             f"&& cp /tmp/template.txt {_WORK}/template.txt "
             f"&& exec db-llm-bench {_WORK}/config.yml {_WORK}/out.json"
         )
-        args = ["--pull", "never", "--add-host", "host.docker.internal:host-gateway"]
+        args = ["--pull", "never"]
         for key in env:
             args += ["-e", key]
         args += ["-v", f"{work}:{_WORK}", str(image), "sh", "-c", cut, "sh", str(template)]

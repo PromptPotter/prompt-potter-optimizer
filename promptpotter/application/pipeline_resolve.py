@@ -130,6 +130,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_resolved_run,
 )
 from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_READ_ERRORS,
     ResolvedDataset,
     campaign_defaults,
     dataset_connector,
@@ -144,7 +145,6 @@ from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
 from promptpotter.shared.errors import (
     BadRequestError,
-    DatasetAccessError,
     FileKind,
     FileUnreadableError,
     PayloadInvalidError,
@@ -376,13 +376,13 @@ def _draft_local(stores: Stores, draft: DraftFile) -> dict[str, Any]:
             assert_never(draft.basis)
 
 
-def draft_backend_type(stores: Stores, draft: DraftFile) -> str:
+def draft_connector(stores: Stores, draft: DraftFile) -> str:
     """The backend the draft's Start runs: an upload's pick, else the one its definition names."""
     match draft.basis:
         case UploadBasis(connector=connector):
             return connector
         case DatasetBasis(dataset=name):
-            return runnable_definition(resolve_dataset(stores, name)).backend_type
+            return runnable_definition(resolve_dataset(stores, name)).connector
         case _:
             assert_never(draft.basis)
 
@@ -390,7 +390,7 @@ def draft_backend_type(stores: Stores, draft: DraftFile) -> str:
 async def draft_served(stores: Stores, draft: DraftFile) -> ServedPipeline:
     return await served_pipeline(
         stores,
-        connectors.CONNECTORS.get(draft_backend_type(stores, draft)),
+        connectors.CONNECTORS.get(draft_connector(stores, draft)),
         experiment=experiment_outside_run(stores, _draft_dataset(stores, draft)),
     )
 
@@ -400,7 +400,7 @@ async def dataset_pipeline(
 ) -> dict[str, Any]:
     """A dataset's pipeline outside a run, over the experiment its panel holds today."""
     definition = runnable_definition(dataset)
-    connector = connectors.CONNECTORS.get(definition.backend_type)
+    connector = connectors.CONNECTORS.get(definition.connector)
     served = await served_pipeline(stores, connector, experiment=experiment)
     return served.over(definition.pipeline)
 
@@ -625,7 +625,7 @@ def draft_config(stores: Stores, draft: DraftFile) -> CampaignConfig:
     return laid_config(
         stores,
         draft_layers(stores, draft),
-        connector=draft_backend_type(stores, draft),
+        connector=draft_connector(stores, draft),
         schema=None,
     ).config
 
@@ -636,7 +636,7 @@ def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
 
 def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
     """What a Start sends, and who pays each."""
-    return sends_on(stores, draft_config(stores, draft), draft_backend_type(stores, draft))
+    return sends_on(stores, draft_config(stores, draft), draft_connector(stores, draft))
 
 
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
@@ -919,7 +919,7 @@ class DraftPipeline:
     config: CampaignConfig
     layers: ConfigLayers
     local: dict[str, Any]
-    backend_type: str
+    connector: str
 
     @functools.cached_property
     def optimizer(self) -> SelectedOptimizer:
@@ -930,7 +930,7 @@ class DraftPipeline:
     @functools.cached_property
     def criterion(self) -> DraftCriterion:
         """``config.scoring`` as a check-in picks it, its dials over this backend's terms."""
-        return draft_criterion(self.config.scoring, campaign_terms(self.backend_type))
+        return draft_criterion(self.config.scoring, campaign_terms(self.connector))
 
 
 def draft_pipeline(stores: Stores, draft: DraftFile, served: ServedPipeline) -> DraftPipeline:
@@ -1064,7 +1064,7 @@ async def resolve_pipeline_for_dataset(
     # Declared, valueless: nothing steers it.
     rows = filtered.node_config_schema(steer_bound=False)
     return DatasetPipelineResponse(
-        connector=definition.backend_type,
+        connector=definition.connector,
         view=filtered.view,
         node_config_schema=rows,
         reach=reach_map(rows),
@@ -1085,12 +1085,7 @@ async def _nested(stores: Stores, ref: NestedPipelineRef, above: frozenset[str])
 # A prompt, a description and a nested value are no setting one line can print.
 _RUNS_WITH_KINDS = frozenset({"model", "enum", "number", "bool", "string"})
 # The typed refusals a root's own data raises; any other exception is a defect and propagates.
-_ROOT_UNRESOLVED = (
-    DatasetAccessError,
-    FileUnreadableError,
-    PayloadInvalidError,
-    ScoringFormulaError,
-)
+_ROOT_UNRESOLVED = (*DEFINITION_READ_ERRORS, ScoringFormulaError)
 
 
 class RootRunsWith(NamedTuple):

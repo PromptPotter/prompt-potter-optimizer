@@ -696,7 +696,7 @@ def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
     definition = built_stores.tenant_datasets.dataset_dir("compacted-renamed")
     definition.mkdir(parents=True)
     (definition / DEFINITION_FILE).write_text(
-        "pipeline:\n  backend_type: termnorm\n"
+        "pipeline:\n  connector: termnorm\n"
         "campaign:\n  scoring: label_match(predicted, ground_truth)\n"
         "  optimization:\n    degradation_threshold: 0.4\n",
         encoding="utf-8",

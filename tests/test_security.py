@@ -3458,7 +3458,7 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
     unframed = {"optimization": {"degradation_threshold": 0.4}}
     write_yaml(
         stores.tenant_datasets.dataset_dir("acts") / DEFINITION_FILE,
-        {"pipeline": {"backend_type": "termnorm"}, "campaign": unframed},
+        {"pipeline": {"connector": "termnorm"}, "campaign": unframed},
     )
     rows = samples(30)
     solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)

@@ -360,7 +360,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     if depth >= MAX_INSTRUMENT_DEPTH:
         raise CellUnscoreableError(
             f"promptpotter connector: an inner run {depth} level(s) deep spawns no inner campaign "
-            f"(MAX_INSTRUMENT_DEPTH={MAX_INSTRUMENT_DEPTH}): the inner dataset's own backend_type "
+            f"(MAX_INSTRUMENT_DEPTH={MAX_INSTRUMENT_DEPTH}): the inner dataset's own connector "
             "is 'promptpotter' — name an inner_benchmark on another backend in the panel.",
             spent={},
         )

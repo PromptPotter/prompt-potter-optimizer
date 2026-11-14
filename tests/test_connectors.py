@@ -69,7 +69,9 @@ def _scripted_lm(sends: list[int], script: list[Exception]) -> Any:
 def _dspy_cell(program: dspy_module.DspyProgram, max_calls: int, ledger: Path) -> dict[str, Any]:
     client = BackendClient(
         dspy_module.CONNECTOR,
-        workload=InProcessWorkload(experiment=None, experiment_dir=None, program=program),
+        workload=InProcessWorkload(
+            experiment=None, experiment_dir=None, program=program, workspace=None
+        ),
         jobs_dir=ledger.parent,
     )
     config = {

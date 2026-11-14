@@ -298,9 +298,9 @@ REPORTABLE_CORE_TERMS: frozenset[str] = frozenset(_CHANNEL_READERS)
 ROW_HEALTH_TERMS: frozenset[str] = frozenset(_ROW_HEALTH)
 
 
-def campaign_terms(backend_type: str) -> dict[str, CellTerm]:
+def campaign_terms(connector: str) -> dict[str, CellTerm]:
     """What a campaign's criterion, dial or anchor may name: the core's terms, then its connector's own."""
-    declared = connectors.CONNECTORS.get(backend_type).cell_terms
+    declared = connectors.CONNECTORS.get(connector).cell_terms
     return {**CELL_TERMS, **{term.name: term for term in declared}}
 
 

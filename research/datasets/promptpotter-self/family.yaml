@@ -1,5 +1,5 @@
 pipeline:
-  backend_type: promptpotter
+  connector: promptpotter
   # What an operator may steer the inner optimizer TO on a babysat fork. It must name the model
   # `assets/optimizers/potter/pipeline.yaml` runs on every node (minimax-m3.1-flash), or every run
   # silently sits in the taints-the-branch case the gate exists to mark; the others stay because

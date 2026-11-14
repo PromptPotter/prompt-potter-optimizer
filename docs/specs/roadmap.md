@@ -143,11 +143,13 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   ([`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured).
 - **landed 66, lw:** every webapp module lives by what it is, one storage-key table, a deselect shows
   none, the Compare bar flush under an open chat.
+- **landed 67, rn-conn:** one word, `connector`, an unregistered one refused typed, `NodeCall` read by
+  its fields, a model's context window off its card.
 - **readings:** one reading for every comparison, the 31 `*Reading` classes folded; key-neutral
   behind the behaviour keys.
 - **then:** faults; narr (the stored dashboard views go, renderers reading the records), rec (a
   discriminated union where optional fields and a validator spell one; write-only fields go, a gate
-  check holding every field to a reader), rn-conn, ren (the two
+  check holding every field to a reader), ren (the two
   `knobs.py` and `free_tier.py` pairs; six class names defined twice, a gate refusing a seventh).
 
 The re-keys end at the behaviour-key switch.

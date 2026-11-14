@@ -35,6 +35,7 @@ from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.identity.default_claim import is_host
 from promptpotter.infrastructure.store.dataset_access import (
+    DEFINITION_READ_ERRORS,
     ResolvedDataset,
     dataset_not_found,
     install_dataset,
@@ -89,11 +90,9 @@ def rows_block(samples: Sequence[Sample]) -> StartBlock | None:
 def _connector_extra(dataset: ResolvedDataset) -> Extra | None:
     """What every cell of the dataset imports beyond core."""
     try:
-        backend_type = runnable_definition(dataset).backend_type
-    except (FileUnreadableError, PayloadInvalidError):
-        backend_type = ""
-    connector = connectors.CONNECTORS.table.get(backend_type)
-    return None if connector is None else connector.extra
+        return connectors.CONNECTORS.get(runnable_definition(dataset).connector).extra
+    except DEFINITION_READ_ERRORS:
+        return None
 
 
 def dataset_extra(dataset: ResolvedDataset) -> Extra | None:

@@ -33,7 +33,7 @@ A containerized agent episode costs 14–48× an `llm_only` call. Latency surviv
 
 ## The model a dataset runs
 
-- **`max_tokens` is never a numeric default in a `{dataset}/dataset.yaml::pipeline` node config** — the provider ceiling applies. A Harbor agent node is the exception: `max_tokens`, `max_input_tokens` and `max_turns` are the only bound on its cell's spend.
+- **`max_tokens` is never a numeric default in a `{dataset}/dataset.yaml::pipeline` node config** — the provider ceiling applies. A Harbor or DB-LLM-Bench node is the exception: its `max_tokens` (and Harbor's `max_turns`) bound its cell's spend beside the window its model's catalogue card holds, and a node missing one refuses before a cell is bought.
 - **The default for a new dataset** is `openai/gpt-oss-20b:nitro` via OpenRouter with no `reasoning_effort`.
 - **"Model floor" is a rung the MODEL decides.** An unset `reasoning_effort` resolves to the lowest rung the running model offers (`low` on `openai/gpt-oss-*`, which refuses `none`); a rung spelled in the file is a pin and follows no model a campaign swaps in.
 - **What a dataset DECLARES is not what the axis SEARCHES** — `PipelineSchema.param_options` replaces the declared values with the model's own answer, a campaign narrowing intersects ([`../../promptpotter/infrastructure/llm/CLAUDE.md`](../../promptpotter/infrastructure/llm/CLAUDE.md) § LLM client).

@@ -16,7 +16,7 @@ from promptpotter.shared.errors import NotFoundError
 
 class BackendResponse(StrictModel):
     id: str = Field(
-        description="The connector's name, as `dataset.yaml::pipeline.backend_type` names it"
+        description="The connector's name, as `dataset.yaml::pipeline.connector` names it"
     )
     execution: ConnectorExecution = Field(
         description="Its wire kind: only a `remote_http` one has a connection to secure"

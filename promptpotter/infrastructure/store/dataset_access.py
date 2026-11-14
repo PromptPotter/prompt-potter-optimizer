@@ -169,19 +169,15 @@ class DatasetDefinition:
     card: DatasetCard | None
 
     @property
-    def backend_type(self) -> str:
-        """The ONE reading of ``pipeline.backend_type``: lowercased, ``""`` where none is declared."""
-        declared = self.pipeline.get("backend_type")
-        return declared.lower() if isinstance(declared, str) else ""
+    def connector(self) -> str:
+        """``pipeline.connector``, ``""`` where none is declared; `Registry.get` refuses the rest."""
+        return named if isinstance(named := self.pipeline.get("connector"), str) else ""
 
 
 def with_node_templates(pipeline: Mapping[str, Any]) -> dict[str, Any]:
     """*pipeline* with its connector's template under each node it declares; a connector this
     install does not register declares none."""
-    declared = pipeline.get("backend_type")
-    connector = connectors.CONNECTORS.table.get(
-        declared.lower() if isinstance(declared, str) else ""
-    )
+    connector = connectors.CONNECTORS.table.get(str(pipeline.get("connector")))
     nodes = pipeline.get("nodes") or {}
     if connector is None or not nodes:
         return dict(pipeline)
@@ -405,13 +401,17 @@ def runnable_definition(dataset: ResolvedDataset) -> DatasetDefinition:
     """One naming its backend; raises typed: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
     path = dataset.directory / DEFINITION_FILE
     definition = read_dataset_definition(dataset)
-    if definition is None or not definition.backend_type:
+    if definition is None or not definition.connector:
         raise PayloadInvalidError(
-            f"backend_type missing or empty in {path}",
+            f"pipeline.connector missing or empty in {path}",
             code="pipeline_config_invalid",
             details={"dataset_dir": str(dataset.directory)},
         )
     return definition
+
+
+# What resolving a name to its `runnable_definition` raises: each reader that answers it unread.
+DEFINITION_READ_ERRORS = (DatasetAccessError, FileUnreadableError, PayloadInvalidError)
 
 
 @dataclass(frozen=True)
@@ -466,19 +466,10 @@ def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
     """``None`` where the definition names no backend; one naming a connector this PROCESS lacks
     raises, since its panel and identity are unreadable, never empty."""
     try:
-        backend_type = runnable_definition(dataset).backend_type
+        named = runnable_definition(dataset).connector
     except (FileUnreadableError, PayloadInvalidError):
         return None
-    connector = connectors.CONNECTORS.table.get(backend_type)
-    if connector is None:
-        raise PayloadInvalidError(
-            f"Dataset {dataset.name!r} declares backend_type {backend_type!r}, which no registered "
-            f"connector is: name one of {sorted(connectors.CONNECTORS.table)} in "
-            f"{dataset.directory / DEFINITION_FILE}.",
-            code="pipeline_config_invalid",
-            details={"dataset_dir": str(dataset.directory)},
-        )
-    return connector
+    return connectors.CONNECTORS.get(named)
 
 
 def dataset_panel_rows(

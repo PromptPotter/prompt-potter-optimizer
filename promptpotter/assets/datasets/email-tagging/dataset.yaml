@@ -117,7 +117,7 @@ source:
 pipeline:
   # Pilot: a single llm_only node against TermNorm /matches, exact-match scoring; mirrors the live
   # n8n subject-classifier-LM tagging decision.
-  backend_type: termnorm
+  connector: termnorm
   available_models:
     - openai/gpt-oss-20b
   description: >-

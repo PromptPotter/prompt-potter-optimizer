@@ -39,6 +39,8 @@ def producer_scratch() -> Path:
 
 PACKAGE_CACHE = "promptpotter-package-cache"
 _PACKAGE_CACHE_PORT = 3142
+# How a cell reaches this host: every container and image build started here carries it.
+HOST_ROUTE = "host.docker.internal:host-gateway"
 PACKAGE_CACHE_PROXY = f"http://host.docker.internal:{_PACKAGE_CACHE_PORT}"
 _PACKAGE_CACHE_DOCKERFILE = (
     "FROM debian:bookworm-slim\n"
@@ -97,8 +99,9 @@ async def run_cell_container(
     label = f"{_PRODUCER_LABEL}={machine_producer()}"
     try:
         return await docker(
-            "run", "--rm", "--name", name, "--label", label, *args, env=env, timeout=timeout
-        )
+            "run", "--rm", "--name", name, "--label", label, "--add-host", HOST_ROUTE, *args,
+            env=env, timeout=timeout,
+        )  # fmt: skip
     except (asyncio.CancelledError, TimeoutError):
         # Left alone, the container goes on calling the provider.
         with contextlib.suppress(OSError, TimeoutError):

@@ -240,7 +240,7 @@ async def init_services(
     if stores is None:
         stores = build_stores(identity, projects_root=default_projects_root())
     dataset = resolve_dataset(stores, dataset_name)
-    connector = connectors.CONNECTORS.get(runnable_definition(dataset).backend_type)
+    connector = connectors.CONNECTORS.get(runnable_definition(dataset).connector)
     async with _session(
         stores, dataset, connector, identity=identity, program=program, served=served
     ) as session:
@@ -272,6 +272,7 @@ async def _session(
             experiment=experiment,
             experiment_dir=None if panel is None else panel.directory,
             program=program,
+            workspace=Path(stores.base_dir),
         ),
         jobs_dir=stores.jobs_dir,
     )

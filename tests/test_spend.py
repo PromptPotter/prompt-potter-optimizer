@@ -2227,7 +2227,7 @@ def test_a_planned_head_to_head_is_priced_at_its_archived_cells_and_optimizer_ro
     write_yaml(
         built_stores.tenant_datasets.dataset_dir("ds1") / DEFINITION_FILE,
         {
-            "pipeline": {"backend_type": "termnorm"},
+            "pipeline": {"connector": "termnorm"},
             "campaign": {"sp_budget_origin": 20, "optimization": {"degradation_threshold": 0.4}},
         },
     )
@@ -2990,9 +2990,14 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
     async def container_cell() -> Any:
         async with CellEnvelope(600.0, attempts=harbor.CONNECTOR.cell_attempts, label="task"):
             return await run_trial(
-                InProcessWorkload(experiment={}, experiment_dir=tmp_path, program=None),
+                InProcessWorkload(
+                    experiment={"agent": {"environment": "docker"}},
+                    experiment_dir=tmp_path,
+                    program=None,
+                    workspace=None,
+                ),
                 Sample(id=0, query="task", ground_truth=None, source_pin={}),
-                {harbor.SKILL_DELIVERY_KEY: "agent_skill"},
+                {"config": {harbor.SKILL_DELIVERY_KEY: "agent_skill"}},
             )
 
     with pytest.raises(CellInfrastructureError):
@@ -3065,7 +3070,9 @@ def dspy_cells(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router)
         )
         client = BackendClient(
             dspy_module.CONNECTOR,
-            workload=InProcessWorkload(experiment=None, experiment_dir=None, program=program),
+            workload=InProcessWorkload(
+                experiment=None, experiment_dir=None, program=program, workspace=None
+            ),
             jobs_dir=jobs,
         )
         config = {"prompt": "Answer.", "model": "openai/gpt-x", "max_calls": 2, "max_tokens": 50}
@@ -3192,7 +3199,7 @@ def agent_cells(tmp_path: Path, offline: Router) -> _AgentCells:
     async def episode_run(_workload: Any, _sample: Any, _payload: dict[str, Any]) -> dict[str, Any]:
         seams.append(
             seam := harbor._AgentModel(
-                "gpt-x", "openai", {"max_tokens": 100, "max_input_tokens": 1000}
+                NodeCall(model="gpt-x", provider="openai", max_tokens=100), 1000
             )
         )
         for n in range(4):
@@ -3299,7 +3306,7 @@ def test_an_agent_whose_sends_died_on_a_5xx_never_measured_the_prompt(offline: R
     wire.down = True
 
     async def downed_turn() -> Any:
-        seam = harbor._AgentModel("gpt-x", "openai", {"max_tokens": 100, "max_input_tokens": 1000})
+        seam = harbor._AgentModel(NodeCall(model="gpt-x", provider="openai", max_tokens=100), 1000)
         with (
             scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)),
             pytest.raises(httpx.HTTPStatusError),
@@ -4369,7 +4376,7 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
         stores.tenant_datasets.dataset_dir("duel") / DEFINITION_FILE,
         {
             "pipeline": {
-                "backend_type": "termnorm",
+                "connector": "termnorm",
                 "nodes": {
                     "llm_only": {"config": {"provider": "groq", "model": "openai/gpt-oss-120b"}}
                 },
@@ -4942,7 +4949,7 @@ def unframed_session(built_stores: Stores) -> _Framing:
     unframed = {"optimization": {"degradation_threshold": 0.4}}
     write_yaml(
         stores.tenant_datasets.dataset_dir("drafted") / DEFINITION_FILE,
-        {"pipeline": {"backend_type": "termnorm"}, "campaign": unframed},
+        {"pipeline": {"connector": "termnorm"}, "campaign": unframed},
     )
     rows = samples(30)
     solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)

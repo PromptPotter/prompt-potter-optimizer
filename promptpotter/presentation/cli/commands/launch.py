@@ -61,12 +61,12 @@ def log_startup_summary(
     )
 
 
-def backend_reach_line(backend_type: str, backend_url: str) -> str:
+def backend_reach_line(connector: str, backend_url: str) -> str:
     """Said of a held run, whose admission probed the backend live; an ``in_process`` connector was
     never contacted, so no URL is claimed for it."""
     reached = BACKEND_REACHABILITY_INFO["live"].label
-    if connectors.CONNECTORS.get(backend_type).execution == "in_process":
-        return f"{reached} in-process ({backend_type}) — no wire"
+    if connectors.CONNECTORS.get(connector).execution == "in_process":
+        return f"{reached} in-process ({connector}) — no wire"
     return f"{reached} at {backend_url}"
 
 
