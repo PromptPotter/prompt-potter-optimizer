@@ -244,6 +244,10 @@ from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
+from promptpotter.infrastructure.llm.capabilities import (
+    CAPABILITY_FILE,
+    resolve_model_capabilities,
+)
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
 from promptpotter.infrastructure.llm.pricing import (
     PriceTier,
@@ -479,9 +483,9 @@ _EVERY_FIELD: dict[str, Any] = {
 }
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
+@pytest.mark.usefixtures("run_bound")
 def test_a_rate_belongs_to_its_provider_model_pair_and_a_cache_read_reprices_inside_input(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     def row(input_usd: float, output_usd: float, lister: str, **tiers: float) -> dict[str, Any]:
         return {
@@ -491,29 +495,29 @@ def test_a_rate_belongs_to_its_provider_model_pair_and_a_cache_read_reprices_ins
             **tiers,
         }
 
-    listed = {
-        "models": {
-            # DeepSeek's first-party key, character-for-character OpenRouter's model id.
-            "deepseek/deepseek-v4-flash": row(0.00000014, 0.00000028, "deepseek"),
-            "openrouter/openai/gpt-oss-20b": row(0.00000004, 0.00000015, "openrouter"),
-            "groq/openai/gpt-oss-120b": row(0.00000015, 0.0000006, "groq"),
-            "gpt-4o": row(
-                0.0000025,
-                0.00001,
-                "openai",
-                cache_creation_input_token_cost=0.000003125,
-                cache_read_input_token_cost=0.00000025,
-            ),
-            # A bare id whose own colon is part of the model, not a route selector.
-            "anthropic.claude-haiku-4-5-v1:0": row(0.000001, 0.000005, "bedrock"),
-            "openrouter/openrouter/auto": row(0.000002, 0.000004, "openrouter"),
-            "orphan-model": {"input_cost_per_token": 0.000001},
-            "openai/half-listed": {"input_cost_per_token": 0.000001},
-        }
+    # Upstream's rows, as its fetch strips them, over an empty floor.
+    offline.rates = {
+        # DeepSeek's first-party key, character-for-character OpenRouter's model id.
+        "deepseek/deepseek-v4-flash": row(0.00000014, 0.00000028, "deepseek"),
+        "openrouter/openai/gpt-oss-20b": row(0.00000004, 0.00000015, "openrouter"),
+        "groq/openai/gpt-oss-120b": row(0.00000015, 0.0000006, "groq"),
+        "gpt-4o": row(
+            0.0000025,
+            0.00001,
+            "openai",
+            cache_creation_input_token_cost=0.000003125,
+            cache_read_input_token_cost=0.00000025,
+        ),
+        # A bare id whose own colon is part of the model, not a route selector.
+        "anthropic.claude-haiku-4-5-v1:0": row(0.000001, 0.000005, "bedrock"),
+        "openrouter/openrouter/auto": row(0.000002, 0.000004, "openrouter"),
+        "orphan-model": {"input_cost_per_token": 0.000001},
+        "openai/half-listed": {"input_cost_per_token": 0.000001},
     }
-    (tmp_path / "rates.json").write_text(json.dumps(listed), encoding="utf-8")
+    (tmp_path / "floor.json").write_text('{"models": {}}', encoding="utf-8")
     with monkeypatch.context() as patched:
-        patched.setattr(pricing, "BUNDLED_PATH", tmp_path / "rates.json")
+        patched.setattr(pricing, "BUNDLED_PATH", tmp_path / "floor.json")
+        assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
         lookup, usd = pricing.lookup_rate, pricing.compute_usd
         for model, provider, rate in (
             ("deepseek-v4-flash", "deepseek", Rate(0.00000014, 0.00000028)),
@@ -2686,6 +2690,16 @@ def test_a_key_two_cycles_of_one_campaign_read_is_priced_once(tmp_path: Path) ->
     assert claims == [True, False], "a second cycle of the campaign priced a key again"
 
 
+def test_a_malformed_capability_override_refuses_naming_its_file_and_key(tmp_path: Path) -> None:
+    (tmp_path / CAPABILITY_FILE).write_text("gpt-x:\n  reasoning_effort: [low]\n", encoding="utf-8")
+    with pytest.raises(FileUnreadableError) as refused:
+        resolve_model_capabilities("gpt-x", "openai", workspace=tmp_path)
+    said = str(refused.value)
+    assert CAPABILITY_FILE in said and "gpt-x" in said, (
+        f"an override no model types was read past, not refused by file and key: {said}"
+    )
+
+
 def test_a_rates_file_rewritten_under_a_live_reader_reprices_its_next_lookup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2693,7 +2707,7 @@ def test_a_rates_file_rewritten_under_a_live_reader_reprices_its_next_lookup(
     monkeypatch.setattr(pricing, "BUNDLED_PATH", rates)
     for usd in (0.000001, 0.0000025):
         row = {"input_cost_per_token": usd, "output_cost_per_token": usd}
-        listed = {"models": {"gpt-x": row | {"litellm_provider": "openai"}}}
+        listed = {"models": {"gpt-x": row | {"lister": "openai"}}}
         rates.write_text(json.dumps(listed), encoding="utf-8")
         assert pricing.lookup_rate("gpt-x", "openai") == Rate(usd, usd), (
             "a rewritten rates file left the reader on the rates it read before"

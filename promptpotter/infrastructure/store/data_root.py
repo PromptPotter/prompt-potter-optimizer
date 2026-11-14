@@ -53,9 +53,9 @@ from promptpotter.infrastructure.identity.grants import (
     IdentityPaths,
 )
 from promptpotter.infrastructure.identity.oidc import ProviderConfigBundle, SessionData
+from promptpotter.infrastructure.llm import capabilities as caps
 from promptpotter.infrastructure.llm.base import LLMResponse
-from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
-from promptpotter.infrastructure.llm.pricing import ROUTE_ANSWER, ROUTE_ANSWERS_DIR
+from promptpotter.infrastructure.llm.pricing import ROUTE_ANSWER, ROUTE_ANSWERS_DIR, RatesFile
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.command_log import COMMAND_LOG_FILE
 from promptpotter.infrastructure.store.dataset_access import (
@@ -185,7 +185,6 @@ type Shape = TypeAdapter[Any] | Parsed | Opaque | Folded
 _HELD = Opaque("a lock or marker its process holds, never parsed")
 _AUDIT = Opaque("an audit trail its writer appends and no reader parses")
 _TREE = Opaque("a file of a tree another tool owns, read by that tool alone")
-_WALKED = Opaque("its reader walks a dict, so no model holds its shape yet")
 _FOR_A_PERSON = Opaque("written for a person to read, never read back")
 _PICKLED = Opaque("folds this process pickled, by their ledger's file_sig and code")
 
@@ -290,7 +289,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("free tier", _INSTALL, "free_tier.yaml", _SURVIVOR, FREE_TIER_ADAPTER),
     OPTIMIZER_SHADOW,
     CHECKIN_SHADOW,
-    Kind("model rates", _INSTALL, "rates.json", Fate.CACHE, _WALKED),
+    Kind("model rates", _INSTALL, "rates.json", Fate.CACHE, TypeAdapter(RatesFile)),
     Kind("route ceilings", _INSTALL, f"{ROUTE_ANSWERS_DIR}/*.json", Fate.CACHE, ROUTE_ANSWER),
     # `HF_HOME`, set by `deploy-linux/install-service.sh`: the only path its unit may write.
     Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE, _TREE),
@@ -323,7 +322,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
 
 
 _DATASETS = "datasets"
-_RUN = Fate.RUN
+_RUN, _WS = Fate.RUN, Scope.WORKSPACE
 
 ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("user", Scope.ACCOUNT, USER_FILE, _SURVIVOR, TypeAdapter(User)),
@@ -375,7 +374,7 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
         "bank labels", Scope.WORKSPACE, f"{BANKS_DIR}/{LABELS_FILE}", _RUN, TypeAdapter(BankLabel)
     ),
     Kind("account block pack", Scope.WORKSPACE, _BLOCK_PACK, _RUN, TypeAdapter(BlockPack)),
-    Kind("model capability override", Scope.WORKSPACE, CAPABILITY_FILE, _RUN, _WALKED),
+    Kind("model capability override", _WS, caps.CAPABILITY_FILE, _RUN, caps.OVERRIDE_SHAPE),
 )
 
 
@@ -507,7 +506,6 @@ def _run_rows(owner: str, rows: tuple[CampaignRow, ...]) -> tuple[Kind, ...]:
     )
 
 
-_WS = Scope.WORKSPACE
 _DRAFT = f"{DRAFTS_DIR}/*"
 _CAMPAIGN_KINDS = _run_rows("campaigns/*", CAMPAIGN_ROWS)
 _DRAFT_KINDS = _run_rows(_DRAFT, _cycle_rows("draft", Path()))
@@ -551,7 +549,7 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
     ),
     Kind("materialized dataset", _WS, f"{MATERIALIZED_DIR}/**", Fate.RUN, _TREE),
     Kind("bank cuts", _WS, f"{BANKS_DIR}/{CUTS_FILE}", Fate.RUN, TypeAdapter(BankCut)),
-    Kind("model capabilities", _WS, CAPABILITIES_CACHE, Fate.RUN, _WALKED),
+    Kind("model capabilities", _WS, caps.CAPABILITIES_CACHE, Fate.RUN, caps.CACHE_SHAPE),
 )
 
 # `io.py` names every atomic write's temporary `.<random>.tmp`, beside the file it replaces, and

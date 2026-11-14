@@ -19,9 +19,9 @@ from typing import Any, cast
 from pydantic import TypeAdapter, ValidationError
 
 from promptpotter.config.paths import user_data_root
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     read_bytes_optional,
-    read_json_optional,
     unlink_robust,
     write_bytes,
     write_text,
@@ -80,29 +80,39 @@ UPSTREAM_URL = (
     "litellm/model_prices_and_context_window_backup.json"
 )
 BUNDLED_PATH = Path(__file__).parent / "data" / "rates.json"
-_KEEP_FIELDS = (
-    "input_cost_per_token",
-    "output_cost_per_token",
-    "cache_creation_input_token_cost",
-    "cache_read_input_token_cost",
-    "max_output_tokens",
-    "litellm_provider",
-    "mode",
-)
 _FETCH_TIMEOUT_S = 30.0
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 _TTL_SECONDS = 24 * 60 * 60
 
 
-def _strip_upstream(raw: dict[str, Any]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
+class RateBody(StrictModel):
+    """One row of `rates.json`, USD per token; ``lister``, the provider listing a bare name."""
+
+    input_cost_per_token: float
+    output_cost_per_token: float
+    cache_creation_input_token_cost: float | None = None
+    cache_read_input_token_cost: float | None = None
+    max_output_tokens: int | None = None
+    lister: str | None = None
+
+
+class RatesFile(StrictModel):
+    """The bundled floor and the fetched cache alike: a name to its one rate body."""
+
+    models: dict[str, RateBody]
+
+
+def _strip_upstream(raw: dict[str, Any]) -> RatesFile:
+    """The one door upstream's vocabulary reaches: its ``litellm_provider`` is our ``lister``, and a
+    row no rate body types (a side unpriced) is no rate."""
+    models: dict[str, RateBody] = {}
     for name, body in raw.items():
         if not isinstance(body, dict):
             continue
-        if "input_cost_per_token" not in body or "output_cost_per_token" not in body:
-            continue
-        out[name] = {k: body[k] for k in _KEEP_FIELDS if k in body}
-    return out
+        kept = {k: body[k] for k in RateBody.model_fields if k in body}
+        with contextlib.suppress(ValidationError):
+            models[name] = RateBody.model_validate(kept | {"lister": body.get("litellm_provider")})
+    return RatesFile(models=models)
 
 
 def cache_path() -> Path:
@@ -140,8 +150,8 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
         return False
 
     stripped = _strip_upstream(raw)
-    write_text(cache_path(), json.dumps({"models": stripped}, indent=0, separators=(",", ":")))
-    logger.info("spend: refreshed %d model rates → %s", len(stripped), cache_path())
+    write_text(cache_path(), stripped.model_dump_json(exclude_none=True))
+    logger.info("spend: refreshed %d model rates → %s", len(stripped.models), cache_path())
     return True
 
 
@@ -149,45 +159,27 @@ def refresh_rates_in_background() -> None:
     threading.Thread(target=refresh_rates, name="rates-refresh", daemon=True).start()
 
 
-def _read_models(path: Path) -> dict[str, Any] | None:
-    try:
-        raw = read_json_optional(path)
-    except (OSError, json.JSONDecodeError) as exc:
-        logger.warning("spend: failed to load %s (%s)", path, exc)
-        return None
-    if not isinstance(raw, dict):
-        return None
-    models = raw.get("models")
-    return models if isinstance(models, dict) else None
+def _read_rates(path: Path) -> dict[str, RateBody]:
+    raw = read_bytes_optional(path)
+    return {} if raw is None else RatesFile.model_validate_json(raw).models
 
 
-def _optional_cost(body: dict[str, Any], key: str) -> float | None:
-    value = body.get(key)
-    return float(value) if value is not None else None
-
-
-def _models_to_rates(models: dict[str, Any]) -> RateTable:
+def _models_to_rates(models: Mapping[str, RateBody]) -> RateTable:
     prefixed: dict[tuple[str, str], Rate] = {}
     bare: dict[tuple[str, str], Rate] = {}
     listed_by: dict[str, str] = {}
     for name, body in models.items():
-        if not isinstance(body, dict):
-            continue
-        in_c = body.get("input_cost_per_token")
-        out_c = body.get("output_cost_per_token")
-        if in_c is None or out_c is None:
-            continue
         rate = Rate(
-            input=float(in_c),
-            output=float(out_c),
-            cache_write=_optional_cost(body, "cache_creation_input_token_cost"),
-            cache_read=_optional_cost(body, "cache_read_input_token_cost"),
-            max_output=_as_tokens(body.get("max_output_tokens")),
+            input=body.input_cost_per_token,
+            output=body.output_cost_per_token,
+            cache_write=body.cache_creation_input_token_cost,
+            cache_read=body.cache_read_input_token_cost,
+            max_output=body.max_output_tokens,
         )
         provider, _, model = name.lower().partition("/")
         if model:
             prefixed[provider, model] = rate
-        elif lister := str(body.get("litellm_provider") or "").lower():
+        elif lister := (body.lister or "").lower():
             bare[lister, provider] = rate
             listed_by[provider] = lister
     # `prefixed` last: where upstream lists a pair both ways, the row spelling its provider wins.
@@ -215,17 +207,16 @@ def load_rates() -> RateTable:
 
 
 def _rates_at(bundled_path: Path, fetched_path: Path) -> RateTable:
-    bundled = _read_models(bundled_path)
-    fetched = _read_models(fetched_path)
-    if bundled is None and fetched is None:
-        logger.warning(
-            "spend: no rate table available (cache %s + bundle %s both missing)",
-            fetched_path,
-            bundled_path,
-        )
-        return RateTable({})
+    """The shipped floor refuses, the bug it is; a fetched cache that does not load is dropped, so the
+    next refresh fetches it again, and the floor prices meanwhile."""
+    try:
+        fetched = _read_rates(fetched_path)
+    except ValidationError as exc:
+        logger.warning("spend: dropped %s, which does not load (%s)", fetched_path, exc)
+        unlink_robust(fetched_path)
+        fetched = {}
     # The fetch lies OVER the floor: a row upstream never listed keeps the price the bundle gave it.
-    return _models_to_rates((bundled or {}) | (fetched or {}))
+    return _models_to_rates(_read_rates(bundled_path) | fetched)
 
 
 def lookup_rate(model: str | None, provider: str | None) -> Rate | None:

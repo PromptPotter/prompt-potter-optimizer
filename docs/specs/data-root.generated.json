@@ -3036,7 +3036,94 @@
       "patterns": [
         "rates.json"
       ],
-      "shape": null
+      "shape": {
+        "$defs": {
+          "RateBody": {
+            "additionalProperties": false,
+            "description": "One row of `rates.json`, USD per token; ``lister``, the provider listing a bare name.",
+            "properties": {
+              "cache_creation_input_token_cost": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Creation Input Token Cost"
+              },
+              "cache_read_input_token_cost": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Read Input Token Cost"
+              },
+              "input_cost_per_token": {
+                "title": "Input Cost Per Token",
+                "type": "number"
+              },
+              "lister": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Lister"
+              },
+              "max_output_tokens": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Max Output Tokens"
+              },
+              "output_cost_per_token": {
+                "title": "Output Cost Per Token",
+                "type": "number"
+              }
+            },
+            "required": [
+              "input_cost_per_token",
+              "output_cost_per_token"
+            ],
+            "title": "RateBody",
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "description": "The bundled floor and the fetched cache alike: a name to its one rate body.",
+        "properties": {
+          "models": {
+            "additionalProperties": {
+              "$ref": "#/$defs/RateBody"
+            },
+            "title": "Models",
+            "type": "object"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "RatesFile",
+        "type": "object"
+      }
     },
     "optimizer manifest": {
       "fate": "SURVIVOR",

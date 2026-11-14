@@ -944,14 +944,17 @@ and derived the knob couplings from each member's draws and the escalation ladde
   event loop across `asyncio.run`; `scoring/formula/compiler.py`'s refusal message carries the whole
   formula. **Rides with:** faults.
 
-### batch/29 · lite
+### lite-2 (what lite left at its landing)
 
-- **Three data-root rows are proven by presence alone** (`store/data_root.py::_WALKED`): `rates.json`, the
-  model capability override and the capabilities cache, whose readers (`llm/pricing.py`,
-  `llm/capabilities.py`) walk a raw dict. Action: a model per file, named by its row. **Rides with:**
-  lite 2 (core's model vocabulary is its own, `rates.json` drops `litellm_provider`); its Owns gain
-  `llm/capabilities.py` and `store/data_root.py`'s three rows (mkey's file too: its `KINDS`). **Re-test:**
-  `git grep -c "_WALKED" -- promptpotter/infrastructure/store/data_root.py` is 0.
+- **The capability override's fate is RUN, though it is authored** (`store/data_root.py`, row "model
+  capability override"): the landing drops an override no model types, while its reader refuses it as
+  operator config (`FileKind.STORED_CONFIG`, "Fix the file"). Action: an authored workspace file is a
+  SURVIVOR, migrated, or the reader drops it as the landing does; one rule. **Re-test:** the row's
+  `Fate` and the reader's refusal agree.
+- **OpenRouter's endpoints payload has no model**: `llm/pricing.py::_fetch_route_ceiling` and
+  `::_host_tiers` walk it with `.get` and `_as_tokens`, the shape lite removed from the three data-root
+  files. Action: one model for the payload, validated at the fetch. **Re-test:** `git grep -c "_as_tokens"
+  -- promptpotter/infrastructure/llm/pricing.py` is 0.
 
 ### batch/29 · xconn
 
