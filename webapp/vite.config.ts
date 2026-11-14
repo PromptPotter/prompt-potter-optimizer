@@ -67,16 +67,13 @@ function head(brand: Brand): HtmlTagDescriptor[] {
 }
 
 // The globals a build compiles in; `vitest.config.ts` defines through it too, on the defaults.
-export function defines(brand: Brand, build: string | null): Record<string, string> {
-  return {
-    // A bare global, not `import.meta.env.*`: Vitest moves those into `process.env`, which stringifies an object.
-    __BRAND__: JSON.stringify(brand),
-    ...(build ? { "import.meta.env.VITE_WEBAPP_BUILD": JSON.stringify(build) } : {}),
-  };
+export function defines(brand: Brand): Record<string, string> {
+  // A bare global, not `import.meta.env.*`: Vitest moves those into `process.env`, which stringifies an object.
+  return { __BRAND__: JSON.stringify(brand) };
 }
 
-// What every page shares and the server reads beside them: the head, the theme script, the manifest, the build id.
-function shell(brand: Brand, build: string | null): Plugin {
+// What every page shares: the head, the theme script, the manifest.
+function shell(brand: Brand): Plugin {
   return {
     name: "promptpotter-shell",
     // After the page's own `<meta charset>`, which must open the head.
@@ -102,22 +99,19 @@ function shell(brand: Brand, build: string | null): Plugin {
         icons: [{ src: "/brand/app-icon-pot-512.png", sizes: "512x512", type: "image/png" }],
       };
       this.emitFile({ type: "asset", fileName: "manifest.webmanifest", source: JSON.stringify(manifest) });
-      if (build) this.emitFile({ type: "asset", fileName: "build-id.txt", source: build });
     },
   };
 }
 
-export default defineConfig(({ command, mode }) => {
-  // Only a build is compared with what the server serves; the dev server stamps none.
-  const build = command === "build" ? Date.now().toString(36) : null;
+export default defineConfig(({ mode }) => {
   const brand = brandOf(loadEnv(mode, WEBAPP, "VITE_"));
   return {
     root: APP,
     publicDir: path.join(WEBAPP, "public"),
     envDir: WEBAPP,
     resolve: RESOLVE,
-    define: defines(brand, build),
-    plugins: [react(), shell(brand, build)],
+    define: defines(brand),
+    plugins: [react(), shell(brand)],
     build: {
       outDir: path.join(WEBAPP, "out"),
       emptyOutDir: true,

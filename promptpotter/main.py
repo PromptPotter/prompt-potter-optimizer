@@ -475,7 +475,7 @@ WEBAPP_DIR = webapp_static_root()
 
 # Inside the header seam; GZip passes ``text/event-stream`` through, so SSE is never buffered.
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
-app.add_middleware(ResponseHeadersMiddleware, webapp_dir=WEBAPP_DIR)
+app.add_middleware(ResponseHeadersMiddleware)
 
 # A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
 if WEBAPP_DIR.exists():

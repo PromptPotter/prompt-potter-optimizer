@@ -1,11 +1,13 @@
-"""The ONE header seam: what a page may load, what a browser may keep, and which build is being served."""
+"""The ONE header seam: what a page may load, what a browser may keep, and which contract is served."""
 
 from __future__ import annotations
 
-import asyncio
+import functools
+import hashlib
+import json
 import time
-from pathlib import Path
 
+from fastapi import FastAPI
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
@@ -54,20 +56,19 @@ def cache_policy(*, api: bool, path: str, status: int) -> str:
     return "no-cache"
 
 
-def served_build(webapp_dir: Path) -> str:
-    """Read per answer, not at startup: a rebuild under a running server is the local loop."""
-    try:
-        return (webapp_dir / "build-id.txt").read_text(encoding="utf-8").strip()
-    except OSError:
-        return ""
+@functools.cache
+def served_contract(app: FastAPI) -> str:
+    """The API's shape as served, once per process (FastAPI's own `/openapi.json` builds it on the
+    loop too); `scripts/build_ts_types.py` stamps a bundle with the one it is built against."""
+    shape = [app.openapi()[part] for part in ("paths", "components")]
+    return hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()[:16]
 
 
 class ResponseHeadersMiddleware:
     """Pure ASGI: ``BaseHTTPMiddleware`` buffers the body and breaks SSE teardown."""
 
-    def __init__(self, app: ASGIApp, *, webapp_dir: Path) -> None:
+    def __init__(self, app: ASGIApp) -> None:
         self.app = app
-        self._webapp_dir = webapp_dir
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -95,10 +96,8 @@ class ResponseHeadersMiddleware:
                 if api:
                     elapsed_ms = (time.perf_counter() - began) * 1000
                     headers["server-timing"] = f"app;dur={elapsed_ms:.1f}"
-                    # The webapp compares it with the id it was built with (`lib/api/client.ts::send`).
-                    build = await asyncio.to_thread(served_build, self._webapp_dir)
-                    if build:
-                        headers["x-webapp-build"] = build
+                    # The webapp compares it with the one it was built against (`lib/api/client.ts::send`).
+                    headers["x-served-contract"] = served_contract(scope["app"])
             await send(message)
 
         await self.app(scope, receive, send_with_headers)

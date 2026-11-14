@@ -758,13 +758,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (`useCycleEvents.ts:49`, `read-cache.ts:390`); the build handshake covers fetches, not streams; and
   the client decides what Delete files (`CampaignMenu.tsx:44-54` vs `workspace_edits.py:62-77`).
   **Rides with:** webd.
-- **A server past its bundle never reads as stale** (operator, 2026-11-14: "Cannot read properties of
-  null (reading 'x')" on :8001): `webapp/out` was built 2026-11-13 and the server ran a3312e3e1, five
-  landings on, whose readings reshape broke the old bundle; a rebuild cleared every view.
-  `headers.py::served_build` reads `build-id.txt` out of that same build, so `client.ts::send` always
-  matches it, and nothing rebuilds `webapp/out` when the checkout moves. Root: the build id names the
-  served contract (the generated types' hash) on both sides. **Rides with:** webd. **Re-test:** a
-  server whose generated types moved past `webapp/out` shows the stale banner on its first fetch.
 - **An L4 panel's Leader card is empty** (C0 on a3312e3e1, 390 and 1280): `panes.tsx::LeaderPane`'s
   `SubjectBox` draws nothing for an origin-only outer campaign and no line says why (I1). **Rides
   with:** webd. **Re-test:** that card names the origin or says why it has no leader.

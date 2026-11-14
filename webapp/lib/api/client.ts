@@ -1,6 +1,7 @@
 import {
   FEED_SUBJECT_HEADER,
   FEED_VERSIONS_HEADER,
+  SERVED_CONTRACT,
   type ErrorEnvelope,
   type NextAct,
 } from "@/lib/api/types";
@@ -13,15 +14,13 @@ export function buildIsStale(): boolean {
   return serverMovedOn;
 }
 
-// The ONE door to the API: every call is uncached, and every answer is checked against this tab's build.
+// The ONE door to the API: every call is uncached, and every answer is checked against the contract
+// this tab was built against.
 export async function send(url: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(url, { cache: "no-store", ...init });
-  const serving = r.headers.get("X-Webapp-Build");
-  // Stamped by the build (`vite.config.ts`). Read here, never at import: the e2e harness loads this
-  // module in Node, where `import.meta.env` is absent.
-  const built: unknown = import.meta.env.VITE_WEBAPP_BUILD;
+  const serving = r.headers.get("X-Served-Contract");
   // Only noted, never acted on here: a reload would drop an ingest draft or a command in flight.
-  if (built && serving && serving !== built) serverMovedOn = true;
+  if (serving && serving !== SERVED_CONTRACT) serverMovedOn = true;
   return r;
 }
 

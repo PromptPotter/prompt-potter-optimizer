@@ -121,7 +121,7 @@ export { expect };
 export async function ready(page: Page) {
   await expect(page.locator("#main-content")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: /hit a render error|running an old build/i }),
+    page.getByRole("heading", { name: /hit a render error|does not match the server/i }),
   ).toHaveCount(0);
 }
 

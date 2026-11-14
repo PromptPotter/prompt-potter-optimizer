@@ -18,7 +18,8 @@ interface State {
 const MISSING_CHUNK =
   /dynamically imported module|Importing a module script failed|Unable to preload CSS/i;
 
-// Two faces of one cause: a piece of the old build is gone from disk, or the old build read an answer the new API shaped.
+// Two faces of one cause: a piece of the old build is gone from disk, or the build read an answer
+// another API shaped (its contract is not the server's: `lib/api/client.ts::send`).
 function fromStaleBuild(error: Error): boolean {
   return buildIsStale() || MISSING_CHUNK.test(`${error.name} ${error.message}`);
 }
@@ -60,14 +61,14 @@ export class ErrorBoundary extends Component<Props, State> {
     return (
       <div role="alert" className={s.panel}>
         <h1 className={s.heading}>
-          {stale ? "This tab is running an old build" : "The dashboard hit a render error"}
+          {stale ? "This tab's build does not match the server" : "The dashboard hit a render error"}
         </h1>
         <p className={s.body}>
           {!stale
             ? "A render error never writes to disk — your campaign is untouched. Reloading usually clears it; if it repeats, the console has the component stack."
             : reload === "already-tried"
-              ? "Your campaign is untouched — the app was rebuilt while this tab was open, so this tab no longer matches it. Reloading was tried once already and did not clear it, which usually means a build is still running; wait for it to finish, then reload."
-              : "Your campaign is untouched — the app was rebuilt while this tab was open, so this tab no longer matches it. Reload once the build has finished."}
+              ? "Your campaign is untouched. Reloading was tried once and did not clear it: the webapp the server holds is older than the server, or its build is still running. Once it is rebuilt (`npm run build` in `webapp/`), reload."
+              : "Your campaign is untouched — this tab was built against another version of the server. Reload once any build has finished."}
         </p>
         <pre className={s.detail}>{error.message}</pre>
         <button type="button" className={s.action} onClick={() => window.location.reload()}>

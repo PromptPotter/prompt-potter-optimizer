@@ -6,7 +6,7 @@ import { defines, RESOLVE } from "./vite.config.ts";
 export default defineConfig({
   resolve: RESOLVE,
   // A test sees the defaults, never the deploy's `VITE_*`.
-  define: defines(brandOf({}), null),
+  define: defines(brandOf({})),
   test: {
     isolate: false,
     pool: "threads",

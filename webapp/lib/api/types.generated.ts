@@ -5407,6 +5407,9 @@ export type ReadKind = keyof typeof READ_ROUTES;
 // (application/cycle_reads.py::FEED_SUBJECT_HEADER, ::FEED_VERSIONS_HEADER).
 export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
+// The API shape this bundle is built against, which every answer names
+// (presentation/api/middleware/headers.py::served_contract).
+export const SERVED_CONTRACT = "3b900a5bab43d8c5";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

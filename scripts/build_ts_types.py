@@ -33,6 +33,7 @@ from promptpotter.domain.spend import RATE_PRICED_LABEL
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.run_state import RECENT_STEP_S
 from promptpotter.main import API_ROUTERS, app
+from promptpotter.presentation.api.middleware.headers import served_contract
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.shared.worded import Worded, registered
 
@@ -200,7 +201,10 @@ def _emit_read_routes() -> str:
         "// The feed subject a read names, and the versions its answer stood on\n"
         "// (application/cycle_reads.py::FEED_SUBJECT_HEADER, ::FEED_VERSIONS_HEADER).\n"
         f"export const FEED_SUBJECT_HEADER = {json.dumps(FEED_SUBJECT_HEADER)};\n"
-        f"export const FEED_VERSIONS_HEADER = {json.dumps(FEED_VERSIONS_HEADER)};"
+        f"export const FEED_VERSIONS_HEADER = {json.dumps(FEED_VERSIONS_HEADER)};\n"
+        "// The API shape this bundle is built against, which every answer names\n"
+        "// (presentation/api/middleware/headers.py::served_contract).\n"
+        f"export const SERVED_CONTRACT = {json.dumps(served_contract(app))};"
     )
 
 
