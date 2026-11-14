@@ -13,12 +13,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.backend import BackpressureReading
+from promptpotter.domain.records.run_records import ProviderEasedRecord, ProviderHoldRecord
 from promptpotter.infrastructure.llm.spend_book import bound_account
-from promptpotter.infrastructure.llm.telemetry import (
-    bound_ledger,
-    emit_provider_eased,
-    emit_provider_hold,
-)
+from promptpotter.infrastructure.llm.telemetry import bound_ledger
 from promptpotter.shared.errors import (
     ContextOverflowError,
     ErrorCategory,
@@ -311,7 +308,7 @@ class Backpressure:
         if self._since is not None:
             held_s = loop_now() - self._since
             for ledger in list(self._heard):
-                emit_provider_eased(ledger=ledger, sender=self.sender, held_s=held_s)
+                ledger.append(ProviderEasedRecord(sender=self.sender, held_s=held_s))
             self._heard.clear()
         self._since = self._since_epoch = self._resumes_at_epoch = None
         self._resumes_at = 0.0
@@ -342,13 +339,14 @@ class Backpressure:
         for ledger in (here,) if root is None else (here, root):
             if self._heard.get(ledger) != self._strikes:
                 self._heard[ledger] = self._strikes
-                emit_provider_hold(
-                    ledger=ledger,
-                    sender=self.sender,
-                    scope=self._scope,
-                    strikes=self._strikes,
-                    gives_up_at=self._gives_up_at,
-                    reading=reading,
+                ledger.append(
+                    ProviderHoldRecord(
+                        sender=self.sender,
+                        scope=self._scope,
+                        strikes=self._strikes,
+                        gives_up_at=self._gives_up_at,
+                        reading=reading,
+                    )
                 )
 
 

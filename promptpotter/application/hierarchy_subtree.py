@@ -55,8 +55,8 @@ from promptpotter.domain.job import ScoringPass
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
+from promptpotter.domain.records.run_records import ForkDirection, SpawnedBy
 from promptpotter.domain.results import Election
-from promptpotter.domain.run_records import ForkDirection, SpawnedBy
 from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.lineage_queries import (

@@ -42,19 +42,20 @@ from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, see
 from promptpotter.domain.phases import (
     SELF_PAUSE_CAUSE,
     STOP_REASON_INFO,
-    ErrorRecord,
     PauseCause,
     StopOutcome,
     StopReason,
 )
-from promptpotter.domain.results import CycleResult
-from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import (
     ConfigOverrides,
     CycleFinal,
+    CycleFinalRecord,
     CycleSeed,
     RebaseRequest,
 )
+from promptpotter.domain.results import CycleResult
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import round_clocks
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import HeldBudget, SpendRollup
@@ -213,30 +214,32 @@ def _finalize_run(
         )
     else:
         # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.
-        session.store.campaigns.bank_final(
+        session.store.campaigns.append(
             session.hop,
-            interrupted_round=interrupted_round,
-            final=CycleFinal(
-                started_at=cycle_result.started_at,
-                wall_clock=scan_ledger_wall_clock(
-                    [session.store.campaigns.ledger(session.hop)],
+            CycleFinalRecord(
+                interrupted_round=interrupted_round,
+                final=CycleFinal(
                     started_at=cycle_result.started_at,
-                    finished_at=cycle_result.finished_at,
-                    optimizer_phases=selected.phases,
+                    wall_clock=scan_ledger_wall_clock(
+                        [session.store.campaigns.ledger(session.hop)],
+                        started_at=cycle_result.started_at,
+                        finished_at=cycle_result.finished_at,
+                        optimizer_phases=selected.phases,
+                    ),
+                    **round_clocks(
+                        cycle_result.rounds, fitness_ceiling=config.fitness_ceiling
+                    )._asdict(),
+                    prompt_hashes=selected.prompt_hashes(),
+                    origin_composite_fitness=(
+                        None
+                        if (origin := cycle_result.origin) is None or origin.composite is None
+                        else origin.composite.value
+                    ),
+                    scorer_id=session.state.scoring.scorer.id,
+                    result_round=cycle_result.result_round,
+                    result_prompt_fields=cycle_result.result_prompt_fields,
+                    result_pipeline_params=cycle_result.result_pipeline_params,
                 ),
-                **round_clocks(
-                    cycle_result.rounds, fitness_ceiling=config.fitness_ceiling
-                )._asdict(),
-                prompt_hashes=selected.prompt_hashes(),
-                origin_composite_fitness=(
-                    None
-                    if (origin := cycle_result.origin) is None or origin.composite is None
-                    else origin.composite.value
-                ),
-                scorer_id=session.state.scoring.scorer.id,
-                result_round=cycle_result.result_round,
-                result_prompt_fields=cycle_result.result_prompt_fields,
-                result_pipeline_params=cycle_result.result_pipeline_params,
             ),
         )
         # After what it banked, and before the drain renders the artifacts that name the stop.
@@ -377,7 +380,7 @@ def _cut_rebase_fork(
         rebase_req.hangs_from
         or store.standing_rounds(fork.child, moment=None).rounds[cut - 1].close
     )
-    store.rebank_round(
+    store.append(
         fork.child,
         branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices})),
     )

@@ -11,12 +11,12 @@ from promptpotter.domain.crowning_bar import BAR_ADMISSION
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
-    ErrorRecord,
     StopLoop,
     StopOutcome,
     StopReason,
 )
-from promptpotter.infrastructure.llm.telemetry import emit_error_record
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.shared.errors import (
     ErrorCategory,
     OptimizerTimeoutError,
@@ -91,7 +91,15 @@ def end_run_on(
         logger.exception("Optimization ended %s: %s.", where, info.label)
     else:
         logger.warning("Optimization ended %s: %s — %s", where, info.label, exc)
-    return reason, emit_error_record(exc, stop_reason=reason, traceback=tb)
+    record = ErrorRecord.raised(
+        exc,
+        kind=type(exc).__name__,
+        stop_reason=reason,
+        traceback=tb,
+        round=current_round(),
+    )
+    append_record(record)
+    return reason, record
 
 
 def origin_gate_tripped(health: DegradationHealth, mode: GateMode) -> StopReason | None:

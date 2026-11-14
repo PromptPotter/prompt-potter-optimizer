@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 
 from promptpotter.application import account, health
 from promptpotter.config.paths import default_projects_root
-from promptpotter.domain.run_records import Device, device_of
+from promptpotter.domain.records.run_records import Device, device_of
 from promptpotter.infrastructure.identity.bundle import IdentityBundle
 from promptpotter.infrastructure.identity.provider_config import (
     SUPPORTED_PROVIDERS,

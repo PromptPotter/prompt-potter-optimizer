@@ -1,72 +1,19 @@
 from __future__ import annotations
 
-from typing import Any, Literal, TypeIs, get_args
+from typing import TYPE_CHECKING, Any, Literal, TypeIs, get_args
 
 from pydantic import Field
 
 from promptpotter.domain.activity import ActivityRecord, ActivityState
-from promptpotter.domain.run_records import RECORD_KINDS, CycleRecord
+from promptpotter.domain.records import RECORDS, CycleRecord
 from promptpotter.domain.strict_model import FrozenModel
 
-# A missing kind is a HOLE, not a filter: the tail still consumes its offset, and the client reconnects.
-ProjectionKind = Literal[
-    "account_event",
-    "arm",
-    "backend_warning",
-    "bank_partition",
-    "campaign_ceiling",
-    "decision",
-    "cycle_final",
-    "cycle_minted",
-    "cycle_share",
-    "cycle_superseded",
-    "election",
-    "error",
-    "flight",
-    "fork_graded",
-    "health",
-    "hold",
-    "intervention",
-    "launch_clock",
-    "left_comparison",
-    "llm_call_progress",
-    "llm_call",
-    "llm_call_start",
-    "phase",
-    "priced_key",
-    "provider_eased",
-    "provider_hold",
-    "race_catch_up",
-    "race_standing",
-    "resolved_run",
-    "round_closed",
-    "round_entered",
-    "round_proposed",
-    "round_restated",
-    "round_warning",
-    "run_phase",
-    "run_wiring",
-    "sample_scored",
-    "sample_started",
-    "scoring_locked",
-    "spawned",
-    "spend_tombstone",
-    "standing_budget",
-    "token_usage",
-    "trail_tombstone",
-    # Synthesized by the ledger tail (``CycleLedgerTail``); on no ledger.
-    "stream_snapshot",
-]
-
-_PROJECTION_ONLY = frozenset({"stream_snapshot"})
-_declared = frozenset(get_args(ProjectionKind)) - _PROJECTION_ONLY
-if _declared != RECORD_KINDS:
-    raise RuntimeError(
-        "ProjectionKind must cover the CycleRecord union exactly — "
-        f"missing {sorted(RECORD_KINDS - _declared)}, "
-        f"unbacked {sorted(_declared - RECORD_KINDS)}."
-    )
-del _declared
+# A missing kind is a HOLE, not a filter: the tail still consumes its offset, and the client
+# reconnects. ``stream_snapshot`` is synthesized by the ledger tail (``CycleLedgerTail``), on no ledger.
+if TYPE_CHECKING:
+    ProjectionKind = str
+else:
+    ProjectionKind = Literal[*RECORDS.registered(), "stream_snapshot"]
 
 _ACTIVITY_ARMS: tuple[type, ...] = get_args(ActivityRecord)
 

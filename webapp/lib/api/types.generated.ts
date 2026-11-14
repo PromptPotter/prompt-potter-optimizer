@@ -2458,7 +2458,7 @@ export interface LoopWarning {
  * signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'decision' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'hold' | 'intervention' | 'launch_clock' | 'left_comparison' | 'llm_call_progress' | 'llm_call' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'hold' | 'intervention' | 'launch_clock' | 'left_comparison' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -6096,6 +6096,11 @@ export const PROMPT_FIELD_INFO: Record<string, PromptFieldInfo> = {
   "plan": { label: "Plan", hint: null, rows: null },
 };
 
+// Mirror of domain/records/run_records.py::VERIFY_WORDS, in display order.
+export const VERIFY_WORDS: Record<'saturated', string> = {
+  "saturated": "Every sample in the {dataset_name} search split is already measured for this config ({already_measured} total). Nothing to add.",
+};
+
 // Mirror of domain/round_health.py::HEALTH_CAUSE_INFO, in display order.
 export const HEALTH_CAUSE_INFO: Record<'origin_unmeasured' | 'origin_incomplete' | 'structural' | 'unscoreable' | 'holed' | 'evidence_starved' | 'structural_untested' | 'persistent' | 'degraded' | 'transient', HealthCauseInfo> = {
   "origin_unmeasured": { title: "not measured", remedy: "Re-score the origin. If it stops in the same place, read the error on the last cell that was measured — the cause is upstream of the prompt. A cell measured but not graded is the formula's: fix the formula and re-read that cell, never re-buy it." },
@@ -6126,11 +6131,6 @@ export const THETA_CAVEAT_INFO: Record<ThetaCaveat, ThetaCaveatInfo> = {
   "prior_pinned": { label: "θ shifts between rounds", detail: "Most samples this round got the default difficulty, because every candidate answered them alike. That default moves as rounds come in, so compare θ within a round, not across rounds.", tone: "attention" },
   "unmeasured_delta": { label: "θ leaves some samples out", detail: "Some samples have no difficulty rating yet, so θ reads fewer samples than the fitness beside it, and two candidates may be read on different ones. A later round includes them.", tone: "attention" },
   "floor_pinned": { label: "No θ for an all-wrong candidate", detail: "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift taken from it, is a placeholder. Other candidates are unaffected.", tone: "attention" },
-};
-
-// Mirror of domain/run_records.py::VERIFY_WORDS, in display order.
-export const VERIFY_WORDS: Record<'saturated', string> = {
-  "saturated": "Every sample in the {dataset_name} search split is already measured for this config ({already_measured} total). Nothing to add.",
 };
 
 // Mirror of domain/run_standing.py::LIVES_WORDS, in display order.
@@ -6251,10 +6251,10 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [NODE_KIND_INFO, ["io", "llm", "tool", "retriever", "cache", "measurement", "member"]],
   [POOL_SOURCE_INFO, ["library", "partition"]],
   [PROMPT_FIELD_INFO, ["persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format", "shots", "plan"]],
+  [VERIFY_WORDS, ["saturated"]],
   [HEALTH_CAUSE_INFO, ["origin_unmeasured", "origin_incomplete", "structural", "unscoreable", "holed", "evidence_starved", "structural_untested", "persistent", "degraded", "transient"]],
   [HEALTH_GRADE_INFO, ["healthy", "degraded", "critical", "unmeasured"]],
   [THETA_CAVEAT_INFO, ["cold_ruler", "flat_ruler", "collapsed_band", "prior_pinned", "unmeasured_delta", "floor_pinned"]],
-  [VERIFY_WORDS, ["saturated"]],
   [LIVES_WORDS, ["banked", "spent_pip", "empty", "empty_sentence", "life", "lives"]],
   [SAMPLE_STATUS_LABELS, ["HIT", "MISS", "ERR", "UNSC"]],
   [CAP_AXIS_INFO, ["usd", "tokens", "rounds", "wall_clock_s"]],

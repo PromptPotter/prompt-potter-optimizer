@@ -1,23 +1,18 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterator
 from pathlib import Path
 
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
-from promptpotter.domain.run_records import (
-    RECORD_ADAPTER,
-    CycleMintedRecord,
-    CycleRecord,
-)
+from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.run_records import CycleMintedRecord
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
-from promptpotter.infrastructure.store.io import append_line, complete_lines
+from promptpotter.infrastructure.store.io import append_jsonl
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR, CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
     Moment,
-    ledger_record,
 )
 
 
@@ -83,24 +78,17 @@ class CycleEventLog:
     def path(self) -> Path:
         return self._path
 
-    def append(self, record: CycleRecord) -> int:
-        # A scored cell's five appends are five moments, never one record: the hold before its send
-        # (decisions.md § 0003), a bill per send, the start as the live marker, the priced key, the score.
-        raw = RECORD_ADAPTER.dump_json(record, fallback=str)
+    def append(self, *records: CycleRecord) -> int:
+        """One locked write; the last record's offset. A scored cell's five appends are five moments,
+        never one batch: the hold before its send (decisions.md § 0003), a bill per send, the start
+        as the live marker, the priced key, the score."""
+        rows = (record.model_dump(mode="json", fallback=str) for record in records)
+        index = LedgerIndex.of(self._path)
         # The offset is the record's LINE, as the index counts it, another writer's lines included.
-        return LedgerIndex.of(self._path).land(raw, append_line(self._path, raw), record)
-
-    def iter(self) -> Iterator[tuple[int, CycleRecord]]:
-        """This file's own records, each at its line: a fork's prefix is `ledger_chain`'s."""
-        if not self._path.exists():
-            return
-        with self._path.open("rb") as fh:
-            for offset, line in enumerate(complete_lines(fh)):
-                record = ledger_record(
-                    RECORD_ADAPTER.validate_json, line, ledger=self._path, offset=offset
-                )
-                if record is not None:
-                    yield offset, record
+        landed = append_jsonl(self._path, *rows).each()
+        return [
+            index.land(raw, at, record) for (raw, at), record in zip(landed, records, strict=True)
+        ][-1]
 
     @property
     def next_offset(self) -> int:

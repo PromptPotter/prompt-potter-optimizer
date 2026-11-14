@@ -17,7 +17,7 @@ from promptpotter.application.jobs.launcher.admission import probe_backend
 from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.run_records import HealthReader, HealthRecord, HealthState
+from promptpotter.domain.records.run_records import HealthReader, HealthRecord, HealthState
 from promptpotter.infrastructure.identity.bundle import build_identity_bundle
 from promptpotter.infrastructure.identity.paths import default_identity_paths
 from promptpotter.infrastructure.identity.provider_config import CodeExchangeError

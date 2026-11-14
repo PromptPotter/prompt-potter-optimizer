@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, ClassVar, get_args
+from typing import Any, ClassVar
 
-from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.records import RECORDS, CycleRecord
 from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 
 # By name, so a handler's module may import its record for typing alone.
-_ARMS: dict[str, type[CycleRecord]] = {
-    arm.__name__: arm for arm in get_args(get_args(CycleRecord)[0])
-}
+_ARMS = {arm.__name__: arm for arm in RECORDS.registered().values()}
 _HANDLER = "_handle_"
 
 

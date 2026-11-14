@@ -41,12 +41,13 @@ from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.phases import CampaignPhase, StopReason
-from promptpotter.domain.run_records import PhaseRecord, StandingBudgetRecord
+from promptpotter.domain.records.run_records import PhaseRecord, StandingBudgetRecord
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
 from promptpotter.infrastructure.llm.spend_book import filed
 from promptpotter.infrastructure.llm.telemetry import bind_priced
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.run_scope import rescope, run_scope
 
@@ -167,7 +168,7 @@ async def open_launch(
         campaign_config=campaign_config,
         dataset=dataset,
         campaign=campaign,
-        resumed_ending=campaigns.resumed_ending(session.hop),
+        resumed_ending=scan_cycle_facts(campaigns.ledger(session.hop)).resumed_ending,
     )
 
 

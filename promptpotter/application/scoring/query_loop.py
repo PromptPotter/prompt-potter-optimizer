@@ -27,8 +27,13 @@ from promptpotter.domain.phases import (
     StopReason,
     WalkEnd,
 )
+from promptpotter.domain.records.run_records import (
+    ComparisonExit,
+    RaceCatchUpRecord,
+    SampleScoredRecord,
+    SampleStartedRecord,
+)
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.run_records import ComparisonExit
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
     CellSheet,
@@ -45,10 +50,9 @@ from promptpotter.infrastructure.llm.spend_book import (
     filed,
 )
 from promptpotter.infrastructure.llm.telemetry import (
+    append_record,
+    bound_round,
     claim_campaign_price,
-    emit_race_catch_up,
-    emit_sample_scored,
-    emit_sample_started,
 )
 from promptpotter.infrastructure.store.command_log import effective_lookahead
 from promptpotter.shared.errors import (
@@ -187,14 +191,17 @@ class QueryLoopState:
         running: ScoreSummary | None,
     ) -> None:
         if (recorded := self.recorded) is not None:
-            emit_sample_scored(
-                individual_id=recorded.individual_id,
-                role=recorded.role,
-                sample_idx=idx,
-                sample_total=total,
-                position=sample.id,
-                cell=cell,
-                running=running,
+            append_record(
+                SampleScoredRecord(
+                    round=bound_round(),
+                    individual_id=recorded.individual_id,
+                    role=recorded.role,
+                    sample_idx=idx,
+                    sample_total=total,
+                    position=sample.id,
+                    result=cell,
+                    running=running,
+                )
             )
 
     def claim_price(self, sample: Sample) -> bool:
@@ -355,14 +362,17 @@ class Walk:
     def _started(self, event: LaunchEvent) -> None:
         if (recorded := self.ctx.recorded) is not None:
             sample, idx, armed = event
-            emit_sample_started(
-                individual_id=recorded.individual_id,
-                role=recorded.role,
-                sample_idx=idx,
-                sample_total=self.n,
-                position=sample.id,
-                query=sample.query,
-                sample_lookahead=armed,
+            append_record(
+                SampleStartedRecord(
+                    round=bound_round(),
+                    individual_id=recorded.individual_id,
+                    role=recorded.role,
+                    sample_idx=idx,
+                    sample_total=self.n,
+                    position=sample.id,
+                    query_preview=sample.query,
+                    sample_lookahead=armed,
+                )
             )
 
     def collect(self) -> None:
@@ -896,15 +906,22 @@ class _ScoringPhase[K: Hashable]:
             for cell in cells:
                 if (address := cell.address) is not None:
                     by_cell.setdefault(cell.key, {})[prior] = address
+        if not by_cell:
+            return
         slot_of = walk.ctx.session.bank.slot_of
-        for key, taken in by_cell.items():
-            emit_race_catch_up(
-                member=caught.member,
-                arm=ArmKey(arm.individual_id),
-                sample_key=key,
-                position=slot_of[key],
-                cells=taken,
+        append_record(
+            *(
+                RaceCatchUpRecord(
+                    round=bound_round(),
+                    arm=ArmKey(arm.individual_id),
+                    member=caught.member,
+                    sample_key=key,
+                    position=slot_of[key],
+                    cells=taken,
+                )
+                for key, taken in by_cell.items()
             )
+        )
 
     def bank(self) -> None:
         for walk in self.live():

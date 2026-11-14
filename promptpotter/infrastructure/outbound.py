@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from promptpotter.config.settings import settings
-from promptpotter.domain.run_records import Device
+from promptpotter.domain.records.run_records import Device
 from promptpotter.shared.tls import tls_context
 
 logger = logging.getLogger(__name__)

@@ -42,6 +42,7 @@ from factories import (
     inner_cells,
     inner_sandbox,
     jumping_clock,
+    ledger_records,
     loop_session,
     mint_fork,
     minted_campaign,
@@ -193,10 +194,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
     WebSpendBound,
 )
-from promptpotter.domain.results import CycleResult
-from promptpotter.domain.ruler import RulerReach
-from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     ArmRecord,
     Bill,
     CallPrice,
@@ -222,6 +220,9 @@ from promptpotter.domain.run_records import (
     StandingBudgetRecord,
     TokenUsageRecord,
 )
+from promptpotter.domain.results import CycleResult
+from promptpotter.domain.ruler import RulerReach
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, PipelineData, Scorer
 from promptpotter.domain.search_point import JobSearchPoint, NodeConfig
@@ -654,7 +655,7 @@ async def test_an_ungraded_cell_bills_what_it_spent_and_a_replay_states_its_rows
             )
         banked = {"agent": StepUsage(input=1200, output=300, rate_priced_usd=0.25)}
         emit_replayed_step_tokens(banked, {})
-    *ran, replayed = [r for _, r in cells.iter() if isinstance(r, TokenUsageRecord)]
+    *ran, replayed = [r for r in ledger_records(cells) if isinstance(r, TokenUsageRecord)]
     assert row_.error_category == ErrorCategory.UNSCOREABLE, "an ungraded cell read as graded"
     assert [(r.price.cost_usd, r.input_tokens, r.bill is None) for r in ran] == [
         (0.0076, 1200, False)
@@ -894,7 +895,9 @@ async def _walk(
                 backfills=priors if parent_lacks_cells else None,
             )
         )
-    depths = [r.sample_lookahead for _, r in started.iter() if isinstance(r, SampleStartedRecord)]
+    depths = [
+        r.sample_lookahead for r in ledger_records(started) if isinstance(r, SampleStartedRecord)
+    ]
     feed = _filed(stores, sp, session)
     taken = {cell.key for cell in walk.results}
     priced = scan_ledger_priced_keys([started.path])
@@ -934,7 +937,7 @@ async def _round(
     def absorbed() -> list[tuple[int, int]]:
         return [
             (int(r.individual_id[1:]), r.position)
-            for _, r in ledger.iter()
+            for r in ledger_records(ledger)
             if isinstance(r, SampleScoredRecord)
         ]
 
@@ -1309,7 +1312,7 @@ async def test_a_skip_holds_and_its_replay_records_the_depth_it_skipped_at(
     )
     depth = [
         r.running.walked
-        for _, r in CycleEventLog(again["ledger"]).iter()
+        for r in ledger_records(again["ledger"])
         if isinstance(r, SampleScoredRecord) and r.running is not None
     ]
     assert not again["calls"] and depth[-1:] == [3], (
@@ -1470,7 +1473,7 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
     )
     assert halted == "spend_budget", "a spent ceiling did not stop the arm"
     assert len(bench.cells) == len(reread), "the search's ceiling stopped the bench pass"
-    kinds = [r.price.kind for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
+    kinds = [r.price.kind for r in ledger_records(ledger) if isinstance(r, TokenUsageRecord)]
     assert kinds == ["optimizer"] + ["bench"] * len(reread) + ["optimizer", "judge"], (
         f"a re-read was metered a second time: {kinds}"
     )
@@ -1680,7 +1683,7 @@ def _billing_on(ledger: CycleEventLog, book: Any) -> Iterator[None]:
 
 
 def _token_bills(ledger: CycleEventLog) -> list[TokenUsageRecord]:
-    return [r for _, r in ledger.iter() if isinstance(r, TokenUsageRecord)]
+    return [r for r in ledger_records(ledger) if isinstance(r, TokenUsageRecord)]
 
 
 def _charges() -> ChargeBook:
@@ -4600,7 +4603,7 @@ def spent_campaign(built_stores: Stores) -> _SpentCampaign:
 
     def tombstones() -> list[SpendTombstoneRecord]:
         workspace = CycleEventLog(CycleEventLog.workspace_path(stores.campaigns.workspace))
-        return [r for _, r in workspace.iter() if isinstance(r, SpendTombstoneRecord)]
+        return [r for r in ledger_records(workspace) if isinstance(r, SpendTombstoneRecord)]
 
     def ceiling_counts_now() -> tuple[float, int]:
         counted = stores.campaigns.metered_spend("camp-2", "bill")
@@ -4680,7 +4683,7 @@ def test_a_ledger_refusing_a_sends_first_part_keeps_its_later_parts_on_the_accou
     root_hop = CycleHop(campaign_id="camp-2", cycle_id=root)
     before = account_usd()
 
-    def unappendable(*_: object) -> None:
+    def unappendable(*_: object, **__: object) -> None:
         raise OSError("the ledger's disk is full")
 
     with (
@@ -5053,7 +5056,7 @@ def test_a_settle_whose_ledger_write_fails_still_closes_its_book_whole(
     root = "cycle_root0000"
 
     # Its part billed and the remainder held, never the whole bound held again on top of the bill.
-    def unwritable(_record: object, _ledger: object) -> None:
+    def unwritable(*_: object, **__: object) -> None:
         raise OSError("the ledger's disk is full")
 
     after_reset = CycleHop(campaign_id="camp-4", cycle_id=root)
@@ -5115,7 +5118,7 @@ def test_a_projection_raising_on_a_landed_bill_is_its_ledgers_one_warning(
                 paid_by="host",
             ) as send:
                 send.settle(Billed(TokenAccount(input=2_000, output=400), 0.2))
-    warned = [r.kind for _, r in faulted_ledger.iter() if isinstance(r, RoundWarningRecord)]
+    warned = [r.kind for r in ledger_records(faulted_ledger) if isinstance(r, RoundWarningRecord)]
     assert book.money_left().usd == pytest.approx(1.0 - 2 * 0.2), (
         "a projection's raise on a landed bill counted its part twice, or unwound the next send"
     )

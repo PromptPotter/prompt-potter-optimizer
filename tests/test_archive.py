@@ -36,6 +36,7 @@ from factories import (
     filed,
     filed_under,
     inner_sandbox,
+    ledger_records,
     loop_session,
     measurement,
     measurements,
@@ -116,7 +117,7 @@ from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.arms import ArmSlot, PointContext
-from promptpotter.domain.bench import DatasetSplit, PartitionRecord, partition_bank
+from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.campaign_config import (
     seed_layer,
 )
@@ -148,9 +149,8 @@ from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, RunPhase, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode
-from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import (
     AnnouncedArms,
     ArmRecord,
     ConfigOverrides,
@@ -167,7 +167,10 @@ from promptpotter.domain.run_records import (
     RoundProposedRecord,
     RunPhaseRecord,
     SpawnedBy,
+    SpawnedRecord,
 )
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import line_reference, walked_slot
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
@@ -187,8 +190,10 @@ from promptpotter.infrastructure.store.archive_queries import (
     sample_fold_rows,
     write_sample_fold,
 )
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import (
+    Appended,
     append_jsonl,
     probe_lock,
     rewrite_lines,
@@ -483,7 +488,7 @@ def test_a_reader_tailing_a_cell_file_rewritten_under_it_skips_no_answer(
     own = ReplayFeed(archive, tailed)
     own.advance()
 
-    def raced(path: Path, *rows: dict[str, Any]) -> range:
+    def raced(path: Path, *rows: dict[str, Any]) -> Appended:
         monkeypatch.setattr(measurement_archive, "append_jsonl", append_jsonl)
         _bank(6, via=reader)
         return append_jsonl(path, *rows)
@@ -1093,7 +1098,7 @@ def test_a_reentered_rounds_arm_folds_only_its_new_walk(
     )
     [rewind] = [
         rec
-        for _, rec in ledger.iter()
+        for rec in ledger_records(ledger)
         if isinstance(rec, RoundEnteredRecord) and rec.rewound and rec.round == 1
     ]
     folds.announce(walk)
@@ -1186,7 +1191,6 @@ def test_an_unreadable_close_refuses_its_cycle_to_every_reader_and_the_remedy_ke
         filed_under(dataset_hash="strandedds"),
     )
     readers: dict[str, Callable[[], object]] = {
-        "iter": lambda: list(CycleEventLog(ledger.path).iter()),
         "resume": lambda: stores.campaigns.standing_rounds(stranded, moment=None),
         "export": lambda: closed_rounds(stores, stranded, scorer, moment=None),
         "index": lambda: stores.campaigns.load(stranded, moment=None),
@@ -1320,7 +1324,9 @@ def scenario_line(built_stores: Stores) -> _Scenario:
         [_emit_round(closing, scenario_log, scenario_rounds, f"s{n}") for n in range(2)][-1]
     )
     bank = samples(4, "g")
-    drawn = partition_bank(bank, DatasetSplit(bench=0), seed=0).record(dataset_hash="bank")
+    drawn = PartitionRecord.of(
+        partition_bank(bank, DatasetSplit(bench=0), seed=0), dataset_hash="bank"
+    )
     store.append(scenario, drawn)
     unheld = (
         RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT),
@@ -1931,7 +1937,7 @@ def _family(stores: Stores) -> _Family:
             # A repair restates a lifted round WHOLE at its mint, so the round is the fork's own.
             for r in restated_at_mint.get(row_course, ()):
                 lifted = store.standing_rounds(hops[row_course], moment=None).rounds[r].close
-                store.rebank_round(hops[row_course], lifted.restated(lifted.optimizer_state))
+                store.append(hops[row_course], lifted.restated(lifted.optimizer_state))
         line, n = line_of[row_course], len(line_of[row_course])
         arms = {
             ArmKey(_ident(p)): arm_state(p, slot=ArmSlot(round=n, idx=i, total=len(row_picks)))
@@ -1992,14 +1998,16 @@ def _family(stores: Stores) -> _Family:
         spawned = CycleHop(campaign_id=f"{name}__20260101-000000", cycle_id=f"cycle_{name}")
         stored_campaign(sandbox, minted_campaign(spawned))
         sandbox.campaigns.mint_cycle(spawned)
-        sandbox.campaigns.record_spawned(
+        sandbox.campaigns.append(
             spawned,
-            SpawnedBy(
-                round=rnd,
-                individual_id=_ident(pick),
-                role=role,
-                cycle_id=asker.cycle_id,
-                task=f"t/{name}",
+            SpawnedRecord(
+                spawned_by=SpawnedBy(
+                    round=rnd,
+                    individual_id=_ident(pick),
+                    role=role,
+                    cycle_id=asker.cycle_id,
+                    task=f"t/{name}",
+                )
             ),
         )
     # The run x asked closes its origin: its line continues the line of the candidate that asked.
@@ -2316,7 +2324,7 @@ def repair(built_stores: Stores) -> _Repair:
         stored_campaign(stores, minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
         drawn = partition_bank(repair_bank, DatasetSplit(bench=0), seed=0)
-        stores.campaigns.append(hop, drawn.record(dataset_hash="bank"))
+        stores.campaigns.append(hop, PartitionRecord.of(drawn, dataset_hash="bank"))
         rows = [
             measurement(i, 1.0, sample_key=s.key, predicted="g") for i, s in enumerate(repair_bank)
         ]
@@ -2447,7 +2455,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
             )
 
         # Read before the launch writes, as `mint.py::open_launch` reads it.
-        resumed = stores.campaigns.resumed_ending(hop)
+        resumed = scan_cycle_facts(stores.campaigns.ledger(hop)).resumed_ending
 
         async def walk() -> LoopEnd:
             gated = await open_origin_round(

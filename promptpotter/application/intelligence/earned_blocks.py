@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign import Campaign
     from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
     from promptpotter.domain.paired_reading import MemberAddress, PairedReading
-    from promptpotter.domain.run_records import RoundStatement
+    from promptpotter.domain.records.run_records import RoundStatement
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
     from promptpotter.infrastructure.store.stores import Stores

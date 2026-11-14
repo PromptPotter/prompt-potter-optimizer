@@ -194,9 +194,7 @@ from promptpotter.domain.prompt_block import (
     Snippet,
     snippet_id,
 )
-from promptpotter.domain.refusal import Refusal
-from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     Bill,
     ForkDirection,
     ForkSpec,
@@ -209,6 +207,8 @@ from promptpotter.domain.run_records import (
     RunWiringRecord,
     StandingEffect,
 )
+from promptpotter.domain.refusal import Refusal
+from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
 from promptpotter.domain.said import Said, pins
 from promptpotter.domain.spend import NOTHING_PAID, Budget
 from promptpotter.domain.validators import ValidatorOutcome

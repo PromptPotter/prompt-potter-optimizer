@@ -9,7 +9,17 @@ command or question that says it still stands. Run the re-test before acting.
 
 ## URGENT — shapes that hide the backbone from a reshape
 
-**Rides with:** any pass in the file named. None open.
+**Rides with:** any pass in the file named.
+
+- **A row read by a function hashes the function's name, not its shape**: for 13 rows,
+  `infrastructure/store/data_root.py::_schema` hashes `{"reader": "module::qualname"}`, among them the
+  CACHE rows `archive index`, `archive cells`, `archive cold`, `archive sample_fold` and `bank`, which
+  `pinned_schemas` exists to pin. A reshape of what those readers parse moves neither `landing_key`
+  nor the pinned schemas. `archive sample_fold`'s reader is a bound `model_validate_json`, hashed as
+  `pydantic.main::BaseModel.model_validate_json`. The ledgers read through `ledger_line` since hubs,
+  and their record kinds are hashed by `domain/kinds.py::KindTable.schemas`. Action: a reader row
+  declares the model it parses, and `_schema` hashes that model. **Re-test:** `row_schema` returns no
+  `reader` shape for any row.
 
 ## Open — multi-arc: wave 4's chains, in landing order
 
@@ -614,10 +624,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### valid (after rk-dec, before the behaviour keys)
 
-- **One fact, two append loops**: `infrastructure/store/io.py::append_jsonl` lands a batch in one
-  locked write, while `infrastructure/ledger.py::CycleEventLog.append` takes one record, so
-  `CampaignStore.append` loops it and a multi-record fact can tear. Action: the event log lands its
-  batch through `append_jsonl`. **Rides with:** valid 4.
 - **`HeldRun.of`'s second config read**: `jobs/launcher/run_job.py::HeldRun.of` reloads the campaign
   and `cycle_config` after `open` and the admission already read them. Action: the opened cycle carries
   the config it read. **Rides with:** valid 4.
@@ -628,15 +634,27 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### hubs (after valid, before layers)
 
-- **Five hub files serialize the arcs**: 434 of the 989 engine commits since 2026-06-01 (44%) touch
-  `runner/entry.py` (180), `domain/results.py` (174; `RoundResult` holds 34 fields),
-  `domain/run_records.py` (169; 84 classes), `campaign_store/store.py` (146) or `runner/round.py`
-  (125). Since an arc owns its files, two arcs that each add a record kind or a round fact run as a
-  chain. Action: open registries. Record kinds live in family modules found by walking the package, as
-  injections are; a round fact is a kind-keyed typed slice, as `StateSlice` / `RoundOutput` are; a
-  feature adds a file instead of editing the spine. Members' imports move (a re-key) and a round's
-  on-disk form changes (a wipe). It follows life, whose spine is `runner/entry.py`. **Rides with:**
-  hubs. **Re-test:** a new record kind or round fact lands in a file of its own, no hub edited.
+- **A cycle's outcome is two types**: `domain/results.py::CycleResult` (what `run_cycle` returns,
+  its rounds with their cells) and `domain/records/run_records.py::CycleFinal` (what `CycleFinalRecord`
+  banks), which `runner/entry.py` fills from the other field by field. Banking `CycleResult` whole
+  would put every round's cells on the ledger beside `RoundClosedRecord`, against the chronology rule
+  (`infrastructure/CLAUDE.md`). Action: one type, the rounds read back off the ledger by its
+  readers (`l4/proxies.py`, the narrative); the L4 estimator digest re-keys. **Rides with:** hubs.
+  **Re-test:** `git grep -c "class CycleFinal(" -- promptpotter` is 0.
+- **A moved panel is warned into a log**: `campaign_store/store.py::write_resolved_run` logs it as a
+  `logger.warning` and appends anyway, a state the run enters and reports nowhere. Action: the moved
+  panel lands as a field of `ResolvedRunRecord`, read by the readout. **Rides with:** hubs.
+  **Re-test:** no `logger.warning` in `write_resolved_run`.
+- **A fold matches 11 kinds to ignore them**: `domain/activity.py`'s fold holds a `case …: pass` arm
+  over 11 record kinds beside its `assert_never`. Action: the fold declares the kinds it reads and is
+  fed nothing else. **Rides with:** hubs. **Re-test:** no `pass` arm in it.
+- **A hop's chain is spelled 16 times**: `ledger_chain(CycleDir(...), moment=None)` across the
+  package. Action: one store read of a hop's chain (`CampaignStore.chain`). **Rides with:** hubs.
+  **Re-test:** `git grep -c "ledger_chain(CycleDir(" -- promptpotter` sums to at most 1.
+- **`p_record_drift` counts handler tables as mirrors**: its 33 is `ledger_scan.py` (12) and
+  `live_dashboard/projection.py` (21), folds and `_handle_*` tables that each read their own subset.
+  Action: the count skips a `_handle_*` table and a fold's declared kinds (the row above's
+  declaration). **Rides with:** hubs. **Re-test:** drift is 0 and its `BASELINE` row says so.
 
 ### layers (alone, after valid, before the behaviour keys)
 
@@ -1036,7 +1054,7 @@ Toolbar, and the phone walk's back step. Left:
   are generated from the Python side as `scripts/build_ts_types.py` generates `types.generated.ts`,
   their values read off the offline world's served run (`scripts/offline_world.py`), drift-checked by
   the gate; the hand builders go. `tests/factories.py` (1360 lines), its Python twin, co-changed with
-  `domain/results.py` 31 times and `domain/run_records.py` 33 times since 2026-06-01, and draws from the
+  `domain/results.py` 31 times and `domain/records/run_records.py` 33 times since 2026-06-01, and draws from the
   same snapshot. **Rides with:** webd, whose Owns gain `scripts/offline_world.py`, the file shared with
   tests-w, which owns it. **Re-test:** `webapp/lib/test-fixtures.ts` holds no
   hand-written builder of a served type.
@@ -1127,7 +1145,7 @@ Toolbar, and the phone walk's back step. Left:
   the readout serves; after narr, money and rec, whose derivers it reads, so its Owns gain one line each in
   `views/readout.py::ReadoutProjection`, `projections/cycle_index.py::CycleIndexProjection`,
   `scoring/closed_rounds.py::RoundFileProjection` and `llm/spend_book.py::SpendBook`, with
-  `domain/run_records.py::stale_file_warning` and `read_model.py`'s `Projected`. **Re-test:** a
+  `domain/records/run_records.py::stale_file_warning` and `read_model.py`'s `Projected`. **Re-test:** a
   `dashboard.json` write fault's warning detail names `dashboard.json`.
 - **A text node's form failure has three answers**: capo's init out of form ends the cycle `crashed`,
   gepa's `fenced` reads an unfenced reply as the instruction (so its form never fails), and every other
@@ -1486,6 +1504,10 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   (`bench/task_context.py::committed_task_context`). Action: the real record, and the committed datasets
   read once through that reader. **Rides with:** tests-w. **Re-test:**
   `git grep -c "SimpleNamespace\|rglob(" -- tests/test_archive.py tests/test_identity.py` is 0.
+- **A failing test can hang the gate's pytest**: in a cloud run (hubs, 2026-11-14) a full-gate pytest
+  sat at 2% CPU for 20 minutes on a failing connector test instead of failing. Not yet reproduced.
+  Action: reproduce it, name what the test waits on, and make that wait end with the failure.
+  **Rides with:** tests-w. **Re-test:** the reproduced failure fails within its test's own timeout.
 
 ### batch/32 · ts-arch
 

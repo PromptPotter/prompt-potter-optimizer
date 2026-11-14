@@ -29,7 +29,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_overlay import overlay_is_locked_axis_only
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     OPERATOR_ORIGIN_SOURCES,
     CycleSeed,
     OriginSource,

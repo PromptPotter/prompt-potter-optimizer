@@ -8,12 +8,13 @@ from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.application.views.view_models import ViewContext
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
-from promptpotter.domain.bench import BankPartition, PartitionRecord, restored_partition
+from promptpotter.domain.bench import BankPartition, restored_partition
 from promptpotter.domain.campaign import Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.run_records import PipelineRead
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import InterventionRecord, PipelineRead
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import Scorer
 from promptpotter.domain.spend import HeldBudget
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
     from promptpotter.application.run_observers import RunObservers
     from promptpotter.application.scoring.evaluators import SampleEvaluator
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.run_records import BackendRevision
+    from promptpotter.domain.records.run_records import BackendRevision
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.domain.validators import StopRule
 
@@ -126,7 +127,7 @@ class Session:
 
     def record_intervention(self, kind: str) -> None:
         """decisions.md § 0005: the act is banked on the cycle, and every run it scores after grades C."""
-        self.store.campaigns.record_intervention(self.hop, kind=kind)
+        self.store.campaigns.append(self.hop, InterventionRecord(kind=kind))
         self.state.human_intervened = True
 
     def bound(self, hop: CycleHop, *, purpose: Purpose) -> Session:

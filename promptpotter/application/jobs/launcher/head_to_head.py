@@ -27,8 +27,8 @@ from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, Job
+from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.infrastructure.store.dataset_access import runnable_definition
 
 if TYPE_CHECKING:

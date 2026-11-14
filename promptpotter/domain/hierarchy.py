@@ -13,7 +13,7 @@ from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.phases import PauseReading, RunAdmission, RunState
-from promptpotter.domain.run_records import ForkDirection, ForkTrigger
+from promptpotter.domain.records.run_records import ForkDirection, ForkTrigger
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import MeteredSpend

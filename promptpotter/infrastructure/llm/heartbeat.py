@@ -5,7 +5,7 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from promptpotter.domain.run_records import LLMCallProgressRecord
+from promptpotter.domain.records.run_records import LLMCallProgressRecord
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 from promptpotter.shared.errors import (
     FileUnreadableError,

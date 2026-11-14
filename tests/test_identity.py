@@ -40,6 +40,7 @@ from factories import (
     inner_sandbox,
     inner_seat,
     jumping_clock,
+    ledger_records,
     loop_session,
     measurement,
     minted_campaign,
@@ -216,7 +217,6 @@ from promptpotter.domain.bench import (
     BankPartition,
     BenchRefusal,
     DatasetSplit,
-    PartitionRecord,
     partition_bank,
     restored_partition,
 )
@@ -291,17 +291,19 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import EARNED_SOURCE, entry_id
 from promptpotter.domain.prompt_block import Authored, BlockPack, Presumption, PromptPart, Snippet
-from promptpotter.domain.results import RoundResult
-from promptpotter.domain.ruler import RulerReach
-from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import (
     ConfigOverrides,
     CycleMintedRecord,
     CycleSeed,
+    InterventionRecord,
     PipelineRead,
     RoundWarningRecord,
     ScoringLockedRecord,
 )
+from promptpotter.domain.results import RoundResult
+from promptpotter.domain.ruler import RulerReach
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
@@ -2946,8 +2948,9 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
     stores.campaigns.mint_cycle(held_campaign.root_hop)
     stores.campaigns.append(
         held_campaign.root_hop,
-        partition_bank(rows_30, door.dataset_split, seed=0).record(
-            dataset_hash=opened.bank.dataset_hash
+        PartitionRecord.of(
+            partition_bank(rows_30, door.dataset_split, seed=0),
+            dataset_hash=opened.bank.dataset_hash,
         ),
     )
     opened = opened.bound(held_campaign.root_hop, purpose=Optimize())
@@ -3213,7 +3216,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
             "a second holder folded a dashboard beside the run's, each writing its own file"
         )
     # A store-door append during the run lands through the run's own `index.json` writer, at once.
-    stores.campaigns.record_intervention(held_campaign.root_hop, kind="steered")
+    stores.campaigns.append(held_campaign.root_hop, InterventionRecord(kind="steered"))
     manifest = CycleLayout(root_dir).manifest
     assert LedgerIndex.of(wired_ledger.path).pinned and "steered" in manifest.read_text(), (
         "a store-door append let go of the run's projections, or left its index.json stale"
@@ -3233,7 +3236,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     )
     assert acked(late) == "voided", "a release took a pause no producer stopped on"
     # Outside a run, the store door holds its one-shot only while its line lands.
-    stores.campaigns.record_intervention(held_campaign.root_hop, kind="steered")
+    stores.campaigns.append(held_campaign.root_hop, InterventionRecord(kind="steered"))
     assert not LedgerIndex.of(wired_ledger.path).pinned, (
         "a store-door append pinned its ledger's index past its own line"
     )
@@ -3332,7 +3335,9 @@ def test_a_projection_that_cannot_write_is_one_stale_file_warning(tmp_path: Path
             faulty.append(RoundWarningRecord(kind="layer_parse_failure", message=str(n)))
             for n in range(2)
         ]
-    kinds = [record.kind for _, record in faulty.iter() if isinstance(record, RoundWarningRecord)]
+    kinds = [
+        record.kind for record in ledger_records(faulty) if isinstance(record, RoundWarningRecord)
+    ]
     assert offsets == [0, 2] and kinds.count("derived_file_stale") == 1 and len(kinds) == 3, (
         "a projection's write fault unwound a landed append, or went unreported, or stormed"
     )
@@ -4030,7 +4035,7 @@ def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
     bank, _, _ = _split_bank()
     l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
     cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0), seed=0)
-    back = restored_partition(bank, cell_drawn.record(dataset_hash="d"))
+    back = restored_partition(bank, PartitionRecord.of(cell_drawn, dataset_hash="d"))
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"
     )
@@ -4046,8 +4051,9 @@ def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stor
     hop = CycleHop(campaign_id="camp-recut", cycle_id="cycle_recut")
     built_stores.campaigns.append(
         hop,
-        partition_bank(l4_bank, DatasetSplit(bench=0), seed=0).record(
-            dataset_hash=drawn_bank.dataset_hash
+        PartitionRecord.of(
+            partition_bank(l4_bank, DatasetSplit(bench=0), seed=0),
+            dataset_hash=drawn_bank.dataset_hash,
         ),
     )
     relabelled = built_stores.tenant_datasets.labelled("recut")

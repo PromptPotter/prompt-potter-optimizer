@@ -20,8 +20,8 @@ from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP
+from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import LaunchedJob
 from promptpotter.infrastructure.store.stores import Stores
 
 logger = logging.getLogger(__name__)

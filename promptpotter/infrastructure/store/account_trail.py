@@ -14,7 +14,7 @@ from promptpotter.domain.phases import (
     StopReason,
     stop_reason_outcome,
 )
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     AccountEventRecord,
     BankedStop,
     Device,

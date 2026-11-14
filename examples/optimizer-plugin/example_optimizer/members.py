@@ -17,7 +17,7 @@ from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
-from promptpotter.domain.run_records import CheckpointInputs
+from promptpotter.domain.records.run_records import CheckpointInputs
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:

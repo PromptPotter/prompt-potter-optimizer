@@ -258,12 +258,11 @@ def _dangling_handlers(out: str) -> Outcome:
     return (1, "a handler table names what does not resolve:\n" + out) if out.strip() else (0, "")
 
 
-# `StrictModel` and the record adapter build on first use, so a schema that cannot build raises
-# mid-run, on the first record of its kind; this builds every one the package defines.
+# `StrictModel` builds on first use, so a schema that cannot build raises mid-run, on the first
+# record of its kind; this builds every one the package defines.
 _SCHEMA_PROBE = """
 import importlib, pkgutil
 import promptpotter
-from promptpotter.domain.run_records import RECORD_ADAPTER
 from promptpotter.domain.strict_model import StrictModel
 for info in pkgutil.walk_packages(promptpotter.__path__, "promptpotter."):
     importlib.import_module(info.name)
@@ -277,7 +276,6 @@ for model in sorted(models, key=lambda m: f"{m.__module__}.{m.__qualname__}"):
         model.model_rebuild(force=True)
     except Exception as exc:
         print(f"  {model.__module__}.{model.__qualname__}: {exc}")
-RECORD_ADAPTER.rebuild(force=True)
 """
 
 

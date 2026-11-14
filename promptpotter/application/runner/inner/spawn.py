@@ -59,8 +59,8 @@ from promptpotter.domain.l4.proxies import (
 )
 from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
+from promptpotter.domain.records.run_records import SpawnedBy, SpawnedRecord
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import SpawnedBy
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import (
@@ -345,8 +345,8 @@ async def _run_inner_campaign(
     with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
         async with _open_seat(cell, store) as opened:
             session, config = opened.session, opened.cycle.config
-            session.store.campaigns.record_spawned(
-                session.hop, SpawnedBy.model_validate(spawned_by)
+            session.store.campaigns.append(
+                session.hop, SpawnedRecord(spawned_by=SpawnedBy.model_validate(spawned_by))
             )
             minted.append(session.hop)
             observers = await asyncio.to_thread(

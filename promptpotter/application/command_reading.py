@@ -11,7 +11,7 @@ from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
-from promptpotter.domain.run_records import LaunchedEffect, LaunchedJob
+from promptpotter.domain.records.run_records import LaunchedEffect, LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal

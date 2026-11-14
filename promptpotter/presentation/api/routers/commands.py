@@ -24,7 +24,7 @@ from promptpotter.domain.command_kinds import (
     Door,
     IngestUploadPayload,
 )
-from promptpotter.domain.run_records import LaunchAnswer
+from promptpotter.domain.records.run_records import LaunchAnswer
 from promptpotter.presentation.api.deps import (
     IdempotencyKeyDep,
     JobRegistryDep,

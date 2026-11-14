@@ -27,13 +27,7 @@ from promptpotter.application.scoring.paired import (
     read_arms,
 )
 from promptpotter.domain.arm_reading import ArmAbility, ElectionColumn
-from promptpotter.domain.bench import (
-    BENCH_HEADLINE,
-    COLUMN_GRADE,
-    BenchColumn,
-    BenchScore,
-    PartitionRecord,
-)
+from promptpotter.domain.bench import BENCH_HEADLINE, COLUMN_GRADE, BenchColumn, BenchScore
 from promptpotter.domain.campaign import (
     BenchSet,
     Campaign,
@@ -53,7 +47,8 @@ from promptpotter.domain.paired_reading import (
     MeasuredLift,
     ReadingState,
 )
-from promptpotter.domain.run_records import ComparisonExit
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import ComparisonExit
 from promptpotter.domain.spend import Budget, MeteredSpend, SpendRollup
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend

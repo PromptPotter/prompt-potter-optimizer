@@ -7,7 +7,7 @@ from typing import Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.domain.run_records import Device
+from promptpotter.domain.records.run_records import Device
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import append_jsonl, write_json, write_lock
 from promptpotter.infrastructure.store.read_model import read_file, read_rows

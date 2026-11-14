@@ -24,8 +24,9 @@ from promptpotter.domain.optimizer_state import OptimizerState
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, RoundArm
 from promptpotter.domain.pass_kinds import SCOPE_ROLES, IndividualWalk, individual_cells
-from promptpotter.domain.phases import ErrorRecord, StopReason
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import LevelSeries, RulerStamp

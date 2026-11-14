@@ -6,13 +6,13 @@ import re
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
-from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self, get_args
+from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self
 
 from pydantic import (
+    AfterValidator,
     ConfigDict,
     Field,
     SerializeAsAny,
-    TypeAdapter,
     field_validator,
     model_validator,
 )
@@ -20,7 +20,6 @@ from pydantic import (
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmRole, ArmState, Proposal, Proposed
 from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop, Subject
@@ -28,13 +27,12 @@ from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
 from promptpotter.domain.opt_search_point import NodePrompt
-from promptpotter.domain.optimizer_state import OptimizerState, StatePart
+from promptpotter.domain.optimizer_state import STATE_KINDS, OptimizerState, StatePart
 from promptpotter.domain.paired_reading import ArmKey, PriorStanding, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
-    ErrorRecord,
     GateKind,
     PauseCause,
     RunPhase,
@@ -53,6 +51,7 @@ from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     NodeSearchNarrowing,
 )
+from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.results import Election, RoundCells, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import LevelSeries, RulerReach
 from promptpotter.domain.run_standing import RunStanding
@@ -80,7 +79,7 @@ class CheckpointInputs(StatePart, kind=None):
     """One kind of decision, declared in the package taking it: everything its writer banks and its replay reads."""
 
 
-class ResumeCheckpointRecord(FrozenModel):
+class ResumeCheckpointRecord(CycleRecord):
     """``inputs_ref`` + ``outcome`` drive divergence; parsed by kind, so a record its writer never writes refuses at the read."""
 
     record_type: Literal["decision"] = "decision"
@@ -97,13 +96,13 @@ class ResumeCheckpointRecord(FrozenModel):
     def _read_by_kind(cls, raw: object) -> object:
         if not isinstance(raw, dict):
             return raw
-        inputs = StatePart.parse(raw["kind"], raw["inputs_ref"])
+        inputs = STATE_KINDS.parse(raw["kind"], raw["inputs_ref"])
         if not isinstance(inputs, CheckpointInputs):
             raise ValueError(f"{raw['kind']!r} is a state kind, never a decision's")
         return {**raw, "inputs_ref": inputs}
 
 
-class PhaseRecord(FrozenModel):
+class PhaseRecord(CycleRecord):
     record_type: Literal["phase"] = "phase"
     phase: str
     event: str
@@ -112,7 +111,7 @@ class PhaseRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RunPhaseRecord(FrozenModel):
+class RunPhaseRecord(CycleRecord):
     """The runner's own declaration: every other phase is derived off the last one, never said."""
 
     forks_inherit: ClassVar[bool] = False
@@ -163,7 +162,7 @@ class RunPhaseRecord(FrozenModel):
         )
 
 
-class BackendWarningRecord(FrozenModel):
+class BackendWarningRecord(CycleRecord):
     """An attempt that failed and will be retried: a transport fault or a 5xx, never a 429."""
 
     record_type: Literal["backend_warning"] = "backend_warning"
@@ -174,12 +173,12 @@ class BackendWarningRecord(FrozenModel):
     error_class: str | None = None
     status_code: int | None = None
     final: bool = False
-    query: str = ""
-    detail: str = ""
+    query: Annotated[str, AfterValidator(lambda q: q[:80])] = ""
+    detail: Annotated[str, AfterValidator(lambda d: d[:400])] = ""
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ProviderHoldRecord(FrozenModel):
+class ProviderHoldRecord(CycleRecord):
     """A 429 episode's open or strike, heard by a ledger from its own sends."""
 
     record_type: Literal["provider_hold"] = "provider_hold"
@@ -192,7 +191,7 @@ class ProviderHoldRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ProviderEasedRecord(FrozenModel):
+class ProviderEasedRecord(CycleRecord):
     """The provider answers the sender again: told at once to every ledger that heard the hold."""
 
     record_type: Literal["provider_eased"] = "provider_eased"
@@ -201,7 +200,7 @@ class ProviderEasedRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RoundEnteredRecord(FrozenModel):
+class RoundEnteredRecord(CycleRecord):
     """Entering N displaces N and every later round; ``rewound`` discards their proposals too."""
 
     record_type: Literal["round_entered"] = "round_entered"
@@ -258,13 +257,13 @@ class RoundStatement(RoundOutcome):
         return RoundRestatedRecord(**body | {"optimizer_state": optimizer_state})
 
 
-class RoundClosedRecord(RoundStatement):
+class RoundClosedRecord(RoundStatement, CycleRecord):
     """The run's clock: a close is its line's latest round, so its standing is the run's."""
 
     record_type: Literal["round_closed"] = "round_closed"
 
 
-class RoundRestatedRecord(RoundStatement):
+class RoundRestatedRecord(RoundStatement, CycleRecord):
     """A closed round stated again, never a close: it moves no clock and announces nothing. It is
     the round WHOLE, so a repair's restatement makes its ledger the owner of every arm in it."""
 
@@ -280,7 +279,7 @@ class WalkRead(FrozenModel):
     role: ArmRole
 
 
-class RoundProposedRecord(FrozenModel):
+class RoundProposedRecord(CycleRecord):
     """Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved."""
 
     record_type: Literal["round_proposed"] = "round_proposed"
@@ -295,7 +294,7 @@ class RoundProposedRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ArmRecord(FrozenModel):
+class ArmRecord(CycleRecord):
     """One arm's transition, LAST wins: proposed, walking, then cut or measured."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -308,7 +307,7 @@ class ArmRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class _Pass(FrozenModel):
+class _Pass(CycleRecord):
     """One cell of a pass: an ARM of the round where its `role`'s row says so."""
 
     round: int
@@ -328,7 +327,7 @@ class SampleStartedRecord(_Pass):
     sample_total: int
     position: int
     # Capped at the writer: the whole query is a dataset fact, in every measurement row.
-    query_preview: str = ""
+    query_preview: Annotated[str, AfterValidator(lambda q: q[:120])] = ""
     sample_lookahead: int = 1
 
 
@@ -397,7 +396,7 @@ class FlightWaiting(FrozenModel):
     since: float
 
 
-class FlightRecord(FrozenModel):
+class FlightRecord(CycleRecord):
     """The whole round's calls in flight, so it names no candidate."""
 
     record_type: Literal["flight"] = "flight"
@@ -412,7 +411,7 @@ class FlightRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RaceStandingRecord(FrozenModel):
+class RaceStandingRecord(CycleRecord):
     """Archive-only, not divergence-gated; ``p_best`` is about the arm ``current`` alone."""
 
     record_type: Literal["race_standing"] = "race_standing"
@@ -425,7 +424,7 @@ class RaceStandingRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class RaceCatchUpRecord(FrozenModel):
+class RaceCatchUpRecord(CycleRecord):
     """The catch-up walks one just-measured cell of ``arm`` took: no pass records their cells."""
 
     record_type: Literal["race_catch_up"] = "race_catch_up"
@@ -463,7 +462,7 @@ class CallPrice(FrozenModel):
         return bill_or_rate_usd(self.cost_usd, self.rate_priced_usd)
 
 
-class Hold(FrozenModel):
+class Hold(CycleRecord):
     """A hold, filed on the book of what it holds: on the account's charge book a run's or a call's
     money, open until a bill or a release closes it (a later hold of the same id restates its
     bound); on a cycle's ledger a job's claim of that cycle, until its run declares itself or the
@@ -533,7 +532,7 @@ class Lapse(FrozenModel):
 ChargeLine = Annotated[Hold | Bill | Release | Lapse, Field(discriminator="record_type")]
 
 
-class TokenUsageRecord(FrozenModel):
+class TokenUsageRecord(CycleRecord):
     """ONE answered send, or a replay; a send that reported no usage writes none."""
 
     record_type: Literal["token_usage"] = "token_usage"
@@ -578,7 +577,7 @@ class TokenUsageRecord(FrozenModel):
         return 0 if self.round is None else self.round
 
 
-class PricedKeyRecord(FrozenModel):
+class PricedKeyRecord(CycleRecord):
     """A key the search has PRICED, so a later read of it, resumed or not, prices nothing again."""
 
     record_type: Literal["priced_key"] = "priced_key"
@@ -610,7 +609,7 @@ class BankedSpend(FrozenModel):
         return UserSpend(**self.model_dump())
 
 
-class SpendTombstoneRecord(FrozenModel):
+class SpendTombstoneRecord(CycleRecord):
     """On the WORKSPACE ledger, so deleting a campaign's cycle cannot re-earn its ceiling; the
     account's charges are `store/wallet_store.py::ChargeBook`'s, which no delete reaches."""
 
@@ -637,7 +636,7 @@ class BankedStop(FrozenModel):
     subject: str
 
 
-class TrailTombstoneRecord(FrozenModel):
+class TrailTombstoneRecord(CycleRecord):
     """On the WORKSPACE ledger, so deleting a cycle cannot delete that its run stopped."""
 
     record_type: Literal["trail_tombstone"] = "trail_tombstone"
@@ -652,7 +651,7 @@ class TrailTombstoneRecord(FrozenModel):
         return Subject(self.campaign_id, self.cycle_id)
 
 
-class LLMCallStartRecord(FrozenModel):
+class LLMCallStartRecord(CycleRecord):
     """Pairs with :class:`LLMCallRecord` via ``call_id``, so a long call does not look frozen."""
 
     record_type: Literal["llm_call_start"] = "llm_call_start"
@@ -675,7 +674,7 @@ class LLMCallStartRecord(FrozenModel):
         return sorted(n for n in self.injection_dropped if n not in self.injection_chars)
 
 
-class LLMCallProgressRecord(FrozenModel):
+class LLMCallProgressRecord(CycleRecord):
     """Heartbeat while the provider call is blocked; cache replays skip it."""
 
     record_type: Literal["llm_call_progress"] = "llm_call_progress"
@@ -689,7 +688,7 @@ class LLMCallProgressRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LLMCallRecord(FrozenModel):
+class LLMCallRecord(CycleRecord):
     record_type: Literal["llm_call"] = "llm_call"
     node: str
     round: int | None = None
@@ -707,7 +706,7 @@ HealthState = Literal["held", "broken", "unverified"]
 HealthReader = Literal["probe", "poll"]
 
 
-class HealthRecord(FrozenModel):
+class HealthRecord(CycleRecord):
     """On the box's own WORKSPACE ledger: a probe's state CHANGED. ``unverified`` never is one."""
 
     record_type: Literal["health"] = "health"
@@ -739,7 +738,7 @@ def device_of(mobile_hint: str | None, user_agent: str | None) -> Device | None:
     return Device.PHONE if _PHONE_UA.search(user_agent) else Device.COMPUTER
 
 
-class AccountEventRecord(FrozenModel):
+class AccountEventRecord(CycleRecord):
     """On the WORKSPACE ledger; ``user_id`` is the acting principal, a delegate's own id in its delegator's tenant."""
 
     record_type: Literal["account_event"] = "account_event"
@@ -839,7 +838,7 @@ RoundWarningKind = Literal[
 RoundWarningSeverity = Literal["warning", "error"]
 
 
-class RoundWarningRecord(FrozenModel):
+class RoundWarningRecord(CycleRecord):
     """A SELF-HEAL the run continued past, mid-round or at its start; never re-add a kind with no emitter."""
 
     record_type: Literal["round_warning"] = "round_warning"
@@ -1029,7 +1028,7 @@ class CycleFinal(FrozenModel):
     result_pipeline_params: PipelineParams | None
 
 
-class ElectionRecord(Election):
+class ElectionRecord(Election, CycleRecord):
     """A round's election, the moment it is held: the close carries the same one."""
 
     record_type: Literal["election"] = "election"
@@ -1037,7 +1036,7 @@ class ElectionRecord(Election):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class StandingBudgetRecord(FrozenModel):
+class StandingBudgetRecord(CycleRecord):
     """A cycle's standing budget, LAST wins; read PHYSICALLY, so a fork never inherits one."""
 
     forks_inherit: ClassVar[bool] = False
@@ -1053,7 +1052,7 @@ class StandingBudgetRecord(FrozenModel):
     _cycle_axes = field_validator("budget")(cycle_axes_only)
 
 
-class CampaignCeilingRecord(FrozenModel):
+class CampaignCeilingRecord(CycleRecord):
     """The money axes an operator named for the whole campaign (`set-limits`), LAST wins on its ROOT's
     ledger, so every cycle of it reads one; every move lands through `jobs/quota.py::move_campaign_money`."""
 
@@ -1064,7 +1063,7 @@ class CampaignCeilingRecord(FrozenModel):
     _money_axes = field_validator("budget")(money_axes_only)
 
 
-class CycleShareRecord(FrozenModel):
+class CycleShareRecord(CycleRecord):
     """The cycle's share of its campaign's ceiling, LAST wins and never inherited; every move lands through `hold_moved`."""
 
     forks_inherit: ClassVar[bool] = False
@@ -1123,7 +1122,7 @@ class BackendRevision(FrozenModel):
         return f"the backend's connector expects revision {self.expected}, and {said}"
 
 
-class RunWiringRecord(FrozenModel):
+class RunWiringRecord(CycleRecord):
     """LAST wins, over the whole chain: a fork stands on its parent's until its own lands."""
 
     record_type: Literal["run_wiring"] = "run_wiring"
@@ -1143,7 +1142,7 @@ class RunWiringRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ScoringLockedRecord(FrozenModel):
+class ScoringLockedRecord(CycleRecord):
     """Appended once, as the origin is scored under dials; a config already locked appends none."""
 
     record_type: Literal["scoring_locked"] = "scoring_locked"
@@ -1164,7 +1163,7 @@ class PipelineRead(FrozenModel):
     knob_layers: dict[str, dict[str, KnobLayer]] = Field(default_factory=dict)
 
 
-class ResolvedRunRecord(FrozenModel):
+class ResolvedRunRecord(CycleRecord):
     """What a run init resolved, read over the chain: the read LAST wins, the roster FIRST."""
 
     record_type: Literal["resolved_run"] = "resolved_run"
@@ -1238,7 +1237,7 @@ class SpawnedBy(StrictModel):
         return RoundArm(round=self.round, arm=ArmKey(self.individual_id))
 
 
-class CycleMintedRecord(FrozenModel):
+class CycleMintedRecord(CycleRecord):
     """One per cycle's own ledger, after only the lines it adopted, and its first own fact: a chain
     is walked off it alone. A cycle runs every seed its chain's mints hold, root first."""
 
@@ -1281,7 +1280,7 @@ def sibling_cycle_id(parent: str | None) -> str | None:
     return parts[1] if len(parts) == 2 and parts[0] == ".." else None
 
 
-class CycleFinalRecord(FrozenModel):
+class CycleFinalRecord(CycleRecord):
     """Banked only where the cycle's own runner stops it; a later ``running`` retires it."""
 
     record_type: Literal["cycle_final"] = "cycle_final"
@@ -1291,7 +1290,7 @@ class CycleFinalRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class LaunchClockRecord(FrozenModel):
+class LaunchClockRecord(CycleRecord):
     """Banked by the cycle holding the campaign's line, at every launch end, a pause's included."""
 
     record_type: Literal["launch_clock"] = "launch_clock"
@@ -1302,7 +1301,7 @@ class LaunchClockRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class CycleSupersededRecord(FrozenModel):
+class CycleSupersededRecord(CycleRecord):
     """On the LEFT-BEHIND side of a supersede cut; a later ``running`` here takes the line back."""
 
     record_type: Literal["cycle_superseded"] = "cycle_superseded"
@@ -1310,7 +1309,7 @@ class CycleSupersededRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class ForkGradedRecord(FrozenModel):
+class ForkGradedRecord(CycleRecord):
     """A cut's MEASURED direction, on the branch: it overrides the one its trigger implies."""
 
     record_type: Literal["fork_graded"] = "fork_graded"
@@ -1318,7 +1317,7 @@ class ForkGradedRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class InterventionRecord(FrozenModel):
+class InterventionRecord(CycleRecord):
     """One is enough to make the cycle babysat for good; appended the moment it happens."""
 
     record_type: Literal["intervention"] = "intervention"
@@ -1343,7 +1342,7 @@ class ComparisonExit(enum.StrEnum):
     SET_LIMITS = "set_limits"
 
 
-class LeftComparisonRecord(FrozenModel):
+class LeftComparisonRecord(CycleRecord):
     """Appended on an arm's cycle as the act runs: from it on, the arm's line reads uncontrolled."""
 
     record_type: Literal["left_comparison"] = "left_comparison"
@@ -1351,69 +1350,12 @@ class LeftComparisonRecord(FrozenModel):
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
-class SpawnedRecord(FrozenModel):
+class SpawnedRecord(CycleRecord):
     """Appended at every open, so the last names the work-item the cycle last measured for."""
 
     record_type: Literal["spawned"] = "spawned"
     spawned_by: SpawnedBy
     timestamp: str = Field(default_factory=utcnow_iso)
-
-
-CycleRecord = Annotated[
-    ResumeCheckpointRecord
-    | AccountEventRecord
-    | ArmRecord
-    | BackendWarningRecord
-    | CampaignCeilingRecord
-    | FlightRecord
-    | PricedKeyRecord
-    | CycleFinalRecord
-    | CycleMintedRecord
-    | CycleShareRecord
-    | CycleSupersededRecord
-    | ElectionRecord
-    | ErrorRecord
-    | ForkGradedRecord
-    | HealthRecord
-    | Hold
-    | InterventionRecord
-    | LaunchClockRecord
-    | LeftComparisonRecord
-    | LLMCallProgressRecord
-    | LLMCallRecord
-    | LLMCallStartRecord
-    | PartitionRecord
-    | PhaseRecord
-    | ProviderEasedRecord
-    | ProviderHoldRecord
-    | RaceCatchUpRecord
-    | RaceStandingRecord
-    | ResolvedRunRecord
-    | RoundClosedRecord
-    | RoundEnteredRecord
-    | RoundProposedRecord
-    | RoundRestatedRecord
-    | RoundWarningRecord
-    | StandingBudgetRecord
-    | RunPhaseRecord
-    | RunWiringRecord
-    | SampleScoredRecord
-    | SampleStartedRecord
-    | ScoringLockedRecord
-    | SpawnedRecord
-    | SpendTombstoneRecord
-    | TrailTombstoneRecord
-    | TokenUsageRecord,
-    Field(discriminator="record_type"),
-]
-
-RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(
-    CycleRecord, config=ConfigDict(defer_build=True)
-)
-
-RECORD_KINDS: frozenset[str] = frozenset(
-    arm.model_fields["record_type"].default for arm in get_args(get_args(CycleRecord)[0])
-)
 
 
 class RebaseRequest(FrozenModel):

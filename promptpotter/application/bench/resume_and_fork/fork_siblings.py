@@ -12,13 +12,13 @@ from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.arms import ArmState, Proposed
-from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_params import PipelineParams, lay_nodes
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import (
     FORK_DIRECTION,
     CycleMintedRecord,
     ForkCutFrom,
@@ -41,7 +41,7 @@ from promptpotter.shared.measurement_context import MeasurementRole
 if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import JobRegistry
     from promptpotter.domain.command_kinds import ForkCyclePayload
-    from promptpotter.domain.run_records import CycleSeed
+    from promptpotter.domain.records.run_records import CycleSeed
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
     from promptpotter.infrastructure.store.stores import Stores
     from promptpotter.shared.identity import Principal

@@ -49,7 +49,7 @@ from promptpotter.application.runner.mint import (
 )
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.domain.arms import PointContext
-from promptpotter.domain.bench import BankPartition, PartitionRecord, partition_bank
+from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import (
     Arm,
     Campaign,
@@ -70,7 +70,8 @@ from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phases import NextAct
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import (
     BackendRevision,
     CycleMintedRecord,
     CycleSeed,
@@ -79,6 +80,7 @@ from promptpotter.domain.run_records import (
     RunWiringRecord,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
 from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_framing,
     runnable_definition,
@@ -276,7 +278,7 @@ def resolve_cycle_plan(
         admits=campaign_admits(cycle.config, configured.pipeline_schema),
         partition=partition,
         # Slots in the session's bank, whichever rows of it the caller hands in.
-        drawn=partition.record(dataset_hash=session.bank.dataset_hash),
+        drawn=PartitionRecord.of(partition, dataset_hash=session.bank.dataset_hash),
         cycle=cycle,
         session=configured,
     )
@@ -362,7 +364,7 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
     if campaign.root_content_hash == checked.origin_hash:
         return plan
     campaigns = session.store.campaigns
-    recorded = campaigns.read_resolved_run(campaign.root_hop)
+    recorded = scan_resolved_run(campaigns.chain(campaign.root_hop))
     wired = campaigns.last(campaign.root_hop, RunWiringRecord)
     raise ConfigDriftError(
         campaign,

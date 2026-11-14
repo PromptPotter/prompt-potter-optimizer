@@ -37,17 +37,18 @@ from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
 from promptpotter.domain.phase_views import OptimizerStepExitView
 from promptpotter.domain.phases import StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
-from promptpotter.domain.results import Reelection
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     CheckpointInputs,
     ConfigOverrides,
     ForkTrigger,
     RebaseRequest,
+    RoundWarningRecord,
 )
+from promptpotter.domain.results import Reelection
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning
+from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.shared.identity import Principal
 
 if TYPE_CHECKING:
@@ -59,8 +60,8 @@ if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.knobs import EscalationLadder
     from promptpotter.domain.paired_reading import RoundArm
     from promptpotter.domain.phase_views import OptimizerStepEnterView
+    from promptpotter.domain.records.run_records import RoundStatement
     from promptpotter.domain.ruler import AbilityReading, LevelSeries
-    from promptpotter.domain.run_records import RoundStatement
 
 logger = logging.getLogger(__name__)
 
@@ -411,19 +412,22 @@ async def _run_transition(
             layer.name,
             parse_err.diagnosis(),
         )
-        emit_round_warning(
-            kind="layer_parse_failure",
-            severity="error",
-            message=(
-                f"{layer.name} returned unusable output "
-                f"({'empty/truncated' if parse_err.is_empty else 'schema-noncompliant'}) "
-                "— the prior framing was kept and the loop continues."
-            ),
-            detail={
-                "node": layer.name,
-                "layer": layer.layer_id,
-                **parse_err.warning_detail(),
-            },
+        append_record(
+            RoundWarningRecord(
+                kind="layer_parse_failure",
+                severity="error",
+                message=(
+                    f"{layer.name} returned unusable output "
+                    f"({'empty/truncated' if parse_err.is_empty else 'schema-noncompliant'}) "
+                    "— the prior framing was kept and the loop continues."
+                ),
+                round=current_round(),
+                detail={
+                    "node": layer.name,
+                    "layer": layer.layer_id,
+                    **parse_err.warning_detail(),
+                },
+            )
         )
         ctx.read(Progress).phase(
             layer.phase.phase, "exit", OptimizerStepExitView(headline="", details=(), audit=None)

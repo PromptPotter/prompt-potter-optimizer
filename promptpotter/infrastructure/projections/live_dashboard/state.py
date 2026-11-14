@@ -14,10 +14,11 @@ from promptpotter.domain.dashboard_rows import (
     VerificationMark,
 )
 from promptpotter.domain.paired_reading import ArmKey, ArmName
-from promptpotter.domain.phases import DashboardState, ErrorRecord, RunPhase, StopReason
+from promptpotter.domain.phases import DashboardState, RunPhase, StopReason
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import BackendRevision, DefaultsDrift, RunWiringRecord
 from promptpotter.domain.round_audit import NodeBlock
 from promptpotter.domain.ruler import LevelSeries
-from promptpotter.domain.run_records import BackendRevision, DefaultsDrift, RunWiringRecord
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel

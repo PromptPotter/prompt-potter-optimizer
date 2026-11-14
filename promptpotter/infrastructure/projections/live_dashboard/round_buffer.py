@@ -6,12 +6,12 @@ from typing import NamedTuple
 from promptpotter.domain.arms import ArmState, arm_name
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey, ArmName
-from promptpotter.domain.results import Election
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     AnnouncedArms,
     ArmRecord,
     SampleScoredRecord,
 )
+from promptpotter.domain.results import Election
 from promptpotter.domain.scoring import Grade, MeasuredCell
 
 

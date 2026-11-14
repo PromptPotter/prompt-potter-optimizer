@@ -33,7 +33,6 @@ from promptpotter.application.scoring.closed_rounds import (
 )
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.arms import Cut, Measuring, Proposed, arm_name
-from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.cells import (
     Cell,
@@ -52,6 +51,7 @@ from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pass_kinds import individual_cells
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import Bank
 from promptpotter.domain.scoring import (

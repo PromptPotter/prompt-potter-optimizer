@@ -62,7 +62,7 @@ from promptpotter.domain.command_kinds import (
     ReadKind,
 )
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse
-from promptpotter.domain.run_records import LaunchAnswer
+from promptpotter.domain.records.run_records import LaunchAnswer
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import (
     ConflictError,

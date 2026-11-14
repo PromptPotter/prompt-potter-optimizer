@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from promptpotter.application.commands.dispatcher import Applier
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import campaign_sends
-from promptpotter.domain.run_records import ComparisonExit
+from promptpotter.domain.records.run_records import ComparisonExit
 from promptpotter.domain.spend import MONEY_AXES
 from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.identity import acting_principal

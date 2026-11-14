@@ -29,7 +29,7 @@ from promptpotter.domain.job import (
     PaidCall,
     ScoringPass,
 )
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     CampaignCeilingRecord,
     CycleShareRecord,
     Hold,

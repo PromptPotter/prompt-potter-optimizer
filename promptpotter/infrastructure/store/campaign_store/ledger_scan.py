@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, assert_never, cast, get_args
 
 from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
-from promptpotter.domain.bench import BenchReading, BenchScore, PartitionRecord
+from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import IndividualWalk
@@ -17,11 +17,12 @@ from promptpotter.domain.phase_views import (
     InitExitView,
     VerificationGradedView,
 )
-from promptpotter.domain.phases import CampaignPhase, ErrorRecord, RunPhase, StopReason
+from promptpotter.domain.phases import CampaignPhase, RunPhase, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
-from promptpotter.domain.results import RoundCells
-from promptpotter.domain.ruler import LevelSeries
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import (
     BABYSAT,
     AnnouncedArms,
     ArmRecord,
@@ -29,7 +30,6 @@ from promptpotter.domain.run_records import (
     ComparisonExit,
     CycleFinalRecord,
     CycleMintedRecord,
-    CycleRecord,
     CycleShareRecord,
     CycleSupersededRecord,
     ElectionRecord,
@@ -61,6 +61,8 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
     WallClock,
 )
+from promptpotter.domain.results import RoundCells
+from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import WalkedCell
 from promptpotter.domain.spend import (

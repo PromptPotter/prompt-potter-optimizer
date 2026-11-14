@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import functools
-import importlib
 import inspect
-import pkgutil
 from collections.abc import Mapping
 from types import MappingProxyType, ModuleType
 from typing import Annotated, Any, ClassVar
@@ -24,6 +22,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 from promptpotter.application.optimizers.potter.records import ExplorationBudget, L1Layout
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.shared.hashing import shapes_optimizer_prompt
+from promptpotter.shared.named_rows import walked
 
 # The one citable name that is NOT a panel: the escape hatch a measured stall licenses.
 STALL_EXPLORATION: Annotated[str, shapes_optimizer_prompt] = "stall_exploration"
@@ -33,11 +32,7 @@ STALL_EXPLORATION: Annotated[str, shapes_optimizer_prompt] = "stall_exploration"
 @functools.cache
 def renderer_modules() -> tuple[ModuleType, ...]:
     """Walked, never listed: a hand-kept tuple silently drops a module from registration and the digest. Name order is digest order."""
-    return tuple(
-        importlib.import_module(f"{_injections_pkg.__name__}.{m.name}")
-        for m in sorted(pkgutil.iter_modules(_injections_pkg.__path__), key=lambda m: m.name)
-        if m.name != "registry"
-    )
+    return walked(_injections_pkg, skip="registry")
 
 
 @shapes_optimizer_prompt

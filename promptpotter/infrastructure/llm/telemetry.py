@@ -4,35 +4,21 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from promptpotter.domain.backend import BackpressureReading
-from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phases import ErrorRecord, StopReason
-from promptpotter.domain.run_records import (
-    BackendWarningRecord,
+from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.run_records import (
     Bill,
     CallPrice,
-    CycleRecord,
     PricedKeyRecord,
-    ProviderEasedRecord,
-    ProviderHoldRecord,
-    RaceCatchUpRecord,
-    RoundWarningKind,
-    RoundWarningRecord,
-    RoundWarningSeverity,
-    SampleScoredRecord,
-    SampleStartedRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.scoring import GradedCell, WalkedCell
 from promptpotter.domain.spend import TokenAccount, TokenUsageKind
 from promptpotter.infrastructure.llm.pricing import compute_usd
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
 from promptpotter.infrastructure.store.io import write_lock
 from promptpotter.infrastructure.store.layout import CampaignLayout, cycle_ledgers
-from promptpotter.shared.measurement_context import MeasurementRole, measured_pass
+from promptpotter.shared.measurement_context import measured_pass
 from promptpotter.shared.run_scope import UNBOUND, run_scope
 
 if TYPE_CHECKING:
@@ -108,11 +94,11 @@ def bound_round() -> int:
     return round_num
 
 
-def append_record(record: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
+def append_record(*records: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
     """``None``: the bound ledger is muted. A failed append raises to the call site."""
     if ledger is None:
-        ledger = bound_ledger(type(record).__name__)
-    return None if ledger is None else ledger.append(record)
+        ledger = bound_ledger(type(records[0]).__name__)
+    return None if ledger is None else ledger.append(*records)
 
 
 def rate_priced_usd(
@@ -180,7 +166,7 @@ def emit_replay_usage(
         mirrored=False,
     )
     if book is None:
-        append_record(record, ledger)
+        append_record(record, ledger=ledger)
     else:
         book.file(record, ledger)
 
@@ -209,54 +195,6 @@ def token_usage_record(
         round=current_round(),
         role=cand.role if (cand := measured_pass()) else None,
     )
-
-
-def emit_backend_warning(
-    *,
-    kind: str,
-    attempt: int,
-    max_attempts: int,
-    wait_s: float,
-    query: str,
-    detail: str = "",
-    error_class: str | None = None,
-    status_code: int | None = None,
-    final: bool = False,
-) -> None:
-    append_record(
-        BackendWarningRecord(
-            kind=kind,
-            attempt=attempt,
-            max_attempts=max_attempts,
-            wait_s=float(wait_s),
-            error_class=error_class,
-            status_code=status_code,
-            final=final,
-            detail=detail[:400],
-            query=query[:80],
-        )
-    )
-
-
-def emit_provider_hold(
-    *,
-    ledger: CycleEventLog,
-    sender: str,
-    scope: str,
-    strikes: int,
-    gives_up_at: float,
-    reading: BackpressureReading,
-) -> None:
-    append_record(
-        ProviderHoldRecord(
-            sender=sender, scope=scope, strikes=strikes, gives_up_at=gives_up_at, reading=reading
-        ),
-        ledger,
-    )
-
-
-def emit_provider_eased(*, ledger: CycleEventLog, sender: str, held_s: float) -> None:
-    append_record(ProviderEasedRecord(sender=sender, held_s=held_s), ledger)
 
 
 # The campaign dir whose cycles' ledgers name the cells (`ReplayFeed.cell_key`) and calls
@@ -290,107 +228,3 @@ def claim_campaign_price(key: str) -> bool:
 
 def claim_call_price(reuse_key: str) -> bool:
     return claim_campaign_price(f"call:{reuse_key}")
-
-
-def emit_error_record(
-    exc: BaseException, *, stop_reason: StopReason, traceback: str | None
-) -> ErrorRecord:
-    record = ErrorRecord.raised(
-        exc,
-        kind=type(exc).__name__,
-        stop_reason=stop_reason,
-        traceback=traceback,
-        round=current_round(),
-    )
-    append_record(record)
-    return record
-
-
-def emit_round_warning(
-    *,
-    kind: RoundWarningKind,
-    message: str,
-    severity: RoundWarningSeverity = "warning",
-    detail: dict[str, Any] | None = None,
-) -> None:
-    append_record(
-        RoundWarningRecord(
-            kind=kind,
-            severity=severity,
-            message=message,
-            round=current_round(),
-            detail=dict(detail or {}),
-        )
-    )
-
-
-# Capped at the writer, never sliced off a full query by a reader.
-QUERY_PREVIEW_CHARS = 120
-
-
-def emit_sample_started(
-    *,
-    individual_id: str,
-    role: MeasurementRole,
-    sample_idx: int,
-    sample_total: int,
-    position: int,
-    query: str,
-    sample_lookahead: int,
-) -> None:
-    append_record(
-        SampleStartedRecord(
-            round=bound_round(),
-            individual_id=individual_id,
-            role=role,
-            sample_idx=sample_idx,
-            sample_total=sample_total,
-            position=int(position),
-            query_preview=query[:QUERY_PREVIEW_CHARS],
-            sample_lookahead=int(sample_lookahead),
-        )
-    )
-
-
-def emit_sample_scored(
-    *,
-    individual_id: str,
-    role: MeasurementRole,
-    sample_idx: int,
-    sample_total: int,
-    position: int,
-    cell: GradedCell,
-    running: ScoreSummary | None,
-) -> None:
-    append_record(
-        SampleScoredRecord(
-            round=bound_round(),
-            individual_id=individual_id,
-            role=role,
-            sample_idx=sample_idx,
-            sample_total=sample_total,
-            position=int(position),
-            result=cell,
-            running=running,
-        )
-    )
-
-
-def emit_race_catch_up(
-    *,
-    member: str,
-    arm: ArmKey,
-    sample_key: str,
-    position: int,
-    cells: dict[ArmKey, WalkedCell],
-) -> None:
-    append_record(
-        RaceCatchUpRecord(
-            round=bound_round(),
-            arm=arm,
-            member=member,
-            sample_key=sample_key,
-            position=int(position),
-            cells=cells,
-        )
-    )

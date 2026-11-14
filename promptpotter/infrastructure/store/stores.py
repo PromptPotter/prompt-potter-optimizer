@@ -9,8 +9,9 @@ from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, WorkspaceDir
-from promptpotter.domain.phases import ErrorRecord, ProducerState, RunState, StopReason
-from promptpotter.domain.run_records import CycleSupersededRecord, RunPhaseRecord
+from promptpotter.domain.phases import ProducerState, RunState, StopReason
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import CycleSupersededRecord, RunPhaseRecord
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.run_state import derive_run_state, run_owed

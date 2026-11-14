@@ -46,6 +46,7 @@ from factories import (
     filed_under,
     inner_sandbox,
     jumping_clock,
+    ledger_records,
     level_series,
     loop_session,
     measurement,
@@ -327,21 +328,23 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
 )
 from promptpotter.domain.pool import BlockPool
-from promptpotter.domain.results import InRunCells, Reelection, RoundResult
-from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import ThetaCaveat
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import (
     ArmRecord,
     CampaignCeilingRecord,
     ComparisonExit,
     ForkSpec,
     ForkTrigger,
+    InterventionRecord,
     PhaseRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     RunWiringRecord,
 )
+from promptpotter.domain.results import InRunCells, Reelection, RoundResult
+from promptpotter.domain.results_health import is_deprecated
+from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.run_standing import (
     LineOutlay,
     RunStanding,
@@ -2245,7 +2248,7 @@ def _pause_mid_pass(
     session.state.control = loop_control
     [*_, stopped_view] = [
         record.view
-        for _, record in ledger.iter()
+        for record in ledger_records(ledger)
         if isinstance(record, PhaseRecord) and record.event == "graded"
     ]
     return phases, acks, stopped_view
@@ -2591,7 +2594,7 @@ def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_re
             "the band stood beside a recorded level over rows it never re-scored (bl3.B2)"
         )
         assert band in [
-            record.view for _, record in ledger.iter() if isinstance(record, PhaseRecord)
+            record.view for record in ledger_records(ledger) if isinstance(record, PhaseRecord)
         ], "the band was not filed on its cycle's ledger"
 
 
@@ -2623,7 +2626,7 @@ def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorde
             )
         bands = [
             record.view
-            for _, record in ledger.iter()
+            for record in ledger_records(ledger)
             if isinstance(record, PhaseRecord)
             and isinstance(record.view, VerificationGradedView)
             and record.view.verification.kind is MeasurementRole.NOISE_FLOOR
@@ -2668,7 +2671,7 @@ def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
                 backend_revision=None,
             )
         )
-        for at, record in ledger.iter():
+        for at, record in enumerate(ledger_records(ledger)):
             if at >= failed_from:
                 dashboard.feed(record)
         served = dashboard.value()
@@ -4024,7 +4027,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             )
             set_cycle(cycle, line=line)
             close_round(ledger, line, cycle=cycle)
-        warned = [r.kind for _, r in ledger.iter() if isinstance(r, RoundWarningRecord)]
+        warned = [r.kind for r in ledger_records(ledger) if isinstance(r, RoundWarningRecord)]
         assert warned == ["derived_file_stale"] and round_files.round_file(2).exists(), (
             "a round file's disk fault unwound its close, went unreported, or stopped the next"
         )
@@ -4321,7 +4324,9 @@ def _evidence_campaign(
     stores.tenant_datasets.put_bank(held)
     for cycle in {root, hop}:
         stores.campaigns.mint_cycle(cycle)
-        stores.campaigns.append(cycle, partition.record(dataset_hash=held.dataset_hash))
+        stores.campaigns.append(
+            cycle, PartitionRecord.of(partition, dataset_hash=held.dataset_hash)
+        )
         ledgers[cycle] = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(cycle)))
         arm_walk(
             ledgers[cycle],
@@ -4351,7 +4356,7 @@ def _evidence_campaign(
             cycle=seat(stores, bank=_H2H_BANK).cycle,
         )
     if steered:
-        stores.campaigns.record_intervention(hop, kind="skip")
+        stores.campaigns.append(hop, InterventionRecord(kind="skip"))
     passes: dict[str, VerificationPass] = {}
     for role, level in (("origin", origin), ("selected", selected))[: 1 + graded]:
         # The origin is ONE individual every campaign sends; each pick is its own.

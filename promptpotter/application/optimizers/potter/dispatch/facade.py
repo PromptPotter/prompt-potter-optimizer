@@ -52,9 +52,10 @@ from promptpotter.domain import ruler
 from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pool import EARNED_SOURCE, BlockPool, DemoPool
+from promptpotter.domain.records.run_records import RoundWarningRecord
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.run_standing import rounds_without_advance
-from promptpotter.infrastructure.llm.telemetry import emit_round_warning
+from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.shared.errors import PromptCompositionError
 from promptpotter.shared.run_scope import RunScope, scoped
 
@@ -110,20 +111,22 @@ def _cap_runaway(name: str, items: list[Item], cap: int) -> list[Item]:
         cap,
         len(items) - len(kept),
     )
-    emit_round_warning(
-        kind="injection_budget_overrun",
-        severity="warning",
-        message=(
-            f"Optimizer prompt section {name!r} ran {total - cap} chars over its {cap}-char "
-            f"runaway backstop — {len(items) - len(kept)} item(s) did not reach the LLM. This is "
-            "a state panel, so the budget could not thin it; the size itself is the anomaly."
-        ),
-        detail={
-            "injection": name,
-            "rendered_chars": total,
-            "cap": cap,
-            "items_dropped": len(items) - len(kept),
-        },
+    append_record(
+        RoundWarningRecord(
+            kind="injection_budget_overrun",
+            message=(
+                f"Optimizer prompt section {name!r} ran {total - cap} chars over its {cap}-char "
+                f"runaway backstop — {len(items) - len(kept)} item(s) did not reach the LLM. This "
+                "is a state panel, so the budget could not thin it; the size itself is the anomaly."
+            ),
+            round=current_round(),
+            detail={
+                "injection": name,
+                "rendered_chars": total,
+                "cap": cap,
+                "items_dropped": len(items) - len(kept),
+            },
+        )
     )
     return kept
 

@@ -1,4 +1,4 @@
-"""**A ray reads each cycle's own file**: ``CycleEventLog.iter`` is an own-file read, and a fork's prefix lies in its ancestors' files, which ``ledger_chain`` joins."""
+"""**A ray reads each cycle's own file**: a ledger file is an own-file read, and a fork's prefix lies in its ancestors' files, which ``ledger_chain`` joins."""
 
 from __future__ import annotations
 
@@ -16,7 +16,8 @@ from promptpotter.domain.activity import ActivityFeed, ActivityItem
 from promptpotter.domain.cycle_paths import CyclePath, Subject
 from promptpotter.domain.hierarchy import MAX_STEP_LIMIT, HierarchyStep, HierarchySteps, StepFacts
 from promptpotter.domain.projection_envelope import bearing_record
-from promptpotter.domain.run_records import RECORD_KINDS, CycleRecord, LLMCallProgressRecord
+from promptpotter.domain.records import RECORDS, CycleRecord
+from promptpotter.domain.records.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.store.layout import (
     course_validator_ns,
     cycle_dir_for,
@@ -35,8 +36,8 @@ RayCursor = tuple[float, str, int]
 
 _INNER_KINDS: frozenset[str] = frozenset({"cycle_minted", "round_closed", "round_warning", "error"})
 
-assert _INNER_KINDS <= RECORD_KINDS, (
-    f"curation names unknown record kinds: {sorted(_INNER_KINDS - RECORD_KINDS)}"
+assert RECORDS.registered().keys() >= _INNER_KINDS, (
+    f"curation names unknown record kinds: {sorted(_INNER_KINDS - RECORDS.registered().keys())}"
 )
 
 # A validator input that moves on DEPLOY, not on a write: left out, a changed one 304s forever.

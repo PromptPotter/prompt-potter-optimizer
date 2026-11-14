@@ -40,7 +40,7 @@ from promptpotter.application.scoring.paired import MemberRows, grade_measurands
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
-from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BandedValue, PartitionRecord
+from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BandedValue
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -53,7 +53,8 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_views import VerificationEnterView, VerificationGradedView
 from promptpotter.domain.phases import STOP_REASON_INFO
-from promptpotter.domain.run_records import PhaseRecord, VerifySaturated
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import PhaseRecord, VerifySaturated
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import (

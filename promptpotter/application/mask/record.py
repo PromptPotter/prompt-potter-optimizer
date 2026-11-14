@@ -4,8 +4,8 @@ from pydantic import Field
 
 from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.records.run_records import ResumeCheckpointRecord
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.worded import Worded
 

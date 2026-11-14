@@ -108,9 +108,9 @@ from promptpotter.domain.optimizer_state import PARSE_FAILURE_MALFORMED, PARSE_F
 from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.records.run_records import CycleSeed, OriginGatePass
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import OnDivergence, RunMode
-from promptpotter.domain.run_records import CycleSeed, OriginGatePass
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
@@ -866,7 +866,7 @@ def pausing_in_walk(stores: Stores, round_num: int) -> Callable[[], Awaitable[No
             return
         (campaign,) = stores.campaigns.list_campaigns(lifecycle="all")
         hop = campaign.root_hop
-        if stores.campaigns.round_proposals(hop, at) is None:
+        if stores.campaigns.standing_rounds(hop, moment=None).proposals.get(at) is None:
             return
         asked = True
         payload = PauseCyclePayload(

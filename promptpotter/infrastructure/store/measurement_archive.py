@@ -260,17 +260,15 @@ class _CellFile:
         self.refresh(path)
         held = self._mark.end
         whole = self._stat is None or self._stat[1] == held
-        rows = [answer.wire() for answer in answers]
-        landed = append_jsonl(path, *rows)
-        if not (whole and landed.start == held):
+        landed = append_jsonl(path, *(answer.wire() for answer in answers))
+        if not (whole and landed.at.start == held):
             return
         # Through JSON, as a reader folds them: a tuple is a list on disk.
-        lines = [json.dumps(row, ensure_ascii=False) for row in rows]
-        fresh = [FiledAnswer.from_wire(json.loads(line)) for line in lines]
+        fresh = [FiledAnswer.from_wire(json.loads(line)) for line in landed.lines]
         self.rows.extend(fresh)
         self.by_id.update((answer.answer, answer) for answer in fresh)
         # The next refresh asks the mark's identity rule whether the file is still the one appended to.
-        self._mark = FileMark(landed.stop, self._mark.inode, (lines[-1] + "\n").encode("utf-8"))
+        self._mark = FileMark(landed.at.stop, self._mark.inode, landed.lines[-1] + b"\n")
         self._stat = None
 
 

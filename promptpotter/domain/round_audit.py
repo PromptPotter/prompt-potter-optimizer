@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import Field
 
-from promptpotter.domain.run_records import RoundWarningKind, RoundWarningSeverity
+from promptpotter.domain.records.run_records import RoundWarningKind, RoundWarningSeverity
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 

@@ -12,6 +12,7 @@ import pytest
 from factories import (
     backend_client,
     jumping_clock,
+    ledger_records,
     pipeline_schema,
     samples,
     spend_book,
@@ -26,7 +27,7 @@ from promptpotter.connectors import dbllmbench, dspy_module, harbor, n8n
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
-from promptpotter.domain.run_records import TokenUsageRecord
+from promptpotter.domain.records.run_records import TokenUsageRecord
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -41,11 +42,7 @@ async def _no_wait(*_: Any) -> None:
 
 
 def _lm_bills(ledger: Path) -> list[TokenUsageRecord]:
-    return [
-        r
-        for _, r in CycleEventLog(ledger).iter()
-        if isinstance(r, TokenUsageRecord) and r.input_tokens
-    ]
+    return [r for r in ledger_records(ledger) if isinstance(r, TokenUsageRecord) and r.input_tokens]
 
 
 def _scripted_lm(sends: list[int], script: list[Exception]) -> Any:

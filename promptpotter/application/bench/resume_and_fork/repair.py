@@ -12,7 +12,7 @@ from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.cell_fold import repairable_holes
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.run_records import ForkDirection, ForkTrigger
+from promptpotter.domain.records.run_records import ForkDirection, ForkGradedRecord, ForkTrigger
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -81,7 +81,7 @@ def _rebank_on_branch(
     for t in rounds:
         if t.round not in retired:
             continue
-        offset = session.store.campaigns.rebank_round(
+        offset = session.store.campaigns.append(
             branch,
             restated_round(
                 t,
@@ -242,8 +242,11 @@ async def apply_correction(
             len(cut.retirements),
             repair_target,
         )
-    campaign_store.grade_fork(
-        branch, ForkDirection.EQUIVALENT if equivalent else ForkDirection.SUPERSEDE
+    campaign_store.append(
+        branch,
+        ForkGradedRecord(
+            direction=ForkDirection.EQUIVALENT if equivalent else ForkDirection.SUPERSEDE
+        ),
     )
     if equivalent:
         logger.warning(

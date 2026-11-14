@@ -35,11 +35,11 @@ from promptpotter.config.paths import default_projects_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
 from promptpotter.domain.campaign_config import OptimizerChoice
-from promptpotter.domain.optimizer_state import StatePart
+from promptpotter.domain.optimizer_state import STATE_KINDS
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.run_records import BackendRevision, PipelineRead
+from promptpotter.domain.records.run_records import BackendRevision, PipelineRead
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient
@@ -214,7 +214,7 @@ def complete_registries(*, every_treatment: bool = True) -> None:
     optimizers.MANIFESTS.complete()
     for member in optimizers.NODE_MEMBERS.table.values():
         member.complete()
-    StatePart.complete()
+    STATE_KINDS.complete()
     if every_treatment:
         for name in optimizers.MANIFESTS.table:
             read_treatment(name)

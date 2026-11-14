@@ -70,7 +70,6 @@ from promptpotter.application.scoring.closed_rounds import (
 )
 from promptpotter.application.scoring.paired import MemberRows, as_family
 from promptpotter.domain.arms import Concluded, Proposed, arm_name
-from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
     flatten_prompts,
@@ -86,6 +85,7 @@ from promptpotter.domain.paired_reading import (
     PairedReading,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
+from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import CellSheet, GradedCell, ScoringFormulaError, WalkedCell
 from promptpotter.domain.spend import SpendRollup

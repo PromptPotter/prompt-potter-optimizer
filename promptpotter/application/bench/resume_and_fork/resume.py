@@ -10,9 +10,9 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.scoring.closed_rounds import closed_rounds
+from promptpotter.domain.records.run_records import ComparisonExit, ForkTrigger
 from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_mode import OnDivergence
-from promptpotter.domain.run_records import ComparisonExit, ForkTrigger
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 

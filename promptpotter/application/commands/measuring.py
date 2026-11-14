@@ -7,7 +7,7 @@ from promptpotter.application.jobs.launcher.admission import campaign_sends, pai
 from promptpotter.application.scoring import passes
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.phase_views import VerificationGradedView
-from promptpotter.domain.run_records import VerifySaturated
+from promptpotter.domain.records.run_records import VerifySaturated
 from promptpotter.domain.spend import Budget
 from promptpotter.shared.measurement_context import MeasurementRole
 

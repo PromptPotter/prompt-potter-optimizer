@@ -585,10 +585,22 @@ def _cut_unterminated(name: str) -> None:
                 f.truncate(size - len(_last_line(f, size)))
 
 
-def append_jsonl(path: Path, *rows: dict[str, Any], durable: bool = False) -> range:
-    """THE appender of JSON rows: every row lands in one locked write, at the byte range returned."""
-    lines = "\n".join(json.dumps(row, ensure_ascii=False) for row in rows)
-    return append_line(path, lines.encode("utf-8"), durable=durable)
+class Appended(NamedTuple):
+    """The lines a batch wrote, as written, and the bytes they landed at, each newline included."""
+
+    lines: tuple[bytes, ...]
+    at: range
+
+    def each(self) -> Iterator[tuple[bytes, range]]:
+        start = self.at.start
+        for line in self.lines:
+            yield line, range(start, start := start + len(line) + 1)
+
+
+def append_jsonl(path: Path, *rows: dict[str, Any], durable: bool = False) -> Appended:
+    """THE appender of JSON rows: every row lands in one locked write."""
+    lines = tuple(json.dumps(row, ensure_ascii=False).encode("utf-8") for row in rows)
+    return Appended(lines, append_line(path, b"\n".join(lines), durable=durable))
 
 
 class FileMark(NamedTuple):

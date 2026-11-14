@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from promptpotter.application.optimizer_manifest import bound_determinism
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_overlay import pinned_route
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     LLMCallRecord,
     LLMCallStartRecord,
 )

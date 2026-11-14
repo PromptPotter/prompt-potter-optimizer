@@ -6,8 +6,8 @@ import abc
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, NamedTuple
 
+from promptpotter.domain.records.run_records import CheckpointInputs, ResumeCheckpointRecord
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import CheckpointInputs, ResumeCheckpointRecord
 
 if TYPE_CHECKING:
     from promptpotter.domain.ruler import DeltaRuler

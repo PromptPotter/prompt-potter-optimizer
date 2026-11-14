@@ -58,7 +58,7 @@ from promptpotter.application.scoring.formula.matchers import matcher_of
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.connectors.protocol import PROBE_WORKLOAD
 from promptpotter.domain.arms import Concluded
-from promptpotter.domain.bench import PartitionRecord, partition_bank, restored_partition
+from promptpotter.domain.bench import partition_bank, restored_partition
 from promptpotter.domain.campaign import CampaignRunsWith, RunsWithParam, VendorModels
 from promptpotter.domain.campaign_config import (
     CAMPAIGN_RULE,
@@ -103,7 +103,8 @@ from promptpotter.domain.pipeline_schema import (
     reach_map,
     running_only,
 )
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import (
     DefaultsDrift,
     DefaultsPin,
     PipelineRead,
@@ -116,6 +117,7 @@ from promptpotter.infrastructure.llm.capabilities import resolve_menu, resolve_s
 from promptpotter.infrastructure.llm.pricing import remembered_priced
 from promptpotter.infrastructure.llm.registry import default_routes
 from promptpotter.infrastructure.llm.wallet import Send
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     campaign_defaults,
@@ -752,7 +754,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
     """Off its mint's records alone, so a campaign outlives its dataset dir; lays no identity:
     what a point is keyed by is the subject's to add."""
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
-    resolved = stores.campaigns.read_resolved_run(hop)
+    resolved = scan_resolved_run(stores.campaigns.chain(hop))
     read = _recorded_read(resolved, hop)
     schema = parse_pipeline_response(read.declaration)
     cycle = cycle_config(stores, campaign, hop)
@@ -786,7 +788,7 @@ def recorded_schema(stores: Stores, hop: CycleHop) -> PipelineSchema:
 
 
 def recorded_read(stores: Stores, hop: CycleHop) -> PipelineRead:
-    return _recorded_read(stores.campaigns.read_resolved_run(hop), hop)
+    return _recorded_read(scan_resolved_run(stores.campaigns.chain(hop)), hop)
 
 
 def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead:
@@ -1150,7 +1152,7 @@ def line_config(stores: Stores, campaign: Campaign, hop: CycleHop) -> LineConfig
 def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     # VALUES, never the ledger's stat: a running root appends there on every sample.
     cycle = cycle_config(stores, campaign, campaign.root_hop)
-    read = stores.campaigns.read_resolved_run(campaign.root_hop).read
+    read = scan_resolved_run(stores.campaigns.chain(campaign.root_hop)).read
     return (
         stable_hash(cycle.config.model_dump(mode="json")),
         stable_hash(cycle.seed_overlay),

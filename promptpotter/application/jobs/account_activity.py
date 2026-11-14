@@ -6,7 +6,7 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.domain.run_records import Bill
+from promptpotter.domain.records.run_records import Bill
 from promptpotter.domain.spend import KEY_SOURCE_LABELS, bill_is_floor, calls_rate_priced
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.account_spend import account_usage

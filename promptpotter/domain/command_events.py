@@ -9,13 +9,13 @@ from typing import Annotated, Any, Literal, Self, get_args
 from pydantic import Field, TypeAdapter, model_validator
 
 from promptpotter.domain.cycle_paths import Subject
-from promptpotter.domain.refusal import Refusal
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     DraftOpenedEffect,
     LaunchedEffect,
     NoEffect,
     StandingEffect,
 )
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import PotterError

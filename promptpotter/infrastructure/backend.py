@@ -14,6 +14,7 @@ import httpx
 
 from promptpotter.config.paths import MACHINE_DIR
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
+from promptpotter.domain.records.run_records import BackendWarningRecord
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
 from promptpotter.infrastructure.llm.pricing import priced_pair
@@ -37,7 +38,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     replied,
     reserved,
 )
-from promptpotter.infrastructure.llm.telemetry import emit_backend_warning
+from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.store.io import HeldLock, take_lock
 from promptpotter.shared.errors import (
     CellHaltedError,
@@ -92,13 +93,15 @@ class _CellSends:
     down_since: float | None = None
 
     def warn(self, kind: str, *, wait_s: float, resending: bool = False, **extra: Any) -> None:
-        emit_backend_warning(
-            kind=kind,
-            attempt=self.budget.attempt - resending,
-            max_attempts=self.budget.attempts,
-            wait_s=float(wait_s),
-            query=self.query,
-            **extra,
+        append_record(
+            BackendWarningRecord(
+                kind=kind,
+                attempt=self.budget.attempt - resending,
+                max_attempts=self.budget.attempts,
+                wait_s=float(wait_s),
+                query=self.query,
+                **extra,
+            )
         )
 
     def wait_after(self, outcome: SendOutcome) -> float | None:

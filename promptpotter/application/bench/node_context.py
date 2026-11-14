@@ -49,8 +49,7 @@ from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool, PoolEntry
-from promptpotter.domain.results import round_document_digest
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     ArmRecord,
     CheckpointInputs,
     PhaseRecord,
@@ -59,6 +58,7 @@ from promptpotter.domain.run_records import (
     RoundRestatedRecord,
     WalkRead,
 )
+from promptpotter.domain.results import round_document_digest
 from promptpotter.domain.run_standing import RunStanding, walked_slot
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -92,9 +92,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.phase_views import PhaseView
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.pool import Access
+    from promptpotter.domain.records.run_records import RoundStatement
     from promptpotter.domain.results import Reelection, RoundResult
     from promptpotter.domain.ruler import LevelSeries
-    from promptpotter.domain.run_records import RoundStatement
     from promptpotter.domain.run_standing import LineOutlay
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import GradedCell

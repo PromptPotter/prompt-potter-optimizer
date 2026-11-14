@@ -29,8 +29,8 @@ from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.optimizer_state import RoundOutput, StateSlice
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
+from promptpotter.domain.records.run_records import CheckpointInputs
 from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.run_records import CheckpointInputs
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
 

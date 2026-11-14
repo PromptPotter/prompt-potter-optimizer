@@ -25,11 +25,10 @@ from typing import (
 
 from pydantic import TypeAdapter, ValidationError
 
-from promptpotter.domain.run_records import (
-    RECORD_ADAPTER,
+from promptpotter.domain.records import RECORDS, CycleRecord
+from promptpotter.domain.records.run_records import (
     Bill,
     ChargeLine,
-    CycleRecord,
     Hold,
     Lapse,
     Release,
@@ -53,7 +52,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.io import (
     ABSENT,
     FileMark,
-    append_line,
+    append_jsonl,
     complete_lines,
     read_bytes_optional,
     read_tail,
@@ -68,9 +67,9 @@ from promptpotter.shared.errors import (
 )
 
 # Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
-EVERY_ARM: tuple[type[StrictModel], ...] = get_args(get_args(CycleRecord)[0])
+_ARM_MODELS = {kind.encode(): arm for kind, arm in RECORDS.registered().items()}
+EVERY_ARM: tuple[type[CycleRecord], ...] = tuple(_ARM_MODELS.values())
 _EVERY_ARM = frozenset(EVERY_ARM)
-_ARM_MODELS = {arm.model_fields["record_type"].default.encode(): arm for arm in EVERY_ARM}
 
 
 # What a line reader raises on a line it cannot take, a model's or a hand-built one's.
@@ -302,6 +301,13 @@ type _Make = Callable[[], LedgerFold[Any, Any]]
 _RECORD_TYPE = re.compile(rb'"record_type"\s*:\s*"([^"]+)"')
 
 
+def ledger_line(raw: bytes) -> CycleRecord:
+    """One line read whole, as a survey of the file asks: a line no arm names raises."""
+    if (kind := _RECORD_TYPE.search(raw)) is None:
+        raise ValueError("no record_type")
+    return RECORDS.parse(kind[1].decode(), raw)
+
+
 class _Feeder:
     def __init__(self, ledger: Path, folds: dict[_Make, LedgerFold[Any, Any]]) -> None:
         self.folds = folds
@@ -321,7 +327,7 @@ class _Feeder:
             placed.at_offset = offset
         kind = _RECORD_TYPE.search(raw)
         model = None if kind is None else self._models.get(kind[1])
-        if model is None:
+        if kind is None or model is None:
             if raw.strip() and (kind is None or kind[1] not in _ARM_MODELS):
                 reason = "no record_type" if kind is None else f"no arm is {kind[1].decode()!r}"
                 self.refused.setdefault(None, _refusal(self._ledger, offset, reason))
@@ -500,9 +506,11 @@ class LedgerIndex(_LedgerTail):
                 self._stale.add(type(projection))
                 at = self._lines - 1 if at is None else at
             warning = stale_file_warning(type(projection).__name__, at, _reason(fault))
-            raw = RECORD_ADAPTER.dump_json(warning, fallback=str)
+            ((raw, landed),) = append_jsonl(
+                self._path, warning.model_dump(mode="json", fallback=str)
+            ).each()
             # A ledger that takes the line, then refuses the warning, raises: that fault is the ledger's.
-            self.land(raw, append_line(self._path, raw), warning)
+            self.land(raw, landed, warning)
 
     def line_count(self) -> int:
         with self._lock:

@@ -58,7 +58,7 @@ BASELINE = {
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
     "deferred_imports": 6,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
-    "p_record": 23,
+    "p_record": 20,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 33,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
@@ -496,14 +496,17 @@ def compute_ledger() -> dict[str, int]:
     from promptpotter.application.optimizers.nodes import CycleRead
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
-    from promptpotter.domain.run_records import CycleRecord
+    from promptpotter.domain.records import RECORDS
 
     py_files = _package_files("*.py")
     source = _source_counts(py_files)
     sites = _sites()
-    arms = typing.get_args(typing.get_args(CycleRecord)[0])
+    arms = RECORDS.registered()
+    # A module declaring arms is the roster itself, never a site the next arm must reach.
+    declaring = {Path(sys.modules[arm.__module__].__file__ or "") for arm in arms.values()}
     records, records_left_out = _enumerations(
-        sites, [_spelled(a.model_fields["record_type"].default, a.__name__) for a in arms]
+        {path: text for path, text in sites.items() if path not in declaring},
+        [_spelled(kind, arm.__name__) for kind, arm in arms.items()],
     )
     commands, commands_left_out = _enumerations(
         sites,

@@ -132,21 +132,8 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import BlockPool, DemoPool
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.results import CycleResult, Election, RoundResult
-from promptpotter.domain.round_health import DegradationHealth
-from promptpotter.domain.ruler import (
-    AbilityReading,
-    DeltaRuler,
-    LevelSeries,
-    RulerReach,
-    RulerScope,
-    RulerStamp,
-    ThetaCaveat,
-    anchor_id_of,
-    flat_ruler_id,
-)
-from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.run_records import (
     ArmRecord,
     Bill,
     CallPrice,
@@ -163,6 +150,20 @@ from promptpotter.domain.run_records import (
     TokenUsageRecord,
     parent_address,
 )
+from promptpotter.domain.results import CycleResult, Election, RoundResult
+from promptpotter.domain.round_health import DegradationHealth
+from promptpotter.domain.ruler import (
+    AbilityReading,
+    DeltaRuler,
+    LevelSeries,
+    RulerReach,
+    RulerScope,
+    RulerStamp,
+    ThetaCaveat,
+    anchor_id_of,
+    flat_ruler_id,
+)
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import LineOutlay, RunStanding
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
@@ -194,10 +195,18 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.io import write_json, write_yaml
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive, config_key
+from promptpotter.infrastructure.store.read_model import ledger_line
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.run_scope import scoped
+
+
+def ledger_records(ledger: CycleEventLog | Path) -> list[CycleRecord]:
+    """A ledger file's own records, in line order; a fork's prefix is `ledger_chain`'s."""
+    path = ledger.path if isinstance(ledger, CycleEventLog) else ledger
+    lines = path.read_bytes().splitlines() if path.exists() else []
+    return [ledger_line(line) for line in lines if line.strip()]
 
 
 class _SpentWaits(selectors.DefaultSelector):

@@ -27,7 +27,7 @@ from promptpotter.domain.pipeline_schema import (
     ManifestNodeOverlay,
     NodeSearchNarrowing,
 )
-from promptpotter.domain.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
+from promptpotter.domain.records.run_records import ConfigOverrides, CycleSeed, ScoringLockedRecord
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel, StrictModel

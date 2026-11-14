@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import pkgutil
 import types
 from functools import reduce
 
@@ -11,6 +12,12 @@ def imported(package: str, row: str) -> object:
     """``attr`` may be dotted (``Class.method``)."""
     module, _, attr = row.partition(":")
     return reduce(getattr, attr.split("."), importlib.import_module(f"{package}.{module}"))
+
+
+def walked(package: types.ModuleType, *, skip: str | None = None) -> tuple[types.ModuleType, ...]:
+    """Every module of *package*, imported in name order: a hand-kept list silently drops one."""
+    found = sorted(m.name for m in pkgutil.iter_modules(package.__path__) if m.name != skip)
+    return tuple(importlib.import_module(f"{package.__name__}.{name}") for name in found)
 
 
 def require_own_docstring(model: type, row: str) -> None:

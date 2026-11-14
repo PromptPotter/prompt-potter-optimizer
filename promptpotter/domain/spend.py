@@ -30,7 +30,7 @@ from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     # Type-only: the record's module imports this one for `TokenUsageKind`.
-    from promptpotter.domain.run_records import TokenUsageRecord
+    from promptpotter.domain.records.run_records import TokenUsageRecord
     from promptpotter.domain.scoring import MeasuredCell
 
 

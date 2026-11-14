@@ -3,17 +3,17 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any, Union
 
 from processes import replace_changed
-from pydantic import TypeAdapter
+from pydantic import Field, TypeAdapter
 
 # ruff: noqa: E402 -- we import from promptpotter after adjusting sys.path
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO))
 
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
-from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.records import RECORDS
 from promptpotter.infrastructure.store.data_root import pinned_schemas
 from promptpotter.main import app
 
@@ -65,10 +65,14 @@ def openapi() -> dict[str, Any]:
 
 
 def asyncapi(paths: dict[str, Any]) -> dict[str, Any]:
+    # A value, not an alias: the arms are the registry's, known once its package is walked.
+    records: Any = Annotated[
+        Union[*RECORDS.registered().values()], Field(discriminator="record_type")
+    ]
     roots, defs = TypeAdapter.json_schemas(
         [
             ("frame", "serialization", TypeAdapter(ProjectionEnvelope)),
-            ("record", "serialization", TypeAdapter(CycleRecord)),
+            ("record", "serialization", TypeAdapter(records)),
         ],
         ref_template="#/components/schemas/{model}",
     )

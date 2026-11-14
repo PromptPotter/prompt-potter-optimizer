@@ -17,7 +17,7 @@ from pydantic import Field, SecretStr
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
-from promptpotter.domain.run_records import AccountEvent, AccountEventRecord, Device
+from promptpotter.domain.records.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity import blocklist, default_claim

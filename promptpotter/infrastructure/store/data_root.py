@@ -41,7 +41,6 @@ from promptpotter.domain.job import JOB_ADAPTER, LIVE_JOB_IDS
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
 from promptpotter.domain.ruler import RulerFold
-from promptpotter.domain.run_records import RECORD_ADAPTER
 from promptpotter.domain.sample import ArchiveConfig
 from promptpotter.infrastructure.identity.blocklist import Blocklist
 from promptpotter.infrastructure.identity.grants import GrantsFile
@@ -89,7 +88,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
     decode_cold,
     index_row,
 )
-from promptpotter.infrastructure.store.read_model import charge_book_fold
+from promptpotter.infrastructure.store.read_model import charge_book_fold, ledger_line
 from promptpotter.infrastructure.store.ruler_store import RULER_FILE
 from promptpotter.infrastructure.store.source_scan import SOURCE_FACTS_FILE, TREATMENT_DIGESTS_FILE
 from promptpotter.infrastructure.store.tenant_dataset_store import (
@@ -406,7 +405,7 @@ class CampaignRow(NamedTuple):
 _CAMPAIGN_SHAPE: Shape = TypeAdapter(Campaign)
 _DRAFT_SHAPE: Shape = TypeAdapter(DraftFile)
 # What a run IS: one of these that does not load takes its campaign or draft with it.
-_RUN_RECORDS = (RECORD_ADAPTER, _CAMPAIGN_SHAPE, _DRAFT_SHAPE)
+_RUN_RECORDS = (ledger_line, _CAMPAIGN_SHAPE, _DRAFT_SHAPE)
 
 
 def _export(raw: bytes) -> object:
@@ -439,7 +438,7 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
         CampaignRow(
             f"{where} round", f"{layout.rounds.as_posix()}/{ROUND_GLOB}", Leaf.STATE, _FOR_A_PERSON
         ),
-        CampaignRow(f"{where} ledger", layout.ledger.as_posix(), Leaf.HISTORY, RECORD_ADAPTER),
+        CampaignRow(f"{where} ledger", layout.ledger.as_posix(), Leaf.HISTORY, ledger_line),
         CampaignRow(f"{where} producer lock", layout.producer_lock.as_posix(), Leaf.TRACE, _HELD),
         CampaignRow(f"{where} pass lock", layout.pass_lock.as_posix(), Leaf.TRACE, _HELD),
         CampaignRow(f"{where} job log", layout.job_log.as_posix(), Leaf.TRACE, _FOR_A_PERSON),
@@ -497,7 +496,7 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         Fate.RUN,
         TypeAdapter(CycleHop),
     ),
-    Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, RECORD_ADAPTER),
+    Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, ledger_line),
     # What was asked, of every subject: a loop's inbox and the trail read it, no survivor fact.
     Kind(
         "command log",

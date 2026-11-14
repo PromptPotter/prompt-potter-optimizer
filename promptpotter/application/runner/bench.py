@@ -42,7 +42,6 @@ from promptpotter.domain.bench import (
     LiftCost,
     LineRun,
     OwnLevel,
-    PartitionRecord,
     PassOutcome,
     PassStop,
     bench_split,
@@ -68,7 +67,8 @@ from promptpotter.domain.phase_views import (
     VerificationGradedView,
 )
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, RunPhase, StopOutcome
-from promptpotter.domain.run_records import LaunchClockRecord, PhaseRecord
+from promptpotter.domain.records.partition import PartitionRecord
+from promptpotter.domain.records.run_records import LaunchClockRecord, PhaseRecord
 from promptpotter.domain.run_standing import LineOutlay, declared_selection
 from promptpotter.domain.scoring import ROW_GRADES, WalkedCell
 from promptpotter.domain.spend import Budget, SpendRollup

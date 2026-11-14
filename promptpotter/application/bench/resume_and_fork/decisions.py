@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol
 
-from promptpotter.domain.run_records import CheckpointInputs, ResumeCheckpointRecord
+from promptpotter.domain.records.run_records import CheckpointInputs, ResumeCheckpointRecord
 
 
 class _DecisionSink(Protocol):

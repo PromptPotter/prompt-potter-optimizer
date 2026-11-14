@@ -28,7 +28,7 @@ from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
-    from promptpotter.domain.run_records import RoundStatement
+    from promptpotter.domain.records.run_records import RoundStatement
 
 
 #: `noise`: the cells were measured no more sharply than they landed apart; `spread`: they differ.

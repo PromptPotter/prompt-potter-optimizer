@@ -7,9 +7,9 @@ from typing import TYPE_CHECKING
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import LaunchState
 from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.domain.bench import PartitionRecord
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
+from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.scoring import CellSheet, MeasuredCell, WalkedCell
 from promptpotter.infrastructure.projections.base import Projection
@@ -25,7 +25,7 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
-    from promptpotter.domain.run_records import (
+    from promptpotter.domain.records.run_records import (
         RoundClosedRecord,
         RoundEnteredRecord,
         RoundRestatedRecord,

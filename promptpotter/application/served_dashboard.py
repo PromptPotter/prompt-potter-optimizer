@@ -23,15 +23,15 @@ from promptpotter.domain.paired_reading import ArmName
 from promptpotter.domain.phases import (
     PRODUCER_STATE_INFO,
     RUN_PHASE_INFO,
-    ErrorRecord,
     PauseReading,
     ProducerReading,
     RunAdmission,
     RunPhase,
     RunState,
 )
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import CycleShareRecord, ForkRemainder
 from promptpotter.domain.round_health import HEALTH_GRADE_INFO
-from promptpotter.domain.run_records import CycleShareRecord, ForkRemainder
 from promptpotter.domain.run_standing import closed_after_origin
 from promptpotter.domain.said import Said, pinned
 from promptpotter.domain.sample import sample_tag

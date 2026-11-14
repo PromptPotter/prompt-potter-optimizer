@@ -19,20 +19,13 @@ from promptpotter.domain.phase_views import (
     VerificationEnterView,
     VerificationGradedView,
 )
-from promptpotter.domain.phases import (
-    CampaignPhase,
-    DashboardState,
-    ErrorRecord,
-    RunPhase,
-)
-from promptpotter.domain.results_health import is_degraded
-from promptpotter.domain.round_audit import NodeBlock
-from promptpotter.domain.ruler import LevelSeries
-from promptpotter.domain.run_records import (
+from promptpotter.domain.phases import CampaignPhase, DashboardState, RunPhase
+from promptpotter.domain.records import CycleRecord
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import (
     ArmRecord,
     BackendWarningRecord,
     CycleMintedRecord,
-    CycleRecord,
     ElectionRecord,
     FlightRecord,
     LLMCallProgressRecord,
@@ -54,6 +47,9 @@ from promptpotter.domain.run_records import (
     StandingBudgetRecord,
     TokenUsageRecord,
 )
+from promptpotter.domain.results_health import is_degraded
+from promptpotter.domain.round_audit import NodeBlock
+from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup

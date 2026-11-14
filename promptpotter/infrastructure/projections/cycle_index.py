@@ -5,7 +5,7 @@ from pathlib import Path
 from promptpotter.domain.cycle_index import CycleIndex, IndexRound, Intervention
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.dashboard_rows import RoundHealth
-from promptpotter.domain.run_records import CycleRecord
+from promptpotter.domain.records import CycleRecord
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (

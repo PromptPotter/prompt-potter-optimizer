@@ -43,14 +43,14 @@ from promptpotter.domain.job import (
     SlotHolder,
 )
 from promptpotter.domain.phases import (
-    ErrorRecord,
     PauseCause,
     RunPhase,
     StopOutcome,
     StopReason,
     stop_reason_outcome,
 )
-from promptpotter.domain.run_records import Hold, RunPhaseRecord
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import Hold, RunPhaseRecord
 from promptpotter.domain.spend import (
     MONEY_AXES,
     NOTHING_METERED,

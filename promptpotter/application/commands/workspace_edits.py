@@ -21,7 +21,7 @@ from promptpotter.domain.command_kinds import (
     DeleteCampaignPayload,
     UnarchiveCampaignPayload,
 )
-from promptpotter.domain.run_records import DraftOpenedEffect
+from promptpotter.domain.records.run_records import DraftOpenedEffect
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.shared.clock import utcnow_iso

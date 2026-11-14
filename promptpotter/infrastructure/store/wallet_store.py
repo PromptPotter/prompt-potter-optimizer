@@ -13,7 +13,7 @@ from pathlib import Path
 
 from pydantic import Field, SecretStr, TypeAdapter
 
-from promptpotter.domain.run_records import ChargeLine
+from promptpotter.domain.records.run_records import ChargeLine
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import append_line, write_json, write_lock

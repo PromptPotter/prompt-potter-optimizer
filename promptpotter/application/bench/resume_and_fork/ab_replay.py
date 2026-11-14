@@ -29,8 +29,8 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.campaign_config import CampaignConfig
+    from promptpotter.domain.records.run_records import ResumeCheckpointRecord
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.run_records import ResumeCheckpointRecord
     from promptpotter.domain.scoring import CellSheet, Scorer
 
 logger = logging.getLogger(__name__)

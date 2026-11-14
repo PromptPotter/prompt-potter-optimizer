@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     BankedSpend,
     Bill,
     Hold,

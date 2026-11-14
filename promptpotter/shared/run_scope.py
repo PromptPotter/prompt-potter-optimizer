@@ -35,7 +35,7 @@ UNBOUND: Literal[Unbound.UNBOUND] = Unbound.UNBOUND
 
 @dataclass(frozen=True)
 class RunScope:
-    # The ledger every `emit_*` lands on; a bound ``None`` is the declared mute of a probe render.
+    # The ledger every `append_record` lands on; a bound ``None`` is the declared mute of a probe render.
     ledger: CycleEventLog | None | Literal[Unbound.UNBOUND] = UNBOUND
     # The launch's one selection, an L4 cell's edit laid into its overlay at spawn.
     optimizer: SelectedOptimizer | None = None

@@ -33,7 +33,7 @@ from promptpotter.domain.command_kinds import (
     SubmitArmsPayload,
 )
 from promptpotter.domain.cycle_paths import Subject, WorkspaceDir
-from promptpotter.domain.run_records import StandingEffect
+from promptpotter.domain.records.run_records import StandingEffect
 from promptpotter.infrastructure.holders import hold_released, producer_alive
 from promptpotter.infrastructure.store.io import append_line, appending
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR

@@ -31,11 +31,11 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, lift_versus
 from promptpotter.domain.phases import StopReason
+from promptpotter.domain.records.run_records import RaceStandingRecord
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import health_reading
 from promptpotter.domain.round_health import DegradationHealth
 from promptpotter.domain.ruler import LevelSeries
-from promptpotter.domain.run_records import RaceStandingRecord
 from promptpotter.domain.run_standing import (
     CEILING_FRACTION,
     RoundClocks,
@@ -62,8 +62,8 @@ if TYPE_CHECKING:
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.cells import HardSamples
     from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
+    from promptpotter.domain.records.run_records import CycleFinal, RoundClosedRecord, WallClock
     from promptpotter.domain.round_audit import RoundAudit
-    from promptpotter.domain.run_records import CycleFinal, RoundClosedRecord, WallClock
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 
 

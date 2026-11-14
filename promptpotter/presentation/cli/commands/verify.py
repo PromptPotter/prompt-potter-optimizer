@@ -11,7 +11,7 @@ from promptpotter.domain.bench import BandedValue
 from promptpotter.domain.command_kinds import Door, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import Subject
 from promptpotter.domain.paired_reading import READING_STATE_INFO
-from promptpotter.domain.run_records import VERIFY_WORDS, VerifySaturated
+from promptpotter.domain.records.run_records import VERIFY_WORDS, VerifySaturated
 from promptpotter.domain.verification import VerifyReading
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.presentation.cli.commands.result import CommandResult

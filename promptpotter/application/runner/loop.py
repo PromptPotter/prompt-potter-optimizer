@@ -31,8 +31,13 @@ from promptpotter.application.runner.termination import (
 from promptpotter.application.scoring.passes import measure_noise_floor
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import repairable_holes
-from promptpotter.domain.phases import STOP_REASON_INFO, ErrorRecord, StopLoop, StopReason
-from promptpotter.domain.run_records import OriginGatePass, RebaseRequest, RoundEnteredRecord
+from promptpotter.domain.phases import STOP_REASON_INFO, StopLoop, StopReason
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import (
+    OriginGatePass,
+    RebaseRequest,
+    RoundEnteredRecord,
+)
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import at_round
 

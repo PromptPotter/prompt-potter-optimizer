@@ -4,6 +4,7 @@ from typing import Annotated, ClassVar, Literal, Self, TypedDict, Unpack
 
 from pydantic import ConfigDict, Field, SerializeAsAny, model_validator
 
+from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import shapes_optimizer_prompt
@@ -37,47 +38,23 @@ class StatePart(FrozenModel):
     kind: ClassVar[str]
     # How many roster members may write it; every part but a pool is one member's.
     writers: ClassVar[Literal["one", "many"]] = "one"
-    _registered: ClassVar[dict[str, type[StatePart]]] = {}
-    _complete: ClassVar[bool] = False
 
     def __init_subclass__(cls, *, kind: str | None, **kwargs: Unpack[ConfigDict]) -> None:
         super().__init_subclass__(**kwargs)
         # `None` is a scope (`StateSlice`, `RoundOutput`), which registers nothing.
         if kind is None:
             return
-        if (held := StatePart._registered.setdefault(kind, cls)) is not cls:
-            raise TypeError(
-                f"state kind {kind!r} is registered twice: {held.__name__}, {cls.__name__}"
-            )
+        STATE_KINDS.register(kind, cls)
         cls.kind = kind
-
-    @staticmethod
-    def complete() -> None:
-        """Every package declaring a kind has loaded: a kind still unknown is data no installed code writes."""
-        StatePart._complete = True
-
-    @staticmethod
-    def registered() -> dict[str, type[StatePart]]:
-        if not StatePart._complete:
-            raise RegistryIncompleteError("the kinds were asked before the registries completed")
-        return dict(sorted(StatePart._registered.items()))
-
-    @staticmethod
-    def parse(kind: str, raw: object) -> StatePart:
-        """The ONE dispatch by kind: every read of a banked part goes through it."""
-        if (held := StatePart._registered.get(kind)) is not None:
-            return held.model_validate(raw)
-        if not StatePart._complete:
-            raise RegistryIncompleteError(
-                f"kind {kind!r} was read before this process completed its registries "
-                "(`land_at_entry`)"
-            )
-        raise ValueError(f"no installed package declares the kind {kind!r}")
 
     @classmethod
     def written_first(cls) -> bool:
         """No value stands before its writer runs, so the roster must walk one ahead of every reader."""
         return any(f.is_required() for f in cls.model_fields.values())
+
+
+# Completed at `wiring.py::complete_registries`, once every package declaring a kind has loaded.
+STATE_KINDS: KindTable[StatePart] = KindTable("state")
 
 
 class StateSlice(StatePart, kind=None):
@@ -86,10 +63,6 @@ class StateSlice(StatePart, kind=None):
 
 class RoundOutput(StatePart, kind=None):
     """What ONE round produced, banked on that round; a round whose writer did not run holds ``cls()``, or nothing where it is written first."""
-
-
-class RegistryIncompleteError(RuntimeError):
-    """A wiring fault, so never a ``ValueError``: ``ledger_record`` would refuse the line as unreadable data."""
 
 
 class Critique(RoundOutput, kind="critique"):
@@ -120,7 +93,7 @@ class OptimizerState(FrozenModel):
             **data,
             **{
                 key: {
-                    kind: StatePart.parse(kind, raw) if isinstance(raw, dict) else raw
+                    kind: STATE_KINDS.parse(kind, raw) if isinstance(raw, dict) else raw
                     for kind, raw in data[key].items()
                 }
                 for key in ("slices", "outputs")

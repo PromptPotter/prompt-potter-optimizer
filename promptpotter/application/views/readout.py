@@ -67,7 +67,7 @@ from promptpotter.domain.phase_views import (
     ViewAnchors,
 )
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     AnnouncedArms,
     ArmRecord,
     ElectionRecord,

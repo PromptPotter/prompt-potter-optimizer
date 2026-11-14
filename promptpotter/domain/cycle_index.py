@@ -9,13 +9,18 @@ from promptpotter.domain.campaign import LIFECYCLE_STATUS_LABELS, LifecycleStatu
 from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
-    ErrorRecord,
     RunPhase,
     StopOutcome,
     StopReason,
     run_phase_label,
 )
-from promptpotter.domain.run_records import CycleFinal, ForkSpec, SpawnedBy, sibling_cycle_id
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import (
+    CycleFinal,
+    ForkSpec,
+    SpawnedBy,
+    sibling_cycle_id,
+)
 from promptpotter.domain.run_standing import RunStanding, closed_after_origin
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel

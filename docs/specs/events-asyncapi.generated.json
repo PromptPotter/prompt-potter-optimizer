@@ -2470,9 +2470,6 @@
         },
         "oneOf": [
           {
-            "$ref": "#/components/schemas/ResumeCheckpointRecord"
-          },
-          {
             "$ref": "#/components/schemas/AccountEventRecord"
           },
           {
@@ -2482,13 +2479,10 @@
             "$ref": "#/components/schemas/BackendWarningRecord"
           },
           {
+            "$ref": "#/components/schemas/PartitionRecord"
+          },
+          {
             "$ref": "#/components/schemas/CampaignCeilingRecord"
-          },
-          {
-            "$ref": "#/components/schemas/FlightRecord"
-          },
-          {
-            "$ref": "#/components/schemas/PricedKeyRecord"
           },
           {
             "$ref": "#/components/schemas/CycleFinalRecord"
@@ -2503,10 +2497,16 @@
             "$ref": "#/components/schemas/CycleSupersededRecord"
           },
           {
+            "$ref": "#/components/schemas/ResumeCheckpointRecord"
+          },
+          {
             "$ref": "#/components/schemas/ElectionRecord"
           },
           {
             "$ref": "#/components/schemas/ErrorRecord"
+          },
+          {
+            "$ref": "#/components/schemas/FlightRecord"
           },
           {
             "$ref": "#/components/schemas/ForkGradedRecord"
@@ -2527,19 +2527,19 @@
             "$ref": "#/components/schemas/LeftComparisonRecord"
           },
           {
-            "$ref": "#/components/schemas/LLMCallProgressRecord"
+            "$ref": "#/components/schemas/LLMCallRecord"
           },
           {
-            "$ref": "#/components/schemas/LLMCallRecord"
+            "$ref": "#/components/schemas/LLMCallProgressRecord"
           },
           {
             "$ref": "#/components/schemas/LLMCallStartRecord"
           },
           {
-            "$ref": "#/components/schemas/PartitionRecord"
+            "$ref": "#/components/schemas/PhaseRecord"
           },
           {
-            "$ref": "#/components/schemas/PhaseRecord"
+            "$ref": "#/components/schemas/PricedKeyRecord"
           },
           {
             "$ref": "#/components/schemas/ProviderEasedRecord"
@@ -2572,9 +2572,6 @@
             "$ref": "#/components/schemas/RoundWarningRecord"
           },
           {
-            "$ref": "#/components/schemas/StandingBudgetRecord"
-          },
-          {
             "$ref": "#/components/schemas/RunPhaseRecord"
           },
           {
@@ -2596,10 +2593,13 @@
             "$ref": "#/components/schemas/SpendTombstoneRecord"
           },
           {
-            "$ref": "#/components/schemas/TrailTombstoneRecord"
+            "$ref": "#/components/schemas/StandingBudgetRecord"
           },
           {
             "$ref": "#/components/schemas/TokenUsageRecord"
+          },
+          {
+            "$ref": "#/components/schemas/TrailTombstoneRecord"
           }
         ]
       },
@@ -3234,7 +3234,6 @@
       },
       "ErrorRecord": {
         "additionalProperties": false,
-        "description": "An arm of ``CycleRecord`` declared here, since ``CycleResult.error`` sits below that union.",
         "properties": {
           "detail": {
             "anyOf": [
@@ -6026,11 +6025,11 @@
               "backend_warning",
               "bank_partition",
               "campaign_ceiling",
-              "decision",
               "cycle_final",
               "cycle_minted",
               "cycle_share",
               "cycle_superseded",
+              "decision",
               "election",
               "error",
               "flight",
@@ -6040,8 +6039,8 @@
               "intervention",
               "launch_clock",
               "left_comparison",
-              "llm_call_progress",
               "llm_call",
+              "llm_call_progress",
               "llm_call_start",
               "phase",
               "priced_key",

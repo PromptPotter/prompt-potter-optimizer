@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     Bill,
     CallPrice,
     CycleShareRecord,
@@ -570,7 +570,7 @@ class SpendBook:
         ledger first, the copy money is summed off."""
         if self.nested:
             self.root().mirror(record)
-        append_record(record, ledger)
+        append_record(record, ledger=ledger)
 
     def mirror(self, record: TokenUsageRecord) -> None:
         """The root ledger's copy of a nested run's call, which its meter counts."""

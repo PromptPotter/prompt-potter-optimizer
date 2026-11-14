@@ -7,7 +7,6 @@ from pydantic import Field
 
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ErrorCategory
 from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
@@ -15,7 +14,7 @@ from promptpotter.shared.worded import Worded
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from promptpotter.domain.run_records import RebaseRequest
+    from promptpotter.domain.records.run_records import RebaseRequest
 
 
 class CampaignPhase(enum.StrEnum):
@@ -876,38 +875,3 @@ class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
         self.unmeasured = unmeasured
         self.fork = fork
         super().__init__(reason.value)
-
-
-class ErrorRecord(FrozenModel):
-    """An arm of ``CycleRecord`` declared here, since ``CycleResult.error`` sits below that union."""
-
-    record_type: Literal["error"] = "error"
-    # Exception class name — operator-facing diagnostic, never load-bearing for routing.
-    kind: str
-    # The exception's first non-blank line, else its class name; the lines after it are `detail`.
-    message: str
-    detail: str | None
-    traceback: str | None = None
-    stop_reason: StopReason
-    round: int | None = None
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-    @classmethod
-    def raised(
-        cls,
-        exc: BaseException,
-        *,
-        kind: str,
-        stop_reason: StopReason,
-        traceback: str | None = None,
-        round: int | None = None,
-    ) -> ErrorRecord:
-        message, _, detail = (str(exc).strip() or type(exc).__name__).partition("\n")
-        return cls(
-            kind=kind,
-            message=message,
-            detail=detail or None,
-            traceback=traceback,
-            stop_reason=stop_reason,
-            round=round,
-        )

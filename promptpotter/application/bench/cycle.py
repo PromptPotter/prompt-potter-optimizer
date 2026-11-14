@@ -27,9 +27,9 @@ from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
+from promptpotter.domain.records.run_records import ResumeCheckpointRecord, RoundProposedRecord
 from promptpotter.domain.results import Election, RoundOutcome, RoundResult
 from promptpotter.domain.ruler import RulerStamp
-from promptpotter.domain.run_records import ResumeCheckpointRecord, RoundProposedRecord
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
@@ -390,7 +390,8 @@ class Cycle:
 
     def banked_walk(self, round_num: int) -> RoundProposedRecord | None:
         session = self.session
-        return session.store.campaigns.round_proposals(session.hop, round_num)
+        held = session.store.campaigns.standing_rounds(session.hop, moment=None).proposals
+        return None if (proposed := held.get(round_num)) is None else proposed.record
 
     def seat_walk(self, round_num: int, walked: OptimizerState) -> None:
         """A replayed walk runs no proposer: the cycle takes up the state its first walk left."""

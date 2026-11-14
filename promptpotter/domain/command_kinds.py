@@ -37,8 +37,8 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.pipeline_params import node_rule
 from promptpotter.domain.pipeline_schema import ParamIntent
+from promptpotter.domain.records.run_records import ConfigOverrides
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import RequestBody, StrictModel, UploadBytes, WireInt

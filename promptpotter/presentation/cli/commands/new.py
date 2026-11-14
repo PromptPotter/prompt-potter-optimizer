@@ -42,7 +42,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.layer_fold import wire_value
-from promptpotter.domain.run_records import LaunchAnswer
+from promptpotter.domain.records.run_records import LaunchAnswer
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES
 from promptpotter.presentation.cli.commands.launch import (
     backend_reach_line,

@@ -28,8 +28,8 @@ from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Lens
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.records.run_records import ConfigOverrides
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.run_records import ConfigOverrides
 from promptpotter.domain.scoring import (
     NO_CELLS,
     CellSheet,

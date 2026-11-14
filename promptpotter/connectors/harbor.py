@@ -41,6 +41,7 @@ from promptpotter.connectors.protocol import (
 )
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import LLMSpendBound
+from promptpotter.domain.records.run_records import BackendWarningRecord
 from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.docker_host import (
     PACKAGE_CACHE_PROXY,
@@ -63,7 +64,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     answered,
     reservation_left,
 )
-from promptpotter.infrastructure.llm.telemetry import emit_backend_warning, rate_priced_usd
+from promptpotter.infrastructure.llm.telemetry import append_record, rate_priced_usd
 from promptpotter.infrastructure.llm.wallet import ENV_KEY_PAYER, keyed_client
 from promptpotter.shared.errors import (
     CellInfrastructureError,
@@ -1372,14 +1373,16 @@ async def _back_off(
         wait_s,
     )
     # On the ledger too: a run the API server hosts has no console.
-    emit_backend_warning(
-        kind="infrastructure",
-        attempt=budget.resent,
-        max_attempts=budget.attempts,
-        wait_s=wait_s,
-        query=query,
-        detail=cause,
-        error_class=category.value,
+    append_record(
+        BackendWarningRecord(
+            kind="infrastructure",
+            attempt=budget.resent,
+            max_attempts=budget.attempts,
+            wait_s=wait_s,
+            query=query,
+            detail=cause,
+            error_class=category.value,
+        )
     )
     await asyncio.sleep(wait_s)
 

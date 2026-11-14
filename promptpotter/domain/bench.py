@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from functools import cached_property
 from typing import TYPE_CHECKING, Literal, NamedTuple, Self
 
 from pydantic import Field, model_validator
@@ -24,13 +23,13 @@ from promptpotter.domain.phases import StopOutcome, StopReason, WalkEnd, stop_re
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellGrade
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
     # `campaign.py` imports this module: the refusal is read here by its member's name.
     from promptpotter.domain.campaign import CampaignRefusal
+    from promptpotter.domain.records.partition import PartitionRecord
 
 
 class DatasetSplit(StrictModel):
@@ -86,34 +85,6 @@ class BankPartition:
     @property
     def bench_rows(self) -> CellSet:
         return bench_split(s.key for s in self.bench)
-
-    def record(self, *, dataset_hash: str) -> PartitionRecord:
-        return PartitionRecord(
-            dataset_hash=dataset_hash,
-            split=self.split,
-            search_ids=[s.id for s in self.search],
-            bench_ids=[s.id for s in self.bench],
-            bench_rows=self.bench_rows,
-            demo_ids=[s.id for s in self.demo],
-        )
-
-
-class PartitionRecord(FrozenModel):
-    """The partition a cycle's mint drew, as slots in its bank; a fork reads its parent's off the chain."""
-
-    record_type: Literal["bank_partition"] = "bank_partition"
-    dataset_hash: str
-    split: DatasetSplit | None
-    search_ids: list[int]
-    bench_ids: list[int]
-    # The held-out content two campaigns are compared on.
-    bench_rows: CellSet
-    demo_ids: list[int]
-    timestamp: str = Field(default_factory=utcnow_iso)
-
-    @cached_property
-    def bank_ids(self) -> frozenset[int]:
-        return frozenset([*self.search_ids, *self.bench_ids, *self.demo_ids])
 
 
 def partition_bank(

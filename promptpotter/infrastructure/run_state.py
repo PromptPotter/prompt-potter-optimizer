@@ -15,7 +15,7 @@ from promptpotter.domain.phases import (
     RunPhase,
     RunState,
 )
-from promptpotter.domain.run_records import RunPhaseRecord
+from promptpotter.domain.records.run_records import RunPhaseRecord
 from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held

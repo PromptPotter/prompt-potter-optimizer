@@ -41,9 +41,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.records.run_records import RoundClosedRecord
     from promptpotter.domain.results import CycleResult, RoundOutcome
     from promptpotter.domain.ruler import AbilityReading
-    from promptpotter.domain.run_records import RoundClosedRecord
 
 
 def _spelled(act: NextAct) -> str:

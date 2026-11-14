@@ -105,8 +105,7 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.phase_views import MeasureEnterView
 from promptpotter.domain.phases import CampaignPhase, RunPhase, StopLoop, StopReason
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION
-from promptpotter.domain.results import Election, InRunCells, RoundResult, round_document_digest
-from promptpotter.domain.run_records import (
+from promptpotter.domain.records.run_records import (
     ArmRecord,
     ComparisonExit,
     ElectionRecord,
@@ -115,6 +114,7 @@ from promptpotter.domain.run_records import (
     RoundClosedRecord,
     RunPhaseRecord,
 )
+from promptpotter.domain.results import Election, InRunCells, RoundResult, round_document_digest
 from promptpotter.domain.run_standing import (
     LineOutlay,
     LineStep,
@@ -213,7 +213,8 @@ async def operator_arms(ctx: RoundContext, drafts: list[Proposal]) -> list[Propo
     """Holds once per round: an answer already banked against this parent IS the round's arms."""
     session = ctx.cycle.session
     rounds = ctx.cycle.rounds
-    answered = session.store.campaigns.round_submission(session.hop, ctx.round_num)
+    standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
+    answered = standing.submitted.get(ctx.round_num)
     if answered is not None and rounds and answered.consumed == round_document_digest(rounds[-1]):
         return list(answered.proposals)
     logger.warning(
@@ -1227,16 +1228,12 @@ def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
 
 
 def announce_population(ctx: RoundContext, opening: RoundOpening, population: Proposals) -> None:
-    for key, arm in population.arms(ctx.round_num).items():
-        ctx.ledger.append(
-            ArmRecord(
-                round=ctx.round_num,
-                arm=key,
-                state=arm,
-                anchors=ctx.cycle.session.state.view_context.anchors(),
-            )
-        )
+    anchors = ctx.cycle.session.state.view_context.anchors()
     ctx.ledger.append(
+        *(
+            ArmRecord(round=ctx.round_num, arm=key, state=arm, anchors=anchors)
+            for key, arm in population.arms(ctx.round_num).items()
+        ),
         PhaseRecord(
             phase=CampaignPhase.PROPOSE,
             event="exit",
@@ -1248,7 +1245,7 @@ def announce_population(ctx: RoundContext, opening: RoundOpening, population: Pr
                 proposals=population.proposals,
                 collapses=collapse_counts(cp.validation_failures for cp in population.proposals),
             ),
-        )
+        ),
     )
 
 

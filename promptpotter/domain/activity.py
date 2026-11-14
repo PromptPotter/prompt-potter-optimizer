@@ -10,14 +10,9 @@ from promptpotter.domain.arms import Cut, Measured, candidate_label
 from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit
 from promptpotter.domain.phase_views import VerificationEnterView
-from promptpotter.domain.phases import (
-    STOP_REASON_INFO,
-    CampaignPhase,
-    ErrorRecord,
-    GateKind,
-    RunPhase,
-)
-from promptpotter.domain.run_records import (
+from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, GateKind, RunPhase
+from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.run_records import (
     AnnouncedArms,
     ArmRecord,
     LLMCallProgressRecord,
