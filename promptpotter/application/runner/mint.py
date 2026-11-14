@@ -9,7 +9,6 @@ ids: ``measurements/`` pools their origin scores."""
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Collection
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
@@ -60,8 +59,6 @@ from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
-
-logger = logging.getLogger(__name__)
 
 
 def origin_content_hash(
@@ -363,8 +360,6 @@ async def _enter_init(
         instrument=instrument,
         banked_instruments=[] if instrument is None else _banked_instruments(session, survey),
     )
-    for w in preflight_warnings:
-        logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
     ledger.append(
         PhaseRecord(
             phase=CampaignPhase.INIT,
