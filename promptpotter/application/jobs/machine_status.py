@@ -21,7 +21,7 @@ from promptpotter.domain.job import (
 from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
 from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.default_claim import is_host
+from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import IdentityContext, acting_principal
 

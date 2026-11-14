@@ -15,13 +15,13 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from promptpotter.application import account, health
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.records.run_records import Device, device_of
-from promptpotter.infrastructure.identity.bundle import IdentityBundle
-from promptpotter.infrastructure.identity.provider_config import (
+from promptpotter.infrastructure.identity.accounts import IdentityBundle
+from promptpotter.infrastructure.identity.oidc import (
     SUPPORTED_PROVIDERS,
     CodeExchangeError,
+    IDTokenInvalidError,
     SignInClient,
 )
-from promptpotter.infrastructure.identity.verifier import IDTokenInvalidError
 from promptpotter.infrastructure.outbound import forward_new_account_to_crm, notify_operator
 from promptpotter.infrastructure.store.user_store import count_accounts
 from promptpotter.presentation.api.deps import (

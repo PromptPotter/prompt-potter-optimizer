@@ -11,9 +11,8 @@ import httpx
 
 from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
+from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat, silence_detail
-from promptpotter.infrastructure.llm.request import ChatRequest
-from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import (

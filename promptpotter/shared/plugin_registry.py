@@ -53,6 +53,7 @@ class Registry[M: _Named]:
         self.group = group
         self._builtins = builtins
         self._validate = validate
+        self._above: tuple[tuple[str, object], ...] = ()
 
     @functools.cached_property
     def _loaded(self) -> tuple[Mapping[str, M], Mapping[str, str]]:
@@ -68,7 +69,7 @@ class Registry[M: _Named]:
             table[member.name] = member
             origins[member.name] = label
 
-        for where, obj in self._builtins():
+        for where, obj in (*self._builtins(), *self._above):
             origin = built_in_origin(where)
             add(self._validate(obj, origin), origin, BUILT_IN)
         built_in = frozenset(table)
@@ -84,8 +85,16 @@ class Registry[M: _Named]:
             add(member, origin, origin)
         return MappingProxyType(table), MappingProxyType(origins)
 
-    def complete(self) -> None:
-        """Loads now, so a member that cannot load stops the boot rather than the first read."""
+    def complete(self, *above: tuple[str, object]) -> None:
+        """Loads now, so a member that cannot load stops the boot rather than the first read.
+        *above*: built-ins of a layer this one may not import, each by its module; a table read
+        before they register is a table missing them, and refuses."""
+        if above != self._above:
+            if "_loaded" in self.__dict__:
+                raise RuntimeError(
+                    f"{self.group}: read before its built-ins from above registered."
+                )
+            self._above = above
         _ = self._loaded
 
     @property

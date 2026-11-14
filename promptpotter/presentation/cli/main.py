@@ -1,14 +1,25 @@
-"""Imports no ``promptpotter.application`` module and no sibling: a handler is NAMED, so ``--help`` loads no verb. A terminal launch is a ``CommandRecord`` like the browser's."""
+"""The parser, every verb's row and the dispatch. Imports no ``promptpotter.application`` module and
+no verb's: a handler is NAMED and ``main()`` imports the one it dispatches, so ``--help`` and an
+argument error load no verb and no use case. A terminal launch is a ``CommandRecord`` like the
+browser's."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import contextlib
+import dataclasses
+import importlib
+import json
+import sys
+from collections.abc import Callable, Coroutine, Iterable, Mapping
 from pathlib import Path
-from typing import Any, Literal, TypeAliasType, get_args, get_origin
+from typing import Any, Literal, TypeAliasType, cast, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic.fields import FieldInfo
 
+from promptpotter.config.settings import settings
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
@@ -18,20 +29,188 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
 from promptpotter.domain.hierarchy import ListingLifecycle
+from promptpotter.domain.phases import StopOutcome
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.run_mode import OnDivergence
+from promptpotter.domain.said import Said
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import VerifyStrategy
-from promptpotter.presentation.cli.parsers import (
-    ACTIVE_CAMPAIGN,
-    ACTIVE_CYCLE,
-    BUDGET_AXES,
-    CAMPAIGN_ID,
-    NO_WAIT,
-    Arg,
-    Verb,
+from promptpotter.shared.errors import PayloadInvalidError, PotterError
+from promptpotter.shared.named_rows import imported
+
+
+class Arg:
+    def __init__(self, *flags: str, **spec: Any) -> None:
+        self.flags = flags
+        self.spec = spec
+
+    @property
+    def dest(self) -> str:
+        """Where argparse files the flag's value: its `dest`, else its first long flag's name."""
+        if "dest" in self.spec:
+            return str(self.spec["dest"])
+        flag = next((f for f in self.flags if f.startswith("--")), self.flags[0])
+        return flag.lstrip("-").replace("-", "_")
+
+
+@dataclasses.dataclass(frozen=True)
+class Verb:
+    name: str
+    handler: str
+    help: str
+    args: tuple[Arg, ...] = ()
+    # A read verb's row and its renderer (`module:fn`); its handler is `read:cmd_read`.
+    read: ReadKind | None = None
+    render: str | None = None
+    # A read verb's flags its renderer reads, which no field of the row's model takes.
+    render_args: tuple[str, ...] = ()
+    # Per payload field of a kind naming this verb, no `Arg` of its name: how the terminal carries it
+    # instead (`_unsaid`, checked at import).
+    unspelled: Mapping[str, str] = dataclasses.field(default_factory=dict)
+    # A written verb dispatching no kind: why no other door carries it.
+    terminal_only: str = ""
+
+
+GLOBAL_ARGS = (
+    Arg(
+        "--tenant",
+        default=None,
+        help=(
+            "Tenant partition under .promptpotter/projects/. Unset → the "
+            "account HOST_ADMIN_EMAIL declares, once it signed in, else "
+            "'default'. Pass a slug to override."
+        ),
+    ),
+    Arg(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Verbose logs (timestamps, module tags, every INFO line)",
+    ),
+    Arg(
+        "--json",
+        action="store_true",
+        dest="json_output",
+        help="Emit machine-readable JSON instead of human-formatted text",
+    ),
 )
 
-# The grammar `new.py::_set_body` walks: a `--set`, and each knob of an `--arm` after its optimizer.
+NO_WAIT = Arg(
+    "--no-wait",
+    action="store_true",
+    help="Refuse instead of waiting when every run slot on the machine is taken.",
+)
+
+
+def _budget_axis(axis: str, cast: Callable[[str], float]) -> Callable[[str], Budget]:
+    """A one-axis Budget, so `none` (the lift) stays apart from an omitted flag's ``None``; a
+    refusal is the model's, in the words REST's body refuses the same text in."""
+
+    def parse(raw: str) -> Budget:
+        try:
+            value: object = None if raw.strip().lower() == "none" else cast(raw)
+        except ValueError:
+            value = raw
+        try:
+            return PayloadInvalidError.validating(Budget, {axis: value})
+        except PayloadInvalidError as refused:
+            raise argparse.ArgumentTypeError(refused.message) from refused
+
+    return parse
+
+
+BUDGET_AXES = (
+    Arg(
+        "--max-usd",
+        dest="max_usd",
+        type=_budget_axis("usd", float),
+        default=None,
+        metavar="USD|none",
+        help="Campaign USD ceiling (optimizer + backend, every live cycle); 0 halts after the "
+        "current round, `none` leaves only your account's allowance. Omit to leave it as it stands.",
+    ),
+    Arg(
+        "--max-tokens",
+        dest="max_tokens",
+        type=_budget_axis("tokens", int),
+        default=None,
+        metavar="N|none",
+        help="Campaign token ceiling (in + out) — the unit that survives an unpriced model; "
+        "whichever ceiling trips first halts. Omit to leave it as it stands.",
+    ),
+    Arg(
+        "--max-rounds",
+        dest="max_rounds",
+        type=_budget_axis("rounds", int),
+        default=None,
+        metavar="N|none",
+        help="L1 round cap, read at the next round boundary; `none` lifts it, so the spend "
+        "ceiling governs. Omit to leave it as it stands.",
+    ),
+    Arg(
+        "--max-wall-clock",
+        dest="max_wall_clock",
+        type=_budget_axis("wall_clock_s", float),
+        default=None,
+        metavar="S|none",
+        help="Wall-clock bound in seconds for each launch; a remote cell still open at the edge "
+        "is cut. Omit to leave it as it stands.",
+    ),
+)
+
+ACTIVE_CAMPAIGN = Arg("--campaign", default="", help="Campaign id (default: the active one).")
+ACTIVE_CYCLE = Arg("--cycle", default="", help="Cycle id (default: the active one).")
+CAMPAIGN_ID = Arg("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
+
+
+def _declare(parser: argparse.ArgumentParser, args: Iterable[Arg]) -> None:
+    for arg in args:
+        parser.add_argument(*arg.flags, **arg.spec)
+
+
+def build_parser(verbs: Iterable[Verb]) -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m promptpotter",
+        description=f"{settings.BRAND_SHORT_NAME} optimization CLI. Bare invocation runs "
+        "`resume` (continue the active session). `new [DATASET|FILE]` mints a "
+        "fresh campaign — from a dataset name or a raw file it ingests + "
+        "origin-resolves. Reads happen by opening the artifact tree "
+        "(campaigns/{campaign_id}/) directly.",
+    )
+    _declare(parser, GLOBAL_ARGS)
+    # A global reads after the verb too; unsaid there, it leaves the one said before it.
+    after = tuple(
+        Arg(*arg.flags, **{**arg.spec, "default": argparse.SUPPRESS}) for arg in GLOBAL_ARGS
+    )
+    sub = parser.add_subparsers(dest="command", required=False)
+    for verb in verbs:
+        verb_parser = sub.add_parser(verb.name, help=verb.help, description=verb.help)
+        _declare(verb_parser, (*after, *verb.args))
+    return parser
+
+
+def budget_from_args(args: argparse.Namespace) -> Budget:
+    """Names only the axes a flag gave: an omitted one is left to the layers beneath."""
+    given = (args.max_usd, args.max_tokens, args.max_rounds, args.max_wall_clock)
+    return Budget().over(*(axis for axis in given if axis is not None))
+
+
+def said_text(row: Said) -> str:
+    """A served row as one terminal line: every part it carries, worded as served."""
+    text = row.label if row.value is None else f"{row.label} {row.value}"
+    text = text if row.sub is None else f"{text} ({row.sub})"
+    return text if row.detail is None else f"{text} — {row.detail}"
+
+
+@dataclasses.dataclass
+class CommandResult:
+    data: dict[str, Any] | None = None
+    human: str | None = None
+    # What the process exits: all a shell, a deploy script or a spawning server reads.
+    exit_code: int = 0
+
+
+# The grammar `launch.py::_set_body` walks: a `--set`, and each knob of an `--arm` after its optimizer.
 SET_GRAMMAR = "PATH=VALUE"
 ARM_GRAMMAR = f"KEY=OPTIMIZER[,{SET_GRAMMAR}…]"
 
@@ -48,7 +227,7 @@ def _read_verb(
     """A read verb: its flags' dests are the row's fields, else its renderer's *render_args*."""
     return Verb(
         name,
-        "read:cmd_read",
+        "cli.commands.reads:cmd_read",
         help=help,
         args=args,
         read=read,
@@ -73,7 +252,7 @@ def _switch_arg(raw: str) -> bool:
 _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "new",
-        "new:cmd_new",
+        "cli.commands.launch:cmd_new",
         unspelled={
             "filename": "the FILE positional: its name",
             "blob": "the FILE positional: its bytes",
@@ -138,7 +317,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     ),
     Verb(
         "head-to-head",
-        "new:cmd_head_to_head",
+        "cli.commands.launch:cmd_head_to_head",
         unspelled={
             "dataset_name": "the DATASET positional",
         },
@@ -173,7 +352,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     ),
     Verb(
         "resume",
-        "resume_command:cmd_resume",
+        "cli.commands.launch:cmd_resume",
         unspelled={
             "mode.from_round": "`--from ROUND`",
             "mode.on_divergence": "`--on-divergence`",
@@ -264,7 +443,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     ),
     Verb(
         "ab",
-        "ab:cmd_ab",
+        "cli.commands.measure:cmd_ab",
         terminal_only="it replays recorded decisions under the engine this checkout runs, which no server door holds",
         help="Deterministic A/B replay of a campaign (the active one, or --campaign): "
         "re-derive every recorded decision (winner / eliminations / L2-L3 triggers) under "
@@ -287,7 +466,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     ),
     Verb(
         "reset",
-        "reset:cmd_reset",
+        "cli.commands.writes:cmd_reset",
         terminal_only="it drops run data under the operator's own hand, which no tenant door may",
         help="Drop the selected tenant's run data and every file no row of "
         "`infrastructure/store/data_root.py` names; keep survivors (who an account is, what it "
@@ -314,11 +493,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 help="List the paths that would be removed; touch nothing. Recommended first run.",
             ),
         ),
-        needs_registries=False,
     ),
     Verb(
         "verify",
-        "verify:cmd_verify",
+        "cli.commands.measure:cmd_verify",
         unspelled={
             "candidate_id": "the SUBJECT positional's last part, beside its campaign and cycle",
         },
@@ -363,18 +541,17 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     ),
     Verb(
         "reindex",
-        "reindex:cmd_reindex",
+        "cli.commands.writes:cmd_reindex",
         terminal_only="disk repair of the data root this process opens",
         help="Rebuild the measurement index (measurements/index.jsonl) from the detail "
         "files, dropping index rows no detail file stands behind. The index is derived, so this "
         "loses nothing — use after a crash mid-append. Refuses while any cycle can still append. "
         "Dry-run by default: names what it would index, writes nothing. Pure disk work, zero spend.",
         args=(Arg("--apply", action="store_true", help="Write (default: report only)."),),
-        needs_registries=False,
     ),
     Verb(
         "compact-archive",
-        "maintenance:cmd_compact_archive",
+        "cli.commands.writes:cmd_compact_archive",
         terminal_only="`inventory` reads the archive's disk across every tenant, which no kind's "
         "mode carries",
         help="Count what the archive holds (`inventory`), move the fields nothing reads out of "
@@ -407,7 +584,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     _read_verb(
         "evidence",
         ReadKind.EVIDENCE,
-        "evidence:evidence_human",
+        "cli.commands.reads:evidence_human",
         render_args=("top",),
         help="What a SET of subjects jointly says: the campaigns' bench headlines head-to-head, "
         "never paired where one bench set did not grade them all, then the roster, whether their "
@@ -498,7 +675,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     _read_verb(
         "price-head-to-head",
         ReadKind.HEAD_TO_HEAD_PRICE,
-        "head_to_head_price:price_human",
+        "cli.commands.reads:price_human",
         help="Price a planned head-to-head before it is minted: every budget point, arm and "
         "replicate a plan file declares, in dollars, calls and wall clock, at the cell price the "
         "archive measured on this bank and its models and each optimizer's measured rounds, then "
@@ -514,7 +691,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     ),
     Verb(
         "bench",
-        "bench:cmd_bench",
+        "cli.commands.measure:cmd_bench",
         help="Grade the campaign's origin and its selection on the held-out bench rows and bank "
         "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
         "when asked, on the cycle holding its line. Reuses a pass the line already holds; refuses "
@@ -526,7 +703,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     _read_verb(
         "cycles",
         ReadKind.HIERARCHY,
-        "cycles:cycles_human",
+        "cli.commands.reads:cycles_human",
         help="Every cycle of every active campaign you own that loads (`--lifecycle` for the "
         "others), with its run state (`run_phase`) — derived at each read and written to "
         "no file, so this is where a terminal reads which runs are live, then each head-to-head's "
@@ -556,7 +733,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     _read_verb(
         "export",
         ReadKind.CYCLE_EXPORT,
-        "export:export_written",
+        "cli.commands.reads:export_written",
         render_args=("out",),
         help="One reading of a cycle, chosen by what you do with it next — the same tiers the "
         "webapp's copy and download offer and `GET …/cycles/{id}/export?tier=` serves. `chat` and "
@@ -584,7 +761,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     _read_verb(
         "command",
         ReadKind.COMMAND,
-        "read:command_human",
+        "cli.commands.reads:command_human",
         help="Where one command you sent stands, by the id its door answered: running, done, "
         "refused, or each job a launch launched. Read-only, zero spend.",
         args=(Arg("command_id", help="The command's id, as `--json` or its door answered it."),),
@@ -592,23 +769,22 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     _read_verb(
         "machine-status",
         ReadKind.MACHINE_STATUS,
-        "machine_status:machine_status_human",
+        "cli.commands.reads:machine_status_human",
         help="How many campaigns the machine runs and admits, and where your queued launches "
         "stand in line. Read-only, zero spend.",
     ),
     Verb(
         "close-admission",
-        "machine_status:cmd_close_admission",
+        "cli.commands.reads:cmd_close_admission",
         terminal_only="a landing's act on this box, before its checkout moves",
         help="A landing's first act, before its checkout moves: close this box's admission to every "
         "process not running TARGET, until the restarted server runs it. Prints `closed …`, or one "
         "`held …` line per live run on other code and closes nothing. Zero spend.",
         args=(Arg("target", help="The full commit the landing checks out."),),
-        needs_registries=False,
     ),
     Verb(
         "land-data",
-        "reset:cmd_land_data",
+        "cli.commands.writes:cmd_land_data",
         terminal_only="a landing's one write to the data root, under the code it lands",
         help="A landing's one write to the data root, under THIS code: stage each survivor "
         "migration (`application/maintenance/migrate.py::MIGRATIONS`), load every file under the "
@@ -630,29 +806,26 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 help="Print what the landing would write, drop and refuse; write nothing.",
             ),
         ),
-        needs_registries=False,
     ),
     Verb(
         "trail",
-        "trail:cmd_trail",
+        "cli.commands.reads:cmd_trail",
         terminal_only="the operator's audit read across accounts, outside every tenant's door",
         help="What an account did, oldest first, in UTC: its sign-ins, its consent, every upload, every attempt "
         "the server refused and every command, the terminal's own included. Bare, this tenant's; "
         "with an EMAIL, every account on the box that carries it. Read-only, zero spend.",
         args=(Arg("email", nargs="?", default="", help="An account's email address."),),
-        needs_registries=False,
     ),
     Verb(
         "offer-extras",
-        "offer:cmd_offer_extras",
+        "cli.commands.writes:cmd_offer_extras",
         terminal_only="what the deploy script installs, read before any server runs",
         help="The pyproject extras the datasets this deployment offers (DATASET_OFFER) need to "
         "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Writes nothing but a missing data root.",
-        needs_registries=False,
     ),
     Verb(
         "health",
-        "machine_status:cmd_health",
+        "cli.commands.reads:cmd_health",
         terminal_only="the box's own probe of what it answers for",
         help="Check everything this box answers for — each remote backend, each configured "
         "sign-in provider — one line each, led by held / broken / unverified; exits 1 on a broken "
@@ -660,7 +833,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     ),
     Verb(
         "mcp",
-        "mcp_host:cmd_mcp",
+        "mcp.server:cmd_mcp",
         terminal_only="it is the host door, over this terminal's stdio",
         help="Serve this workspace to a local host assistant over MCP stdio: every command and "
         "read as a tool, campaigns and courses as resources, the check-in as a prompt — each "
@@ -669,7 +842,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     ),
     Verb(
         "pin-roster",
-        "pin_roster:cmd_pin_roster",
+        "cli.commands.writes:cmd_pin_roster",
         terminal_only="the one fetch of Harbor's registry, written into the package's resources",
         help="Pin a published Harbor dataset's task roster into the harbor connector's resources "
         "(`harbor-roster.<dataset>@<version>.json`) — the ONE fetch of Harbor's registry, so no "
@@ -680,7 +853,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             Arg("dataset", help="The dataset's registry name (`harbor dataset list`)."),
             Arg("version", help="Its published version — a pin names one, never 'latest'."),
         ),
-        needs_registries=False,
     ),
 )
 
@@ -737,7 +909,7 @@ def command_verb(kind: CommandKind) -> Verb:
     assert kind.cli_verb is not None
     return Verb(
         kind.cli_verb,
-        "command:cmd_command",
+        "cli.commands.writes:cmd_command",
         help=" ".join((model.__doc__ or "").split()),
         args=(*address, *fields),
     )
@@ -793,3 +965,94 @@ VERBS: tuple[Verb, ...] = (
     *_WRITTEN_VERBS,
     *(command_verb(k) for k in CommandKind if k.cli_verb and k.cli_verb not in _WRITTEN),
 )
+
+
+# Windows consoles default to cp1252 which can't print Unicode symbols.
+if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+
+
+# A verb's handler and renderer are named under it: `mcp`'s lives with its server.
+VERB_PACKAGE = "promptpotter.presentation"
+COMMANDS: dict[str, str] = {verb.name: verb.handler for verb in VERBS}
+_PARSER = build_parser(VERBS)
+
+
+def _handler(verb: str) -> Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]:
+    return cast(
+        "Callable[[argparse.Namespace], Coroutine[Any, Any, CommandResult]]",
+        imported(VERB_PACKAGE, COMMANDS[verb]),
+    )
+
+
+def main() -> None:
+
+    parser = _PARSER
+    args = parser.parse_args()
+
+    if args.command is None:
+        # Named as a string like the handlers: `--help` loads no use case.
+        listing = importlib.import_module("promptpotter.application.cycle_addressing")
+        if not listing.holds_active_pointer(tenant=args.tenant):
+            print(
+                f"Welcome to {settings.BRAND_SHORT_NAME}.\n\n"
+                "Pick a verb to get started:\n"
+                "  promptpotter new <dataset>   mint a fresh campaign on the named dataset\n"
+                "  promptpotter new <file.csv>  ingest a raw file → resolve origin → mint + run\n"
+                "  promptpotter resume          continue the active campaign\n"
+                "  promptpotter verify          re-score a candidate on more samples\n"
+                "  promptpotter bench           grade the origin and the selection on held-out rows\n"
+                "  promptpotter ab              re-derive the active cycle's decisions under the current engine\n\n"
+                "Run `promptpotter <verb> --help` for per-verb options.\n"
+                f"Docs: {settings.BRAND_DOCS_URL}"
+            )
+            return
+        # Appended to the ORIGINAL argv, so `resume`'s defaults populate without dropping the globals before the verb.
+        args = parser.parse_args([*sys.argv[1:], "resume"])
+
+    runner = asyncio.Runner()
+    try:
+        # Every verb lands, its registries completed as the landing imports; its refusal is this
+        # one catch's to say, as a verb's is. Named as a string like the handlers: `--help` loads
+        # no use case.
+        landing = importlib.import_module("promptpotter.application.maintenance.landing")
+        landing.land_at_entry(every_treatment=False)
+        # A launch verb's handler runs its preamble and THEN answers the coroutine: a preamble's
+        # refusal is this one catch's to say, as the run's is.
+        result = runner.run(_handler(args.command)(args))
+    except PotterError as exc:
+        runner.close()
+        refused = Refusal.of(exc)
+        if args.json_output:
+            # One stream: the refusal is the answer, and stderr stays empty of it.
+            print(json.dumps(refused.model_dump(mode="json")))
+        else:
+            # What this terminal alone can do about it rides the refusal as a note, said after it.
+            said = [f"Error: {refused.message}", *getattr(exc, "__notes__", ())]
+            print("\n\n".join(said), file=sys.stderr)
+        sys.exit(1)
+    except (KeyboardInterrupt, asyncio.CancelledError) as exc:
+        # The cycle already finalized itself as PAUSED; closing a loop a second SIGINT stopped mid-unwind raises.
+        with contextlib.suppress(RuntimeError, KeyboardInterrupt):
+            runner.close()
+        reason = f" — {exc}" if str(exc) else ""
+        print(f"\nPaused{reason}. Completed work is saved.", file=sys.stderr)
+        lines = cast(
+            "Callable[[str], list[str]]",
+            imported("promptpotter.application.commands", "dispatcher:interrupted_lines"),
+        )
+        print("\n".join(lines(args.command)), file=sys.stderr)
+        sys.exit(StopOutcome.PAUSED.exit_code)
+    runner.close()
+    if args.json_output or result.human is None:
+        print(json.dumps(result.data, indent=2, default=str))
+    elif result.human:
+        # An empty one prints nothing: a verb whose stdout was a wire (`mcp`) leaves it clean.
+        print(result.human)
+    if result.exit_code:
+        sys.exit(result.exit_code)
+
+
+if __name__ == "__main__":
+    main()

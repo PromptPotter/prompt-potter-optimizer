@@ -19,7 +19,7 @@ from pydantic.fields import ComputedFieldInfo, FieldInfo
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from promptpotter.application.cycle_reads import FEED_SUBJECT_HEADER, FEED_VERSIONS_HEADER
-from promptpotter.application.initialization.wiring import complete_registries
+from promptpotter.application.maintenance.landing import read_every_treatment
 from promptpotter.application.read_params import PARAMS_FOR_READ
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.domain.campaign import LifecycleFilter
@@ -272,7 +272,7 @@ def _word_tables() -> list[_Declared]:
     holds what it serves; a re-export binds without an annotation and is no owner. A table no
     declaration owns, or two own, is refused.
     """
-    complete_registries()
+    read_every_treatment()
     owners: dict[int, list[tuple[str, str, object]]] = {}
     for module, loaded in list(sys.modules.items()):
         if not module.startswith("promptpotter."):

@@ -28,6 +28,7 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
 from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
+from promptpotter.infrastructure.outbound import notify_operator
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
 from promptpotter.shared.tls import tls_context
 
@@ -236,7 +237,8 @@ def _process_update(update: dict[str, Any], chat_id: str, passphrase: str | None
         # The refusal is the reply: an invalid identity file, a bad argument, a crash alike.
         logger.exception("admin command /%s failed", command)
         reply = f"Error: {exc}"
-    notices.answer_operator(reply)
+    # A command's answer rings: the operator is waiting on it.
+    notify_operator(reply, ring=True)
 
 
 def run_bot(token: str, chat_id: str, passphrase: str | None) -> None:

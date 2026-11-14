@@ -70,7 +70,7 @@ Four roots, owned by `promptpotter/config/paths.py`; the resolution rules are st
 
 ## 5. CLI flags — `new` and `resume`
 
-The loop-mint verbs. The flag set is `presentation/cli/commands/verbs.py` and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s; v1 promises the two verbs and their declared flags keep their meanings. Not readable off `--help`: every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/mint.py::root_cycle_id_of`); a launch flag SETS an axis of the cycle's budget over what the dataset declares and stays on the standing budget for later resumes (`set-limits` moves it mid-flight). Maintenance and diagnostic verbs are not part of v1.
+The loop-mint verbs. The flag set is `presentation/cli/main.py::VERBS` and what each does to the tree is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md)'s; v1 promises the two verbs and their declared flags keep their meanings. Not readable off `--help`: every `new` mints a fresh `campaign_id`, but two `new` calls on an unchanged declaration SHARE their content-addressed root `cycle_id` and its origin score, then diverge from round 1 (`runner/mint.py::root_cycle_id_of`); a launch flag SETS an axis of the cycle's budget over what the dataset declares and stays on the standing budget for later resumes (`set-limits` moves it mid-flight). Maintenance and diagnostic verbs are not part of v1.
 
 ## 5b. Embedded launch entry (Python)
 

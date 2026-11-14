@@ -52,7 +52,7 @@ class StatePart(FrozenModel):
         return any(f.is_required() for f in cls.model_fields.values())
 
 
-# Completed at `wiring.py::complete_registries`, once every package declaring a kind has loaded.
+# Completed at `maintenance/landing.py::complete_registries`, once every package declaring a kind has loaded.
 STATE_KINDS: KindTable[StatePart] = KindTable("state")
 
 

@@ -301,15 +301,14 @@ from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
 from promptpotter.domain.spend import Budget, HeldBudget
-from promptpotter.infrastructure.identity import blocklist, grants
+from promptpotter.infrastructure.identity import grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
+from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.registry import default_routes
-from promptpotter.infrastructure.llm.request import ChatRequest
-from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.producer_lock import cycle_held
 from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.projections.live_dashboard.projection import (
+from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardCheckout,
     fold_at,
 )
@@ -335,8 +334,8 @@ from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, has
 from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
 from promptpotter.infrastructure.store.stores import Stores, build_stores
-from promptpotter.presentation.cli import campaign_runner
-from promptpotter.presentation.cli.commands import new as cli_new
+from promptpotter.presentation.cli import main as cli_main
+from promptpotter.presentation.cli.commands import launch as cli_launch
 from promptpotter.shared.errors import (
     LANDING_REMEDY,
     CellUnscoreableError,
@@ -1367,7 +1366,7 @@ def test_new_on_a_wheel_says_where_the_l4_panel_lives(
         wheel.setattr(sys, "argv", ["promptpotter", "new", "promptpotter-self/panel"])
         capsys.readouterr()
         with pytest.raises(SystemExit):
-            campaign_runner.main()
+            cli_main.main()
     assert "no research tier" in capsys.readouterr().err, (
         "`new` on a wheel dropped why the L4 panel is not found"
     )
@@ -1386,7 +1385,7 @@ def test_new_says_an_uploads_slug_refusal_in_its_own_words(
         cli.setattr(sys, "argv", ["promptpotter", "new", str(upload), "--slug", "Bad Slug!"])
         capsys.readouterr()
         with pytest.raises(SystemExit):
-            campaign_runner.main()
+            cli_main.main()
     assert str(bad_slug.value) in capsys.readouterr().err, "`new` reworded an upload's refusal"
 
 
@@ -1403,7 +1402,7 @@ def test_a_check_in_renamed_onto_an_install_name_is_refused_and_told_its_draft_i
         )
         capsys.readouterr()
         with pytest.raises(SystemExit):
-            campaign_runner.main()
+            cli_main.main()
     said = capsys.readouterr().err
     assert said.startswith(
         "Error: A dataset named 'email-tagging' already exists. Suggested slug: email-tagging-2."
@@ -1512,7 +1511,7 @@ def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
         (
             blocks_file,
             b'{"emails": "ada@x.com"}',
-            lambda: blocklist.block_email(
+            lambda: grants.block_email(
                 blocks_file, "eve@x.com", actor="o", audit_path=tmp_path / "audit.jsonl"
             ),
             stored_config,
@@ -2088,8 +2087,8 @@ def test_an_empty_answer_buys_a_turn_only_where_one_is_owed(
     assert unowed.value.code == origin_resolving.RESOLVER_NOT_OWED
     with pytest.raises(OriginIncompleteError):
         asyncio.run(
-            cli_new._hold_checkin(
-                campaign_runner._PARSER.parse_args(["new", "x"]),
+            cli_launch._hold_checkin(
+                cli_main._PARSER.parse_args(["new", "x"]),
                 CommandDispatcher(built_stores),
                 authored.draft_id,
                 None,
@@ -2915,7 +2914,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         )
         capsys.readouterr()
         with pytest.raises(SystemExit):
-            campaign_runner.main()
+            cli_main.main()
     assert json.loads(capsys.readouterr().out)["code"] == "connector_moved", (
         "the terminal's resume ran a campaign on a connector its dataset no longer names"
     )

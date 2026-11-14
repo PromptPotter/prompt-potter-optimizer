@@ -17,7 +17,7 @@ from factories import workspace
 from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
 from pydantic import SecretStr
 
-from promptpotter.application.initialization.wiring import complete_registries
+from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import send_pacing
@@ -28,7 +28,7 @@ from promptpotter.infrastructure.store.stores import Stores
 
 @pytest.fixture(autouse=True, scope="session")
 def completed_registries() -> None:
-    complete_registries(every_treatment=False)
+    complete_registries()
 
 
 @pytest.fixture

@@ -20,21 +20,22 @@ from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
 from promptpotter.domain.records.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity import blocklist, default_claim
-from promptpotter.infrastructure.identity.bundle import (
+from promptpotter.infrastructure.identity import accounts
+from promptpotter.infrastructure.identity import grants as grant_files
+from promptpotter.infrastructure.identity.accounts import (
     IdentityBundle,
+    derive_user_id,
     identity_of_session,
     resolve_access_state,
 )
 from promptpotter.infrastructure.identity.grants import (
     PrincipalGrant,
+    default_identity_paths,
     grant_principal,
     list_grants,
     revoke_principal,
 )
-from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.infrastructure.identity.provider_config import ProviderIdentity
-from promptpotter.infrastructure.identity.user import derive_user_id
+from promptpotter.infrastructure.identity.oidc import ProviderIdentity
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.store.account_trail import (
@@ -166,7 +167,7 @@ def arrive(stores: Stores, *, device: Device | None) -> Arrival:
         if existing is not None:
             return Arrival(existing, opened=False)
         held = count_accounts(stores.projects_root)
-        if not default_claim.is_host(stores.identity) and held >= settings.MAX_ACCOUNTS:
+        if not accounts.is_host(stores.identity) and held >= settings.MAX_ACCOUNTS:
             raise AccountCeilingError(
                 f"This box holds its ceiling of {settings.MAX_ACCOUNTS} accounts "
                 f"({held} now), so it opens no new one.",
@@ -238,7 +239,7 @@ def sign_in_oidc(
     """THE browser sign-in: blocked, the box's claim, the account ceiling and the opening are
     decided here, and a session stands only for an account that does."""
     user_id = str(derive_user_id(verified.issuer, verified.subject))
-    host_admin = default_claim.is_declared_host(verified.email)
+    host_admin = accounts.is_declared_host(verified.email)
     root, rings = default_projects_root(), list[str]()
     # A blocked account still gets a session: the session seam empties its capabilities per request.
     if resolve_access_state(verified.email, bundle) == "blocked":
@@ -246,13 +247,11 @@ def sign_in_oidc(
     elif host_admin:
         # The terminal's tree is the box's own, so who takes it is declared, never inferred from
         # arrival order.
-        refused = default_claim.claim_default(
-            projects_root=root, user_id=user_id, email=verified.email
-        )
+        refused = accounts.claim_default(projects_root=root, user_id=user_id, email=verified.email)
         if refused is not None:
             logger.warning("The host's sign-in did not claim this box: %s", refused)
             rings.append(f"Your sign-in did not claim this box: {refused}")
-    elif default_claim.host_user_id(root) is None:
+    elif accounts.host_user_id(root) is None:
         why = (
             "HOST_ADMIN_EMAIL's account has not signed in yet"
             if settings.HOST_ADMIN_EMAIL.strip()
@@ -500,7 +499,7 @@ def trails_since(projects_root: Path, since: float) -> tuple[list[AccountTrail],
 
 
 def host_user_id() -> str | None:
-    return default_claim.host_user_id(default_projects_root())
+    return accounts.host_user_id(default_projects_root())
 
 
 def registered_or_default_identity(explicit_tenant: str | None = None) -> IdentityContext:
@@ -517,19 +516,19 @@ def local_stores(*, tenant: str | None) -> Stores:
 
 
 def blocked_emails() -> list[str]:
-    return blocklist.list_blocked(default_identity_paths().blocklist)
+    return grant_files.list_blocked(default_identity_paths().blocklist)
 
 
 def block_email(email: str, *, actor: str) -> list[str]:
     paths = default_identity_paths()
-    return blocklist.block_email(
+    return grant_files.block_email(
         paths.blocklist, email, actor=actor, audit_path=paths.blocklist_audit
     )
 
 
 def unblock_email(email: str, *, actor: str) -> list[str]:
     paths = default_identity_paths()
-    return blocklist.unblock_email(
+    return grant_files.unblock_email(
         paths.blocklist, email, actor=actor, audit_path=paths.blocklist_audit
     )
 

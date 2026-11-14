@@ -7,7 +7,7 @@ import json
 from collections.abc import Mapping
 from pathlib import Path
 
-from promptpotter.infrastructure.identity.paths import IDENTITY_DIR, IdentityPaths
+from promptpotter.infrastructure.identity.grants import IDENTITY_DIR, IdentityPaths
 from promptpotter.infrastructure.store.data_root import Staged, read_as_staged
 
 

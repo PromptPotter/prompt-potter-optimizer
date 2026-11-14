@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
-from functools import cache
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple, assert_never, cast, get_args
 
@@ -86,33 +85,13 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerFold,
     LedgerIndex,
     LedgerSpan,
-    LineIndex,
     RecordClasses,
+    last_fold,
     money_on,
+    scan_last,
 )
 from promptpotter.shared.clock import epoch_seconds
 from promptpotter.shared.measurement_context import MeasurementRole
-
-
-class _Last:
-    records: ClassVar[RecordClasses]
-
-    def __init__(self) -> None:
-        self._found: StrictModel | None = None
-
-    def feed(self, record: StrictModel) -> None:
-        self._found = record
-
-    def value(self) -> StrictModel | None:
-        return self._found
-
-
-@cache
-def _last(record: type[StrictModel]) -> type[_Last]:
-    """Held by its name here, as a fold snapshot pickles it."""
-    made = type(f"_Last{record.__name__}", (_Last,), {"records": (record,)})
-    globals()[made.__name__] = made
-    return made
 
 
 @dataclass(frozen=True)
@@ -311,36 +290,6 @@ class _CycleHold:
 
     def value(self) -> CycleHold | None:
         return self._found
-
-
-class Progress(NamedTuple):
-    progressed_at: float | None = None
-    waiting_since: float | None = None
-
-
-class _Progress:
-    def __init__(self) -> None:
-        self._held = Progress()
-
-    def feed(self, line: dict[str, Any]) -> None:
-        kind = line.get("record_type")
-        # A heartbeat proves the process alive, not that it progressed.
-        if kind in ("llm_call_progress", "cell_beat"):
-            return
-        held = self._held
-        if kind == "flight":
-            waiting = line.get("waiting")
-            since = waiting.get("since") if isinstance(waiting, dict) else None
-            held = held._replace(
-                waiting_since=float(since) if isinstance(since, int | float) else None
-            )
-        elif kind == "run_phase":
-            held = held._replace(waiting_since=None)
-        at = epoch_seconds(line.get("timestamp"))
-        self._held = held if at is None else held._replace(progressed_at=at)
-
-    def value(self) -> Progress:
-        return self._held
 
 
 class StandingArm(NamedTuple):
@@ -767,7 +716,7 @@ class _Timeline:
 
 LedgerIndex.readers(
     *map(
-        _last,
+        last_fold,
         (
             CampaignCeilingRecord,
             CycleMintedRecord,
@@ -797,19 +746,10 @@ def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[Any, V]]) -> V:
     return LedgerIndex.of(ledger_path).view(fold)
 
 
-def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R | None:
-    """The last *record* the spans hold, a later span's over an earlier one's."""
-    found: R | None = None
-    for span in spans:
-        own = LedgerIndex.of(span.path).view(_last(record), span.until)
-        found = found if own is None else cast("R", own)
-    return found
-
-
 def scan_each_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> list[R | None]:
     """Each span's own last *record*, ``None`` where it holds none, the earliest span's first."""
     return [
-        cast("R | None", LedgerIndex.of(span.path).view(_last(record), span.until))
+        cast("R | None", LedgerIndex.of(span.path).view(last_fold(record), span.until))
         for span in spans
     ]
 
@@ -882,9 +822,6 @@ def scan_bench_open(ledger_path: Path) -> bool:
     return _view(ledger_path, _BenchOpen)
 
 
-PROGRESS_FOLDS = (_Progress,)
-
-
 def scan_cycle_facts(ledger_path: Path, until: int | None = None) -> CycleFacts:
     return LedgerIndex.of(ledger_path).view(_CycleFacts, until)
 
@@ -895,10 +832,6 @@ def scan_cell_formula(spans: Iterable[LedgerSpan]) -> str | None:
         held = LedgerIndex.of(span.path).view(_CycleFacts, span.until)
         formula = held.formula or formula
     return formula
-
-
-def scan_ledger_progress(ledger_path: Path) -> Progress:
-    return LineIndex.of(ledger_path, PROGRESS_FOLDS).view(_Progress)
 
 
 def scan_standing_rounds(spans: Iterable[LedgerSpan]) -> StandingRounds:

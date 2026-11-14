@@ -5,7 +5,7 @@ import asyncio
 from fastapi import FastAPI, Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from promptpotter.infrastructure.identity.bundle import IdentityBundle, identity_of_session
+from promptpotter.infrastructure.identity.accounts import IdentityBundle, identity_of_session
 from promptpotter.shared.identity import IdentityContext
 
 SESSION_COOKIE_NAME = "promptpotter_session"

@@ -164,7 +164,7 @@ Changelog = "https://github.com/PromptPotter/prompt-potter-optimizer/blob/main/C
 Issues = "https://github.com/PromptPotter/prompt-potter-optimizer/issues"
 
 [project.scripts]
-promptpotter = "promptpotter.presentation.cli.campaign_runner:main"
+promptpotter = "promptpotter.presentation.cli.main:main"
 
 # The ONE uv pin: uv refuses any other, CI's setup-uv installs this, deploy-linux/uv.sh reads it.
 [tool.uv]

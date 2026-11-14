@@ -176,9 +176,14 @@ _ROUTER_IMPORTS_INFRASTRUCTURE = (
     ("infrastructure/",),
     "presentation/api/routers/auth.py",
 )
-# `api/` is held by the router rule alone: its deps and middleware are the Identity adapter's seam.
-_PRESENTATION_IMPORTS_INFRASTRUCTURE = ("presentation/", ("infrastructure/",), "presentation/api/")
-_LAYERING: tuple[tuple[str, tuple[str, ...], str], ...] = (
+# `api/` is held by the router rule alone: its deps and middleware are the Identity adapter's seam;
+# the admin bot rings the operator's channel itself (`infrastructure/outbound.py::notify_operator`).
+_PRESENTATION_IMPORTS_INFRASTRUCTURE = (
+    "presentation/",
+    ("infrastructure/",),
+    ("presentation/api/", "presentation/admin_bot.py"),
+)
+_LAYERING: tuple[tuple[str, tuple[str, ...], str | tuple[str, ...]], ...] = (
     ("application/", ("presentation/",), ""),
     ("shared/", ("!shared/",), ""),
     ("domain/", ("infrastructure/", "connectors/", "application/", "presentation/"), ""),
@@ -208,7 +213,7 @@ def _layering(_: Selection) -> Outcome:
     return (1, "\n".join(hits)) if hits else (0, "")
 
 
-# Verbs name their handlers as strings (`campaign_runner.py::COMMANDS`) so the parser loads no use case.
+# Verbs name their handlers as strings (`main.py::COMMANDS`) so the parser loads no use case.
 _LOADED = "loaded: "
 _HELP_PROBE = f"""
 import runpy, sys
@@ -237,9 +242,9 @@ _HANDLER_PROBE = """
 import importlib
 from promptpotter.application.commands import dispatcher
 from promptpotter.domain.command_kinds import CommandKind
-from promptpotter.presentation.cli import campaign_runner
+from promptpotter.presentation.cli import main as cli_main
 for table, package, rows in (
-    ("COMMANDS", campaign_runner._COMMANDS_PACKAGE, campaign_runner.COMMANDS),
+    ("COMMANDS", cli_main.VERB_PACKAGE, cli_main.COMMANDS),
     ("CommandKind", dispatcher._HANDLER_PACKAGE, {k.value: k.handler for k in CommandKind}),
 ):
     for key, target in rows.items():

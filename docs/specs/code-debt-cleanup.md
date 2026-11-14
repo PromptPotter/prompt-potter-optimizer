@@ -119,7 +119,7 @@ row it closes.
   Action: `arm_plans` refuses it. **Rides with:** admit-2.
 - **A draft opened from the CLI dead-ends** (reported): `open-dataset-draft` and `open-origin-draft`
   have no verb that edits, resolves or starts them; and the upload bound is spelled twice
-  (`new.py:202-205` vs `deps.py:149-152`). Action: `new --draft ID`, and one bound. **Rides with:** admit-2.
+  (`cli/commands/launch.py::_ingest_checkin` vs `deps.py:149-152`). Action: `new --draft ID`, and one bound. **Rides with:** admit-2.
 
 ### The edge tail · passb-2 (after batch/26; `chain N` is passb's link N)
 
@@ -136,9 +136,9 @@ row it closes.
   **Re-test:** `git grep -n "started_at === null" -- webapp/components` is empty.
 - **The held-out verb has three names**: `verify`, `bench`, `grade-bench` and "Grade on bench"; `bench`
   also collides with `application/bench/`. It is spelled in `domain/command_kinds.py` (`grade-bench`,
-  `measuring:grade_bench`, `anyone("bench")`), `cli/commands/bench.py`, `webapp/lib/api/commands.ts`,
+  `measuring:grade_bench`, `anyone("bench")`), `cli/commands/measure.py`, `webapp/lib/api/commands.ts`,
   `domain/campaign_config.py:421`,
-  `infrastructure/projections/live_dashboard/projection.py:255`, `domain/bench.py:359` (`can_run`'s
+  `infrastructure/projections/live_dashboard.py`, `domain/bench.py:359` (`can_run`'s
   description) and `webapp/components/searchpoint/BenchGradeAction.tsx:29` ("Grade on bench"). Action: "held-out" at
   all five doors, at once. **Rides with:** passb-2 2, whose Owns gain those files. **Re-test:**
   `git grep -n "grade_bench" -- promptpotter webapp scripts` is empty (8 hits in 5 files today).
@@ -148,15 +148,15 @@ row it closes.
   (`ledger_scan.py::scan_closed_bench`), so `write_export` has one caller. **Rides with:** passb-2 2.
   **Re-test:** `git grep -c "restate_export_bench" -- promptpotter` is 0.
 - **A stopped paid pass exits 1 at the CLI**:
-  `presentation/cli/campaign_runner.py::main` maps `PassStoppedError` to exit 1. Action: `campaign_runner.py`
+  `presentation/cli/main.py::main` maps `PassStoppedError` to exit 1. Action: `cli/main.py`
   answers it with the paused exit code. **Rides with:** passb-2 3. **Re-test:**
-  `git grep -lE "except PassStoppedError" -- promptpotter/presentation` names `campaign_runner.py` alone.
+  `git grep -lE "except PassStoppedError" -- promptpotter/presentation` names `cli/main.py` alone.
 - **`line_run` reads a paused pass as selecting**: a pass with a pause asked reads `PAUSED`
   (`infrastructure/run_state.py:82`), so `runner/bench.py::line_run` takes its hold for the loop's.
   Action: the pass's hold is read by its bracket (`producer_lock.pass_held`). **Rides with:** passb-2 3.
   **Re-test:** a bench pass with a pause asked reads `selecting=False`.
 - **A bench pass's served delta is always zero**: `runner/bench.py::_bench_counted` (called at `:769`, `:780`
-  inside `bench_origin`) reads the one `SpendRollup` before and after the pass, but `live_dashboard/projection.py:449` replaces
+  inside `bench_origin`) reads the one `SpendRollup` before and after the pass, but `live_dashboard.py` replaces
   `state.spend` on each bank, so the snapshot never moves. Action: the delta is folded off the pass's own
   charges, not two reads of one snapshot. **Rides with:** passb-2 3, whose Owns gain `_bench_counted`.
   **Re-test:** a bench pass that spends serves a nonzero delta.
@@ -194,7 +194,7 @@ row it closes.
   `WorkspaceBank.deleted`. Action: the second write goes. **Rides with:** money 5, which reads the
   tombstone; its Owns gain `delete_campaign`'s `_set_lifecycle` line. **Re-test:**
   `git grep -n '_set_lifecycle(campaign_id, "deleted"' -- promptpotter` is empty.
-- **The default claim moves a tree a pass may be scoring**: `identity/default_claim.py::claim_default`
+- **The default claim moves a tree a pass may be scoring**: `identity/accounts.py::claim_default`
   reads `producer_attached` under the accounts lock, never the admission gate, so a registered pass on a
   terminal cycle is missed. `infrastructure/` may not import `admission.py` (`gate.py::_LAYERING`).
   Root: its caller, `application/account.py:256`, holds `admission.py::destroying` of each of the
@@ -311,7 +311,7 @@ row it closes.
   narr 2. **Re-test:** `git grep -c "RoundClosedRecord.of(" -- promptpotter tests` is 1.
 - **The ledger banks dashboard views**: `domain/phase_views.py` holds 13 pre-rendered view classes,
   built in `application/views/ingress.py` through `ViewContext` and taken apart again in
-  `views/render/ansi.py` and `projections/live_dashboard/projection.py`; `RoundCompleteView` repeats
+  `views/render/ansi.py` and `projections/live_dashboard.py`; `RoundCompleteView` repeats
   `RoundClosedRecord`, and `RunSpendView` copies the spend fields one by one. Action: the ledger keeps
   domain facts only and every renderer reads the records; the view classes go with `ViewContext`
   (the largest excision of the row above; a run-data reshape, wiped). **Rides with:** narr 2.
@@ -345,18 +345,18 @@ row it closes.
   new read, breaks R7, so the closed-round series' read is decided first, then every `dash.rounds` reader
   moves. **Rides with:** narr 2; webb-5's Owns gain `hooks/useOriginEvidence.ts`, `hooks/useVerify.ts` and
   the `dash.rounds` panes. **Re-test:** `git grep -nE "dash\??\.rounds" -- webapp/lib webapp/components`.
-- **The live dashboard keeps a third hold tracker** (narr-1's landing): `live_dashboard/projection.py::_holds`
+- **The live dashboard keeps a third hold tracker** (narr-1's landing): `live_dashboard.py::_holds`
   keeps the last `ProviderHoldRecord` per sender and, unlike `narration.py::Narration`'s, is never
   cleared at a run-phase declaration. Action: the dashboard reads the narration's holds. **Rides with:**
-  narr 2. **Re-test:** `git grep -c "_holds" -- promptpotter/infrastructure/projections/live_dashboard` is 0.
+  narr 2. **Re-test:** `git grep -c "_holds" -- promptpotter/infrastructure/projections/live_dashboard.py` is 0.
 - **`_Standing.value` builds a `StandingArm` per arm of every round on each call** (narr-1's landing):
   closed rounds' cells are shared, but the tuples and outer dicts stay O(R·A) per poll. Action: a closed
   round's `StandingArm`s freeze at its close. **Rides with:** narr 2. **Re-test:** a value at round R
   builds tuples for the live round only.
 - **`RoundBuffer` wraps `Narration`'s arm API one call deep** (narr-1's landing,
-  `live_dashboard/round_buffer.py:28`: `announce`, `take`, `enter`): the buffer is a view of the
+  `live_dashboard.py::RoundBuffer`: `announce`, `take`, `enter`): the buffer is a view of the
   narration's live round, not a holder of its own. Action: its readers read the narration and the
-  buffer goes. **Rides with:** narr 2. **Re-test:** `git ls-files promptpotter/infrastructure/projections/live_dashboard/round_buffer.py` is empty.
+  buffer goes. **Rides with:** narr 2. **Re-test:** `git grep -c "class RoundBuffer" -- promptpotter/infrastructure/projections/live_dashboard.py` is 0.
 - **The arms gate is worded twice** (narr-1's landing): `views/readout.py`'s `[ARM GATE]` block and
   `activity.py::_arms_gate` say one hold, because the gate is no narration row. Action: the gate is the
   typed act's narration row (the U3 row above). **Rides with:** narr 2.
@@ -620,7 +620,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   package. Action: one store read of a hop's chain (`CampaignStore.chain`). **Rides with:** hubs.
   **Re-test:** `git grep -c "ledger_chain(CycleDir(" -- promptpotter` sums to at most 1.
 - **`p_record_drift` counts handler tables as mirrors**: its 33 is `ledger_scan.py` (12) and
-  `live_dashboard/projection.py` (21), folds and `_handle_*` tables that each read their own subset.
+  `live_dashboard.py` (21), folds and `_handle_*` tables that each read their own subset.
   Action: the count skips a `_handle_*` table and a fold's declared kinds (the row above's
   declaration). **Rides with:** hubs. **Re-test:** drift is 0 and its `BASELINE` row says so.
 
@@ -796,71 +796,13 @@ and derived the knob couplings from each member's draws and the escalation ladde
   which no domain fold holds. Action: the readers fold `StandingArm.cells` through
   `metrics.py::compute_composite_fitness` in `application/`, and the field goes (run data wiped).
 - **Generated `last` record classes live in module globals so a snapshot can pickle them** (rec's
-  landing): `store/campaign_store/ledger_scan.py::_last` builds a class at runtime and registers it with
+  landing): `store/read_model.py::last_fold` builds a class at runtime and registers it with
   `globals()[made.__name__] = made`. Action: the last-wins records become declared classes, and the
-  registration goes. **Re-test:** `git grep -c "globals()\[" -- promptpotter/infrastructure/store/campaign_store/ledger_scan.py` is 0.
+  registration goes. **Re-test:** `git grep -c "globals()\[" -- promptpotter/infrastructure/store/read_model.py` is 0.
 - **An empty round's error rate reads 0.0** (rec's landing, reported):
   `domain/round_diagnostics.py::RoundDiagnostics.error_rate` stays a `float` where no cell ran, the
   absent-as-zero shape rec closed for a round's fitness. Action: `None` where no cells ran.
   **Re-test:** a round with no scored cell serves `error_rate: null`.
-
-### batch/27 · la
-
-- **CLI `--json` says a refusal on both streams**: `campaign_runner.py::main` prints the `Refusal` JSON to
-  stdout and `Error: …` to stderr. Decided (2026-11-10): one stream. **Rides with:** la 1. **Re-test:**
-  `python -m promptpotter resume --json --campaign nope 2>&1 >/dev/null` prints nothing.
-- **Wave A — presentation and infrastructure, no digest re-key**: the CLI as five modules
-  (`cli/campaign_runner.py` + `parsers.py` + `commands/verbs.py` → `cli/main.py`; small read verbs →
-  `commands/reads.py`, measure verbs → `commands/measure.py`); `infrastructure/identity/` 12 → 3
-  (`oidc`, `grants`, `accounts`); `infrastructure/projections/live_dashboard/` → one module; LLM wire types into
-  `llm/base.py`. Close with `gate.py --only layering,help-imports,handler-tables,doc-claims,instruction-files`.
-  **Rides with:** la 1-2.
-- **`Verb.needs_registries` carries two decisions**: seven verbs declare it `False` (`reset`, `reindex`,
-  `close-admission`, `land-data`, `trail`, `offer-extras`, `pin-roster`; `verbs.py:337,391,748,774,784,792,824`),
-  and skip the landing with the registries, so they read and write the data root unlanded (`cli/campaign_runner.py::main`). Action: every registry
-  completes at import, the flag goes, and every verb lands. **Rides with:** la 3. **Re-test:**
-  `git grep -n "needs_registries" -- promptpotter` is empty.
-- **The fold roster rests on side-effect imports**: `initialization/wiring.py` joins `health` and
-  `event_stream` to `LedgerIndex`'s roster by `noqa: F401` imports, and
-  `read_model.py::LedgerIndex.check_every_arm_read` runs only under `every_treatment=True`, so no CLI
-  process checks it. Action: the roster completes at import with the registries, and every entry checks
-  it. **Rides with:** la 3. **Re-test:** `git grep -n "joins the roster" -- promptpotter/application/initialization/wiring.py` is empty.
-- **`main.py`'s CORS still allows `If-Modified-Since`**, which no client sends since the dashboard reads
-  by ETag. Action: the header leaves `allow_headers`. **Rides with:** la 2. **Re-test:**
-  `git grep -n "If-Modified-Since" -- promptpotter/main.py` is empty.
-- **The run-state derivation cannot move into `stores.py`**: `infrastructure/run_state.py`'s
-  `derive_run_state`, `run_owed`, `read_run_state` and `run_state_stamps` read the ledger and the producer
-  lock that `store/stores.py::Stores.declare_stop` and `::declare_ended` write, but `stores.py` imports
-  `CampaignStore`, and `campaign_store/store.py:67` (`run_state_stamps`) reads the run state, so the
-  move closes an import loop. The row keeps only the leg: `run_state.py` (the derivation, `run_owed`,
-  the stamps and `RECENT_STEP_S`) imports neither `stores.py` nor `campaign_store/`, and both read it.
-  **Rides with:** la 2, a regroup by subject; its Owns gain the import lines la already takes
-  (`store/stores.py`, `campaign_store/store.py`, `scripts/{build_ts_types,offline_run}.py`,
-  `tests/test_security.py`) and `llm/heartbeat.py`'s doc line (`cycle_reads.py` imports none of it).
-  **Re-test:** `python scripts/gate.py --only layering` is green with `stores.py` reading `run_state.py`.
-- **`run_owed` re-derives `SILENT`'s fact beside `derive_run_state`**: `run_state.py::run_owed`
-  reads the last phase and the launch claim again, because `derive_run_state` cannot tell a lock
-  holder's own hold from a producer's. Root: the derivation takes the reader's hold as an input.
-  **Rides with:** la 2, in the same files as the row above. **Re-test:**
-  `git grep -c "def run_owed" -- promptpotter` is 0.
-- **Two spellings of "a producer holds it"**: `run_state.py::producer_attached` derives the whole run
-  state, ledger and inbox included, to answer a lock probe, while `campaign_store/store.py::run_held_cycles`
-  asks `producer_lock.cycle_held` directly. The `account_spend` readers are gone (df701cd20). Root:
-  `producer_attached` (`run_state.py:156-158`) goes, and its readers ask `producer_lock.cycle_held`
-  (`scripts/offline_run.py:714`, `tests/test_security.py:2052`). **Rides with:** la 2, in the same
-  files as the rows above. **Re-test:**
-  `git grep -n "producer_attached" -- promptpotter scripts tests` is empty.
-- **The connector registry names an application module by string**: `connectors/__init__.py::_APPLICATION_BUILT_INS`
-  loads the recursion's connector from `application/` by name. Root: it registers where the application
-  completes its registries. **Rides with:** la 3 (every registry completes at import); its Owns gain
-  `connectors/__init__.py`'s `_APPLICATION_BUILT_INS` (rk-run's and xconn's file, named shared).
-  **Re-test:** `git grep -n "_APPLICATION_BUILT_INS" -- promptpotter` is empty.
-- **`application/notices.py::answer_operator` is a one-line ring wrapper** the layering rule forced
-  (`presentation/admin_bot.py` may not reach `infrastructure/`). Decided (2026-11-10): it goes, once the
-  admin bot has a sanctioned infrastructure seam (`scripts/gate.py::_PRESENTATION_IMPORTS_INFRASTRUCTURE`).
-  **Rides with:** la 1, the presentation's reshape; its Owns gain `application/notices.py`,
-  `presentation/admin_bot.py` and that `scripts/gate.py` line (rel's file, named shared). **Re-test:**
-  `git grep -n "answer_operator" -- promptpotter` is empty.
 
 ### webd (the edge tail, after lw)
 
@@ -1060,7 +1002,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   cookie alone and reads no bearer, so a third party needs `PROMPTPOTTER_AUTH=off`.
   Action: an account mints a named, scoped, revocable token (hash at rest, a SURVIVOR row of
   `store/data_root.py::KINDS`); a bearer resolves through the one caller dependency, a new auth door
-  reviewed in `access-model.md` (`identity/bundle.py::identity_of_session` per carrier; `deps.py::open_caller`
+  reviewed in `access-model.md` (`identity/accounts.py::identity_of_session` per carrier; `deps.py::open_caller`
   splits the rate draw from the `Caller` build, the seam mcp 2 rides); a new section of
   `docs/developer/stable-api.md` (its § 8 is "What is NOT stable") shows submit → poll → fetch with it. **Rides with:** mkey 1, 2. **Re-test:** a bearer reader in
   `promptpotter/presentation/api/`.
@@ -1098,7 +1040,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   included. Root: each tick re-reads the session (`session_store.read` + `identity_of_session`) and ends the
   stream on a mismatch; `_events` (`reads.py:158`) runs once, so the check belongs in
   `cycle_reads.py::cycle_event_frames` (`:170`) and `::feed_frames` (`:227`), or a wrapper around both. Beside it (reported, sub-threshold): one-level delegation is
-  enforced one way only (`grants.py:104` vs `bundle.py:91-105`); `capability=None` kinds
+  enforced one way only (`identity/grants.py::grant_principal` vs `identity/accounts.py::identity_of_session`); `capability=None` kinds
   (set-user-settings, accept-terms) act for blocked accounts and delegates; `dispatcher.py:354` resolves
   the prefix before the capability check (`:358`). **Rides with:** mkey (the access review), ahead of
   the edge tail's order if a delegate is ever granted on the box.
@@ -1116,7 +1058,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   its sign-in, a second transport of the one adapter, on mkey's bearer; its auth follows
   [`access-model.md`](../operations/access-model.md). **Rides with:** mcp 2. **Re-test:** in claude.ai,
   a custom connector at the box's MCP URL answers `tools/list`.
-- **`main.py::API_ROUTERS` declares `APIRouter`s only**, so an ASGI mount (the webapp's `StaticFiles`,
+- **`promptpotter/main.py::API_ROUTERS` declares `APIRouter`s only**, so an ASGI mount (the webapp's `StaticFiles`,
   MCP next) sits outside the declared gate and `_off_catalogue`. Action: a mount is a declared row.
   **Rides with:** mcp 2. **Re-test:** `git grep -n "app.mount(" -- promptpotter/main.py` is empty.
 
@@ -1162,7 +1104,7 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 ### batch/30 · forks
 
 - **Money text has no sub-cent rule**: a cell's price at six places (`preflight.py::_RoundShort.costing`,
-  `cli/commands/head_to_head_price.py::_human`, and `potter/dispatch/injections/panels.py:1179-1180`) beside `domain/spend.py::usd_text`, which prints `$0.0000`
+  `cli/commands/reads.py::_human`, and `potter/dispatch/injections/panels.py:1179-1180`) beside `domain/spend.py::usd_text`, which prints `$0.0000`
   for a cheap model; `usd_text` and webapp `fmtUsd` are one rule; `run_standing.py` spells a third.
   Open (operator): the rule (significant digits under a dollar is one candidate). **Rides with:** forks 1.
   **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
@@ -1328,7 +1270,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   published metrics, `spend_book.py`'s billing parts). Action: each is renamed to what it holds, and a
   gate check refuses a top-level class name defined twice. **Rides with:** ren. **Re-test:** the
   check passes with an empty allowlist.
-- **Two functions named for another act**: `initialization/wiring.py::read_treatment` returns None and
+- **Two functions named for another act**: `maintenance/landing.py::read_treatment` returns None and
   raises (a check, named as a read); `views/render/export.py`'s local `needs_export` returns a
   `PromptExport` (a getter, named as a predicate). Action: each named for its act. **Rides with:** ren.
 

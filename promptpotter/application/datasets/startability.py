@@ -33,7 +33,7 @@ from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
-from promptpotter.infrastructure.identity.default_claim import is_host
+from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_READ_ERRORS,
     ResolvedDataset,

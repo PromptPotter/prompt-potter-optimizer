@@ -70,9 +70,8 @@ from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import host_dispatcher, run_campaign, run_head_to_head
 from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
-from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
-from promptpotter.application.maintenance.landing import plan_landing
+from promptpotter.application.maintenance.landing import plan_landing, read_every_treatment
 from promptpotter.application.optimizer_manifest import (
     manifest_directories,
     running_prompt,
@@ -117,11 +116,11 @@ from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS
 from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, run_scope, scoped
-from promptpotter.infrastructure.run_state import producer_attached
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
@@ -133,7 +132,7 @@ from promptpotter.infrastructure.store.dataset_access import install_dataset, re
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.presentation.cli import campaign_runner
+from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import default_identity
 from promptpotter.shared.measurement_context import instrument_depth
@@ -733,7 +732,7 @@ def forked_at_init(stores: Stores, parent: CycleHop, fork: CycleHop) -> None:
     ]
     if [r["spend"] is not None for r in rebased] != [True]:
         raise SystemExit(f"offline run: the parent ended on {rebased}, not one REBASED with spend")
-    if producer_attached(layout.cycle_dir, stores.jobs_dir):
+    if producer_lock.cycle_held(layout.cycle_dir):
         raise SystemExit("offline run: the fork left its parent's producer lock held")
     last = layout.readout.read_text(encoding="utf-8").rstrip().splitlines()[-1]
     if fork.cycle_id not in last:
@@ -1183,7 +1182,7 @@ def run_terminal(
     sys.argv = ["promptpotter", *(new if verb == "new" else [verb])]
     # A child of a pool thread may inherit SIGINT ignored; a terminal's process never does.
     signal.signal(signal.SIGINT, signal.default_int_handler)
-    campaign_runner.main()
+    cli_main.main()
 
 
 def _commands(stores: Stores, subject: str) -> dict[str, list[dict[str, Any]]]:
@@ -1632,7 +1631,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 
 
 def digests() -> dict[str, str]:
-    complete_registries()
+    read_every_treatment()
     out = {"estimator": estimator()}
     for name in sorted(optimizers.MANIFESTS.table):
         selected = select_optimizer(OptimizerChoice(optimizer=name))
@@ -2242,7 +2241,7 @@ def main() -> int:
     asked = [f"--{k}={v}" for k, v in sorted(vars(args).items()) if v != ap.get_default(k)]
     run = " ".join([OFFLINE_RUN, *(a for a in asked if not a.startswith("--against="))])
     home = named_home()
-    complete_registries()
+    read_every_treatment()
     arm_names = args.optimizer or ["potter", "capo"]
     names = (
         list(CONTROLLED)

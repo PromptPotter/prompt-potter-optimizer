@@ -34,7 +34,7 @@ from promptpotter.domain.spend import MONEY_AXES, Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
-from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import rescope, run_scope
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer

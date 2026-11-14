@@ -54,7 +54,7 @@ from promptpotter.domain.spend import (
     money_text,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity.default_claim import is_host
+from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.wallet import (

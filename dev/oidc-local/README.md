@@ -36,8 +36,8 @@ PromptPotter's `oidc.json` accepts four optional discovery overrides on
 the Google slot (`issuer` / `authorize_url` / `token_url` / `jwks_url`).
 Production leaves them unset → Google's production URLs apply. This
 harness sets all four → the Google client rides Dex instead. The
-verifier (`promptpotter/infrastructure/identity/verifier.py`) is already
-discovery-agnostic; only `google.py` carried the hard-coded URLs, now
+verifier (`promptpotter/infrastructure/identity/oidc.py`) is already
+discovery-agnostic; only the Google client carried the hard-coded URLs, now
 config-driven.
 
 Dex is a CNCF-graduated OIDC provider. The `dex-config.yaml` ships:

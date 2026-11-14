@@ -5,9 +5,9 @@
 - **`intelligence/` imports neither `bench/` nor an optimizer**; both import it at module level. A back-import moved into a function hides the cycle, it does not fix it. Nothing outside `optimizers/` imports an optimizer package (`scripts/gate.py::_IMPORTS_OPTIMIZER`).
 - **Init writes `Session`, frozen; the runner writes only `Session.state`.** <!-- probe: git grep -cE "^\s*session\.[a-z_]+ = " -- promptpotter/application/runner == 0 --> State that survives `new` / `resume` rides the ledger.
 
-## Registries complete at a declared step
+## Registries complete at import
 
-**A registry whose members import back up the stack completes in `wiring.py::complete_registries`, never at import**; every process calls it once at entry, and a CLI verb that parses no ledger, banked round or member declares `Verb.needs_registries=False`.
+**A registry whose members import back up the stack completes in `maintenance/landing.py::complete_registries`, as that module imports**, so every process, landing first, reads complete registries; nothing declares a way around it. A layer below registers a member of the application's here, by its module (`plugin_registry.py::Registry.complete`), never by name. A ledger reader no run imports joins `LedgerIndex`'s roster there, and the roster is checked at every entry.
 
 ## Conventions
 

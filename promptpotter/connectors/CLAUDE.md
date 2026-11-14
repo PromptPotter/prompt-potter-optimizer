@@ -20,7 +20,7 @@ A **ranked-label** connector yields `ground_truth: "<label>"`; a **verifier-grad
 
 ## A connector is trusted code, not sandboxed
 
-Loading one imports it into this process with the API keys, tenant tree and identity store in reach; capability scoping ([`decisions.md`](../../docs/decisions.md) § 0005) governs API principals, not in-process code. The table completes at [`application/CLAUDE.md`](../application/CLAUDE.md) § Registries complete, never at module scope.
+Loading one imports it into this process with the API keys, tenant tree and identity store in reach; capability scoping ([`decisions.md`](../../docs/decisions.md) § 0005) governs API principals, not in-process code. The table completes at [`application/CLAUDE.md`](../application/CLAUDE.md) § Registries complete at import, never at module scope.
 
 ## The credential rides the connector
 

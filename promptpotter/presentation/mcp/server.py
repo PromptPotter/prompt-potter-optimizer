@@ -11,6 +11,7 @@ request's JSON-RPC error data.
 
 from __future__ import annotations
 
+import argparse
 import json
 from typing import Any
 
@@ -27,9 +28,11 @@ except ModuleNotFoundError:
     raise
 
 from promptpotter.application import host_surface
+from promptpotter.application.account import local_stores
 from promptpotter.application.caller import Caller
 from promptpotter.application.host_surface import HostAnswer, HostSession, HostTask
 from promptpotter.domain.refusal import Refusal
+from promptpotter.presentation.cli.main import CommandResult
 from promptpotter.shared.errors import PotterError
 
 TASKS_EXTENSION = "io.modelcontextprotocol/tasks"
@@ -250,3 +253,12 @@ async def serve_stdio(caller: Caller) -> None:
     server = host_server(HostSession(caller))
     async with stdio_server() as (read, write):
         await server.run(read, write, server.create_initialization_options())
+
+
+async def cmd_mcp(args: argparse.Namespace) -> CommandResult:
+    """The `mcp` verb, here so only it imports this module: the guard above refuses an install
+    without the extra by name, and no other verb reaches it. As the principal every other verb
+    acts as: a host is one more door of the terminal's."""
+    await serve_stdio(Caller.holding(local_stores(tenant=args.tenant)))
+    # Nothing to report: stdout was the wire, and its host has hung up.
+    return CommandResult(human="")

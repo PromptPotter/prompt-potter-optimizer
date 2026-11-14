@@ -17,11 +17,11 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import TypeAdapter, model_validator
 
-from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import RunStart, campaign_at, refuse_campaign
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
+from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
@@ -350,7 +350,7 @@ def main() -> None:
         level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
     )
     spec = JobSpec.model_validate_json(sys.stdin.buffer.read())
-    complete_registries(every_treatment=False)
+    land_at_entry(every_treatment=False)
     if (outcome := asyncio.run(run_job(spec))) is not None and (code := outcome.exit_code):
         sys.exit(code)
 

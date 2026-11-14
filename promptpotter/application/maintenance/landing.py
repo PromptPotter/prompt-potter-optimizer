@@ -13,7 +13,8 @@ from typing import NamedTuple
 
 from pydantic import ValidationError
 
-from promptpotter.application.initialization.wiring import complete_registries, read_treatment
+from promptpotter import connectors
+from promptpotter.application import health, optimizers
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.migrate import MIGRATIONS
@@ -25,12 +26,19 @@ from promptpotter.application.maintenance.reset import (
     resetting,
 )
 from promptpotter.application.notices import tell_landed
-from promptpotter.application.optimizer_manifest import checkin_manifest
+from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
+from promptpotter.application.runner.inner import spawn
+from promptpotter.application.scoring.evaluators import connector_name_refusals
+from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root, jobs_dir, user_data_root
+from promptpotter.config.prompt_blocks import PackShelf
+from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.optimizer_state import STATE_KINDS
+from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.infrastructure import projections
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,
     KINDS,
@@ -57,6 +65,7 @@ from promptpotter.infrastructure.store.io import (
     write_text,
 )
 from promptpotter.infrastructure.store.layout import INNER_SANDBOXES_DIR, CampaignLayout
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import (
     DEFINITION_SWAP_DIR,
     complete_definition_swap,
@@ -65,8 +74,48 @@ from promptpotter.infrastructure.store.stores import (
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, PotterError
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.named_rows import walked
 
 logger = logging.getLogger(__name__)
+
+
+def complete_registries() -> None:
+    """Every registry whose members import back up the stack, completed as this module imports:
+    every entry imports it to land, so no process reads a ledger or a member before. The recursion's
+    connector is the application's own built-in, registered here; the roster gains the readers no
+    run imports, every projection and the health probes' standing."""
+    connectors.CONNECTORS.complete((spawn.__name__, spawn.CONNECTOR))
+    for name, connector in connectors.CONNECTORS.table.items():
+        if shadowed := connector_name_refusals(connector.cell_terms, connector.reported_keys):
+            where = f"connector {name!r} [{connectors.CONNECTORS.origins[name]}]"
+            raise RuntimeError(f"{where}: {'; '.join(shadowed)}.")
+    judge_registry.JUDGES.complete()
+    optimizers.MANIFESTS.complete()
+    for member in optimizers.NODE_MEMBERS.table.values():
+        member.complete()
+    STATE_KINDS.complete()
+    walked(projections)
+    LedgerIndex.readers(*health.LEDGER_FOLDS)
+    LedgerIndex.check_every_arm_read()
+    for connector in connectors.CONNECTORS.table.values():
+        if connector.completion_check is not None:
+            connector.completion_check()
+
+
+def read_treatment(name: str) -> None:
+    """An optimizer as every launch reads it, an install shadow included; its source digest raises
+    on a prompt-shaping helper nothing hashes."""
+    select_optimizer(OptimizerChoice(optimizer=name)).treatment(
+        frozenset(Presumption), PackShelf(account=None)
+    )
+
+
+def read_every_treatment() -> None:
+    """Every optimizer, and the check-in as every check-in and mint reads it, an install shadow
+    included: a process serving any campaign reads them all at entry."""
+    for name in optimizers.MANIFESTS.table:
+        read_treatment(name)
+    checkin_manifest()
 
 
 class Unloadable(NamedTuple):
@@ -199,8 +248,6 @@ def _staged(projects_root: Path) -> dict[Path, Staged]:
 
 def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
     """Writes nothing."""
-    # A ledger line holds the state kinds each optimizer package registers as it loads.
-    complete_registries(every_treatment=False)
     data_root = projects_root.parent
     staged = _staged(projects_root)
     found_at: dict[Path, Found | None] = {}
@@ -445,11 +492,13 @@ def _landed(projects_root: Path) -> bool:
 
 
 def land_at_entry(*, every_treatment: bool) -> None:
-    """Every process's first step, before it reads the data root: its registries complete, then
-    the root lands under this code's record schema, once per schema. What it wrote and dropped is
+    """Every process's first step, before it reads the data root (its registries completed as this
+    module imported; *every_treatment* reads each one, for a process serving any campaign): the
+    root lands under this code's record schema, once per schema. What it wrote and dropped is
     said here, a line each on the process's log and one tally to the operator, for every entry
     alike; the stamp keeps the lines. A landing that refuses raises, having written nothing."""
-    complete_registries(every_treatment=every_treatment)
+    if every_treatment:
+        read_every_treatment()
     projects_root = default_projects_root()
     if _landed(projects_root):
         return
@@ -460,3 +509,6 @@ def land_at_entry(*, every_treatment: bool) -> None:
     for one in landing.said:
         logger.warning("landed: %s", one)
     tell_landed(landing.tally)
+
+
+complete_registries()

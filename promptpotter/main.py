@@ -42,8 +42,8 @@ from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, setting
 from promptpotter.domain.command_kinds import CommandAcceptedBody, CommandKind, ReadKind
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody, StrictModel
-from promptpotter.infrastructure.identity.bundle import IdentityBundle, build_identity_bundle
-from promptpotter.infrastructure.identity.paths import default_identity_paths
+from promptpotter.infrastructure.identity.accounts import IdentityBundle, build_identity_bundle
+from promptpotter.infrastructure.identity.grants import default_identity_paths
 from promptpotter.infrastructure.outbound import notify_operator
 from promptpotter.infrastructure.producer_lock import minted_producer, this_producer
 from promptpotter.presentation.api.deps import (
@@ -453,7 +453,7 @@ app.add_middleware(
     allow_credentials=True,
     # Starlette types `methods` optional; an `APIRoute` always sets it.
     allow_methods=sorted({method for route in _ROUTES for method in route.methods or ()}),
-    allow_headers=["Idempotency-Key", "If-Modified-Since", "If-None-Match", FEED_SUBJECT_HEADER],
+    allow_headers=["Idempotency-Key", "If-None-Match", FEED_SUBJECT_HEADER],
 )
 
 # Tokens never appear past this boundary (decisions.md § 0002): downstream code sees only IdentityContext.

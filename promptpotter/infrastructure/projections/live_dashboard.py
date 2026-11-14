@@ -2,13 +2,34 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, assert_never
+from typing import Any, NamedTuple, assert_never
 
-from promptpotter.domain.arms import Concluded, Measuring
+from pydantic import ConfigDict, Field
+
+from promptpotter.domain.arm_reading import (
+    ArmElection,
+    ArmReading,
+    DisplayMetric,
+    panel_counts,
+    panel_cuts,
+)
+from promptpotter.domain.arms import ArmState, Concluded, Measuring, arm_name
+from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BandedValue, BenchReading
+from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
-from promptpotter.domain.dashboard_rows import RoundSummary, RunLimits, VerificationMark
+from promptpotter.domain.dashboard_rows import (
+    DashboardSample,
+    LiveCandidate,
+    RoundSummary,
+    RunLimits,
+    VerificationMark,
+    sample_status,
+)
+from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey, ArmName
 from promptpotter.domain.phase_views import (
     BenchScoredView,
@@ -19,14 +40,16 @@ from promptpotter.domain.phase_views import (
     VerificationEnterView,
     VerificationGradedView,
 )
-from promptpotter.domain.phases import CampaignPhase, DashboardState
+from promptpotter.domain.phases import CampaignPhase, DashboardState, RunPhase, StopReason
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
+    BackendRevision,
     BackendWarningRecord,
     CycleMintedRecord,
+    DefaultsDrift,
     ElectionRecord,
     Ended,
     FlightRecord,
@@ -49,28 +72,25 @@ from promptpotter.domain.records.run_records import (
     StandingBudgetRecord,
     TokenUsageRecord,
 )
-from promptpotter.domain.results_health import is_degraded
+from promptpotter.domain.results import Election
+from promptpotter.domain.results_health import is_degraded, terminal_node
 from promptpotter.domain.round_audit import NodeBlock
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import RunStanding
-from promptpotter.domain.scoring import MeasuredCell
-from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup
+from promptpotter.domain.scoring import (
+    Grade,
+    MeasuredCell,
+    SampleStatus,
+    graded_answer,
+    ground_truth_text,
+    is_verifier_graded,
+)
+from promptpotter.domain.spend import CeilingMeter, MeteredSpend, SpendRollup, TokenAccount
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import build_node_block
 from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.projections.live_dashboard.blocks import (
-    build_candidate_rows,
-    build_racing_block,
-)
-from promptpotter.infrastructure.projections.live_dashboard.round_buffer import RoundBuffer
-from promptpotter.infrastructure.projections.live_dashboard.state import (
-    BackendWarning,
-    CatchUpLogEntry,
-    CurrentRound,
-    LiveDashboardState,
-    WaitingOn,
-)
 from promptpotter.infrastructure.store.io import write_json
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
@@ -78,7 +98,350 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
 )
+from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.measurement_context import MeasurementRole
+
+
+def _trim(text: str, n: int) -> str:
+    t = str(text or "").replace("\n", " ").strip()
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def sample_row(s: WalkedSample) -> DashboardSample:
+    facts, grade = s.facts, s.grade
+    cost_s = facts.cost_s
+    status: SampleStatus = sample_status(facts, grade)
+    # A verifier-graded row's `predicted` is the `NO_RESULT` sentinel: served EMPTY, not as an answer.
+    ground_truth = _trim(facts.ground_truth, 20)
+    graded_by_verifier = is_verifier_graded(ground_truth)
+    account = TokenAccount.from_step_tokens(facts.pipeline.step_tokens)
+    return DashboardSample(
+        position=s.position,
+        sample_key=facts.sample_key,
+        status=status,
+        fitness=grade.fitness,
+        terminal_node=terminal_node(facts),
+        cached=facts.cached,
+        cost_s=None if cost_s is None else round(cost_s, 2),
+        predicted="" if graded_by_verifier else _trim(graded_answer(facts, grade) or "", 28),
+        ground_truth=ground_truth,
+        ground_truth_text=ground_truth_text(ground_truth),
+        query=_trim(facts.query, 42),
+        input_tokens=account.input if account else None,
+        output_tokens=account.output if account else None,
+        cache_read_tokens=account.cache_read if account else None,
+    )
+
+
+def build_candidate_rows(
+    buffer: RoundBuffer, short_formula_template: str | None
+) -> list[LiveCandidate]:
+    arms = [
+        (key, arm, buffer.fold(key))
+        for key, arm in buffer.arms()
+        if arm.role != MeasurementRole.PARENT
+    ]
+    cuts = panel_cuts([panel_counts(arm, fold) for _, arm, fold in arms])
+    election = buffer.election
+    rows: list[LiveCandidate] = []
+    for (key, arm, fold), cut in zip(arms, cuts, strict=True):
+        reading = ArmReading.of(
+            arm_name(key, arm, buffer.round_num),
+            arm,
+            fold=fold,
+            cut=cut,
+            election=ArmElection.of(
+                key,
+                held=election is not None,
+                selected=None if election is None else election.selected,
+                leading=None if election is None else election.leading,
+                electable=None if election is None else election.electable,
+            ),
+            fit=None if election is None else election.fit.get(key),
+        )
+        rows.append(
+            LiveCandidate.in_flight(
+                reading,
+                arm,
+                samples=[sample_row(s) for s in buffer.samples[key]],
+                composite_fitness_formula_short=inline_short_formula_values(
+                    short_formula_template, {} if fold is None else dict(fold.evaluators)
+                ),
+            )
+        )
+    return rows
+
+
+def build_racing_block(buffer: RoundBuffer) -> RacingBlock | None:
+    if not buffer.race_standings:
+        return None
+    ranked = sorted(buffer.race_standings.items(), key=lambda kv: -kv[1])
+    return RacingBlock(
+        member=buffer.race_member,
+        n_samples=buffer.race_n_samples,
+        top=[{"id": cid, "p_best": p} for cid, p in ranked[:5]],
+    )
+
+
+class CatchUpLogEntry(StrictModel):
+    """One race catch-up: the priors eliminator ``member`` re-measured on one sample."""
+
+    member: str
+    round: int
+    arm: ArmKey
+    # The arm's label as the round names it.
+    label: str
+    position: int
+    prior_keys: list[ArmKey]
+
+
+class BackendWarning(StrictModel):
+    """A backend transport or 5xx retry; a 429 is ``backpressure``, never one of these."""
+
+    ts: str
+    kind: str
+    attempt: int | None = None
+    max_attempts: int | None = None
+    wait_s: float | None = None
+    error_class: str | None = None
+    status_code: int | None = None
+    final: bool = False
+    query: str | None = None
+    detail: str | None = None
+
+
+class WaitingOn(StrictModel):
+    """The cell the producer's open call holds, worded once by `served_dashboard.py::held_call`."""
+
+    label: str | None = Field(description="The owning arm's label; null for a pass no arm owns.")
+    position: int
+
+
+class RacingBlock(StrictModel):
+    """The round's standing in its eliminator ``member``'s race."""
+
+    member: str
+    n_samples: int
+    top: list[dict[str, Any]]
+
+
+class CurrentRound(StrictModel):
+    """The round in flight, rebuilt whole on every persist."""
+
+    round: int = 0
+    active_node: str | None = None
+    measurement_node: str = Field(
+        description="The optimizer node every scoring pass of the run runs as — origin, round, "
+        "bench and verify alike — as its wiring declares it."
+    )
+    inner: CycleHop | None = Field(
+        default=None,
+        description="The inner cycle an open cell runs, where a cell is a whole campaign (L4), "
+        "in this cycle's sandbox; null where no open cell has named one.",
+    )
+    candidates: list[LiveCandidate] = Field(default_factory=list)
+    nodes: dict[str, NodeBlock] = Field(default_factory=dict)
+    racing: RacingBlock | None = None
+
+
+class DashboardFacts(StrictModel):
+    model_config = ConfigDict(validate_assignment=False)
+
+    # ``-1`` until the first record lands; the SSE snapshot parks its tail one past it.
+    at_offset: int = -1
+
+    state: DashboardState = DashboardState.INIT
+    optimizer_step: str | None = None
+
+    stop_reason: StopReason | None = None
+
+    round: int = 0
+    # The arm the oldest open cell is walked for; ``None`` between walks and on a pass of no arm.
+    measuring_arm: ArmName | None = None
+
+    rounds: list[RoundSummary] = Field(default_factory=list)
+
+    verification: list[VerificationMark] = Field(
+        default_factory=list,
+        description="Each arm's latest verify and held-out bench pass on this cycle's ledger, "
+        "in flight or ended; its rows are no round's cells.",
+    )
+    composite_fitness_formula: str | None = None
+    display_metric: DisplayMetric
+
+    degraded_count: int = 0
+    error_count: int = 0
+
+    backend_retry_count: int = 0
+    recent_backend_warnings: list[BackendWarning] = Field(default_factory=list)
+
+    total_backend_calls: int = 0
+
+    current_query_payload: str | None = None
+
+    backpressure: BackpressureReading | None = None
+    measured_unit: MeasuredUnit
+
+    round_cells_ceiling: int
+
+    defaults_drift: DefaultsDrift | None = Field(
+        default=None,
+        description="Set where the bench defaults or the treatment the campaign's declaration is a "
+        "delta over moved since it was declared, under an unchanged origin: this launch runs "
+        "today's values.",
+    )
+    backend_revision: BackendRevision | None = Field(
+        default=None,
+        description="What this launch read of the backend's revision beside the one its connector "
+        "expects; `None` where the connector checks none. A drift is served, never refused.",
+    )
+
+    catch_up_log: list[CatchUpLogEntry] = Field(default_factory=list)
+
+    current_round: CurrentRound
+
+
+class LiveDashboardState(DashboardFacts):
+    # Says "running" forever after a kill: the answer is ``ServedDashboard.run_phase``.
+    declared_phase: RunPhase = RunPhase.RUNNING
+    # A FAILED stop's failure, else absent: served only as the run's pinned `said` row.
+    error: ErrorRecord | None = None
+    # The course entry serves both (`CourseFacts.standing` / `elects_on`); the file keeps them.
+    run_standing: RunStanding | None = None
+    elects_on: DisplayMetric
+    # The cell the open call holds; served only as `ServedDashboard.held_call`.
+    waiting_on: WaitingOn | None = None
+
+    current_position: int | None = None
+    # The last close's; served only as each `ServedRound`'s readings of it.
+    level_series: LevelSeries | None = None
+    # A PLAN: an eliminator can stop a candidate before the tail is reached.
+    declared_sample_order: list[int] = Field(default_factory=list)
+
+    waiting_since: float | None = None
+
+    # The look-ahead gauge, served only as `ServedDashboard.lookahead`.
+    sample_lookahead_discards: int = 0
+    in_flight: int = 0
+    lookahead_allowed: int = 0
+    # Between phases it is the NEXT round's.
+    lookahead_most: int = 0
+    # ``None``: no book binds.
+    lookahead_affordable: int | None = None
+    cell_reserve_usd: float | None = None
+    # `1` says the look-ahead control does not apply.
+    max_cells_in_flight: int
+
+    spend: SpendRollup = Field(default_factory=SpendRollup)
+
+    # PER ROUND, and NOT clamped by a rewind, unlike `rounds[]`: a re-measured round costs twice.
+    spend_by_round: dict[str, SpendRollup] = Field(default_factory=dict)
+
+    def orphaned(self, spare: MeasurementRole | None = None) -> list[VerificationMark]:
+        """The passes, each still running and not of kind *spare* ended stopped: its process is gone ungraded."""
+        return [
+            mark.orphaned() if mark.state == "running" and mark.kind != spare else mark
+            for mark in self.verification
+        ]
+
+    def round_closed(self) -> bool:
+        """`current_round` lingers after its close: closed once `rounds` holds it with rows."""
+        return any(r.round == self.current_round.round and r.candidates for r in self.rounds)
+
+    @classmethod
+    def declared(cls, wiring: RunWiringRecord) -> LiveDashboardState:
+        return cls(
+            current_round=CurrentRound(measurement_node=wiring.measurement_node),
+            **cls.launched(wiring),
+        )
+
+    @staticmethod
+    def launched(wiring: RunWiringRecord) -> dict[str, Any]:
+        """What each launch's wiring declares, and clears of what the last launch left."""
+        return {
+            "round_cells_ceiling": wiring.round_cells_ceiling,
+            "display_metric": wiring.display_metric,
+            "elects_on": wiring.elects_on,
+            "max_cells_in_flight": wiring.max_cells_in_flight,
+            "measured_unit": wiring.measured_unit,
+            "defaults_drift": wiring.defaults_drift,
+            "backend_revision": wiring.backend_revision,
+            "state": DashboardState.INIT,
+            "optimizer_step": None,
+            "measuring_arm": None,
+            "stop_reason": None,
+            "error": None,
+            "current_query_payload": None,
+            "current_position": None,
+            "declared_sample_order": [],
+        }
+
+
+class WalkedSample(NamedTuple):
+    position: int
+    facts: MeasuredCell
+    grade: Grade
+
+
+@dataclass
+class RoundBuffer:
+    round_num: int = 0
+    # Every round's: a cell names an arm announced before the buffer reached its round.
+    announced: Narration = field(default_factory=Narration)
+    # Each arm of THIS round, in announcement order, with the cells it walked.
+    samples: dict[ArmKey, list[WalkedSample]] = field(default_factory=dict)
+    race_standings: dict[str, float] = field(default_factory=dict)
+    race_member: str = ""
+    race_n_samples: int = 0
+    # ``None`` until the election is held.
+    election: Election | None = None
+
+    def reset(self, round_num: int) -> None:
+        self.round_num = round_num
+        self.samples = {key: [] for rnd, key in self.announced if rnd == round_num}
+        self.election = None
+        self.race_standings = {}
+        self.race_member = ""
+        self.race_n_samples = 0
+
+    def enter(self, round_num: int) -> None:
+        self.announced.enter(round_num)
+        self.reset(round_num)
+
+    def announce(self, record: ArmRecord) -> None:
+        self.announced.announce(record)
+        if record.round == self.round_num:
+            self.samples.setdefault(record.arm, [])
+
+    def take(self, record: SampleScoredRecord) -> ArmKey | None:
+        arm = self.announced.take(record)
+        if arm is not None and record.round == self.round_num:
+            # Held with its grade: without it `blocks.py::sample_row` renders an ungraded cell MISS.
+            result = record.result
+            self.samples[arm].append(WalkedSample(record.position, result.facts, result.grade))
+        return arm
+
+    def arms(self) -> list[tuple[ArmKey, ArmState]]:
+        return [(key, self.announced.state(self.round_num, key)) for key in self.samples]
+
+    def fold(self, key: ArmKey) -> ScoreSummary | None:
+        return self.announced.fold(self.round_num, key)
+
+    def name(self, key: ArmKey) -> ArmName | None:
+        if key not in self.samples:
+            return None
+        return arm_name(key, self.announced.state(self.round_num, key), self.round_num)
+
+    def label(self, key: ArmKey) -> str:
+        return "" if (name := self.name(key)) is None else name.label
+
+    def record_race_standing(
+        self, member: str, current_id: str, n_samples: int, p_best: float
+    ) -> None:
+        self.race_standings[current_id] = p_best
+        self.race_member = member
+        self.race_n_samples = n_samples
+
 
 _DASHBOARD_DEBOUNCE_S = 0.25
 # The write holds the lock every ledger append takes, so the next one rests this many times its cost.

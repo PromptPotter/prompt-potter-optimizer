@@ -1,4 +1,4 @@
-from promptpotter.presentation.cli.campaign_runner import main
+from promptpotter.presentation.cli.main import main
 
 if __name__ == "__main__":
     main()

@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from promptpotter.config.settings import settings
-from promptpotter.infrastructure.identity.paths import IDENTITY_DIR
+from promptpotter.infrastructure.identity.grants import IDENTITY_DIR
 from promptpotter.infrastructure.store.data_root import Staged, read_as_staged
 from promptpotter.infrastructure.store.user_store import USER_FILE
 from promptpotter.shared.identity import TERMINAL_IDENTITY_ID

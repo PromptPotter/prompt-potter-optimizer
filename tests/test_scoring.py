@@ -106,7 +106,7 @@ from promptpotter.application.host_surface import (
 )
 from promptpotter.application.initialization.scoring_scope import scorer_setup
 from promptpotter.application.initialization.session import LaunchClock, Session
-from promptpotter.application.initialization.wiring import complete_registries, init_services
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
     responses_of,
@@ -116,6 +116,7 @@ from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     paid_pass,
 )
+from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.optimizer_manifest import (
     select_optimizer,
 )
@@ -374,7 +375,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     require_spend_book,
 )
 from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
-from promptpotter.infrastructure.projections.live_dashboard.projection import (
+from promptpotter.infrastructure.projections.live_dashboard import (
     LiveDashboardProjection,
 )
 from promptpotter.infrastructure.run_scope import run_scope, scoped
@@ -964,7 +965,7 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
                 Registry(shipped.group, members.copy, connectors._validate),
             )
             try:
-                complete_registries(every_treatment=False)
+                complete_registries()
             except RuntimeError:
                 return True
         return False

@@ -241,7 +241,7 @@ each ends as a rule built or a closed note.
 A visitor uploads and previews a dataset before sign-in, and nothing paid runs before it; an
 unauthenticated write door, so [`../operations/access-model.md`](../operations/access-model.md) first and
 a security review. Its own issuer sentinel, `is_anonymous` asked before the operator arm
-(`default_claim.py::is_host` reads a missing issuer as the box operator) · no capability but upload and
+(`identity/accounts.py::is_host` reads a missing issuer as the box operator) · no capability but upload and
 preview · one shared quarantine tenant, the upload held under an unguessable claim token that sign-in
 claims · a global daily pool and size and row caps · no trustworthy origin signal ⇒ refused.
 

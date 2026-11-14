@@ -20,6 +20,7 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat, silence_detail
 from promptpotter.infrastructure.llm.json_parse import (
     OptimizerPromptParseError,
@@ -27,8 +28,6 @@ from promptpotter.infrastructure.llm.json_parse import (
 )
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 from promptpotter.infrastructure.llm.registry import default_routes
-from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
-from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.llm.send_pacing import (
     SEND_ATTEMPTS,
     SendBudget,

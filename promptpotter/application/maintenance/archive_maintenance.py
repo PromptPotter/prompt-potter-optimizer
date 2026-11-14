@@ -16,7 +16,7 @@ from promptpotter.domain.sample import FiledAnswer
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.holders import holder_of
-from promptpotter.infrastructure.identity.default_claim import is_host
+from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.measurement_archive import (
     ArchiveFile,

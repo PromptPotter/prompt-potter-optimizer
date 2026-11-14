@@ -218,47 +218,42 @@ from promptpotter.domain.spend import NOTHING_PAID, Budget
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure import docker_host
-from promptpotter.infrastructure.identity.blocklist import (
-    block_email,
-    check_blocklist,
-    unblock_email,
-)
-from promptpotter.infrastructure.identity.bundle import (
+from promptpotter.infrastructure.identity.accounts import (
     IdentityBundle,
     build_identity_bundle,
-    identity_of_session,
-)
-from promptpotter.infrastructure.identity.default_claim import (
     claim_default,
     host_user_id,
+    identity_of_session,
     is_host,
 )
-from promptpotter.infrastructure.identity.google import GoogleProviderClient
 from promptpotter.infrastructure.identity.grants import (
+    IDENTITY_DIR,
+    IdentityPaths,
+    block_email,
+    check_blocklist,
+    default_identity_paths,
     grant_principal,
     list_grants,
     read_grant,
     resolve_effective_capabilities,
     revoke_principal,
+    unblock_email,
 )
-from promptpotter.infrastructure.identity.jwks import JWKSCache
-from promptpotter.infrastructure.identity.paths import (
-    IDENTITY_DIR,
-    IdentityPaths,
-    default_identity_paths,
-)
-from promptpotter.infrastructure.identity.provider_config import (
+from promptpotter.infrastructure.identity.oidc import (
+    GoogleProviderClient,
+    JWKSCache,
     OIDCProviderConfig,
+    OIDCSessionStore,
     ProviderConfigBundle,
     ProviderIdentity,
+    SessionData,
     load_provider_config,
 )
-from promptpotter.infrastructure.identity.session import OIDCSessionStore, SessionData
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.producer_lock import hold_cycle, minted_producer, release_cycle
 from promptpotter.infrastructure.run_scope import scoped
-from promptpotter.infrastructure.run_state import derive_run_state, producer_attached
+from promptpotter.infrastructure.run_state import derive_run_state
 from promptpotter.infrastructure.store import io as store_io
 from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
@@ -309,11 +304,11 @@ from promptpotter.presentation.api.middleware.oidc import (
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers import auth
 from promptpotter.presentation.api.routers.reads import reads_router
-from promptpotter.presentation.cli import campaign_runner
-from promptpotter.presentation.cli.commands.bench import cmd_bench
-from promptpotter.presentation.cli.commands.command import cmd_command
-from promptpotter.presentation.cli.commands.read import cmd_read
-from promptpotter.presentation.cli.commands.result import said_text
+from promptpotter.presentation.cli import main as cli_main
+from promptpotter.presentation.cli.commands.measure import cmd_bench
+from promptpotter.presentation.cli.commands.reads import cmd_read
+from promptpotter.presentation.cli.commands.writes import cmd_command
+from promptpotter.presentation.cli.main import said_text
 from promptpotter.presentation.mcp.server import _refused
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -2131,7 +2126,7 @@ def held_cycle(built_stores: Stores) -> _HeldCycle:
         held = built_stores.run_state(hop).producer.attached
         jobs = built_stores.jobs_dir
         assert (
-            producer_attached(cycle_dir, jobs)
+            derive_run_state(cycle_dir, Controls(), jobs).producer.attached
             is held
             is derive_run_state(cycle_dir, asked, jobs).producer.attached
         )
@@ -3724,7 +3719,7 @@ from promptpotter.config.settings import settings
 for key in PROVIDER_KEYS:
     setattr(settings, key, SecretStr(NOT_A_KEY))
 install_network(Router(FakeLLM(lambda _body: "ok"), FakeBackend([])))
-from promptpotter.presentation.cli.campaign_runner import main
+from promptpotter.presentation.cli.main import main
 if sys.argv[3] == "terminal":
     sys.argv = ["promptpotter", "--tenant", sys.argv[2], "mcp"]
     main()
@@ -4199,16 +4194,22 @@ async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_re
     async def raising(_args: argparse.Namespace) -> Any:
         raise raised.value
 
-    monkeypatch.setattr(campaign_runner, "_handler", lambda _verb: raising)
+    monkeypatch.setattr(cli_main, "_handler", lambda _verb: raising)
     monkeypatch.setattr(sys, "argv", ["promptpotter", "--json", "reindex"])
     with pytest.raises(SystemExit):
         # The terminal runs its own loop, so off this test's.
-        await asyncio.to_thread(campaign_runner.main)
+        await asyncio.to_thread(cli_main.main)
     said = capsys.readouterr()
     assert json.loads(said.out) == value, "the terminal's --json served it another way"
-    assert said.err.startswith(f"Error: {value['message']}"), "the terminal reworded it"
+    assert not said.err, "the terminal's --json said the refusal on a second stream"
+    monkeypatch.setattr(sys, "argv", ["promptpotter", "reindex"])
+    with pytest.raises(SystemExit):
+        await asyncio.to_thread(cli_main.main)
+    assert capsys.readouterr().err.startswith(f"Error: {value['message']}"), (
+        "the terminal reworded it"
+    )
     # A flag accepts the text it always did, and refuses in the sentence the model refuses with.
-    flags = campaign_runner._PARSER.parse_args(["new", "x", "--max-tokens", "1_000"])
+    flags = cli_main._PARSER.parse_args(["new", "x", "--max-tokens", "1_000"])
     assert flags.max_tokens.tokens == 1000, "a flag refused a count it always accepted"
     for argv, sentence in (
         (["new", "x", "--max-usd", "null"], "usd: "),
@@ -4216,7 +4217,7 @@ async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_re
     ):
         monkeypatch.setattr(sys, "argv", ["promptpotter", *argv])
         with pytest.raises(SystemExit):
-            campaign_runner.main()
+            cli_main.main()
         assert sentence in capsys.readouterr().err, f"`{' '.join(argv)}` was not refused in it"
 
 

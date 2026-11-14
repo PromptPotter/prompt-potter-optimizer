@@ -46,11 +46,11 @@ from promptpotter.domain.spend import (
     metered_line,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.projections.live_dashboard.projection import fold_at
-from promptpotter.infrastructure.projections.live_dashboard.state import (
+from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardFacts,
     LiveDashboardState,
     WaitingOn,
+    fold_at,
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,

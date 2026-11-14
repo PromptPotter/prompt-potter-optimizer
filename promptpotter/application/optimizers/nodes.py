@@ -185,7 +185,7 @@ class NodeMember(Protocol):
         return None
 
     def complete(self) -> None:
-        """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
+        """Run where every registry completes (``maintenance/landing.py::complete_registries``)."""
         return None
 
 

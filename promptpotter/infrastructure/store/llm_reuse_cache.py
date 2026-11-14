@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.spend import TokenUsageKind
-from promptpotter.infrastructure.llm.request import ChatRequest
-from promptpotter.infrastructure.llm.response import LLMResponse
+from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.telemetry import (
     call_price,
     claim_call_price,

@@ -46,14 +46,16 @@ from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.ruler import RulerFold
 from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, Bank, FiledAnswer
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.identity.blocklist import Blocklist
-from promptpotter.infrastructure.identity.grants import GrantsFile
-from promptpotter.infrastructure.identity.paths import IDENTITY_DIR, IdentityPaths
-from promptpotter.infrastructure.identity.provider_config import ProviderConfigBundle
-from promptpotter.infrastructure.identity.session import SessionData
+from promptpotter.infrastructure.identity.grants import (
+    IDENTITY_DIR,
+    Blocklist,
+    GrantsFile,
+    IdentityPaths,
+)
+from promptpotter.infrastructure.identity.oidc import ProviderConfigBundle, SessionData
+from promptpotter.infrastructure.llm.base import LLMResponse
 from promptpotter.infrastructure.llm.capabilities import CAPABILITIES_CACHE, CAPABILITY_FILE
 from promptpotter.infrastructure.llm.pricing import ROUTE_ANSWER, ROUTE_ANSWERS_DIR
-from promptpotter.infrastructure.llm.response import LLMResponse
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.command_log import COMMAND_LOG_FILE
 from promptpotter.infrastructure.store.dataset_access import (

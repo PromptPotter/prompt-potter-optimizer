@@ -70,7 +70,7 @@ from promptpotter.domain.verification import (
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
-from promptpotter.infrastructure.projections.live_dashboard.projection import DashboardCheckout
+from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_verify,

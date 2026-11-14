@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
+from typing import Any, NamedTuple
 
 from promptpotter.domain.phases import (
     LaunchStage,
@@ -19,25 +20,51 @@ from promptpotter.domain.records.run_records import (
     ArmsGate,
     Ended,
     Paused,
-    Running,
     RunPhaseRecord,
 )
 from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.producer_lock import cycle_held, pass_held
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_last,
-    scan_ledger_progress,
-)
 from promptpotter.infrastructure.store.command_log import Controls, PauseAsk
 from promptpotter.infrastructure.store.io import newest_mtime_ns
 from promptpotter.infrastructure.store.layout import CycleLayout
-from promptpotter.infrastructure.store.read_model import LedgerSpan
+from promptpotter.infrastructure.store.read_model import LedgerSpan, LineIndex, scan_last
+from promptpotter.shared.clock import epoch_seconds
 
 # `RUN_FRESH_S` bounds ANY ledger append (a heartbeat is one); the other two, the last NON-heartbeat one.
 RUN_FRESH_S = 30.0
 RECENT_STEP_S = 9 * HEARTBEAT_INTERVAL_S
 WEDGED_AFTER_S = 30 * HEARTBEAT_INTERVAL_S
+
+
+class Progress(NamedTuple):
+    progressed_at: float | None = None
+    waiting_since: float | None = None
+
+
+class _Progress:
+    def __init__(self) -> None:
+        self._held = Progress()
+
+    def feed(self, line: dict[str, Any]) -> None:
+        kind = line.get("record_type")
+        # A heartbeat proves the process alive, not that it progressed.
+        if kind in ("llm_call_progress", "cell_beat"):
+            return
+        held = self._held
+        if kind == "flight":
+            waiting = line.get("waiting")
+            since = waiting.get("since") if isinstance(waiting, dict) else None
+            held = held._replace(
+                waiting_since=float(since) if isinstance(since, int | float) else None
+            )
+        elif kind == "run_phase":
+            held = held._replace(waiting_since=None)
+        at = epoch_seconds(line.get("timestamp"))
+        self._held = held if at is None else held._replace(progressed_at=at)
+
+    def value(self) -> Progress:
+        return self._held
 
 
 def _beat_stale_after(cycle_dir: Path) -> float | None:
@@ -123,7 +150,7 @@ def read_run_state(
 
 def _graded(cycle_dir: Path) -> ProducerReading:
     """A held producer's clock grade: WEDGED past its beat or long silent with no call open."""
-    progress = scan_ledger_progress(CycleLayout(cycle_dir).ledger)
+    progress = LineIndex.of(CycleLayout(cycle_dir).ledger, (_Progress,)).view(_Progress)
     now = time.time()
     silent = None if progress.progressed_at is None else max(0.0, now - progress.progressed_at)
     open_for = None if progress.waiting_since is None else max(0.0, now - progress.waiting_since)
@@ -143,8 +170,12 @@ def _claimed(cycle_dir: Path, jobs_dir: Path) -> LaunchStage | None:
     return None if holder is None else holder.stage
 
 
-def derive_run_state(cycle_dir: Path, inbox: Controls, jobs_dir: Path) -> RunState:
-    held = cycle_held(cycle_dir)
+def derive_run_state(
+    cycle_dir: Path, inbox: Controls, jobs_dir: Path, *, own_hold: bool = False
+) -> RunState:
+    """*own_hold*: the reader holds the producer lock itself, so the hold is no producer's and a
+    run declared RUNNING with no live claim reads SILENT."""
+    held = not own_hold and cycle_held(cycle_dir)
     # The pause asked of the hold now on the cycle, as its loop takes it (`for_hold`): one asked of
     # a run whose lock is released and whose job has not ended yet stands for that run alone.
     holder = holder_of(jobs_dir, cycle_dir) if held else None
@@ -157,19 +188,6 @@ def derive_run_state(cycle_dir: Path, inbox: Controls, jobs_dir: Path) -> RunSta
         pass_held=held and pass_held(cycle_dir),
         graded=_graded(cycle_dir) if held else None,
     )
-
-
-def run_owed(cycle_dir: Path, jobs_dir: Path) -> bool:
-    """`SILENT`'s fact without its lock read: the run declared RUNNING, no live launch claiming it.
-    Read under the producer lock, where `derive_run_state` would see its reader's own hold."""
-    last = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], RunPhaseRecord)
-    owed = last is not None and isinstance(last.state, Running)
-    return owed and _claimed(cycle_dir, jobs_dir) is None
-
-
-def producer_attached(cycle_dir: Path, jobs_dir: Path) -> bool:
-    """Attachment reads no command: a pause never moves it (`read_run_state`)."""
-    return derive_run_state(cycle_dir, Controls(), jobs_dir).producer.attached
 
 
 def run_state_stamps(cycle_dir: Path, jobs_dir: Path) -> tuple[int | bool | None, ...]:

@@ -18,9 +18,9 @@ from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.records.run_records import HealthReader, HealthRecord, HealthState
-from promptpotter.infrastructure.identity.bundle import build_identity_bundle
-from promptpotter.infrastructure.identity.paths import default_identity_paths
-from promptpotter.infrastructure.identity.provider_config import CodeExchangeError
+from promptpotter.infrastructure.identity.accounts import build_identity_bundle
+from promptpotter.infrastructure.identity.grants import default_identity_paths
+from promptpotter.infrastructure.identity.oidc import CodeExchangeError
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.openai_compat import ProviderSpec
 from promptpotter.infrastructure.llm.registry import keyed_specs
@@ -194,7 +194,8 @@ class _Standing:
         return dict(self._last)
 
 
-LedgerIndex.readers(_Standing)
+# Joined to the roster where the registries complete (`maintenance/landing.py::complete_registries`).
+LEDGER_FOLDS = (_Standing,)
 
 
 def _box(projects_root: Path) -> WorkspaceDir:

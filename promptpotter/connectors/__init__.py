@@ -50,24 +50,22 @@ def _validate(c: object, origin: str) -> Connector:
         raise RuntimeError(f"{where}: compose_overlay needs cells_hold_the_machine.")
     if c.round_trip_is_latency and c.execution != "remote_http":
         raise RuntimeError(f"{where}: core clocks an in-process cell — drop round_trip_is_latency.")
-    if c.self_optimization and origin not in {built_in_origin(m) for m in _APPLICATION_BUILT_INS}:
+    if c.self_optimization and not origin.startswith(built_in_origin("promptpotter.application.")):
         raise RuntimeError(f"{where}: only an application built-in is the recursion.")
     if refused := misdeclared_connector_terms(c.cell_terms):
         raise RuntimeError(f"{where}: {'; '.join(refused)}.")
     return c
 
 
-# Loaded by name: this package imports nothing of the application (`scripts/gate.py::_LAYERING`).
-_APPLICATION_BUILT_INS = ("promptpotter.application.runner.inner.spawn",)
-
-
 def _builtins() -> Iterator[tuple[str, object]]:
     here = [f"{__name__}.{m.name}" for m in pkgutil.iter_modules(__path__) if m.name != "protocol"]
-    for name in (*here, *_APPLICATION_BUILT_INS):
+    for name in here:
         module = importlib.import_module(name)
         yield module.__name__, getattr(module, "CONNECTOR", None)
 
 
+# The recursion's connector is the application's (`application/runner/inner/spawn.py`), registered
+# where it completes its registries: this package imports nothing of it (`scripts/gate.py::_LAYERING`).
 CONNECTORS = Registry(ENTRY_POINT_GROUP, _builtins, _validate)
 
 

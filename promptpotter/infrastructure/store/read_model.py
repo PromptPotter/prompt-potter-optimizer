@@ -435,7 +435,7 @@ class LedgerIndex(_LedgerTail):
     def readers(cls, *folds: type[Any]) -> None:
         """The roster every reader of a ledger declares its folds on, a `Projection` by subclassing."""
         with cls._registry_lock:
-            cls._readers.extend(folds)
+            cls._readers.extend(fold for fold in folds if fold not in cls._readers)
             cls._screened.extend(
                 fold
                 for fold in folds
@@ -445,7 +445,7 @@ class LedgerIndex(_LedgerTail):
     @classmethod
     def check_every_arm_read(cls) -> None:
         """Every `CycleRecord` arm is a `records` arm of a fold on the roster: a kind none reads is a
-        state the system enters and reports nowhere. Run once the readers are imported."""
+        state the system enters and reports nowhere. Run where the registries complete."""
         read = {arm for fold in cls._readers for arm in fold.records}
         if unread := sorted(k.decode() for k, arm in _ARM_MODELS.items() if arm not in read):
             raise RuntimeError(f"No fold on the roster reads these record kinds: {unread}.")
@@ -691,6 +691,37 @@ def _stash(snapshot: Path, joined: _Joined) -> None:
         write_bytes(snapshot, pickle.dumps(joined))
     except (OSError, pickle.PicklingError, TypeError, AttributeError) as exc:
         logger.warning("fold snapshot %s not written: %s", snapshot, exc)
+
+
+class _Last:
+    records: ClassVar[RecordClasses]
+
+    def __init__(self) -> None:
+        self._found: StrictModel | None = None
+
+    def feed(self, record: StrictModel) -> None:
+        self._found = record
+
+    def value(self) -> StrictModel | None:
+        return self._found
+
+
+@cache
+def last_fold(record: type[StrictModel]) -> type[_Last]:
+    """The fold holding a ledger's last *record*, held by its name here, as a fold snapshot
+    pickles it."""
+    made = type(f"_Last{record.__name__}", (_Last,), {"records": (record,)})
+    globals()[made.__name__] = made
+    return made
+
+
+def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R | None:
+    """The last *record* the spans hold, a later span's over an earlier one's."""
+    found: R | None = None
+    for span in spans:
+        own = LedgerIndex.of(span.path).view(last_fold(record), span.until)
+        found = found if own is None else cast("R", own)
+    return found
 
 
 class LineIndex(_LedgerTail):

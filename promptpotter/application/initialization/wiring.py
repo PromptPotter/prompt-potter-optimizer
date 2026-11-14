@@ -11,10 +11,6 @@ from typing import Any
 import httpx
 
 from promptpotter import connectors
-from promptpotter.application import (
-    health,  # noqa: F401 -- a reader no run imports joins the roster
-    optimizers,
-)
 from promptpotter.application.datasets.loaders import (
     build_panel,
     resolve_bank,
@@ -23,32 +19,22 @@ from promptpotter.application.datasets.loaders import (
 from promptpotter.application.datasets.prompts import pipeline_node_overlay
 from promptpotter.application.datasets.tabular_ingest import read_candidate_library_file
 from promptpotter.application.initialization.session import Session
-from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
 from promptpotter.application.scoring.evaluators import (
-    connector_name_refusals,
     connector_report_owner,
     observation_key_refusals,
 )
-from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root
-from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.optimizer_state import STATE_KINDS
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.run_records import BackendRevision, PipelineRead
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import all_verifier_graded
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
-from promptpotter.infrastructure.projections import (
-    event_stream,  # noqa: F401 -- a reader no run imports joins the roster
-)
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     dataset_experiment,
@@ -56,7 +42,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     resolve_dataset,
     runnable_definition,
 )
-from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
@@ -191,37 +176,6 @@ def session_bank(
         )
     # Unioned with the ground-truth answers, never replacing them: every label stays rankable.
     return bank, read_candidate_library_file(dataset.directory)
-
-
-def read_treatment(name: str) -> None:
-    """An optimizer as every launch reads it, an install shadow included; its source digest raises
-    on a prompt-shaping helper nothing hashes."""
-    select_optimizer(OptimizerChoice(optimizer=name)).treatment(
-        frozenset(Presumption), PackShelf(account=None)
-    )
-
-
-def complete_registries(*, every_treatment: bool = True) -> None:
-    """Every process calls it once, before it reads a ledger; one running ONE campaign passes ``False``."""
-    connectors.CONNECTORS.complete()
-    for name, connector in connectors.CONNECTORS.table.items():
-        if shadowed := connector_name_refusals(connector.cell_terms, connector.reported_keys):
-            where = f"connector {name!r} [{connectors.CONNECTORS.origins[name]}]"
-            raise RuntimeError(f"{where}: {'; '.join(shadowed)}.")
-    judge_registry.JUDGES.complete()
-    optimizers.MANIFESTS.complete()
-    for member in optimizers.NODE_MEMBERS.table.values():
-        member.complete()
-    STATE_KINDS.complete()
-    if every_treatment:
-        for name in optimizers.MANIFESTS.table:
-            read_treatment(name)
-        # The check-in as every check-in and mint reads it, an install shadow included.
-        checkin_manifest()
-        LedgerIndex.check_every_arm_read()
-    for connector in connectors.CONNECTORS.table.values():
-        if connector.completion_check is not None:
-            connector.completion_check()
 
 
 @asynccontextmanager

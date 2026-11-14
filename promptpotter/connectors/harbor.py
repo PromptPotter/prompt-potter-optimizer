@@ -58,9 +58,9 @@ from promptpotter.infrastructure.docker_host import (
     machine_step,
     producer_scratch,
 )
+from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.capabilities import context_window, sent_llm_bound
 from promptpotter.infrastructure.llm.registry import openai_compat_spec, providers
-from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, drawn_budget
 from promptpotter.infrastructure.llm.spend_book import (

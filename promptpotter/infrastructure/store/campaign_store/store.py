@@ -43,7 +43,7 @@ from promptpotter.infrastructure.projections.cycle_index import (
     CycleIndexProjection,
     read_cycle_index,
 )
-from promptpotter.infrastructure.projections.live_dashboard.projection import (
+from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardCheckout,
     run_limits_at,
 )
@@ -60,7 +60,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_campaign_ceiling,
     scan_cycle_facts,
     scan_each_last,
-    scan_last,
     scan_ledger_metered,
     scan_resolved_run,
     scan_standing_rounds,
@@ -97,6 +96,7 @@ from promptpotter.infrastructure.store.read_model import (
     file_sig,
     money_on,
     read_file,
+    scan_last,
 )
 from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_path,

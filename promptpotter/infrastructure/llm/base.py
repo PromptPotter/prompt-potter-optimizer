@@ -1,16 +1,18 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import socket
-from dataclasses import dataclass, field
-from typing import Any, NamedTuple
+from dataclasses import dataclass, field, fields
+from typing import Any, Literal, NamedTuple, NotRequired, TypedDict, cast
 
 import httpx
-from pydantic import SecretStr
+from pydantic import BaseModel, Field, SecretStr
 
 from promptpotter.domain.pipeline_schema import token_bound_of_bytes
-from promptpotter.domain.spend import KeySource
+from promptpotter.domain.spend import KeySource, TokenAccount
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.pricing import (
     PriceListUnreachableError,
     RateCeiling,
@@ -20,6 +22,163 @@ from promptpotter.infrastructure.llm.send_pacing import Backpressure, RateLimite
 from promptpotter.infrastructure.llm.spend_book import FRAMING_TOKENS, SendBound
 from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.shared.tls import tls_context
+
+
+class ToolCall(TypedDict):
+    """One call a model asked for: ``arguments`` parsed, never the wire's JSON string."""
+
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+class ChatMessage(TypedDict):
+    """One turn in the provider-neutral shape each client translates to its own wire."""
+
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str
+    # An assistant turn's calls, replayed so the tool turns after it answer them.
+    tool_calls: NotRequired[list[ToolCall]]
+    # A tool turn: the call it answers.
+    tool_call_id: NotRequired[str]
+
+
+# Each key under these is a name (a property, a definition), never a keyword.
+_NAMED = frozenset({"properties", "patternProperties", "$defs", "definitions"})
+# Each value under these is data, never a schema.
+_DATA = frozenset({"default", "const", "enum", "examples"})
+
+
+def strip_titles(schema: object) -> object:
+    """A schema is serialized into the INPUT, so Pydantic's auto `title`s are prompt tokens."""
+    if isinstance(schema, list):
+        return [strip_titles(v) for v in schema]
+    if not isinstance(schema, dict):
+        return schema
+    return {
+        k: v
+        if k in _DATA
+        else {name: strip_titles(s) for name, s in v.items()}
+        if k in _NAMED
+        else strip_titles(v)
+        for k, v in schema.items()
+        if k != "title"
+    }
+
+
+@dataclass(frozen=True)
+class Tool:
+    name: str
+    description: str
+    # A JSON Schema object, and prompt text: the model reads every field of it.
+    parameters: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class ChatRequest:
+    """``None`` = not asked for; a client refuses an asked field it cannot send (``OpenAICompatibleClient.SENDS``)."""
+
+    messages: list[ChatMessage]
+    model: str
+    temperature: float | None = None
+    max_tokens: int | None = None
+    response_model: type[BaseModel] | None = None
+    response_schema: dict[str, Any] | None = None
+    reasoning_effort: str | None = None
+    top_p: float | None = None
+    seed: int | None = None
+    route_order: list[str] | None = None
+    tools: tuple[Tool, ...] | None = None
+
+    @functools.cached_property
+    def wire_schema(self) -> dict[str, Any] | None:
+        """The schema SENT, titles stripped: the client sends it and `hash_call` keys on it."""
+        schema = self.response_schema or (
+            self.response_model.model_json_schema() if self.response_model else None
+        )
+        return None if schema is None else cast("dict[str, Any]", strip_titles(schema))
+
+    def asked(self) -> frozenset[str]:
+        return frozenset(f.name for f in fields(self) if getattr(self, f.name) is not None)
+
+
+class LLMResponse(StrictModel):
+    content: str = Field(..., description="Response content")
+    reasoning: str = Field(
+        "",
+        description=(
+            "The model's own thinking channel (``message.reasoning`` on the "
+            "OpenAI-compat wire); empty for non-reasoning models. A CORE field: a "
+            "model with nowhere to put its internal process answers without one, so "
+            "the slot is part of the ask and capturing it is part of the contract. "
+            "Strictly ANALYTICAL — it rides the ledger to the audit trail and the "
+            "operator's node detail, and must NEVER feed a gate, metric, validator, "
+            "scorer, or cache key. Having no code reader is by design; do not delete "
+            "it as dead surface."
+        ),
+    )
+    model: str = Field(..., description="Model used")
+    usage: TokenAccount | None = Field(
+        default_factory=TokenAccount,
+        description=(
+            "What this call consumed. A provider's own spelling stops at the client that "
+            "parses it: every client normalizes to this account, and no consumer converts. "
+            "``None``: the provider reported no count, never a 0 nor an estimate."
+        ),
+    )
+    cost_usd: float | None = Field(
+        None,
+        description=(
+            "What the PROVIDER says the call cost, summed across a repair retry (both "
+            "round-trips are billed). Its own field rather than a ``usage`` key because "
+            "``usage`` counts tokens and this is money. ``None`` means the provider "
+            "reported nothing — the honest answer, never a zero nobody measured. The call is "
+            "then priced at our rate in its own field (``telemetry.py::rate_priced_usd``), "
+            "never in this one."
+        ),
+    )
+    served_by: str | None = Field(
+        None,
+        description=(
+            "WHICH upstream host answered, where the provider is a gateway that routes "
+            "onward; ``None`` where it is its own host. Distinct from the provider, which "
+            "names who we called and so reads the same for every route through it. "
+            "Analytical like ``reasoning`` — never a gate, metric or cache key."
+        ),
+    )
+    finish_reason: str | None = Field(
+        None,
+        description=(
+            "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client "
+            "normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason "
+            "leads its ``schema_repair_errors`` entry. ``None`` where the provider reported none."
+        ),
+    )
+    parsed: Any | None = Field(
+        None,
+        description=(
+            "Parsed response. Typed Pydantic instance when ``chat`` was "
+            "called with ``response_model``; plain dict when only "
+            "``response_schema`` was supplied; ``None`` for text-mode."
+        ),
+    )
+    tool_calls: list[ToolCall] = Field(
+        default_factory=list,
+        description=(
+            "The calls the model asked for, in its order; empty where it answered in text or was "
+            "offered no tools. A tool call's ``content`` may be empty: the calls are the answer."
+        ),
+    )
+    schema_repair_errors: list[str] = Field(
+        default_factory=list,
+        description=(
+            "The schema rules each retried attempt broke, one entry per paid retry before the "
+            "parsed response landed — empty on a clean first parse. Its length is the retry "
+            "count: bad templates produce schema-noncompliant JSON and silently double-up the "
+            "LLM spend, and the entries say which rule the prompt fails to teach."
+        ),
+    )
+
 
 # Per read gap: a reasoning model may think for minutes before its first byte.
 WIRE_TIMEOUT_S = 600.0

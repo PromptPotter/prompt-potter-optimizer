@@ -8,7 +8,7 @@ from typing import NamedTuple
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.spend import NOTHING_PAID, Budget, PaidSpend
-from promptpotter.infrastructure.identity.default_claim import is_host_account
+from promptpotter.infrastructure.identity.accounts import is_host_account
 from promptpotter.infrastructure.llm.wallet import face_of
 from promptpotter.infrastructure.store.account_spend import account_bill
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore

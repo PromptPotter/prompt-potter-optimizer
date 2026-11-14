@@ -240,16 +240,16 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.validators import StopSignal
 from promptpotter.infrastructure import holders
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.identity.default_claim import is_host
+from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import base, pricing, telemetry
+from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
 from promptpotter.infrastructure.llm.pricing import (
     PriceTier,
     Rate,
     RateCeiling,
 )
-from promptpotter.infrastructure.llm.request import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.send_pacing import (
     SEND_ATTEMPTS,
     SendBudget,
@@ -287,7 +287,6 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.campaign_store import store as campaign_store_module
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_last,
     scan_ledger_priced_keys,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
@@ -308,13 +307,14 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
     money_on,
+    scan_last,
 )
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.infrastructure.store.wallet_store import ChargeBook, CouponGrant
 from promptpotter.presentation.api.routers import commands as commands_api
-from promptpotter.presentation.cli import campaign_runner
+from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
     BudgetUnenforceableError,
     CellHaltedError,
@@ -4444,7 +4444,7 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
             "1",
         ],
     )
-    campaign_runner.main()
+    cli_main.main()
     answered = LaunchAnswer.model_validate_json(capsys.readouterr().out).launches
     arms = mint.standing_arms(stores, "duel-1")
     assert [launch.hop for launch in answered] == [arms[k].root_hop for k in ("capo", "capo-b3")], (

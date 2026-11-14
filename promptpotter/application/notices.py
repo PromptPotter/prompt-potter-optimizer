@@ -19,11 +19,6 @@ from promptpotter.shared.clock import utcnow_iso
 _TRAIL_WINDOW_H = 24
 
 
-def answer_operator(text: str) -> bool:
-    """A command's answer: it rings, since the operator is waiting on it."""
-    return notify_operator(text, ring=True)
-
-
 def _tell(one: health.Checked) -> None:
     if one.change is not None and (said := health.notice(one)) is not None:
         notify_operator(said, ring=one.change.state == "broken")

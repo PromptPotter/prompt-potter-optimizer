@@ -15,7 +15,7 @@
 
 ## Structural invariants live in production, not tests
 
-**A wiring or shape guarantee becomes a check in the module owning the registry** (the accessor that completes it, or import time for a table built there: [`application/CLAUDE.md`](../promptpotter/application/CLAUDE.md) § Registries complete), never a repo-wide scan.
+**A wiring or shape guarantee becomes a check in the module owning the registry** (the accessor that completes it, or import time for a table built there: [`application/CLAUDE.md`](../promptpotter/application/CLAUDE.md) § Registries complete at import), never a repo-wide scan.
 
 ## Mocks, fixtures, builders
 

@@ -63,7 +63,7 @@ export async function startFakeIssuer(
         JSON.stringify({
           user_id: tenantId,
           tenant_id: tenantId,
-          // A session file names its issuer (`identity/session.py`); nothing dials out to it.
+          // A session file names its issuer (`identity/oidc.py::SessionData`); nothing dials out to it.
           issuer: "https://fake-issuer.e2e.test/",
           subject: `sub-${tenantId}`,
           email,

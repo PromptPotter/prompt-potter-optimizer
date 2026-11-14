@@ -18,7 +18,7 @@ from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import KnobLayer, PipelineNode, PipelineSchema
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.spend import draws_coupon
-from promptpotter.infrastructure.identity.default_claim import is_host
+from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.llm.registry import providers
 from promptpotter.infrastructure.llm.wallet import paying_key
 from promptpotter.infrastructure.store.io import read_yaml

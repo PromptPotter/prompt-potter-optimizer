@@ -27,7 +27,7 @@ from promptpotter.domain.spend import (
     money_text,
     usd_text,
 )
-from promptpotter.infrastructure.identity.default_claim import is_host
+from promptpotter.infrastructure.identity.accounts import is_host
 from promptpotter.infrastructure.llm.base import ProviderKey
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 from promptpotter.infrastructure.llm.registry import get_llm_client, host_key, host_key_attr
