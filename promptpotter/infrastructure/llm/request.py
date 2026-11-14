@@ -26,13 +26,27 @@ class ChatMessage(TypedDict):
     tool_call_id: NotRequired[str]
 
 
-def strip_titles(node: object) -> object:
+# Each key under these is a name (a property, a definition), never a keyword.
+_NAMED = frozenset({"properties", "patternProperties", "$defs", "definitions"})
+# Each value under these is data, never a schema.
+_DATA = frozenset({"default", "const", "enum", "examples"})
+
+
+def strip_titles(schema: object) -> object:
     """A schema is serialized into the INPUT, so Pydantic's auto `title`s are prompt tokens."""
-    if isinstance(node, dict):
-        return {k: strip_titles(v) for k, v in node.items() if k != "title"}
-    if isinstance(node, list):
-        return [strip_titles(v) for v in node]
-    return node
+    if isinstance(schema, list):
+        return [strip_titles(v) for v in schema]
+    if not isinstance(schema, dict):
+        return schema
+    return {
+        k: v
+        if k in _DATA
+        else {name: strip_titles(s) for name, s in v.items()}
+        if k in _NAMED
+        else strip_titles(v)
+        for k, v in schema.items()
+        if k != "title"
+    }
 
 
 @dataclass(frozen=True)

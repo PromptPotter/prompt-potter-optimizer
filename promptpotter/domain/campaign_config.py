@@ -34,6 +34,8 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 
 GateMode = Literal["strict", "off"]
 ArmGateMode = Literal["off", "review", "author"]
+# A scoring formula: the shipped datasets' longest is 59 characters.
+_Formula = Annotated[str, Field(max_length=2048)]
 
 
 class Estimand(StrEnum):
@@ -327,7 +329,7 @@ class CampaignConfig(StrictModel):
         "+ graded C (`steer_verdict`, asked when a fork's seed is parsed). Nothing declared for "
         "a node = nothing sanctioned there, the restrictive default.",
     )
-    scoring: Annotated[str | dict[str, str], Knob(Estimand.GATE)]
+    scoring: Annotated[_Formula | dict[str, _Formula], Knob(Estimand.GATE)]
     judges: Annotated[dict[str, JudgeSpec], Knob(Estimand.GATE)] = Field(
         default_factory=dict,
         description="LLM-as-judge graders for datasets whose answer is free text, where no "

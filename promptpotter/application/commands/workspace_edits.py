@@ -36,7 +36,7 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.layout import inner_sandboxes_dir
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import LedgerUnreadableError
+from promptpotter.shared.errors import FileKind, FileUnreadableError
 
 
 async def campaign_lifecycle(dispatched: Dispatched[LifecyclePayload]) -> Applier[object]:
@@ -92,11 +92,10 @@ async def reopened(replaying: Replaying[Any]) -> DraftCampaignWire:
     """A retry under the first act's key answers the draft it opened, as that draft reads now."""
     effect, stores = replaying.end.effect, replaying.stores
     if not isinstance(effect, DraftOpenedEffect):
-        raise LedgerUnreadableError(
-            ledger=str(CycleEventLog.workspace_path(stores.base_dir)),
-            offset=None,
+        raise FileUnreadableError(
+            FileKind.LEDGER,
+            path=str(CycleEventLog.workspace_path(stores.base_dir)),
             reason=f"a draft-open's ack names no draft, its effect is {effect.kind!r}",
-            campaign_id=None,
         )
     return await reread_draft_wire(stores, effect.draft_id)
 

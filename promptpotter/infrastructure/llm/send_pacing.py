@@ -245,14 +245,9 @@ class Backpressure:
 
     @asynccontextmanager
     async def send(self) -> AsyncIterator[int]:
-        abort = run_scope().abort_check
         self._announce()
         while (hold := self._hold()) > 0:
-            if abort is not None and abort():
-                raise asyncio.CancelledError(f"backpressure wait aborted ({self.sender})")
-            started = loop_now()
-            await asyncio.sleep(min(1.0, hold))
-            report_throttle_stall(loop_now() - started)
+            await held_slice(hold, f"backpressure {self.sender}")
             self._announce()
         self._out += 1
         try:
@@ -294,7 +289,7 @@ class Backpressure:
         self._strikes += 1
         self._at_once = max(1, self._out // 2)
         retry_after = parse_retry_after(headers)
-        wait = retry_after + 1.0 if retry_after else _cooldown_s(self._strikes)
+        wait = _cooldown_s(self._strikes) if retry_after is None else retry_after + 1.0
         self._resumes_at, self._resumes_at_epoch = now + wait, time.time() + wait
         self._scope, self._detail = scope, detail
         self._announce()
@@ -348,18 +343,22 @@ class Backpressure:
                 )
 
 
-async def held_wait(total_sec: float, label: str) -> None:
-    abort = run_scope().abort_check
+async def held_slice(seconds: float, label: str) -> None:
+    """At most a second of a held wait, given back as slept: a pause is seen within it, and no
+    send deadline fires on time spent waiting."""
+    if (abort := run_scope().abort_check) is not None and abort():
+        raise asyncio.CancelledError(f"{label} wait aborted")
     started = loop_now()
-    end = started + total_sec
-    # Reported on EVERY exit, abort included: waiting is not working.
     try:
-        while (remaining := end - loop_now()) > 0:
-            if abort is not None and abort():
-                raise asyncio.CancelledError(f"resend wait aborted ({label})")
-            await asyncio.sleep(min(1.0, remaining))
+        await asyncio.sleep(min(1.0, seconds))
     finally:
         report_throttle_stall(loop_now() - started)
+
+
+async def held_wait(total_sec: float, label: str) -> None:
+    end = loop_now() + total_sec
+    while (remaining := end - loop_now()) > 0:
+        await held_slice(remaining, f"resend {label}")
 
 
 def estimate_tokens(messages: Sequence[Mapping[str, object]], max_output: int | None) -> int:
@@ -423,12 +422,12 @@ def apply_discovered_caps(
     rate_limiter: RateLimiter | None,
     headers: object | None,
     *,
-    rpm_header: str,
+    rpm_header: str | None,
     tpm_header: str,
 ) -> None:
     if rate_limiter is None:
         return
-    rpm = _parse_int_header(headers, rpm_header)
+    rpm = None if rpm_header is None else _parse_int_header(headers, rpm_header)
     tpm = _parse_int_header(headers, tpm_header)
     rate_limiter.apply_discovered(rpm, tpm)
 
@@ -510,7 +509,6 @@ class RateLimiter:
             self.tpm = tpm
 
     async def _acquire(self, estimated_tokens: int) -> _TokenReservation:
-        started = loop_now()
         # The ACCOUNT, never the campaign: N campaigns must not take one user N shares.
         tenant = str(bound_account("a rate-limited send").tenant_id)
         waiter = _Waiter(tenant=tenant, tokens=estimated_tokens)
@@ -530,11 +528,10 @@ class RateLimiter:
                         self._tokens.append(entry)
                         return entry
                     wait = self._wait_needed(now, estimated_tokens)
-                await asyncio.sleep(wait if wait > 0 else _YIELD_S)
+                await held_slice(wait if wait > 0 else _YIELD_S, "rate limiter")
         finally:
             if waiter in self._waiting:
                 self._waiting.remove(waiter)
-            report_throttle_stall(loop_now() - started)
 
     def _served(self, tenant: str) -> float:
         if self.tpm is not None:

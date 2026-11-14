@@ -14,7 +14,7 @@ from promptpotter.infrastructure.store.account_spend import account_bill
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.user_store import Torn, User, read_accounts
 from promptpotter.infrastructure.store.wallet_store import ChargeBook, GrantStore
-from promptpotter.shared.errors import FileUnreadableError, LedgerUnreadableError
+from promptpotter.shared.errors import FileUnreadableError
 
 
 class AccountUsage(NamedTuple):
@@ -37,7 +37,7 @@ def read_install_spend(projects_root: Path) -> list[AccountUsage]:
         try:
             campaigns = CampaignStore(account.workspace, jobs_dir(projects_root))
             rows.append(_account_row(account.user, campaigns))
-        except (OSError, LedgerUnreadableError, FileUnreadableError) as exc:
+        except (OSError, FileUnreadableError) as exc:
             # A ledger that will not scan is the same row as a `user.json` that will not load.
             rows.append(_unreadable_row(account.workspace, f"{type(exc).__name__}: {exc}"))
     rows.sort(key=lambda r: (r.spent.total.sent_usd, r.spent.total.used_tokens), reverse=True)

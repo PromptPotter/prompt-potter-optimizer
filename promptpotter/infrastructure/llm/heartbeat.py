@@ -9,10 +9,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.records.run_records import LLMCallProgressRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
-from promptpotter.shared.errors import (
-    FileUnreadableError,
-    LedgerUnreadableError,
-)
+from promptpotter.shared.errors import FileUnreadableError
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
@@ -62,7 +59,7 @@ async def heartbeat(
                         inner=_safe_read(inner_fn),
                     )
                 )
-        except (OSError, LedgerUnreadableError):
+        except (OSError, FileUnreadableError):
             logger.exception("heartbeat of %s (call %s) failed a beat", node, call_id)
 
 
@@ -72,11 +69,6 @@ def _safe_read[T](read: Callable[[], T | None] | None) -> T | None:
         return None
     try:
         return read()
-    except (
-        OSError,
-        ValueError,
-        LedgerUnreadableError,
-        FileUnreadableError,
-    ) as exc:
+    except (OSError, ValueError, FileUnreadableError) as exc:
         logger.warning("heartbeat read unavailable — %s: %s", exc.__class__.__name__, exc)
         return None

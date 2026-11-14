@@ -181,13 +181,18 @@ def compile_expression(formula: str, *, source: str) -> CompiledExpression:
     """A term the record lacks raises ``ScoringTermMissingError``, which a read side reports as *unscorable*."""
     try:
         tree = ast.parse(formula, f"<{source}>", "eval")
+        validate_ast(tree, source=source)
+        names = frozenset(node.id for node in ast.walk(tree) if isinstance(node, ast.Name))
+        numeric = ast.fix_missing_locations(_NumericOperands().visit(tree))
+        code = compile(numeric, f"<{source}>", "eval")
     except (SyntaxError, ValueError) as exc:  # ValueError: a null byte
         raise ScoringFormulaError(
             f"Scoring formula rejected — {formula!r} in {source} does not parse: {exc}."
         ) from exc
-    validate_ast(tree, source=source)
-    names = frozenset(node.id for node in ast.walk(tree) if isinstance(node, ast.Name))
-    code = compile(ast.fix_missing_locations(_NumericOperands().visit(tree)), f"<{source}>", "eval")
+    except (RecursionError, MemoryError) as exc:
+        raise ScoringFormulaError(
+            f"Scoring formula rejected — the one in {source} nests past what this server parses."
+        ) from exc
 
     def _evaluate(namespace: dict[str, Any], subject: str) -> float:
         try:

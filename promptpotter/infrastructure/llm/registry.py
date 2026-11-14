@@ -62,11 +62,14 @@ _OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
         "GROQ_API_KEY",
         base_url="https://api.groq.com/openai/v1",
         timeout=60.0,
+        # Its `x-ratelimit-limit-requests` is the per-DAY cap.
+        rpm_header=None,
     ),
     "openai": ProviderSpec(
         "OpenAI",
         "OPENAI_API_KEY",
         base_url="https://api.openai.com/v1",
+        max_tokens_key="max_completion_tokens",
     ),
     # A `:nitro` host may silently drop `response_format`: re-run the schema probe on a new route.
     "openrouter": ProviderSpec(

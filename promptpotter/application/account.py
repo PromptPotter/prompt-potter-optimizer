@@ -58,7 +58,6 @@ from promptpotter.shared.clock import epoch_seconds, utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
     FileUnreadableError,
-    LedgerUnreadableError,
     PayloadInvalidError,
     PotterError,
 )
@@ -412,7 +411,7 @@ def _scanned(
     for account in accounts:
         try:
             found = list(workspace_lines(tenant_stores(projects_root, account.workspace)))
-        except (OSError, FileUnreadableError, LedgerUnreadableError):
+        except (OSError, FileUnreadableError):
             if (who := _who(account)) not in unreadable:
                 unreadable.append(who)
             continue

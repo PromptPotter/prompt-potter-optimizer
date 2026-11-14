@@ -58,14 +58,8 @@ from promptpotter.infrastructure.store.io import (
     read_bytes_optional,
     read_tail,
 )
-from promptpotter.infrastructure.store.layout import CycleLayout, campaign_cycles_dir
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.errors import (
-    FileKind,
-    FileUnreadableError,
-    LedgerUnreadableError,
-    validation_reason,
-)
+from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason
 
 # Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
 _ARM_MODELS = {kind.encode(): arm for kind, arm in RECORDS.registered().items()}
@@ -180,16 +174,8 @@ def line_dict(raw: bytes) -> dict[str, Any]:
     return rec
 
 
-def _refusal(ledger: Path, offset: int, reason: str) -> LedgerUnreadableError:
-    cycle_dir = CycleLayout.of_ledger(ledger).cycle_dir
-    campaign_dir = cycle_dir.parent.parent
-    held = campaign_cycles_dir(campaign_dir) == cycle_dir.parent
-    return LedgerUnreadableError(
-        ledger=str(ledger),
-        offset=offset,
-        reason=reason,
-        campaign_id=campaign_dir.name if held else None,
-    )
+def _refusal(ledger: Path, offset: int, reason: str) -> FileUnreadableError:
+    return FileUnreadableError(FileKind.LEDGER, path=str(ledger), reason=f"line {offset}: {reason}")
 
 
 def ledger_record[R](
@@ -321,7 +307,7 @@ class _Feeder:
         # read whole: a reshape of one kind leaves the spend bank readable, so a delete can bank before
         # it wipes. Keyed by the model a line failed, by the fold that could not take a line (fed no
         # line after), or by `None` for a line no `CycleRecord` arm names, which a fold of every arm reads.
-        self.refused: dict[type[StrictModel] | _Make | None, LedgerUnreadableError] = {}
+        self.refused: dict[type[StrictModel] | _Make | None, FileUnreadableError] = {}
 
     def line(self, offset: int, raw: bytes) -> None:
         for placed in self._placed:
@@ -338,7 +324,7 @@ class _Feeder:
             record = ledger_record(
                 model.model_validate_json, raw, ledger=self._ledger, offset=offset
             )
-        except LedgerUnreadableError as refusal:
+        except FileUnreadableError as refusal:
             self.refused.setdefault(model, refusal)
             return
         if record is None:
@@ -347,7 +333,7 @@ class _Feeder:
             if model in fold.records and make not in self.refused:
                 try:
                     feed_fold(fold, record, ledger=self._ledger, offset=offset)
-                except LedgerUnreadableError as refusal:
+                except FileUnreadableError as refusal:
                     self.refused[make] = refusal
 
     def vouch(self, make: _Make) -> None:
@@ -675,7 +661,7 @@ class LineIndex(_LedgerTail):
             type(fold): fold for fold in (make() for make in self._roster)
         }
         self._placed = [fold for fold in self._folds.values() if isinstance(fold, Positioned)]
-        self._refused: LedgerUnreadableError | None = None
+        self._refused: FileUnreadableError | None = None
 
     def view[V](self, fold: Callable[[], LineFold[V]]) -> V:
         with self._lock:
@@ -689,7 +675,7 @@ class LineIndex(_LedgerTail):
             placed.at_offset = self._lines
         try:
             line = ledger_record(line_dict, raw, ledger=self._path, offset=self._lines)
-        except LedgerUnreadableError as refusal:
+        except FileUnreadableError as refusal:
             self._refused = self._refused or refusal
             return
         if line is None or self._refused is not None:
@@ -697,7 +683,7 @@ class LineIndex(_LedgerTail):
         try:
             for fold in self._folds.values():
                 feed_fold(fold, line, ledger=self._path, offset=self._lines)
-        except LedgerUnreadableError as refusal:
+        except FileUnreadableError as refusal:
             self._refused = refusal
 
 

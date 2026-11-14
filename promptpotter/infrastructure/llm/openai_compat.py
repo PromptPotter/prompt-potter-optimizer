@@ -4,10 +4,10 @@ import json
 import logging
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Annotated, Any, TypedDict, TypeVar
 
 import httpx
-from pydantic import AliasPath, BaseModel, Field, ValidationError
+from pydantic import AliasPath, BaseModel, Field, TypeAdapter, ValidationError
 
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
@@ -26,10 +26,10 @@ from promptpotter.infrastructure.llm.json_parse import (
     RETRY_CLEAN_REASK,
     RETRY_SCHEMA_REPAIR,
     OptimizerPromptParseError,
+    failed_generation,
     parse_response_content,
-    try_groq_json_validate_repair,
 )
-from promptpotter.infrastructure.llm.pricing import PriceTier
+from promptpotter.infrastructure.llm.pricing import PriceTier, RateCeiling
 from promptpotter.infrastructure.llm.request import (
     ChatMessage,
     ChatRequest,
@@ -143,6 +143,35 @@ class ChatReply(BaseModel):
         return self.choices[0].finish_reason
 
 
+class _ReplyFault(TypedDict):
+    code: int
+    message: str
+
+
+class _FaultReply(TypedDict):
+    """A gateway failing after its 200 left says so in the body, ``code`` its status (OpenRouter)."""
+
+    error: _ReplyFault
+
+
+# Left to right: a body naming an `error` is the fault, whatever else it carries.
+_REPLY: TypeAdapter[_FaultReply | ChatReply] = TypeAdapter(
+    Annotated[_FaultReply | ChatReply, Field(union_mode="left_to_right")]
+)
+
+
+class FaultedReplyError(httpx.HTTPStatusError):
+    """``status_code`` is the envelope's: `send_failure.py` classifies the send by it."""
+
+    def __init__(self, reply: httpx.Response, fault: _ReplyFault) -> None:
+        super().__init__(
+            f"HTTP {fault['code']} inside a 200 from {reply.url}: {fault['message'][:500]}",
+            request=reply.request,
+            response=reply,
+        )
+        self.status_code = fault["code"]
+
+
 def billed_cost(first: float | None, second: float | None) -> float | None:
     if first is None and second is None:
         return None
@@ -184,6 +213,10 @@ class ProviderSpec:
     gateway: bool = False
     # A GET under `base_url` that needs the key and spends nothing: how a dead key is told apart.
     key_check: str = "/models"
+    # The reply header stating the per-MINUTE request cap; `None` where none does.
+    rpm_header: str | None = OPENAI_RPM_HEADER
+    # OpenAI's reasoning models refuse `max_tokens`; its every model takes `max_completion_tokens`.
+    max_tokens_key: str = "max_tokens"
 
 
 def _gateway_body(
@@ -266,8 +299,9 @@ class _ParsedReply:
     response: ChatReply
     content: str
     parsed: Any
-    first: TokenAccount = field(default_factory=TokenAccount)
-    first_cost: float | None = None
+    # What the rungs before *response* billed.
+    earlier: TokenAccount = field(default_factory=TokenAccount)
+    earlier_cost: float | None = None
     repair_errors: list[str] = field(default_factory=list)
 
 
@@ -313,8 +347,8 @@ def _llm_response(landed: _ParsedReply, provider_name: str) -> LLMResponse:
         reasoning=choice.reasoning or "",
         tool_calls=[call.parsed(provider_name) for call in choice.tool_calls or ()],
         model=response.model,
-        usage=response.tokens + landed.first,
-        cost_usd=billed_cost(landed.first_cost, response.cost),
+        usage=response.tokens + landed.earlier,
+        cost_usd=billed_cost(landed.earlier_cost, response.cost),
         served_by=response.served_by,
         finish_reason=response.finish_reason,
         parsed=landed.parsed,
@@ -377,13 +411,12 @@ class OpenAICompatibleClient:
         messages: Sequence[Mapping[str, object]],
         sent: object,
         max_tokens: int | None,
+        ceiling: RateCeiling | None,
         send: Callable[[], Awaitable[tuple[object | None, _R]]],
         billed: Callable[[_R], Billed | None],
     ) -> _R:
         """``billed`` answers ``None`` for a reply that reports no usage, which leaves the send unreported."""
-        bound = send_bound(
-            await hold_ceiling(model, self._provider), sent=sent, max_tokens=max_tokens
-        )
+        bound = send_bound(ceiling, sent=sent, max_tokens=max_tokens)
         backpressure = self._backpressure.setdefault(
             model, Backpressure(f"{self._provider_name} {model}")
         )
@@ -433,7 +466,7 @@ class OpenAICompatibleClient:
                         apply_discovered_caps(
                             self._rate_limiter,
                             headers,
-                            rpm_header=OPENAI_RPM_HEADER,
+                            rpm_header=self._spec.rpm_header,
                             tpm_header=OPENAI_TPM_HEADER,
                         )
                         spent = billed(reply)
@@ -453,11 +486,12 @@ class OpenAICompatibleClient:
 
     async def _chat(self, request: ChatRequest, label: CallLabel) -> LLMResponse:
         response_model, response_schema = request.response_model, request.response_schema
-        request_params = await self._request_params(request)
-        result = await self._one_attempt(request_params, response_model, response_schema, label)
-        if isinstance(result, LLMResponse):
-            return result
-        response, content, validation_err, parsed = result
+        # One read per call: the price its body caps a host at is the one each send is admitted on.
+        ceiling = await hold_ceiling(request.model, self._provider)
+        request_params = self._request_params(request, ceiling)
+        response, content, validation_err, parsed = await self._one_attempt(
+            request_params, response_model, response_schema, label, ceiling
+        )
         if validation_err is None:
             return _llm_response(_ParsedReply(response, content, parsed), self._provider_name)
         landed = await self._climb_retry_ladder(
@@ -465,17 +499,14 @@ class OpenAICompatibleClient:
             response_model,
             response_schema,
             label,
+            ceiling,
             response,
             content,
             validation_err,
         )
-        return (
-            landed
-            if isinstance(landed, LLMResponse)
-            else _llm_response(landed, self._provider_name)
-        )
+        return _llm_response(landed, self._provider_name)
 
-    async def _request_params(self, request: ChatRequest) -> dict[str, Any]:
+    def _request_params(self, request: ChatRequest, ceiling: RateCeiling | None) -> dict[str, Any]:
         seed, top_p = request.seed, request.top_p
         request_params: dict[str, Any] = {
             "model": request.model,
@@ -486,9 +517,7 @@ class OpenAICompatibleClient:
         if request.tools:
             request_params["tools"] = _wire_tools(request.tools)
         if request.max_tokens is not None:
-            request_params["max_tokens"] = request.max_tokens
-        # The price the call is admitted on (`base.py::_admitted_send`), so no host bills past it.
-        ceiling = await hold_ceiling(request.model, self._provider)
+            request_params[self._spec.max_tokens_key] = request.max_tokens
         body = gateway_body(
             self._spec,
             self._provider,
@@ -527,16 +556,17 @@ class OpenAICompatibleClient:
         response_model: type[BaseModel] | None,
         response_schema: dict[str, Any] | None,
         label: CallLabel,
+        ceiling: RateCeiling | None,
         response: ChatReply,
         content: str,
         rejected: ValidationError,
-    ) -> LLMResponse | _ParsedReply:
+    ) -> _ParsedReply:
         validation_err: ValidationError | None
         validation_err = rejected
         repair_errors: list[str] = []
         # Captured before `response` is rebound to a retry's: the FAILING attempt's own account.
         first = response.tokens
-        first_cost = response.cost
+        earlier, earlier_cost = first, response.cost
         first_finish_reason = response.finish_reason
         schema_name = response_model.__name__ if response_model else "<schema>"
         content_len = len(content.strip())
@@ -598,13 +628,9 @@ class OpenAICompatibleClient:
                 len(ladder),
                 truncate(repair_errors[-1], 900),
             )
-            result = await self._one_attempt(retry_params, response_model, response_schema, label)
-            if isinstance(result, LLMResponse):
-                result.schema_repair_errors = list(repair_errors)
-                result.usage = result.usage + first
-                result.cost_usd = billed_cost(first_cost, result.cost_usd)
-                return result
-            response, content, validation_err, parsed = result
+            response, content, validation_err, parsed = await self._one_attempt(
+                retry_params, response_model, response_schema, label, ceiling
+            )
             if validation_err is None:
                 break
             if attempt_no == len(ladder):
@@ -616,7 +642,7 @@ class OpenAICompatibleClient:
                     first_content_chars=content_len,
                     first=first,
                     retry_kind=retry_kind,
-                    **_failure_diagnostics(response, first),
+                    **_failure_diagnostics(response, earlier),
                 )
                 logger.error(
                     "%s: %s parse failed on every rung (%d errors, %d content chars on the "
@@ -629,9 +655,9 @@ class OpenAICompatibleClient:
                     err.diagnosis(),
                 )
                 raise err from validation_err
-            first = first + response.tokens
-            first_cost = billed_cost(first_cost, response.cost)
-        return _ParsedReply(response, content, parsed, first, first_cost, repair_errors)
+            earlier = earlier + response.tokens
+            earlier_cost = billed_cost(earlier_cost, response.cost)
+        return _ParsedReply(response, content, parsed, earlier, earlier_cost, repair_errors)
 
     async def _one_attempt(
         self,
@@ -639,24 +665,19 @@ class OpenAICompatibleClient:
         response_model: type[BaseModel] | None,
         response_schema: dict[str, Any] | None,
         label: CallLabel,
-    ) -> LLMResponse | tuple[ChatReply, str, ValidationError | None, Any]:
-        import httpx
-
-        async def send() -> tuple[object | None, LLMResponse | ChatReply]:
+        ceiling: RateCeiling | None,
+    ) -> tuple[ChatReply, str, ValidationError | None, Any]:
+        async def send() -> tuple[object | None, ChatReply]:
             try:
                 reply = await self._post(request_params)
             except httpx.HTTPStatusError as refused:
-                recovered = self._try_recover_from_refusal(refused, request_params, response_model)
-                if recovered is None:
+                if (generated := self._refused_generation(refused, request_params)) is None:
                     raise
-                return None, recovered
-            return reply.headers, ChatReply.model_validate_json(reply.content)
-
-        def billed(reply: LLMResponse | ChatReply) -> Billed | None:
-            if isinstance(reply, LLMResponse):
-                # A salvaged 400 was generated, and billed, but its body reports no usage.
-                return None
-            return reply.bill()
+                return None, generated
+            said = _REPLY.validate_json(reply.content)
+            if not isinstance(said, ChatReply):
+                raise FaultedReplyError(reply, said["error"])
+            return reply.headers, said
 
         response = await self._admitted_send(
             label,
@@ -667,13 +688,11 @@ class OpenAICompatibleClient:
                 for k in ("messages", "response_format", "tools")
                 if k in request_params
             },
-            max_tokens=request_params.get("max_tokens"),
+            max_tokens=request_params.get(self._spec.max_tokens_key),
+            ceiling=ceiling,
             send=send,
-            billed=billed,
+            billed=ChatReply.bill,
         )
-        if isinstance(response, LLMResponse):
-            return response
-
         if not response.choices:
             raise ValueError(f"{self._provider_name} returned empty choices")
         content = response.choices[0].content or ""
@@ -689,12 +708,11 @@ class OpenAICompatibleClient:
             return response, content, err, None
         return response, content, None, parsed
 
-    def _try_recover_from_refusal(
-        self,
-        exc: httpx.HTTPStatusError,
-        request_params: dict[str, Any],
-        response_model: type[BaseModel] | None,
-    ) -> LLMResponse | None:
+    def _refused_generation(
+        self, exc: httpx.HTTPStatusError, request_params: dict[str, Any]
+    ) -> ChatReply | None:
+        """A refusal that carries its generation, read as the reply it would have been: no usage
+        rides a 400, so it reports no bill."""
         raise_if_request_too_large(exc, self._provider_name)
         raise_if_context_overflow(exc, self._provider_name)
         if exc.response.status_code == 404:
@@ -705,6 +723,8 @@ class OpenAICompatibleClient:
                 f"promptpotter/assets/optimizers/potter/pipeline.yaml (or the dataset's pipeline "
                 f"overlay for a backend node)."
             ) from exc
-        return try_groq_json_validate_repair(
-            exc, request_params, self._provider_name, response_model
+        if (generated := failed_generation(exc)) is None:
+            return None
+        return ChatReply.model_validate(
+            {"model": request_params["model"], "choices": [{"message": {"content": generated}}]}
         )

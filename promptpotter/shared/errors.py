@@ -410,6 +410,8 @@ class FileKind(enum.Enum):
     # Never migrated: the landing drops the run it belongs to whole.
     MANIFEST = ("manifest_unreadable", 409, LANDING_REMEDY)
     JOB = ("job_unreadable", 409, LANDING_REMEDY)
+    # A line this build cannot read refuses every reader of its kind.
+    LEDGER = ("ledger_unreadable", 409, LANDING_REMEDY)
     # 500, not 422: the request was fine and the caller cannot fix a file the server persisted.
     STORED_CONFIG = ("stored_config_invalid", 500, "Fix the file.")
     # An optimizer prompt's manifest, the install's or the operator's copy shadowing it.
@@ -426,7 +428,7 @@ def unknown_slots_said(name: str, unknown: set[str]) -> str:
 
 
 class FileUnreadableError(PotterError):
-    """THE refusal of a file that is not a ledger, carrying its path and its `FileKind`: no reader
+    """THE refusal of a file this build cannot read, carrying its path and its `FileKind`: no reader
     yields its bytes as a dict or reads past them. Never a `ValueError`: a survey reads this type
     by name and lists its one subject unreadable, and every other door answers it as itself."""
 
@@ -444,28 +446,6 @@ class FileUnreadableError(PotterError):
     @property
     def http_status(self) -> int:  # type: ignore[override]
         return self.kind.http_status
-
-
-class LedgerUnreadableError(ConflictError):
-    """A ledger is run data, never migrated: a line this build cannot read refuses every reader of
-    its kind, until the landing drops it with its run."""
-
-    code = "ledger_unreadable"
-
-    def __init__(
-        self, *, ledger: str, offset: int | None, reason: str, campaign_id: str | None
-    ) -> None:
-        """*offset* ``None``: the ledger lacks a record every reader of it relies on."""
-        where = ledger if offset is None else f"{ledger} line {offset}"
-        super().__init__(
-            f"{where} is unreadable by this build ({reason}). {LANDING_REMEDY}",
-            details={
-                "ledger": ledger,
-                "offset": offset,
-                "reason": reason,
-                "campaign_id": campaign_id,
-            },
-        )
 
 
 class UngeneratedRequestError(PotterError):

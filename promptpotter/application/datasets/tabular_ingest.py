@@ -130,15 +130,20 @@ def _parse_table(blob: bytes, filename: str) -> Table:
             reason="hardened_blocked",
             message="Spreadsheet uploads are disabled in hardened mode — export your sheet to CSV and drop it again.",
         )
-    match fmt:
-        case "xlsx":
-            return _records_to_table(_xlsx_records(blob))
-        case "ods":
-            return _records_to_table(_ods_records(blob))
-        case "xls":
-            return _records_to_table(_xls_records(blob))
-        case "text":
-            return _read_text(decode_text(blob), file_extension(filename))
+    try:
+        match fmt:
+            case "xlsx":
+                return _records_to_table(_xlsx_records(blob))
+            case "ods":
+                return _records_to_table(_ods_records(blob))
+            case "xls":
+                return _records_to_table(_xls_records(blob))
+            case "text":
+                return _read_text(decode_text(blob), file_extension(filename))
+    except (RecursionError, MemoryError):
+        raise IngestError(
+            reason="too_large", message="The file nests or expands past what this server parses."
+        ) from None
 
 
 def decode_text(blob: bytes) -> str:
@@ -415,7 +420,7 @@ def _ods_records(blob: bytes) -> Iterator[dict[str, Any]]:
         with source:
             try:
                 yield from _sheet_records(_ods_rows(source))
-            except ElementTree.ParseError as exc:
+            except (ElementTree.ParseError, ValueError) as exc:  # ValueError: a non-integer repeat
                 raise IngestError(
                     reason="unreadable", message=f"OpenDocument parse failed: {exc}"
                 ) from None

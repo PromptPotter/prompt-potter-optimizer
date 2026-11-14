@@ -866,8 +866,8 @@ Toolbar, and the phone walk's back step. Left:
   reporting). **Rides with:** rec 2. **Re-test:** `grep -n "spend\|token" promptpotter/domain/export.py`.
 - **`Sample.key` re-hashes on every read** (16,781 calls per potter leg, `domain/sample.py::Sample.key`).
   Action: computed once at validation. **Rides with:** rec 2.
-- **`infrastructure/llm/json_parse.py::try_groq_json_validate_repair` banks a missing count as an empty
-  account.** Never estimate from content length. Action: `TokenUsageRecord` carries an unknown count.
+- **`infrastructure/llm/openai_compat.py::OpenAICompatibleClient._refused_generation` banks a missing
+  count as an empty account.** Never estimate from content length. Action: `TokenUsageRecord` carries an unknown count.
   **Rides with:** rec 3. **Re-test:** a `provider: groq` in any dataset pipeline.
 - **A cold server folds every ledger before the first page answers**: the first `GET /hierarchy?depth=1`
   waits on a full `LEDGER_FOLDS` pass (37 µs a line cold, 2026-11-07); the boot sweep no longer runs
@@ -1045,8 +1045,6 @@ Toolbar, and the phone walk's back step. Left:
   import. Invariant: the gate lists every `except` there that neither raises nor hands its fault on, and
   the list is empty.
   **Rides with:** faults 1. **Re-test:** `git grep -l "^import logging" -- promptpotter/application`.
-- **`shared/errors.py::LedgerUnreadableError` stands beside `FileUnreadableError`.** Action: it folds into
-  `FileUnreadableError` at every raise, catch and import (13 files). **Rides with:** faults 2.
 - **The wound map has no home** (`docs/developer/self-healing-internals.md`, deleted at batch/21). Action:
   its two-axis table and `classify_result`'s two row rules become `domain/results_health.py::classify_result`'s
   docstring, from `git show d9012dc0e:docs/developer/self-healing-internals.md`. **Rides with:** faults.
@@ -1084,28 +1082,14 @@ Toolbar, and the phone walk's back step. Left:
   (`main.py:270-279`) (root: `Source.of` raises a refusal naming the field); ✓ `OPTIMIZER_ABORT` has an
   empty `next_step` and no acts (`phases.py:614-616`) and its reason is only logged (`escalation.py:516-531`),
   a state the system enters but cannot report. **Rides with:** faults 1.
-- **The LLM layer's wire faults**: `infrastructure/llm/request.py::strip_titles` drops every key
-  named `title`, so a property called `title` leaves `properties` while `required` still names it
-  (latent: no wire schema has one yet); `send_pacing.py:302` reads `Retry-After: 0` as absent and takes
-  the 15–300 s cooldown. Reported, verify first: `json_parse.py:178` a ValidationError from Groq's
-  `failed_generation` salvage escapes the repair ladder as UNKNOWN; `openai_compat.py:648` a 200 reply
-  with an error envelope classifies UNKNOWN and drops its usage; `send_pacing.py`'s `RateLimiter._acquire`
-  sleeps the whole window, so the send deadline fires mid-wait and a pause goes unseen; `:426` Groq's
-  per-day `x-ratelimit-limit-requests` is read as RPM; `:483` OpenAI reasoning models take
-  `max_completion_tokens`; `:612` the `first_*` tokens fold in the repair rung's; `:485` `hold_ceiling`
-  reads disk twice per attempt on the loop; `base.py:39` `wire_client`'s cached httpx client crosses event
-  loops (the teleprompter runs `asyncio.run` per compile). Action: `title` stripped from schema keywords
-  only; a Retry-After present is honoured at 0. **Rides with:** faults 1.
-- **A depth bomb is a 500 the webapp retries** (an untrusted-input pass): `tabular_ingest.py:202-206`
-  catches only `JSONDecodeError`, so `"["*200000` raises `RecursionError`; `scoring/formula/compiler.py:184`
-  catches only `(SyntaxError, ValueError)`, so `"-"*100000+"1"` and `"not "*50000+"1"` raise
-  `MemoryError` and `"1"+"+1"*200000` `RecursionError`; `CampaignConfig.scoring` (`campaign_config.py:349`)
-  and the hierarchy read's `lens=score:` (`read_params.py:374-406`) have no length bound, and a draft
-  patch's `origin_prompts`, `candidate_library` and `output_schema` only the body cap. Reported beside it:
-  a non-integer ODS repeat attribute is an `int()` `ValueError` 500 (`tabular_ingest.py:431-440`). Root:
-  each parser seam maps `RecursionError` and `MemoryError` (and the ODS cast) to its typed refusal, on
-  the refusal root above, and each tenant-authored text field carries its own bound. **Rides with:**
-  faults. **Re-test:** each input above answers a typed refusal, never a 500.
+- **A deep YAML ends the process, never a refusal** (faults-w's landing): `store/io.py::parse_yaml` loads
+  with `CSafeLoader`, so `"["*5000+"1"+"]"*5000` exits the interpreter with no exception (depth 2000
+  parses). The server writes those files, so no tenant path is shown yet. Root: one depth bound where
+  `parse_yaml` reads. **Rides with:** faults. **Re-test:** that text raises `ValueError`.
+- **Reported beside faults-w** (verify first): `commands/launching.py::launch_cancels`' refusal names
+  "the launch's ledger", not a path; `llm/registry.py`'s cached `RateLimiter._lock` stays bound to its
+  event loop across `asyncio.run`; `scoring/formula/compiler.py`'s refusal message carries the whole
+  formula. **Rides with:** faults.
 
 ### batch/29 · lite
 

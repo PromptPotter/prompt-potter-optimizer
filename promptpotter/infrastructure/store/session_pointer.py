@@ -10,7 +10,7 @@ from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.infrastructure.store.io import validate_path_component, write_bytes, write_lock
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
 from promptpotter.infrastructure.store.read_model import read_file
-from promptpotter.shared.errors import LedgerUnreadableError
+from promptpotter.shared.errors import FileUnreadableError
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -74,7 +74,7 @@ def cleanup_stub_fork_if_empty(*, campaign_store: CampaignStore, hop: CycleHop) 
     was_active = _swap_pointer(workspace, hop, parent)
     try:
         deleted, reason = campaign_store.try_delete_stub_cycle(hop)
-    except (OSError, LedgerUnreadableError) as exc:
+    except (OSError, FileUnreadableError) as exc:
         logger.warning("Stub cleanup raised for %s: %s", hop.cycle_id, exc)
         if was_active:
             _swap_pointer(workspace, parent, hop)

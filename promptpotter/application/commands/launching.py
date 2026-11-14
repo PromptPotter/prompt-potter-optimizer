@@ -94,7 +94,8 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     ConflictError,
-    LedgerUnreadableError,
+    FileKind,
+    FileUnreadableError,
     NotFoundError,
     PayloadInvalidError,
     TaskUncancellableError,
@@ -272,11 +273,10 @@ def launch_cancels(
 def _recorded_launches(effect: CommandEffect) -> list[LaunchedJob]:
     """What a launch's ack recorded, which every launch kind's retry answers."""
     if not isinstance(effect, LaunchedEffect):
-        raise LedgerUnreadableError(
-            ledger="the launch's ledger",
-            offset=None,
+        raise FileUnreadableError(
+            FileKind.LEDGER,
+            path="the launch's ledger",
             reason=f"a launch's ack names no job, its effect is {effect.kind!r}",
-            campaign_id=None,
         )
     return effect.launches
 

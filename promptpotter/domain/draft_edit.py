@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Collection
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field, create_model
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field, create_model
 from pydantic.fields import FieldInfo
 
 from promptpotter.domain.campaign_config import CampaignConfig, Knob, OptimizationConfig
@@ -53,12 +54,19 @@ class CampaignLayer(_partial(CampaignConfig, optimization=OptimizationLayer)):  
     refuses where the layer is read."""
 
 
+# The shipped datasets' largest schema is 293 characters of JSON.
+def _bounded_schema[T](schema: T) -> T:
+    if len(json.dumps(schema)) > 16384:
+        raise ValueError("an output schema is at most 16384 characters of JSON")
+    return schema
+
+
 class NodeOutputEdit(StrictModel):
     """One node's authored output contract: the schema whole, and the fields carrying the answer
     where the operator named them."""
 
     node: str = Field(min_length=1)
-    output_schema: dict[str, Any]
+    output_schema: Annotated[dict[str, Any], AfterValidator(_bounded_schema)]
     answer_fields: list[str] | None = None
 
 
@@ -96,10 +104,13 @@ class EditDraftPatch(StrictModel):
     node_output: NodeOutputEdit | None = None
     column_query: str | None = Field(default=None, max_length=256)
     column_ground_truth: str | None = Field(default=None, max_length=256)
-    # Per step, its fields by name; replaces the draft's whole map.
-    origin_prompts: dict[str, dict[str, str]] | None = None
+    # Per step, its fields by name; replaces the draft's whole map. A field is at most a task's
+    # length (the shipped longest is 320).
+    origin_prompts: dict[str, dict[str, Annotated[str, Field(max_length=16384)]]] | None = None
     # The library's three sources; one patch sends at most one (`draft_patch.py`).
-    candidate_library: list[str] | None = Field(default=None, min_length=1)
+    candidate_library: list[Annotated[str, Field(max_length=1024)]] | None = Field(
+        default=None, min_length=1
+    )
     candidate_library_column: str | None = Field(
         default=None,
         min_length=1,

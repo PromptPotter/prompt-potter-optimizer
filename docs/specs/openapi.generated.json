@@ -2233,10 +2233,12 @@
           "scoring": {
             "anyOf": [
               {
+                "maxLength": 2048,
                 "type": "string"
               },
               {
                 "additionalProperties": {
+                  "maxLength": 2048,
                   "type": "string"
                 },
                 "type": "object"
@@ -2525,10 +2527,12 @@
           "scoring": {
             "anyOf": [
               {
+                "maxLength": 2048,
                 "type": "string"
               },
               {
                 "additionalProperties": {
+                  "maxLength": 2048,
                   "type": "string"
                 },
                 "type": "object"
@@ -4275,10 +4279,12 @@
           "scoring": {
             "anyOf": [
               {
+                "maxLength": 2048,
                 "type": "string"
               },
               {
                 "additionalProperties": {
+                  "maxLength": 2048,
                   "type": "string"
                 },
                 "type": "object"
@@ -5888,6 +5894,7 @@
             "anyOf": [
               {
                 "items": {
+                  "maxLength": 1024,
                   "type": "string"
                 },
                 "minItems": 1,
@@ -6004,6 +6011,7 @@
               {
                 "additionalProperties": {
                   "additionalProperties": {
+                    "maxLength": 16384,
                     "type": "string"
                   },
                   "type": "object"
@@ -22756,6 +22764,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "maxLength": 4096,
                   "type": "string"
                 },
                 {

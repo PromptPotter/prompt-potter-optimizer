@@ -147,7 +147,6 @@ from promptpotter.shared.errors import (
     DatasetAccessError,
     FileKind,
     FileUnreadableError,
-    LedgerUnreadableError,
     PayloadInvalidError,
     PotterError,
     validation_reason,
@@ -789,11 +788,10 @@ def recorded_read(stores: Stores, hop: CycleHop) -> PipelineRead:
 
 def _recorded_read(resolved: ResolvedRun, hop: CycleHop) -> PipelineRead:
     if resolved.read is None:
-        raise LedgerUnreadableError(
-            ledger=f"campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}",
-            offset=None,
+        raise FileUnreadableError(
+            FileKind.LEDGER,
+            path=f"campaigns/{hop.campaign_id}/cycles/{hop.cycle_id}",
             reason="it holds no resolved run, which its mint appends before the campaign exists",
-            campaign_id=hop.campaign_id,
         )
     return resolved.read
 
@@ -1090,7 +1088,6 @@ _RUNS_WITH_KINDS = frozenset({"model", "enum", "number", "bool", "string"})
 _ROOT_UNRESOLVED = (
     DatasetAccessError,
     FileUnreadableError,
-    LedgerUnreadableError,
     PayloadInvalidError,
     ScoringFormulaError,
 )

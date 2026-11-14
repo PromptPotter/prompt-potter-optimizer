@@ -386,6 +386,7 @@ class HierarchySubtreeParams(
     address: str = Field(min_length=1, description="The entry's hierarchy address")
     lens: str | None = Field(
         default=None,
+        max_length=4096,
         description="`score:<formula>`, `dials:<term=weight,…>` or `abort:<variant>`",
     )
     samples: str | None = Field(default=None, description="A comma-separated sample-id mask")

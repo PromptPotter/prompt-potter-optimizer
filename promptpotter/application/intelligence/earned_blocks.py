@@ -23,7 +23,7 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import LedgerUnreadableError
+from promptpotter.shared.errors import FileUnreadableError
 
 logger = logging.getLogger(__name__)
 
@@ -34,14 +34,14 @@ class CampaignSurvey:
     def __init__(self, campaigns: CampaignStore) -> None:
         self._store = campaigns
         self.campaigns = campaigns.list_campaigns(lifecycle="all")
-        self.faulted: dict[str, LedgerUnreadableError] = {}
+        self.faulted: dict[str, FileUnreadableError] = {}
 
     def standing(self, hop: CycleHop) -> StandingRounds | None:
         if hop.campaign_id in self.faulted:
             return None
         try:
             return self._store.standing_rounds(hop, moment=None)
-        except LedgerUnreadableError as exc:
+        except FileUnreadableError as exc:
             logger.warning("the survey skips %s: %s", hop.campaign_id, exc)
             self.faulted[hop.campaign_id] = exc
             return None

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import functools
+import asyncio
 import json
 import socket
 from dataclasses import dataclass, field
@@ -34,29 +34,34 @@ KEEPALIVE_OPTIONS = [(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)] + [
 ]
 
 
-@functools.cache
+# Per running loop: a pooled connection is its opening loop's, and a teleprompter compile runs its
+# sends under an `asyncio.run` of its own. A closed loop's pools are dropped.
+_POOLS: dict[asyncio.AbstractEventLoop, dict[tuple[str, float], httpx.AsyncClient]] = {}
+
+
 def wire_client(base_url: str, *, timeout_s: float) -> httpx.AsyncClient:
-    """One pool per host, holding no key: each send carries its own (`post_json`).
+    """One pool per host on the running loop, holding no key: each send carries its own (`post_json`).
 
     Resends nothing: `OpenAICompatibleClient._admitted_send` is the one loop, and each resend a bill."""
-    import httpx
-
-    return httpx.AsyncClient(
-        base_url=base_url,
-        timeout=httpx.Timeout(timeout_s, connect=5.0),
-        transport=httpx.AsyncHTTPTransport(
-            verify=tls_context(),
-            limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
-            socket_options=KEEPALIVE_OPTIONS,
-        ),
-    )
+    for closed in [loop for loop in _POOLS if loop.is_closed()]:
+        del _POOLS[closed]
+    pools = _POOLS.setdefault(asyncio.get_running_loop(), {})
+    if (client := pools.get((base_url, timeout_s))) is None:
+        client = pools[base_url, timeout_s] = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=httpx.Timeout(timeout_s, connect=5.0),
+            transport=httpx.AsyncHTTPTransport(
+                verify=tls_context(),
+                limits=httpx.Limits(max_connections=1000, max_keepalive_connections=100),
+                socket_options=KEEPALIVE_OPTIONS,
+            ),
+        )
+    return client
 
 
 async def post_json(
     http: httpx.AsyncClient, path: str, body: dict[str, Any], *, headers: dict[str, str]
 ) -> httpx.Response:
-    import httpx
-
     reply = await http.post(path, json=body, headers=headers)
     if not reply.is_success:
         # httpx's own message names the status alone; the provider's words are the diagnosis.

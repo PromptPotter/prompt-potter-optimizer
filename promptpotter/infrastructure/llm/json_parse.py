@@ -8,7 +8,6 @@ from json_repair import repair_json
 from pydantic import BaseModel, ValidationError
 
 from promptpotter.domain.spend import TokenAccount
-from promptpotter.infrastructure.llm.response import LLMResponse
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +44,7 @@ class OptimizerPromptParseError(RuntimeError):
         self.attempts = attempts
         self.model = model
         self.finish_reason = finish_reason
-        # BILLED across both round-trips: `bench/llm_call.py` meters the burned spend off it.
+        # BILLED across every round-trip: `bench/llm_call.py` meters the burned spend off it.
         self.usage = usage or TokenAccount()
         self.reasoning_chars = reasoning_chars
         self.first_finish_reason = first_finish_reason
@@ -156,28 +155,10 @@ def parse_response_content(
     return response_model.model_validate(parsed)
 
 
-def try_groq_json_validate_repair(
-    exc: httpx.HTTPStatusError,
-    request_params: dict[str, Any],
-    provider_name: str,
-    response_model: type[BaseModel] | None,
-) -> LLMResponse | None:
+def failed_generation(exc: httpx.HTTPStatusError) -> str | None:
+    """The generation Groq's `json_validate_failed` 400 refused, which the reply's own parse reads."""
     if exc.response.status_code != 400 or "json_validate_failed" not in exc.response.text:
         return None
     error = exc.response.json().get("error")
-    fg_text = error.get("failed_generation") if isinstance(error, dict) else None
-    if not isinstance(fg_text, str):
-        return None
-    parsed = try_parse_json(fg_text, "json_repair")
-    if parsed is None:
-        return None
-    if response_model is not None:
-        parsed = _unwrap_single_element_list(parsed)
-        parsed = response_model.model_validate(parsed)
-    logger.info("%s: salvaged failed_generation via JSON repair", provider_name)
-    # No `usage`: the 400 body carries none, so the default empty account is the honest answer.
-    return LLMResponse(
-        content=fg_text,
-        model=request_params.get("model", ""),
-        parsed=parsed,
-    )
+    generated = error.get("failed_generation") if isinstance(error, dict) else None
+    return generated if isinstance(generated, str) else None

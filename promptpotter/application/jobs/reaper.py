@@ -19,7 +19,7 @@ from promptpotter.infrastructure.store.layout import (
     tenant_workspace,
 )
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, tenant_stores
-from promptpotter.shared.errors import LedgerUnreadableError
+from promptpotter.shared.errors import FileUnreadableError
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ def _reap(stores: Stores) -> int:
             try:
                 if stores.mark_producer_vanished(hop):
                     reaped += 1
-            except LedgerUnreadableError as refused:
+            except FileUnreadableError as refused:
                 # A refused cycle is no answer for the cycles after it: each is reaped on its own.
                 logger.warning("sweep left a refused cycle: %s", refused)
             if (inner := inner_sandbox_store(stores, campaign_id, cycle_dir.name)) is not None:

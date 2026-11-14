@@ -20,7 +20,6 @@ from pydantic import SecretStr
 from promptpotter.application.initialization.wiring import complete_registries
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm import pricing
-from promptpotter.infrastructure.llm.base import wire_client
 from promptpotter.infrastructure.llm.registry import send_pacing
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import OpenAt
@@ -59,11 +58,9 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
     restore = install_network(world)
     send_pacing.cache_clear()
-    wire_client.cache_clear()
     with scoped(account=workspace(tmp_path / "account")):
         yield world
     restore()
     send_pacing.cache_clear()
-    wire_client.cache_clear()
     # A refused request reads as a provider error, which a journey can assert past unseen.
     assert not world.unrouted, f"a journey sent what the world does not answer: {world.unrouted}"

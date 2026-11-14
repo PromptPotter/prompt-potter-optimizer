@@ -324,9 +324,9 @@ from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
     ErrorCategory,
+    FileUnreadableError,
     HostAllowanceExhaustedError,
     LaunchRefusalReason,
-    LedgerUnreadableError,
     NoApiKeyError,
     NotFoundError,
     PayloadInvalidError,
@@ -1655,7 +1655,7 @@ class _Provider:
         if self.hang:
             await asyncio.Event().wait()
         prompt = self.rng.randint(1, len(body["messages"][0]["content"]))
-        said = self.rng.randint(0, body["max_tokens"])
+        said = self.rng.randint(0, body["max_completion_tokens"])
         usage = {"prompt_tokens": prompt, "completion_tokens": said, "total_tokens": prompt + said}
         return completion("ok", model="gpt-x", usage=None if self.unbilled else usage)
 
@@ -5033,7 +5033,7 @@ def test_a_reset_over_a_reshaped_ledger_drops_it_and_the_accounts_charges_with_i
     for line in lines:
         line.pop("money", None)
     write_jsonl(reshaped, lines)
-    with pytest.raises(LedgerUnreadableError):
+    with pytest.raises(FileUnreadableError):
         billed_spend([reshaped])
     activity = account_activity(stores, window="1d", group_by="model")
     assert activity.total_spend_usd == pytest.approx(framed_total + 0.13), (

@@ -214,7 +214,6 @@ from promptpotter.shared.errors import (
     ConflictError,
     FileKind,
     FileUnreadableError,
-    LedgerUnreadableError,
     PayloadInvalidError,
     PotterError,
     ResumeDivergenceError,
@@ -1198,11 +1197,15 @@ def test_an_unreadable_close_refuses_its_cycle_to_every_reader_and_the_remedy_ke
         "dashboard": lambda: served_dashboard(stores, stranded),
     }
     for name, read in readers.items():
-        with pytest.raises(LedgerUnreadableError) as unreadable:
+        with pytest.raises(FileUnreadableError) as unreadable:
             read()
-        named = (unreadable.value.details["offset"], unreadable.value.details["campaign_id"])
-        assert named == (retired[0], stranded.campaign_id), (
-            f"the {name} read refused another line, or named another campaign to delete"
+        refused = unreadable.value
+        assert refused.kind is FileKind.LEDGER, f"the {name} read refused no ledger"
+        assert refused.details["reason"].startswith(f"line {retired[0]}:"), (
+            f"the {name} read refused another line"
+        )
+        assert stranded.campaign_id in refused.details["path"], (
+            f"the {name} read refused another campaign's ledger"
         )
     asyncio.run(
         CommandDispatcher(stores).dispatch(
