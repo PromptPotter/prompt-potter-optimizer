@@ -3,7 +3,6 @@ import { Badge, CardFrame, DataTable, FailureLine, Term, type Column } from "@/c
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { PairedLift } from "@/components/searchpoint/PairedLift";
 import type { PairedReading, ServedArm } from "@/lib/api/types";
-import { liftVersus } from "@/lib/derivations";
 import { fmtSigned, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { failureOf, readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
@@ -24,8 +23,9 @@ function scoreboardColumns(
   wonOnTheta: boolean,
   arms: readonly ServedArm[],
 ): Column<ServedArm>[] {
-  // The lift column's sheet, as its readings name it: every arm's is the round's one.
-  const cells = arms.find((r) => r.reading.vs_reference?.cell_set)?.reading.vs_reference?.cell_set;
+  // The column takes its readings' one served name; where they differ, each row says its own.
+  const [only, ...others] = new Set(arms.flatMap(({ reading: s }) => s.vs_reference_name ?? []));
+  const shared = only !== undefined && others.length === 0 ? only : null;
   return [
     { id: "rank", label: "#", width: "3rem", cell: (r) => arms.indexOf(r) + 1 },
     {
@@ -69,12 +69,19 @@ function scoreboardColumns(
     {
       id: "lift",
       label: (
-        <Term content="The candidate's blocked lift over the parent on the cells both measured, with its 95% interval. An interval spanning 0 means the round could not separate them.">
-          Lift {liftVersus("parent", cells)}
+        <Term content="The candidate's blocked lift over the parent, with its 95% interval. An interval spanning 0 means the round could not separate them.">
+          Lift {shared}
         </Term>
       ),
       width: "minmax(0, 2fr)",
-      cell: ({ reading: s }) => <ArmLift reading={s.vs_reference} />,
+      cell: ({ reading: s }) => (
+        <>
+          <ArmLift reading={s.vs_reference} />
+          {shared === null && s.vs_reference_name && (
+            <span className="round-file-dim"> {s.vs_reference_name}</span>
+          )}
+        </>
+      ),
     },
     {
       id: "win",

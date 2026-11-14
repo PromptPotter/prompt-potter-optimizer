@@ -26,6 +26,7 @@ from functools import cache
 from importlib import metadata
 from pathlib import Path
 from typing import Any, Literal
+from urllib.request import url2pathname
 
 import yaml
 from last_green import (
@@ -1802,7 +1803,10 @@ def _editable_target() -> Path | None:
         iter(metadata.distributions(name="promptpotter", path=[str(p) for p in sites])), None
     )
     record = dist.read_text("direct_url.json") if dist else None
-    return Path.from_uri(json.loads(record)["url"]).resolve() if record else None
+    if not record:
+        return None
+    # Not `Path.from_uri` (3.13+): this runs before the re-exec, on whatever `python3` the hook names.
+    return Path(url2pathname(urllib.parse.urlparse(json.loads(record)["url"]).path)).resolve()
 
 
 def _surplus(uv: str, owner: Path, extras: list[str]) -> list[str]:

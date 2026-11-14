@@ -1151,6 +1151,19 @@
             ],
             "description": "This arm (`b`) over the individual it was judged against (`a`), on the cells both scored. Null on the origin and until the election stamps it."
           },
+          "vs_reference_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SERVED: `vs_reference`'s lift named: over the parent, on the cells its own reading was read on. Null beside a null `vs_reference`.",
+            "readOnly": true,
+            "title": "Vs Reference Name"
+          },
           "walked_short": {
             "description": "`end` names a stop of its walk, for it or against it: false on an `invalid` arm, which never started one.",
             "title": "Walked Short",
@@ -1176,7 +1189,8 @@
           "election",
           "bench",
           "verify",
-          "on_origin_panel"
+          "on_origin_panel",
+          "vs_reference_name"
         ],
         "title": "ArmReading",
         "type": "object"
@@ -4541,6 +4555,63 @@
           "email"
         ],
         "title": "ConnectedAccount",
+        "type": "object"
+      },
+      "ContractRow": {
+        "additionalProperties": false,
+        "description": "One field of a node's output contract, flattened at the depth its schema has.",
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "description": {
+            "description": "The declaration site's, else its `$defs` target's: the site says the role.",
+            "title": "Description",
+            "type": "string"
+          },
+          "enums": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Enums",
+            "type": "array"
+          },
+          "limit": {
+            "description": "Its caps; the declaration site's bind where it sets any.",
+            "title": "Limit",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "description": "Dotted from the root, the key a row is told apart by.",
+            "title": "Path",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "A `$defs` name, a JSON type, `T[]` for an array, `A | B` for a union; empty where only `fields` names the field.",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "depth",
+          "type",
+          "required",
+          "description",
+          "limit",
+          "enums"
+        ],
+        "title": "ContractRow",
         "type": "object"
       },
       "ContrastArm": {
@@ -11239,12 +11310,14 @@
         "additionalProperties": false,
         "description": "The structured output a target pipeline node produces, parsed from ``GET /pipeline``.",
         "properties": {
-          "field_descriptions": {
-            "additionalProperties": {
-              "type": "string"
+          "contract": {
+            "description": "SERVED: every field of `json_schema` at every depth it has, parents first, else one row per `fields` name; empty on a node that answers in free text.",
+            "items": {
+              "$ref": "#/components/schemas/ContractRow"
             },
-            "title": "Field Descriptions",
-            "type": "object"
+            "readOnly": true,
+            "title": "Contract",
+            "type": "array"
           },
           "fields": {
             "items": {
@@ -11259,6 +11332,9 @@
             "type": "object"
           }
         },
+        "required": [
+          "contract"
+        ],
         "title": "NodeOutputSchema",
         "type": "object"
       },

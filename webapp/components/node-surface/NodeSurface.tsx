@@ -14,7 +14,6 @@ import {
   authoredOutputSchema,
   descriptionSubtree,
   nodeLockPatch,
-  outputContract,
 } from "@/lib/derivations";
 import { Button } from "@/components/ui";
 import type { NodeScope } from "@/lib/address";
@@ -179,7 +178,7 @@ function OutputContract({
 } & ContractTree) {
   const entries = Object.entries(schema ?? {});
   const nodes = entries
-    .map(([node, out]) => [node, outputContract(out)] as const)
+    .map(([node, out]) => [node, out?.contract ?? []] as const)
     .filter(([, fields]) => fields.length > 0);
   // `null` = the read has not landed, and the config editor above already says so.
   if (schema === null) return null;
@@ -200,7 +199,7 @@ function OutputContract({
       {nodes.map(([node, fields]) => (
         <dl key={node} className="node-output-list" aria-label={`${node} output schema`}>
           {fields.map((f) => (
-            <div key={f.key} className="node-output-row" data-depth={f.depth}>
+            <div key={f.path} className="node-output-row" data-depth={f.depth}>
               <dt className="node-output-field">
                 <code>{f.name}</code>
                 {f.required && (

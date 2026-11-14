@@ -686,30 +686,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   the action leaves alone. Action: type `current_config` as `NodeCall` and read its fields.
   **Re-test:** `git grep -cE "current_config\.get\(" -- promptpotter` is 0.
 
-### webb-5 (what webb-4 left at its landing)
-
-- **The output contract is flattened in the browser**: `lib/derivations/output-contract.ts::outputContract`
-  walks a JSON Schema with its own `MAX_DEPTH = 3`. Action: `domain/pipeline_schema.py::NodeOutputSchema`
-  serves the flattened contract rows and `node-surface/NodeSurface.tsx` draws them. **Rides with:**
-  webb-5, after rk-run (which holds `pipeline_schema.py`); its Owns gain both files. **Re-test:**
-  `git grep -n "MAX_DEPTH" -- webapp` is empty.
-- **Adapters over a flat served shape**: `useCandidatesModel.ts` joins about twelve sources; `.facts.` is
-  opened at many sites; liveness is re-derived at each `phaseWalks(` site. Action: the served rows carry
-  what the adapters join. **Rides with:** webb-5. **Re-test:** `git grep -c "\.facts\." -- webapp/components webapp/lib`.
-- **A lift's name is composed twice**: `webapp/lib/derivations/paired-reading.ts::liftVersus` re-spells
-  `paired_reading.py::lift_versus`'s "vs {over} {words}" (the words are generated, the composition is
-  not), because the round read serves no label (`RoundView.candidates[].reading.vs_reference`). In
-  `components/files/RoundFileView.tsx` the lift column's name comes from the first served arm's cell
-  set alone, and its hint reads "on the cells both measured" whatever that set is. Action: the reading
-  serves its lift's name, which `RoundFileView` and `searchpoint/SearchpointDrillIn.tsx` read;
-  `liftVersus` and the hint's fixed wording go. **Rides with:** webb-5. **Re-test:**
-  `git grep -n "liftVersus" -- webapp` is empty.
-- **The gate's bootstrap assumes the pinned interpreter**: `scripts/gate.py::_editable_target` calls
-  `Path.from_uri` (3.13+) in `_reexec_pinned`, before the re-exec, while `.githooks/pinned-python`
-  tells a desk to build the venv with `python3 scripts/gate.py`; a 3.11 `python3` dies there.
-  Action: the code before the re-exec runs on any `python3` the hook names, or refuses first with the
-  floor. **Re-test:** a 3.11 `python3 scripts/gate.py --only doc-claims` reaches the re-exec.
-
 ### batch/27 · rec
 
 - **`PairedReading` is a tagged union spelled as optional fields and a validator**:
@@ -735,11 +711,18 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### webd (the edge tail, after lw)
 
+- **Adapters over a flat served shape** (webb-5's): `useCandidatesModel.ts` joins about twelve sources;
+  `.facts.` is opened at many sites; liveness is re-derived at each `phaseWalks(` site. Action: the
+  served rows carry what the adapters join. **Rides with:** webd. **Re-test:**
+  `git grep -c "\.facts\." -- webapp/components webapp/lib`.
+- **A round's markdown names its lift column from the first arm** (webb-5b's report):
+  `runner/output.py::_render_variants_table` reads the first fit's `vs_reference.cell_set`, the
+  first-arm shape `RoundFileView` dropped, because the served name sits on `ArmReading` and the table
+  reads `ArmFit`. Root: the name is the pair's, served wherever the pair is, so every reader takes each
+  arm's own. **Rides with:** webd. **Re-test:** `git grep -n "lift_versus('parent', sheet)" -- promptpotter` is empty.
 - **The browser recomputes engine facts**: `webapp/lib/derivations/` (~2.2k lines, plus tests) derives
   node config, spend, run phase and the search point the engine already computes. Action: each fact is
-  served on its existing read and the TypeScript copy and its tests go; the derivation rows filed
-  elsewhere (`output-contract.ts`, `paired-reading.ts::liftVersus`) close inside it where their chain
-  has not; so do `wonOnTheta` (9 hits in 5 files; its filed row and `electedMetric` went, ec96b1cda) and
+  served on its existing read and the TypeScript copy and its tests go; so do `wonOnTheta` (9 hits in 5 files; its filed row and `electedMetric` went, ec96b1cda) and
   `ConfigMode` (`lib/derivations/node-config.ts:11`; no row files it). So does `run-phase.ts:51`'s copy
   of a cycle's acts, which drops only `start-run` where `phases.py:447` drops every act of a refused
   admission (narr-2's review): the acts are served once faults 1 serves `next_acts`. **Rides with:** webd. **Re-test:**

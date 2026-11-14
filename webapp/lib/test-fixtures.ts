@@ -305,6 +305,7 @@ export function armReading(
     prefix: null,
     ability: null,
     vs_reference: null,
+    vs_reference_name: null,
     bench: null,
     verify: null,
     on_origin_panel: null,

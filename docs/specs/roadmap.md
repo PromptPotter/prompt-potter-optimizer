@@ -167,6 +167,8 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   dashboard read reaches every door. Run data wiped (cycles).
 - **landed 76, small-2:** the `Selector` reads the parent on the panel's cells by default; one typed
   remainder carries an overdraft.
+- **landed 77, webb-5b:** a node's output contract and a lift's name are served, so the browser's
+  copies go; the gate boots on any `python3`.
 - **then:** faults-1 (a refusal names its next acts), then narr 3 (the acts bank facts, not text; one door to a run's
   ledger), then ren (classes defined twice, a gate refusing another).
 

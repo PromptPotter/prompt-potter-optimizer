@@ -36,9 +36,8 @@ from processes import REPO, clone_cache, git, replace_changed, run
 BASELINE = {
     # Lines of the package's own Python: a change removes more than it adds (operator, 2026-11-13),
     # judged, not counted (2026-11-14): a raise names the substance its lines carry.
-    # xconn (+110): a node's wire keys and their refusal; named endpoints threaded from the
-    # dataset to every client, probe and identity.
-    "package_lines": 110449,
+    # webb-5b (+130): the output contract's flattening, moved from the browser (-275 lines there).
+    "package_lines": 110579,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -68,7 +67,9 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 35,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 199,
+    # webb-5b (+1): `NodeOutputSchema.json_schema`, the backend's own document, served beside the
+    # `contract` rows the browser now draws.
+    "p_served": 200,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     "p_unread_fields": 27,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.

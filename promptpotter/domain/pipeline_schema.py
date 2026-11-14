@@ -1,9 +1,10 @@
 import enum
+import json
 import re
 from collections.abc import Collection, Iterable, Mapping
 from typing import Annotated, Any, Literal, NamedTuple, get_args
 
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, computed_field, field_validator, model_validator
 
 from promptpotter.domain.layer_fold import Lay
 from promptpotter.domain.pipeline_params import (
@@ -205,12 +206,149 @@ class ObservationMapping(FrozenModel):
     is_llm: bool = False
 
 
+class ContractRow(FrozenModel):
+    """One field of a node's output contract, flattened at the depth its schema has."""
+
+    path: str = Field(description="Dotted from the root, the key a row is told apart by.")
+    name: str
+    depth: int
+    type: str = Field(
+        description="A `$defs` name, a JSON type, `T[]` for an array, `A | B` for a union; empty "
+        "where only `fields` names the field."
+    )
+    required: bool
+    description: str = Field(
+        description="The declaration site's, else its `$defs` target's: the site says the role."
+    )
+    limit: str = Field(description="Its caps; the declaration site's bind where it sets any.")
+    enums: list[str]
+
+
+class _Resolved(NamedTuple):
+    schema: Mapping[str, object]
+    type: str
+    ref: str | None
+    optional: bool
+
+
+def _resolve(raw: object, defs: Mapping[str, object], chain: frozenset[str]) -> _Resolved | None:
+    if not isinstance(raw, dict):
+        return None
+    if isinstance(ref := raw.get("$ref"), str):
+        name = ref.rsplit("/", 1)[-1]
+        target = defs.get(name)
+        if name in chain or not isinstance(target, dict):
+            return _Resolved({}, name, name, False)
+        inner = _resolve(target, defs, chain | {name})
+        return None if inner is None else inner._replace(type=name, ref=name)
+    if isinstance(any_of := raw.get("anyOf"), list):
+        live = [b for b in any_of if not (isinstance(b, dict) and b.get("type") == "null")]
+        optional = len(live) < len(any_of)
+        if len(live) == 1:
+            inner = _resolve(live[0], defs, chain)
+            return None if inner is None else inner._replace(optional=inner.optional or optional)
+        kinds = [r.type if (r := _resolve(b, defs, chain)) else "?" for b in live]
+        return _Resolved({}, " | ".join(kinds) or "any", None, optional)
+    if raw.get("type") == "array":
+        item = _resolve(raw.get("items"), defs, chain)
+        if item is None:
+            return _Resolved({}, "any[]", None, False)
+        return item._replace(type=f"{item.type}[]", optional=False)
+    kind = raw.get("type")
+    return _Resolved(raw, kind if isinstance(kind, str) and kind else "object", None, False)
+
+
+_CAPS = (
+    ("maxLength", "≤{} chars"),
+    ("maxItems", "≤{} items"),
+    ("minItems", "≥{} items"),
+    ("minimum", "≥{}"),
+    ("maximum", "≤{}"),
+)
+
+
+def _caps(decl: Mapping[str, object], target: Mapping[str, object]) -> str:
+    for site in (decl, target):
+        parts = [
+            word.format(int(v) if float(v).is_integer() else v)
+            for key, word in _CAPS
+            if isinstance(v := site.get(key), int | float) and not isinstance(v, bool)
+        ]
+        if parts:
+            return " · ".join(parts)
+    return ""
+
+
+def _enums(decl: Mapping[str, object], target: Mapping[str, object]) -> list[str]:
+    for site in (decl, target):
+        if isinstance(values := site.get("enum"), list):
+            return [v if isinstance(v, str) else json.dumps(v) for v in values]
+    return []
+
+
+def _said(schema: Mapping[str, object]) -> str:
+    said = schema.get("description")
+    return said if isinstance(said, str) else ""
+
+
+def _flatten(
+    obj: Mapping[str, object],
+    depth: int,
+    path: str,
+    defs: Mapping[str, object],
+    seen: frozenset[str],
+    out: list[ContractRow],
+) -> None:
+    props = obj.get("properties")
+    if not isinstance(props, dict):
+        return
+    named = obj.get("required")
+    required = {r for r in named if isinstance(r, str)} if isinstance(named, list) else set()
+    for name, raw in props.items():
+        if (r := _resolve(raw, defs, frozenset())) is None:
+            continue
+        at = f"{path}.{name}" if path else name
+        out.append(
+            ContractRow(
+                path=at,
+                name=name,
+                depth=depth,
+                type=r.type,
+                required=name in required and not r.optional,
+                description=_said(raw) or _said(r.schema),
+                limit=_caps(raw, r.schema),
+                enums=_enums(raw, r.schema),
+            )
+        )
+        # A `$defs` name already on the path is a cycle: its rows are above.
+        if r.ref is None or r.ref not in seen:
+            _flatten(r.schema, depth + 1, at, defs, seen if r.ref is None else seen | {r.ref}, out)
+
+
 class NodeOutputSchema(FrozenModel):
     """The structured output a target pipeline node produces, parsed from ``GET /pipeline``."""
 
     fields: list[str] = Field(default_factory=list)
-    field_descriptions: dict[str, str] = Field(default_factory=dict)
     json_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="SERVED: every field of `json_schema` at every depth it has, parents first, "
+        "else one row per `fields` name; empty on a node that answers in free text."
+    )
+    @property
+    def contract(self) -> list[ContractRow]:
+        # Both arrive: an optimizer manifest's envelope `{name, strict, schema}` and a bare schema.
+        envelope = self.json_schema.get("schema")
+        root = envelope if isinstance(envelope, dict) else self.json_schema
+        defs = root.get("$defs")
+        out: list[ContractRow] = []
+        _flatten(root, 0, "", defs if isinstance(defs, dict) else {}, frozenset(), out)
+        return out or [
+            ContractRow(
+                path=f, name=f, depth=0, type="", required=False, description="", limit="", enums=[]
+            )
+            for f in self.fields
+        ]
 
 
 class NodePromptInfo(FrozenModel):

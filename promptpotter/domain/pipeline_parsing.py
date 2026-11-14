@@ -251,18 +251,8 @@ def parse_resolved_schema(resolved: Mapping[str, Any]) -> NodeOutputSchema:
             properties=list(props),
         )
     if props and list(props) != fields:
-        props = {f: props[f] for f in fields}
-        json_schema = {**json_schema, "properties": props}
-    field_descriptions = {
-        k: v["description"] for k, v in props.items() if isinstance(v, dict) and "description" in v
-    }
-    return _built(
-        NodeOutputSchema,
-        "output_schema",
-        fields=fields,
-        field_descriptions=field_descriptions,
-        json_schema=json_schema,
-    )
+        json_schema = {**json_schema, "properties": {f: props[f] for f in fields}}
+    return _built(NodeOutputSchema, "output_schema", fields=fields, json_schema=json_schema)
 
 
 def _registered(

@@ -1469,6 +1469,9 @@ export interface ArmReading {
    * Null for an arm neither on the best-so-far line nor triggered, and where
    * it does not hold the whole panel. */
   on_origin_panel: LineRate | null;
+  /** SERVED: `vs_reference`'s lift named: over the parent, on the cells its own
+   * reading was read on. Null beside a null `vs_reference`. */
+  vs_reference_name: string | null;
 }
 
 /** The cells one arm's walk holds of the panel its round asked of it. */
@@ -3668,8 +3671,28 @@ export interface PipelineViewEdge {
  * /pipeline``. */
 export interface NodeOutputSchema {
   fields: string[];
-  field_descriptions: Record<string, string>;
   json_schema: Record<string, unknown>;
+  /** SERVED: every field of `json_schema` at every depth it has, parents first,
+   * else one row per `fields` name; empty on a node that answers in free
+   * text. */
+  contract: ContractRow[];
+}
+
+/** One field of a node's output contract, flattened at the depth its schema has. */
+export interface ContractRow {
+  /** Dotted from the root, the key a row is told apart by. */
+  path: string;
+  name: string;
+  depth: number;
+  /** A `$defs` name, a JSON type, `T[]` for an array, `A | B` for a union; empty
+   * where only `fields` names the field. */
+  type: string;
+  required: boolean;
+  /** The declaration site's, else its `$defs` target's: the site says the role. */
+  description: string;
+  /** Its caps; the declaration site's bind where it sets any. */
+  limit: string;
+  enums: string[];
 }
 
 /** What one model accepts and what it costs on one provider, resolved server-

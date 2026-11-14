@@ -4,7 +4,7 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Literal, NamedTuple, get_args
 
-from pydantic import Field
+from pydantic import Field, computed_field
 
 from promptpotter.domain.arms import (
     ARM_END_INFO,
@@ -30,6 +30,7 @@ from promptpotter.domain.paired_reading import (
     MeasurandUnit,
     PairedReading,
     level_text,
+    lift_versus,
 )
 from promptpotter.domain.ruler import ThetaCaveat
 from promptpotter.domain.spend import PrefixReading, TokenAccount
@@ -404,6 +405,15 @@ class ArmReading(FrozenModel):
         "arm neither on the best-so-far line nor triggered, and where it does not hold the whole "
         "panel."
     )
+
+    @computed_field(  # type: ignore[prop-decorator]
+        description="SERVED: `vs_reference`'s lift named: over the parent, on the cells its own "
+        "reading was read on. Null beside a null `vs_reference`."
+    )
+    @property
+    def vs_reference_name(self) -> str | None:
+        pair = self.vs_reference
+        return None if pair is None else lift_versus("parent", pair.cell_set)
 
     @classmethod
     def of(

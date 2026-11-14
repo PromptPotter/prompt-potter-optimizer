@@ -8,7 +8,7 @@ import {
 } from "@/lib/api/types";
 import type { PipelineAt } from "@/lib/hooks/useConnector";
 import type { ReadFailure } from "@/lib/read-cache";
-import { liftOf, liftVersus, NOT_SEPARABLE, type ObserveConfig } from "@/lib/derivations";
+import { liftOf, NOT_SEPARABLE, type ObserveConfig } from "@/lib/derivations";
 import { FailureLine, Said, Term } from "@/components/ui";
 import { fmtUnit, PLACEHOLDER, sideTone } from "@/lib/format";
 import { NodeSurface } from "@/components/node-surface/NodeSurface";
@@ -46,7 +46,7 @@ export function SearchpointDrillIn({
   const composite = reading?.own?.composite?.value ?? null;
   const bench = reading?.bench ?? null;
   const paired = liftOf(reading?.vs_reference ?? null);
-  const overParent = liftVersus("parent", reading?.vs_reference?.cell_set);
+  const overParent = reading?.vs_reference_name ?? null;
   // Said once, in the first slot left empty.
   const note =
     failure !== null ? (
@@ -96,14 +96,14 @@ export function SearchpointDrillIn({
                 }
               />
             )}
-            {paired != null && (
+            {paired != null && overParent != null && (
               <Fact
                 k={overParent}
                 v={fmtUnit(paired.measurand.unit, paired.rate_a)}
                 hint="The candidate's PARENT — the origin at round 0, the prior round's winner after — re-scored on the samples THIS candidate measured, and the floor the promotion gate compared it against. Under elimination a candidate may run only part of the round's samples, so the parent's full-set rate is the wrong comparison and would read as a phantom lift."
               />
             )}
-            {paired != null && (
+            {paired != null && overParent != null && (
               <Fact
                 k={`lift ${overParent}`}
                 hint="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
