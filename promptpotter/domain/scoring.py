@@ -42,14 +42,13 @@ from promptpotter.shared.errors import (
     error_category,
     is_error_result,
 )
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
 
 # What a cell's `predicted` reads when its pipeline ran and emitted nothing parseable.
-NO_RESULT: Annotated[str, shapes_optimizer_prompt] = "NO_RESULT"
+NO_RESULT: str = "NO_RESULT"
 
 # Above this many distinct ground truths the answer space is open: no enumerable label identity.
-ANSWER_SPACE_CAP: Annotated[int, shapes_optimizer_prompt] = 10
+ANSWER_SPACE_CAP: int = 10
 
 
 class TurnRecord(TypedDict, total=False):
@@ -691,19 +690,17 @@ DEFAULT_SCORER_ID = "default_hit"
 
 # Every pass size — a definition's, a derived default's, a request's — is bounded here:
 # docs/decisions.md § 0010.
-MAX_PASS_ROWS: Annotated[int, shapes_optimizer_prompt] = 150
+MAX_PASS_ROWS: int = 150
 
-HIT_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 1.0
+HIT_THRESHOLD: float = 1.0
 
 
-@shapes_optimizer_prompt
 def extract_item_label(c: Any) -> str:
     if isinstance(c, dict):
         return str(c.get("candidate", c))
     return c[0] if isinstance(c, (list, tuple)) else str(c)
 
 
-@shapes_optimizer_prompt
 def find_rank(items: Sequence[Any], ground_truth: str) -> int | None:
     if not items or not ground_truth:
         return None
@@ -713,7 +710,6 @@ def find_rank(items: Sequence[Any], ground_truth: str) -> int | None:
     return None
 
 
-@shapes_optimizer_prompt
 def is_hit(fitness: float | None) -> bool:
     """Display and stratification ONLY, never a rate: graded formulas never reach the ceiling."""
     return fitness is not None and fitness >= HIT_THRESHOLD
@@ -733,7 +729,6 @@ class UngradedCellError(ValueError):
     """A column read off a cell that carries no grade: a zero in its place is a miss nobody measured."""
 
 
-@shapes_optimizer_prompt
 def _stamped(cell: GradedCell, grade: CellGrade) -> float:
     value: float | None = getattr(cell.grade, grade)
     if not cell.scored or value is None:
@@ -744,7 +739,7 @@ def _stamped(cell: GradedCell, grade: CellGrade) -> float:
     return value
 
 
-ROW_GRADES: Annotated[dict[str, GradeColumn], shapes_optimizer_prompt] = {
+ROW_GRADES: dict[str, GradeColumn] = {
     "fitness": GradeColumn(False, None, lambda cell: _stamped(cell, "fitness")),
     "objective": GradeColumn(False, "score", lambda cell: _stamped(cell, "objective")),
     # The one column every scorer's rows carry two-valued, by construction of `is_hit`.
@@ -868,7 +863,6 @@ def anchored_criterion_dials(formula: str) -> dict[str, Dial] | None:
     return dials
 
 
-@shapes_optimizer_prompt
 def is_verifier_graded(ground_truth: str | None) -> bool:
     """Ask this, never ``predicted == NO_RESULT``: ``node_role`` declarations decide that sentinel."""
     return not (ground_truth or "")
@@ -883,7 +877,6 @@ def ground_truth_text(ground_truth: str | None) -> str:
     return ground_truth
 
 
-@shapes_optimizer_prompt
 def all_verifier_graded(labels: Iterable[str | None]) -> bool:
     """Empty is False: "measured nothing yet" is not "this backend has no labels"."""
     seen = False
@@ -894,7 +887,6 @@ def all_verifier_graded(labels: Iterable[str | None]) -> bool:
     return seen
 
 
-@shapes_optimizer_prompt
 def enumerable_truth_labels(cells: Sequence[GradedCell]) -> Counter[str] | None:
     """``None`` where collapse is not a meaningful question: an open space, or one truth per row."""
     truth = Counter(c.facts.ground_truth for c in cells if c.facts.ground_truth)
@@ -913,20 +905,17 @@ class ConstantAnswer(NamedTuple):
         return 1.0 if cell.facts.ground_truth == self.label else 0.0
 
 
-@shapes_optimizer_prompt
 def constant_answer(truth: Counter[str]) -> ConstantAnswer:
     label, n = truth.most_common(1)[0]
     return ConstantAnswer(label, n / sum(truth.values()))
 
 
-@shapes_optimizer_prompt
 def graded_answer(facts: MeasuredCell, grade: Grade) -> str | None:
     """What the formula compared to the truth, the whole reply where it reads no span; ``None`` is no answer."""
     said = facts.predicted if grade.span is None else grade.span
     return None if said in ("", NO_RESULT) else said
 
 
-@shapes_optimizer_prompt
 def modal_answer_share(cells: Sequence[GradedCell]) -> float | None:
     """Over PREDICTIONS; reports and never gates — below 1.0 it measures hedging."""
     if enumerable_truth_labels(cells) is None:

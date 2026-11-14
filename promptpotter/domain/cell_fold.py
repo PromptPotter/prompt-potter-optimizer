@@ -7,7 +7,6 @@ from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import ErrorCategory
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 class CellFold(FrozenModel):
@@ -78,7 +77,6 @@ def field_accuracy(scoreable: Iterable[GradedCell]) -> dict[str, float]:
     return {name: sum(hits) / len(hits) for name, hits in verdicts.items()}
 
 
-@shapes_optimizer_prompt
 def merge_known_outcomes(
     prior: Iterable[GradedCell], incoming: Iterable[GradedCell]
 ) -> list[GradedCell]:
@@ -89,7 +87,6 @@ def merge_known_outcomes(
     return list(by_key.values())
 
 
-@shapes_optimizer_prompt
 def measured_cells(rows: Iterable[GradedCell]) -> set[str]:
     return {cell.key for cell in rows if cell.scored}
 

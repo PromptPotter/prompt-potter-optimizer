@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from functools import cached_property
-from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple, Self
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, Self
 
 from pydantic import Field, field_validator
 
@@ -19,17 +19,16 @@ from promptpotter.domain.search_point import (
     strip_rendered_prompt,
 )
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
 
 
-FEW_SHOT_BLOCK: Annotated[str, shapes_optimizer_prompt] = "few_shot_block"
+FEW_SHOT_BLOCK: str = "few_shot_block"
 """The rendered shots' key — last in a target render, and in the wire's ``prompt_fields``."""
 
 
-@shapes_optimizer_prompt
 def render_prompt(fields: Mapping[str, str], order: Sequence[str]) -> str:
     """A field *order* omits renders nowhere, so the caller refuses one first."""
     return "\n\n".join(v for f in order if (v := fields.get(f, "")))
@@ -187,7 +186,6 @@ class OptSearchPoint(FrozenModel):
     def prompt(self, node: str) -> NodePrompt:
         return self.prompts.get(node) or NodePrompt()
 
-    @shapes_optimizer_prompt
     def fields_of(self, node: PipelineNode) -> dict[str, str]:
         """Its own text on *node*, refusing a field the node does not declare (it would render nowhere)."""
         fields = self.prompt(node.name).fields
@@ -198,12 +196,10 @@ class OptSearchPoint(FrozenModel):
             )
         return fields
 
-    @shapes_optimizer_prompt
     def render(self, node: PipelineNode) -> str:
         """Its own fields on *node* — never the campaign's framing nor its shots, which ``scored_prompts`` adds."""
         return render_prompt(self.fields_of(node), node.prompt_fields)
 
-    @shapes_optimizer_prompt
     def _render_few_shot_block(self, node: str, demo: Sequence[Sample]) -> str:
         rows = {s.key: s for s in demo}
         shots = self.prompt(node).shots
@@ -211,7 +207,6 @@ class OptSearchPoint(FrozenModel):
             raise ValueError(f"shots {missing} are not in the demo pool this render was handed")
         return "\n".join(f"Input: {rows[k].query}\nOutput: {rows[k].ground_truth}" for k in shots)
 
-    @shapes_optimizer_prompt
     def _target_fields(
         self, node: PipelineNode, framing: TaskDecomposition, *, demo: Sequence[Sample]
     ) -> list[tuple[str, str]]:
@@ -232,13 +227,11 @@ class OptSearchPoint(FrozenModel):
             pairs.append((FEW_SHOT_BLOCK, block))
         return pairs
 
-    @shapes_optimizer_prompt
     def render_target(
         self, node: PipelineNode, framing: TaskDecomposition, *, demo: Sequence[Sample]
     ) -> str:
         return "\n\n".join(v for _, v in self._target_fields(node, framing, demo=demo))
 
-    @shapes_optimizer_prompt
     def scored_prompts(
         self, schema: PipelineSchema, framing: TaskDecomposition, *, demo: Sequence[Sample]
     ) -> dict[str, dict[str, str]]:

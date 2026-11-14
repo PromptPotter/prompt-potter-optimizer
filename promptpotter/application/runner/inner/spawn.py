@@ -7,7 +7,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-import random
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -41,6 +40,7 @@ from promptpotter.application.runner.inner.tasks import (
     panel_cell,
     parse_panel,
     parse_resolved,
+    seat_draw,
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.campaign import Campaign
@@ -82,10 +82,8 @@ from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
 )
-from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import (
     MAX_INSTRUMENT_DEPTH,
-    MeasurementRole,
     instrument_depth,
     measured_pass,
     measured_pass_context,
@@ -117,22 +115,9 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int, query: str) -> dic
     }
 
 
-def _purpose(role: MeasurementRole | None) -> str:
-    return "backfill" if role is MeasurementRole.BACKFILL else "own"
-
-
-def inner_campaign_id(
-    spec: InnerTaskSpec,
-    overrides: Overrides,
-    estimator: str,
-    role: MeasurementRole | None,
-) -> str:
-    """Content, never asker: the TREATMENT, never the budget, so a deepened cell continues the rounds already banked."""
-    # The estimator too: one that reads a new per-round fact never continues a campaign lacking it.
-    digest = stable_hash(
-        [spec.treatment(), resolved_overrides(overrides), _purpose(role), estimator], length=6
-    )
-    return f"{dataset_id_prefix(spec.inner_dataset)}__{digest}"
+def inner_campaign_id(spec: InnerTaskSpec, overrides: Overrides) -> str:
+    """Content, never asker: the cell's continuation and the arm's edits, never why a pass ran."""
+    return f"{dataset_id_prefix(spec.inner_dataset)}__{spec.continuation(resolved_overrides(overrides))}"
 
 
 class _InnerCell(NamedTuple):
@@ -154,9 +139,8 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
     cells = _cells(ctx)
     cell = panel_cell(sample)
     arm = cells.own(cell, payload.get("optimizer_prompt_overrides") or {})
-    role = cand.role if (cand := measured_pass()) else None
     spec = cells.spec(cell)
-    campaign_id = inner_campaign_id(spec, arm, cells.estimator, role)
+    campaign_id = inner_campaign_id(spec, arm)
     return _InnerCell(ctx, cell, spec, arm, campaign_id)
 
 
@@ -278,15 +262,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
         all_samples = session.bank.samples
         if not all_samples:
             raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
-        n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(all_samples))
-        # A pure function of the seat's seed, so every arm of a head-to-head draws one bank.
-        search = random.Random(spec.run_seed).sample(all_samples, n)
-        taken = {s.key for s in search}
-        rest = [s for s in all_samples if s.key not in taken]
-        bench = [
-            s.model_copy(update={"held_out": True})
-            for s in random.Random(spec.run_seed).sample(rest, min(spec.n_samples_bench, len(rest)))
-        ]
+        search, bench = seat_draw(all_samples, spec)
         if len(bench) < spec.n_samples_bench:
             # Before anything is minted or sent: a short bench is a panel geometry error, not a measurement.
             raise CellUnscoreableError(
@@ -463,22 +439,9 @@ def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) 
 def _identity_config(
     stores: Stores, experiment: Mapping[str, Any] | None
 ) -> dict[str, dict[str, Any]]:
-    """What reads every cell's number alike; what measures ONE cell is in its pin (`_instrument`)."""
+    """What reads every cell's number alike; what measures ONE cell is in its pin (`InnerTaskSpec.key`)."""
     cells = _inner_cells(stores, experiment)
     return {cells.chain[0]: {INNER_ORIGIN_KEY: cells.estimator}}
-
-
-def _instrument(cells: InnerCells, cell: Seat) -> str:
-    held = cells.held(cell)
-    # `config` only: widening a permission list changes nothing the origin does, so it voids no cell.
-    nodes = (
-        {n: (node or {}).get("config") for n, node in held.pipeline["nodes"].items()}
-        if held.pipeline and isinstance(held.pipeline.get("nodes"), dict)
-        else None
-    )
-    config = CampaignConfig.model_validate(held.campaign_config).identity()
-    # The spec's treatment, which subtracts the depth a seat may deepen to.
-    return stable_hash([cells.spec(cell).treatment(), nodes, config])
 
 
 def promptpotter_wire_adapter(
@@ -501,7 +464,7 @@ def _resolve_panel(stores: Stores, panel: Mapping[str, Any]) -> dict[str, Any]:
     cells = parsed.resolve_cells(stores)
     resolved = ResolvedPanel(
         panel=parsed,
-        instruments={t.id: _instrument(cells, t) for t in parsed.tasks},
+        instruments={t.id: cells.spec(t).key() for t in parsed.tasks},
         datasets={t.id: parsed.dataset_for(t) for t in parsed.tasks},
     )
     return resolved.model_dump(mode="json", exclude_unset=True)

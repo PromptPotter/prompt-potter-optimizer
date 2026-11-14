@@ -11,7 +11,7 @@ from pydantic import Field
 
 from example_optimizer import prompts
 from promptpotter.application.bench.node_context import Calls, Children, Lineage, Replay, Target
-from promptpotter.application.optimizers import ManifestDir, nodes, paper_templates
+from promptpotter.application.optimizers import ManifestDir, nodes
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.campaign_config import Estimand, Knob
@@ -21,8 +21,6 @@ from promptpotter.domain.records.run_records import CheckpointInputs
 from promptpotter.domain.strict_model import StrictModel
 
 if TYPE_CHECKING:
-    from types import ModuleType
-
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.optimizers.nodes import (
@@ -80,7 +78,6 @@ class Propose(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = ProposeKnobs
     sees = frozenset({Calls, Children, Lineage, Target})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates, prompts)
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, ProposeKnobs).variants

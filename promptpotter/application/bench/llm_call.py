@@ -39,12 +39,10 @@ from promptpotter.infrastructure.llm.wallet import keyed_client
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.shared.errors import OptimizerTimeoutError
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 logger = logging.getLogger(__name__)
 
 
-@shapes_optimizer_prompt
 def _drop_class_description(schema: dict[str, Any], _model: type[BaseModel]) -> None:
     schema.pop("description", None)
 
@@ -54,7 +52,6 @@ _HELD_AFTER = frozenset({"minLength", "minProperties"})
 _TYPED = frozenset({"type", "enum", "const", "anyOf", "oneOf", "allOf", "$ref"})
 
 
-@shapes_optimizer_prompt
 def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
     if any(s.get("type") == "null" for s in (schema, *schema.get("anyOf", ()))):
         return {k: v for k, v in schema.items() if k != "default"}
@@ -63,7 +60,6 @@ def _nullable(schema: dict[str, Any]) -> dict[str, Any]:
     return {"anyOf": [inner, {"type": "null"}], **named}
 
 
-@shapes_optimizer_prompt
 def wire_closed(schema: dict[str, Any]) -> dict[str, Any]:
     """The one wire rule a strict host enforces: every object closed, every property required, one
     the model may leave unsaid nullable. An open map or an untyped value cannot be stated, so it raises."""
@@ -96,7 +92,6 @@ def _unsaid(value: object) -> object:
     return {k: v for k, v in kept.items() if v != {} or value[k] == {}}
 
 
-@shapes_optimizer_prompt
 class OptimizerResponseModel(StrictModel):
     """Every model whose JSON Schema goes on the wire; class descriptions are dropped from it."""
 

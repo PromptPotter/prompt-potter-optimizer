@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Sequence
-from typing import Annotated, Literal, NamedTuple
+from typing import Literal, NamedTuple
 
 from pydantic import Field
 
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import ErrorCategory
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
 
 
@@ -833,7 +832,7 @@ class ErrorCategoryInfo(NamedTuple):
     stops: StopReason | None
 
 
-ERROR_CATEGORY_INFO: Annotated[dict[ErrorCategory, ErrorCategoryInfo], shapes_optimizer_prompt] = {
+ERROR_CATEGORY_INFO: dict[ErrorCategory, ErrorCategoryInfo] = {
     ErrorCategory.CLIENT: ErrorCategoryInfo(True, None),
     ErrorCategory.PARAMETER_REFUSED: ErrorCategoryInfo(True, None),
     ErrorCategory.SERVER: ErrorCategoryInfo(False, None),

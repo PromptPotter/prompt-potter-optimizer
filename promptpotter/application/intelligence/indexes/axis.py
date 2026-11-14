@@ -4,7 +4,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
-from typing import Annotated, Any
+from typing import Any
 
 from promptpotter.application.intelligence.indexes.sample import (
     FailureCluster,
@@ -17,25 +17,21 @@ from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS
 from promptpotter.domain.pipeline_schema import LocusKind, PipelineSchema
 from promptpotter.domain.results import RoundResult
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
-@shapes_optimizer_prompt
 def _is_forbidden_axis(axis: str) -> bool:
     _, _, param = axis.partition(".")
     return param in PARAM_FORBIDDEN_KEYS
 
 
-NOISE_THRESHOLD: Annotated[float, shapes_optimizer_prompt] = 0.02
+NOISE_THRESHOLD: float = 0.02
 
 
-@shapes_optimizer_prompt
 def _value_preview(value: Any) -> str:
     s = str(value)
     return s[:80] if len(s) > 80 else s
 
 
-@shapes_optimizer_prompt
 def _fmt_axis_rankings(
     rankings: list[AxisImpact], peaked_axes: frozenset[str] | None = None
 ) -> str:
@@ -54,7 +50,6 @@ def _fmt_axis_rankings(
     return "; ".join(parts)
 
 
-@shapes_optimizer_prompt
 def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
     if with_counts:
         return "; ".join(
@@ -63,7 +58,6 @@ def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
     return "; ".join(f"{c.failure_mode} ({c.fraction:.0%})" for c in clusters)
 
 
-@shapes_optimizer_prompt
 def _fmt_persistent_failures(persistent: list[SampleRecord]) -> str:
     intractable = [q for q in persistent if q.hit_rate == 0]
     chronic = [q for q in persistent if q.hit_rate > 0]
@@ -93,7 +87,6 @@ class AxisImpact:
     sample_count: int = 0
 
 
-@shapes_optimizer_prompt
 def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
     out = {k: v for k, v in items if v}
     return out or None
@@ -114,13 +107,11 @@ class AxisIndex:
         )
         self._axis_kinds: dict[str, LocusKind] = {}
 
-    @shapes_optimizer_prompt
     def peaked_axes(self) -> frozenset[str]:
         return frozenset(
             axis for axis in self._axis_values if self._axis_value_trend(axis) == "peaked"
         )
 
-    @shapes_optimizer_prompt
     def _ranked_axes(self, only: LocusKind | None) -> list[tuple[str, dict[str, list[float]]]]:
         """``None`` ranks every kind."""
         return [
@@ -129,7 +120,6 @@ class AxisIndex:
             if not _is_forbidden_axis(axis) and only in (None, self._axis_kinds[axis])
         ]
 
-    @shapes_optimizer_prompt
     def axis_rankings(self, only: LocusKind | None) -> list[AxisImpact]:
         impacts = [
             i
@@ -138,7 +128,6 @@ class AxisIndex:
         ]
         return sorted(impacts, key=lambda a: -a.effect_size)
 
-    @shapes_optimizer_prompt
     def _exhausted_axes(
         self, only: LocusKind | None, min_values: int = 4, max_effect: float = 0.02
     ) -> list[AxisImpact]:
@@ -151,7 +140,6 @@ class AxisIndex:
         ]
         return sorted(out, key=lambda a: a.effect_size)
 
-    @shapes_optimizer_prompt
     def _axis_value_trend(self, axis: str) -> str:
         pairs: list[tuple[float, float]] = []
         for v, accs in self._axis_values.get(axis, {}).items():
@@ -177,7 +165,6 @@ class AxisIndex:
                 return "peaked"
         return "flat"
 
-    @shapes_optimizer_prompt
     def digest(self, *, only: LocusKind | None) -> dict[str, str] | None:
         rankings5 = self.axis_rankings(only)[:5]
         top_vals_str: str | None = None
@@ -235,7 +222,6 @@ class AxisIndex:
                     # Keyed whole: two prompts sharing a preview are two values.
                     self._axis_values[locus.name][str(value)].append(fold.fitness)
 
-    @shapes_optimizer_prompt
     def _compute_axis_impact(
         self,
         axis: str,

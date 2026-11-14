@@ -27,11 +27,9 @@ from promptpotter.domain.scoring import (
     all_verifier_graded,
     extract_item_label,
 )
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
 
 
-@shapes_optimizer_prompt
 def compute_fitness(*, results: Sequence[GradedCell], **_: Any) -> float | None:
     """``None``, never 0.0, with no scoreable row: a zero invents the worst measurement out of none."""
     scoreable = scoreable_rows(results)

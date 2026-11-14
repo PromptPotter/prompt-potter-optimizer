@@ -57,6 +57,7 @@ from processes import (
     end_children_with_this_process,
     long_path,
     queue_behind_siblings,
+    replace_changed,
 )
 
 import promptpotter
@@ -77,9 +78,11 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.optimizers.nodes import BEHAVIOUR_KEYS_FILE, BehaviourKeys
 from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.application.runner.inner.tasks import measurement_modules
+from promptpotter.application.runner.inner.tasks import estimator
 from promptpotter.config.paths import (
+    PACKAGE_ROOT,
     PROJECTS_DIR,
     default_projects_root,
     install_datasets_root,
@@ -131,7 +134,7 @@ from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import campaign_runner
-from promptpotter.shared.hashing import module_source_digest
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import default_identity
 from promptpotter.shared.measurement_context import instrument_depth
 
@@ -457,6 +460,8 @@ class ByCallIdentity:
                 {"request": body, "response": shown}, indent=1, sort_keys=True, ensure_ascii=False
             ),
             encoding="utf-8",
+            # Its bytes are the request's hash in a behaviour key: one platform's newline.
+            newline="\n",
         )
         return said
 
@@ -1386,6 +1391,7 @@ def _kept(o: Any, under: str = "") -> Any:
 
 
 _HEX32 = re.compile(r"^[0-9a-f]{32}$")
+_HEX16 = re.compile(r"^[0-9a-f]{16}$")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _EMBEDDED_HEX32 = re.compile(r"[0-9a-f]{32}")
 _SHORT_HEX = re.compile(r"\b[0-9a-f]{6,12}\b")
@@ -1404,12 +1410,17 @@ class Canon:
         self.forks = forks
         # Prose names a candidate by an id prefix ("crossover 2dda4b+917e53", "parent c27b1862").
         self.short = {k[:n]: v for k, v in ids.items() for n in range(6, 13)}
+        self.hashes: dict[str, str] = {}
 
     def s(self, v: str) -> str:
         if v in self.ids:
             return self.ids[v]
         if _HEX32.match(v) or _UUID.match(v):
             return "<id>"
+        if _HEX16.match(v):
+            # A content hash (a ruler over fitted δ, a digest) carries a platform's float noise, so
+            # the trace keeps only which hashes are one; a behaviour key then reads alike anywhere.
+            return self.hashes.setdefault(v, f"<hash {len(self.hashes)}>")
         v = _EMBEDDED_HEX32.sub(lambda m: self.ids.get(m.group(0), "<id>"), v)
         v = _SHORT_HEX.sub(lambda m: self.short.get(m.group(0), m.group(0)), v)
         v = _CAMPAIGN_ID.sub("<campaign>", v)
@@ -1614,13 +1625,43 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 
 def digests() -> dict[str, str]:
     complete_registries()
-    out = {"estimator": module_source_digest(*measurement_modules())}
+    out = {"estimator": estimator()}
     for name in sorted(optimizers.MANIFESTS.table):
         selected = select_optimizer(OptimizerChoice(optimizer=name))
         out[f"treatment:{name}"] = selected.treatment(
             frozenset(Presumption), PackShelf(account=None)
         ).digest
     return out
+
+
+def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
+    """Regenerates `nodes.py::BEHAVIOUR_KEYS_FILE` from each built-in's straight-run trace in
+    *home*, naming it on a `wrote` or `unchanged` line (`gate.py::_rewrote`); `True` where it moved."""
+    builtin = {
+        n for n in optimizers.MANIFESTS.table
+        if optimizers.MANIFESTS.get(n).directory.is_relative_to(PACKAGE_ROOT)
+    }  # fmt: skip
+    held = BehaviourKeys.held()
+    fingerprints = {n: f for n, f in held.fingerprints.items() if n in builtin}
+    if held.world != WORLD:
+        fingerprints = {}
+    for name in sorted(builtin.intersection(names)):
+        trace = BehaviourTrace.read(home / name)
+        fingerprints[name] = stable_hash([trace.decisions, trace.requests])
+    fingerprint = held.estimator
+    if "potter" in names and (nested := home / "potter" / L4 / TRACE).is_file():
+        # Its pins carry the estimator the leg ran under, read out so the fingerprint is not its own input.
+        trace = BehaviourTrace.read(nested.parent)
+        fingerprint = stable_hash(
+            json.dumps([trace.decisions, trace.requests], sort_keys=True).replace(estimator(), "")
+        )
+    kept = BehaviourKeys(
+        world=WORLD, fingerprints=dict(sorted(fingerprints.items())), estimator=fingerprint
+    )
+    text = json.dumps(kept.model_dump(mode="json"), indent=1) + "\n"
+    wrote = replace_changed(BEHAVIOUR_KEYS_FILE, text)
+    print(f"{'wrote' if wrote else 'unchanged'} {BEHAVIOUR_KEYS_FILE.relative_to(REPO).as_posix()}")
+    return wrote
 
 
 def traced(out: Path) -> None:
@@ -1728,7 +1769,11 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
 def optimizer_keys(kept: LastGreen, names: Sequence[str], *, controlled: bool) -> dict[str, str]:
     # A controlled workspace runs several optimizers, so it reads every one.
     skipped = {} if controlled else unreached(names)
-    return {name: kept.key(OFFLINE_RUN_READS, without=skipped.get(name, ())) for name in names}
+    # Its own output is no source: regenerating the keys reruns no optimizer.
+    keyed = BEHAVIOUR_KEYS_FILE.relative_to(REPO).as_posix()
+    return {
+        name: kept.key(OFFLINE_RUN_READS, without=(*skipped.get(name, ()), keyed)) for name in names
+    }
 
 
 def still_green(home: Path, keys: dict[str, str]) -> set[str]:
@@ -2203,10 +2248,15 @@ def main() -> int:
     for name in sorted(green):
         print(f"{name}: unchanged since green -- {home / name}")
     due = [name for name in names if name not in green]
+    # Only a run under the default flags fingerprints the world, and only a controlled one runs no
+    # optimizer alone.
+    keying = not args.controlled and all(
+        a.startswith(("--optimizer=", "--against=")) for a in asked
+    )
     if not due:
         if args.against is not None:
             print("\n".join(moved_against(home, args.against, names)))
-        return 0
+        return int(keying and behaviour_keys(home, names))
     stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run, "workspaces": names}
     queue_behind_siblings("offline_run")
     covered = prepared_home(home, stamp, due, held=held, coverage=args.coverage)
@@ -2342,7 +2392,9 @@ def main() -> int:
         now = optimizer_keys(kept, due, controlled=args.controlled)
         for name in (n for n in due if not failed[n] and keys[n] == now[n]):
             (home / name / GREEN).write_text(keys[name], "utf-8")
-    return 1 if any(failed.values()) else 0
+    if any(failed.values()):
+        return 1
+    return int(keying and behaviour_keys(home, names))
 
 
 if __name__ == "__main__":

@@ -35,13 +35,16 @@ from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.export import parse_prompt_export
+from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.free_tier import FREE_TIER_ADAPTER
 from promptpotter.domain.job import JOB_ADAPTER, LIVE_JOB_IDS
+from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
+from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.ruler import RulerFold
-from promptpotter.domain.sample import ArchiveConfig
+from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, Bank, FiledAnswer
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.identity.blocklist import Blocklist
 from promptpotter.infrastructure.identity.grants import GrantsFile
 from promptpotter.infrastructure.identity.paths import IDENTITY_DIR, IdentityPaths
@@ -58,6 +61,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     MATERIALIZED_PANEL,
     MATERIALIZED_PANEL_FILE,
     ORIGIN_FILE,
+    DatasetFraming,
     dataset_framing,
     definition_layer,
     origin_layer,
@@ -84,13 +88,13 @@ from promptpotter.infrastructure.store.layout import (
 )
 from promptpotter.infrastructure.store.measurement_archive import (
     ArchiveFile,
+    MovedFields,
     answer_of,
     decode_cold,
     index_row,
 )
-from promptpotter.infrastructure.store.read_model import charge_book_fold, ledger_line
+from promptpotter.infrastructure.store.read_model import Money, charge_book_fold, ledger_line
 from promptpotter.infrastructure.store.ruler_store import RULER_FILE
-from promptpotter.infrastructure.store.source_scan import SOURCE_FACTS_FILE, TREATMENT_DIGESTS_FILE
 from promptpotter.infrastructure.store.tenant_dataset_store import (
     BANKS_DIR,
     CUTS_FILE,
@@ -109,7 +113,11 @@ from promptpotter.infrastructure.store.user_store import (
     ConsentLine,
     User,
 )
-from promptpotter.infrastructure.store.visit_records import VISIT_RECORDS_DIR, visit_record
+from promptpotter.infrastructure.store.visit_records import (
+    VISIT_RECORDS_DIR,
+    VisitRecord,
+    visit_record,
+)
 from promptpotter.infrastructure.store.wallet_store import (
     API_KEYS_FILE,
     CHARGES_FILE,
@@ -118,7 +126,6 @@ from promptpotter.infrastructure.store.wallet_store import (
     CouponGrant,
 )
 from promptpotter.shared.errors import validation_reason
-from promptpotter.shared.hashing import SourceFacts
 from promptpotter.shared.worded import Worded
 
 
@@ -154,14 +161,23 @@ class Opaque(NamedTuple):
     why: str
 
 
+class Parsed(NamedTuple):
+    """A row a landing proves by its reader's parse; ``model`` is what the reader parses into (a
+    type, or the `KindTable` whose kinds it parses by), and its shape is what the row hashes."""
+
+    read: Callable[[bytes], object]
+    model: object
+
+
 class Folded(NamedTuple):
     """A row a landing proves by its reader's fold over the whole file, never each line's parse:
     lines that each parse can still fold wrong."""
 
     fold: Callable[[bytes], object]
+    model: object
 
 
-type Shape = TypeAdapter[Any] | Callable[[bytes], object] | Opaque | Folded
+type Shape = TypeAdapter[Any] | Parsed | Opaque | Folded
 
 _HELD = Opaque("a lock or marker its process holds, never parsed")
 _AUDIT = Opaque("an audit trail its writer appends and no reader parses")
@@ -258,7 +274,13 @@ INSTALL_KINDS: tuple[Kind, ...] = (
         TypeAdapter(SessionData),
     ),
     # The app's perimeter log, 90 days deep: no account is in it, so a reset takes it.
-    Kind("app visits", _INSTALL, f"{VISIT_RECORDS_DIR}/*.jsonl", Fate.RUN, visit_record),
+    Kind(
+        "app visits",
+        _INSTALL,
+        f"{VISIT_RECORDS_DIR}/*.jsonl",
+        Fate.RUN,
+        Parsed(visit_record, VisitRecord),
+    ),
     Kind("install block pack", _INSTALL, _BLOCK_PACK, _SURVIVOR, TypeAdapter(BlockPack)),
     Kind("environment", _INSTALL, ".env", _SURVIVOR, Opaque("dotenv lines the settings read")),
     Kind("free tier", _INSTALL, "free_tier.yaml", _SURVIVOR, FREE_TIER_ADAPTER),
@@ -266,21 +288,6 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     CHECKIN_SHADOW,
     Kind("model rates", _INSTALL, "rates.json", Fate.CACHE, _WALKED),
     Kind("route ceilings", _INSTALL, f"{ROUTE_ANSWERS_DIR}/*.json", Fate.CACHE, ROUTE_ANSWER),
-    # Under the data root where the install cache is its `.cache` (an install with no checkout).
-    Kind(
-        "source facts",
-        _INSTALL,
-        f"{INSTALL_CACHE_DIR}/{SOURCE_FACTS_FILE}",
-        Fate.CACHE,
-        TypeAdapter(dict[str, SourceFacts]),
-    ),
-    Kind(
-        "treatment digests",
-        _INSTALL,
-        f"{INSTALL_CACHE_DIR}/{TREATMENT_DIGESTS_FILE}",
-        Fate.CACHE,
-        TypeAdapter(dict[str, str]),
-    ),
     # `HF_HOME`, set by `deploy-linux/install-service.sh`: the only path its unit may write.
     Kind("dataset fetch cache", _INSTALL, f"{INSTALL_CACHE_DIR}/huggingface/**", Fate.CACHE, _TREE),
     # Today's launches are what the daily quota counts, so a reset keeps them.
@@ -319,8 +326,8 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
     Kind("consent trail", Scope.ACCOUNT, CONSENT_FILE, _SURVIVOR, TypeAdapter(ConsentLine)),
     Kind("grant", Scope.ACCOUNT, GRANT_FILE, _RUN, TypeAdapter(CouponGrant)),
     Kind("api keys", Scope.ACCOUNT, API_KEYS_FILE, _SURVIVOR, HELD_KEYS),
-    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _RUN, Folded(charge_book_fold)),
-    Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, read_bank),
+    Kind("charges", Scope.ACCOUNT, CHARGES_FILE, _RUN, Folded(charge_book_fold, Money)),
+    Kind("bank", Scope.ACCOUNT, f"{BANKS_DIR}/*.json", Fate.CACHE, Parsed(read_bank, Bank)),
     # An upload definition's `source:` reads it.
     Kind("upload", Scope.ACCOUNT, f"{UPLOADS_DIR}/**", _RUN, Opaque("an uploaded file's bytes")),
     # A file two rows name takes the first one's shape.
@@ -329,12 +336,22 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
         Scope.WORKSPACE,
         f"{_DATASETS}/**/{DEFINITION_FILE}",
         _RUN,
-        definition_layer,
+        Parsed(definition_layer, dict[str, Any] | None),
     ),
     Kind(
-        "dataset framing", Scope.WORKSPACE, f"{_DATASETS}/**/{FRAMING_FILE}", _RUN, dataset_framing
+        "dataset framing",
+        Scope.WORKSPACE,
+        f"{_DATASETS}/**/{FRAMING_FILE}",
+        _RUN,
+        Parsed(dataset_framing, DatasetFraming),
     ),
-    Kind("dataset origin", Scope.WORKSPACE, f"{_DATASETS}/**/{ORIGIN_FILE}", _RUN, origin_layer),
+    Kind(
+        "dataset origin",
+        Scope.WORKSPACE,
+        f"{_DATASETS}/**/{ORIGIN_FILE}",
+        _RUN,
+        Parsed(origin_layer, dict[str, dict[str, Any]] | None),
+    ),
     Kind(
         "dataset file",
         Scope.WORKSPACE,
@@ -342,7 +359,13 @@ ACCOUNT_KINDS: tuple[Kind, ...] = (
         _RUN,
         Opaque("a dataset's own file, its connector's"),
     ),
-    Kind("task context", Scope.WORKSPACE, f"{TASK_CONTEXT_DIR}/*.yaml", _RUN, read_task_context),
+    Kind(
+        "task context",
+        Scope.WORKSPACE,
+        f"{TASK_CONTEXT_DIR}/*.yaml",
+        _RUN,
+        Parsed(read_task_context, TaskDecomposition),
+    ),
     Kind(
         "bank labels", Scope.WORKSPACE, f"{BANKS_DIR}/{LABELS_FILE}", _RUN, TypeAdapter(BankLabel)
     ),
@@ -405,7 +428,8 @@ class CampaignRow(NamedTuple):
 _CAMPAIGN_SHAPE: Shape = TypeAdapter(Campaign)
 _DRAFT_SHAPE: Shape = TypeAdapter(DraftFile)
 # What a run IS: one of these that does not load takes its campaign or draft with it.
-_RUN_RECORDS = (ledger_line, _CAMPAIGN_SHAPE, _DRAFT_SHAPE)
+_LEDGER = Parsed(ledger_line, RECORDS)
+_RUN_RECORDS = (_LEDGER, _CAMPAIGN_SHAPE, _DRAFT_SHAPE)
 
 
 def _export(raw: bytes) -> object:
@@ -416,7 +440,7 @@ def _declared_rows(where: str, at: Path, layout: CycleLayout | CampaignLayout) -
     probe = CycleLayout(Path())
     shapes: dict[str, Shape] = {
         CampaignLayout(Path()).manifest.name: _CAMPAIGN_SHAPE,
-        probe.export.name: _export,
+        probe.export.name: Parsed(_export, PromptExport),
     }
     return [
         CampaignRow(
@@ -438,7 +462,7 @@ def _cycle_rows(where: str, cycle: Path) -> tuple[CampaignRow, ...]:
         CampaignRow(
             f"{where} round", f"{layout.rounds.as_posix()}/{ROUND_GLOB}", Leaf.STATE, _FOR_A_PERSON
         ),
-        CampaignRow(f"{where} ledger", layout.ledger.as_posix(), Leaf.HISTORY, ledger_line),
+        CampaignRow(f"{where} ledger", layout.ledger.as_posix(), Leaf.HISTORY, _LEDGER),
         CampaignRow(f"{where} producer lock", layout.producer_lock.as_posix(), Leaf.TRACE, _HELD),
         CampaignRow(f"{where} pass lock", layout.pass_lock.as_posix(), Leaf.TRACE, _HELD),
         CampaignRow(f"{where} job log", layout.job_log.as_posix(), Leaf.TRACE, _FOR_A_PERSON),
@@ -496,7 +520,7 @@ WORKSPACE_KINDS: tuple[Kind, ...] = (
         Fate.RUN,
         TypeAdapter(CycleHop),
     ),
-    Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, ledger_line),
+    Kind("workspace ledger", _WS, f"{WORKSPACE_STATE_DIR}/events.jsonl", Fate.RUN, _LEDGER),
     # What was asked, of every subject: a loop's inbox and the trail read it, no survivor fact.
     Kind(
         "command log",
@@ -538,12 +562,12 @@ LIVE_LOCKS = frozenset(
 ) | {ATOMIC_WRITE}
 
 _ARCHIVE_SHAPES: dict[ArchiveFile, Shape] = {
-    ArchiveFile.INDEX: index_row,
+    ArchiveFile.INDEX: Parsed(index_row, tuple[str, ArchiveEntry]),
     ArchiveFile.CONFIG: TypeAdapter(ArchiveConfig),
-    ArchiveFile.CELLS: answer_of,
-    ArchiveFile.COLD: decode_cold,
+    ArchiveFile.CELLS: Parsed(answer_of, FiledAnswer),
+    ArchiveFile.COLD: Parsed(decode_cold, list[MovedFields]),
     ArchiveFile.CLAIM_LOCK: _HELD,
-    ArchiveFile.SAMPLE_FOLD: SampleFoldRow.model_validate_json,
+    ArchiveFile.SAMPLE_FOLD: TypeAdapter(SampleFoldRow),
 }
 assert set(_ARCHIVE_SHAPES) == set(ArchiveFile), "an archive file no row names"
 
@@ -581,6 +605,9 @@ def _retired(_raw: bytes) -> object:
     raise ValueError("no row names it: run data a retired writer left")
 
 
+_RETIRED = Parsed(_retired, None)
+
+
 KINDS: tuple[Kind, ...] = (
     ATOMIC_WRITE,
     *INSTALL_KINDS,
@@ -592,20 +619,20 @@ KINDS: tuple[Kind, ...] = (
 # Asked after every row and its write lock: a file under a campaign or a draft that nothing above
 # names is run data a retired writer left, which no reader takes, so a landing drops it.
 RETIRED_KINDS: tuple[Kind, ...] = (
-    Kind("retired run file", _WS, "campaigns/*/**", Fate.RUN, _retired),
-    Kind("retired draft file", _WS, f"{_DRAFT}/**", Fate.RUN, _retired),
-    Kind("retired diagnostic", _WS, "diagnostics/*.json", Fate.RUN, _retired),
+    Kind("retired run file", _WS, "campaigns/*/**", Fate.RUN, _RETIRED),
+    Kind("retired draft file", _WS, f"{_DRAFT}/**", Fate.RUN, _RETIRED),
+    Kind("retired diagnostic", _WS, "diagnostics/*.json", Fate.RUN, _RETIRED),
     # A cell claim's row: its holder files the cell's answer instead (`ReplayFeed.claim`).
     Kind(
         "retired cell claim row",
         Scope.ARCHIVE_HOME,
         f"{MEASUREMENTS_DIR}/{ArchiveFile.CLAIM_LOCK.folder}/*.json",
         Fate.RUN,
-        _retired,
+        _RETIRED,
     ),
     # Its claim moved onto the host's account (`migrations/host_account.py`).
     Kind(
-        "retired host claim", _INSTALL, f"{IDENTITY_DIR}/default_claimed.json", Fate.RUN, _retired
+        "retired host claim", _INSTALL, f"{IDENTITY_DIR}/default_claimed.json", Fate.RUN, _RETIRED
     ),
 )
 
@@ -667,9 +694,9 @@ def classify(rel: PurePosixPath) -> Found | None:
     return None if retired is None else Found(retired, lock=False)
 
 
-def _check(shape: TypeAdapter[Any] | Callable[[bytes], object], kind: Kind, raw: bytes) -> None:
-    if not isinstance(shape, TypeAdapter):
-        shape(raw)
+def _check(shape: TypeAdapter[Any] | Parsed, kind: Kind, raw: bytes) -> None:
+    if isinstance(shape, Parsed):
+        shape.read(raw)
     elif kind.authored:
         shape.validate_python(parse_yaml(raw))
     else:
@@ -716,9 +743,9 @@ def _schema(shape: Shape) -> object:
         return shape.json_schema()
     if isinstance(shape, Opaque):
         return None
-    if isinstance(shape, Folded):
-        shape = shape.fold
-    return {"reader": f"{shape.__module__}::{shape.__qualname__}"}
+    if isinstance(model := shape.model, KindTable):
+        return model.schemas()
+    return TypeAdapter(model).json_schema()
 
 
 def row_schema(kind: Kind) -> dict[str, Any]:

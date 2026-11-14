@@ -30,7 +30,6 @@ from promptpotter.config.paths import default_projects_root, jobs_dir, user_data
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.optimizer_state import STATE_KINDS
-from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,
@@ -416,12 +415,12 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
 
 @functools.cache
 def landing_key() -> str:
-    """Every row's patterns, fate and shape, every state kind a ledger line parses by, and every
-    migration: a reshape of any lands again."""
+    """Every row's patterns, fate and shape (a ledger row's the record kinds it parses by), every
+    state kind a record nests, and every migration: a reshape of any lands again."""
     rows = {kind.name: row_schema(kind) for kind in KINDS}
-    # A ledger row names its reader, so the record kinds it parses by are hashed here.
-    kinds = {"state": STATE_KINDS.schemas(), "record": RECORDS.schemas()}
-    return stable_hash({"rows": rows, "kinds": kinds, "migrations": sorted(MIGRATIONS)}, length=16)
+    return stable_hash(
+        {"rows": rows, "state": STATE_KINDS.schemas(), "migrations": sorted(MIGRATIONS)}, length=16
+    )
 
 
 def _stamp(projects_root: Path) -> Path:

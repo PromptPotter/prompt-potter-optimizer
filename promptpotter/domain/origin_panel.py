@@ -16,7 +16,6 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
 
 
@@ -29,7 +28,6 @@ class StallEffect(StrEnum):
 
 # Marked: `stall` is the ONE pacing rule L1 patience, `rounds_without_advance` and the life bank
 # read; the words (`ROUND_ADVANCE_INFO`) reach a closure only where a prompt prints one.
-@shapes_optimizer_prompt
 class RoundAdvance(StrEnum):
     """Whether a closed round ADVANCED the best-so-far line."""
 
@@ -92,7 +90,6 @@ ROUND_ADVANCE_INFO: Worded[RoundAdvance, RoundAdvanceInfo] = Worded(
 assert ROUND_ADVANCE_INFO.keys() == set(RoundAdvance)
 
 
-@shapes_optimizer_prompt
 def round_advance(
     round_num: int,
     improved: bool,
@@ -209,7 +206,6 @@ class LineRate(FrozenModel):
     n: int = Field(description="How many of the panel's cells it holds scoreable.")
 
 
-@shapes_optimizer_prompt
 def overlap_line(overlap: OverlapReading) -> list[LineRate]:
     """C0 is on the lead's reading of it, before any pick on the first triggered one's."""
     anchor = next(
@@ -238,7 +234,6 @@ def overlap_line(overlap: OverlapReading) -> list[LineRate]:
     return line
 
 
-@shapes_optimizer_prompt
 def triggered_rates(overlap: OverlapReading) -> list[LineRate]:
     return [
         LineRate(arm=arm, rate=headline.rate_b, unit=headline.measurand.unit, n=b.n)

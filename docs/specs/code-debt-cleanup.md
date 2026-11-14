@@ -7,20 +7,6 @@ reaches it ([`roadmap.md`](roadmap.md) § The cleanup chains (wave 4)), or **Hel
 none can yet (a digest, a decision, a mechanism, a served change, a survivor) — **Re-test:** the
 command or question that says it still stands. Run the re-test before acting.
 
-## URGENT — shapes that hide the backbone from a reshape
-
-**Rides with:** any pass in the file named.
-
-- **A row read by a function hashes the function's name, not its shape**: for 13 rows,
-  `infrastructure/store/data_root.py::_schema` hashes `{"reader": "module::qualname"}`, among them the
-  CACHE rows `archive index`, `archive cells`, `archive cold`, `archive sample_fold` and `bank`, which
-  `pinned_schemas` exists to pin. A reshape of what those readers parse moves neither `landing_key`
-  nor the pinned schemas. `archive sample_fold`'s reader is a bound `model_validate_json`, hashed as
-  `pydantic.main::BaseModel.model_validate_json`. The ledgers read through `ledger_line` since hubs,
-  and their record kinds are hashed by `domain/kinds.py::KindTable.schemas`. Action: a reader row
-  declares the model it parses, and `_schema` hashes that model. **Re-test:** `row_schema` returns no
-  `reader` shape for any row.
-
 ## Open — multi-arc: wave 4's chains, in landing order
 
 Each row sits under the wave-4 chain that closes it ([`roadmap.md`](roadmap.md) § The cleanup chains
@@ -490,7 +476,7 @@ row it closes.
   `campaign_store/store.py:407,835`. **Rides with:** addr 2. **Re-test:**
   `git grep -nE "\.parents\[[0-9]\]|\.parent\.parent" -- promptpotter` names none beside the
   data-layout and package-root sites (`read_model.py:181`, `layout.py:232`, `archive_maintenance.py:57`,
-  `config/paths.py:9`, `store/source_scan.py:29`) and the landing's two (`maintenance/landing.py:256,380`);
+  `config/paths.py:9`) and the landing's two (`maintenance/landing.py:256,380`);
   the allowlist holds none of the three defect sites. `landing.py:256`'s `unit.parent.parent` is also
   admit-2's re-test (`:64-66`), which wants it gone, so the two rows' allowlists conflict until admit-2
   lands.
@@ -666,39 +652,31 @@ and derived the knob couplings from each member's draws and the escalation ladde
   fingerprint line on bkeys. **Rides with:** each named chain. **Re-test:** each claim re-read against
   its code line.
 
-### bkeys (the last re-key; L4's cell identity rides it)
+### bkeys-2 (what bkeys left at its landing)
 
-- **A node's call settings carry its prompt fields** (✓, valid-3's symptom): `search_point.py::NodeConfig.call_settings`
-  dumps with `include=CALL_CONFIG_KEYS`, which `pipeline_params.py::NodeCall._dump`'s plain serializer
-  ignores, so `optimizer_manifest.py::_node_digest` hashes the prompt fields twice (once as the running
-  prompt, once as "call settings"). Root: the call keys are read by attribute, as `prompt_edits` is since
-  valid-3. Moves every treatment digest. **Rides with:** bkeys 1, whose switch moves them all anyway.
-- **An L4 cell's depth defines its measurand but enters no key** (✓, an L4 pass): the panel says
-  "`max_inner_rounds` IS the estimand's budget" (`research/…/panel/dataset.yaml:29-32`), yet
-  `DEPTH_FIELDS` stay out of every key (`cells.py:24-28`, `Seat.pin` `:48-52`, the treatment
-  `tasks.py:321-324`, `_instrument` `spawn.py:507-517`) and the outer `ReplayFeed` serves banked rows
-  (`search_point_scorer.py:303-316`): raising `max_inner_rounds` or `n_samples` replays every banked cell
-  at the old depth, C0 included, while new arms read deep, so `held_out_lift` compares two measurands
-  silently (`n_samples` also moves `draw_bench`'s rows); `tasks.py:136-141`'s "every cell deepens in
-  place" is false (a continued inner campaign runs its stored declaration, `spawn.py:217-250` →
-  `mint.py:352-375`). Decided (orchestrator; the operator may reverse it): the depth fields that define
-  the measurand join the outer key; only the inner continuation stays depth-free.
-- **One L4 cell has two keys, and the instrument hashes a hand-picked subset** (✓ for the keys):
-  `inner_campaign_id` (`spawn.py:130-142`: treatment, edits, model, `_purpose(role)`, estimator) vs
-  `_instrument` (`:507-517`: treatment, node config, campaign identity), so an inner dataset's node-config
-  edit moves the outer pin but not the inner id, the old campaign continues into `ConfigDriftError` and
-  `CellUnscoreableError(spent={})`, and that (arm, cell) is unscoreable for good (test gap:
-  `test_identity.py:1065-1118`); reported, the instrument skips what the inner session loads live
-  (`wiring.py:228-307`: `origin.yaml`, the `source:` cut and recipe, `task.md` framing, the pipelines
-  walk, the backend revision), and pins freeze at outer run init while the session loads live
-  (`tasks.py:586-596` vs `spawn.py:306`); over-keying: `_purpose(role)` inside a content id
-  (`spawn.py:139`), `Seat.id` a label inside the pin, axes key order and mixed-manifest chain order.
-  Root: the instrument hashes the inner origin's own content identity (origin hash, cut hash, framing)
-  off the object the session loads, and the inner id derives from the outer cell key plus the edits.
-- **The estimator digest misses what decides a cell's number** (✓): `measurement_modules`
-  (`tasks.py:330-333`) omits `inner_instrument_config` (`tasks.py:501-562`), `draw_bank` / `draw_bench`
-  and the n rule (`spawn.py:317`). Root: they move into `domain/l4/` or their modules are digested.
-  Also: `l4.md` says `max_inner_rounds ≥ 2` while the code takes `ge=1`; the code is fixed.
+- **An L4 cell's instrument hashes a hand-picked subset, not what its session loads** (✓): the pin's
+  `InnerTaskSpec.instrument` (`runner/inner/tasks.py::InnerTasks`: node config, campaign identity,
+  estimator) skips what the inner session loads live (`wiring.py:228-307`: `origin.yaml`, the `source:`
+  cut and recipe, `task.md` framing, the pipelines walk, the backend revision), and pins freeze at outer
+  run init while the session loads at each spawn; over-keying: `Seat.id` a label inside the pin, axes
+  key order and mixed-manifest chain order. Root: the instrument hashes the seat's
+  `MintPlan.origin_hash` plus its `measured_address`, resolved at the outer run's init (one async
+  resolve and one backend read per seat), which `dataset_access.py::dataset_experiment`'s synchronous
+  resolve cannot host. **Rides with:** bkeys-2. **Re-test:** an edit to an inner `task.md` moves the
+  pin of every seat on that dataset.
+- **A seat's `n_rounds` takes `ge=1` under a panel floor of 2**: `domain/cells.py::Seat.n_rounds`
+  overrides `max_inner_rounds` (`ge=2`) per seat, so one seat still runs a single inner round, a
+  difference with no series behind it. Action: `ge=2`. **Rides with:** bkeys-2. **Re-test:** a seat
+  declaring `n_rounds: 1` is refused.
+- **A deepened inner campaign may stop at its old depth** (reported): depth leaves the inner id, so
+  raising `max_inner_rounds` continues the inner campaign, but `runner/inner/spawn.py:217-250` resumes
+  its stored declaration, whose round budget is the old depth. Action: verify first; if it
+  reproduces, the continued campaign takes the spec's depth as its round budget. **Rides with:**
+  bkeys-2. **Re-test:** a 2-round inner campaign, raised to 3, closes a third round.
+- **The paid L4 browser walk's stop was sized for one inner round** (reported):
+  `research/datasets/promptpotter-self/e2e/dataset.yaml:30`'s `usd: 0.05` predates the depth-2 floor,
+  so `webapp/e2e/spend/l4.spec.ts` may halt on its ceiling. Action: size it from one measured depth-2
+  run. **Rides with:** the next paid walk.
 
 ### readings (after the L4 C0 re-measure; behaviour keys make it key-neutral)
 
@@ -754,18 +732,13 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `git grep -nw backend_type -- promptpotter` is empty.
 - **An unregistered `backend_type` is a bare `KeyError` at thirteen `CONNECTORS.get` sites**; only
   `dataset_access.py::dataset_connector` refuses it typed, and lowercase is documented on
-  `Connector.name`, enforced nowhere. `shared/plugin_registry.py::Registry` is a hashed unit: every
-  member's digest reaches it (`store/source_scan.py::optimizer_prompt_shapers`), so an edit to
-  `Registry.get` re-keys every treatment (conn 1 stopped on it). Action: inside the re-key,
-  `shared.plugin_registry` joins `source_scan.py::PLUMBING_MODULES`; then `Registry.get` refuses typed,
-  naming the registered set (a `CONNECTORS.resolve` wrapper would be a second door), `_validate` refuses
-  a non-lowercase name, and callers take the Connector. **Rides with:** rn-conn 1, alone and last on the
-  assembled tip, in the re-key window; its Owns (every `backend_type` holder, the `CONNECTORS.get` lines
+  `Connector.name`, enforced nowhere. Action: `Registry.get` refuses typed, naming the registered set (a `CONNECTORS.resolve` wrapper would be a second door), `_validate` refuses
+  a non-lowercase name, and callers take the Connector. **Rides with:** rn-conn 1; its Owns (every `backend_type` holder, the `CONNECTORS.get` lines
   of conn's nine holders among them: `datasets/draft_campaign.py`, `free_tier.py`, `health.py`,
   `initialization/wiring.py`, `jobs/launcher/admission.py`, `jobs/quota.py`, `pipeline_resolve.py`,
-  `scoring/formula/compiler.py`, `cli/commands/launch.py`) gain `shared/plugin_registry.py` and
-  `store/source_scan.py::PLUMBING_MODULES`. **Re-test:** a dataset naming `backend_type: nope` answers
-  422 on `new`, `start-run` and the pipeline read; an edit to `Registry.get` moves no `--digests` value.
+  `scoring/formula/compiler.py`, `cli/commands/launch.py`) gain `shared/plugin_registry.py`.
+  **Re-test:** a dataset naming `backend_type: nope` answers 422 on `new`, `start-run` and the pipeline
+  read.
 - **What a definition's read raises is spelled three times**: `jobs/launcher/admission.py::_definition_read`
   catches `(DatasetAccessError, FileUnreadableError, PayloadInvalidError)`,
   `pipeline_resolve.py::_ROOT_UNRESOLVED` a superset and `datasets/startability.py::_connector_extra` a
@@ -1042,7 +1015,7 @@ Toolbar, and the phone walk's back step. Left:
 - **Wave B — `application/runner/` is 10 modules, not 8.** lb collapsed it by phase (21 modules to
   10) and deleted the ledger-scan forwarders. The two left over the target: `termination.py` (row
   below) and `inner/narrative.py`, whose whole text is the L4 estimator digest
-  (`inner/tasks.py::measurement_modules`). The registry and `knobs.py` fold is the rk-run row below.
+  (`inner/tasks.py::estimator`). The registry and `knobs.py` fold is the rk-run row below.
   **Held:** the termination row. **Re-test:** `git ls-files 'promptpotter/application/runner/*.py' | grep -vc __init__` is 8 or fewer.
 - **`runner/termination.py` is a phase module that `jobs/` reads**: `jobs/registry.py` imports
   `run_stop_reason`, so the stop vocabulary cannot join a phase module without a cycle
@@ -1053,11 +1026,9 @@ Toolbar, and the phone walk's back step. Left:
   in stores.campaigns.line(...)` sits in `runner/bench.py` (×4), `evidence/head_to_head.py` and
   `head_to_head_price.py`. Action: the campaign store serves a line's spans. **Held:** no chain owns
   `campaign_store/` reads yet. **Re-test:** `git grep -c "stores.campaigns.line(" -- promptpotter/application` sums above 1.
-- **The optimizer registry is outside `optimizers/nodes.py`.** The registry fold waits until optimizer-unit
-  coverage no longer rides `optimizers/__init__.py` (`source_scan.py::optimizer_prompt_shapers`):
-  `nodes.py` is a `PLUMBING_MODULES` stop, so the fold drops `llm_nodes`, `unfit_pipeline` and
-  `_members` out of every treatment digest, so it waits for the behaviour keys' digest walk. With the
-  `knobs.py` fold, it **rides with:** rk-run 1.
+- **The optimizer registry is outside `optimizers/nodes.py`.** No digest walk holds it since the
+  behaviour keys: the fold moves `llm_nodes`, `unfit_pipeline` and `_members` with no treatment re-key.
+  With the `knobs.py` fold, it **rides with:** rk-run 1.
   **Re-test:** `promptpotter/application/optimizers/__init__.py` defines `NODE_MEMBERS`.
 
 ### batch/28 · faults
@@ -1427,20 +1398,18 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   (`bench/task_context.py::committed_task_context`). Action: the real record, and the committed datasets
   read once through that reader. **Rides with:** tests-w. **Re-test:**
   `git grep -c "SimpleNamespace\|rglob(" -- tests/test_archive.py tests/test_identity.py` is 0.
+- **The offline world asks the internet for LiteLLM's rates on every leg** (bkeys' landing, ✓ on
+  Windows, WSL and the cloud): each trace's `harness.unrouted` holds
+  `urlopen …/model_prices_and_context_window_backup.json`, because the run's home has no fresh
+  `rates.json` and `pricing.py::refresh_rates_in_background` fires a thread the world refuses
+  (`offline_world.py::install_network`, `router.rates` is `None`). A refused thread is a race the
+  behaviour key happens to read alike. Action: the world answers the rates URL from the bundled
+  table, so every leg's `unrouted` is empty. **Rides with:** tests-w. **Re-test:** no trace's
+  `harness.unrouted` names the rates URL.
 - **A failing test can hang the gate's pytest**: in a cloud run (hubs, 2026-11-14) a full-gate pytest
   sat at 2% CPU for 20 minutes on a failing connector test instead of failing. Not yet reproduced.
   Action: reproduce it, name what the test waits on, and make that wait end with the failure.
   **Rides with:** tests-w. **Re-test:** the reproduced failure fails within its test's own timeout.
-
-### batch/32 · ts-arch
-
-- **The treatment digest's edit probe patches `Path.read_text`**:
-  `tests/test_identity.py::test_a_prompt_shaping_classs_method_rekeys_the_run`
-  blocks keying `source_scan.py::prompt_source_digest` on a once-per-process tree hash (~250 ms per
-  boot). Action: the probe writes the edit to a tree copy under a patched `_PACKAGE_ROOT`, then the tree
-  key is process-cached; the test's assertion at `test_identity.py:504-512` forbids that cache and changes
-  with the action (`nodes.py::_source_digest` is already `functools.cache`, `nodes.py:395-405`).
-  **Rides with:** ts-arch 3. **Re-test:** `git grep -n "read_text" -- tests/test_identity.py`.
 
 ### batch/32 · ts-score
 
@@ -1538,7 +1507,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ## Held — no wave-4 chain yet
 
-- **The estimator has no golden corpus**: its key reads `measurement_modules()` over its source, not
+- **The estimator has no golden corpus**: its key reads `estimator()` over its source and the L4 leg, not
   its outputs on fixed inputs. A corpus would read each inner cell's `CycleResult` (~255 KB each) and the
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
@@ -1592,7 +1561,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **Nothing keeps an L4 edit L4-only**: Shape: nothing refuses a mark in `runner/inner/narrative.py` or
   an optimizer import of it, and potter's `panels.py` reaches `OuterSampleProxies`, `outer_proxies_of`,
   `inner_facts_of` and `InnerCellFacts`, so an edit to the scored term re-keys every potter campaign.
-  Action: an import-time check in `runner/inner/tasks.py::measurement_modules`' module that no estimator
+  Action: an import-time check in `runner/inner/tasks.py::estimator`' module that no estimator
   module is a shaper; the injection reads L4 cells through the connector's served terms. **Held:** the
   re-key. **Re-test:** `git grep -n "domain.l4" -- promptpotter/application/optimizers`.
 - **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`

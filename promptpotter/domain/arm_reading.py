@@ -34,12 +34,10 @@ from promptpotter.domain.ruler import ThetaCaveat, ThetaLift, theta_band
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.verification import VerifyReading
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
 
-@shapes_optimizer_prompt
 def order_floor(score: float | None) -> float:
     return score if score is not None else -math.inf
 
@@ -122,7 +120,6 @@ def level_text(value: float | None, unit: MeasurandUnit) -> str:
     return f"{fmt.prefix}{_number(value, fmt, fmt.digits, '')}{fmt.suffix}"
 
 
-@shapes_optimizer_prompt
 def fold_fitness_text(fold: CellFold | None) -> str:
     return "—" if fold is None else level_text(fold.fitness, fold.fitness_unit)
 

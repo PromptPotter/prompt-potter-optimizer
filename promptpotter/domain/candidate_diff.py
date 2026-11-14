@@ -5,16 +5,14 @@ import json
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any
+from typing import Any
 
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import described_field, description_path
 from promptpotter.domain.search_point import SHOTS_KEY
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
-@shapes_optimizer_prompt
 def parent_param_value(parent_cfg: dict[str, Any], param: str) -> Any:
     """A folded description key lives inside the schema: unread there, re-proposed prose reads as a mutation."""
     path = description_path(param)
@@ -23,7 +21,6 @@ def parent_param_value(parent_cfg: dict[str, Any], param: str) -> Any:
     return (described_field(parent_cfg.get("output_schema"), path) or {}).get("description", "")
 
 
-@shapes_optimizer_prompt
 @dataclass(frozen=True)
 class CandidateDelta:
     """A locus left alone is absent; ``""`` EMPTIED a field, ``()`` dropped a node's every shot; empty: a clone."""
@@ -45,13 +42,11 @@ class CandidateDelta:
         )
 
 
-@shapes_optimizer_prompt
 def _is_edit(value: object, parent_value: object) -> bool:
     # An overlay is a PARTIAL in which a model spells "unchanged" as "", so an empty string is no edit.
     return value is not None and value != "" and value != parent_value
 
 
-@shapes_optimizer_prompt
 def candidate_delta(
     child: Mapping[str, NodePrompt],
     parent: Mapping[str, NodePrompt],
@@ -87,7 +82,6 @@ def candidate_delta(
     )
 
 
-@shapes_optimizer_prompt
 def changed_words(parent: str, child: str) -> str:
     old, new = parent.split(), child.split()
     spans: list[str] = []
@@ -102,7 +96,7 @@ def changed_words(parent: str, child: str) -> str:
     return " ".join(spans)
 
 
-IDEA_STOPWORDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+IDEA_STOPWORDS: frozenset[str] = frozenset(
     [
         "about",
         "after",
@@ -166,31 +160,28 @@ IDEA_STOPWORDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
         "your",
     ]
 )
-IDEA_MIN_TOKEN_CHARS: Annotated[int, shapes_optimizer_prompt] = 4
+IDEA_MIN_TOKEN_CHARS: int = 4
 # Fewer content words cannot support a ratio: at 3 tokens one shared word is already 33%.
-IDEA_MIN_TOKENS: Annotated[int, shapes_optimizer_prompt] = 6
+IDEA_MIN_TOKENS: int = 6
 # Overlap coefficient, NOT Jaccard: the union scores a short restatement of a long idea low.
-IDEA_MATCH_MARK: Annotated[float, shapes_optimizer_prompt] = 0.6
+IDEA_MATCH_MARK: float = 0.6
 # Stricter than MARK: marking is free and reversible, a wrong rejection costs a slot invisibly.
 # Never tighten it to catch missed restatements: on `changes_description` the fingerprint sits at chance.
 IDEA_MATCH_REJECT = 0.70
 
 
-@shapes_optimizer_prompt
 def idea_fingerprint(values: Iterable[str]) -> frozenset[str]:
     """Catches a re-proposal that REUSES vocabulary only: a zero repeat count is no evidence of exploration."""
     words = re.findall(r"[a-z]+", " ".join(values).lower())
     return frozenset(w for w in words if len(w) >= IDEA_MIN_TOKEN_CHARS and w not in IDEA_STOPWORDS)
 
 
-@shapes_optimizer_prompt
 def same_idea(a: frozenset[str], b: frozenset[str], *, threshold: float) -> bool:
     if len(a) < IDEA_MIN_TOKENS or len(b) < IDEA_MIN_TOKENS:
         return False
     return len(a & b) / min(len(a), len(b)) >= threshold
 
 
-@shapes_optimizer_prompt
 def candidate_idea(
     child: Mapping[str, NodePrompt],
     parent_prompts: Mapping[str, NodePrompt],
@@ -212,14 +203,12 @@ def candidate_idea(
     return written - carried
 
 
-@shapes_optimizer_prompt
 def _fmt_pp_val(v: object) -> str:
     if isinstance(v, float):
         return f"{v:g}"
     return str(v)
 
 
-@shapes_optimizer_prompt
 def flatten_sp_summary(pp: Mapping[str, Mapping[str, Any]] | None) -> dict[str, str]:
     """A nested param flattens ONE level further (``node.param.key``); ``group_diff_keys`` splits on the first dot."""
     flat: dict[str, str] = {}

@@ -11,7 +11,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ValidationError
 
 from promptpotter.shared.account_tabs import AccountTab
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -556,7 +555,6 @@ class OptimizerTimeoutError(TimeoutError):
     """The run halts with ``OPTIMIZER_TIMEOUT``; any other timeout is a crash."""
 
 
-@shapes_optimizer_prompt
 def is_error_result(result: Mapping[str, Any]) -> bool:
     """``predicted == "ERROR"`` is a display token and ``error`` a message: neither detects."""
     return result.get("error_category") is not None
@@ -572,7 +570,6 @@ def graceful(msg: str) -> Iterator[None]:
         logger.exception(msg)
 
 
-@shapes_optimizer_prompt
 def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
     cat = result.get("error_category")
     if cat is None:

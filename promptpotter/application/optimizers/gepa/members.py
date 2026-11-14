@@ -5,7 +5,6 @@ from __future__ import annotations
 import random
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from types import ModuleType
 from typing import Annotated, ClassVar
 
 from pydantic import Field
@@ -21,7 +20,7 @@ from promptpotter.application.bench.node_context import (
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.descriptors import cell_objectives
 from promptpotter.application.optimizers.fence import fence_untrusted
 from promptpotter.application.optimizers.nodes import (
@@ -198,7 +197,6 @@ class GepaReflect(nodes.Proposer):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
         {Calls, Children, Frontier, Lineage, Target}
     )
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1

@@ -141,7 +141,7 @@ def provenance_lines(p: Provenance, kind: str) -> list[str]:
         stamp,
         f"campaign {p.campaign_id} · cycle {p.cycle_id}",
         f"dataset {p.dataset_name} · dataset_hash {p.dataset_hash}",
-        f"optimizer {t.optimizer} {t.version} · manifest {t.manifest} · source {t.source}",
+        f"optimizer {t.optimizer} {t.version} · manifest {t.manifest} · behaviour {t.behaviour}",
         f"model {models}",
         f"ledger offset {'—' if p.ledger_offset is None else p.ledger_offset}",
     ]

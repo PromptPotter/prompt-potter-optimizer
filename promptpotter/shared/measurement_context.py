@@ -3,9 +3,6 @@ from __future__ import annotations
 import contextvars
 import enum
 from dataclasses import dataclass
-from typing import Annotated
-
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 # L4 runs one level deep: an inner run spawns none (`docs/concepts/l4.md` § Depth).
 MAX_INSTRUMENT_DEPTH = 1
@@ -20,8 +17,8 @@ class InstrumentMode:
 
 
 # Never reset: `_MODE` must cover FINALIZE, or a late bill lands on the cell's own ledger.
-_MODE: Annotated[contextvars.ContextVar[InstrumentMode | None], shapes_optimizer_prompt] = (
-    contextvars.ContextVar("instrument_mode", default=None)
+_MODE: contextvars.ContextVar[InstrumentMode | None] = contextvars.ContextVar(
+    "instrument_mode", default=None
 )
 
 
@@ -33,7 +30,6 @@ def enter_instrument_mode(*, spawned_in: int | None) -> InstrumentMode:
     return mode
 
 
-@shapes_optimizer_prompt
 def instrument_mode() -> InstrumentMode | None:
     return _MODE.get()
 

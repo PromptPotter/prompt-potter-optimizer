@@ -19,7 +19,7 @@ from promptpotter.domain.wounds import (
     fatal_validation_failures,
 )
 from promptpotter.shared.errors import ConflictError
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
@@ -27,7 +27,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
 
 
-@shapes_optimizer_prompt
 def candidate_label(round_num: int, idx: int) -> str:
     if round_num == 0:
         return "C0"
@@ -296,7 +295,6 @@ def walked_short(arm: ArmState) -> bool:
     return arm_end(arm) not in (None, "invalid")
 
 
-@shapes_optimizer_prompt
 def arm_elimination(arm: ArmState) -> Elimination | None:
     """The eliminator's verdict on an arm it settled, cut or locked in."""
     match arm:

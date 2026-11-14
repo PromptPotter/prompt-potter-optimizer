@@ -21,12 +21,6 @@ HARD_SAMPLE_ORDER_LABELS: Worded[HardSampleOrder, str] = Worded(
 )
 assert HARD_SAMPLE_ORDER_LABELS.keys() == set(get_args(HardSampleOrder))
 
-# How much evidence a cell buys, never what it is: out of every key, so a deepened cell CONTINUES
-# its campaign. Named as `runner/inner/tasks.py::InnerTaskSpec` names them, which subtracts the same set.
-DEPTH_FIELDS: frozenset[str] = frozenset(
-    {"n_rounds", "depth_nodes", "n_samples", "n_samples_origin", "n_samples_bench"}
-)
-
 
 class Seat(FrozenModel):
     """One fresh inner campaign, declared off its panel. ``id`` is the outer query; omitted
@@ -46,10 +40,9 @@ class Seat(FrozenModel):
     inner_route_order: list[str] | None = None
 
     def pin(self) -> dict[str, JsonValue]:
-        """What the cell IS, never its seat or its depth: a default is one key spelled or not."""
-        return self.model_dump(
-            mode="json", exclude_defaults=True, exclude={"held_out", *DEPTH_FIELDS}
-        )
+        """What the cell IS, never its seat; its depth is the instrument's, resolved (`InnerTaskSpec.key`):
+        a default is one key spelled or not."""
+        return self.model_dump(mode="json", exclude_defaults=True, exclude={"held_out", "n_rounds"})
 
 
 _INSTRUMENT = "instrument"

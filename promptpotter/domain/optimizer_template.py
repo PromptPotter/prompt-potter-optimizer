@@ -1,16 +1,13 @@
 import re
 from collections.abc import Collection
-from typing import Annotated, ClassVar
+from typing import ClassVar
 
 from pydantic import create_model
 
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
-TEMPLATE_TOKEN_RE: Annotated[re.Pattern[str], shapes_optimizer_prompt] = re.compile(
-    r"\{\{(\w+)\}\}"
-)
-PROMPT_FIELDS: Annotated[tuple[str, ...], shapes_optimizer_prompt] = (
+TEMPLATE_TOKEN_RE: re.Pattern[str] = re.compile(r"\{\{(\w+)\}\}")
+PROMPT_FIELDS: tuple[str, ...] = (
     "persona",
     "task_intent",
     "problem_description",
@@ -24,7 +21,7 @@ PROMPT_FIELDS: Annotated[tuple[str, ...], shapes_optimizer_prompt] = (
 class OptimizerPromptTemplate(StrictModel):
     """A prompt the optimizer RUNS ON (`dispatch/llm_call`), never one it produces."""
 
-    RENDER_ORDER: ClassVar[Annotated[tuple[str, ...], shapes_optimizer_prompt]] = (
+    RENDER_ORDER: ClassVar[tuple[str, ...]] = (
         *(f for f in PROMPT_FIELDS if f != "problem_description"),
         "problem_description",
     )
@@ -37,11 +34,9 @@ class OptimizerPromptTemplate(StrictModel):
     thinking_style: str = ""
     answer_format: str = ""
 
-    @shapes_optimizer_prompt
     def render(self) -> str:
         return "\n\n".join(self.prompt_fields().values())
 
-    @shapes_optimizer_prompt
     def slots(self) -> frozenset[str]:
         """Each ``{{slot}}`` its render names: the one parse of a template's tokens."""
         return frozenset(TEMPLATE_TOKEN_RE.findall(self.render()))
@@ -50,7 +45,6 @@ class OptimizerPromptTemplate(StrictModel):
         """Its slots *known* does not fill; each reader refuses them in its own type."""
         return set(self.slots()) - set(known)
 
-    @shapes_optimizer_prompt
     def compile_prompt(self, **kwargs: str | int) -> str:
         """Any ``{{…}}`` left after substitution stays LITERAL: it is the backend's placeholder to fill."""
         text = self.render()
@@ -58,7 +52,6 @@ class OptimizerPromptTemplate(StrictModel):
             text = text.replace("{{" + key + "}}", str(value))
         return text
 
-    @shapes_optimizer_prompt
     def prompt_fields(self) -> dict[str, str]:
         return {f: v for f in self.RENDER_ORDER if (v := getattr(self, f))}
 
@@ -67,7 +60,6 @@ class OptimizerPromptTemplate(StrictModel):
 assert tuple(OptimizerPromptTemplate.model_fields) == PROMPT_FIELDS
 
 
-@shapes_optimizer_prompt
 class OptimizerPromptEdits(
     create_model("_Edits", __base__=StrictModel, **dict.fromkeys(PROMPT_FIELDS, (str, None)))  # type: ignore[misc]
 ):

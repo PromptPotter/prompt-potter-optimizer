@@ -865,6 +865,7 @@ def run_wiring() -> RunWiringRecord:
         run_limits=RunLimits(),
         defaults_drift=None,
         backend_revision=None,
+        tree_hash="tree",
     )
 
 
@@ -1072,6 +1073,7 @@ def inner_cells(
             n_samples=n_samples,
             n_samples_bench=1,
             n_rounds=1,
+            instrument="e",
         )
     cells = tuple(Seat(kind="seat", id=name, inner_dataset=on[name]) for name in optimizers)
     return InnerCells(cells=cells, by_dataset=by_dataset, specs=specs, estimator="e")

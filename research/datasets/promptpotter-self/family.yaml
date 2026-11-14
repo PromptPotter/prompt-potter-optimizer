@@ -22,7 +22,7 @@ campaign:
   # may pick where an axis is open, and what a human may steer to un-tainted where it is not. A
   # `param_allowed_values` entry REPLACES the node's own list rather than intersecting with it
   # (`PipelineSchema.narrow`), so this file may name a model the manifest predates. It is a
-  # permission, not an instrument: no cell's pin (`runner/inner/spawn.py::_instrument`) reads it.
+  # permission, not an instrument: no cell's pin (`domain/l4/cells.py::InnerTaskSpec`) reads it.
   optimizer_narrowing:
     l1_generate: &pp_self_narrowing
       param_allowed_values:

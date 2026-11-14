@@ -3,9 +3,7 @@ from __future__ import annotations
 import contextlib
 import functools
 import logging
-import sys
 from collections.abc import Mapping, Sequence
-from types import ModuleType
 from typing import NamedTuple
 
 from promptpotter.application.bench.llm_call import FilledPrompt, InjectionBreakdown
@@ -20,7 +18,6 @@ from promptpotter.application.bench.node_context import (
 )
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimizers.nodes import CycleRead
-from promptpotter.application.optimizers.potter.dispatch import compose
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     Item,
     PoolParent,
@@ -34,7 +31,6 @@ from promptpotter.application.optimizers.potter.dispatch.compose import (
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     injection_table,
-    renderer_modules,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     L1_LAYOUT_SLOTS,
@@ -54,7 +50,6 @@ from promptpotter.application.optimizers.potter.records import (
     exploration_budget,
 )
 from promptpotter.application.optimizers.variation.members import Cross, crossable
-from promptpotter.domain import ruler
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
@@ -578,8 +573,3 @@ class PotterView:
                 for name in NODE_LAYOUTS["l1_generate"].possible
                 if not DispatchHub.render_items(name, self)
             )
-
-
-def fingerprinted_modules() -> tuple[ModuleType, ...]:
-    """In digest order; held here because this module imports every other member and the registry cannot import it."""
-    return (compose, sys.modules[__name__], ruler, *renderer_modules())

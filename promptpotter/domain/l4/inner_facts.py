@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated
 
 from pydantic import Field
 
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 class SeriesGap(StrEnum):
@@ -19,7 +17,7 @@ class SeriesGap(StrEnum):
     NO_L1_ROUND = "no_l1_round"
 
 
-SERIES_GAP_HEAD: Annotated[dict[SeriesGap, str], shapes_optimizer_prompt] = {
+SERIES_GAP_HEAD: dict[SeriesGap, str] = {
     SeriesGap.NEVER_STARTED: "it never started, so it read no level series",
     SeriesGap.UNREAD_ROUND: "a round holds no scored cell on its series' δ scale",
     SeriesGap.NO_L1_ROUND: "it closed no L1 round, so its series holds no level past its origin's",
@@ -27,7 +25,6 @@ SERIES_GAP_HEAD: Annotated[dict[SeriesGap, str], shapes_optimizer_prompt] = {
 assert set(SERIES_GAP_HEAD) == set(SeriesGap), "every SeriesGap renders a head"
 
 
-@shapes_optimizer_prompt
 def series_reason_head(reason: ThetaCaveat | SeriesGap) -> str:
     if isinstance(reason, ThetaCaveat):
         return THETA_CAVEAT_INFO[reason].label

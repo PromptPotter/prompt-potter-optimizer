@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from typing import Annotated
 
 from promptpotter.domain.arm_reading import level_text, lift_interval_text, lift_text
 from promptpotter.domain.bench import BandedValue
@@ -28,14 +27,13 @@ from promptpotter.domain.scoring import (
     modal_answer_share,
 )
 from promptpotter.shared.errors import ErrorCategory
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.statistics import mean_ci
 
 STRUCTURAL_FLAG_RATE: float = 0.30
 DEGRADED_RATE_FLAG: float = 0.20
 CONSECUTIVE_DEGRADED_CRITICAL: int = 3
 UNSCOREABLE_RATE: float = 0.50
-EVIDENCE_STARVED_RATE: Annotated[float, shapes_optimizer_prompt] = 0.40
+EVIDENCE_STARVED_RATE: float = 0.40
 # The share of its panel a round must have SENT before any rate below may grade the pipeline.
 MEASURED_COVERAGE_FLOOR: float = 0.50
 
@@ -78,7 +76,7 @@ def _is_refusal(facts: MeasuredCell) -> bool:
     return bool(_REFUSAL_PATTERN.match(head))
 
 
-UNKNOWN_STEP: Annotated[str, shapes_optimizer_prompt] = "unknown"
+UNKNOWN_STEP: str = "unknown"
 
 
 def _collect_advisories(facts: MeasuredCell) -> set[str]:
@@ -102,12 +100,10 @@ def _advisory_key(warning: NodeWarning) -> str:
     return f"{warning.step or UNKNOWN_STEP}:{warning.code or 'unknown'}"
 
 
-@shapes_optimizer_prompt
 def terminal_node(facts: MeasuredCell) -> str | None:
     return facts.pipeline.terminal_node
 
 
-@shapes_optimizer_prompt
 def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int]:
     usage = facts.pipeline.step_tokens.get(node)
     if usage is None:
@@ -115,13 +111,11 @@ def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int
     return (usage.finish_reason, usage.reasoning or 0)
 
 
-@shapes_optimizer_prompt
 def _answered(facts: MeasuredCell) -> bool:
     predicted = facts.predicted.strip()
     return bool(predicted) and predicted != NO_RESULT
 
 
-@shapes_optimizer_prompt
 def ran_to_output_ceiling(facts: MeasuredCell) -> bool:
     """An answer cut at its token ceiling: a miss the prompt's length owns, never infra."""
     node = terminal_node(facts)
@@ -180,7 +174,6 @@ def is_deprecated(facts: MeasuredCell) -> bool:
     return classify_result(facts).deprecates
 
 
-@shapes_optimizer_prompt
 def _failure_kind(step_statuses: Mapping[str, str], warning: NodeWarning) -> str | None:
     """A node that finished ``success`` produced its evidence: a recovered retry is a cost, never a failure."""
     if warning.kind not in ("structural", "transient"):
@@ -234,7 +227,6 @@ def is_degraded(facts: MeasuredCell) -> bool:
     return not facts.errored and row_failure(facts)[0] is not None
 
 
-@shapes_optimizer_prompt
 def evidence_starved_node(rates: dict[str, float]) -> str | None:
     return max(
         (n for n in rates if rates[n] >= EVIDENCE_STARVED_RATE),
@@ -543,7 +535,6 @@ def assemble_prior_healths(
     return [r.health for r in rounds if r.round < round_num]
 
 
-@shapes_optimizer_prompt
 def compute_node_failure_rates(results: Sequence[GradedCell]) -> dict[str, float]:
     total = len(results)
     if total <= 0:

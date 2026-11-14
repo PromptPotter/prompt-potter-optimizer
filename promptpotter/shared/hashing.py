@@ -7,20 +7,11 @@ import json
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NewType, TypedDict
+from typing import Any
 
 ID_HEX = 16
 # 16 hex collides at archive scale (cells = configurations x samples); 64 strains Windows paths.
 ADDRESS_HEX = 32
-
-_PACKAGE_NAME = __name__.split(".")[0]
-
-
-def shapes_optimizer_prompt[T](obj: T) -> T:
-    return obj
-
-
-NormalizedSource = NewType("NormalizedSource", str)
 
 
 def _import_bindings(stmt: ast.stmt) -> list[tuple[str, str]] | None:
@@ -69,226 +60,16 @@ def _normalized_source(tree: ast.AST) -> str:
     return f"{sorted(bindings)}\n{ast.unparse(tree)}"
 
 
-def _is_marker(node: ast.AST) -> bool:
-    return isinstance(node, ast.Name) and node.id == shapes_optimizer_prompt.__name__
-
-
-def _marked(tree: ast.Module) -> list[ast.AST]:
-    if any(
-        isinstance(s, ast.Expr) and isinstance(s.value, ast.Call) and _is_marker(s.value.func)
-        for s in tree.body
-    ):
-        return [tree]
-    found: list[ast.AST] = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            if any(_is_marker(d) for d in node.decorator_list):
-                found.append(node)
-        elif isinstance(node, ast.AnnAssign) and any(map(_is_marker, ast.walk(node.annotation))):
-            found.append(node)
-    return found
-
-
-def _package_imports(nodes: Iterable[ast.AST]) -> list[list[str]]:
-    return [
-        [alias.asname or alias.name, node.module, alias.name]
-        for node in nodes
-        if isinstance(node, ast.ImportFrom)
-        and node.module
-        and node.module.split(".")[0] == _PACKAGE_NAME
-        for alias in node.names
-    ]
-
-
-def _top_level_defs(tree: ast.Module) -> list[tuple[str, ast.stmt]]:
-    defs: list[tuple[str, ast.stmt]] = []
-    for stmt in tree.body:
-        if isinstance(stmt, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-            defs.append((stmt.name, stmt))
-        elif isinstance(stmt, ast.Assign | ast.AnnAssign):
-            targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
-            defs.extend((t.id, stmt) for t in targets if isinstance(t, ast.Name))
-        elif isinstance(stmt, ast.TypeAlias):
-            defs.append((stmt.name.id, stmt))
-    return defs
-
-
-def _unit_name(unit: ast.AST) -> str | None:
-    if isinstance(unit, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-        return unit.name
-    if isinstance(unit, ast.AnnAssign) and isinstance(unit.target, ast.Name):
-        return unit.target.id
-    return None
-
-
-def _bound_within(unit: ast.AST) -> set[str]:
-    names: set[str] = set()
-    for node in ast.walk(unit):
-        if isinstance(node, ast.arg):
-            names.add(node.arg)
-        elif isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
-            names.add(node.id)
-        elif (
-            isinstance(
-                node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef | ast.ExceptHandler
-            )
-            and node is not unit
-            and node.name
-        ):
-            names.add(node.name)
-    return names
-
-
-def _annotation_ids(unit: ast.AST) -> set[int]:
-    roots = [
-        a
-        for node in ast.walk(unit)
-        for a in (
-            node.annotation if isinstance(node, ast.arg | ast.AnnAssign) else None,
-            getattr(node, "returns", None),
-        )
-        if a is not None
-    ]
-    # ``Annotated[T, *meta]``'s metadata is a value the annotated name carries, so it is read.
-    meta = {
-        id(n)
-        for root in roots
-        for node in ast.walk(root)
-        if isinstance(node, ast.Subscript)
-        and isinstance(node.slice, ast.Tuple)
-        and (
-            node.value.id if isinstance(node.value, ast.Name) else getattr(node.value, "attr", None)
-        )
-        == "Annotated"
-        for value in node.slice.elts[1:]
-        for n in ast.walk(value)
-    }
-    return {id(n) for root in roots for n in ast.walk(root)} - meta
-
-
-def _raised_ids(unit: ast.AST) -> set[int]:
-    """A refusal shapes no prompt: what a ``raise`` reads is never walked."""
-    return {
-        id(n)
-        for node in ast.walk(unit)
-        if isinstance(node, ast.Raise)
-        for part in (node.exc, node.cause)
-        if part is not None
-        for n in ast.walk(part)
-    }
-
-
-def _unworded(unit: ast.AST) -> ast.AST:
-    """A unit's raises keep their exception class and drop its arguments: a reworded refusal is free."""
-    for node in ast.walk(unit):
-        if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call):
-            node.exc.args, node.exc.keywords = [], []
-    return unit
-
-
-class SourceReads(TypedDict):
-    """A whole module's own names are left out: they are hashed with it."""
-
-    names: list[str]
-    attrs: list[list[str]]
-    imports: list[list[str]]
-
-
-class UnitFacts(TypedDict):
-    name: str | None
-    whole: bool
-    source: str
-    reads: SourceReads
-
-
-class SourceFacts(TypedDict):
-    """A function of ONE source text: ``source_scan.py`` resolves another module's imports."""
-
-    names: list[str]
-    imports: list[list[str]]
-    reads: SourceReads
-    units: list[UnitFacts]
-    defs: dict[str, UnitFacts]
-
-
-def _reads(unit: ast.AST, names: set[str], imported: set[str]) -> SourceReads:
-    whole = isinstance(unit, ast.Module)
-    own = [] if whole else _package_imports(n for n in ast.walk(unit) if n is not unit)
-    bound = imported | {row[0] for row in own}
-    local = set() if whole else _bound_within(unit) - bound
-    skip = _annotation_ids(unit) | _raised_ids(unit)
-    read_names: set[str] = set()
-    read_attrs: set[tuple[str, str]] = set()
-    for node in ast.walk(unit):
-        if id(node) in skip:
-            continue
-        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
-            if node.value.id in bound:
-                read_attrs.add((node.value.id, node.attr))
-        elif (
-            isinstance(node, ast.Name)
-            and isinstance(node.ctx, ast.Load)
-            and node.id not in local
-            and not (whole and node.id in names)
-        ):
-            read_names.add(node.id)
-    return {
-        "names": sorted(read_names),
-        "attrs": [list(pair) for pair in sorted(read_attrs)],
-        "imports": own,
-    }
-
-
-def _unit_facts(units: list[ast.AST], tree: ast.Module, names: set[str]) -> list[UnitFacts]:
-    imported = {row[0] for row in _package_imports(ast.walk(tree))}
-    reads = [_reads(u, names, imported) for u in units]
-    # Last, and in unit order: normalizing rewrites the tree, an outer unit's pass included.
-    return [
-        {
-            "name": _unit_name(unit),
-            "whole": unit is tree,
-            "source": _normalized_source(_unworded(unit)),
-            "reads": unit_reads,
-        }
-        for unit, unit_reads in zip(units, reads, strict=True)
-    ]
-
-
-def source_facts(text: str) -> SourceFacts:
-    """``units`` are the marked ones; ``defs`` every top-level name's, for a scan that reaches it."""
-    tree = ast.parse(text)
-    names = {name for name, _ in _top_level_defs(tree)}
-    imports = _package_imports(ast.walk(tree))
-    module_reads = _reads(tree, names, {row[0] for row in imports})
-    units = _unit_facts(_marked(tree), tree, names)
-    # A fresh tree: the marked units' normalizing above rewrote theirs.
-    fresh = ast.parse(text)
-    named = _top_level_defs(fresh)
-    defs = _unit_facts([stmt for _, stmt in named], fresh, names)
-    return {
-        "names": sorted(names),
-        "imports": imports,
-        "reads": module_reads,
-        "units": units,
-        "defs": {
-            name: {**facts, "name": name} for (name, _), facts in zip(named, defs, strict=True)
-        },
-    }
-
-
-def module_source_digest(*sources: ModuleType | NormalizedSource) -> str:
+def module_source_digest(*modules: ModuleType) -> str:
     return stable_hash(
-        [
-            s if isinstance(s, str) else normalized_module(Path(str(s.__file__)).read_text("utf-8"))
-            for s in sources
-        ]
+        [normalized_module(Path(str(m.__file__)).read_text("utf-8")) for m in modules]
     )
 
 
 @functools.cache
-def normalized_module(text: str) -> NormalizedSource:
+def normalized_module(text: str) -> str:
     """Memoized on the text, never the module: an edit on disk is never answered by an older read."""
-    return NormalizedSource(_normalized_source(ast.parse(text)))
+    return _normalized_source(ast.parse(text))
 
 
 def stable_hash(value: Any, *, length: int = ID_HEX) -> str:

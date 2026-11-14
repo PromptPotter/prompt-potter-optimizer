@@ -18,7 +18,7 @@ from promptpotter.domain.ruler import (
     ruler_entry,
 )
 from promptpotter.domain.scoring import CellSheet, GradedCell, is_hit
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.statistics import logistic
 
 
@@ -271,14 +271,12 @@ def _dispersion(y: NDArray[np.floating[Any]], p: NDArray[np.floating[Any]], *, d
     return (misfit + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
 
 
-@shapes_optimizer_prompt
 def _cell_parameters(keys: Collection[str], delta: Ruler | None) -> dict[str, tuple[float, float]]:
     if delta is None:
         return dict.fromkeys(keys, (0.0, 1.0))
     return {key: ruler_entry(delta[key]) for key in keys if key in delta}
 
 
-@shapes_optimizer_prompt
 def expected_score_gain(
     theta: float, move: float, keys: Collection[str], delta: Ruler | None
 ) -> float:
@@ -290,7 +288,6 @@ def expected_score_gain(
     return float(np.sum(logistic(a * (theta + move - d)) - logistic(a * (theta - d))))
 
 
-@shapes_optimizer_prompt
 def expected_information(theta: float, keys: Collection[str], delta: Ruler | None) -> float:
     """Fisher information about θ that one answer on each of *keys* carries; a cell off the ruler adds none."""
     params = _cell_parameters(keys, delta)

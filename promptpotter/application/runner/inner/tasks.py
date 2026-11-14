@@ -5,10 +5,11 @@ The spawn context sits apart from ``spawn.py``: the runner publishes it on its w
 from __future__ import annotations
 
 import itertools
+import random
 import re
+import sys
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 from pydantic import Field, ValidationError, model_validator
@@ -24,6 +25,7 @@ from promptpotter.application.optimizer_manifest import (
     fired_on,
     select_optimizer,
 )
+from promptpotter.application.optimizers.nodes import BehaviourKeys
 from promptpotter.application.runner.inner import narrative
 from promptpotter.application.scoring import metrics, selection
 from promptpotter.domain.bench import DatasetSplit
@@ -57,7 +59,7 @@ from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeli
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, DatasetAccessError, PayloadInvalidError
-from promptpotter.shared.hashing import module_source_digest, shapes_optimizer_prompt
+from promptpotter.shared.hashing import module_source_digest, stable_hash
 from promptpotter.shared.measurement_context import enter_instrument_mode
 
 if TYPE_CHECKING:
@@ -73,7 +75,7 @@ class InnerBenchmarkConfig(FrozenModel):
     # Held OUT of the search: drawn beside the origin bank under the cell's seed, read by every
     # bench pass and reached by no inner node. The scored lift is read on these rows alone.
     n_samples_bench: int = Field(ge=1)
-    max_inner_rounds: int = Field(ge=1)
+    max_inner_rounds: int = Field(ge=2)
     # Part of what a cell IS, so it enters the cell's identity.
     inner_nodes: dict[str, ManifestNodeOverlay] = Field(default_factory=dict)
     # Held OUT of the identity: how much evidence a cell buys, never what it is.
@@ -130,9 +132,9 @@ class InnerTasks(FrozenModel):
         for key, levels in axes.items():
             if key == "n_rounds":
                 raise ValueError(
-                    "`axes.n_rounds` is not a grid axis — depth is CONTINUED on a cell, "
-                    "never forked into a second one. Run the grid at one depth, then raise "
-                    "`max_inner_rounds` and re-run: every cell deepens in place."
+                    "`axes.n_rounds` is not a grid axis — depth is CONTINUED on an inner "
+                    "campaign, never forked into a second one. Run the grid at one depth, then "
+                    "raise `max_inner_rounds`: each cell is measured anew, its campaign continued."
                 )
             if key not in griddable:
                 raise ValueError(
@@ -199,22 +201,31 @@ class InnerTasks(FrozenModel):
                 # Keyed before the cell's chain resolves: every admission, so no drawable edit hides.
                 treatment=identity.treatment(frozenset(Presumption), stores.block_packs).digest,
             )
+        measures = estimator()
         return InnerCells(
             cells=tuple(self.tasks),
             by_dataset=by_dataset,
             specs={
-                seat.id: self._seat_spec(by_dataset[self.dataset_for(seat)].treatment, seat)
+                seat.id: self._seat_spec(by_dataset[self.dataset_for(seat)], seat, measures)
                 for seat in self.tasks
             },
-            estimator=module_source_digest(*measurement_modules()),
+            estimator=measures,
         )
 
-    def _seat_spec(self, treatment: str, cell: Seat) -> InnerTaskSpec:
-        """Depth is the panel's, never the pin's: a cell's key holds what it is, not how deep it ran."""
+    def _seat_spec(self, held: InnerCell, cell: Seat, measures: str) -> InnerTaskSpec:
+        """Depth is the panel's, never the pin's: the spec's key holds it once, resolved."""
         cfg = self.inner_benchmark_config
+        # `config` only: widening a permission list changes nothing the origin does, so it voids no cell.
+        nodes = (
+            {n: (node or {}).get("config") for n, node in held.pipeline["nodes"].items()}
+            if held.pipeline and isinstance(held.pipeline.get("nodes"), dict)
+            else None
+        )
+        config = CampaignConfig.model_validate(held.campaign_config).identity()
         return InnerTaskSpec(
+            instrument=stable_hash([nodes, config, measures]),
             inner_dataset=self.dataset_for(cell),
-            optimizer_treatment=treatment,
+            optimizer_treatment=held.treatment,
             run_seed=cell.run_seed,
             n_samples=cfg.n_samples_per_inner_round,
             n_samples_origin=cfg.n_samples_origin,
@@ -300,10 +311,28 @@ def parse_resolved(raw: object) -> ResolvedPanel:
     return ResolvedPanel.model_validate(raw)
 
 
-def measurement_modules() -> tuple[ModuleType, ...]:
-    """Never ``APP_VERSION``: it voids every banked cell on each release, measurement changed or not."""
-    # The δ scale (how it is fit, what each cell reads it on) and what the outer model reads.
-    return (rasch, metrics, selection, proxies, difficulty, narrative)
+def estimator() -> str:
+    """What decides a cell's number, never ``APP_VERSION`` (each release would void every banked cell):
+    the δ scale, what the outer model reads and this module (the seat's draw, its n rule, the
+    instrument), the L4 leg's fingerprint on the offline world, and that world's version."""
+    keys = BehaviourKeys.held()
+    code = module_source_digest(
+        rasch, metrics, selection, proxies, difficulty, narrative, sys.modules[__name__]
+    )
+    return stable_hash({"code": code, "fingerprint": keys.estimator, "world": keys.world})
+
+
+def seat_draw(samples: Sequence[Sample], spec: InnerTaskSpec) -> tuple[list[Sample], list[Sample]]:
+    """A seat's bank (the larger n) and held-out bench, by its seed: every arm draws one bank."""
+    n = min(max(spec.n_samples, spec.n_samples_origin or 0), len(samples))
+    search = random.Random(spec.run_seed).sample(list(samples), n)
+    taken = {s.key for s in search}
+    rest = [s for s in samples if s.key not in taken]
+    bench = [
+        s.model_copy(update={"held_out": True})
+        for s in random.Random(spec.run_seed).sample(rest, min(spec.n_samples_bench, len(rest)))
+    ]
+    return search, bench
 
 
 def is_self_optimization(backend_type: str) -> bool:
@@ -455,7 +484,6 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
     )
 
 
-@shapes_optimizer_prompt
 def inner_spawn_context() -> InnerSpawnContext | None:
     if (spawn := run_scope().spawn) is UNBOUND:
         raise RuntimeError(
@@ -465,7 +493,6 @@ def inner_spawn_context() -> InnerSpawnContext | None:
     return spawn
 
 
-@shapes_optimizer_prompt
 def inner_cells() -> InnerCells | None:
     """The cells an L4 outer's arms are measured on, each running its own manifest, never the
     outer's own; ``None`` off the recursion."""

@@ -5,7 +5,6 @@ from __future__ import annotations
 import math
 import random
 from collections.abc import Mapping, Sequence
-from types import ModuleType
 from typing import Annotated, ClassVar
 
 import numpy as np
@@ -21,7 +20,7 @@ from promptpotter.application.bench.node_context import (
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.descriptors import (
     DescriptorFeature,
     behaviour_descriptor,
@@ -500,7 +499,6 @@ class LeviSeed(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = LeviSeedKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, LeviSeedKnobs).n_diverse_seeds
@@ -532,7 +530,6 @@ class LeviParadigmShift(nodes.Proposer):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
         {Calls, Children, Lineage, Replay, Target}
     )
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
@@ -629,7 +626,6 @@ class LeviRefine(nodes.Proposer):
         {Calls, Children, Lineage, Replay, Target}
     )
     consults: ClassVar[frozenset[type]] = frozenset({LeviParadigmShift})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.reached_knobs(self, LeviParadigmShiftKnobs).interval - 1

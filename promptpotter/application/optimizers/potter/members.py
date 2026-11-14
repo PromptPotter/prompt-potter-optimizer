@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from types import MappingProxyType, ModuleType
+from types import MappingProxyType
 from typing import Any, ClassVar, Literal
 
 from pydantic import BaseModel
@@ -44,7 +44,6 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
     VIEW_READS,
     VIEW_SEES,
     PotterView,
-    fingerprinted_modules,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     LayoutNode,
@@ -133,9 +132,6 @@ from promptpotter.shared.answer_text import truncate
 
 logger = logging.getLogger(__name__)
 
-# What every layout node's prompt is said through; importing it fills the registry `injections` counts.
-_HUB = fingerprinted_modules()
-
 
 def _strata(pool: list[Sample], by: CellStrata) -> list[list[Sample]]:
     """In first-seen order; `none` is the pool whole."""
@@ -219,7 +215,6 @@ class L1Generate(LayoutNode, nodes.Proposer):
     response_model: ClassVar[type[BaseModel] | None] = L1GenerateOutput
     # L2 moves this node's panels, so the outer's only lever here is its output schema's names.
     outer_levers: ClassVar[Mapping[str, str]] = {SCHEMA_RENAME_PARAM: "object"}
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
     priced_surface: ClassVar[Mapping[str, int]] = {"injections": len(injection_registry())}
 
     @property
@@ -363,7 +358,6 @@ class L1Critique(LayoutNode, nodes.Adapter):
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Critique})
     sees: ClassVar[frozenset[type[CycleRead]]] = VIEW_SEES | {Calls}
     response_model: ClassVar[type[BaseModel] | None] = L1CritiqueOutput
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
 
     @property
     def consults(self) -> frozenset[type]:
@@ -385,7 +379,6 @@ class L2Context(LayoutNode):
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L2Memory})
     sees: ClassVar[frozenset[type[CycleRead]]] = VIEW_SEES | {Calls, Progress}
     response_model: ClassVar[type[BaseModel] | None] = L2ContextOutput
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
         phase=PotterPhase.REFINE_STRATEGY, node="l2_context", activity="refining strategy"
     )
@@ -523,7 +516,6 @@ class L3Plan(LayoutNode):
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({L3Memory})
     sees: ClassVar[frozenset[type[CycleRead]]] = VIEW_SEES | {Calls, Progress}
     response_model: ClassVar[type[BaseModel] | None] = L3PlanOutput
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = _HUB
     phase: ClassVar[OptimizerPhase] = OptimizerPhase(
         phase=PotterPhase.MODIFY_PLAN, node="l3_plan", activity="replanning"
     )

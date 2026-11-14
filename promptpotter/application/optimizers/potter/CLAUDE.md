@@ -39,7 +39,7 @@
 
 ## Editing a renderer's PROSE is a measurement change
 
-`nodes.py::source_digest` hashes the prompt-shaping set, so rewording a directive voids banked origins. A prompt-shaping constant lives in `bundle.py`; a unit reached only through an instance or registry carries `shared/hashing.py::shapes_optimizer_prompt`. A validator either REJECTS (`validators.py`: a `ValidationFailure` the layer heals) or SCORES (`behavior_checks.py`, into `review.md`), never both.
+`nodes.py::behaviour_key` hashes this package's code and its fingerprint on the offline world, so rewording a directive re-keys potter and voids banked origins; the offline run regenerates the fingerprint, and the gate is red until it is committed. A prompt-shaping constant lives in `bundle.py`. A validator either REJECTS (`validators.py`: a `ValidationFailure` the layer heals) or SCORES (`behavior_checks.py`, into `review.md`), never both.
 
 ## Add no 4th layer — L4 is a recursion
 

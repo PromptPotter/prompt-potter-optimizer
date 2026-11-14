@@ -12,10 +12,8 @@ from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import PayloadInvalidError
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
-@shapes_optimizer_prompt
 def resolved_key(family: object, version: object) -> str | None:
     """The `resolved_prompts` / `resolved_schemas` key a family and version name."""
     if not family:
@@ -23,7 +21,6 @@ def resolved_key(family: object, version: object) -> str | None:
     return f"{family}/{version}" if version is not None else str(family)
 
 
-@shapes_optimizer_prompt
 def prompt_key(config: NodeConfig) -> str | None:
     """The `resolved_prompts` key a node's config names; ``None`` where it runs no prompt."""
     return resolved_key(config.prompt_family, config.prompt_version)

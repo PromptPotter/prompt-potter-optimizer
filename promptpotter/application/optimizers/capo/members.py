@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 import random
 from collections.abc import Mapping, Sequence
-from types import ModuleType
 from typing import Annotated, Any, ClassVar
 
 from pydantic import Field
@@ -19,7 +18,7 @@ from promptpotter.application.bench.node_context import (
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
-from promptpotter.application.optimizers import nodes, paper_templates
+from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.descriptors import prompt_chars
 from promptpotter.application.optimizers.nodes import (
     CycleRead,
@@ -498,7 +497,6 @@ class CapoInit(nodes.Proposer):
         {Calls, Children, Lineage, Replay, Target}
     )
     draws: ClassVar[Mapping[type[Pool], Draw]] = {DemoPool: nodes.CountKnob(CapoInitKnobs, "k_max")}
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, CapoInitKnobs).size
@@ -566,7 +564,6 @@ class CapoCrossover(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         pairs = _mated(ctx, proposals)
@@ -617,7 +614,6 @@ class CapoMutate(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "llm"
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
-    prompt_sources: ClassVar[tuple[ModuleType, ...]] = (paper_templates,)
 
     async def propose(self, ctx: NodeContext, _panel: Panel, proposals: Proposals) -> Proposals:
         live = [i for i, p in enumerate(proposals.proposals) if not p.refused]

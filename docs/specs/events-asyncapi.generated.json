@@ -2657,7 +2657,7 @@
       },
       "DefaultsPin": {
         "additionalProperties": false,
-        "description": "What a declaration is a delta over, in two halves: the bench's defaults, which every arm of\na head-to-head shares, and its optimizer's whole treatment — manifest, source and prompts —\nwhich differs by arm by design.",
+        "description": "What a declaration is a delta over, in two halves: the bench's defaults, which every arm of\na head-to-head shares, and its optimizer's whole treatment — manifest, behaviour and prompts —\nwhich differs by arm by design.",
         "properties": {
           "bench": {
             "minLength": 1,
@@ -7748,6 +7748,10 @@
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
+          },
+          "tree_hash": {
+            "title": "Tree Hash",
+            "type": "string"
           }
         },
         "required": [
@@ -7759,7 +7763,8 @@
           "measurement_node",
           "run_limits",
           "defaults_drift",
-          "backend_revision"
+          "backend_revision",
+          "tree_hash"
         ],
         "title": "RunWiringRecord",
         "type": "object"
@@ -8871,6 +8876,10 @@
         "additionalProperties": false,
         "description": "Two runs are one treatment only where ``digest`` agrees; no measurement key reads it.",
         "properties": {
+          "behaviour": {
+            "title": "Behaviour",
+            "type": "string"
+          },
           "manifest": {
             "title": "Manifest",
             "type": "string"
@@ -8886,10 +8895,6 @@
             "title": "Prompt Hashes",
             "type": "object"
           },
-          "source": {
-            "title": "Source",
-            "type": "string"
-          },
           "version": {
             "title": "Version",
             "type": "string"
@@ -8900,7 +8905,7 @@
           "version",
           "prompt_hashes",
           "manifest",
-          "source"
+          "behaviour"
         ],
         "title": "Treatment",
         "type": "object"

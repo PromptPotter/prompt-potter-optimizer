@@ -1945,7 +1945,7 @@ export interface DefaultsDrift {
 
 /** What a declaration is a delta over, in two halves: the bench's defaults, which
  * every arm of a head-to-head shares, and its optimizer's whole treatment —
- * manifest, source and prompts — which differs by arm by design. */
+ * manifest, behaviour and prompts — which differs by arm by design. */
 export interface DefaultsPin {
   bench: string;
   treatment: Treatment;
@@ -1958,7 +1958,7 @@ export interface Treatment {
   version: string;
   prompt_hashes: Record<string, string>;
   manifest: string;
-  source: string;
+  behaviour: string;
 }
 
 /** What a launch read of the backend's revision, beside the one its connector was

@@ -1443,7 +1443,9 @@ CHECKS: tuple[Check, ...] = (
         reads=(*ENGINE_RUNTIME, "tests/", "scripts/"),
     ),
     # The script keeps a green per optimizer, keyed on the sources that optimizer reaches, so a run
-    # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved.
+    # by hand answers for it and a pushed tip reruns only the optimizers whose sources moved. It
+    # regenerates `behaviour_keys.json` and is red where it moved; that file is no `writes`, which
+    # would queue every engine reader behind this landing check.
     Check(
         OFFLINE_RUN,
         "py",

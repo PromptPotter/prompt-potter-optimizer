@@ -6,13 +6,13 @@ from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from statistics import NormalDist
-from typing import Annotated, Literal, NamedTuple
+from typing import Literal, NamedTuple
 
 from pydantic import Field
 
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 # A bare δ is 1PL (a ≡ 1); a ``(δ, a)`` pair is 2PL.
@@ -123,48 +123,46 @@ class ThetaCaveatInfo(NamedTuple):
 
 
 # A footnote to a θ, never an alarm: the reading stands, read with this in mind.
-THETA_CAVEAT_INFO: Annotated[Worded[ThetaCaveat, ThetaCaveatInfo], shapes_optimizer_prompt] = (
-    Worded(
-        {
-            ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
-                "θ is plain fitness so far",
-                "Too few earlier answers to rate how hard each sample is, so θ is fitness on another "
-                "scale. A lift against the parent holds; θ compared across rounds or candidates does not.",
-                "attention",
-            ),
-            ThetaCaveat.FLAT_RULER: ThetaCaveatInfo(
-                "θ is plain fitness here",
-                "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as "
-                "fitness does. No round can change that.",
-                "attention",
-            ),
-            ThetaCaveat.COLLAPSED_BAND: ThetaCaveatInfo(
-                "θ is plain fitness this round",
-                "This round's samples were all about equally hard, so θ ranks candidates exactly as "
-                "fitness does. A round drawing harder and easier samples reads differently.",
-                "attention",
-            ),
-            ThetaCaveat.PRIOR_PINNED: ThetaCaveatInfo(
-                "θ shifts between rounds",
-                "Most samples this round got the default difficulty, because every candidate answered "
-                "them alike. That default moves as rounds come in, so compare θ within a round, not "
-                "across rounds.",
-                "attention",
-            ),
-            ThetaCaveat.UNMEASURED_DELTA: ThetaCaveatInfo(
-                "θ leaves some samples out",
-                "Some samples have no difficulty rating yet, so θ reads fewer samples than the fitness "
-                "beside it, and two candidates may be read on different ones. A later round includes them.",
-                "attention",
-            ),
-            ThetaCaveat.FLOOR_PINNED: ThetaCaveatInfo(
-                "No θ for an all-wrong candidate",
-                "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift "
-                "taken from it, is a placeholder. Other candidates are unaffected.",
-                "attention",
-            ),
-        }
-    )
+THETA_CAVEAT_INFO: Worded[ThetaCaveat, ThetaCaveatInfo] = Worded(
+    {
+        ThetaCaveat.COLD_RULER: ThetaCaveatInfo(
+            "θ is plain fitness so far",
+            "Too few earlier answers to rate how hard each sample is, so θ is fitness on another "
+            "scale. A lift against the parent holds; θ compared across rounds or candidates does not.",
+            "attention",
+        ),
+        ThetaCaveat.FLAT_RULER: ThetaCaveatInfo(
+            "θ is plain fitness here",
+            "Every sample of this dataset rates as equally hard, so θ ranks candidates exactly as "
+            "fitness does. No round can change that.",
+            "attention",
+        ),
+        ThetaCaveat.COLLAPSED_BAND: ThetaCaveatInfo(
+            "θ is plain fitness this round",
+            "This round's samples were all about equally hard, so θ ranks candidates exactly as "
+            "fitness does. A round drawing harder and easier samples reads differently.",
+            "attention",
+        ),
+        ThetaCaveat.PRIOR_PINNED: ThetaCaveatInfo(
+            "θ shifts between rounds",
+            "Most samples this round got the default difficulty, because every candidate answered "
+            "them alike. That default moves as rounds come in, so compare θ within a round, not "
+            "across rounds.",
+            "attention",
+        ),
+        ThetaCaveat.UNMEASURED_DELTA: ThetaCaveatInfo(
+            "θ leaves some samples out",
+            "Some samples have no difficulty rating yet, so θ reads fewer samples than the fitness "
+            "beside it, and two candidates may be read on different ones. A later round includes them.",
+            "attention",
+        ),
+        ThetaCaveat.FLOOR_PINNED: ThetaCaveatInfo(
+            "No θ for an all-wrong candidate",
+            "It missed every sample it answered, so θ has nothing to measure: its θ, and any lift "
+            "taken from it, is a placeholder. Other candidates are unaffected.",
+            "attention",
+        ),
+    }
 )
 
 _missing_caveat_info = set(ThetaCaveat) - set(THETA_CAVEAT_INFO)
@@ -203,7 +201,6 @@ def is_flat_ruler_id(value: str) -> bool:
     return value.startswith(_FLAT_PREFIX)
 
 
-@shapes_optimizer_prompt
 def ruler_entry(value: RulerEntry) -> tuple[float, float]:
     if isinstance(value, tuple):
         return float(value[0]), float(value[1])

@@ -39,7 +39,6 @@ from promptpotter.domain.scoring import (
     Scorer,
     ScoringFormulaError,
 )
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import (
     discordant_counts,
@@ -303,7 +302,6 @@ class FlippedCells[K](NamedTuple):
     kept: list[K]
 
 
-@shapes_optimizer_prompt
 def flipped_keys(a: Mapping[str, GradedCell], b: Mapping[str, GradedCell]) -> FlippedCells[str]:
     hit = ROW_GRADES["hit"]
     flipped = FlippedCells[str]([], [], [])
@@ -319,7 +317,6 @@ def flipped_keys(a: Mapping[str, GradedCell], b: Mapping[str, GradedCell]) -> Fl
     return flipped
 
 
-@shapes_optimizer_prompt
 def _graded(grade: GradeColumn, cell: GradedCell) -> float | None:
     return grade.read(cell) if cell.scored else None
 

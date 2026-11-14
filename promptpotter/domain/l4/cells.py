@@ -10,7 +10,7 @@ from typing import Any
 
 from pydantic import Field
 
-from promptpotter.domain.cells import DEPTH_FIELDS, Seat
+from promptpotter.domain.cells import Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
@@ -21,6 +21,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
 )
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.hashing import stable_hash
 
 
 class InnerTaskSpec(FrozenModel):
@@ -37,14 +38,23 @@ class InnerTaskSpec(FrozenModel):
     inner_provider: str | None = None
     inner_route_order: list[str] | None = None
     inner_optimizer_temperature: float | None = None
+    # What measures it beyond the spec: its dataset's node config, campaign identity and estimator.
+    instrument: str
 
-    def treatment(self) -> dict[str, Any]:
-        """SUBTRACTED, so a new spec field defaults to identity: a needless fork wastes a run, a
-        wrong continue corrupts one."""
-        return {k: v for k, v in self.model_dump(mode="json").items() if k not in DEPTH_FIELDS}
+    def key(self) -> str:
+        """The ONE cell key, depth inside: a deeper cell is another measurand, so no banked row replays it."""
+        return stable_hash(self.model_dump(mode="json"))
+
+    def continuation(self, edits: Mapping[str, Any]) -> str:
+        """The key less `CONTINUED`, and an arm's *edits*: SUBTRACTED, so a new spec field defaults
+        to identity (a needless fork wastes a run, a wrong continue corrupts one)."""
+        kept = {k: v for k, v in self.model_dump(mode="json").items() if k not in CONTINUED}
+        return stable_hash([kept, edits], length=6)
 
 
-assert set(InnerTaskSpec.model_fields) >= DEPTH_FIELDS
+# How much evidence a continued campaign buys on top of its banked rounds, never what it measures.
+CONTINUED: frozenset[str] = frozenset({"n_rounds", "depth_nodes", "n_samples_bench"})
+assert set(InnerTaskSpec.model_fields) >= CONTINUED
 
 # `problem_description` and `answer_format` are absent: they carry the injection slots and the output contract.
 OUTER_PROMPT_FIELDS: tuple[str, ...] = ("persona", "task_intent", "instruction", "thinking_style")

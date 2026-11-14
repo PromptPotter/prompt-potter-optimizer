@@ -5,8 +5,8 @@ from __future__ import annotations
 import functools
 import inspect
 from collections.abc import Mapping
-from types import MappingProxyType, ModuleType
-from typing import Annotated, Any, ClassVar
+from types import MappingProxyType
+from typing import Any, ClassVar
 
 from promptpotter.application.optimizers.nodes import LlmNode
 from promptpotter.application.optimizers.potter.dispatch import injections as _injections_pkg
@@ -21,24 +21,16 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 )
 from promptpotter.application.optimizers.potter.records import ExplorationBudget, L1Layout
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.named_rows import walked
 
 # The one citable name that is NOT a panel: the escape hatch a measured stall licenses.
-STALL_EXPLORATION: Annotated[str, shapes_optimizer_prompt] = "stall_exploration"
+STALL_EXPLORATION: str = "stall_exploration"
 
 
-@shapes_optimizer_prompt
-@functools.cache
-def renderer_modules() -> tuple[ModuleType, ...]:
-    """Walked, never listed: a hand-kept tuple silently drops a module from registration and the digest. Name order is digest order."""
-    return walked(_injections_pkg, skip="registry")
-
-
-@shapes_optimizer_prompt
 @functools.cache
 def injection_table() -> Mapping[str, _Injection]:
-    modules = renderer_modules()
+    # Walked, never listed: a hand-kept tuple silently drops a module from registration.
+    modules = walked(_injections_pkg, skip="registry")
     table = injection_registry()
     for key, inj in table.items():
         if inj.name != key:
@@ -92,7 +84,6 @@ class LayoutNode(LlmNode):
         )
 
 
-@shapes_optimizer_prompt
 def citable_fields(
     layout: L1Layout,
     *,

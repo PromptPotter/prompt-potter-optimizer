@@ -2,10 +2,7 @@ from __future__ import annotations
 
 import re
 
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
 # Whole: every matcher's answer span is read here, and a span reaches the prompt.
-shapes_optimizer_prompt(__name__)
 
 
 def truncate(s: str, max_len: int, ellipsis: str = "…") -> str:

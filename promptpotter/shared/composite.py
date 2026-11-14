@@ -3,11 +3,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
-shapes_optimizer_prompt(__name__)
-
-
 SHORT_NAMES: dict[str, str] = {
     "fitness": "fit",
     "error_rate": "err",

@@ -14,7 +14,7 @@ from promptpotter.domain.pipeline_params import (
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.value_tree import Delivery, ValueLeaf, visibility_of
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 # A locus's kind, decided by the roster: a prompt field, a prompt node's shots, or a config param.
@@ -32,43 +32,38 @@ MOVABLE_AGENT_LABELS: Worded[MovableAgent, str] = Worded(
 assert tuple(MOVABLE_AGENT_LABELS) == MOVABLE_AGENTS
 
 # The parser types `output_schema` as `object`, so a fork's overlay merges one level.
-OUTPUT_SCHEMA_KEY: Annotated[str, shapes_optimizer_prompt] = "output_schema"
+OUTPUT_SCHEMA_KEY: str = "output_schema"
 # The slots the backend posts back: one is its value, several the object of them (`fields_match`).
-ANSWER_FIELDS_KEY: Annotated[str, shapes_optimizer_prompt] = "answer_fields"
-OUTPUT_CONTRACT_KEYS: Annotated[tuple[str, str], shapes_optimizer_prompt] = (
+ANSWER_FIELDS_KEY: str = "answer_fields"
+OUTPUT_CONTRACT_KEYS: tuple[str, str] = (
     OUTPUT_SCHEMA_KEY,
     ANSWER_FIELDS_KEY,
 )
 
 # Fenced off from the OPTIMIZER only — a search rule, never a display one: served rows carry them.
-SCHEMA_OWNED_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+SCHEMA_OWNED_FIELDS: frozenset[str] = frozenset(
     {*OUTPUT_CONTRACT_KEYS, "schema_family", "schema_version"}
 )
 
 # `pipeline_params.py::node_rule` merges an `object` one level; an `array` replaces wholesale.
-NESTED_PARAM_TYPES: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    {"object", "array"}
-)
+NESTED_PARAM_TYPES: frozenset[str] = frozenset({"object", "array"})
 
 # The one nested param a campaign must UNLOCK before L1 may emit it (potter's `schema_field_rename`).
-SCHEMA_RENAME_PARAM: Annotated[str, shapes_optimizer_prompt] = "output_schema_field_names"
+SCHEMA_RENAME_PARAM: str = "output_schema_field_names"
 
-SCHEMA_DESCRIPTION_PREFIX: Annotated[str, shapes_optimizer_prompt] = "output_schema_descriptions."
+SCHEMA_DESCRIPTION_PREFIX: str = "output_schema_descriptions."
 
 
-@shapes_optimizer_prompt
 def description_key(path: str) -> str:
     return SCHEMA_DESCRIPTION_PREFIX + path
 
 
-@shapes_optimizer_prompt
 def description_path(key: str) -> str | None:
     return (
         key[len(SCHEMA_DESCRIPTION_PREFIX) :] if key.startswith(SCHEMA_DESCRIPTION_PREFIX) else None
     )
 
 
-@shapes_optimizer_prompt
 def _fields_of(schema: object) -> dict[str, object] | None:
     """Never through a ``$ref``, whose target this schema does not carry."""
     while isinstance(schema, dict) and "$ref" not in schema:
@@ -85,7 +80,6 @@ def _fields_of(schema: object) -> dict[str, object] | None:
     return None
 
 
-@shapes_optimizer_prompt
 def description_paths(json_schema: object) -> list[str]:
     out: list[str] = []
 
@@ -101,7 +95,6 @@ def description_paths(json_schema: object) -> list[str]:
     return out
 
 
-@shapes_optimizer_prompt
 def described_field(json_schema: object, path: str) -> dict[str, object] | None:
     node: dict[str, object] | None = None
     fields = _fields_of(json_schema)
@@ -114,9 +107,9 @@ def described_field(json_schema: object, path: str) -> dict[str, object] | None:
 
 
 # UNSET is not a third state: `schema_toggle_default` reads it and the fold writes nothing.
-SCHEMA_TOGGLE_PARAM: Annotated[str, shapes_optimizer_prompt] = "response_format"
-ANSWER_AS_JSON: Annotated[str, shapes_optimizer_prompt] = "json"
-ANSWER_AS_TEXT: Annotated[str, shapes_optimizer_prompt] = "text"
+SCHEMA_TOGGLE_PARAM: str = "response_format"
+ANSWER_AS_JSON: str = "json"
+ANSWER_AS_TEXT: str = "text"
 
 
 def schema_toggle_default(node: "PipelineNode") -> str:
@@ -154,12 +147,10 @@ class NodeKind(enum.StrEnum):
     CONTROLLER = "controller"
 
 
-THINKING_KINDS: Annotated[frozenset[NodeKind], shapes_optimizer_prompt] = frozenset(
-    {NodeKind.LLM, NodeKind.AGENT}
-)
+THINKING_KINDS: frozenset[NodeKind] = frozenset({NodeKind.LLM, NodeKind.AGENT})
 assert frozenset(NodeKind) >= THINKING_KINDS
 
-MEMBER_KINDS: Annotated[frozenset[NodeKind], shapes_optimizer_prompt] = frozenset(
+MEMBER_KINDS: frozenset[NodeKind] = frozenset(
     {
         NodeKind.SAMPLER,
         NodeKind.ELIMINATOR,
@@ -230,7 +221,7 @@ class NodePromptInfo(FrozenModel):
 
     template_variables: list[str] = Field(default_factory=list)
     # The node's prompt loci, IN RENDER ORDER: the order sits inside every cell key it renders.
-    fields: Annotated[tuple[str, ...], shapes_optimizer_prompt]
+    fields: tuple[str, ...]
     # The field a whole-prompt rewrite lands in; `None` declares none, and such a rewrite is refused.
     rewrite_slot: str | None = None
 
@@ -395,13 +386,11 @@ class PipelineNode(FrozenModel):
         return [m.pipeline_key for m in self.observation_mappings]
 
     @property
-    @shapes_optimizer_prompt
     def prompt_fields(self) -> tuple[str, ...]:
         """In render order; ``()`` on a node that bears no prompt."""
         return () if self.prompt_info is None else self.prompt_info.fields
 
     @property
-    @shapes_optimizer_prompt
     def open_prompt_fields(self) -> list[str]:
         """The ones a search may write: every declared field the operator did not hold."""
         return [f for f in self.prompt_fields if f not in self.prompt_fields_held]
@@ -431,7 +420,6 @@ class PipelineNode(FrozenModel):
         return any(m.is_llm for m in self.observation_mappings)
 
     @property
-    @shapes_optimizer_prompt
     def description_keys(self) -> list[str]:
         """Its description params in schema order — the order every surface lists them in."""
         if self.output_schema is None:
@@ -879,7 +867,6 @@ class PipelineSchema(FrozenModel):
         options = self.param_options(node, param)
         return options is not None and len(options) == 1
 
-    @shapes_optimizer_prompt
     def param_indistinct(self, node: "PipelineNode", param: str) -> list[str]:
         """Reported only: these values stay legal and offered."""
         answered = self._answering(node, param, None)
@@ -1121,7 +1108,6 @@ class PipelineSchema(FrozenModel):
         configs = self.node_configs(pipeline_params)
         return stable_hash(configs) if configs else ""
 
-    @shapes_optimizer_prompt
     def value_tree(self, *, prompt_delivery: Delivery) -> tuple[ValueLeaf, ...]:
         """``prompt_delivery`` is ``Connector.prompt_delivery``: a default would claim "always arrives"."""
         leaves: list[ValueLeaf] = []
@@ -1175,12 +1161,10 @@ class PipelineSchema(FrozenModel):
         return out
 
     @property
-    @shapes_optimizer_prompt
     def emits_ranking(self) -> bool:
         """Some node of the chain ranks AND maps that ranking into what a cell carries."""
         return any(node.emits_ranking and node.output_keys for node in self.nodes)
 
-    @shapes_optimizer_prompt
     def prompt_nodes(self) -> list[PipelineNode]:
         """The running set's prompt-bearing nodes, the chain's first: every one renders its own prompt."""
         return [node for node in self.running_nodes if node.prompt_info is not None]

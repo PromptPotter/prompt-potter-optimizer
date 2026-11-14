@@ -24,7 +24,6 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from statistics import NormalDist
-from types import ModuleType
 from typing import Any, ClassVar, NamedTuple, cast
 from unittest.mock import Mock
 
@@ -59,7 +58,7 @@ from factories import (
 from offline_world import LLM_ONLY_NODE, Router
 from pydantic import ValidationError
 
-from promptpotter.application import optimizer_manifest, optimizers
+from promptpotter.application import optimizers
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.children import (
@@ -145,7 +144,6 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
-from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect, ParetoScores
 from promptpotter.application.optimizers.nodes import MintFacts, Panel, Proposals
@@ -315,7 +313,6 @@ from promptpotter.infrastructure.projections.live_dashboard.projection import (
     fold_at,
 )
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
-from promptpotter.infrastructure.store import source_scan
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
@@ -350,9 +347,8 @@ from promptpotter.shared.errors import (
     PotterError,
     SlugTakenError,
 )
-from promptpotter.shared.hashing import SourceFacts, dataset_hash, source_facts, stable_hash
+from promptpotter.shared.hashing import dataset_hash, stable_hash
 from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, default_identity
-from promptpotter.shared.measurement_context import MeasurementRole
 
 pytestmark = pytest.mark.usefixtures("offline", "optimizing_memory")
 
@@ -372,6 +368,7 @@ _SPEC = InnerTaskSpec(
     n_samples=28,
     n_samples_bench=8,
     n_rounds=4,
+    instrument="e",
 )
 
 
@@ -384,7 +381,6 @@ def _connector_config(**fields: Any) -> CampaignConfig:
 
 # 1. Hashes — what a measurement is filed under
 
-_MARKED = "from promptpotter.shared.hashing import shapes_optimizer_prompt\n"
 _CAPO_MUTATED = {
     "capo_mutate": {"instruction": "Rephrase [{{instruction}}] to {{task_description}}."}
 }
@@ -405,131 +401,6 @@ def test_a_value_the_canonical_form_cannot_spell_is_refused() -> None:
     # A value the canonical form cannot spell is refused, never stringified into a stored key.
     with pytest.raises(TypeError):
         stable_hash({"when": Path(".")})
-
-
-def test_prose_moves_no_source_digest_and_a_code_token_does() -> None:
-    def digest(text: str) -> str:
-        return "".join(unit["source"] for unit in source_facts(text)["units"])
-
-    bare = _MARKED + (
-        "shapes_optimizer_prompt(None)\n"
-        "LIMIT = 3\n"
-        "class Arm:\n"
-        "    width: int = 2\n"
-        "    def cut(self, n):\n"
-        "        if n > LIMIT:\n"
-        "            return n - self.width\n"
-        "        return n\n"
-    )
-    documented = _MARKED + (
-        '"""Module docstring."""\n'
-        "shapes_optimizer_prompt(None)\n"
-        "LIMIT = 3  # a comment\n"
-        '"""Attribute docstring."""\n'
-        "class Arm:\n"
-        '    """Class docstring."""\n'
-        "    width: int = 2\n"
-        '    """Attribute docstring."""\n'
-        "    def cut(self, n):\n"
-        '        """Function docstring."""\n'
-        "        if n > LIMIT:\n"
-        '            "a bare string in a branch"\n'
-        "            return n - self.width\n"
-        "        return n\n"
-    )
-    assert digest(bare) == digest(documented), "prose re-keyed a treatment"
-    for old, new in (("n > LIMIT", "n >= LIMIT"), ("LIMIT = 3", "LIMIT = 4")):
-        assert digest(bare.replace(old, new)) != digest(bare), f"`{new}` moved no treatment"
-    only_prose = _MARKED + 'shapes_optimizer_prompt(None)\ndef f():\n    """Doc."""\n'
-    assert digest(only_prose) == digest(only_prose.replace('"""Doc."""', "pass")), (
-        "a body of nothing but a docstring keyed apart from an empty one"
-    )
-    # A refusal shapes no prompt: its words, and what only a raise reads, are free.
-    refusing = _MARKED + (
-        "HINT = 1\n"
-        "@shapes_optimizer_prompt\n"
-        "def cut(n):\n"
-        "    if n < 0:\n"
-        "        raise ValueError(f'no {n}')\n"
-        "    return n\n"
-    )
-    reworded = refusing.replace("f'no {n}'", "HINT, n")
-    assert digest(reworded) == digest(refusing), "a reworded refusal re-keyed a treatment"
-    cut_reads = [u["reads"] for u in source_facts(reworded)["units"] if u["name"] == "cut"]
-    assert cut_reads and "HINT" not in cut_reads[0]["names"], "a raise-only read was walked"
-    # An annotation is free, but `Annotated` metadata is a value its name carries, so it is walked.
-    annotated = _MARKED + "@shapes_optimizer_prompt\ndef pick(n: Annotated[Arm, BOUND]): pass\n"
-    (pick,) = source_facts(annotated)["units"]
-    assert "BOUND" in pick["reads"]["names"], "an annotation's metadata went unwalked"
-    assert "Arm" not in pick["reads"]["names"], "an annotation was walked"
-
-
-def test_the_digest_walk_stops_at_plumbing_and_reads_the_edited_tree(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # The walk stops at plumbing: editing what it reads re-keys nothing.
-    package = (tmp_path / "pkg" / "promptpotter").resolve()
-    for module, text in {
-        "__init__": "",
-        "config/__init__": "",
-        "config/settings": "WIDTH = 2\n",
-        "config/shaped": "WIDTH = 2\n",
-        "unit": _MARKED + "from promptpotter.config import settings, shaped\n"
-        "@shapes_optimizer_prompt\n"
-        "def width():\n    return settings.WIDTH + shaped.WIDTH\n",
-    }.items():
-        (package / f"{module}.py").parent.mkdir(parents=True, exist_ok=True)
-        (package / f"{module}.py").write_text(text, encoding="utf-8")
-
-    unit = ModuleType("promptpotter.unit")
-    unit.__file__ = str(package / "unit.py")
-
-    def process() -> Callable[[], str]:
-        """A new process on the scratch package: nothing held in memory, one cache file."""
-        stores = {
-            "_FACTS": source_scan._ContentCache[SourceFacts](source_scan.SOURCE_FACTS_FILE),
-            "_DIGESTS": source_scan._ContentCache[str](source_scan.TREATMENT_DIGESTS_FILE),
-        }
-
-        def treatment() -> str:
-            with monkeypatch.context() as patch:
-                patch.setattr(source_scan, "_PACKAGE_ROOT", package)
-                patch.setattr(source_scan, "install_cache_root", lambda: tmp_path / "cache")
-                for name, store in stores.items():
-                    patch.setattr(source_scan, name, store)
-                return source_scan.prompt_source_digest((unit,), covered=(), foreign=())
-
-        return treatment
-
-    def with_edit(module: str, text: str) -> str:
-        path = package / f"{module}.py"
-        kept = path.read_text(encoding="utf-8")
-        path.write_text(text, encoding="utf-8")
-        try:
-            return process()()
-        finally:
-            path.write_text(kept, encoding="utf-8")
-
-    assert with_edit("config/settings", "WIDTH = 3\n") == process()(), (
-        "a plumbing module's edit re-keyed a treatment"
-    )
-    assert with_edit("config/shaped", "WIDTH = 3\n") != process()(), (
-        "the walk stopped short of a shaping module"
-    )
-    # A digest is derived from the tree its key hashes: a module edited after a process's first
-    # digest is answered by the edited text, whether the cache file holds it or not.
-    running = process()
-    first_digest = running()
-    (package / "unit.py").write_text(
-        (package / "unit.py").read_text(encoding="utf-8") + "EXTRA = 1\n", encoding="utf-8"
-    )
-    edited_digest = running()
-    assert edited_digest != first_digest, "an edit after a first digest kept the old text's digest"
-    digests_file = tmp_path / "cache" / source_scan.TREATMENT_DIGESTS_FILE
-    assert digests_file.is_file(), "the process kept no digest"
-    assert process()() == edited_digest, "a new process read a cached digest of another text"
-    digests_file.unlink()
-    assert process()() == edited_digest, "the cached digest differs from a fresh derivation"
 
 
 def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
@@ -699,22 +570,27 @@ def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimat
     every = frozenset(Presumption)
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
-    panel = MeasurementRole.PANEL
-    ids = {inner_campaign_id(_SPEC, o, "e", panel) for o in (c1, c2, {}, _CAPO_MUTATED)}
+    ids = {inner_campaign_id(_SPEC, o) for o in (c1, c2, {}, _CAPO_MUTATED)}
     assert len(ids) == 4, (
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
     )
     breaching = {"l1_critique": {"layout": {"thinking_style": ["no_such_panel"]}}}
-    assert inner_campaign_id(_SPEC, breaching, "e", panel) != inner_campaign_id(
-        _SPEC, {}, "e", panel
-    ), "a refused layout arm continued the floor arm's inner campaign"
-    assert inner_campaign_id(
-        _SPEC.model_copy(update={"run_seed": 6}), c1, "e", panel
-    ) != inner_campaign_id(_SPEC, c1, "e", panel), "two seeds share one inner campaign"
-    assert inner_campaign_id(_SPEC, c1, "e", panel) != inner_campaign_id(_SPEC, c1, "f", panel), (
+    assert inner_campaign_id(_SPEC, breaching) != inner_campaign_id(_SPEC, {}), (
+        "a refused layout arm continued the floor arm's inner campaign"
+    )
+    assert inner_campaign_id(_SPEC.model_copy(update={"run_seed": 6}), c1) != inner_campaign_id(
+        _SPEC, c1
+    ), "two seeds share one inner campaign"
+    moved = _SPEC.model_copy(update={"instrument": "f"})
+    assert inner_campaign_id(_SPEC, c1) != inner_campaign_id(moved, c1), (
         "a moved estimator continued the campaign the old one banked"
     )
+    deeper = _SPEC.model_copy(update={"n_rounds": 6})
+    assert inner_campaign_id(deeper, c1) == inner_campaign_id(_SPEC, c1), "a deeper cell forked"
+    assert deeper.key() != _SPEC.key(), "a deeper cell replayed the shallow one's banked rows"
+    wider = _SPEC.model_copy(update={"n_samples": 30})
+    assert inner_campaign_id(wider, c1) != inner_campaign_id(_SPEC, c1), "a new draw continued"
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
     as_run, as_cut = (
         select_optimizer(OptimizerChoice(optimizer="potter", nodes=n))
@@ -723,40 +599,14 @@ def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimat
         for n in ({}, cut)
     )
     assert inner_campaign_id(
-        _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1, "e", panel
-    ) != inner_campaign_id(
-        _SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1, "e", panel
-    ), "a moved optimizer knob ran under the inner campaign of the unmoved one"
+        _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1
+    ) != inner_campaign_id(_SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1), (
+        "a moved optimizer knob ran under the inner campaign of the unmoved one"
+    )
     rewalked = capo.manifest.model_copy(update={"initial_population_walks": "alone"})
     assert replace(capo, manifest=rewalked).treatment(every, built_stores.block_packs).digest != (
         capo.treatment(every, built_stores.block_packs).digest
     ), "a manifest walking its initial population apart ran under the treatment of one racing it"
-
-
-def test_a_prompt_shaping_classs_method_rekeys_the_run(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A prompt-shaping class's method re-keys the run though it is only ever read through an instance.
-    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
-    every = frozenset(Presumption)
-    manifest_file, read_text = Path(optimizer_manifest.__file__), Path.read_text
-    as_shipped = read_text(manifest_file, "utf-8")
-    drawing_on = as_shipped.replace(
-        'self.access(member, pool) != "off"', 'self.access(member, pool) == "on"'
-    )
-    assert drawing_on != as_shipped, "the probe's edit no longer lands in `SelectedOptimizer.draws`"
-    as_run_source = potter.treatment(every, built_stores.block_packs).source
-    with monkeypatch.context() as patch:
-        patch.setattr(
-            Path,
-            "read_text",
-            lambda p, *a, **k: drawing_on if p == manifest_file else read_text(p, *a, **k),
-        )
-        nodes._source_digest.cache_clear()
-        assert potter.treatment(every, built_stores.block_packs).source != as_run_source, (
-            "an edit to which pools a member draws ran under the unedited treatment"
-        )
-    nodes._source_digest.cache_clear()
 
 
 def test_a_pool_its_readers_could_draw_nothing_from_never_runs(built_stores: Stores) -> None:
@@ -828,8 +678,8 @@ def test_a_packs_drawable_snippets_key_its_treatment(
                 OptimizerChoice(optimizer="potter", nodes={"block_pool": overlay})
             )
 
-        assert drawing(["one"], ["*"]).treatment(every, built_stores.block_packs).source != (
-            drawing(["two"], ["*"]).treatment(every, built_stores.block_packs).source
+        assert drawing(["one"], ["*"]).treatment(every, built_stores.block_packs).behaviour != (
+            drawing(["two"], ["*"]).treatment(every, built_stores.block_packs).behaviour
         ), "campaigns seeded from two different block packs share one treatment"
         # Only what `active` keeps reaches a prompt, so only its edit re-keys the run.
         intent_only = (
@@ -3093,9 +2943,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         ruler=RulerReach(version=0, own=None),
     )
     inner_hop = CycleHop(
-        campaign_id=inner_campaign_id(
-            seats.spec(inner_seat), seats.own(inner_seat, {}), seats.estimator, None
-        ),
+        campaign_id=inner_campaign_id(seats.spec(inner_seat), seats.own(inner_seat, {})),
         cycle_id="cycle-0",
     )
     stored_campaign(spawn.sandbox_stores(spawning), minted_campaign(inner_hop, dataset_name="decl"))

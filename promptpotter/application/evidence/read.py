@@ -118,7 +118,6 @@ from promptpotter.infrastructure.store.read_model import derived, file_sig
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import BadRequestError, NotFoundError
-from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import sample_sd
 
@@ -359,7 +358,8 @@ class _Head(NamedTuple):
 
 
 class _CycleFacts(NamedTuple):
-    arm_id: str | None
+    # Its campaign's treatment digest: replicates of one behaviour key pair, whoever minted them.
+    arm_id: str
     instrument_id: str
     # The fit the last close read its series on, so every subject of the cycle levels on one scale.
     scale: AbilityScale | None
@@ -810,9 +810,7 @@ def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop, cycle_dir: P
     chain = ledger_chain(CycleDir(cycle_dir), moment=None)
     scanned = scan_standing_rounds(chain)
     standing, series = scanned.rounds, scanned.level_series
-    origin = standing[0].close if 0 in standing else None
     spend_by_round = scan_ledger_spend_by_round(chain)
-    hashes = origin.closed_state.prompt_hashes if origin else None
     instrument_id = cycle_instrument(stores.campaigns.last(hop, PartitionRecord), standing)
     if instrument_id is None:
         raise NotFoundError(f"cycle {hop.cycle_id} drew no bank, so it names no instrument")
@@ -830,8 +828,7 @@ def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop, cycle_dir: P
         )
     )
     return _CycleFacts(
-        # Unstamped is `None`, never a shared hash: `replicates` would pair every unstamped campaign.
-        arm_id=stable_hash(dict(hashes)) if hashes else None,
+        arm_id=campaign.treatment.digest,
         instrument_id=instrument_id,
         scale=scale,
         # No bill at all priced nothing (`None`); bills summing to 0 measured it.

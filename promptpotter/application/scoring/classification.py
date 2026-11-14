@@ -11,7 +11,6 @@ from promptpotter.domain.results_health import classify_result, is_deprecated
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import GradedCell, MeasuredCell
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 def terminal_ranking(pipeline_data: Mapping[str, Any], schema: PipelineSchema | None) -> list[Any]:
@@ -28,7 +27,6 @@ def extract_warning_types(facts: MeasuredCell) -> list[str]:
     return classify_result(facts).all_codes
 
 
-@shapes_optimizer_prompt
 def scoreable_rows(results: Iterable[GradedCell]) -> list[GradedCell]:
     """A DEPRECATED row stays: dropping a refusal pays the prompt fitness for the cells it could not answer."""
     return [cell for cell in results if cell.scored]

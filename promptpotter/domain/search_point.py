@@ -2,24 +2,23 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping
 from dataclasses import asdict, dataclass, fields
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import ConfigDict, Field
 
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS, OptimizerPromptEdits
 from promptpotter.domain.pipeline_params import CALL_CONFIG_KEYS, NodeCall, PipelineParams
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import content_hash, shapes_optimizer_prompt
+from promptpotter.shared.hashing import content_hash
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
 # A prompt node's shots locus; no field may take its name, nor the render's (`prompt`).
-SHOTS_KEY: Annotated[str, shapes_optimizer_prompt] = "shots"
+SHOTS_KEY: str = "shots"
 
 
-@shapes_optimizer_prompt
 class NodeConfig(NodeCall, OptimizerPromptEdits):
     """An llm node's resolved config, laid flat as the operator lays it: its call keys, naming its
     provider and model, and the prompt fields it sets over its template (rendered, never sent); its
@@ -35,10 +34,10 @@ class NodeConfig(NodeCall, OptimizerPromptEdits):
 
     def call_settings(self) -> dict[str, str | int | float | list[str] | None]:
         """Its engine call keys as laid, each to its value: what a call is keyed and sent by."""
-        return self.model_dump(include=set(CALL_CONFIG_KEYS), exclude_unset=True)
+        return {k: getattr(self, k) for k in sorted(CALL_CONFIG_KEYS) if k in self.model_fields_set}
 
     def prompt_edits(self) -> dict[str, str]:
-        # Read by attribute: `NodeCall`'s plain serializer ignores `include`.
+        # Read by attribute, as `call_settings` is: `NodeCall`'s plain serializer ignores `include`.
         return {f: v for f in PROMPT_FIELDS if (v := getattr(self, f)) is not None}
 
 
@@ -83,7 +82,7 @@ class JobSearchPoint(FrozenModel):
 
 
 # Operator-authored, never measured, frozen for the run: `application/optimizers/potter/CLAUDE.md` § L2 — what.
-FRAMING_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+FRAMING_FIELDS: frozenset[str] = frozenset(
     {
         "domain",
         "pipeline_purpose",
@@ -94,13 +93,12 @@ FRAMING_FIELDS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
 )
 
 # Enforced ONCE at mint, never at render: a render-time clip loses words the author never sees go.
-FRAMING_VALUE_BUDGET: Annotated[int, shapes_optimizer_prompt] = 600
+FRAMING_VALUE_BUDGET: int = 600
 
 # The per-field budget alone permits five full fields, rendered VERBATIM into every optimizer prompt.
-FRAMING_TOTAL_BUDGET: Annotated[int, shapes_optimizer_prompt] = 1500
+FRAMING_TOTAL_BUDGET: int = 1500
 
 
-@shapes_optimizer_prompt
 @dataclass
 class TaskDecomposition:
     domain: str = ""

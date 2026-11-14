@@ -20,7 +20,6 @@ from promptpotter.domain.prompt_block import (
 )
 from promptpotter.domain.refusal import Refusal
 from promptpotter.shared.errors import ConflictError, NotFoundError, validation_reason
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 PACK_FILE = "pack.json"
 
@@ -209,7 +208,6 @@ class PackShelf:
             )
         return self.account / name / PACK_FILE
 
-    @shapes_optimizer_prompt
     def entries(
         self, names: Sequence[str], *, admits: frozenset[Presumption]
     ) -> dict[str, PoolEntry]:

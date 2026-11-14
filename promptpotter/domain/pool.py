@@ -8,7 +8,7 @@ from __future__ import annotations
 import enum
 from abc import abstractmethod
 from collections.abc import Iterable, Mapping, Sequence
-from typing import Annotated, ClassVar, Literal, NamedTuple
+from typing import ClassVar, Literal, NamedTuple
 
 from pydantic import Field
 
@@ -17,14 +17,13 @@ from promptpotter.domain.prompt_block import AUTHORED_SOURCE, snippet_id
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
 
 # How a reader takes a pool: not at all, as material it may adapt, or by entry id alone.
 Access = Literal["off", "open", "closed"]
 
 # The source of a block no library holds: a run on the same answer space measured it as a lift.
-EARNED_SOURCE: Annotated[str, shapes_optimizer_prompt] = "earned"
+EARNED_SOURCE: str = "earned"
 
 
 class PoolSource(enum.StrEnum):
@@ -51,7 +50,6 @@ POOL_SOURCE_INFO: Worded[PoolSource, PoolSourceInfo] = Worded(
 )
 
 
-@shapes_optimizer_prompt
 def entry_id(field: str, text: str) -> str:
     """A block's id is its content: an edited text is a new entry, never the old id re-pointed."""
     return f"{field}.{snippet_id(text)}"
@@ -123,7 +121,6 @@ def offers(entries: Sequence[PoolEntry]) -> list[PoolOffer]:
     return out
 
 
-@shapes_optimizer_prompt
 def _in_play(path: str, entry: str, group: Sequence[str]) -> bool:
     if path in ("*", entry):
         return True
@@ -131,7 +128,6 @@ def _in_play(path: str, entry: str, group: Sequence[str]) -> bool:
     return parts == tuple(group[: len(parts)])
 
 
-@shapes_optimizer_prompt
 def kept(paths: Sequence[str], entries: Iterable[tuple[str, Sequence[str]]]) -> tuple[str, ...]:
     """The ``(id, group)`` entries some path keeps — ``*``, the id, or a leading run of its group — in source order."""
     return tuple(i for i, group in entries if any(_in_play(p, i, group) for p in paths))

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Literal
-
-from promptpotter.shared.hashing import shapes_optimizer_prompt
+from typing import Literal
 
 Delivery = Literal[
     # In the request that carries the task — a system or user message. Always seen.
@@ -30,7 +28,7 @@ Visibility = Literal[
 ]
 
 # Hashed with the prompt: a row edited here changes which keys `node_param_keys` projects.
-_VISIBILITY_BY_DELIVERY: Annotated[dict[Delivery, Visibility], shapes_optimizer_prompt] = {
+_VISIBILITY_BY_DELIVERY: dict[Delivery, Visibility] = {
     "request": "eager",
     "artifact_meta": "eager",
     "artifact_body": "on_demand",
@@ -39,7 +37,6 @@ _VISIBILITY_BY_DELIVERY: Annotated[dict[Delivery, Visibility], shapes_optimizer_
 }
 
 
-@shapes_optimizer_prompt
 def visibility_of(delivery: Delivery) -> Visibility:
     return _VISIBILITY_BY_DELIVERY[delivery]
 

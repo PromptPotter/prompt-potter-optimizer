@@ -65,7 +65,7 @@ BASELINE = {
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 33,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
-    "p_served": 192,
+    "p_served": 193,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.

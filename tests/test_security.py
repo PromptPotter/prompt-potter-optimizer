@@ -2149,6 +2149,7 @@ def _running(cycle_dir: Path) -> Path:
             run_limits=RunLimits(),
             defaults_drift=None,
             backend_revision=None,
+            tree_hash="tree",
         )
     )
     ledger = CycleLayout(cycle_dir).ledger

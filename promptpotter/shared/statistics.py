@@ -10,20 +10,16 @@ from typing import Literal, NamedTuple, overload
 import numpy as np
 from numpy.typing import NDArray
 
-from promptpotter.shared.hashing import shapes_optimizer_prompt
-
 
 @overload
 def logistic(x: float) -> float: ...
 @overload
 def logistic(x: NDArray[np.float64]) -> NDArray[np.float64]: ...
-@shapes_optimizer_prompt
 def logistic(x: float | NDArray[np.float64]) -> float | NDArray[np.float64]:
     p: float | NDArray[np.float64] = 1.0 / (1.0 + np.exp(-np.clip(x, -50, 50)))
     return p
 
 
-@shapes_optimizer_prompt
 def _beta_fraction(a: float, b: float, x: float) -> float:
     """The continued fraction of the incomplete beta function, by modified Lentz."""
     tiny = 1e-300
@@ -46,7 +42,6 @@ def _beta_fraction(a: float, b: float, x: float) -> float:
     return h
 
 
-@shapes_optimizer_prompt
 def _beta_cdf(x: float, a: float, b: float, *, rest: float | None = None) -> float:
     """*rest* is ``1 - x`` where the caller holds it exactly: near 1 the subtraction loses it."""
     rest = 1.0 - x if rest is None else rest
@@ -63,14 +58,12 @@ def _beta_cdf(x: float, a: float, b: float, *, rest: float | None = None) -> flo
     return 1.0 - front * _beta_fraction(b, a, rest) / b
 
 
-@shapes_optimizer_prompt
 def _t_sf(x: float, df: float) -> float:
     scale = df + x * x
     tail = 0.5 * _beta_cdf(df / scale, df / 2.0, 0.5, rest=x * x / scale)
     return tail if x >= 0.0 else 1.0 - tail
 
 
-@shapes_optimizer_prompt
 def _t_ppf(p: float, df: float) -> float:
     """Valid for ``p >= 0.5`` only."""
     target = 1.0 - p
@@ -88,7 +81,6 @@ def _t_ppf(p: float, df: float) -> float:
     return 0.5 * (lo + hi)
 
 
-@shapes_optimizer_prompt
 @cache
 def t_critical(df: int, alpha: float = 0.05) -> float:
     """Student-t, never the normal quantile, which understates at paired panel sizes."""
@@ -97,7 +89,6 @@ def t_critical(df: int, alpha: float = 0.05) -> float:
     return _t_ppf(1 - alpha / 2, df)
 
 
-@shapes_optimizer_prompt
 def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) -> float:
     """Takes the estimator's SE, never ``n``: an ``n`` form assumes the binomial worst case."""
     if se <= 0.0:
@@ -106,7 +97,6 @@ def min_detectable_effect(se: float, alpha: float = 0.05, power: float = 0.8) ->
     return (normal.inv_cdf(1 - alpha / 2) + normal.inv_cdf(power)) * se
 
 
-@shapes_optimizer_prompt
 def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     """The SE is floored at ``1/(4n)``: 4/4 hits has variance 0 and would be a point mass."""
     n = len(scores)
@@ -125,7 +115,6 @@ def _normal_posterior(scores: list[float]) -> tuple[float, float]:
     return (mean, max(se, se_floor))
 
 
-@shapes_optimizer_prompt
 def paired_diff_posterior(
     candidate_scores: list[float],
     prior_scores: list[float],
@@ -149,7 +138,6 @@ def mean_ci(values: list[float], alpha: float = 0.05) -> tuple[float, float, flo
     return (mean, mean - half, mean + half)
 
 
-@shapes_optimizer_prompt
 def paired_mean_t(
     candidate_scores: list[float],
     prior_scores: list[float],
@@ -184,7 +172,6 @@ def discordant_counts(candidate: Sequence[float], prior: Sequence[float]) -> tup
     return wins, losses
 
 
-@shapes_optimizer_prompt
 def sign_posterior(wins: int, losses: int) -> float:
     if wins + losses == 0:
         return 0.5
@@ -365,7 +352,6 @@ def two_way_effect_sds(
     return (_sd(list(cell_mean.values())), _sd(list(arm_mean.values())), residual)
 
 
-@shapes_optimizer_prompt
 def _sd(xs: list[float]) -> float:
     mean = sum(xs) / len(xs)
     return math.sqrt(sum((x - mean) ** 2 for x in xs) / (len(xs) - 1))

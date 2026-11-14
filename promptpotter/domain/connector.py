@@ -8,7 +8,6 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.said import Tone
 from promptpotter.shared.errors import PotterError
 from promptpotter.shared.extras import MissingExtraError
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.worded import Worded
 
 if TYPE_CHECKING:
@@ -22,12 +21,10 @@ ConnectorExecution = Literal["remote_http", "in_process"]
 MeasuredUnit = Literal["sample", "cell"]
 
 
-@shapes_optimizer_prompt
 def unit_plural(unit: MeasuredUnit) -> str:
     return f"{unit}s"
 
 
-@shapes_optimizer_prompt
 def unit_count(n: int, unit: MeasuredUnit) -> str:
     return f"{n} {unit if n == 1 else unit_plural(unit)}"
 

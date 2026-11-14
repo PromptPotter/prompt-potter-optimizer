@@ -11,7 +11,7 @@ from pydantic import Field, StringConstraints, model_validator
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 # One path segment, so a name a knob carries resolves to a directory under the packs root alone.
@@ -122,7 +122,6 @@ PROMPT_FIELD_INFO: Worded[str, PromptFieldInfo] = Worded(
 )
 
 
-@shapes_optimizer_prompt
 def snippet_id(text: str) -> str:
     """A snippet's id is its content, the suffix of every pool entry it expands into."""
     return stable_hash(text, length=10)

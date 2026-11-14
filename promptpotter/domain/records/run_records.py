@@ -1067,7 +1067,7 @@ class CycleShareRecord(CycleRecord):
 
 class DefaultsPin(FrozenModel):
     """What a declaration is a delta over, in two halves: the bench's defaults, which every arm of
-    a head-to-head shares, and its optimizer's whole treatment — manifest, source and prompts —
+    a head-to-head shares, and its optimizer's whole treatment — manifest, behaviour and prompts —
     which differs by arm by design."""
 
     bench: str = Field(min_length=1)
@@ -1131,6 +1131,8 @@ class RunWiringRecord(CycleRecord):
     defaults_drift: DefaultsDrift | None
     # `None` where the connector checks no revision; a drift is served, never refused (`wiring.py`).
     backend_revision: BackendRevision | None
+    # The whole package's code this run executed (`nodes.py::tree_hash`): recorded, never keyed on.
+    tree_hash: str
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

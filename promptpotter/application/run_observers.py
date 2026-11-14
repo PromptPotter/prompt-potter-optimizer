@@ -7,6 +7,7 @@ from dataclasses import dataclass
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
+from promptpotter.application.optimizers.nodes import tree_hash
 from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
 from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
 from promptpotter.application.runner.output import RunArtifacts
@@ -102,6 +103,7 @@ def declare_run_wiring(
                 ),
             ),
             backend_revision=session.backend_revision,
+            tree_hash=tree_hash(),
         )
     )
 

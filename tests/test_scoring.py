@@ -2655,6 +2655,7 @@ def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
                 run_limits=RunLimits(),
                 defaults_drift=None,
                 backend_revision=None,
+                tree_hash="tree",
             )
         )
         for at, record in enumerate(ledger_records(ledger)):

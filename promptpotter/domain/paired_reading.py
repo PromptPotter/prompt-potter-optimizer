@@ -14,7 +14,7 @@ from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.worded import Worded
 
@@ -33,7 +33,6 @@ class ReadingStateKind(StrEnum):
 
 # Marked: a state's kind decides the round's advance, and so the stall a prompt reports; its words
 # (`READING_STATE_INFO`) are unmarked, so no prompt's closure reaches them.
-@shapes_optimizer_prompt
 class ReadingState(StrEnum):
     """Whether a pair was read, and the ONE reason it was not."""
 

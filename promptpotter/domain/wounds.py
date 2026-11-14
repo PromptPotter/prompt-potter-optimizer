@@ -3,12 +3,11 @@ from __future__ import annotations
 import enum
 import json
 from collections.abc import Iterable
-from typing import Annotated, Any
+from typing import Any
 
 from pydantic import Field
 
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 class NurseOwner(enum.StrEnum):
@@ -20,12 +19,12 @@ class NurseOwner(enum.StrEnum):
 
 
 # In `domain/`: `RoundResult` counts collapses off these and may not import their validator.
-INVARIANT_REASONS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
+INVARIANT_REASONS: frozenset[str] = frozenset(
     {"no_op_variant", "duplicate_variant", "repeat_variant"}
 )
 
 # The word for each, on every surface: the inner narrative renders it into the outer's prompt.
-COLLAPSE_WORDS: Annotated[dict[str, str], shapes_optimizer_prompt] = {
+COLLAPSE_WORDS: dict[str, str] = {
     "no_op_variant": "no-op",
     "duplicate_variant": "duplicate",
     "repeat_variant": "repeat",
@@ -87,13 +86,11 @@ class ValidationFailure(FrozenModel):
     )
 
 
-@shapes_optimizer_prompt
 def collapse_reason(failures: Iterable[ValidationFailure]) -> str | None:
     """One per proposal, or the collapse counts would sum past the population."""
     return next((vf.reason for vf in failures if vf.reason in INVARIANT_REASONS), None)
 
 
-@shapes_optimizer_prompt
 def collapse_counts(populations: Iterable[Iterable[ValidationFailure]]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for failures in populations:

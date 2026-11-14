@@ -42,7 +42,729 @@
         ".archives/*/measurements/cells/*.jsonl"
       ],
       "shape": {
-        "reader": "promptpotter.infrastructure.store.measurement_archive::answer_of"
+        "$defs": {
+          "Diagnostics": {
+            "properties": {
+              "step_statuses": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Step Statuses",
+                "type": "object"
+              },
+              "warnings": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/NodeWarning"
+                },
+                "title": "Warnings",
+                "type": "array"
+              }
+            },
+            "title": "Diagnostics",
+            "type": "object"
+          },
+          "ErrorCategory": {
+            "enum": [
+              "CLIENT",
+              "PARAMETER_REFUSED",
+              "SERVER",
+              "CONNECTION",
+              "PROVIDER_CREDIT",
+              "PROVIDER_THROTTLED",
+              "SPEND_CEILING",
+              "TOKEN_CEILING",
+              "HOST_ALLOWANCE",
+              "WALL_CLOCK",
+              "PRICE_LIST_UNREACHABLE",
+              "NO_RATE",
+              "PIPELINE",
+              "HALTED",
+              "UNSCOREABLE",
+              "UNKNOWN"
+            ],
+            "title": "ErrorCategory",
+            "type": "string"
+          },
+          "JudgeReading": {
+            "description": "Beside the term's score, never in place of it; a failed grading has a reason and no label.",
+            "properties": {
+              "label": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Label"
+              },
+              "why": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Why"
+              }
+            },
+            "title": "JudgeReading",
+            "type": "object"
+          },
+          "MeasuredCell": {
+            "description": "``sample_key`` is what the cell IS: replay matches on it. Its position is the bank's.",
+            "properties": {
+              "answer": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Answer"
+              },
+              "cached": {
+                "default": false,
+                "title": "Cached",
+                "type": "boolean"
+              },
+              "degraded_obs_count": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Degraded Obs Count"
+              },
+              "degraded_obs_threshold": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Degraded Obs Threshold"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Error"
+              },
+              "error_category": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ErrorCategory"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "ground_truth": {
+                "default": "",
+                "title": "Ground Truth",
+                "type": "string"
+              },
+              "pipeline": {
+                "$ref": "#/$defs/PipelineData"
+              },
+              "predicted": {
+                "default": "",
+                "title": "Predicted",
+                "type": "string"
+              },
+              "query": {
+                "default": "",
+                "title": "Query",
+                "type": "string"
+              },
+              "refused_parameter": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Refused Parameter"
+              },
+              "rerun_comparison": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/RerunComparison"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              },
+              "retry_of_deprecated_cache": {
+                "default": false,
+                "title": "Retry Of Deprecated Cache",
+                "type": "boolean"
+              },
+              "sample_key": {
+                "title": "Sample Key",
+                "type": "string"
+              },
+              "stale_outcome": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/StaleOutcome"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null
+              }
+            },
+            "required": [
+              "sample_key"
+            ],
+            "title": "MeasuredCell",
+            "type": "object"
+          },
+          "MeasurementRole": {
+            "description": "Why a scoring pass ran, stamped on every answer it files: provenance an id cannot carry.",
+            "enum": [
+              "origin",
+              "panel",
+              "backfill",
+              "parent",
+              "repair",
+              "overlap",
+              "verify",
+              "bench",
+              "noise_floor"
+            ],
+            "title": "MeasurementRole",
+            "type": "string"
+          },
+          "NodeWarning": {
+            "description": "``kind`` is the BACKEND's stamp: an absent or unrecognized one is SKIPPED, never guessed.",
+            "properties": {
+              "code": {
+                "default": "",
+                "title": "Code",
+                "type": "string"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "items": {},
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
+              },
+              "kind": {
+                "default": "",
+                "title": "Kind",
+                "type": "string"
+              },
+              "message": {
+                "default": "",
+                "title": "Message",
+                "type": "string"
+              },
+              "stats": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Stats"
+              },
+              "step": {
+                "default": "",
+                "title": "Step",
+                "type": "string"
+              }
+            },
+            "title": "NodeWarning",
+            "type": "object"
+          },
+          "PipelineData": {
+            "description": "``None`` is a key the record did not carry; ``0.0`` is a reading.",
+            "properties": {
+              "cell_report": {
+                "additionalProperties": true,
+                "title": "Cell Report",
+                "type": "object"
+              },
+              "diagnostics": {
+                "$ref": "#/$defs/Diagnostics"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Error"
+              },
+              "judge_readings": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/JudgeReading"
+                },
+                "title": "Judge Readings",
+                "type": "object"
+              },
+              "observations": {
+                "additionalProperties": true,
+                "title": "Observations",
+                "type": "object"
+              },
+              "outcome_note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Outcome Note"
+              },
+              "question": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Question"
+              },
+              "reasoning_trace": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning Trace"
+              },
+              "result_ranking": {
+                "anyOf": [
+                  {
+                    "items": {},
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Result Ranking"
+              },
+              "step_phases": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "type": "number"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Step Phases"
+              },
+              "step_timings": {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "title": "Step Timings",
+                "type": "object"
+              },
+              "step_tokens": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/StepUsage"
+                },
+                "title": "Step Tokens",
+                "type": "object"
+              },
+              "target_prompt_chars": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Prompt Chars"
+              },
+              "terminal_node": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Terminal Node"
+              },
+              "total_time": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Total Time"
+              },
+              "turns": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/TurnRecord"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Turns"
+              },
+              "unworked_s": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Unworked S"
+              }
+            },
+            "title": "PipelineData",
+            "type": "object"
+          },
+          "RerunComparison": {
+            "description": "What re-measuring a degraded cached cell changed, in the words the tape prints.",
+            "properties": {
+              "hit_change": {
+                "title": "Hit Change",
+                "type": "string"
+              },
+              "improved": {
+                "title": "Improved",
+                "type": "boolean"
+              },
+              "rank_change": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Rank Change"
+              }
+            },
+            "required": [
+              "hit_change",
+              "rank_change",
+              "improved"
+            ],
+            "title": "RerunComparison",
+            "type": "object"
+          },
+          "StaleOutcome": {
+            "description": "Where the stale-data ladder left a degraded cached cell: one exit, so one value.",
+            "enum": [
+              "observed",
+              "config_skip",
+              "retried",
+              "switched_out",
+              "persistently_degraded",
+              "paused"
+            ],
+            "title": "StaleOutcome",
+            "type": "string"
+          },
+          "StepUsage": {
+            "properties": {
+              "cache_read": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Read"
+              },
+              "cost_usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cost Usd"
+              },
+              "estimated": {
+                "default": false,
+                "title": "Estimated",
+                "type": "boolean"
+              },
+              "finish_reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Finish Reason"
+              },
+              "input": {
+                "default": 0,
+                "title": "Input",
+                "type": "integer"
+              },
+              "model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Model"
+              },
+              "output": {
+                "default": 0,
+                "title": "Output",
+                "type": "integer"
+              },
+              "provider": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Provider"
+              },
+              "rate_priced_usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Rate Priced Usd"
+              },
+              "reasoning": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning"
+              },
+              "served_by": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Served By"
+              },
+              "unreported_attempts": {
+                "default": 0,
+                "title": "Unreported Attempts",
+                "type": "integer"
+              }
+            },
+            "title": "StepUsage",
+            "type": "object"
+          },
+          "TurnRecord": {
+            "description": "ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``.\n\nA connector parses it as plain JSON so an upstream field degrades the record instead of raising\nin a paid cell. No ``turns`` key is no turn concept; ``[]`` is none happened.",
+            "properties": {
+              "index": {
+                "title": "Index",
+                "type": "integer"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string"
+              },
+              "observation": {
+                "title": "Observation",
+                "type": "string"
+              },
+              "reasoning": {
+                "title": "Reasoning",
+                "type": "string"
+              },
+              "source": {
+                "title": "Source",
+                "type": "string"
+              },
+              "step": {
+                "title": "Step",
+                "type": "string"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Tools",
+                "type": "array"
+              }
+            },
+            "title": "TurnRecord",
+            "type": "object"
+          }
+        },
+        "description": "Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it.",
+        "properties": {
+          "cell": {
+            "$ref": "#/$defs/MeasuredCell"
+          },
+          "compaction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Compaction"
+          },
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_hash": {
+            "title": "Dataset Hash",
+            "type": "string"
+          },
+          "provenance": {
+            "title": "Provenance",
+            "type": "string"
+          },
+          "purged": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Purged"
+          },
+          "role": {
+            "$ref": "#/$defs/MeasurementRole"
+          }
+        },
+        "required": [
+          "cell",
+          "config_key",
+          "dataset_hash",
+          "role",
+          "provenance",
+          "created_at"
+        ],
+        "title": "FiledAnswer",
+        "type": "object"
       }
     },
     "archive claim_lock": {
@@ -60,7 +782,471 @@
         ".archives/*/measurements/cold/*.jsonl.gz"
       ],
       "shape": {
-        "reader": "promptpotter.infrastructure.store.measurement_archive::decode_cold"
+        "$defs": {
+          "Diagnostics": {
+            "properties": {
+              "step_statuses": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "title": "Step Statuses",
+                "type": "object"
+              },
+              "warnings": {
+                "default": [],
+                "items": {
+                  "$ref": "#/$defs/NodeWarning"
+                },
+                "title": "Warnings",
+                "type": "array"
+              }
+            },
+            "title": "Diagnostics",
+            "type": "object"
+          },
+          "JudgeReading": {
+            "description": "Beside the term's score, never in place of it; a failed grading has a reason and no label.",
+            "properties": {
+              "label": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Label"
+              },
+              "why": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Why"
+              }
+            },
+            "title": "JudgeReading",
+            "type": "object"
+          },
+          "MovedFields": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "title": "Answer",
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/PipelineData"
+              }
+            ],
+            "type": "array"
+          },
+          "NodeWarning": {
+            "description": "``kind`` is the BACKEND's stamp: an absent or unrecognized one is SKIPPED, never guessed.",
+            "properties": {
+              "code": {
+                "default": "",
+                "title": "Code",
+                "type": "string"
+              },
+              "details": {
+                "anyOf": [
+                  {
+                    "items": {},
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Details"
+              },
+              "kind": {
+                "default": "",
+                "title": "Kind",
+                "type": "string"
+              },
+              "message": {
+                "default": "",
+                "title": "Message",
+                "type": "string"
+              },
+              "stats": {
+                "anyOf": [
+                  {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Stats"
+              },
+              "step": {
+                "default": "",
+                "title": "Step",
+                "type": "string"
+              }
+            },
+            "title": "NodeWarning",
+            "type": "object"
+          },
+          "PipelineData": {
+            "description": "``None`` is a key the record did not carry; ``0.0`` is a reading.",
+            "properties": {
+              "cell_report": {
+                "additionalProperties": true,
+                "title": "Cell Report",
+                "type": "object"
+              },
+              "diagnostics": {
+                "$ref": "#/$defs/Diagnostics"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Error"
+              },
+              "judge_readings": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/JudgeReading"
+                },
+                "title": "Judge Readings",
+                "type": "object"
+              },
+              "observations": {
+                "additionalProperties": true,
+                "title": "Observations",
+                "type": "object"
+              },
+              "outcome_note": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Outcome Note"
+              },
+              "question": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Question"
+              },
+              "reasoning_trace": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning Trace"
+              },
+              "result_ranking": {
+                "anyOf": [
+                  {
+                    "items": {},
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Result Ranking"
+              },
+              "step_phases": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "type": "number"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Step Phases"
+              },
+              "step_timings": {
+                "additionalProperties": {
+                  "type": "number"
+                },
+                "title": "Step Timings",
+                "type": "object"
+              },
+              "step_tokens": {
+                "additionalProperties": {
+                  "$ref": "#/$defs/StepUsage"
+                },
+                "title": "Step Tokens",
+                "type": "object"
+              },
+              "target_prompt_chars": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Target Prompt Chars"
+              },
+              "terminal_node": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Terminal Node"
+              },
+              "total_time": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Total Time"
+              },
+              "turns": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/TurnRecord"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Turns"
+              },
+              "unworked_s": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Unworked S"
+              }
+            },
+            "title": "PipelineData",
+            "type": "object"
+          },
+          "StepUsage": {
+            "properties": {
+              "cache_read": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Read"
+              },
+              "cost_usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cost Usd"
+              },
+              "estimated": {
+                "default": false,
+                "title": "Estimated",
+                "type": "boolean"
+              },
+              "finish_reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Finish Reason"
+              },
+              "input": {
+                "default": 0,
+                "title": "Input",
+                "type": "integer"
+              },
+              "model": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Model"
+              },
+              "output": {
+                "default": 0,
+                "title": "Output",
+                "type": "integer"
+              },
+              "provider": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Provider"
+              },
+              "rate_priced_usd": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Rate Priced Usd"
+              },
+              "reasoning": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning"
+              },
+              "served_by": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Served By"
+              },
+              "unreported_attempts": {
+                "default": 0,
+                "title": "Unreported Attempts",
+                "type": "integer"
+              }
+            },
+            "title": "StepUsage",
+            "type": "object"
+          },
+          "TurnRecord": {
+            "description": "ONE turn of a multi-turn cell, a narrowed projection of an ATIF trajectory ``Step``.\n\nA connector parses it as plain JSON so an upstream field degrades the record instead of raising\nin a paid cell. No ``turns`` key is no turn concept; ``[]`` is none happened.",
+            "properties": {
+              "index": {
+                "title": "Index",
+                "type": "integer"
+              },
+              "message": {
+                "title": "Message",
+                "type": "string"
+              },
+              "observation": {
+                "title": "Observation",
+                "type": "string"
+              },
+              "reasoning": {
+                "title": "Reasoning",
+                "type": "string"
+              },
+              "source": {
+                "title": "Source",
+                "type": "string"
+              },
+              "step": {
+                "title": "Step",
+                "type": "string"
+              },
+              "tools": {
+                "items": {
+                  "type": "string"
+                },
+                "title": "Tools",
+                "type": "array"
+              }
+            },
+            "title": "TurnRecord",
+            "type": "object"
+          }
+        },
+        "items": {
+          "$ref": "#/$defs/MovedFields"
+        },
+        "type": "array"
       }
     },
     "archive config": {
@@ -126,7 +1312,81 @@
         ".archives/*/measurements/index.jsonl"
       ],
       "shape": {
-        "reader": "promptpotter.infrastructure.store.measurement_archive::index_row"
+        "$defs": {
+          "ArchiveEntry": {
+            "additionalProperties": false,
+            "description": "A configuration under ONE dataset; ``name`` and ``created_at`` are its first answer's.",
+            "properties": {
+              "config_key": {
+                "title": "Config Key",
+                "type": "string"
+              },
+              "created_at": {
+                "default": "",
+                "title": "Created At",
+                "type": "string"
+              },
+              "dataset_hash": {
+                "title": "Dataset Hash",
+                "type": "string"
+              },
+              "name": {
+                "default": "",
+                "title": "Name",
+                "type": "string"
+              },
+              "node_configs": {
+                "items": {
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "prefixItems": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": true,
+                      "type": "object"
+                    }
+                  ],
+                  "type": "array"
+                },
+                "title": "Node Configs",
+                "type": "array"
+              },
+              "pipeline_params": {
+                "$ref": "#/$defs/PipelineParams"
+              },
+              "prompt_fields_id": {
+                "title": "Prompt Fields Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "config_key",
+              "prompt_fields_id",
+              "node_configs",
+              "pipeline_params",
+              "dataset_hash"
+            ],
+            "title": "ArchiveEntry",
+            "type": "object"
+          },
+          "PipelineParams": {
+            "additionalProperties": true,
+            "type": "object"
+          }
+        },
+        "maxItems": 2,
+        "minItems": 2,
+        "prefixItems": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/ArchiveEntry"
+          }
+        ],
+        "type": "array"
       }
     },
     "archive sample_fold": {
@@ -136,7 +1396,113 @@
         ".archives/*/measurements/sample_folds/*.jsonl"
       ],
       "shape": {
-        "reader": "pydantic.main::BaseModel.model_validate_json"
+        "additionalProperties": false,
+        "properties": {
+          "cells": {
+            "items": {
+              "maxItems": 4,
+              "minItems": 4,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Cells",
+            "type": "array"
+          },
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
+          "fk": {
+            "title": "Fk",
+            "type": "string"
+          },
+          "graded": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Graded",
+            "type": "array"
+          },
+          "new_samples": {
+            "items": {
+              "maxItems": 3,
+              "minItems": 3,
+              "prefixItems": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "New Samples",
+            "type": "array"
+          },
+          "sig": {
+            "items": {
+              "items": {},
+              "type": "array"
+            },
+            "title": "Sig",
+            "type": "array"
+          },
+          "sp": {
+            "title": "Sp",
+            "type": "string"
+          },
+          "unscoreable": {
+            "default": false,
+            "title": "Unscoreable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "config_key",
+          "sp",
+          "fk",
+          "sig",
+          "graded"
+        ],
+        "title": "SampleFoldRow",
+        "type": "object"
       }
     },
     "bank": {
@@ -145,7 +1511,111 @@
         "projects/*/banks/*.json"
       ],
       "shape": {
-        "reader": "promptpotter.infrastructure.store.tenant_dataset_store::read_bank"
+        "$defs": {
+          "JsonValue": {},
+          "Sample": {
+            "properties": {
+              "ground_truth": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Ground Truth"
+              },
+              "held_out": {
+                "default": false,
+                "title": "Held Out",
+                "type": "boolean"
+              },
+              "id": {
+                "title": "Id",
+                "type": "integer"
+              },
+              "measured_dataset": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Measured Dataset"
+              },
+              "query": {
+                "title": "Query",
+                "type": "string"
+              },
+              "question": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Question"
+              },
+              "source_pin": {
+                "anyOf": [
+                  {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/JsonValue"
+                    },
+                    "type": "object"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Source Pin"
+              }
+            },
+            "required": [
+              "id",
+              "query",
+              "ground_truth"
+            ],
+            "title": "Sample",
+            "type": "object"
+          }
+        },
+        "description": "Rows by content: a row's slot is its position, so ``dataset_hash`` names every slot too.",
+        "properties": {
+          "dataset_hash": {
+            "title": "Dataset Hash",
+            "type": "string"
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/$defs/Sample"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
+          "slot_of": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Slot Of",
+            "type": "object"
+          }
+        },
+        "required": [
+          "samples",
+          "dataset_hash",
+          "slot_of"
+        ],
+        "title": "Bank",
+        "type": "object"
       }
     },
     "blocklist": {
@@ -2306,153 +3776,6 @@
           }
         },
         "title": "ProviderConfigBundle",
-        "type": "object"
-      }
-    },
-    "source facts": {
-      "fate": "CACHE",
-      "patterns": [
-        ".cache/source_facts.json"
-      ],
-      "shape": {
-        "$defs": {
-          "SourceFacts": {
-            "description": "A function of ONE source text: ``source_scan.py`` resolves another module's imports.",
-            "properties": {
-              "defs": {
-                "additionalProperties": {
-                  "$ref": "#/$defs/UnitFacts"
-                },
-                "title": "Defs",
-                "type": "object"
-              },
-              "imports": {
-                "items": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "title": "Imports",
-                "type": "array"
-              },
-              "names": {
-                "items": {
-                  "type": "string"
-                },
-                "title": "Names",
-                "type": "array"
-              },
-              "reads": {
-                "$ref": "#/$defs/SourceReads"
-              },
-              "units": {
-                "items": {
-                  "$ref": "#/$defs/UnitFacts"
-                },
-                "title": "Units",
-                "type": "array"
-              }
-            },
-            "required": [
-              "names",
-              "imports",
-              "reads",
-              "units",
-              "defs"
-            ],
-            "title": "SourceFacts",
-            "type": "object"
-          },
-          "SourceReads": {
-            "description": "A whole module's own names are left out: they are hashed with it.",
-            "properties": {
-              "attrs": {
-                "items": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "title": "Attrs",
-                "type": "array"
-              },
-              "imports": {
-                "items": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "title": "Imports",
-                "type": "array"
-              },
-              "names": {
-                "items": {
-                  "type": "string"
-                },
-                "title": "Names",
-                "type": "array"
-              }
-            },
-            "required": [
-              "names",
-              "attrs",
-              "imports"
-            ],
-            "title": "SourceReads",
-            "type": "object"
-          },
-          "UnitFacts": {
-            "properties": {
-              "name": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Name"
-              },
-              "reads": {
-                "$ref": "#/$defs/SourceReads"
-              },
-              "source": {
-                "title": "Source",
-                "type": "string"
-              },
-              "whole": {
-                "title": "Whole",
-                "type": "boolean"
-              }
-            },
-            "required": [
-              "name",
-              "whole",
-              "source",
-              "reads"
-            ],
-            "title": "UnitFacts",
-            "type": "object"
-          }
-        },
-        "additionalProperties": {
-          "$ref": "#/$defs/SourceFacts"
-        },
-        "type": "object"
-      }
-    },
-    "treatment digests": {
-      "fate": "CACHE",
-      "patterns": [
-        ".cache/treatment_digests.json"
-      ],
-      "shape": {
-        "additionalProperties": {
-          "type": "string"
-        },
         "type": "object"
       }
     },

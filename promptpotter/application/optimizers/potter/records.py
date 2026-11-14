@@ -11,7 +11,6 @@ from promptpotter.domain.pipeline_params import lay_nodes
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 
 class L1Layout(StrictModel):
@@ -21,7 +20,6 @@ class L1Layout(StrictModel):
     thinking_style: list[str] = Field(default_factory=list)
     problem_description: list[str] = Field(default_factory=list)
 
-    @shapes_optimizer_prompt
     def all_placeholders(self) -> list[str]:
         return [name for slot in type(self).model_fields for name in self.slot(slot)]
 
@@ -135,7 +133,6 @@ class L1Readout(RoundOutput, kind="l1_readout"):
     axis_memory_peaked: list[str] = Field(default_factory=list)
 
 
-@shapes_optimizer_prompt
 class ExplorationBudget(enum.StrEnum):
     """ONE source for the ``escalation_panel`` signal and the review writer's ``ValidatorContext``: prompt and validator agree."""
 
@@ -144,7 +141,6 @@ class ExplorationBudget(enum.StrEnum):
     WIDE = "wide"  # patience exhausted — explore freely; a PEAKED axis is mutable with a wide rebut
 
 
-@shapes_optimizer_prompt
 def exploration_budget(stall_count: int, l1_patience: int) -> ExplorationBudget:
     if stall_count <= 0:
         return ExplorationBudget.TIGHT

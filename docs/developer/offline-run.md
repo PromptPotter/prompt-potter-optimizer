@@ -29,7 +29,7 @@ One workspace per optimizer, `<home>/<optimizer>/`, because the archive and the 
 |---|---|
 | `data/projects/default/campaigns/<id>/cycles/<cycle>/` | the campaign tree a real run writes, in its own data root beside everything below (`scripts/offline_run.py::data_root`), since every process lands its root at entry; browse it with `PROMPTPOTTER_HOME=<home>/<optimizer>/data` on the server |
 | `requests/NNNN_<node>_<k>.json` | every optimizer LLM request as sent, in arrival order, beside the fake's answer |
-| `trace.json` | the run's `scripts/offline_run.py::BehaviourTrace`: every decision it made, canonical (ids mapped to labels, timestamps and hashes dropped), the race standings (`p_best`, `paired_breakdown`) among them; `harness` adds the stop reason, unrouted URLs and call counts; the hash of each request; the world version (`scripts/offline_world.py::WORLD`) |
+| `trace.json` | the run's `scripts/offline_run.py::BehaviourTrace`: every decision it made, canonical (ids mapped to labels, timestamps dropped, each content hash labelled by first appearance so a platform's float noise never moves it), the race standings (`p_best`, `paired_breakdown`) among them; `harness` adds the stop reason, unrouted URLs and call counts; the hash of each request; the world version (`scripts/offline_world.py::WORLD`) |
 | `resumed/` | the same campaign paused at the first fresh cell measured past a banked walk, round 2 on, and ended on a session rebuilt from disk: the resume replays the walk, its reads included, and runs no proposer; the round it paused in is read off its ledger (`scripts/offline_run.py::paused_at`) |
 | `diverged/` | the first optimizer's campaign resumed with `--on-divergence fork` under an edited proposer prompt, then forked twice more (the multi-course sidebar fixture) |
 | `rebased/` | potter's campaign resumed with `--from 1` under an L2 proposing the same config-changing fork at every fire; fails unless the line forks and ends on a stop other than `REBASED` within its budget |
@@ -52,7 +52,7 @@ PROMPTPOTTER_HOME=after python scripts/offline_run.py --against base
 diff -r base/<optimizer>/requests after/<optimizer>/requests   # what each optimizer call was SENT
 ```
 
-Requests moving while decisions hold is a rendering change; decisions moving is a behaviour change; a field the base's trace lacks reads moved. Two runs of one tree are byte identical. `--digests` prints the L4 identity digests, which a change that should not re-key an inner cell leaves equal. `--coverage` prints, per package, the function-body lines the run's processes ran (PEP 669, once a line), which is what a trace can vouch for.
+Requests moving while decisions hold is a rendering change; decisions moving is a behaviour change; a field the base's trace lacks reads moved. Two runs of one tree are byte identical. A run under the default flags regenerates `promptpotter/assets/behaviour_keys.json`, each built-in optimizer's fingerprint (the hash of its straight run's decisions and requests) and the L4 estimator's (the L4 leg's, its own estimator read out) under `offline_world.py::WORLD`, and exits 1 on a line `wrote …` where it moved: a behaviour change re-keys its optimizer once the file is committed, a refactor leaves it unchanged. `--digests` prints the L4 identity digests, which a change that should not re-key an inner cell leaves equal. `--coverage` prints, per package, the function-body lines the run's processes ran (PEP 669, once a line), which is what a trace can vouch for.
 
 ## What is faked, and how
 

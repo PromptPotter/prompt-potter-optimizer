@@ -20,7 +20,6 @@ from pydantic_core import core_schema
 
 from promptpotter.domain.layer_fold import Laid, Lay, Layer, Rule, fold_layers
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -56,7 +55,6 @@ class _LaidOrder(tuple[str, ...]):
         return 0
 
 
-@shapes_optimizer_prompt
 class NodeCall(FrozenModel):
     """A node's engine call keys typed as laid (strict: a wrong type refuses, a number stays the int
     or float it was hashed as), each field its key's one spelling; other keys are its backend's."""
@@ -121,19 +119,13 @@ def _call_keys_in(roster: _Roster) -> frozenset[str]:
     )
 
 
-WHO_ANSWERS_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(
-    _Roster.WHO_ANSWERS
-)
-PARAM_FORBIDDEN_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(
-    _Roster.FORBIDDEN
-)
+WHO_ANSWERS_KEYS: frozenset[str] = _call_keys_in(_Roster.WHO_ANSWERS)
+PARAM_FORBIDDEN_KEYS: frozenset[str] = _call_keys_in(_Roster.FORBIDDEN)
 # A forbidden key changes who answers: else a steer of one inherits a C0 measured by another host.
 assert PARAM_FORBIDDEN_KEYS <= WHO_ANSWERS_KEYS, PARAM_FORBIDDEN_KEYS - WHO_ANSWERS_KEYS
-PARAM_SCOPE_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = _call_keys_in(_Roster.SCOPE)
+PARAM_SCOPE_KEYS: frozenset[str] = _call_keys_in(_Roster.SCOPE)
 # Every key an llm node's config may set beside its knobs and prompt fields.
-CALL_CONFIG_KEYS: Annotated[frozenset[str], shapes_optimizer_prompt] = frozenset(
-    NodeCall.model_fields
-)
+CALL_CONFIG_KEYS: frozenset[str] = frozenset(NodeCall.model_fields)
 
 
 class PipelineParams(FrozenModel):

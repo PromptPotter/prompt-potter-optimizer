@@ -14,7 +14,7 @@ from promptpotter.application.optimizers.nodes import (
     PanelSize,
     Reviewer,
     RoundWalk,
-    source_digest,
+    behaviour_key,
 )
 from promptpotter.config.paths import (
     checkin_assets_root,
@@ -25,7 +25,6 @@ from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.campaign_config import ArmGateMode, OptimizerChoice
 from promptpotter.domain.dashboard_rows import OptimizerLimit
-from promptpotter.domain.l4 import proxies
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_manifest import (
@@ -66,7 +65,7 @@ from promptpotter.shared.errors import (
     PotterError,
     unknown_slots_said,
 )
-from promptpotter.shared.hashing import shapes_optimizer_prompt, stable_hash
+from promptpotter.shared.hashing import stable_hash
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import (
@@ -83,7 +82,6 @@ if TYPE_CHECKING:
     )
 
 
-@shapes_optimizer_prompt
 def _stamp(path: Path) -> int:
     try:
         return path.stat().st_mtime_ns
@@ -104,14 +102,12 @@ def authored_manifest(path: Path) -> PipelineManifest | ManifestSwitch:
     return _read_manifest(path, _stamp(path))
 
 
-@shapes_optimizer_prompt
 @functools.lru_cache(maxsize=8)
 def _read_schemas(path: Path) -> dict[str, Any]:
     schemas: dict[str, Any] = read_json(path)
     return schemas
 
 
-@shapes_optimizer_prompt
 def _parse(manifest: PipelineManifest, schemas: Mapping[str, Any]) -> PipelineSchema:
     authored = manifest.model_dump(mode="json", exclude_unset=True)
     # Every prompt a manifest resolves is an `OptimizerPromptTemplate`, so its loci are that class's.
@@ -130,7 +126,6 @@ def _role(holds: Holds, *kinds: NodeKind) -> dict[str, Any]:
     return {"admits": frozenset(kinds), "holds": holds}
 
 
-@shapes_optimizer_prompt
 @dataclass(frozen=True)
 class RoundPlan:
     """What the bench walks, by role: built once, at load, so a walk the bench cannot run is refused before a mint."""
@@ -265,7 +260,6 @@ def _round_plan(
     )
 
 
-@shapes_optimizer_prompt
 @dataclass(frozen=True)
 class SelectedOptimizer:
     """``manifest`` is as resolved, a switch laid onto what it extends; ``schema`` is it parsed with the overlay applied."""
@@ -595,10 +589,10 @@ class SelectedOptimizer:
                     {n: self.knobs(n).model_dump(mode="json") for n in self.member_nodes},
                 ]
             ),
-            # What an initializer seeds its pool from is prompt MATERIAL stored as data, which no module digest reads.
-            source=stable_hash(
+            # What an initializer seeds its pool from is prompt MATERIAL stored as data, which no file hash reads.
+            behaviour=stable_hash(
                 [
-                    source_digest(self.members, proxies),
+                    behaviour_key(self.name, self.members, manifest_directories(self.name)),
                     {
                         i.name: i.starting_content(self, admits, shelf)
                         for i in self.plan.initializers
@@ -613,7 +607,6 @@ def _resolved_levers(node: str, declared: Mapping[str, Any]) -> dict[str, Any]:
     return {} if member is None else member.resolved_levers(declared)
 
 
-@shapes_optimizer_prompt
 def running_prompt(
     node: str, config: NodeConfig, manifest: PipelineManifest
 ) -> OptimizerPromptTemplate:
@@ -993,7 +986,6 @@ class CheckinManifest:
         return self.manifest.config
 
 
-@shapes_optimizer_prompt
 @functools.lru_cache(maxsize=2)
 def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
     manifest = CHECKIN_MANIFEST.validate_python(read_yaml(path))
@@ -1001,7 +993,6 @@ def _checkin_at(path: Path, _mtime_ns: int) -> CheckinManifest:
     return CheckinManifest(manifest=manifest, schema=_parse(manifest, schemas))
 
 
-@shapes_optimizer_prompt
 def checkin_manifest() -> CheckinManifest:
     path = checkin_manifest_path()
     return _checkin_at(path, _stamp(path))

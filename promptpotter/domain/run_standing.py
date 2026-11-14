@@ -22,7 +22,6 @@ from promptpotter.domain.paired_reading import (
 from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.clock import duration_words
-from promptpotter.shared.hashing import shapes_optimizer_prompt
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
@@ -31,7 +30,6 @@ def closed_after_origin(rounds: Sequence[int]) -> int:
     return sum(1 for number in rounds if number > 0)
 
 
-@shapes_optimizer_prompt
 def rounds_without_advance(rounds: Sequence[RoundOutcome]) -> int:
     depth = 0
     for rr in reversed(rounds):
