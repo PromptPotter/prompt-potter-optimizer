@@ -489,10 +489,10 @@ def install_network(router: Router) -> Callable[[], None]:
         urllib.request.urlopen,
         socket.getaddrinfo,
         wire["held_wait"],
-        settings.TERMNORM_URL,
+        settings.TERMNORM_ENDPOINTS,
     )
-    # The operator's TermNorm is this world's backend.
-    settings.TERMNORM_URL = FakeBackend.URL
+    # The operator's TermNorm is this world's backend, its one endpoint.
+    settings.TERMNORM_ENDPOINTS = {"offline": FakeBackend.URL}
     httpx.AsyncHTTPTransport.handle_async_request = handle_async_request  # type: ignore[method-assign,assignment]
     httpx.HTTPTransport.handle_request = handle_request  # type: ignore[method-assign,assignment]
     urllib.request.urlopen = urlopen
@@ -508,7 +508,7 @@ def install_network(router: Router) -> Callable[[], None]:
             urllib.request.urlopen,
             socket.getaddrinfo,
             wire["held_wait"],
-            settings.TERMNORM_URL,
+            settings.TERMNORM_ENDPOINTS,
         ) = real
 
     return restore

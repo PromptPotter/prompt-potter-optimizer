@@ -82,7 +82,8 @@ type ArmSource = DatasetArms | CheckinArms
 
 
 async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
-    await refuse_unreachable(runnable_definition(dataset).connector)
+    definition = runnable_definition(dataset)
+    await refuse_unreachable(definition.connector, definition.endpoint)
     closing = AsyncExitStack()
     session = await closing.enter_async_context(
         init_services(dataset_name=dataset.name, identity=stores.identity, stores=stores)
@@ -93,7 +94,7 @@ async def dataset_arms(stores: Stores, dataset: ResolvedDataset) -> DatasetArms:
 async def checkin_arms(
     stores: Stores, claim: DraftClaim, request: HeadToHeadRequest, served: ServedPipeline
 ) -> CheckinArms:
-    await refuse_unreachable(served.connector)
+    await refuse_unreachable(served.connector, served.endpoint)
     overlays = [request.declared_optimization(arm) for arm in request.arms]
     closing = AsyncExitStack()
     opened = await closing.enter_async_context(

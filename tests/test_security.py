@@ -1927,7 +1927,7 @@ async def test_a_backend_with_no_address_is_on_every_check_and_never_told(
     offline: Router, oidc: _Oidc, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A box deployed green with its backend unaddressed: the roster had dropped it unsaid.
-    monkeypatch.setattr(settings_mod.settings, "TERMNORM_URL", "")
+    monkeypatch.setattr(settings_mod.settings, "TERMNORM_ENDPOINTS", {})
     offline.token_endpoints["oauth2.googleapis.com/token"] = (400, {"error": "invalid_grant"})
     checked = await health.check(oidc.projects)
     backends = [c for c in checked if c.probe.name == "backend:termnorm"]

@@ -9,6 +9,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Changed
 
 - **A definition names its connector `pipeline.connector`** (was `pipeline.backend_type`); an account's own definition naming the old key no longer resolves until its key is renamed. An unregistered name answers a 422 naming the registered set, never a 500.
+- **A connector's address is a map of named endpoints, and a dataset names one as `pipeline.endpoint`**; a map of one answers a dataset naming none, a map of more refuses it naming the names. `TERMNORM_URL=<url>` becomes `TERMNORM_ENDPOINTS={"local": "<url>"}` and `N8N_HARNESS_URL=<url>` becomes `N8N_HARNESS_ENDPOINTS={"<name>": "<url>"}` in every install's `.env` (the box's included); an n8n cell keeps its key, since each hashes its own endpoint's URL. `GET /backends` serves `endpoints` in place of `base_url`, and `/backends/{id}/health` no `base_url`.
+- **`DBLLMBENCH_DB_URL` has no default**: a dbllmbench launch refuses without it (`.env.example` names upstream's compose addresses). A harbor dataset names `nodes.agent.config.skill_delivery` (`agent_skill` was the default); one naming none refuses at run init.
 
 ### Removed
 

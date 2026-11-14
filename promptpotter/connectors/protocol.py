@@ -85,12 +85,13 @@ AuthTokenFn = Callable[[], str | None]
 
 @dataclass(frozen=True)
 class Endpoint:
-    """Where a ``remote_http`` backend listens: the operator's config, never a request's word."""
+    """Where a ``remote_http`` backend listens, by name: the operator's config, never a request's
+    word. A dataset names one as ``pipeline.endpoint``; a map of one answers a dataset naming none."""
 
     setting: str
-    """The ``.env`` key holding it, which an unset address names."""
+    """The ``.env`` key holding the name → URL map, which an unresolved name names."""
 
-    read: Callable[[], str]
+    read: Callable[[], Mapping[str, str]]
 
 
 # `(node name, node config, the run's workload) -> what one run of that node can bill`; an LLM
@@ -254,9 +255,10 @@ class Connector:
     ``dataset.yaml::pipeline`` overlays it."""
 
     identity_config: (
-        Callable[[Stores, Mapping[str, Any] | None], dict[str, dict[str, Any]]] | None
+        Callable[[Stores, Mapping[str, Any] | None, str], dict[str, dict[str, Any]]] | None
     ) = None
-    """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds."""
+    """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds;
+    handed the dataset's endpoint address (``base_url``)."""
 
     uploads: UploadDefaults | None = None
     """Set = a check-in may name it: it runs an uploaded table's rows, and nothing beside them."""
@@ -276,14 +278,34 @@ class Connector:
     def serves_pipeline(self) -> bool:
         return self.execution == "remote_http" and self.pipeline_declaration is None
 
-    def base_url(self) -> str:
-        return self.endpoint.read().rstrip("/") if self.endpoint is not None else ""
+    def endpoints(self) -> dict[str, str]:
+        """Each named address the operator holds; empty where none is, or the backend has no wire."""
+        held = {} if self.endpoint is None else self.endpoint.read()
+        return {name: url.rstrip("/") for name, url in held.items() if url}
 
-    def unconfigured(self) -> str | None:
-        """Why a ``remote_http`` backend has no address; ``None`` where it holds one or has no wire."""
-        if self.endpoint is None or self.base_url():
+    def probed_endpoints(self) -> list[str | None]:
+        """What a probe of the whole backend asks: each named endpoint, else the unnamed one."""
+        named: list[str | None] = [*self.endpoints()]
+        return named or [None]
+
+    def base_url(self, endpoint: str | None) -> str:
+        """*endpoint*'s address, as a dataset names it; ``""`` where it resolves to none."""
+        held = self.endpoints()
+        if endpoint is None:
+            return next(iter(held.values())) if len(held) == 1 else ""
+        return held.get(endpoint, "")
+
+    def unconfigured(self, endpoint: str | None) -> str | None:
+        """Why a ``remote_http`` backend has no address for *endpoint*; ``None`` where it holds one
+        or has no wire."""
+        if self.endpoint is None or self.base_url(endpoint):
             return None
-        return f"{self.endpoint.setting} is unset: name the {self.name} backend in .env."
+        setting, held = self.endpoint.setting, sorted(self.endpoints())
+        if not held:
+            return f"{setting} is unset: name the {self.name} backend in .env."
+        if endpoint is None:
+            return f"{setting} holds {held}: the dataset names one as `pipeline.endpoint`."
+        return f"{setting} holds no endpoint {endpoint!r}, only {held}."
 
     def credential_header(self) -> dict[str, str]:
         """The header the operator's credential rides in on every request; empty where config holds none."""
@@ -293,16 +315,16 @@ class Connector:
         scheme = self.auth_scheme()
         return {scheme.header: f"{scheme.prefix}{token}"}
 
-    async def unreachable(self) -> str | None:
-        """Why the backend cannot be reached now; ``None`` where it answers or probes nothing. A
-        failed probe's transport error is the reason, so no ``preflight`` catches its own."""
-        if (unset := self.unconfigured()) is not None:
+    async def unreachable(self, endpoint: str | None) -> str | None:
+        """Why the backend cannot be reached now at *endpoint*; ``None`` where it answers or probes
+        nothing. A failed probe's transport error is the reason, so no ``preflight`` catches its own."""
+        if (unset := self.unconfigured(endpoint)) is not None:
             return unset
         if self.preflight is None:
             return None
         import httpx
 
-        base_url = self.base_url()
+        base_url = self.base_url(endpoint)
         try:
             return await self.preflight(base_url)
         except httpx.TransportError as exc:

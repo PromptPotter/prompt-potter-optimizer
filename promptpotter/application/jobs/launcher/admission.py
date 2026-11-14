@@ -164,17 +164,19 @@ class RunStart:
             logger.exception("failed to record launch stop for job %s", self.job_id)
 
 
-async def probe_backend(name: str) -> BackendUnreachableError | MissingExtraError | None:
+async def probe_backend(
+    name: str, endpoint: str | None
+) -> BackendUnreachableError | MissingExtraError | None:
     connector = connectors.CONNECTORS.get(name)
     if connector.extra is not None and (absent := missing(connector.extra)):
         return MissingExtraError(connector.extra, absent)
-    if (down := await connector.unreachable()) is not None:
-        return BackendUnreachableError(connector.name, connector.base_url(), down)
+    if (down := await connector.unreachable(endpoint)) is not None:
+        return BackendUnreachableError(connector.name, connector.base_url(endpoint), down)
     return None
 
 
-async def refuse_unreachable(name: str) -> None:
-    if (down := await probe_backend(name)) is not None:
+async def refuse_unreachable(name: str, endpoint: str | None) -> None:
+    if (down := await probe_backend(name, endpoint)) is not None:
         raise down
 
 
@@ -385,7 +387,7 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
             refuse_campaign(stores, campaign_at(stores, hop))
 
     t0 = time.perf_counter()
-    await refuse_unreachable(request.connector(stores))
+    await refuse_unreachable(request.connector(stores), request.endpoint(stores))
     t_probe = time.perf_counter()
     declared, asked = declare_run_budget(
         request.declared_budget(stores), stores=stores, hop=hop, requested=request.budget

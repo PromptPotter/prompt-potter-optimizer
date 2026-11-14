@@ -3070,6 +3070,7 @@ def dspy_cells(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router)
         )
         client = BackendClient(
             dspy_module.CONNECTOR,
+            endpoint=None,
             workload=InProcessWorkload(
                 experiment=None, experiment_dir=None, program=program, workspace=None
             ),

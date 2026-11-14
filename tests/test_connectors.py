@@ -69,6 +69,7 @@ def _scripted_lm(sends: list[int], script: list[Exception]) -> Any:
 def _dspy_cell(program: dspy_module.DspyProgram, max_calls: int, ledger: Path) -> dict[str, Any]:
     client = BackendClient(
         dspy_module.CONNECTOR,
+        endpoint=None,
         workload=InProcessWorkload(
             experiment=None, experiment_dir=None, program=program, workspace=None
         ),
@@ -242,6 +243,29 @@ def test_a_trailing_slash_on_the_n8n_harness_url_rekeys_no_cell(
     assert harness is not None
     keys = []
     for url in ("https://n8n.example/webhook/eval", "https://n8n.example/webhook/eval/"):
-        monkeypatch.setattr(settings, "N8N_HARNESS_URL", url)
-        keys.append(harness(stores, None))
+        monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"eval": url})
+        keys.append(harness(stores, None, n8n.CONNECTOR.base_url(None)))
     assert keys[0] == keys[1], "a trailing slash re-keyed every banked n8n cell"
+
+
+# Each dataset names its endpoint; adding one is no `.env` edit of another's.
+@pytest.mark.usefixtures("offline")
+def test_a_second_n8n_endpoint_rekeys_no_cell_of_the_first(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    stores = workspace(tmp_path)
+    harness = n8n.CONNECTOR.identity_config
+    assert harness is not None
+    first, second = "https://n8n.example/webhook/classify", "https://n8n.example/webhook/route"
+    monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": first})
+    alone = harness(stores, None, n8n.CONNECTOR.base_url(None))
+    monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": first, "route": second})
+    keyed = {
+        name: harness(stores, None, n8n.CONNECTOR.base_url(name)) for name in ("classify", "route")
+    }
+    assert keyed["classify"] == alone, "a second endpoint re-keyed the first's banked cells"
+    assert keyed["route"] != alone, "two workflows' cells share a key"
+    refused = n8n.CONNECTOR.unconfigured(None)
+    assert refused is not None and "['classify', 'route']" in refused, (
+        "a dataset naming no endpoint ran on one of two"
+    )

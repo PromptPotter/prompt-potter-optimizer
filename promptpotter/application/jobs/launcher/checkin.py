@@ -30,7 +30,6 @@ from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
     ServedPipeline,
     draft_budget,
-    draft_connector,
     draft_pipeline,
     draft_sends,
     laid_config,
@@ -79,8 +78,11 @@ class CheckinStart:
     def holder(self) -> CampaignLaunch:
         return CampaignLaunch(self.dataset_name, draft_id=self.claim.draft_id)
 
-    def connector(self, stores: Stores) -> str:
-        return draft_connector(stores, owned_draft(stores, self.claim.draft_id))
+    def connector(self, _stores: Stores) -> str:
+        return self.served.connector
+
+    def endpoint(self, _stores: Stores) -> str | None:
+        return self.served.endpoint
 
     def declared_budget(self, stores: Stores) -> Budget:
         return draft_budget(stores, owned_draft(stores, self.claim.draft_id))

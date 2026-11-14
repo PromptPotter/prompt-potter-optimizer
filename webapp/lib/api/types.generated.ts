@@ -452,16 +452,15 @@ export interface BackendResponse {
   execution: 'remote_http' | 'in_process';
   /** False where a `remote_http` one names no address, so every call refuses */
   configured: boolean;
-  /** Where the operator configured it; empty where none is */
-  base_url: string;
+  /** Each address the operator configured, by the name a dataset's
+   * `pipeline.endpoint` gives; empty where none is */
+  endpoints: Record<string, string>;
   /** The header the operator's credential rides in on every request; null where
    * operator config holds none */
   auth_header: string | null;
 }
 
 export interface BackendHealthResponse {
-  /** Backend API base URL probed */
-  base_url: string;
   /** Reachability, worded by `BACKEND_REACHABILITY_INFO` */
   status: 'live' | 'unreachable' | 'missing_extra';
   /** ISO 8601 probe timestamp */

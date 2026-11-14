@@ -24,7 +24,10 @@ class BackendResponse(StrictModel):
     configured: bool = Field(
         description="False where a `remote_http` one names no address, so every call refuses"
     )
-    base_url: str = Field(description="Where the operator configured it; empty where none is")
+    endpoints: dict[str, str] = Field(
+        description="Each address the operator configured, by the name a dataset's "
+        "`pipeline.endpoint` gives; empty where none is"
+    )
     auth_header: str | None = Field(
         description="The header the operator's credential rides in on every request; null where "
         "operator config holds none"
@@ -32,7 +35,6 @@ class BackendResponse(StrictModel):
 
 
 class BackendHealthResponse(StrictModel):
-    base_url: str = Field(description="Backend API base URL probed")
     status: BackendReachability = Field(
         description="Reachability, worded by `BACKEND_REACHABILITY_INFO`"
     )
@@ -47,8 +49,8 @@ def list_backends() -> list[BackendResponse]:
         BackendResponse(
             id=name,
             execution=connector.execution,
-            configured=connector.unconfigured() is None,
-            base_url=connector.base_url(),
+            configured=connector.endpoint is None or bool(connector.endpoints()),
+            endpoints=connector.endpoints(),
             auth_header=next(iter(connector.credential_header()), None),
         )
         for name, connector in sorted(connectors.CONNECTORS.table.items())
@@ -56,13 +58,14 @@ def list_backends() -> list[BackendResponse]:
 
 
 async def backend_health(backend_id: str) -> BackendHealthResponse:
-    """A down backend is an answer, never an error; only an unregistered *backend_id* is a 404."""
+    """A down backend is an answer, never an error; only an unregistered *backend_id* is a 404.
+    Each endpoint is probed, and the first refusal is the answer."""
     connector = connectors.CONNECTORS.table.get(backend_id)
     if connector is None:
         raise NotFoundError(f"Backend '{backend_id}' not found")
-    down = await probe_backend(connector.name)
+    downs = [await probe_backend(connector.name, e) for e in connector.probed_endpoints()]
+    down = next((d for d in downs if d is not None), None)
     return BackendHealthResponse(
-        base_url=connector.base_url(),
         status=backend_reachability(down),
         checked_at=utcnow_iso(),
         detail=None if down is None else str(down),

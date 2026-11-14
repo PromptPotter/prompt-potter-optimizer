@@ -30,6 +30,7 @@ from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     own_definition,
+    resolve_dataset,
     runnable_definition,
 )
 from promptpotter.infrastructure.store.stores import Stores
@@ -88,6 +89,9 @@ class FreshMint:
     def connector(self, _stores: Stores) -> str:
         return runnable_definition(self.dataset).connector
 
+    def endpoint(self, _stores: Stores) -> str | None:
+        return runnable_definition(self.dataset).endpoint
+
     def campaign_config(self, stores: Stores) -> CampaignConfig:
         """Bound to no node: what the mint admits and sends reads no pipeline."""
         return laid_config(
@@ -136,6 +140,10 @@ class ExistingCycle:
 
     def connector(self, _stores: Stores) -> str:
         return self.campaign.connector
+
+    def endpoint(self, stores: Stores) -> str | None:
+        """The definition's, as the resume's session reads it."""
+        return runnable_definition(resolve_dataset(stores, self.dataset_name)).endpoint
 
     def declared_budget(self, stores: Stores) -> Budget:
         return cycle_config(stores, self.campaign, self.hop).config.optimization.budget

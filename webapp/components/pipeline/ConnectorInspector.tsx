@@ -20,9 +20,9 @@ export function ConnectorInspector() {
   // Only a remote wire has a connection to secure.
   const remote = backend.active?.execution === "remote_http";
   const unset = remote && !backend.active?.configured;
-  const baseUrl = backend.active?.base_url || null;
+  const urls = Object.values(backend.active?.endpoints ?? {});
   const authHeader = backend.active?.auth_header ?? null;
-  const isTls = baseUrl ? baseUrl.startsWith("https://") : null;
+  const isTls = urls.length > 0 ? urls.every((url) => url.startsWith("https://")) : null;
   const { reachable, stateCls, stateLabel } = connectorReachability(health);
   // No resolved connector is a terminal "idle", never a perpetual "probing…" (webapp/CLAUDE.md § I1).
   const noBackend = connector == null;
@@ -46,11 +46,11 @@ export function ConnectorInspector() {
         <span className="name">{connector ?? PLACEHOLDER}</span>
         <span className="state">{label}</span>
       </div>
-      {baseUrl && (
-        <div className="connector-pop-url" title={baseUrl}>
-          {baseUrl}
+      {urls.map((url) => (
+        <div key={url} className="connector-pop-url" title={url}>
+          {url}
         </div>
-      )}
+      ))}
       <div className="connector-pop-sec">
         {unset && (
           <span className="sec-chip warn" title="No address configured: every call refuses">

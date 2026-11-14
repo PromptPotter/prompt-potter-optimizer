@@ -173,6 +173,11 @@ class DatasetDefinition:
         """``pipeline.connector``, ``""`` where none is declared; `Registry.get` refuses the rest."""
         return named if isinstance(named := self.pipeline.get("connector"), str) else ""
 
+    @property
+    def endpoint(self) -> str | None:
+        """``pipeline.endpoint``: which of its connector's named addresses it runs on (`Endpoint`)."""
+        return named if isinstance(named := self.pipeline.get("endpoint"), str) else None
+
 
 def with_node_templates(pipeline: Mapping[str, Any]) -> dict[str, Any]:
     """*pipeline* with its connector's template under each node it declares; a connector this

@@ -55,6 +55,6 @@ Next: [Your first campaign](03-first-campaign.md).
 | `GROQ_API_KEY` | using Groq |
 | `OPENAI_API_KEY` | using OpenAI |
 | `ANTHROPIC_API_KEY` | the `dbllmbench` connector's writer on `provider: anthropic` |
-| `TERMNORM_URL` | a TermNorm backend (unset: TermNorm is not configured; locally `http://127.0.0.1:8000`) |
+| `TERMNORM_ENDPOINTS` | the TermNorm backends by name, as a dataset's `pipeline.endpoint` names one (unset: TermNorm is not configured; locally `{"local": "http://127.0.0.1:8000"}`) |
 | `TERMNORM_TOKEN` | a TermNorm backend that requires auth |
-| `N8N_HARNESS_URL` / `N8N_HARNESS_TOKEN` | the `n8n` connector: an eval-harness webhook and its secret (`N8N_HARNESS_AUTH_HEADER`, default `X-Eval-Secret`) |
+| `N8N_HARNESS_ENDPOINTS` / `N8N_HARNESS_TOKEN` | the `n8n` connector: its eval-harness webhooks by name and their secret (`N8N_HARNESS_AUTH_HEADER`, default `X-Eval-Secret`) |

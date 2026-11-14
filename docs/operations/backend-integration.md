@@ -41,7 +41,7 @@ A ceiling is enforced before a cell is SENT, at the most the cell may cost; with
 
 ## Connection security
 
-An HTTP connector's endpoint, token and header reach the wire only through the connector (`Authorization: Bearer` unless declared; TermNorm's read `TERMNORM_URL` / `TERMNORM_TOKEN`, n8n's `N8N_HARNESS_URL` / `N8N_HARNESS_TOKEN`). An empty `TERMNORM_TOKEN` sends no header; the backend decides whether to require it (`TERMNORM_REQUIRE_AUTH=1`; mismatch → 401), and the Linux deploy provisions one shared token per install, required even on loopback.
+An HTTP connector's endpoint, token and header reach the wire only through the connector (`Authorization: Bearer` unless declared; TermNorm's read `TERMNORM_ENDPOINTS` / `TERMNORM_TOKEN`, n8n's `N8N_HARNESS_ENDPOINTS` / `N8N_HARNESS_TOKEN`). Each `*_ENDPOINTS` maps a name to a URL, and a dataset names its own as `pipeline.endpoint`; a map of one answers a dataset naming none, a map of more refuses it (`Connector.unconfigured`). An empty `TERMNORM_TOKEN` sends no header; the backend decides whether to require it (`TERMNORM_REQUIRE_AUTH=1`; mismatch → 401), and the Linux deploy provisions one shared token per install, required even on loopback.
 
 **Resilience** — a 429 is the run's backpressure (one shared cooldown); a 5xx or a connection broken before any reply backs off 1→2→4→8 s unless the body says `detail.retryable: false`; a connection never made waits for the connector's own probe up to an outage bound; a link dropped mid-wait surfaces through TCP keepalive as a broken connection, resent; a cell open past the smaller of `cell_envelope_s` and the launch's wall clock left is cut `HALTED`; **a read timeout is never resent** — the backend is still working, and billing, the first request.
 
@@ -51,12 +51,12 @@ An HTTP connector's endpoint, token and header reach the wire only through the c
 
 | Variable | Holds |
 |---|---|
-| `N8N_HARNESS_URL` | the harness webhook, e.g. `https://<instance>/webhook/eval-harness-classify`; one per install |
+| `N8N_HARNESS_ENDPOINTS` | the harness webhooks by name, e.g. `{"classify": "https://<instance>/webhook/eval-harness-classify"}` |
 | `N8N_HARNESS_TOKEN` | the secret the webhook's header-auth credential holds |
 | `N8N_HARNESS_AUTH_HEADER` / `N8N_HARNESS_AUTH_PREFIX` | the header it rides in and what precedes it; default `X-Eval-Secret`, no prefix |
 
 - **Request** `{case_id, input, expected, prompt, params}` — `Sample.key`, the row's query, its gold (informational), the rendered candidate (`""` asks for the production text), the node's `output_schema` / `answer_fields`. **Reply** `{case_id, answer, raw}` — `answer` is graded (a label, or the graded fields as an object or its JSON string); an HTTP error, a timeout or an empty `answer` is an errored cell, never a wrong answer.
-- **The model is the n8n node's.** Cells are keyed on a hash of `N8N_HARNESS_URL` less any trailing `/`, so a model changed inside n8n is a new dataset. **No usage is reported**, so a dollar or token ceiling refuses it (`NO_RATE`).
+- **The model is the n8n node's.** Cells are keyed on a hash of the dataset's endpoint URL less any trailing `/`, so a model changed inside n8n is a new dataset and a second endpoint re-keys no cell of the first. **No usage is reported**, so a dollar or token ceiling refuses it (`NO_RATE`).
 - **Each `output_schema` property's description is a search axis the harness must apply**; one answer field opens the `response_format` toggle, whose `text` arm sends no `params`. Several graded fields: [`../research/structured-output.md`](../research/structured-output.md) § Several graded fields.
 
 ```yaml

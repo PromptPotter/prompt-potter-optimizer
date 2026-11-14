@@ -419,7 +419,7 @@ def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
     )
 
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
-        identity = identity_layer(None, None, None, judges, schema.active_steps)
+        identity = identity_layer(None, None, None, judges, schema.active_steps, base_url="")
         return schema.sp_hash(
             ParamLayers(schema=schema, workspace=None, identity=identity).fold().params
         )
@@ -1039,7 +1039,7 @@ def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: 
     def keyed(declared: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
         resolved = resolve(built_stores, declared)
         rows = samples_from_dicts(extract(resolved))
-        return {s.query: s.key for s in rows}, identity_of(built_stores, resolved)
+        return {s.query: s.key for s in rows}, identity_of(built_stores, resolved, "")
 
     before, fingerprint = keyed(panel)
     other = {"kind": "seat", "id": "other", "inner_dataset": "otherbench"}
@@ -1736,7 +1736,9 @@ def test_an_upload_searches_the_model_axis_its_connectors_menu_bounds() -> None:
     uploads = upload_connector().uploads
     assert uploads is not None
     served_termnorm = ServedPipeline(
-        "termnorm", {"nodes": {"llm_only": LLM_ONLY_NODE}, "pipelines": {"llm_only": ["llm_only"]}}
+        "termnorm",
+        None,
+        {"nodes": {"llm_only": LLM_ONLY_NODE}, "pipelines": {"llm_only": ["llm_only"]}},
     )
     upload_graph = parse_pipeline_response(
         served_termnorm.over(
@@ -3231,7 +3233,7 @@ def test_answering_in_text_sends_no_contract_to_answer_into() -> None:
     assert d234 is not None
     # TermNorm serves its prompt's fields and no slot: its node template declares the slot.
     served_llm = {"type": "llm", "prompt_info": {"fields": list(PROMPT_INFO.fields)}}
-    text_pipeline = ServedPipeline("termnorm", {"nodes": {"llm_only": served_llm}}).over(d234)
+    text_pipeline = ServedPipeline("termnorm", None, {"nodes": {"llm_only": served_llm}}).over(d234)
     text_schema = parse_pipeline_response(text_pipeline)
     base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
     assert {"output_schema", "answer_fields"} <= base["llm_only"].keys(), (

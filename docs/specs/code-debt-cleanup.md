@@ -743,13 +743,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `openai_compat.py`, a record payload in `audit_trail.py`, a model menu, dspy's `LM.kwargs`), which
   the action leaves alone. Action: type `current_config` as `NodeCall` and read its fields.
   **Re-test:** `git grep -cE "current_config\.get\(" -- promptpotter` is 0.
-- **Two connectors still default in code** (rn-conn's landing): `connectors/dbllmbench.py::_DB_DEFAULT_URLS`
-  maps a database to upstream's compose address when `DBLLMBENCH_DB_URL` is unset, and
-  `connectors/harbor.py:229` defaults `skill_delivery` to `agent_skill`, against §0.5. Deleting the map
-  breaks a TypeQL run on an `.env` without the URL, so the address's home is the decision. Action: the
-  address is operator config (the install's `.env.example` names it) and `skill_delivery` sits in the
-  dataset's file; both refuse when absent. **Rides with:** xconn 2 (named endpoints per connector).
-  **Re-test:** `git grep -cE "_DB_DEFAULT_URLS|skill_delivery.*or " -- promptpotter/connectors` is 0.
 
 ### webb-5 (what webb-4 left at its landing)
 
@@ -1021,12 +1014,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
   launch against a backend one contract behind fails at the probe, naming both numbers;
   `connectors/termnorm.py` probes `/version`.
-- **A connector's endpoint is one per install**: `config/settings.py` `TERMNORM_URL`, `N8N_HARNESS_URL`;
-  a second workflow edits `.env` and re-keys every banked cell of the first (`n8n.py::_identity_config`,
-  `:94`, hashes `CONNECTOR.base_url()`). Action: operator config holds named endpoints per connector, and a dataset names one;
-  the credential never leaves operator config ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md)
-  § The credential rides the connector). **Rides with:** xconn 2. **Re-test:** two n8n datasets on two
-  workflows both run, no `.env` edit between them.
 - **A moved capability or backend revision alone passes a resume**: it is a drift cause only when the
   origin hash also mismatches (`jobs/mint.py::resolve_resume`, `::_revision_moved`). Action: a resume
   refuses a moved capability or backend revision. **Rides with:** xconn 3. **Re-test:** a resume after a

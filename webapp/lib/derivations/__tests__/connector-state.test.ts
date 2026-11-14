@@ -3,7 +3,6 @@ import { connectorReachability } from "../connector-state";
 import { type BackendHealthResponse, BACKEND_REACHABILITY_INFO } from "@/lib/api/types";
 
 const health = (status: BackendHealthResponse["status"]): BackendHealthResponse => ({
-  base_url: "http://127.0.0.1:8000",
   status,
   checked_at: "2026-06-03T00:00:00Z",
   detail: null,
