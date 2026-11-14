@@ -58,10 +58,10 @@ def bound_round() -> int:
     return round_num
 
 
-def append_record(*records: CycleRecord, ledger: CycleEventLog | None = None) -> int | None:
-    """``None``: the bound ledger is muted. A failed append raises to the call site."""
-    if ledger is None:
-        ledger = bound_ledger(type(records[0]).__name__)
+def append_record(*records: CycleRecord) -> int | None:
+    """The one way onto the run's ledger, the scope's; ``None``: it is muted. A failed append
+    raises to the call site."""
+    ledger = bound_ledger(type(records[0]).__name__)
     return None if ledger is None else ledger.append(*records)
 
 
@@ -130,7 +130,7 @@ def emit_replay_usage(
         mirrored=False,
     )
     if book is None:
-        append_record(record, ledger=ledger)
+        ledger.append(record)
     else:
         book.file(record, ledger)
 

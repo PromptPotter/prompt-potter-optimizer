@@ -9505,17 +9505,6 @@
         "additionalProperties": false,
         "description": "A candidate of the round in flight, with its sample tape beside its served arm.",
         "properties": {
-          "composite_fitness_formula_short": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Composite Fitness Formula Short"
-          },
           "pipeline_overlay": {
             "anyOf": [
               {
@@ -12985,6 +12974,116 @@
         "title": "ParamIntent",
         "type": "object"
       },
+      "PassGradedRecord": {
+        "additionalProperties": false,
+        "description": "The pass is the fact, the reading a cache of one grading of it; ``reading`` is ``None``\nexactly where ``state`` is not ``read``.",
+        "properties": {
+          "reading": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerifyReading"
+              },
+              {
+                "$ref": "#/components/schemas/BenchReading"
+              },
+              {
+                "$ref": "#/components/schemas/NoiseBand"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reading"
+          },
+          "record_type": {
+            "const": "pass_graded",
+            "default": "pass_graded",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "reserve_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Tokens"
+          },
+          "reserve_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Usd"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReadingState"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "enum": [
+                  "origin",
+                  "selected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "tolerance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tolerance"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationPass"
+          }
+        },
+        "required": [
+          "verification",
+          "subject",
+          "tolerance",
+          "reserve_usd",
+          "reserve_tokens",
+          "reading",
+          "state",
+          "refusal"
+        ],
+        "title": "PassGradedRecord",
+        "type": "object"
+      },
       "PassStop": {
         "additionalProperties": false,
         "description": "Why a bench pass holds fewer rows than it was sent on.",
@@ -13095,6 +13194,12 @@
             "title": "Detail",
             "type": "string"
           },
+          "said": {
+            "description": "SERVED: the cause as every door words it (`paused_by`).",
+            "readOnly": true,
+            "title": "Said",
+            "type": "string"
+          },
           "stop_reason": {
             "anyOf": [
               {
@@ -13111,7 +13216,8 @@
           "stop_reason",
           "cause",
           "detail",
-          "at"
+          "at",
+          "said"
         ],
         "title": "PauseReading",
         "type": "object"
@@ -13597,6 +13703,7 @@
               "arm_act",
               "backend_warning",
               "bank_partition",
+              "bench_scored",
               "campaign_ceiling",
               "cell_beat",
               "cycle_final",
@@ -13614,6 +13721,7 @@
               "llm_call",
               "llm_call_progress",
               "llm_call_start",
+              "pass_graded",
               "phase",
               "priced_key",
               "provider_eased",
@@ -14486,6 +14594,11 @@
         "additionalProperties": false,
         "description": "Which run verbs a cycle admits now: the one answer the run control and the dispatcher read.\n\nEach ``*_refusal`` is the sentence that verb is refused with, empty where it is admitted.",
         "properties": {
+          "launch_refusal": {
+            "description": "Why the cycle's campaign refuses every launch (archived, its definition moved), so its stop's `start-run` acts are not offered; empty where a launch is admitted.",
+            "title": "Launch Refusal",
+            "type": "string"
+          },
           "lookahead_refusal": {
             "description": "`set-sample-lookahead` for ONE round. `auto` is a mode and a disarm removes an arming, so neither needs a walk and neither is refused here.",
             "title": "Lookahead Refusal",
@@ -14535,7 +14648,8 @@
           "refusal",
           "skip_refusal",
           "lookahead_refusal",
-          "payload"
+          "payload",
+          "launch_refusal"
         ],
         "title": "RunAdmission",
         "type": "object"
@@ -17645,112 +17759,6 @@
           "models"
         ],
         "title": "VendorModels",
-        "type": "object"
-      },
-      "VerificationGradedView": {
-        "additionalProperties": false,
-        "description": "The pass is the fact, the reading a cache of one grading of it; ``reading`` is ``None``\nexactly where ``state`` is not ``read``.",
-        "properties": {
-          "kind": {
-            "const": "verification_graded",
-            "default": "verification_graded",
-            "title": "Kind",
-            "type": "string"
-          },
-          "reading": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VerifyReading"
-              },
-              {
-                "$ref": "#/components/schemas/BenchReading"
-              },
-              {
-                "$ref": "#/components/schemas/NoiseBand"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reading"
-          },
-          "refusal": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refusal"
-          },
-          "reserve_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reserve Tokens"
-          },
-          "reserve_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reserve Usd"
-          },
-          "state": {
-            "$ref": "#/components/schemas/ReadingState"
-          },
-          "subject": {
-            "anyOf": [
-              {
-                "enum": [
-                  "origin",
-                  "selected"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Subject"
-          },
-          "tolerance": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tolerance"
-          },
-          "verification": {
-            "$ref": "#/components/schemas/VerificationPass"
-          }
-        },
-        "required": [
-          "verification",
-          "subject",
-          "tolerance",
-          "reserve_usd",
-          "reserve_tokens",
-          "reading",
-          "state",
-          "refusal"
-        ],
-        "title": "VerificationGradedView",
         "type": "object"
       },
       "VerificationMark": {
@@ -21891,7 +21899,7 @@
                 "schema": {
                   "anyOf": [
                     {
-                      "$ref": "#/components/schemas/VerificationGradedView"
+                      "$ref": "#/components/schemas/PassGradedRecord"
                     },
                     {
                       "$ref": "#/components/schemas/VerifySaturated"

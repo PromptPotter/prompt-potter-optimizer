@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from promptpotter.application.datasets.draft_campaign import owned_drafts
+from promptpotter.application.jobs.launcher.admission import admitted
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import (
     LineConfig,
@@ -325,7 +326,9 @@ def course_entry(
     )
     task = None if index.spawned_by is None else index.spawned_by.task or None
     # Run state is the head's under any moment: a replayed stop beside a live phase is no state.
-    state = HierarchyState.of(run, head, lifecycle=campaign.lifecycle_status)
+    state = HierarchyState.of(
+        run, head, lifecycle=campaign.lifecycle_status, admission=admitted(stores, campaign, run)
+    )
     facts = CourseFacts(
         mint=mint,
         spawn=spawn,
@@ -456,15 +459,16 @@ def campaign_entry(
             bench=bench if hop == holder else None,
         )
     line = courses.get(holder.cycle_id)
-    state = (
-        HierarchyState.of(
-            stores.run_state(holder),
+    if line is None:
+        held_run = stores.run_state(holder)
+        state = HierarchyState.of(
+            held_run,
             None,
             lifecycle=campaign.lifecycle_status,
+            admission=admitted(stores, campaign, held_run),
         )
-        if line is None
-        else line.state
-    )
+    else:
+        state = line.state
     spent = campaign_spend(stores.campaigns, stores.charges, campaign.campaign_id)
     lifetime = LifetimeSpend.of(spent.total)
     return HierarchyCampaign(

@@ -64,7 +64,7 @@ BASELINE = {
     # `TYPE_CHECKING` imports on a file-level import cycle: a knot hidden, not cut (`_type_cycles`).
     "type_cycles": 81,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
-    "p_record": 20,
+    "p_record": 21,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
     "p_record_drift": 35,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.

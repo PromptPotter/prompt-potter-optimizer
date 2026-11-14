@@ -721,7 +721,7 @@ def poisoned(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Poisoned:
     # Off the L4 recursion: no inner cells measure this run's arms.
     monkeypatch.setattr(node_context, "inner_cells", lambda: None)
     seated = seat(workspace(tmp_path), origin=(OptSearchPoint(), lambda _s: sheet([])))
-    run_init(seated.cycle, seated.ledger)
+    run_init(seated.cycle)
     set_cycle(seated.cycle, line=[seated.cycle.origin_round, measured], slices=[l2, l3])
     return _Poisoned(seated, poisoned_query, poisoned_value, poisoned_warning)
 

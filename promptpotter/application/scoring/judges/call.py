@@ -15,10 +15,7 @@ from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat, silence_detail
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget
 from promptpotter.infrastructure.llm.spend_book import CallLabel
-from promptpotter.infrastructure.llm.telemetry import (
-    active_cycle_ledger,
-    current_round,
-)
+from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.llm.wallet import keyed_client
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.llm_reuse_cache import hash_call
@@ -129,10 +126,9 @@ def _request(stage: JudgeStage, prompt: str) -> ChatRequest:
 async def _sample(stage: JudgeStage, prompt: str, *, judge: str, started: float) -> LLMResponse:
     client = keyed_client(stage.provider)
     label = f"{judge}:{stage.role}"
-    # Unconditional: `heartbeat` takes `ledger=None`, so a missing sink cannot disarm liveness.
+    # Unconditional: an unbound scope still ticks, so a missing ledger cannot disarm liveness.
     beat = asyncio.create_task(
         heartbeat(
-            active_cycle_ledger(),
             CallBeat(uuid.uuid4().hex, label),
             round_num=current_round(),
             start_monotonic=started,

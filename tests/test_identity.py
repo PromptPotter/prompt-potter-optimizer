@@ -2855,7 +2855,7 @@ def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(
     stores = built_stores
     declared = decl.declared
     opened, held_campaign = held
-    wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
+    CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     root_cut = Cut(
         cycle=CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)),
         hop=held_campaign.root_hop,
@@ -2872,9 +2872,7 @@ def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(
         "a moved bench defaults pin drifted nothing, or blamed another part"
     )
     for on_disk, served_drift in ((stale, drift), (held_campaign, None)):
-        declare_run_wiring(
-            opened, effective_config(declared), wired_ledger, campaign=on_disk, selected=running
-        )
+        declare_run_wiring(opened, effective_config(declared), campaign=on_disk, selected=running)
         served = fold_at(root_cut)
         assert served is not None and served.defaults_drift == served_drift, (
             "a launch past moved bench defaults served no drift, or one on its own served one"
@@ -3061,7 +3059,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     launched = effective_config(declared)
     # The wiring a launch declares before its observers build.
     selected = select_optimizer(launched.optimization)
-    declare_run_wiring(opened, launched, wired_ledger, campaign=held_campaign, selected=selected)
+    declare_run_wiring(opened, launched, campaign=held_campaign, selected=selected)
     address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
 
     def pause(key: str) -> str:
@@ -3170,9 +3168,9 @@ def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
     stores = built_stores
     opened, held_campaign = held
     launched = effective_config(decl.declared)
-    wired = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
+    CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     selected = select_optimizer(launched.optimization)
-    declare_run_wiring(opened, launched, wired, campaign=held_campaign, selected=selected)
+    declare_run_wiring(opened, launched, campaign=held_campaign, selected=selected)
     queue = JobRegistry(stores.jobs_dir, capacity=lambda _live: 0)
     address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
 
@@ -4152,7 +4150,7 @@ def _view(
     an L4 outer's under *cells*, which run each inner campaign's manifest."""
     monkeypatch.setattr(node_context, "inner_cells", lambda: cells)
     seated = seat(stores, schema=schema, framing=framing, origin=(parent, lambda _s: sheet([])))
-    run_init(seated.cycle, seated.ledger)
+    run_init(seated.cycle)
     return PotterView(NodeContext(seated, optimizers.NODE_MEMBERS.get("l1_generate")), Ladder())
 
 
@@ -4179,7 +4177,7 @@ def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
     hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(80)]
     monkeypatch.setattr(node_context, "inner_cells", lambda: None)
     seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
-    run_init(seated.cycle, seated.ledger)
+    run_init(seated.cycle)
     parent = ArmKey(prompted(instruction="parent").id)
     latest = round_result(
         1,

@@ -247,40 +247,6 @@
         "title": "ActivityState",
         "type": "object"
       },
-      "ArmAbility": {
-        "additionalProperties": false,
-        "description": "One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale.",
-        "properties": {
-          "caveat": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ThetaCaveat"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Why `theta` is not this arm's ability, of the ARM's own scope."
-          },
-          "theta": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Estimate"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null where the round's fit read no θ for the arm."
-          }
-        },
-        "required": [
-          "theta",
-          "caveat"
-        ],
-        "title": "ArmAbility",
-        "type": "object"
-      },
       "ArmAct": {
         "description": "An act on an arm, admitted like on any campaign; on a head-to-head's arm it is the arm's\nexit, from which its line reads uncontrolled (decisions.md § 0009).",
         "enum": [
@@ -317,50 +283,6 @@
           "act"
         ],
         "title": "ArmActRecord",
-        "type": "object"
-      },
-      "ArmElection": {
-        "additionalProperties": false,
-        "description": "What one arm's round decided about it. Built by :meth:`of` alone.",
-        "properties": {
-          "crown": {
-            "anyOf": [
-              {
-                "enum": [
-                  "elected",
-                  "uncontested"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How a selected arm advanced, read off the election's electable count; null on every arm the election did not select.",
-            "title": "Crown"
-          },
-          "held": {
-            "description": "The arm's round has held its election. `selected: false` reads the same on a round still scoring and on one that crowned nobody; only this tells them apart.",
-            "title": "Held",
-            "type": "boolean"
-          },
-          "leading": {
-            "description": "The ONE arm its round is read off, as the selector named it (`Election.leading`); false until the election.",
-            "title": "Leading",
-            "type": "boolean"
-          },
-          "selected": {
-            "title": "Selected",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "held",
-          "selected",
-          "leading",
-          "crown"
-        ],
-        "title": "ArmElection",
         "type": "object"
       },
       "ArmFit": {
@@ -456,283 +378,10 @@
         "title": "ArmName",
         "type": "object"
       },
-      "ArmPanel": {
-        "additionalProperties": false,
-        "description": "The cells one arm's walk holds of the panel its round asked of it.",
-        "properties": {
-          "cached": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Of `scored`, how many were replayed from the archive rather than measured. Null on an arm never measured.",
-            "title": "Cached"
-          },
-          "cached_share": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`cached` over `scored`. Null where either is, and on a walk holding no cell.",
-            "title": "Cached Share"
-          },
-          "cut": {
-            "description": "Stopped short of its round's panel (`panel_cuts`): under its own `expected`, or, for a panel arm, under the fullest panel a panel arm of its round reached.",
-            "title": "Cut",
-            "type": "boolean"
-          },
-          "expected": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The walk's length; null until its first cell announces it.",
-            "title": "Expected"
-          },
-          "scored": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Cells the walk holds. Null on an arm with no score report — never measured, which is not a walk of zero cells.",
-            "title": "Scored"
-          }
-        },
-        "required": [
-          "scored",
-          "expected",
-          "cached",
-          "cached_share",
-          "cut"
-        ],
-        "title": "ArmPanel",
-        "type": "object"
-      },
-      "ArmReading": {
-        "additionalProperties": false,
-        "description": "One arm of one round, read: the one carrier every surface that lists or ranks arms embeds.\n\nEach part lands when its fact exists, so an arm in flight is this type with fewer parts set.",
-        "properties": {
-          "ability": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmAbility"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Null outside the round's election fit."
-          },
-          "arm": {
-            "$ref": "#/components/schemas/ArmName",
-            "description": "THE key, and where the arm was walked."
-          },
-          "bench": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/BenchReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "This arm's individual on the held-out bench set; null unless a pass graded it."
-          },
-          "changes_description": {
-            "title": "Changes Description",
-            "type": "string"
-          },
-          "election": {
-            "$ref": "#/components/schemas/ArmElection"
-          },
-          "end": {
-            "anyOf": [
-              {
-                "enum": [
-                  "invalid",
-                  "skipped",
-                  "broken",
-                  "refused",
-                  "eliminated",
-                  "locked_in"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How its walk ended short of its panel: cut against it (`invalid` refused it before a cell), or `locked_in` — settled FOR it by the eliminator. Null on a walk still running and one that ran its panel.",
-            "title": "End"
-          },
-          "fitness_terms": {
-            "additionalProperties": {
-              "type": "number"
-            },
-            "description": "The round mean of each term the scoring formula reads, `fitness` aside, over the cells that answered it: an L4 outer arm's `held_out_lift` and `floored` share.",
-            "title": "Fitness Terms",
-            "type": "object"
-          },
-          "on_origin_panel": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/LineRate"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Its individual's rate on the origin panel, as the newest overlap reading holds it: the one level two arms of different rounds may be differenced on. Null for an arm neither on the best-so-far line nor triggered, and where it does not hold the whole panel."
-          },
-          "own": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/OwnLevel"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The arm's own level on its round's cells: fitness with the band the gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null before the first row is graded, and on an `invalid` arm, which holds no cell."
-          },
-          "panel": {
-            "$ref": "#/components/schemas/ArmPanel"
-          },
-          "prefix": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PrefixReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The provider's prefix-cache reading of `tokens.input`; null beside a null `tokens`."
-          },
-          "refused_parameter": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The request parameter the endpoint refused, where `end` is `refused`; null on every other arm.",
-            "title": "Refused Parameter"
-          },
-          "role": {
-            "description": "What the arm IS in this round: its origin, one of its proposals, or a `parent` re-read on its cells as a reference — never one of the round's proposals, whatever round `arm` names.",
-            "enum": [
-              "origin",
-              "panel",
-              "parent"
-            ],
-            "title": "Role",
-            "type": "string"
-          },
-          "sp_hash": {
-            "description": "The archive address of this arm's measurements (`prompt_fields_id`). Not a key: a re-proposed configuration shares it across rounds. Empty before it is measured.",
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "state": {
-            "description": "Where the arm's walk stands: proposed, being measured, or ended — cut short against it, or measured.",
-            "enum": [
-              "proposed",
-              "measuring",
-              "cut",
-              "measured"
-            ],
-            "title": "State",
-            "type": "string"
-          },
-          "tokens": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/TokenAccount"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "What measuring it consumed, the BACKEND bucket alone, replayed rows excluded; null until its score report folds an account."
-          },
-          "verify": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VerifyReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Its last `verify` pass, on search cells its rounds never bought."
-          },
-          "vs_reference": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PairedReading"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "This arm (`b`) over the individual it was judged against (`a`), on the cells both scored. Null on the origin and until the election stamps it."
-          },
-          "walked_short": {
-            "description": "`end` names a stop of its walk, for it or against it: false on an `invalid` arm, which never started one.",
-            "title": "Walked Short",
-            "type": "boolean"
-          }
-        },
-        "required": [
-          "arm",
-          "role",
-          "sp_hash",
-          "changes_description",
-          "state",
-          "end",
-          "walked_short",
-          "refused_parameter",
-          "own",
-          "fitness_terms",
-          "panel",
-          "tokens",
-          "prefix",
-          "ability",
-          "vs_reference",
-          "election",
-          "bench",
-          "verify",
-          "on_origin_panel"
-        ],
-        "title": "ArmReading",
-        "type": "object"
-      },
       "ArmRecord": {
         "additionalProperties": false,
         "description": "One arm's transition, LAST wins: proposed, walking, then cut or measured.",
         "properties": {
-          "anchors": {
-            "$ref": "#/components/schemas/ViewAnchors"
-          },
           "arm": {
             "title": "Arm",
             "type": "string"
@@ -1405,23 +1054,28 @@
         "title": "BenchScore",
         "type": "object"
       },
-      "BenchScoredView": {
+      "BenchScoredRecord": {
         "additionalProperties": false,
+        "description": "The line's bench as a run declared it at its close.",
         "properties": {
           "bench": {
             "$ref": "#/components/schemas/BenchScore"
           },
-          "kind": {
+          "record_type": {
             "const": "bench_scored",
             "default": "bench_scored",
-            "title": "Kind",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "timestamp": {
+            "title": "Timestamp",
             "type": "string"
           }
         },
         "required": [
           "bench"
         ],
-        "title": "BenchScoredView",
+        "title": "BenchScoredRecord",
         "type": "object"
       },
       "BenchStatus": {
@@ -1766,48 +1420,6 @@
         "title": "CampaignCeilingRecord",
         "type": "object"
       },
-      "CandidatesGeneratedView": {
-        "additionalProperties": false,
-        "description": "``propose:exit``.",
-        "properties": {
-          "clone_labels": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Clone Labels",
-            "type": "array"
-          },
-          "kind": {
-            "const": "candidates_generated",
-            "default": "candidates_generated",
-            "title": "Kind",
-            "type": "string"
-          },
-          "n_candidates": {
-            "title": "N Candidates",
-            "type": "integer"
-          },
-          "source": {
-            "enum": [
-              "disk",
-              "llm"
-            ],
-            "title": "Source",
-            "type": "string"
-          },
-          "sp_diff": {
-            "$ref": "#/components/schemas/SpDiffView"
-          }
-        },
-        "required": [
-          "n_candidates",
-          "source",
-          "clone_labels",
-          "sp_diff"
-        ],
-        "title": "CandidatesGeneratedView",
-        "type": "object"
-      },
       "CellBeatRecord": {
         "additionalProperties": false,
         "description": "A scoring cell still open, by the arm it walks and the bank row it measures: no node runs it.",
@@ -1883,6 +1495,26 @@
           "elapsed_s"
         ],
         "title": "CellBeatRecord",
+        "type": "object"
+      },
+      "CellFormula": {
+        "additionalProperties": false,
+        "description": "What a cell's worth is read by; a short form exists only for the default, never an override.",
+        "properties": {
+          "formula": {
+            "title": "Formula",
+            "type": "string"
+          },
+          "overridden": {
+            "title": "Overridden",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "formula",
+          "overridden"
+        ],
+        "title": "CellFormula",
         "type": "object"
       },
       "CellSet": {
@@ -2429,6 +2061,7 @@
             "arm_act": "#/components/schemas/ArmActRecord",
             "backend_warning": "#/components/schemas/BackendWarningRecord",
             "bank_partition": "#/components/schemas/PartitionRecord",
+            "bench_scored": "#/components/schemas/BenchScoredRecord",
             "campaign_ceiling": "#/components/schemas/CampaignCeilingRecord",
             "cell_beat": "#/components/schemas/CellBeatRecord",
             "cycle_final": "#/components/schemas/CycleFinalRecord",
@@ -2446,6 +2079,7 @@
             "llm_call": "#/components/schemas/LLMCallRecord",
             "llm_call_progress": "#/components/schemas/LLMCallProgressRecord",
             "llm_call_start": "#/components/schemas/LLMCallStartRecord",
+            "pass_graded": "#/components/schemas/PassGradedRecord",
             "phase": "#/components/schemas/PhaseRecord",
             "priced_key": "#/components/schemas/PricedKeyRecord",
             "provider_eased": "#/components/schemas/ProviderEasedRecord",
@@ -2486,6 +2120,9 @@
           },
           {
             "$ref": "#/components/schemas/PartitionRecord"
+          },
+          {
+            "$ref": "#/components/schemas/BenchScoredRecord"
           },
           {
             "$ref": "#/components/schemas/CampaignCeilingRecord"
@@ -2537,6 +2174,9 @@
           },
           {
             "$ref": "#/components/schemas/LLMCallStartRecord"
+          },
+          {
+            "$ref": "#/components/schemas/PassGradedRecord"
           },
           {
             "$ref": "#/components/schemas/PhaseRecord"
@@ -3856,108 +3496,34 @@
         "title": "IndividualLineage",
         "type": "object"
       },
-      "InitEnterView": {
+      "InitClosed": {
         "additionalProperties": false,
-        "description": "The formula rides here so the mask editor has one to reference DURING origin scoring.",
+        "description": "``resumed_from_round`` is the NEXT L1 round; ``cached_rounds`` counts round artifacts.",
         "properties": {
-          "composite_fitness_formula": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Composite Fitness Formula"
-          },
-          "composite_fitness_formula_short": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Composite Fitness Formula Short"
-          },
-          "kind": {
-            "const": "init_enter",
-            "default": "init_enter",
-            "title": "Kind",
+          "act": {
+            "const": "init_closed",
+            "default": "init_closed",
+            "title": "Act",
             "type": "string"
           },
-          "model": {
-            "default": "",
-            "title": "Model",
-            "type": "string"
-          },
-          "sp_budget_round": {
-            "default": 0,
-            "title": "Sp Budget Round",
-            "type": "integer"
-          },
-          "warnings": {
-            "default": [],
-            "items": {
-              "$ref": "#/components/schemas/WarningEntry"
-            },
-            "title": "Warnings",
-            "type": "array"
-          }
-        },
-        "title": "InitEnterView",
-        "type": "object"
-      },
-      "InitExitView": {
-        "additionalProperties": false,
-        "description": "``resumed_from_round`` is the NEXT L1 round; ``cached_rounds_count`` counts round artifacts.",
-        "properties": {
           "bench_samples": {
             "title": "Bench Samples",
             "type": "integer"
           },
-          "cached_rounds_count": {
-            "default": 0,
-            "title": "Cached Rounds Count",
+          "cached_rounds": {
+            "title": "Cached Rounds",
             "type": "integer"
           },
-          "composite_fitness_formula": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Composite Fitness Formula"
-          },
-          "composite_fitness_formula_short": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Composite Fitness Formula Short"
-          },
-          "cycle_id_short": {
-            "title": "Cycle Id Short",
+          "cycle_id": {
+            "title": "Cycle Id",
             "type": "string"
           },
-          "kind": {
-            "const": "init_exit",
-            "default": "init_exit",
-            "title": "Kind",
-            "type": "string"
+          "formula": {
+            "$ref": "#/components/schemas/CellFormula"
+          },
+          "framing_keys": {
+            "title": "Framing Keys",
+            "type": "integer"
           },
           "origin_fitness": {
             "anyOf": [
@@ -3971,27 +3537,53 @@
             "title": "Origin Fitness"
           },
           "resumed_from_round": {
-            "default": 1,
             "title": "Resumed From Round",
             "type": "integer"
           },
           "samples": {
             "title": "Samples",
             "type": "integer"
-          },
-          "task_context_keys": {
-            "default": 0,
-            "title": "Task Context Keys",
-            "type": "integer"
           }
         },
         "required": [
           "origin_fitness",
-          "cycle_id_short",
+          "cycle_id",
           "samples",
-          "bench_samples"
+          "bench_samples",
+          "resumed_from_round",
+          "cached_rounds",
+          "framing_keys",
+          "formula"
         ],
-        "title": "InitExitView",
+        "title": "InitClosed",
+        "type": "object"
+      },
+      "InitOpened": {
+        "additionalProperties": false,
+        "description": "The formula rides here so the mask editor has one to reference DURING origin scoring.",
+        "properties": {
+          "act": {
+            "const": "init_opened",
+            "default": "init_opened",
+            "title": "Act",
+            "type": "string"
+          },
+          "formula": {
+            "$ref": "#/components/schemas/CellFormula"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/PreflightNote"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "formula"
+        ],
+        "title": "InitOpened",
         "type": "object"
       },
       "Invalid": {
@@ -4049,6 +3641,55 @@
           "payload"
         ],
         "title": "KeepDraftsAction",
+        "type": "object"
+      },
+      "KindSpend": {
+        "additionalProperties": false,
+        "description": "One spend kind as every surface reads it: metered, billed, rate-priced and incurred.",
+        "properties": {
+          "billed_usd": {
+            "title": "Billed Usd",
+            "type": "number"
+          },
+          "counted": {
+            "title": "Counted",
+            "type": "boolean"
+          },
+          "incurred_usd": {
+            "title": "Incurred Usd",
+            "type": "number"
+          },
+          "metered_usd": {
+            "title": "Metered Usd",
+            "type": "number"
+          },
+          "prefix": {
+            "$ref": "#/components/schemas/PrefixReading"
+          },
+          "rate_priced_usd": {
+            "title": "Rate Priced Usd",
+            "type": "number"
+          },
+          "sent": {
+            "title": "Sent",
+            "type": "boolean"
+          },
+          "tokens": {
+            "title": "Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "counted",
+          "sent",
+          "metered_usd",
+          "billed_usd",
+          "rate_priced_usd",
+          "incurred_usd",
+          "tokens",
+          "prefix"
+        ],
+        "title": "KindSpend",
         "type": "object"
       },
       "LLMCallProgressRecord": {
@@ -4386,37 +4027,6 @@
         "title": "LiftCost",
         "type": "object"
       },
-      "LineRate": {
-        "additionalProperties": false,
-        "description": "One member of the best-so-far line as an overlap reading holds it.",
-        "properties": {
-          "arm": {
-            "$ref": "#/components/schemas/ArmName"
-          },
-          "n": {
-            "description": "How many of the panel's cells it holds scoreable.",
-            "title": "N",
-            "type": "integer"
-          },
-          "rate": {
-            "description": "Its level over the panel cells it and C0 both scored.",
-            "title": "Rate",
-            "type": "number"
-          },
-          "unit": {
-            "$ref": "#/components/schemas/MeasurandUnit",
-            "description": "The unit `rate` reads in: its headline's."
-          }
-        },
-        "required": [
-          "arm",
-          "rate",
-          "unit",
-          "n"
-        ],
-        "title": "LineRate",
-        "type": "object"
-      },
       "LivesReading": {
         "additionalProperties": false,
         "description": "A run's life bank: what is left of it, and its cap.",
@@ -4515,29 +4125,29 @@
         ],
         "type": "string"
       },
-      "MeasureEnterView": {
+      "MeasureOpened": {
         "additionalProperties": false,
         "properties": {
-          "kind": {
-            "const": "measure_enter",
-            "default": "measure_enter",
-            "title": "Kind",
+          "act": {
+            "const": "measure_opened",
+            "default": "measure_opened",
+            "title": "Act",
             "type": "string"
           },
-          "n_candidates": {
-            "title": "N Candidates",
+          "candidates": {
+            "title": "Candidates",
             "type": "integer"
           },
-          "n_samples": {
-            "title": "N Samples",
+          "cells": {
+            "title": "Cells",
             "type": "integer"
           }
         },
         "required": [
-          "n_candidates",
-          "n_samples"
+          "candidates",
+          "cells"
         ],
-        "title": "MeasureEnterView",
+        "title": "MeasureOpened",
         "type": "object"
       },
       "Measured": {
@@ -4858,6 +4468,98 @@
           "pass_role"
         ],
         "title": "MemberAddress",
+        "type": "object"
+      },
+      "MeteredSpend": {
+        "additionalProperties": false,
+        "description": "What a run's spend caps have counted, in the units they meter, by kind.",
+        "properties": {
+          "bill_is_floor": {
+            "title": "Bill Is Floor",
+            "type": "boolean"
+          },
+          "billed_tokens": {
+            "title": "Billed Tokens",
+            "type": "integer"
+          },
+          "billed_usd": {
+            "title": "Billed Usd",
+            "type": "number"
+          },
+          "calls_rate_priced": {
+            "title": "Calls Rate Priced",
+            "type": "boolean"
+          },
+          "incurred_usd": {
+            "title": "Incurred Usd",
+            "type": "number"
+          },
+          "kinds": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/KindSpend"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/TokenUsageKind"
+            },
+            "title": "Kinds",
+            "type": "object"
+          },
+          "meter": {
+            "enum": [
+              "bill",
+              "search_incurred"
+            ],
+            "title": "Meter",
+            "type": "string"
+          },
+          "metered_tokens": {
+            "title": "Metered Tokens",
+            "type": "integer"
+          },
+          "metered_usd": {
+            "title": "Metered Usd",
+            "type": "number"
+          },
+          "rate_known": {
+            "title": "Rate Known",
+            "type": "boolean"
+          },
+          "rate_priced_usd": {
+            "title": "Rate Priced Usd",
+            "type": "number"
+          },
+          "replay_share": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replay Share"
+          },
+          "unpriced_tokens": {
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "meter",
+          "metered_usd",
+          "metered_tokens",
+          "billed_usd",
+          "rate_priced_usd",
+          "calls_rate_priced",
+          "rate_known",
+          "bill_is_floor",
+          "incurred_usd",
+          "billed_tokens",
+          "unpriced_tokens",
+          "kinds",
+          "replay_share"
+        ],
+        "title": "MeteredSpend",
         "type": "object"
       },
       "ModelCapability": {
@@ -5374,100 +5076,6 @@
         "title": "OptimizerState",
         "type": "object"
       },
-      "OptimizerStepEnterView": {
-        "additionalProperties": false,
-        "properties": {
-          "activity": {
-            "title": "Activity",
-            "type": "string"
-          },
-          "kind": {
-            "const": "optimizer_step_enter",
-            "default": "optimizer_step_enter",
-            "title": "Kind",
-            "type": "string"
-          },
-          "lines": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Lines",
-            "type": "array"
-          },
-          "node": {
-            "title": "Node",
-            "type": "string"
-          },
-          "tag": {
-            "title": "Tag",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node",
-          "activity",
-          "title",
-          "tag",
-          "lines"
-        ],
-        "title": "OptimizerStepEnterView",
-        "type": "object"
-      },
-      "OptimizerStepExitView": {
-        "additionalProperties": false,
-        "description": "``headline`` is empty where the step adopted nothing.",
-        "properties": {
-          "audit": {
-            "anyOf": [
-              {
-                "maxItems": 2,
-                "minItems": 2,
-                "prefixItems": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "string"
-                  }
-                ],
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Audit"
-          },
-          "details": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Details",
-            "type": "array"
-          },
-          "headline": {
-            "title": "Headline",
-            "type": "string"
-          },
-          "kind": {
-            "const": "optimizer_step_exit",
-            "default": "optimizer_step_exit",
-            "title": "Kind",
-            "type": "string"
-          }
-        },
-        "required": [
-          "headline",
-          "details",
-          "audit"
-        ],
-        "title": "OptimizerStepExitView",
-        "type": "object"
-      },
       "OriginSource": {
         "enum": [
           "fork_seed",
@@ -5796,6 +5404,182 @@
         "title": "PartitionRecord",
         "type": "object"
       },
+      "PassGradedRecord": {
+        "additionalProperties": false,
+        "description": "The pass is the fact, the reading a cache of one grading of it; ``reading`` is ``None``\nexactly where ``state`` is not ``read``.",
+        "properties": {
+          "reading": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/VerifyReading"
+              },
+              {
+                "$ref": "#/components/schemas/BenchReading"
+              },
+              {
+                "$ref": "#/components/schemas/NoiseBand"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reading"
+          },
+          "record_type": {
+            "const": "pass_graded",
+            "default": "pass_graded",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Refusal"
+          },
+          "reserve_tokens": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Tokens"
+          },
+          "reserve_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reserve Usd"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReadingState"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "enum": [
+                  "origin",
+                  "selected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "tolerance": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tolerance"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/VerificationPass"
+          }
+        },
+        "required": [
+          "verification",
+          "subject",
+          "tolerance",
+          "reserve_usd",
+          "reserve_tokens",
+          "reading",
+          "state",
+          "refusal"
+        ],
+        "title": "PassGradedRecord",
+        "type": "object"
+      },
+      "PassOpened": {
+        "additionalProperties": false,
+        "description": "Every ``sample_scored`` up to the matching exit is one of its rows; round 0 is the origin.",
+        "properties": {
+          "act": {
+            "const": "pass_opened",
+            "default": "pass_opened",
+            "title": "Act",
+            "type": "string"
+          },
+          "arm": {
+            "$ref": "#/components/schemas/ArmName"
+          },
+          "rows": {
+            "title": "Rows",
+            "type": "integer"
+          },
+          "sp_hash": {
+            "title": "Sp Hash",
+            "type": "string"
+          },
+          "strategy": {
+            "anyOf": [
+              {
+                "enum": [
+                  "random",
+                  "hard"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "enum": [
+                  "origin",
+                  "selected"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "verification": {
+            "$ref": "#/components/schemas/MeasurementRole"
+          }
+        },
+        "required": [
+          "verification",
+          "subject",
+          "arm",
+          "sp_hash",
+          "rows",
+          "strategy"
+        ],
+        "title": "PassOpened",
+        "type": "object"
+      },
       "PassStop": {
         "additionalProperties": false,
         "description": "Why a bench pass holds fewer rows than it was sent on.",
@@ -5874,12 +5658,61 @@
         "title": "Paused",
         "type": "object"
       },
+      "PhaseAct": {
+        "discriminator": {
+          "mapping": {
+            "init_closed": "#/components/schemas/InitClosed",
+            "init_opened": "#/components/schemas/InitOpened",
+            "measure_opened": "#/components/schemas/MeasureOpened",
+            "pass_opened": "#/components/schemas/PassOpened",
+            "propose_closed": "#/components/schemas/ProposeClosed",
+            "propose_opened": "#/components/schemas/ProposeOpened",
+            "step_closed": "#/components/schemas/StepClosed",
+            "step_opened": "#/components/schemas/StepOpened"
+          },
+          "propertyName": "act"
+        },
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/InitOpened"
+          },
+          {
+            "$ref": "#/components/schemas/InitClosed"
+          },
+          {
+            "$ref": "#/components/schemas/ProposeOpened"
+          },
+          {
+            "$ref": "#/components/schemas/ProposeClosed"
+          },
+          {
+            "$ref": "#/components/schemas/MeasureOpened"
+          },
+          {
+            "$ref": "#/components/schemas/PassOpened"
+          },
+          {
+            "$ref": "#/components/schemas/StepOpened"
+          },
+          {
+            "$ref": "#/components/schemas/StepClosed"
+          }
+        ]
+      },
       "PhaseRecord": {
         "additionalProperties": false,
+        "description": "A phase's bracket; ``act`` is what the step said on it, worded at render.",
         "properties": {
-          "event": {
-            "title": "Event",
-            "type": "string"
+          "act": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PhaseAct"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "phase": {
             "title": "Phase",
@@ -5903,76 +5736,22 @@
             "default": null,
             "title": "Round"
           },
+          "step": {
+            "enum": [
+              "enter",
+              "exit"
+            ],
+            "title": "Step",
+            "type": "string"
+          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
-          },
-          "view": {
-            "anyOf": [
-              {
-                "discriminator": {
-                  "mapping": {
-                    "bench_scored": "#/components/schemas/BenchScoredView",
-                    "candidates_generated": "#/components/schemas/CandidatesGeneratedView",
-                    "init_enter": "#/components/schemas/InitEnterView",
-                    "init_exit": "#/components/schemas/InitExitView",
-                    "measure_enter": "#/components/schemas/MeasureEnterView",
-                    "optimizer_step_enter": "#/components/schemas/OptimizerStepEnterView",
-                    "optimizer_step_exit": "#/components/schemas/OptimizerStepExitView",
-                    "round_complete": "#/components/schemas/RoundCompleteView",
-                    "round_start": "#/components/schemas/RoundStartView",
-                    "verification_enter": "#/components/schemas/VerificationEnterView",
-                    "verification_graded": "#/components/schemas/VerificationGradedView"
-                  },
-                  "propertyName": "kind"
-                },
-                "oneOf": [
-                  {
-                    "$ref": "#/components/schemas/InitEnterView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/InitExitView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/RoundStartView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/CandidatesGeneratedView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/MeasureEnterView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/VerificationEnterView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/BenchScoredView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/VerificationGradedView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/RoundCompleteView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/OptimizerStepEnterView"
-                  },
-                  {
-                    "$ref": "#/components/schemas/OptimizerStepExitView"
-                  }
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "View"
           }
         },
         "required": [
           "phase",
-          "event"
+          "step"
         ],
         "title": "PhaseRecord",
         "type": "object"
@@ -6081,6 +5860,25 @@
         "title": "PrefixReading",
         "type": "object"
       },
+      "PreflightNote": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "detail"
+        ],
+        "title": "PreflightNote",
+        "type": "object"
+      },
       "PricedKeyRecord": {
         "additionalProperties": false,
         "description": "A key the search has PRICED, so a later read of it, resumed or not, prices nothing again.",
@@ -6146,6 +5944,7 @@
               "arm_act",
               "backend_warning",
               "bank_partition",
+              "bench_scored",
               "campaign_ceiling",
               "cell_beat",
               "cycle_final",
@@ -6163,6 +5962,7 @@
               "llm_call",
               "llm_call_progress",
               "llm_call_start",
+              "pass_graded",
               "phase",
               "priced_key",
               "provider_eased",
@@ -6239,6 +6039,174 @@
           "individual"
         ],
         "title": "Proposal",
+        "type": "object"
+      },
+      "ProposeClosed": {
+        "additionalProperties": false,
+        "description": "Each column a flat ``key → value`` of one subject: the start, the parent, then each candidate.",
+        "properties": {
+          "act": {
+            "const": "propose_closed",
+            "default": "propose_closed",
+            "title": "Act",
+            "type": "string"
+          },
+          "collapses": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Collapses",
+            "type": "object"
+          },
+          "columns": {
+            "items": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "node_param_keys": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Param Keys"
+          },
+          "proposer": {
+            "title": "Proposer",
+            "type": "string"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "replayed",
+          "proposer",
+          "columns",
+          "node_param_keys",
+          "collapses"
+        ],
+        "title": "ProposeClosed",
+        "type": "object"
+      },
+      "ProposeOpened": {
+        "additionalProperties": false,
+        "description": "``standing`` and ``note`` are the optimizer's own words (``RoundOpening``).",
+        "properties": {
+          "act": {
+            "const": "propose_opened",
+            "default": "propose_opened",
+            "title": "Act",
+            "type": "string"
+          },
+          "arms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arms"
+          },
+          "budget_rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Rounds"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "node": {
+            "title": "Node",
+            "type": "string"
+          },
+          "note": {
+            "title": "Note",
+            "type": "string"
+          },
+          "parent_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Fitness"
+          },
+          "parent_prompt": {
+            "title": "Parent Prompt",
+            "type": "string"
+          },
+          "run_standing": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RunStanding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "standing": {
+            "title": "Standing",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "budget_rounds",
+          "standing",
+          "parent_fitness",
+          "parent_prompt",
+          "arms",
+          "note",
+          "model",
+          "run_standing"
+        ],
+        "title": "ProposeOpened",
         "type": "object"
       },
       "Proposed": {
@@ -6761,9 +6729,6 @@
         "additionalProperties": false,
         "description": "The run's clock: a close is its line's latest round, so its standing is the run's.",
         "properties": {
-          "anchors": {
-            "$ref": "#/components/schemas/ViewAnchors"
-          },
           "arms": {
             "additionalProperties": {
               "discriminator": {
@@ -6900,100 +6865,9 @@
           "positions",
           "level_series",
           "run_standing",
-          "panel_precision",
-          "anchors"
+          "panel_precision"
         ],
         "title": "RoundClosedRecord",
-        "type": "object"
-      },
-      "RoundCompleteView": {
-        "additionalProperties": false,
-        "description": "``select:exit``; the readout HOLDS it until the round closes: the panel gate can unwind it.",
-        "properties": {
-          "arms": {
-            "items": {
-              "$ref": "#/components/schemas/ArmReading"
-            },
-            "title": "Arms",
-            "type": "array"
-          },
-          "composite_fitness_formula": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Composite Fitness Formula"
-          },
-          "composite_fitness_formula_short": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Composite Fitness Formula Short"
-          },
-          "display_metric": {
-            "$ref": "#/components/schemas/DisplayMetric",
-            "default": "fitness"
-          },
-          "ended_on": {
-            "title": "Ended On",
-            "type": "string"
-          },
-          "fold": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ScoreSummary"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "improved": {
-            "title": "Improved",
-            "type": "boolean"
-          },
-          "kind": {
-            "const": "round_complete",
-            "default": "round_complete",
-            "title": "Kind",
-            "type": "string"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          },
-          "verdict_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Verdict Reason"
-          }
-        },
-        "required": [
-          "round",
-          "arms",
-          "ended_on",
-          "fold",
-          "improved",
-          "verdict_reason",
-          "composite_fitness_formula",
-          "composite_fitness_formula_short"
-        ],
-        "title": "RoundCompleteView",
         "type": "object"
       },
       "RoundDiagnostics": {
@@ -7152,9 +7026,6 @@
         "additionalProperties": false,
         "description": "A closed round stated again, never a close: it moves no clock and announces nothing. It is\nthe round WHOLE, so a repair's restatement makes its ledger the owner of every arm in it.",
         "properties": {
-          "anchors": {
-            "$ref": "#/components/schemas/ViewAnchors"
-          },
           "arms": {
             "additionalProperties": {
               "discriminator": {
@@ -7291,103 +7162,9 @@
           "positions",
           "level_series",
           "run_standing",
-          "panel_precision",
-          "anchors"
+          "panel_precision"
         ],
         "title": "RoundRestatedRecord",
-        "type": "object"
-      },
-      "RoundStartView": {
-        "additionalProperties": false,
-        "description": "``propose:enter``; ``standing`` and ``note`` are the optimizer's own words (``RoundOpening``).",
-        "properties": {
-          "arms": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Arms"
-          },
-          "budget_rounds": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Rounds"
-          },
-          "kind": {
-            "const": "round_start",
-            "default": "round_start",
-            "title": "Kind",
-            "type": "string"
-          },
-          "model": {
-            "title": "Model",
-            "type": "string"
-          },
-          "node": {
-            "title": "Node",
-            "type": "string"
-          },
-          "note": {
-            "title": "Note",
-            "type": "string"
-          },
-          "parent_fitness": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parent Fitness"
-          },
-          "prompt_preview": {
-            "title": "Prompt Preview",
-            "type": "string"
-          },
-          "round": {
-            "title": "Round",
-            "type": "integer"
-          },
-          "run_standing": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RunStanding"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "standing": {
-            "title": "Standing",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node",
-          "round",
-          "budget_rounds",
-          "standing",
-          "parent_fitness",
-          "prompt_preview",
-          "arms",
-          "note",
-          "model"
-        ],
-        "title": "RoundStartView",
         "type": "object"
       },
       "RoundWarningRecord": {
@@ -7601,7 +7378,7 @@
           "spend": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/RunSpendView"
+                "$ref": "#/components/schemas/StopSpend"
               },
               {
                 "type": "null"
@@ -7621,108 +7398,6 @@
           "state"
         ],
         "title": "RunPhaseRecord",
-        "type": "object"
-      },
-      "RunSpendView": {
-        "additionalProperties": false,
-        "description": "The caps bound the CAMPAIGN, so they pair with its metered spend; this cycle's sits beside.",
-        "properties": {
-          "billed_usd": {
-            "title": "Billed Usd",
-            "type": "number"
-          },
-          "campaign_metered_tokens": {
-            "title": "Campaign Metered Tokens",
-            "type": "integer"
-          },
-          "campaign_metered_usd": {
-            "title": "Campaign Metered Usd",
-            "type": "number"
-          },
-          "incurred_usd": {
-            "title": "Incurred Usd",
-            "type": "number"
-          },
-          "meter": {
-            "enum": [
-              "bill",
-              "search_incurred"
-            ],
-            "title": "Meter",
-            "type": "string"
-          },
-          "metered_tokens": {
-            "title": "Metered Tokens",
-            "type": "integer"
-          },
-          "metered_usd": {
-            "title": "Metered Usd",
-            "type": "number"
-          },
-          "rate_priced_usd": {
-            "title": "Rate Priced Usd",
-            "type": "number"
-          },
-          "token_cap": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Token Cap"
-          },
-          "token_share": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Token Share"
-          },
-          "usd_cap": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usd Cap"
-          },
-          "usd_share": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Usd Share"
-          }
-        },
-        "required": [
-          "billed_usd",
-          "rate_priced_usd",
-          "incurred_usd",
-          "meter",
-          "metered_usd",
-          "metered_tokens",
-          "campaign_metered_usd",
-          "campaign_metered_tokens",
-          "usd_cap",
-          "token_cap",
-          "usd_share",
-          "token_share"
-        ],
-        "title": "RunSpendView",
         "type": "object"
       },
       "RunStanding": {
@@ -8461,87 +8136,6 @@
         "title": "Skipped",
         "type": "object"
       },
-      "SpDiffView": {
-        "additionalProperties": false,
-        "properties": {
-          "clone_labels": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Clone Labels",
-            "type": "array"
-          },
-          "collapses": {
-            "additionalProperties": {
-              "type": "integer"
-            },
-            "title": "Collapses",
-            "type": "object"
-          },
-          "columns": {
-            "items": {
-              "maxItems": 2,
-              "minItems": 2,
-              "prefixItems": [
-                {
-                  "type": "string"
-                },
-                {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                }
-              ],
-              "type": "array"
-            },
-            "title": "Columns",
-            "type": "array"
-          },
-          "node_param_keys": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Node Param Keys"
-          },
-          "proposer": {
-            "title": "Proposer",
-            "type": "string"
-          },
-          "round_num": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Round Num"
-          }
-        },
-        "required": [
-          "columns",
-          "node_param_keys",
-          "round_num",
-          "clone_labels",
-          "collapses",
-          "proposer"
-        ],
-        "title": "SpDiffView",
-        "type": "object"
-      },
       "SpawnedBy": {
         "additionalProperties": false,
         "description": "The outer work-item an L4 inner cycle was spawned to measure; an arm's address places the run under its candidate.",
@@ -8730,6 +8324,101 @@
         "title": "StateSlice",
         "type": "object"
       },
+      "StepClosed": {
+        "additionalProperties": false,
+        "description": "``headline`` is empty where the step adopted nothing.",
+        "properties": {
+          "act": {
+            "const": "step_closed",
+            "default": "step_closed",
+            "title": "Act",
+            "type": "string"
+          },
+          "audit": {
+            "anyOf": [
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "string"
+                  }
+                ],
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audit"
+          },
+          "details": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Details",
+            "type": "array"
+          },
+          "headline": {
+            "title": "Headline",
+            "type": "string"
+          }
+        },
+        "required": [
+          "headline",
+          "details",
+          "audit"
+        ],
+        "title": "StepClosed",
+        "type": "object"
+      },
+      "StepOpened": {
+        "additionalProperties": false,
+        "description": "An optimizer step's own words on its fire.",
+        "properties": {
+          "act": {
+            "const": "step_opened",
+            "default": "step_opened",
+            "title": "Act",
+            "type": "string"
+          },
+          "activity": {
+            "title": "Activity",
+            "type": "string"
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Lines",
+            "type": "array"
+          },
+          "node": {
+            "title": "Node",
+            "type": "string"
+          },
+          "tag": {
+            "title": "Tag",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "node",
+          "activity",
+          "title",
+          "tag",
+          "lines"
+        ],
+        "title": "StepOpened",
+        "type": "object"
+      },
       "StopReason": {
         "description": "Why a cycle's run ended or paused.",
         "enum": [
@@ -8763,6 +8452,32 @@
         ],
         "title": "StopReason",
         "type": "string"
+      },
+      "StopSpend": {
+        "additionalProperties": false,
+        "description": "A stop's spend: the caps bound the CAMPAIGN, so they pair with its metered spend; the cycle's beside.",
+        "properties": {
+          "campaign": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "cap": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "share": {
+            "$ref": "#/components/schemas/Budget"
+          },
+          "spent": {
+            "$ref": "#/components/schemas/MeteredSpend"
+          }
+        },
+        "required": [
+          "spent",
+          "campaign",
+          "cap",
+          "share"
+        ],
+        "title": "StopSpend",
+        "type": "object"
       },
       "TestFamily": {
         "additionalProperties": false,
@@ -9151,178 +8866,6 @@
         "title": "Variation",
         "type": "object"
       },
-      "VerificationEnterView": {
-        "additionalProperties": false,
-        "description": "Every ``sample_scored`` up to the matching ``exit`` is one of its rows; round 0 is the origin.",
-        "properties": {
-          "arm": {
-            "$ref": "#/components/schemas/ArmName"
-          },
-          "kind": {
-            "const": "verification_enter",
-            "default": "verification_enter",
-            "title": "Kind",
-            "type": "string"
-          },
-          "rows": {
-            "title": "Rows",
-            "type": "integer"
-          },
-          "sp_hash": {
-            "title": "Sp Hash",
-            "type": "string"
-          },
-          "strategy": {
-            "anyOf": [
-              {
-                "enum": [
-                  "random",
-                  "hard"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strategy"
-          },
-          "subject": {
-            "anyOf": [
-              {
-                "enum": [
-                  "origin",
-                  "selected"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Subject"
-          },
-          "verification": {
-            "$ref": "#/components/schemas/MeasurementRole"
-          }
-        },
-        "required": [
-          "verification",
-          "subject",
-          "arm",
-          "sp_hash",
-          "rows",
-          "strategy"
-        ],
-        "title": "VerificationEnterView",
-        "type": "object"
-      },
-      "VerificationGradedView": {
-        "additionalProperties": false,
-        "description": "The pass is the fact, the reading a cache of one grading of it; ``reading`` is ``None``\nexactly where ``state`` is not ``read``.",
-        "properties": {
-          "kind": {
-            "const": "verification_graded",
-            "default": "verification_graded",
-            "title": "Kind",
-            "type": "string"
-          },
-          "reading": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/VerifyReading"
-              },
-              {
-                "$ref": "#/components/schemas/BenchReading"
-              },
-              {
-                "$ref": "#/components/schemas/NoiseBand"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reading"
-          },
-          "refusal": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Refusal"
-          },
-          "reserve_tokens": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reserve Tokens"
-          },
-          "reserve_usd": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reserve Usd"
-          },
-          "state": {
-            "$ref": "#/components/schemas/ReadingState"
-          },
-          "subject": {
-            "anyOf": [
-              {
-                "enum": [
-                  "origin",
-                  "selected"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Subject"
-          },
-          "tolerance": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Tolerance"
-          },
-          "verification": {
-            "$ref": "#/components/schemas/VerificationPass"
-          }
-        },
-        "required": [
-          "verification",
-          "subject",
-          "tolerance",
-          "reserve_usd",
-          "reserve_tokens",
-          "reading",
-          "state",
-          "refusal"
-        ],
-        "title": "VerificationGradedView",
-        "type": "object"
-      },
       "VerificationPass": {
         "discriminator": {
           "mapping": {
@@ -9525,41 +9068,6 @@
         "title": "VerifyReading",
         "type": "object"
       },
-      "ViewAnchors": {
-        "additionalProperties": false,
-        "properties": {
-          "composite_fitness_formula": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Composite Fitness Formula"
-          },
-          "composite_fitness_formula_short": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Composite Fitness Formula Short"
-          },
-          "display_metric": {
-            "$ref": "#/components/schemas/DisplayMetric",
-            "default": "fitness"
-          }
-        },
-        "title": "ViewAnchors",
-        "type": "object"
-      },
       "WalkEnd": {
         "description": "Why one walk ended before its last cell while its round went on.",
         "enum": [
@@ -9690,25 +9198,6 @@
           "elapsed_s"
         ],
         "title": "WallClock",
-        "type": "object"
-      },
-      "WarningEntry": {
-        "additionalProperties": false,
-        "properties": {
-          "detail": {
-            "title": "Detail",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "detail"
-        ],
-        "title": "WarningEntry",
         "type": "object"
       }
     }

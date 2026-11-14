@@ -8,7 +8,7 @@ from promptpotter.domain.command_kinds import (
     GradeBenchPayload,
     VerifyCandidatePayload,
 )
-from promptpotter.domain.phase_views import VerificationGradedView
+from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.run_records import VerifySaturated
 from promptpotter.domain.spend import Budget
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -16,12 +16,12 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 async def verify_candidate(
     dispatched: DispatchedToCycle[VerifyCandidatePayload],
-) -> Applier[VerificationGradedView | VerifySaturated]:
+) -> Applier[PassGradedRecord | VerifySaturated]:
     """Answers the graded pass, or what was already measured where that is every sample; its end
     keeps that answer, so a retry and its task's result read this pass, never a later one."""
     stores, hop, payload = dispatched.dispatcher.stores, dispatched.hop, dispatched.payload
 
-    async def _apply_verify() -> VerificationGradedView | VerifySaturated:
+    async def _apply_verify() -> PassGradedRecord | VerifySaturated:
         # Taken HERE, not inside `verify_candidate`: the loop's saturation check calls that under its book.
         async with paid_pass(
             stores=stores,

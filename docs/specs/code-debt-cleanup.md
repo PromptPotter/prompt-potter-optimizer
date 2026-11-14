@@ -286,83 +286,35 @@ row it closes.
 
 ### batch/26 · narr (links 1-2, on stream-rk's tip)
 
-- **U3: one phase act is said three ways, and render text is banked on the ledger.**
-  `run_records.py::PhaseRecord` carries a phase string, an untyped event string and a view whose kind
-  repeats both; `InitEnterView` banks display text; `view_models.py::ViewContext` is a mutable bag a
-  fork shares, held on `initialization/session.py:82` (`LaunchState.view_context`, reset at
-  `runner/mint.py:101`) and read by `runner/mint.py:358,432`, `runner/round.py:1186,1222,1367` and 9
-  `view_context.anchors()` calls, whose `ArmRecord.anchors` defaults to `ViewAnchors()`, so a writer
-  that forgets it stamps another metric silently. The act's 25 `PhaseRecord(` writers sit in 7
-  application modules (`runner/round.py`, `bench/node_context.py`, `origin.py`, `runner/bench.py`,
-  `scoring/passes.py`, `run_phase_control.py`, `runner/mint.py`), some hashed. Action: the typed act
-  is the record, text is computed at render, and the anchors fold from the launch's INIT record in the
-  projection, so `ViewContext` and the field's default go; a re-key link. **Rides with:** narr 2.
-  **Re-test:** `git grep -n "class ViewContext" -- promptpotter` is empty.
-- **The run's ledger is reached three ways**: a threaded `ledger` (`RoundContext.ledger`,
-  `RunObservers.ledger`, ~25 signatures that already take `cycle`), the run scope
-  (`active_cycle_ledger()`/`bound_ledger()`, e.g. `runner/round.py::hold_for_operator` beside
-  `operator_arms` in one chain, `scoring/passes.py::_bracketed`) and `session.state.observers.ledger`.
-  They part where a probe render mutes the scope and the threaded handle still writes. Action: writers
-  read the scope (or `Cycle.ledger`) and the `ledger` parameters go. **Rides with:** narr 2, which
-  rewrites the same writers. **Re-test:** `git grep -c "ledger: CycleEventLog" -- promptpotter/application/runner` is 0.
-- **A round's close is composed twice**: `runner/round.py::close_round` and `tests/factories.py`'s
-  `close_round` each spell `stated_line` + `RoundClosedRecord.of`; the restate has one builder,
-  `bench/node_context.py::restated_round`. Action: a `closed_round` builder beside it. **Rides with:**
-  narr 2. **Re-test:** `git grep -c "RoundClosedRecord.of(" -- promptpotter tests` is 1.
-- **The ledger banks dashboard views**: `domain/phase_views.py` holds 13 pre-rendered view classes,
-  built in `application/views/ingress.py` through `ViewContext` and taken apart again in
-  `views/render/ansi.py` and `projections/live_dashboard.py`; `RoundCompleteView` repeats
-  `RoundClosedRecord`, and `RunSpendView` copies the spend fields one by one. Action: the ledger keeps
-  domain facts only and every renderer reads the records; the view classes go with `ViewContext`
-  (the largest excision of the row above; a run-data reshape, wiped). **Rides with:** narr 2.
-  **Re-test:** `git grep -cE "^class \w+View\b" -- promptpotter/domain/phase_views.py` is 0.
-- **A pause by interrupt is served as a bare "Paused"**: the `run_phase` record holds
-  `cause: "interrupt"`, and no surface names it. Action: a stop's cause is narrated and served on every
-  door. **Rides with:** narr 2. **Re-test:** interrupt a running `new`; the readout and `hierarchy` name
-  the interrupt.
-- **`domain/phases.py::RunPhaseInfo.parked` is read only for a phase with an action**: QUEUED's,
-  STARTING's and GATE's words are served and read by nothing. Action: the word lives only where it is
-  read. **Rides with:** narr 2. **Re-test:** every non-empty `parked` row has a reader.
-- **A cycle admission refuses still offers its launch acts**: `domain/phases.py::STOP_REASON_INFO`'s
-  `next_acts` are per stop reason, so an archived campaign's halted or paused cycle, or one whose
-  definition now names another connector or none, serves Resume, which admission refuses
-  (`admission.py::campaign_refusal`); the bench's `can_run` already reads that answer (`BenchLine.refused`).
-  Action: the typed phase act is served per cycle off the same answer and offers no launch act it
-  refuses. `domain/phases.py` cannot import admission, so the answer is joined where the phase is
-  projected (`application/hierarchy.py`, its two `HierarchyState.of` calls) and carried on
-  `domain/hierarchy.py::HierarchyState`; `webapp/lib/derivations/run-phase.ts` reads it. **Rides with:**
-  narr 2, whose Owns gain those two `hierarchy.py` hunks (money's and addr's files too).
-  **Re-test:** archive a paused campaign; its served acts name no `start-run`.
-- **No door but the browser reads a live dashboard** (reported): the CLI has no dashboard read verb,
-  though `potter-run/SKILL.md:29,53` relies on one; the disk `dashboard.json` lacks `run_phase`,
-  `admission`, `run_limits` and pause; `embedded_run.py:64-73` exports no read. Action: one served read
-  every door reaches. **Rides with:** narr.
 - **The live reads re-serve history per poll** (a hot-path pass, ✓ unless reported): `_cycle_cells`
   and `_campaign_edits` cost O((R·A)²) per request, `snapshot_frame` re-folds per connect, and a ray
   page re-folds per "older". Root: a value is its aggregate plus the live round, never a copy of its
   history. The same root serves the wire: the polled live dashboard re-serves every closed round on every frame (570 kB at 16
   rounds, `domain/dashboard_rows.py::served_rounds`); a browser stitch of `…/rounds/{n}` per round, or a
   new read, breaks R7, so the closed-round series' read is decided first, then every `dash.rounds` reader
-  moves. **Rides with:** narr 2; webb-5's Owns gain `hooks/useOriginEvidence.ts`, `hooks/useVerify.ts` and
-  the `dash.rounds` panes. **Re-test:** `git grep -nE "dash\??\.rounds" -- webapp/lib webapp/components`.
-- **The live dashboard keeps a third hold tracker** (narr-1's landing): `live_dashboard.py::_holds`
-  keeps the last `ProviderHoldRecord` per sender and, unlike `narration.py::Narration`'s, is never
-  cleared at a run-phase declaration. Action: the dashboard reads the narration's holds. **Rides with:**
-  narr 2. **Re-test:** `git grep -c "_holds" -- promptpotter/infrastructure/projections/live_dashboard.py` is 0.
-- **`_Standing.value` builds a `StandingArm` per arm of every round on each call** (narr-1's landing):
-  closed rounds' cells are shared, but the tuples and outer dicts stay O(R·A) per poll. Action: a closed
-  round's `StandingArm`s freeze at its close. **Rides with:** narr 2. **Re-test:** a value at round R
-  builds tuples for the live round only.
-- **`RoundBuffer` wraps `Narration`'s arm API one call deep** (narr-1's landing,
-  `live_dashboard.py::RoundBuffer`: `announce`, `take`, `enter`): the buffer is a view of the
-  narration's live round, not a holder of its own. Action: its readers read the narration and the
-  buffer goes. **Rides with:** narr 2. **Re-test:** `git grep -c "class RoundBuffer" -- promptpotter/infrastructure/projections/live_dashboard.py` is 0.
-- **The arms gate is worded twice** (narr-1's landing): `views/readout.py`'s `[ARM GATE]` block and
-  `activity.py::_arms_gate` say one hold, because the gate is no narration row. Action: the gate is the
-  typed act's narration row (the U3 row above). **Rides with:** narr 2.
-
-### batch/26 · rk-run
-
+  moves. **Rides with:** webd, once the closed-round read is decided (narr 2 held it as that fork);
+  its Owns gain `hooks/useOriginEvidence.ts`, `hooks/useVerify.ts` and the `dash.rounds` panes.
+  **Re-test:** `git grep -nE "dash\??\.rounds" -- webapp/lib webapp/components`.
+- **The live dashboard tracks the race beside the narration** (narr-2's report):
+  `live_dashboard.py`'s `_race` / `_race_standings` (`:440-441`, filled `:712-713`) fold
+  `RaceStandingRecord`s apart from the `Narration` that reads the same ledger. Root: the race standing
+  is one fold every door reads. **Rides with:** the row above. **Re-test:**
+  `git grep -n "_race_standings" -- promptpotter` is empty.
+- **The typed acts still bank render text** (narr-2's review): `domain/phase_acts.py`'s
+  `StepOpened.title/tag/lines`, `StepClosed.headline/details`, `ProposeOpened.parent_prompt` (a
+  120-char slice) and `ProposeClosed.columns` (the diff table, rebuildable from `RoundProposedRecord`,
+  the origin and the parent) are strings built in `potter/members.py:478-509,565-585` and
+  `runner/round.py`, against "its text computed at render". Action: each act keeps the facts and its
+  renderer words them; a run-data reshape, wiped. **Rides with:** narr 3, after faults 1 and small 2
+  (they take `potter/members.py` and `runner/round.py`), before ren. **Re-test:** no `phase_acts.py`
+  field holds text a renderer could build from the records.
+- **A run's ledger has two doors** (narr-2's review): inside a run, `append_record` writes the scope's
+  ledger while the run's own declarations go through `CampaignStore.append` on a named cycle
+  (`run_observers.py:84,175`, `runner/entry.py:216`, `runner/mint.py:199,261`, `inner/spawn.py:317`),
+  which a muted scope cannot mute; `scoring_scope.py::verb_ledger` yields any bound ledger whatever
+  the hop it was asked for. Root: one door, the scope, opened on the cycle the caller names.
+  **Rides with:** narr 3. **Re-test:** `git grep -n "campaigns.append(" -- promptpotter/application/runner
+  promptpotter/application/run_observers.py` is empty.
 - **DSPy derives its cell's priced pair beside core's**: `dspy_module.py::_in_process_run` calls
   `pricing.py::priced_pair` off the payload's `params`, while core binds each node's pair once
   (`sample_measurement.py::priced_pairs`); they agree only while the payload's `provider` is `NodeCall`'s.
@@ -648,9 +600,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 - **Concept and method docs state what the code does not** (the rest of a docs-vs-code pass; the docs
   chain rewrote the others): `the-loop.md:38-40`'s `terminate_proposal` line waits on the faults row that
-  makes the abort report; the race-vs-election and joint-fit lines wait on readings 2; the L4
-  fingerprint line on bkeys. **Rides with:** each named chain. **Re-test:** each claim re-read against
-  its code line.
+  makes the abort report. **Rides with:** faults. **Re-test:** the line re-read against its code.
 
 ### bkeys-2 (what bkeys left at its landing)
 
@@ -790,7 +740,9 @@ and derived the knob couplings from each member's draws and the escalation ladde
   served on its existing read and the TypeScript copy and its tests go; the derivation rows filed
   elsewhere (`output-contract.ts`, `paired-reading.ts::liftVersus`) close inside it where their chain
   has not; so do `wonOnTheta` (9 hits in 5 files; its filed row and `electedMetric` went, ec96b1cda) and
-  `ConfigMode` (`lib/derivations/node-config.ts:11`; no row files it). **Rides with:** webd. **Re-test:**
+  `ConfigMode` (`lib/derivations/node-config.ts:11`; no row files it). So does `run-phase.ts:51`'s copy
+  of a cycle's acts, which drops only `start-run` where `phases.py:447` drops every act of a refused
+  admission (narr-2's review): the acts are served once faults 1 serves `next_acts`. **Rides with:** webd. **Re-test:**
   `git ls-files webapp/lib/derivations | grep -v __tests__ | xargs wc -l` falls by the served facts.
 - **A hand-kept mirror of the served shapes**: `webapp/lib/test-fixtures.ts` (616 lines, imported by 23
   webapp files) hand-writes default builders for ~30 Python-served types (`configParam`,
@@ -841,6 +793,16 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (`useCycleEvents.ts:49`, `read-cache.ts:390`); the build handshake covers fetches, not streams; and
   the client decides what Delete files (`CampaignMenu.tsx:44-54` vs `workspace_edits.py:62-77`).
   **Rides with:** webd.
+- **A server past its bundle never reads as stale** (operator, 2026-11-14: "Cannot read properties of
+  null (reading 'x')" on :8001): `webapp/out` was built 2026-11-13 and the server ran a3312e3e1, five
+  landings on, whose readings reshape broke the old bundle; a rebuild cleared every view.
+  `headers.py::served_build` reads `build-id.txt` out of that same build, so `client.ts::send` always
+  matches it, and nothing rebuilds `webapp/out` when the checkout moves. Root: the build id names the
+  served contract (the generated types' hash) on both sides. **Rides with:** webd. **Re-test:** a
+  server whose generated types moved past `webapp/out` shows the stale banner on its first fetch.
+- **An L4 panel's Leader card is empty** (C0 on a3312e3e1, 390 and 1280): `panes.tsx::LeaderPane`'s
+  `SubjectBox` draws nothing for an origin-only outer campaign and no line says why (I1). **Rides
+  with:** webd. **Re-test:** that card names the origin or says why it has no leader.
 
 ### batch/28 · lb
 
@@ -889,6 +851,16 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `scoring/closed_rounds.py::RoundFileProjection` and `llm/spend_book.py::SpendBook`, with
   `domain/records/run_records.py::stale_file_warning` and `read_model.py`'s `Projected`. **Re-test:** a
   `dashboard.json` write fault's warning detail names `dashboard.json`.
+- **A preflight warning reaches the terminal alone** (narr-2's landing): `InitOpened.warnings` is read
+  by `render/ansi.py::_render_init_enter` only; `domain/narration.py` has no row for it, so the chat
+  thread and the dashboard never say an inner connector's or a knob's warning. Root: the warnings are
+  a narration row every door reads. **Rides with:** faults 2. **Re-test:** a launch with a preflight
+  warning shows it in the run's thread.
+- **A run phase spells two refusal words** (narr-2's report): `domain/phases.py::RunPhaseInfo`'s
+  `no_action` and `parked` (`:325-326`) are prose `phases.py:439,444` hands out as a refusal, beside
+  `Refusal`'s own message. Root: the phase's refusal is a `Refusal` with its `next_acts`.
+  **Rides with:** faults 2, after faults 1's `next_acts`. **Re-test:**
+  `git grep -nE "no_action|\.parked\b" -- promptpotter/domain/phases.py` is empty.
 - **A text node's form failure has three answers**: capo's init out of form ends the cycle `crashed`,
   gepa's `fenced` reads an unfenced reply as the instruction (so its form never fails), and every other
   text node (capo's crossover, levi's seed and refine, potter's L1 and L2) refuses its child. det's

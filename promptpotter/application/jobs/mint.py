@@ -13,6 +13,7 @@ from promptpotter.application.bench.task_context import (
     checkin_provider,
     commit_task_framing,
     committed_task_context,
+    draft_ledger,
 )
 from promptpotter.application.datasets.authored import declare_run, effective_config
 from promptpotter.application.datasets.draft_campaign import mint_draft_id
@@ -68,7 +69,7 @@ from promptpotter.domain.campaign_config import (
 )
 from promptpotter.domain.command_events import CommandLanded, draft_subject, subject_key
 from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.phases import NextAct
 from promptpotter.domain.pipeline_params import PipelineParams
@@ -86,7 +87,7 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.treatment import Treatment
-from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
 from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_framing,
@@ -574,10 +575,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
         declaration=declaration,
         lifecycle_status="active",
     )
-    ledger = CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop)))
-    declare_run_wiring(
-        session, plan.cycle.config, ledger, campaign=campaign, selected=plan.optimizer
-    )
+    declare_run_wiring(session, plan.cycle.config, campaign=campaign, selected=plan.optimizer)
     # The mint's commit, last: a mint that dies before it leaves no campaign to list.
     campaigns.create_campaign(campaign)
     # The name labels the bank its newest campaign declares, an L4 inner cell's as every other.
@@ -693,18 +691,21 @@ async def _mint_after_framing(
     assert session.dataset_name, "a framing commits to the dataset the session opened"
     drafts = session.store.drafts
     draft_id = mint_draft_id()
-    checkin_ledger = CycleEventLog.open(CycleDir(drafts.draft_dir(draft_id)))
     try:
-        async with paid_call(stores=session.store, bucket="checkin", provider=checkin_provider()):
-            await commit_task_framing(
-                session.store,
-                session.dataset_name,
-                description,
-                prompt_fields=(
-                    f for node in session.pipeline_schema.prompt_nodes() for f in node.prompt_fields
-                ),
-                ledger=checkin_ledger,
-            )
+        with scoped(ledger=draft_ledger(session.store, draft_id)):
+            async with paid_call(
+                stores=session.store, bucket="checkin", provider=checkin_provider()
+            ):
+                await commit_task_framing(
+                    session.store,
+                    session.dataset_name,
+                    description,
+                    prompt_fields=(
+                        f
+                        for node in session.pipeline_schema.prompt_nodes()
+                        for f in node.prompt_fields
+                    ),
+                )
         logger.info("Committed task framing for %s from its check-in", session.dataset_name)
         framed = [
             replace(

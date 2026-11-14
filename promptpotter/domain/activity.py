@@ -104,8 +104,11 @@ class ActivityFeed:
             )
             for idx, draft in enumerate(() if gate is None else gate.drafts)
         ]
+        # A holding gate's row is its decision, so the chat says it once.
+        if gate is not None or (status is not None and not narration.lives(status)):
+            status = None
         return ActivityState(
-            status=None if status is None or not narration.lives(status) else status.said,
+            status=None if status is None else status.said,
             notices=[n.said for n in self._notices if narration.lives(n)],
             decision=None if gate is None else _arms_gate(narration.round, drafts),
         )

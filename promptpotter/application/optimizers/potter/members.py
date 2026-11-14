@@ -116,7 +116,7 @@ from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import Critique, StatePart
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
+from promptpotter.domain.phase_acts import StepClosed, StepOpened
 from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, NodeKind
 from promptpotter.domain.pool import BlockPool, DemoPool, Pool
 from promptpotter.domain.records.run_records import StopLoop
@@ -475,7 +475,7 @@ class L2Context(LayoutNode):
         assert fire.ask is not None, "only L3 heals"
         return l2_fired(ladder, fire.ask.l2)
 
-    def enter_view(self, ctx: NodeContext, fire: Fire) -> OptimizerStepEnterView:
+    def enter_act(self, ctx: NodeContext, fire: Fire) -> StepOpened:
         items = [(k, str(v)) for k, v in ctx.slice(L2Memory).steered("l1_generate").items()]
         if items:
             shown = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
@@ -483,7 +483,7 @@ class L2Context(LayoutNode):
             overrides = f"l1_overrides: {', '.join(shown)}{more}"
         else:
             overrides = "l1_overrides: (none)"
-        return OptimizerStepEnterView(
+        return StepOpened(
             node=self.name,
             activity=self.phase.activity,
             title="L2 REFINE CONTEXT",
@@ -498,11 +498,11 @@ class L2Context(LayoutNode):
             ),
         )
 
-    def exit_view(self, ctx: NodeContext, result: TransitionResult) -> OptimizerStepExitView:
+    def exit_act(self, ctx: NodeContext, result: TransitionResult) -> StepClosed:
         layout = ", l1_layout edited" if result.l1_layout is not None else ""
         axis = f", axis={result.axis_targeted}" if result.axis_targeted else ""
         changed = len(ctx.slice(L2Memory).steered("l1_generate"))
-        return OptimizerStepExitView(
+        return StepClosed(
             headline=f"L2 decision: {changed} param changes{layout}{axis}",
             details=(result.described,),
             audit=("L2 call", self.name),
@@ -562,8 +562,8 @@ class L3Plan(LayoutNode):
     def record(self, ladder: Ladder, fire: Fire) -> Ladder:
         return l3_fired(ladder, None if fire.ask is None else fire.ask.l3)
 
-    def enter_view(self, ctx: NodeContext, fire: Fire) -> OptimizerStepEnterView:
-        return OptimizerStepEnterView(
+    def enter_act(self, ctx: NodeContext, fire: Fire) -> StepOpened:
+        return StepOpened(
             node=self.name,
             activity=self.phase.activity,
             title="L3 MODIFY PLAN",
@@ -577,8 +577,8 @@ class L3Plan(LayoutNode):
             ),
         )
 
-    def exit_view(self, _ctx: NodeContext, result: TransitionResult) -> OptimizerStepExitView:
-        return OptimizerStepExitView(
+    def exit_act(self, _ctx: NodeContext, result: TransitionResult) -> StepClosed:
+        return StepClosed(
             headline=f"New plan: {truncate(result.plan[:120], 55, '...')}",
             details=(result.described,),
             audit=None,

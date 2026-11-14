@@ -23,7 +23,7 @@ from promptpotter.application.bench.llm_call import (
     answer,
     llm_call,
 )
-from promptpotter.application.bench.resume_and_fork.decisions import record_decision
+from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.round_analysis import ended_on
 from promptpotter.application.intelligence.earned_blocks import (
     answer_space_signature,
@@ -59,7 +59,7 @@ from promptpotter.domain.opt_search_point import (
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
-from promptpotter.domain.phase_views import PhaseView
+from promptpotter.domain.phase_acts import StepClosed, StepOpened
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineNode, PipelineSchema
 from promptpotter.domain.pool import Access, BlockPool, DemoPool, Pool, PoolEntry
@@ -68,6 +68,7 @@ from promptpotter.domain.records.run_records import (
     CheckpointInputs,
     PhaseRecord,
     RaceStandingRecord,
+    RoundClosedRecord,
     RoundProposedRecord,
     RoundRestatedRecord,
     RoundStatement,
@@ -83,6 +84,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
+from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.shared.errors import SendRefusedError
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -123,18 +125,28 @@ def restated_round(
     close: RoundStatement,
     slot_of: Mapping[str, int],
 ) -> RoundRestatedRecord:
-    """*closing* stated again under its round's own anchors and outlay (*close*), never the
+    """*closing* stated again under its round's own outlay (*close*), never the
     launch restating it."""
     line, series, standing = stated_line(
         closing, prior, difficulty, lives=lives, outlay=close.run_standing.outlay
     )
-    return RoundRestatedRecord.of(line, slot_of, series, standing, close.anchors)
+    return RoundRestatedRecord.of(line, slot_of, series, standing)
+
+
+def closed_round(
+    closing: RoundResult, prior: Sequence[RoundResult], cycle: Cycle, *, outlay: LineOutlay
+) -> RoundClosedRecord:
+    """*closing*'s close over *prior*, read under the line's *outlay* as it closes."""
+    line, series, standing = stated_line(
+        closing, prior, cycle.difficulty, lives=cycle.config.optimization.lives, outlay=outlay
+    )
+    return RoundClosedRecord.of(line, cycle.session.bank.slot_of, series, standing)
 
 
 def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submitted: bool) -> None:
     """Banked beside what they were composed from, so a resume asks whether that round still says the same."""
     rounds = round_.cycle.rounds
-    round_.ledger.append(
+    append_record(
         RoundProposedRecord(
             round=round_.round_num,
             consumed=round_document_digest(rounds[-1]) if rounds else "",
@@ -172,7 +184,7 @@ async def reread_walk(round_: RoundContext, reads: Sequence[WalkRead]) -> None:
 async def walk_origin(round_: RoundContext, cells: list[Sample]) -> ReadArm:
     """Round 0's ONE walk of the origin over *cells*; the archive never replays an errored cell."""
     cycle = round_.cycle
-    round_.ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="enter", round=0))
+    append_record(PhaseRecord(phase=CampaignPhase.ORIGIN, step="enter", round=0))
     try:
         return await measure_as_parent(
             round_,
@@ -182,7 +194,7 @@ async def walk_origin(round_: RoundContext, cells: list[Sample]) -> ReadArm:
             role=MeasurementRole.ORIGIN,
         )
     finally:
-        round_.ledger.append(PhaseRecord(phase=CampaignPhase.ORIGIN, event="exit", round=0))
+        append_record(PhaseRecord(phase=CampaignPhase.ORIGIN, step="exit", round=0))
 
 
 async def measure_as_parent(
@@ -209,14 +221,7 @@ async def measure_as_parent(
         sample_order=[s.id for s in cells],
     )
     if announce:
-        round_.ledger.append(
-            ArmRecord(
-                round=round_.round_num,
-                arm=key,
-                state=arm,
-                anchors=round_.cycle.session.state.view_context.anchors(),
-            )
-        )
+        append_record(ArmRecord(round=round_.round_num, arm=key, state=arm))
     walked = await score_search_point(
         sp,
         cells,
@@ -237,14 +242,7 @@ async def measure_as_parent(
         )
     read = ReadArm(key, conclude(arm, walked, round_num=round_.round_num), walked.sheet)
     if announce:
-        round_.ledger.append(
-            ArmRecord(
-                round=round_.round_num,
-                arm=key,
-                state=read.state,
-                anchors=round_.cycle.session.state.view_context.anchors(),
-            )
-        )
+        append_record(ArmRecord(round=round_.round_num, arm=key, state=read.state))
     round_.walked(read, asked)
     return read
 
@@ -536,7 +534,6 @@ class Calls(CycleRead):
             node=node,
             config=self._cycle.optimizer.node_config(node),
             template=self.prompt(),
-            ledger=self._round.ledger,
             round_num=round_num,
             candidate_idx=idx,
             cache=session.store.optimizer_reuse,
@@ -708,12 +705,8 @@ class Replay(CycleRead):
 
     def decide(self, inputs: CheckpointInputs, outcome: Any) -> Any:
         """A resume re-derives it only where *inputs* is ``Replayed``; else it is archived."""
-        record_decision(
-            self._cycle.pending_decisions,
-            inputs,
-            outcome,
-            node=self._member.name,
-            round=self._round.round_num,
+        self._cycle.pending_decisions.append(
+            decision(inputs, outcome, node=self._member.name, round=self._round.round_num)
         )
         return outcome
 
@@ -721,13 +714,13 @@ class Replay(CycleRead):
 class Progress(CycleRead):
     """What the operator watches it do: its phases and its race's standing."""
 
-    def phase(self, phase: str, step: Literal["enter", "exit"], view: PhaseView) -> None:
-        self._round.ledger.append(
-            PhaseRecord(phase=phase, event=step, round=self._round.round_num, view=view)
-        )
+    def phase(
+        self, phase: str, step: Literal["enter", "exit"], act: StepOpened | StepClosed
+    ) -> None:
+        append_record(PhaseRecord(phase=phase, step=step, round=self._round.round_num, act=act))
 
     def race_standing(self, snapshot: RaceSnapshot) -> None:
-        self._round.ledger.append(
+        append_record(
             RaceStandingRecord(
                 round=self._round.round_num,
                 member=self._member.name,
@@ -821,5 +814,5 @@ class NodeContext:
             session = cycle.session
             standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
             close = standing.rounds[restated.round].close
-            self._round.ledger.append(close.restated(restated.closed_state))
+            append_record(close.restated(restated.closed_state))
         cycle.seat(restated)

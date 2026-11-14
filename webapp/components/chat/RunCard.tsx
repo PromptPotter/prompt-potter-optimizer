@@ -25,7 +25,7 @@ export function RunCard() {
 // The course entry as served when its producer detached: frozen, never re-worded here.
 export function RunSummaryItem({ course }: { course: HierarchyCourse }) {
   const changes = course.facts.standing?.changes;
-  const nextStep = runNextStep(course.state.status);
+  const nextStep = runNextStep(course.state);
   return (
     <div className="chat-msg ai run-summary-item" role="note">
       <SummaryBlock dense entry={course} />

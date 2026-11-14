@@ -59,6 +59,7 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import round_clocks
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import HeldBudget, SpendRollup
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_book
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
@@ -146,10 +147,10 @@ def close_cycle(
     try:
         # Before the result is built: a decision made after the last round has no next `close_round`.
         if cycle is not None:
-            flush_pending_decisions(cycle, observers.ledger)
+            flush_pending_decisions(cycle)
         banked = None if cycle is None else cycle.bench_passes
         bench = declare_line_bench(
-            session, config, observers.ledger, passes=banked, selecting=False, ending=stop_reason
+            session, config, passes=banked, selecting=False, ending=stop_reason
         )
         cycle_result = build_cycle_result(
             cycle,
@@ -198,7 +199,6 @@ def _finalize_run(
         bank_campaign_result(
             session.store,
             session.hop,
-            ledger=observers.ledger,
             clock=session.state.launch_clock(),
             finished_at=cycle_result.finished_at,
             optimizer_phases=selected.phases,
@@ -270,7 +270,7 @@ async def _run_single_cycle(
     open_round: int | None = None
     pause_cause = PauseCause.INTERRUPT
     try:
-        cycle, cut = await open_cycle(prep, session=session, ledger=observers.ledger, mode=mode)
+        cycle, cut = await open_cycle(prep, session=session, mode=mode)
         if cut is not None:
             # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
             declare_run_stop(session, observers, StopReason.REBASED, interrupted_by=pause_cause)
@@ -280,16 +280,15 @@ async def _run_single_cycle(
             # Held through the fork's mint, which moves the campaign's holds off it.
             parent.release()
         session = cycle.session
-        close_init(cycle, observers.ledger)
+        close_init(cycle)
         declare_round_allowance(session, step_rounds)
         book = require_spend_book("the bench's set-aside")
         ended = await open_origin_round(
             cycle,
             dataset,
-            observers.ledger,
             spend=observers.dashboard.spend,
             resumed_ending=prep.resumed_ending,
-        ) or await run_round_loop(cycle, cycle.config, session, observers.ledger)
+        ) or await run_round_loop(cycle, cycle.config, session)
         stop_reason, cycle_error, fork, open_round, cancel_exc, stepped = ended
         if stepped:
             pause_cause = PauseCause.STEP
@@ -313,7 +312,6 @@ async def _run_single_cycle(
                     cycle.rounds,
                     points=cycle.points,
                     banked=cycle.bench_passes,
-                    ledger=observers.ledger,
                 )
         except (*RUN_STOPS, KeyboardInterrupt, asyncio.CancelledError) as exc:
             # Only a pause escapes the pass; the resume takes the pass again.
@@ -441,7 +439,7 @@ async def run_optimization(
         with (
             scoped(
                 round=0,
-                ledger=observers.ledger,
+                ledger=CycleEventLog.open(observers.cycle_dir),
                 account=session.store,
                 determinism=run_clamp(campaign_config.optimization.determinism, session.purpose),
             ),

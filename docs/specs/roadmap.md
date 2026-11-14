@@ -160,9 +160,14 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   connector names its endpoints (`TERMNORM_ENDPOINTS`, `N8N_HARNESS_ENDPOINTS`).
 - **landed 74, ws 1–2:** a DOM reading line under each painted chart; one lineage tree, paired under
   the bars or freed, one button between. ws 3 (the 16:9 compare row) waits on the phone layout.
-- **then:** narr-2 (the stored dashboard views go, renderers read the records, one way to the
-  ledger), faults-1 (a refusal names its next acts), ren (classes defined twice, a gate refusing
-  another).
+- **L4 C0 re-measured** at landing 74: composite 0.546 over six cells, $0.276 billed
+  ([`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured).
+- **landed 75, narr-2:** the ledger keeps facts and phase acts are typed, so the stored dashboard
+  views go and every renderer reads the records; one way to the ledger, the open run scope; the
+  dashboard read reaches every door. Run data wiped (cycles).
+- **then:** faults-1 (a refusal names its next acts) beside small-2 (one `Selector` default, the
+  spend book's typed remainder), then narr 3 (the acts bank facts, not text; one door to a run's
+  ledger), then ren (classes defined twice, a gate refusing another).
 
 The re-keys end at the behaviour-key switch.
 

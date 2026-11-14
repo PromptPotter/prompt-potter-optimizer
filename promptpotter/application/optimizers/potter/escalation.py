@@ -43,7 +43,7 @@ from promptpotter.application.optimizers.potter.records import (
 from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
 from promptpotter.domain.paired_reading import RoundArm
-from promptpotter.domain.phase_views import OptimizerStepEnterView, OptimizerStepExitView
+from promptpotter.domain.phase_acts import StepClosed, StepOpened
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.records.run_records import (
@@ -380,9 +380,9 @@ class Layer(Protocol):
 
     def record(self, ladder: Ladder, fire: Fire) -> Ladder: ...
 
-    def enter_view(self, ctx: NodeContext, fire: Fire) -> OptimizerStepEnterView: ...
+    def enter_act(self, ctx: NodeContext, fire: Fire) -> StepOpened: ...
 
-    def exit_view(self, ctx: NodeContext, result: TransitionResult) -> OptimizerStepExitView: ...
+    def exit_act(self, ctx: NodeContext, result: TransitionResult) -> StepClosed: ...
 
 
 class LayerCall(NamedTuple):
@@ -397,7 +397,7 @@ async def _run_transition(
 ) -> tuple[TransitionResult, PotterView] | None:
     """With the view it was composed from; ``None`` when the layer's output never parsed."""
     layer, ctx = fired
-    ctx.read(Progress).phase(layer.phase.phase, "enter", layer.enter_view(ctx, fire))
+    ctx.read(Progress).phase(layer.phase.phase, "enter", layer.enter_act(ctx, fire))
     ladder = ctx.slice(Ladder)
     # The prompt reports the verdict that asked for it, which lands only if this fire does.
     view = PotterView(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
@@ -430,12 +430,12 @@ async def _run_transition(
             )
         )
         ctx.read(Progress).phase(
-            layer.phase.phase, "exit", OptimizerStepExitView(headline="", details=(), audit=None)
+            layer.phase.phase, "exit", StepClosed(headline="", details=(), audit=None)
         )
         return None
 
     layer.land(ctx, result)
-    ctx.read(Progress).phase(layer.phase.phase, "exit", layer.exit_view(ctx, result))
+    ctx.read(Progress).phase(layer.phase.phase, "exit", layer.exit_act(ctx, result))
     return result, view
 
 

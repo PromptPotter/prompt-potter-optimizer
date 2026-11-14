@@ -93,14 +93,20 @@ class HierarchyState(FrozenModel):
 
     @classmethod
     def of(
-        cls, run: RunState, index: CycleIndex | None, *, lifecycle: LifecycleStatus
+        cls,
+        run: RunState,
+        index: CycleIndex | None,
+        *,
+        lifecycle: LifecycleStatus,
+        admission: RunAdmission,
     ) -> HierarchyState:
+        """*admission* is *run*'s with its campaign's refusal joined (`admission.py::admitted`)."""
         stop = None if index is None else index.stop_reason
         return cls(
             status=RunStatus.of(run.run_phase, stop, lifecycle=lifecycle),
             attached=run.producer.attached,
             pause=run.pause,
-            admission=run.admission,
+            admission=admission,
             intervened=index is not None and index.human_intervened,
         )
 

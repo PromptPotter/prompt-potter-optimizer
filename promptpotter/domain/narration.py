@@ -7,8 +7,8 @@ from promptpotter.domain.arms import ArmState, Cut, Measured, Proposed
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, level_text
-from promptpotter.domain.phase_views import VerificationEnterView
-from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase
+from promptpotter.domain.phase_acts import PassOpened
+from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, paused_by
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
@@ -17,11 +17,13 @@ from promptpotter.domain.records.run_records import (
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
+    Paused,
     PhaseRecord,
     ProviderEasedRecord,
     ProviderHoldRecord,
     RoundClosedRecord,
     RoundEnteredRecord,
+    RoundProposedRecord,
     RoundStatement,
     RoundWarningRecord,
     Running,
@@ -45,6 +47,7 @@ NarratedRecord = (
     | RunPhaseRecord
     | RoundEnteredRecord
     | RoundClosedRecord
+    | RoundProposedRecord
     | RoundWarningRecord
     | ErrorRecord
     | ProviderHoldRecord
@@ -122,8 +125,8 @@ class Narration:
         self._arms: dict[tuple[int, ArmKey], _Announced] = {}
         # Each arm's label by its key, off its records: a sample names its individual alone.
         self._labels: dict[ArmKey, str] = {}
-        # Each held sender's reading and the row that said it.
-        self._held: dict[str, tuple[BackpressureReading, str]] = {}
+        # Each held sender's hold and the row that said it: the one hold tracker every reader shares.
+        self._held: dict[str, tuple[ProviderHoldRecord, str]] = {}
         self._bench: _BenchPass | None = None
         self._declared = 0
         self._launched = 0
@@ -156,14 +159,20 @@ class Narration:
             case PhaseRecord():
                 return self._phase(record)
             case RunPhaseRecord():
-                self._run_phase(record)
-                return None
+                return self._run_phase(record)
             case RoundEnteredRecord():
                 self.enter(record.round)
                 return None
             case RoundClosedRecord():
                 lead = record.run_standing.lead_line
                 return _Line("success", f"Round {record.round}", lead, round=record.round)
+            case RoundProposedRecord():
+                if not record.submitted:
+                    return None
+                said = f"{len(record.proposals)} arm(s) answered the hold"
+                return _Line(
+                    "success", f"Round {record.round} · your arms", said, round=record.round
+                )
             case RoundWarningRecord():
                 tone: Tone = "danger" if record.severity == "error" else "warn"
                 label = record.message or "round degraded"
@@ -241,15 +250,37 @@ class Narration:
     def label(self, key: ArmKey) -> str | None:
         return self._labels.get(key)
 
+    def announced(self, round_num: int) -> list[ArmKey]:
+        """*round_num*'s arms, in announcement order."""
+        return [key for at, key in self._arms if at == round_num]
+
+    @property
+    def longest_hold(self) -> BackpressureReading | None:
+        """The hold that has held longest: the one a single-sender field shows."""
+        held = min((r for r, _ in self._held.values()), key=lambda r: r.gives_up_at, default=None)
+        return None if held is None else held.reading
+
     # -- one row per kind --
 
-    def _run_phase(self, record: RunPhaseRecord) -> None:
+    def _run_phase(self, record: RunPhaseRecord) -> _Line | None:
         # A declaration starts or stops the sends a hold describes; the hold lasts to the next.
         self._declared += 1
         self.gate = record.state if isinstance(record.state, ArmsGate) else None
         if isinstance(record.state, Running):
             self._launched += 1
         self._held.clear()
+        if isinstance(state := record.state, Paused):
+            return _Line("warn", paused_by(state.cause, ""), state.detail or None, "run")
+        if (gate := self.gate) is None:
+            return None
+        # The arms gate's row, said while it holds: each draft it offers, or that no proposer ran.
+        held = "The round" if self.round is None else f"Round {self.round}"
+        drafts = "; ".join(
+            f"draft {idx}: {d.individual.lineage.changes_description or '-'}"
+            for idx, d in enumerate(gate.drafts)
+        )
+        detail = drafts or "no proposer ran: every arm this round measures is yours"
+        return _Line("warn", f"{held} holds for your arms", detail, round=self.round)
 
     def _call_start(self, record: LLMCallStartRecord) -> _Line:
         # The alarm is a REFUSED panel, never a big prompt: a mandatory floor is admitted whatever it costs.
@@ -304,11 +335,11 @@ class Narration:
 
     def _hold(self, key: str, record: ProviderHoldRecord) -> _Line | None:
         sender, held = record.sender, record.reading
-        shown = self._held.get(sender)
-        if shown is not None and shown[0] == held:
+        shown = None if (was := self._held.get(sender)) is None else was[0].reading
+        if shown == held:
             return None
-        self._held[sender] = (held, key)
-        going = shown is not None and shown[0].since == held.since
+        self._held[sender] = (record, key)
+        going = shown is not None and shown.since == held.since
         bits = [f"throttle {record.strikes}" if going else record.scope]
         if held.detail and not going:
             bits.append(f'"{held.detail}"')
@@ -355,14 +386,14 @@ class Narration:
         return _Line("quiet", label, f"{who} · {so_far} so far" if so_far else who, arm=arm)
 
     def _phase(self, record: PhaseRecord) -> _Line | None:
-        if record.event == "enter" and record.round is not None and self.round is None:
+        if record.step == "enter" and record.round is not None and self.round is None:
             self.round = record.round
         if record.phase != CampaignPhase.BENCH:
             return None
         # Without this bracket the pass's row ticks read as the last candidate scoring again.
-        view = record.view
-        if not isinstance(view, VerificationEnterView):
-            if record.event == "exit":
+        view = record.act
+        if not isinstance(view, PassOpened):
+            if record.step == "exit":
                 self._bench = None
             return None
         candidate = view.arm.label or None

@@ -4,7 +4,7 @@ import enum
 from collections.abc import Sequence
 from typing import Literal, NamedTuple
 
-from pydantic import Field
+from pydantic import Field, computed_field
 
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
@@ -123,6 +123,11 @@ class PauseCause(enum.StrEnum):
     OWED = "owed"
 
 
+def paused_by(cause: PauseCause, detail: str) -> str:
+    """A pause's cause as every door words it: "Paused by interrupt"."""
+    return f"Paused by {cause.value}" + (f": {detail}" if detail else "")
+
+
 class PauseReading(FrozenModel):
     """Why a cycle reads paused: its declaration, or an accepted pause the loop has yet to reach."""
 
@@ -132,6 +137,11 @@ class PauseReading(FrozenModel):
     cause: PauseCause
     detail: str = Field(description="Who or what asked, in the declarer's own words.")
     at: str
+
+    @computed_field(description="SERVED: the cause as every door words it (`paused_by`).")  # type: ignore[prop-decorator]
+    @property
+    def said(self) -> str:
+        return paused_by(self.cause, self.detail)
 
 
 class ProducerState(enum.StrEnum):
@@ -328,7 +338,7 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             2,
             None,
             f"Queued — {QUEUE_STARTS_ITSELF}.",
-            "waiting for a machine slot",
+            "",
         ),
         RunPhase.STARTING: RunPhaseInfo(
             "Starting",
@@ -338,7 +348,7 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             1,
             None,
             "Starting up…",
-            "coming up",
+            "",
         ),
         RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", "", ""),
         # No loop walks it, so a skip or a look-ahead has nothing to spend; the one stop reaches it.
@@ -363,7 +373,7 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             0,
             None,
             "Holding for you — the chat says what it waits on.",
-            "awaiting your decision",
+            "",
         ),
         RunPhase.DETACHED: RunPhaseInfo(
             "Detached", False, False, False, 3, "start", "", "producer gone"
@@ -406,9 +416,15 @@ class RunAdmission(FrozenModel):
         description="What the offered start or resume sends beside the cycle's address: the "
         "`start-run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent as served."
     )
+    launch_refusal: str = Field(
+        description="Why the cycle's campaign refuses every launch (archived, its definition "
+        "moved), so its stop's `start-run` acts are not offered; empty where a launch is admitted."
+    )
 
     @classmethod
-    def of(cls, run: RunState) -> RunAdmission:
+    def of(cls, run: RunState, *, campaign_refusal: str = "") -> RunAdmission:
+        """*campaign_refusal* is the cycle's campaign's own (`admission.py::admitted`): a launch
+        verb it refuses is not offered."""
         info = RUN_PHASE_INFO[run.run_phase]
         # Both are spent by a walk: accepted anywhere else, the next launch would drop them.
         walking = info.walks and run.producer.appending
@@ -428,14 +444,18 @@ class RunAdmission(FrozenModel):
             offers, refusal = None, declined if pausing else f"{info.parked.capitalize()}."
         else:
             offers, refusal = info.action, ""
+        refuses_launch = bool(campaign_refusal) and info.action in ("resume", "start")
+        if refuses_launch and offers is not None:
+            offers, refusal = None, campaign_refusal
         stop = run.ended or (None if run.pause is None else run.pause.stop_reason)
-        acts = () if stop is None or pausing else STOP_REASON_INFO[stop].next_acts
+        acts = () if stop is None or pausing or refuses_launch else STOP_REASON_INFO[stop].next_acts
         return cls(
             offers=offers,
             refusal=refusal,
             skip_refusal=skip,
             lookahead_refusal=lookahead,
             payload={k: v for act in acts for k, v in act.payload.items()},
+            launch_refusal=campaign_refusal,
         )
 
 

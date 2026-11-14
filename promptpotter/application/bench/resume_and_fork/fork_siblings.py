@@ -8,14 +8,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from promptpotter.application.bench.resume_and_fork.decisions import record_decision
+from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.arms import ArmState, Proposed
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.command_kinds import ForkCyclePayload
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_params import PipelineParams, lay_nodes
 from promptpotter.domain.pipeline_schema import NodeSearchNarrowing
@@ -31,7 +31,6 @@ from promptpotter.domain.records.run_records import (
     parent_address,
 )
 from promptpotter.domain.run_standing import line_reference
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
@@ -72,11 +71,9 @@ def _fork_sibling_setup(
     new_dir.mkdir(parents=True)
 
     # The FORK_CUT's own offset: a parent still running appends past it, never into the fork.
-    cut = record_decision(
-        CycleEventLog.open(CycleDir(parent_dir)),
-        ForkCutFrom(from_round=from_round, fork=payload),
-        child.cycle_id,
-        node=None,
+    cut = campaign_store.append(
+        parent,
+        decision(ForkCutFrom(from_round=from_round, fork=payload), child.cycle_id, node=None),
     )
     logger.info(
         "Forked %s → %s at round %d [trigger=%s]",

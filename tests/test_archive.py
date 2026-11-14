@@ -30,6 +30,7 @@ from factories import (
     arm_state,
     arm_walk,
     close_round,
+    cycle_ledger,
     defaulted_config,
     degradation_health,
     election,
@@ -827,6 +828,8 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
             Panel(cells=ten, order=ten, block_size=len(ten)),
         )
 
+    rescope(ledger=cycle_ledger(racing.cycle))
+
     walked = sheet(
         measurement(i, None, error="boom", error_category="transient")
         if i == 2
@@ -1066,7 +1069,7 @@ def test_a_resume_from_3_that_halts_on_a_divergence_below_it_displaces_no_round_
     resuming = seat(stores, hop=halted)
     resuming.cycle.session.state.resumed_from_round = stores.campaigns.rewind_enters(halted, 3)
     with (
-        scoped(ledger=resuming.ledger, spawn=inner_spawn_of(resuming.cycle.session)),
+        scoped(ledger=cycle_ledger(resuming.cycle), spawn=inner_spawn_of(resuming.cycle.session)),
         scoped(book=spend_book()),
         pytest.raises(ResumeDivergenceError),
     ):
@@ -2353,9 +2356,9 @@ def repair(built_stores: Stores) -> _Repair:
             round_num=2,
             origin=(repair_origin, lambda _s: sheet(rows)),
         )
-        cycle, ledger = running.cycle, running.ledger
-        rescope(spawn=inner_spawn_of(cycle.session))
-        run_init(cycle, ledger)
+        cycle, ledger = running.cycle, cycle_ledger(running.cycle)
+        rescope(spawn=inner_spawn_of(cycle.session), ledger=ledger)
+        run_init(cycle)
         # Round 1's arm ran to its end on cell 3 and came back with no measurement.
         hole = measurement(
             3, None, sample_key=repair_bank[3].key, error="boom", error_category="transient"
@@ -2460,10 +2463,10 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
             origin=(origin, lambda _session: dead),
             optimization={"budget": {"rounds": 0}},
         )
-        cycle, session = ctx.cycle, ctx.cycle.session
+        cycle, session, ledger = ctx.cycle, ctx.cycle.session, cycle_ledger(ctx.cycle)
         session.state.clock = LaunchClock.now()
         rescope(spawn=inner_spawn_of(session))
-        ctx.ledger.append(RunPhaseRecord(state=Running()))
+        ledger.append(RunPhaseRecord(state=Running()))
         if replayed:
             # The origin a resume replays stands on its close (`closed_rounds.py::closed_rounds`).
             closed = stores.campaigns.standing_rounds(hop, moment=None).rounds[0]
@@ -2476,17 +2479,15 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
         resumed = scan_cycle_facts(stores.campaigns.ledger(hop)).resumed_ending
 
         async def walk() -> LoopEnd:
-            gated = await open_origin_round(
-                cycle, [], ctx.ledger, spend=SpendRollup(), resumed_ending=resumed
-            )
-            return gated or await run_round_loop(cycle, cycle.config, session, ctx.ledger)
+            gated = await open_origin_round(cycle, [], spend=SpendRollup(), resumed_ending=resumed)
+            return gated or await run_round_loop(cycle, cycle.config, session)
 
         with scoped(account=stores):
             book = spend_book()
-        with scoped(ledger=ctx.ledger), scoped(book=book):
+        with scoped(ledger=ledger), scoped(book=book):
             end = asyncio.run(walk())
         if not crashes:
-            ctx.ledger.append(RunPhaseRecord.stop(end.stop_reason))
+            ledger.append(RunPhaseRecord.stop(end.stop_reason))
         return end.stop_reason
 
     def passes() -> list[str]:

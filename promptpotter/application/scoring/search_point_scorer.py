@@ -25,7 +25,7 @@ from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Measure
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import CellBeat, heartbeat
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger, current_round
+from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.io import HeldLock
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
@@ -156,7 +156,6 @@ async def _claim_cell(
             if waiting is None:
                 waiting = asyncio.create_task(
                     heartbeat(
-                        active_cycle_ledger(),
                         CellBeat(sample.id),
                         round_num=current_round(),
                         start_monotonic=time.monotonic(),

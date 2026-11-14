@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 import time
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple, assert_never
 
@@ -15,10 +14,9 @@ from promptpotter.domain.arm_reading import (
     panel_counts,
     panel_cuts,
 )
-from promptpotter.domain.arms import ArmState, Concluded, Measuring, arm_name
+from promptpotter.domain.arms import Concluded, Measuring, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading
-from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import Cut, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import (
@@ -31,19 +29,18 @@ from promptpotter.domain.dashboard_rows import (
 )
 from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey, ArmName
-from promptpotter.domain.phase_views import (
-    BenchScoredView,
-    InitEnterView,
-    InitExitView,
-    OptimizerStepEnterView,
-    RoundStartView,
-    VerificationEnterView,
-    VerificationGradedView,
+from promptpotter.domain.phase_acts import (
+    InitClosed,
+    InitOpened,
+    PassOpened,
+    ProposeOpened,
+    StepOpened,
 )
 from promptpotter.domain.phases import CampaignPhase, DashboardState, RunPhase, StopReason
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     BackendRevision,
@@ -98,7 +95,6 @@ from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     LedgerSpan,
 )
-from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.measurement_context import MeasurementRole
 
 
@@ -134,19 +130,22 @@ def sample_row(s: WalkedSample) -> DashboardSample:
 
 
 def build_candidate_rows(
-    buffer: RoundBuffer, short_formula_template: str | None
+    narration: Narration,
+    round_num: int,
+    samples: dict[ArmKey, list[WalkedSample]],
+    election: Election | None,
 ) -> list[LiveCandidate]:
+    """The narration's live round: each arm it announced at *round_num*, with the cells it walked."""
     arms = [
-        (key, arm, buffer.fold(key))
-        for key, arm in buffer.arms()
-        if arm.role != MeasurementRole.PARENT
+        (key, arm, narration.fold(round_num, key))
+        for key in narration.announced(round_num)
+        if (arm := narration.state(round_num, key)).role != MeasurementRole.PARENT
     ]
     cuts = panel_cuts([panel_counts(arm, fold) for _, arm, fold in arms])
-    election = buffer.election
     rows: list[LiveCandidate] = []
     for (key, arm, fold), cut in zip(arms, cuts, strict=True):
         reading = ArmReading.of(
-            arm_name(key, arm, buffer.round_num),
+            arm_name(key, arm, round_num),
             arm,
             fold=fold,
             cut=cut,
@@ -161,24 +160,21 @@ def build_candidate_rows(
         )
         rows.append(
             LiveCandidate.in_flight(
-                reading,
-                arm,
-                samples=[sample_row(s) for s in buffer.samples[key]],
-                composite_fitness_formula_short=inline_short_formula_values(
-                    short_formula_template, {} if fold is None else dict(fold.evaluators)
-                ),
+                reading, arm, samples=[sample_row(s) for s in samples.get(key, ())]
             )
         )
     return rows
 
 
-def build_racing_block(buffer: RoundBuffer) -> RacingBlock | None:
-    if not buffer.race_standings:
+def build_racing_block(
+    race: RaceStandingRecord | None, standings: dict[str, float]
+) -> RacingBlock | None:
+    if race is None:
         return None
-    ranked = sorted(buffer.race_standings.items(), key=lambda kv: -kv[1])
+    ranked = sorted(standings.items(), key=lambda kv: -kv[1])
     return RacingBlock(
-        member=buffer.race_member,
-        n_samples=buffer.race_n_samples,
+        member=race.member,
+        n_samples=race.n_samples,
         top=[{"id": cid, "p_best": p} for cid, p in ranked[:5]],
     )
 
@@ -383,66 +379,6 @@ class WalkedSample(NamedTuple):
     grade: Grade
 
 
-@dataclass
-class RoundBuffer:
-    round_num: int = 0
-    # Every round's: a cell names an arm announced before the buffer reached its round.
-    announced: Narration = field(default_factory=Narration)
-    # Each arm of THIS round, in announcement order, with the cells it walked.
-    samples: dict[ArmKey, list[WalkedSample]] = field(default_factory=dict)
-    race_standings: dict[str, float] = field(default_factory=dict)
-    race_member: str = ""
-    race_n_samples: int = 0
-    # ``None`` until the election is held.
-    election: Election | None = None
-
-    def reset(self, round_num: int) -> None:
-        self.round_num = round_num
-        self.samples = {key: [] for rnd, key in self.announced if rnd == round_num}
-        self.election = None
-        self.race_standings = {}
-        self.race_member = ""
-        self.race_n_samples = 0
-
-    def enter(self, round_num: int) -> None:
-        self.announced.enter(round_num)
-        self.reset(round_num)
-
-    def announce(self, record: ArmRecord) -> None:
-        self.announced.announce(record)
-        if record.round == self.round_num:
-            self.samples.setdefault(record.arm, [])
-
-    def take(self, record: SampleScoredRecord) -> ArmKey | None:
-        arm = self.announced.take(record)
-        if arm is not None and record.round == self.round_num:
-            # Held with its grade: without it `blocks.py::sample_row` renders an ungraded cell MISS.
-            result = record.result
-            self.samples[arm].append(WalkedSample(record.position, result.facts, result.grade))
-        return arm
-
-    def arms(self) -> list[tuple[ArmKey, ArmState]]:
-        return [(key, self.announced.state(self.round_num, key)) for key in self.samples]
-
-    def fold(self, key: ArmKey) -> ScoreSummary | None:
-        return self.announced.fold(self.round_num, key)
-
-    def name(self, key: ArmKey) -> ArmName | None:
-        if key not in self.samples:
-            return None
-        return arm_name(key, self.announced.state(self.round_num, key), self.round_num)
-
-    def label(self, key: ArmKey) -> str:
-        return "" if (name := self.name(key)) is None else name.label
-
-    def record_race_standing(
-        self, member: str, current_id: str, n_samples: int, p_best: float
-    ) -> None:
-        self.race_standings[current_id] = p_best
-        self.race_member = member
-        self.race_n_samples = n_samples
-
-
 _DASHBOARD_DEBOUNCE_S = 0.25
 # The write holds the lock every ledger append takes, so the next one rests this many times its cost.
 _PERSIST_REST_FACTOR = 9.0
@@ -459,12 +395,14 @@ _AT_ONCE: frozenset[type[CycleRecord]] = frozenset(
         RoundClosedRecord,
         RoundRestatedRecord,
         PhaseRecord,
+        PassGradedRecord,
+        BenchScoredRecord,
         ElectionRecord,
     }
 )
 
 
-# MEASURE, BENCH and optimizer steps are absent on purpose: sample records, a bracket and the enter view drive them.
+# MEASURE, BENCH and optimizer steps are absent on purpose: sample records, a bracket and the step's act drive them.
 _PHASE_TO_STATE: dict[str, DashboardState] = {
     CampaignPhase.INIT: DashboardState.INIT,
     CampaignPhase.ORIGIN: DashboardState.ORIGIN,
@@ -489,8 +427,14 @@ class LiveDashboardProjection(Projection):
         self._launch()
 
     def _launch(self) -> None:
-        self.short_formula_template: str | None = None
-        self._buffer = RoundBuffer()
+        # Every round's arms and the run's holds: a cell names an arm announced before its round.
+        self._narration = Narration()
+        # The live round the arms below are of, each with the cells it walked.
+        self._live = 0
+        self._samples: dict[ArmKey, list[WalkedSample]] = {}
+        self._election: Election | None = None
+        self._race: RaceStandingRecord | None = None
+        self._race_standings: dict[str, float] = {}
         self._open_samples: dict[int, tuple[str, ArmKey | None, int]] = {}
         self._bench_readings: dict[int, BenchReading] = {}
         self._around_bench: tuple[DashboardState, str | None, ArmName | None] | None = None
@@ -500,8 +444,6 @@ class LiveDashboardProjection(Projection):
         self._affordable: int | None = None
         self._cell_reserve_usd: float | None = None
         self._waiting: tuple[int, float] | None = None
-        # A launch hears a hold still on at its first send: one the last launch saw open ends here.
-        self._holds: dict[str, ProviderHoldRecord] = {}
         self._in_flight: tuple[str, str] | None = None
         self._inner: CycleHop | None = None
         self._proposer_node: str | None = None
@@ -537,6 +479,7 @@ class LiveDashboardProjection(Projection):
         self._measurement_node = record.measurement_node
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
+        self._narration.read(self.at_offset, record)
         if self.state.declared_phase == record.state.run_phase:
             return
         self.state.declared_phase = record.state.run_phase
@@ -565,10 +508,10 @@ class LiveDashboardProjection(Projection):
         self.state.recent_backend_warnings = [*self.state.recent_backend_warnings, warning][-10:]
 
     def _handle_provider_hold(self, record: ProviderHoldRecord) -> None:
-        self._holds[record.sender] = record
+        self._narration.read(self.at_offset, record)
 
     def _handle_provider_eased(self, record: ProviderEasedRecord) -> None:
-        self._holds.pop(record.sender, None)
+        self._narration.read(self.at_offset, record)
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
         self._enter(record.round)
@@ -584,7 +527,15 @@ class LiveDashboardProjection(Projection):
         s.rounds = [r for r in s.rounds if r.round < round_num]
         self._standings = {n: held for n, held in self._standings.items() if n < round_num}
         self._stand()
-        self._buffer.enter(round_num)
+        self._narration.enter(round_num)
+        self._reset_live(round_num)
+
+    def _reset_live(self, round_num: int) -> None:
+        self._live = round_num
+        self._samples = {}
+        self._election = None
+        self._race = None
+        self._race_standings = {}
 
     def _stand(self) -> None:
         """The run stands where its LATEST round's last statement says, whichever round was stated last."""
@@ -596,8 +547,8 @@ class LiveDashboardProjection(Projection):
     def _move_to_round(self, round_num: int | None) -> None:
         if round_num is not None:
             self.state.round = round_num
-        if self._buffer.round_num != self.state.round:
-            self._buffer.reset(self.state.round)
+        if self._live != self.state.round:
+            self._reset_live(self.state.round)
 
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         self._stated(record)
@@ -615,74 +566,70 @@ class LiveDashboardProjection(Projection):
     def _handle_phase(self, record: PhaseRecord) -> None:
         s = self.state
         self._move_to_round(record.round)
-        view = record.view
-        if record.phase == CampaignPhase.BENCH and record.event == "enter":
+        act = record.act
+        if record.phase == CampaignPhase.BENCH and record.step == "enter":
             # Stopped included: `grade-bench` opens a pass outside any run, and its exit hands the state back.
             self._around_bench = (s.state, s.optimizer_step, s.measuring_arm)
             self._set_state(DashboardState.BENCH)
-        elif record.event == "enter" and s.state != DashboardState.STOPPED:
+        elif record.step == "enter" and s.state != DashboardState.STOPPED:
             mapped = _PHASE_TO_STATE.get(record.phase)
             if mapped is not None:
                 self._set_state(mapped)
-            elif isinstance(view, OptimizerStepEnterView):
-                self._set_state(DashboardState.OPTIMIZER_STEP, step=view.activity)
-        match view:
-            case InitEnterView() | InitExitView():
-                if view.composite_fitness_formula is not None:
-                    s.composite_fitness_formula = view.composite_fitness_formula
-                if view.composite_fitness_formula_short is not None:
-                    self.short_formula_template = view.composite_fitness_formula_short
-            case RoundStartView():
-                self._proposer_node = view.node
-            case OptimizerStepEnterView():
-                self._step_node = view.node
-            case VerificationEnterView():
+            elif isinstance(act, StepOpened):
+                self._set_state(DashboardState.OPTIMIZER_STEP, step=act.activity)
+        match act:
+            case InitOpened() | InitClosed():
+                s.composite_fitness_formula = act.formula.formula
+            case ProposeOpened():
+                self._proposer_node = act.node
+            case StepOpened():
+                self._step_node = act.node
+            case PassOpened():
                 self._in_pass = True
-                self._mark(_opened(view.verification, view.arm, view.rows))
-            case BenchScoredView():
-                for reading in (view.bench.origin, view.bench.selected):
-                    if reading is not None:
-                        self._place_bench(reading)
-            case VerificationGradedView(verification=taken, reading=read):
-                opened = _opened(taken.kind, taken.arm, len(taken.sample_keys))
-                match read:
-                    case None:
-                        ended = opened.ended(
-                            scored=len(taken.cells), level=None, failed_as=view.state
-                        )
-                    case BenchReading():
-                        self._place_bench(read)
-                        ended = opened.ended(scored=read.n, level=read.level, failed_as=None)
-                    case VerifyReading(fresh=fresh):
-                        ended = opened.ended(scored=fresh.n, level=fresh.fitness, failed_as=None)
-                    case NoiseBand(fresh_fitness=fitness):
-                        # Its rows are every rescore's, as its bracket opened them.
-                        ended = _opened(taken.kind, taken.arm, len(taken.cells)).ended(
-                            scored=len(taken.cells),
-                            level=fitness,
-                            failed_as=None,
-                        )
-                self._mark(ended)
-        if record.event == "exit" and record.phase in (CampaignPhase.BENCH, CampaignPhase.VERIFY):
+                self._mark(_opened(act.verification, act.arm, act.rows))
+        if record.step == "exit" and record.phase in (CampaignPhase.BENCH, CampaignPhase.VERIFY):
             self._in_pass = False
-        if record.phase == CampaignPhase.VERIFY and record.event == "exit":
+        if record.phase == CampaignPhase.VERIFY and record.step == "exit":
             # A verify or a noise floor is graded inside its bracket; a bench pass after it.
             s.verification = s.orphaned(spare=MeasurementRole.BENCH)
         if (
             record.phase == CampaignPhase.BENCH
-            and record.event == "exit"
+            and record.step == "exit"
             and (around := self._around_bench) is not None
         ):
             self._around_bench = None
             state, step, s.measuring_arm = around
             self._set_state(state, step=step)
 
+    def _handle_bench_scored(self, record: BenchScoredRecord) -> None:
+        for reading in (record.bench.origin, record.bench.selected):
+            if reading is not None:
+                self._place_bench(reading)
+
+    def _handle_pass_graded(self, record: PassGradedRecord) -> None:
+        taken = record.verification
+        opened = _opened(taken.kind, taken.arm, len(taken.sample_keys))
+        match read := record.reading:
+            case None:
+                ended = opened.ended(scored=len(taken.cells), level=None, failed_as=record.state)
+            case BenchReading():
+                self._place_bench(read)
+                ended = opened.ended(scored=read.n, level=read.level, failed_as=None)
+            case VerifyReading(fresh=fresh):
+                ended = opened.ended(scored=fresh.n, level=fresh.fitness, failed_as=None)
+            case NoiseBand(fresh_fitness=fitness):
+                # Its rows are every rescore's, as its bracket opened them.
+                ended = _opened(taken.kind, taken.arm, len(taken.cells)).ended(
+                    scored=len(taken.cells), level=fitness, failed_as=None
+                )
+        self._mark(ended)
+
     def _handle_election(self, record: ElectionRecord) -> None:
-        self._buffer.election = record
+        self._election = record
 
     def _handle_arm(self, record: ArmRecord) -> None:
-        self._buffer.announce(record)
-        if record.round != self._buffer.round_num:
+        self._narration.announce(record)
+        if record.round != self._live:
             return
         # A walk ending: a sample launched INTO an armed window is a discard; one left open at depth 1 failed on its own.
         if isinstance(record.state, Concluded) and self._open_samples:
@@ -738,7 +685,12 @@ class LiveDashboardProjection(Projection):
         self._inner = None
         self._absorb_sample_scored(record.result.facts, last_in_candidate=(qi + 1 >= qt))
         # A pass no arm walks (a bench pass, a verify) moves the run's scalars, never the round's arms.
-        if self._buffer.take(record) is not None:
+        if (arm := self._narration.take(record)) is not None:
+            if record.round == self._live:
+                # Held with its grade: without it `blocks.py::sample_row` renders an ungraded cell MISS.
+                result = record.result
+                walked = WalkedSample(record.position, result.facts, result.grade)
+                self._samples.setdefault(arm, []).append(walked)
             return
         for held in self.state.verification:
             if (
@@ -752,9 +704,8 @@ class LiveDashboardProjection(Projection):
                 return
 
     def _handle_race_standing(self, record: RaceStandingRecord) -> None:
-        self._buffer.record_race_standing(
-            record.member, record.current, record.n_samples, record.p_best
-        )
+        self._race = record
+        self._race_standings[record.current] = record.p_best
 
     def _handle_flight(self, record: FlightRecord) -> None:
         self._flight = (record.out, record.allowed, record.most)
@@ -769,7 +720,7 @@ class LiveDashboardProjection(Projection):
                 member=record.member,
                 round=record.round,
                 arm=record.arm,
-                label=self._buffer.label(record.arm),
+                label=self._label(record.arm),
                 position=record.position,
                 prior_keys=record.prior_keys,
             )
@@ -784,7 +735,15 @@ class LiveDashboardProjection(Projection):
         sid, (query_text, arm, _depth) = next(iter(self._open_samples.items()))
         s.current_query_payload = query_text
         s.current_position = sid
-        s.measuring_arm = None if arm is None else self._buffer.name(arm)
+        s.measuring_arm = None if arm is None else self._name(arm)
+
+    def _name(self, key: ArmKey) -> ArmName | None:
+        if key not in self._narration.announced(self._live):
+            return None
+        return arm_name(key, self._narration.state(self._live, key), self._live)
+
+    def _label(self, key: ArmKey) -> str:
+        return "" if (name := self._name(key)) is None else name.label
 
     def _absorb_sample_scored(self, facts: MeasuredCell, *, last_in_candidate: bool) -> None:
         s = self.state
@@ -882,12 +841,10 @@ class LiveDashboardProjection(Projection):
         if self._waiting is not None and opened is not None:
             arm = opened[1]
             waiting_on = WaitingOn(
-                label=None if arm is None else self._buffer.label(arm),
+                label=None if arm is None else self._label(arm),
                 position=self._waiting[0],
             )
             waiting_since = self._waiting[1]
-        # The field holds one sender: the episode that has held longest.
-        held = min(self._holds.values(), key=lambda r: r.gives_up_at, default=None)
         active = self._active_node()
         measuring = active == self._measurement_node
         current = CurrentRound(
@@ -895,9 +852,11 @@ class LiveDashboardProjection(Projection):
             active_node=active,
             measurement_node=self._measurement_node,
             inner=self._inner,
-            candidates=build_candidate_rows(self._buffer, self.short_formula_template),
+            candidates=build_candidate_rows(
+                self._narration, self._live, self._samples, self._election
+            ),
             nodes=self._current_round_nodes(),
-            racing=build_racing_block(self._buffer),
+            racing=build_racing_block(self._race, self._race_standings),
         )
         return s.model_copy(
             update={
@@ -911,7 +870,8 @@ class LiveDashboardProjection(Projection):
                 "cell_reserve_usd": self._cell_reserve_usd,
                 "waiting_on": waiting_on,
                 "waiting_since": waiting_since,
-                "backpressure": None if held is None else held.reading,
+                # The field holds one sender: the episode that has held longest.
+                "backpressure": self._narration.longest_hold,
             }
         )
 

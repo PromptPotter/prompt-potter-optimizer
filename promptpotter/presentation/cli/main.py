@@ -759,6 +759,25 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         ),
     ),
     _read_verb(
+        "dashboard",
+        ReadKind.CYCLE_DASHBOARD,
+        "cli.commands.reads:dashboard_human",
+        help="One cycle's live dashboard, the body `GET …/cycles/{id}/dashboard` serves every "
+        "door: its run phase (derived at each read, not the file's `declared_phase`), why it is "
+        "paused, the verb its admission offers, its rounds and spend. `--json` prints the body. "
+        "Read-only, zero spend.",
+        args=(
+            ACTIVE_CAMPAIGN,
+            ACTIVE_CYCLE,
+            Arg(
+                "--at",
+                type=int,
+                default=None,
+                help="A line of the cycle's own ledger: the state then.",
+            ),
+        ),
+    ),
+    _read_verb(
         "command",
         ReadKind.COMMAND,
         "cli.commands.reads:command_human",

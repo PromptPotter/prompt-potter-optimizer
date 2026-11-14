@@ -26,8 +26,9 @@ shipped `promptpotter/assets/datasets/`), a raw file path ([onboarding.md](refer
 
 1. `.promptpotter/projects/{tenant}/.workspace/active_session.json` → the LATEST launch only; parallel
    runs: `python -m promptpotter cycles --attached` (`--inside <campaign>::<cycle>` for an L4 inner run's).
-2. That cycle's `dashboard.json` + newest `rounds/round_NNNN.json`. Trust `run_phase` from `cycles` (it
-   also names the verb a paused cycle admits), not the runner's `declared_phase`.
+2. `python -m promptpotter dashboard --campaign <id> [--cycle <id>]` (the served dashboard, `--json` for
+   the body) + newest `rounds/round_NNNN.json`. Trust its `run_phase`, `pause` and `admission` (the verb
+   the cycle admits), never `dashboard.json`'s `declared_phase`.
 3. That cycle's `readout.log` tail.
 
 Then **one line**: `mode · what's live · next action`. Nothing before it. Node I/O:
@@ -51,7 +52,7 @@ are `{dataset}/dataset.yaml::campaign`, never guessed. `head-to-head` mints ever
 
 **Every ending states its next verb** (the readout's `cli:` line). A `set-limits` raise fails silently two
 ways: the ceiling is clamped to the account allowance (read the ARMED value off
-the served dashboard's `run_limits.budget`), and the counter is CUMULATIVE across resumes and cycles. A hard
+`dashboard --json`'s `run_limits.budget`), and the counter is CUMULATIVE across resumes and cycles. A hard
 kill loses nothing: every query lands in `measurements/cells/{config_key}.jsonl` at once.
 
 ## Supervise

@@ -80,7 +80,7 @@ export function useRunControl(): RunControl | null {
     // No dashboard yet: a warming cycle's launch is already in flight.
     noneReason: admission === undefined ? "Starting up…" : admission.refusal || null,
     pauseNote: pause
-      ? `Paused by ${pause.cause}${pause.detail ? ` (${pause.detail})` : ""} — ${pauseNextStep(pause)}`
+      ? `${pause.said} — ${pauseNextStep(pause, admission?.launch_refusal ?? "")}`
       : null,
     toggle,
     step: action === null || action === "pause" ? null : step,

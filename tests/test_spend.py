@@ -3657,7 +3657,7 @@ def test_a_cycle_retaken_after_a_killed_bench_pass_closes_its_dead_bracket(
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     killed = _account_stores(tmp_path / "killed", issuer=_WEB, user=user, spent=None)
     CycleEventLog.open(CycleDir(killed.campaigns.cycle_dir(_HELD_HOP))).append(
-        PhaseRecord(phase=CampaignPhase.BENCH, event="enter")
+        PhaseRecord(phase=CampaignPhase.BENCH, step="enter")
     )
 
     async def _retaken() -> bool:
@@ -4714,7 +4714,7 @@ def test_a_ledger_refusing_a_sends_first_part_keeps_its_later_parts_on_the_accou
         scoped(book=spend_book(1.0)),
         pytest.raises(OSError),
     ):
-        patched.setattr("promptpotter.infrastructure.llm.spend_book.append_record", unappendable)
+        patched.setattr("promptpotter.infrastructure.ledger.CycleEventLog.append", unappendable)
         with admitted(
             CallLabel("backend", "backend"),
             SendBound(input_tokens=2_000, output_tokens=800, usd=0.5),
@@ -4988,8 +4988,8 @@ def test_a_framing_paid_before_its_cycle_exists_stays_billed_past_its_refused_mi
     # The account before the framing bills.
     with_draft = account_usd()
 
-    async def framed(*_: object, ledger: CycleEventLog, **__: object) -> None:
-        _pay(ledger, 0.03, input_tokens=500, output_tokens=200)
+    async def framed(*_: object, **__: object) -> None:
+        _pay(telemetry.billing_ledger("framing"), 0.03, input_tokens=500, output_tokens=200)
         raise PayloadInvalidError("refused after the framing", code="refused")
 
     monkeypatch.setattr(mint, "commit_task_framing", framed)
@@ -5095,7 +5095,7 @@ def test_a_settle_whose_ledger_write_fails_still_closes_its_book_whole(
             paid_by="host",
         ) as send,
     ):
-        patched.setattr("promptpotter.infrastructure.llm.spend_book.append_record", unwritable)
+        patched.setattr("promptpotter.infrastructure.ledger.CycleEventLog.append", unwritable)
         send.settle(
             Billed(TokenAccount(input=2_000, output=400), 0.2),
             unknown=SendBound(input_tokens=0, output_tokens=400, usd=0.1),

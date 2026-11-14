@@ -1530,7 +1530,7 @@ LEDGER_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
     "decision": ("decisions", ("round", "kind", "outcome", "inputs_ref")),
     "election": ("elections", ("round", "selected", "ended_on", "fit")),
     "arm": ("arms", ("round", "arm", "state")),
-    "phase": ("phases", ("round", "phase", "event")),
+    "phase": ("phases", ("round", "phase", "step")),
     "round_entered": ("rounds_entered", ("round",)),
     "round_closed": ("rounds_closed", ("round", "election")),
     "run_phase": ("run_phases", ("run_phase", "stop_reason")),

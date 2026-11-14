@@ -38,6 +38,7 @@ from factories import (
     bench_passes,
     billed_call,
     close_round,
+    cycle_ledger,
     defaulted_config,
     delta_ruler,
     election_knobs,
@@ -305,8 +306,7 @@ from promptpotter.domain.paired_reading import (
     RoundArm,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
-from promptpotter.domain.phase_views import VerificationGradedView
-from promptpotter.domain.phases import CampaignPhase, PauseCause, RunPhase, StopReason, WalkEnd
+from promptpotter.domain.phases import PauseCause, RunPhase, StopReason, WalkEnd
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -315,6 +315,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
 )
 from promptpotter.domain.pool import BlockPool
+from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
@@ -322,7 +323,6 @@ from promptpotter.domain.records.run_records import (
     CampaignCeilingRecord,
     ForkSpec,
     ForkTrigger,
-    PhaseRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
     Running,
@@ -1358,13 +1358,13 @@ def _peer_cycle(
             framing=TaskDecomposition(pipeline_purpose="Answer each query with its letter."),
             origin_replicates=origin_replicates,
         )
-        cycle, ledger = seated.cycle, seated.ledger
+        cycle, ledger = seated.cycle, cycle_ledger(seated.cycle)
         with scoped(
             ledger=ledger,
             spawn=inner_spawn_of(cycle.session),
             determinism=cycle.config.optimization.determinism,
         ):
-            run_init(cycle, ledger)
+            run_init(cycle)
             with scoped(book=spend_book() if book is None else book):
                 yield cycle, ledger
 
@@ -1579,10 +1579,10 @@ def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
         "potter",
         {"l1_generate": {"config": {"n_variants": 2}}},
         one_more_than_parent,
-    ) as (cycle, ledger):
+    ) as (cycle, _):
         parent_id = cycle.parent.id
         offline.llm.says = _potter_says("Check each premise.", "Guess.")
-        first = asyncio.run(execute_round(cycle, 1, ledger)).result
+        first = asyncio.run(execute_round(cycle, 1)).result
         assert first.election is not None and first.election.selected is None, "round 1 held"
         leader = first.election.leading
         assert leader is not None
@@ -1591,7 +1591,7 @@ def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
             "a held leader ahead of its parent was dropped with its evidence"
         )
         offline.llm.says = _potter_says("Guess.")
-        second = asyncio.run(execute_round(cycle, 2, ledger)).result
+        second = asyncio.run(execute_round(cycle, 2)).result
         assert next(iter(second.panel)) == leader and second.rows(leader), (
             "the round after a leader missed the bar did not re-score it, first"
         )
@@ -1615,13 +1615,13 @@ def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
         "potter",
         {"l1_generate": {"config": {"n_variants": 3}}},
         every_other,
-    ) as (cycle, ledger):
+    ) as (cycle, _):
         offline.llm.says = _potter_says("Check each premise.", "Guess.", "Check twice.")
-        asyncio.run(execute_round(cycle, 1, ledger))
+        asyncio.run(execute_round(cycle, 1))
 
         # Round 1's cells fold after its election, so round 2 is the first to read them.
         offline.llm.says = _potter_says("Guess.")
-        second = asyncio.run(execute_round(cycle, 2, ledger)).result
+        second = asyncio.run(execute_round(cycle, 2)).result
     assert second.election is not None
     stamp, stores = second.election.ruler, cycle.session.store
 
@@ -1722,7 +1722,7 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
             even_cells,
             book=book,
             panel_gate=panel_gate,
-        ) as (cycle, ledger):
+        ) as (cycle, _):
             offline.llm.says = capo_says
             session = cycle.session
             running.append(True)
@@ -1739,12 +1739,12 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
                     )
                 )
             else:
-                uncut = asyncio.run(execute_round(cycle, 1, ledger)).cut
+                uncut = asyncio.run(execute_round(cycle, 1)).cut
                 assert uncut is None, f"{case}: round 1 ran inside its budget"
             paid.clear()
             parent = ArmKey(cycle.parent.id)
             cutting.append(True)
-            cut_walk = execute_round(cycle, cut_round, ledger)
+            cut_walk = execute_round(cycle, cut_round)
             if panel_gate == "strict":
                 with pytest.raises(StopLoop) as halted:
                     asyncio.run(cut_walk)
@@ -1817,9 +1817,9 @@ def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at
             "capo",
             _CAPO_NODES,
             misses_after_block_one,
-        ) as (cycle, ledger):
+        ) as (cycle, _):
             offline.llm.says = capo_says
-            return asyncio.run(execute_round(cycle, 1, ledger)).result
+            return asyncio.run(execute_round(cycle, 1)).result
 
     def fates(closed: RoundResult) -> dict[str, list[int]]:
         out: dict[str, list[int]] = {}
@@ -1964,11 +1964,11 @@ def test_one_round_composes_a_peers_crossover_and_selector_with_potters_race(
             name,
             composed_nodes,
             lambda prompt, _s: "Merged." in prompt,
-        ) as (cycle, ledger),
+        ) as (cycle, _),
     ):
         offline.llm.says = crossover_says
         assert not cycle.population
-        closed, cut, _ = asyncio.run(execute_round(cycle, 1, ledger))
+        closed, cut, _ = asyncio.run(execute_round(cycle, 1))
     assert cut is None
     assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
         "a crossover saw one parent"
@@ -2056,7 +2056,7 @@ def test_a_cut_theta_round_reads_its_cold_parent_on_the_cells_the_archive_holds_
             paid_then_cut,
             book=theta_book,
             panel_gate="off",
-        ) as (cycle, ledger),
+        ) as (cycle, _),
     ):
         offline.llm.says = crossover_says
         session = cycle.session
@@ -2083,7 +2083,7 @@ def test_a_cut_theta_round_reads_its_cold_parent_on_the_cells_the_archive_holds_
         )
         theta_walking.append(True)
         with pytest.raises(StopLoop) as unwound:
-            asyncio.run(execute_round(cycle, 1, ledger))
+            asyncio.run(execute_round(cycle, 1))
     assert unwound.value.reason is StopReason.SPEND_BUDGET
     assert cycle.rounds[-1].round == 0, "a cut round stood with no arm its selector could read"
 
@@ -2159,7 +2159,7 @@ def _bench_cycle(
 ) -> Iterator[_Bench]:
     """Its round, whose declared pick tops a higher-composite arm, and the origin's bench pass."""
     with _peer_bench(tmp_path, monkeypatch, offline) as (cycle, ledger, session, stores, cycle_dir):
-        picked = asyncio.run(execute_round(cycle, 1, ledger)).result
+        picked = asyncio.run(execute_round(cycle, 1)).result
         head, fold = picked.head, picked.fold
         assert head is not None and fold is not None and fold.fitness is not None
         origin = cycle.origin_round.origin.individual
@@ -2171,16 +2171,13 @@ def _bench_cycle(
                 subject="origin",
                 label="C0",
                 round_num=0,
-                ledger=ledger,
             )
         )
 
         def graded(*held: BenchPass) -> BenchPasses:
             banked = bench_passes(origin_pass, *held)
             return asyncio.run(
-                bench_selection(
-                    session, cycle.rounds, points=cycle.points, banked=banked, ledger=ledger
-                )
+                bench_selection(session, cycle.rounds, points=cycle.points, banked=banked)
             )
 
         yield _Bench(
@@ -2230,7 +2227,6 @@ def _pause_mid_pass(
                 cycle.rounds,
                 points=cycle.points,
                 banked=bench_passes(bench.origin_pass),
-                ledger=ledger,
             )
 
     with monkeypatch.context() as patched:
@@ -2239,9 +2235,7 @@ def _pause_mid_pass(
             asyncio.run(_bench_pick())
     session.state.control = loop_control
     [*_, stopped_view] = [
-        record.view
-        for record in ledger_records(ledger)
-        if isinstance(record, PhaseRecord) and record.event == "graded"
+        record for record in ledger_records(ledger) if isinstance(record, PassGradedRecord)
     ]
     return phases, acks, stopped_view
 
@@ -2355,7 +2349,7 @@ def test_a_pause_reaches_a_bench_pass_in_flight_and_it_banks_as_stopped_on_the_c
         assert (phases, acks) == ([RunPhase.SCORING, RunPhase.PAUSED], ["accepted"]), (
             "a pause was refused by a pass in flight, or the cycle never read as scoring"
         )
-        assert isinstance(stopped_view, VerificationGradedView)
+        assert isinstance(stopped_view, PassGradedRecord)
         paused_pass = stopped_view.verification
         assert stopped_view.state is ReadingState.PENDING and paused_pass.stop is not None, (
             "a paused pass read as faulted, when `resume` sends it again"
@@ -2585,7 +2579,7 @@ def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_re
             "the band stood beside a recorded level over rows it never re-scored (bl3.B2)"
         )
         assert band in [
-            record.view for record in ledger_records(ledger) if isinstance(record, PhaseRecord)
+            record for record in ledger_records(ledger) if isinstance(record, PassGradedRecord)
         ], "the band was not filed on its cycle's ledger"
 
 
@@ -2612,15 +2606,12 @@ def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorde
         ledger.append(RoundEnteredRecord(round=0))
         walked = list(session.state.scoring.partition.search)[:4]
         with scoped(round=0):
-            asyncio.run(
-                open_origin_round(cycle, walked, ledger, spend=SpendRollup(), resumed_ending=None)
-            )
+            asyncio.run(open_origin_round(cycle, walked, spend=SpendRollup(), resumed_ending=None))
         bands = [
-            record.view
+            record
             for record in ledger_records(ledger)
-            if isinstance(record, PhaseRecord)
-            and isinstance(record.view, VerificationGradedView)
-            and record.view.verification.kind is MeasurementRole.NOISE_FLOOR
+            if isinstance(record, PassGradedRecord)
+            and record.verification.kind is MeasurementRole.NOISE_FLOOR
         ]
     assert len(bands) == 1, "round 0 filed no band, or one per replicate"
     (band,) = bands
@@ -2921,9 +2912,9 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             operator_solves,
             control=RunControl(commands=authored.commands, cycle=authored.subject(hop)),
             arm_gate="author",
-        ) as (cycle, ledger):
+        ) as (cycle, _):
             offline.llm.says = lambda _body: "ok"
-            at_origin = RoundContext(cycle=cycle, round_num=0, ledger=ledger)
+            at_origin = RoundContext(cycle=cycle, round_num=0)
             origin_read = PotterView(
                 NodeContext(at_origin, optimizers.NODE_MEMBERS.get("l1_critique")), Ladder()
             )
@@ -2962,7 +2953,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                     await submit("arms-at-the-hold")
 
                 (held_round, held_cut, _), _ = await asyncio.gather(
-                    execute_round(cycle, 1, ledger), answer()
+                    execute_round(cycle, 1), answer()
                 )
                 assert held_cut is None
                 return held_round
@@ -3898,7 +3889,7 @@ def test_a_round_of_no_op_variants_measures_no_candidate_and_books_zero_candidat
         "potter",
         {},
         lambda _p, _s: True,
-    ) as (cycle, ledger):
+    ) as (cycle, _):
         restated = {"solve": dict(cycle.parent.prompts["solve"].fields)}
         variant = {
             "evidence_grounding": {"field": "critique", "citation": "the parent"},
@@ -3909,7 +3900,7 @@ def test_a_round_of_no_op_variants_measures_no_candidate_and_books_zero_candidat
         offline.llm.says = lambda _body: json.dumps({"variants": [variant, variant]})
         offline.llm.sent.clear()
         generating = NodeContext(
-            RoundContext(cycle=cycle, round_num=1, ledger=ledger),
+            RoundContext(cycle=cycle, round_num=1),
             optimizers.NODE_MEMBERS.get("l1_generate"),
         )
         no_cells = Panel(cells=[], order=[], block_size=0)
@@ -3940,7 +3931,7 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
         "potter",
         {},
         lambda _p, _s: True,
-    ) as (cycle, ledger):
+    ) as (cycle, _):
         writes = [{"answer_format": "Say anything."}, {"instruction": "Check each premise."}]
         offline.llm.says = lambda _body: json.dumps(
             {
@@ -3951,7 +3942,7 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
             }
         )
         generating = NodeContext(
-            RoundContext(cycle=cycle, round_num=1, ledger=ledger),
+            RoundContext(cycle=cycle, round_num=1),
             optimizers.NODE_MEMBERS.get("l1_generate"),
         )
         proposed = asyncio.run(member.propose(generating, no_cells, node_contract.Proposals([])))
@@ -3985,7 +3976,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             round_result(1, candidates_scored=3, optimizer_state=optimizer_state(), cells=unwalked),
         ]
         forking = NodeContext(
-            RoundContext(cycle=cycle, round_num=2, ledger=ledger),
+            RoundContext(cycle=cycle, round_num=2),
             optimizers.NODE_MEMBERS.get("l2_context"),
         )
         set_cycle(cycle, line=line)
@@ -4017,7 +4008,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             "a round file's disk fault unwound its close, went unreported, or stopped the next"
         )
         forking = NodeContext(
-            RoundContext(cycle=cycle, round_num=3, ledger=ledger),
+            RoundContext(cycle=cycle, round_num=3),
             optimizers.NODE_MEMBERS.get("l2_context"),
         )
         stalled = PotterView(forking, Ladder())
@@ -4392,29 +4383,25 @@ def _evidence_campaign(
         )
     for role, taken in passes.items():
         ledgers[hop].append(
-            PhaseRecord(
-                phase=CampaignPhase.BENCH,
-                event="graded",
-                view=VerificationGradedView(
-                    verification=taken,
-                    subject=role,  # type: ignore[arg-type]
-                    tolerance=0,
-                    reserve_usd=0.05 if role == "origin" else None,
-                    reserve_tokens=0 if role == "origin" else None,
-                    reading=None,
-                    state=ReadingState.READ,
-                    refusal=None,
-                ),
+            PassGradedRecord(
+                verification=taken,
+                subject=role,  # type: ignore[arg-type]
+                tolerance=0,
+                reserve_usd=0.05 if role == "origin" else None,
+                reserve_tokens=0 if role == "origin" else None,
+                reading=None,
+                state=ReadingState.READ,
+                refusal=None,
             )
         )
-    bank_campaign_result(
-        stores,
-        hop,
-        ledger=ledgers[hop],
-        clock=LaunchClock(started_at=started, monotonic=0.0),
-        finished_at=f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
-        optimizer_phases=frozenset(),
-    )
+    with scoped(ledger=ledgers[hop]):
+        bank_campaign_result(
+            stores,
+            hop,
+            clock=LaunchClock(started_at=started, monotonic=0.0),
+            finished_at=f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
+            optimizer_phases=frozenset(),
+        )
     campaign = stores.campaigns.load_campaign(cid)
     assert campaign is not None and len(line_launches(stores, campaign)) == 1
     return Subject(cid)

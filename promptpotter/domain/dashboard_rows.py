@@ -157,7 +157,6 @@ class LiveCandidate(ServedArm):
 
     pipeline_overlay: dict[str, dict[str, Any]] | None = None
     samples: list[DashboardSample] = Field(default_factory=list)
-    composite_fitness_formula_short: str | None = None
 
     @classmethod
     def in_flight(
@@ -166,14 +165,12 @@ class LiveCandidate(ServedArm):
         arm: ArmState,
         *,
         samples: list[DashboardSample],
-        composite_fitness_formula_short: str | None,
     ) -> LiveCandidate:
         """The arm as `ServedArm.of` serves it, its overlay and tape beside it."""
         return cls(
             **dict(ServedArm.of(reading, arm)),
             pipeline_overlay=arm.overlay,
             samples=samples,
-            composite_fitness_formula_short=composite_fitness_formula_short,
         )
 
 

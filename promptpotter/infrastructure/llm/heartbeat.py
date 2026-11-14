@@ -10,7 +10,7 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.run_records import LLMCallProgressRecord
-from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 from promptpotter.shared.errors import FileUnreadableError
 from promptpotter.shared.measurement_context import measured_pass
@@ -47,7 +47,6 @@ class CellBeat(NamedTuple):
 
 
 async def heartbeat(
-    ledger: CycleEventLog | None,
     beat: CallBeat | CellBeat,
     *,
     round_num: int | None,
@@ -56,7 +55,8 @@ async def heartbeat(
     inner_fn: Callable[[], CycleHop | None] | None = None,
     on_suspend: Callable[[float], None] | None = None,
 ) -> None:
-    """A beat's I/O fault is logged, never raised, so it never replaces the awaited call's reply or raise; ``ledger=None`` still ticks, so a missing ledger cannot disarm ``on_suspend``."""
+    """A beat's I/O fault is logged, never raised, so it never replaces the awaited call's reply or raise; an unbound or muted scope still ticks, so a missing ledger cannot disarm ``on_suspend``."""
+    ledger = active_cycle_ledger()
     while True:
         overshoot = await sleep_measuring_suspend(HEARTBEAT_INTERVAL_S)
         try:

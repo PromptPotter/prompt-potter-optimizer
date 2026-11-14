@@ -12,16 +12,12 @@ from promptpotter.domain.cycle_index import Intervention
 from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import IndividualWalk
-from promptpotter.domain.phase_views import (
-    BenchScoredView,
-    InitEnterView,
-    InitExitView,
-    VerificationGradedView,
-)
+from promptpotter.domain.phase_acts import InitClosed, InitOpened
 from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.pipeline_schema import CapabilityMenu
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.error import ErrorRecord
+from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     BABYSAT,
@@ -193,13 +189,9 @@ _CycleFact = (
 
 
 def _init_formula(record: PhaseRecord) -> str | None:
-    match record:
-        case PhaseRecord(
-            phase=CampaignPhase.INIT,
-            view=InitEnterView(composite_fitness_formula=str() as formula)
-            | InitExitView(composite_fitness_formula=str() as formula),
-        ):
-            return formula
+    match record.act:
+        case InitOpened(formula=formula) | InitClosed(formula=formula):
+            return formula.formula
     return None
 
 
@@ -433,6 +425,8 @@ class _Standing:
         self._cells: dict[tuple[int, ArmKey], dict[str, WalkedCell]] = {}
         # Below the round last entered, a value shares an arm's cells: a later cell copies them first.
         self._live: int | None = None
+        # Each closed round's arms as its close left them, built once: a later record of one thaws it.
+        self._frozen: dict[tuple[int, ArmKey], StandingArm] = {}
 
     def feed(self, record: _RoundStep) -> None:
         if isinstance(record, CycleMintedRecord):
@@ -452,6 +446,7 @@ class _Standing:
                 )
                 self._arms.enter(rnd)
                 self._cells = _before(self._cells, rnd)
+                self._frozen = _before(self._frozen, rnd)
                 self._live = rnd
             case ElectionRecord():
                 held.elections[rnd] = record
@@ -461,6 +456,7 @@ class _Standing:
                 self._arms.close(record, record.arms)
                 for arm_key in record.arms:
                     self._cells.setdefault((rnd, arm_key), {})
+                self._freeze(rnd, record.arms)
                 held.rounds[rnd] = StandingRound(record, offset)
             case RoundRestatedRecord():
                 # A restatement is its round WHOLE, so the ledger holding it owns every arm.
@@ -469,12 +465,14 @@ class _Standing:
                     self._cells[rnd, arm_key] = {
                         c[0]: c for c in record.cells.arms.get(arm_key, ())
                     }
+                self._freeze(rnd, record.arms)
                 held.rounds[rnd] = StandingRound(record, offset)
             case RoundProposedRecord() if record.submitted:
                 held.submitted[rnd] = record
             case RoundProposedRecord():
                 held.proposals[rnd] = StandingProposal(record, offset)
             case ArmRecord():
+                self._frozen.pop((rnd, record.arm), None)
                 self._arms.announce(record)
                 self._cells.setdefault((rnd, record.arm), {})
                 match record.state:
@@ -484,7 +482,9 @@ class _Standing:
                     case Cut() | Measured():
                         held.skipped.pop((rnd, record.arm), None)
             case SampleScoredRecord():
-                walking = self._arms.take(record)
+                # The arm's fold moved, so its frozen standing goes whether or not a cell was walked.
+                if (walking := self._arms.take(record)) is not None:
+                    self._frozen.pop((rnd, walking), None)
                 if (cell := _walked_cell(record)) is None:
                     return
                 if walking is not None:
@@ -502,20 +502,29 @@ class _Standing:
     def _shared(self, rnd: int) -> bool:
         return self._live is not None and rnd < self._live
 
+    def _standing_arm(self, rnd: int, key: ArmKey, *, copied: bool) -> StandingArm:
+        cells = self._cells[rnd, key]
+        return StandingArm(
+            self._arms.state(rnd, key), dict(cells) if copied else cells, self._arms.fold(rnd, key)
+        )
+
+    def _freeze(self, rnd: int, keys: Iterable[ArmKey]) -> None:
+        # Its cells copied once: the live round keeps walking its own dict past the close.
+        for key in keys:
+            self._frozen[rnd, key] = self._standing_arm(rnd, key, copied=True)
+
     def value(self) -> StandingRounds:
-        """The aggregate plus the live round: only the live round's cells are copied."""
-        held, arms, cells = self._held, self._arms, self._cells
+        """The aggregate plus the live round: a closed round's arms stand frozen at its close."""
+        held, frozen = self._held, self._frozen
         return held._replace(
             rounds=dict(held.rounds),
             proposals=dict(held.proposals),
             submitted=dict(held.submitted),
             arms={
-                (rnd, key): StandingArm(
-                    arms.state(rnd, key),
-                    cells[rnd, key] if self._shared(rnd) else dict(cells[rnd, key]),
-                    arms.fold(rnd, key),
-                )
-                for rnd, key in arms
+                at: frozen[at]
+                if at in frozen
+                else self._standing_arm(*at, copied=not self._shared(at[0]))
+                for at in self._arms
             },
             passes={k: dict(taken) for k, taken in held.passes.items()},
             elections=dict(held.elections),
@@ -536,7 +545,11 @@ def moves_index(record: CycleRecord) -> bool:
 
 
 _Naming = (
-    SampleScoredRecord | RoundClosedRecord | RoundRestatedRecord | RaceCatchUpRecord | PhaseRecord
+    SampleScoredRecord
+    | RoundClosedRecord
+    | RoundRestatedRecord
+    | RaceCatchUpRecord
+    | PassGradedRecord
 )
 
 
@@ -560,10 +573,8 @@ class _Answers:
                 walked = [cell for walk in walks for cell in walk.cells]
             case RaceCatchUpRecord():
                 walked = list(record.cells.values())
-            case PhaseRecord(view=VerificationGradedView(verification=banked)):
+            case PassGradedRecord(verification=banked):
                 walked = banked.cells
-            case PhaseRecord():
-                return
             case _:
                 assert_never(record)
         named = [answer for _, answer, _ in walked]
@@ -587,30 +598,28 @@ class VerifyLedger(NamedTuple):
 class _Verification:
     """Every graded held-out pass of either kind, oldest first; a reader keys it `(kind, arm.key)`."""
 
-    records: ClassVar[RecordClasses] = (PhaseRecord,)
+    records: ClassVar[RecordClasses] = (PassGradedRecord,)
 
     def __init__(self) -> None:
-        self._graded: list[VerificationGradedView] = []
+        self._graded: list[PassGradedRecord] = []
 
-    def feed(self, record: PhaseRecord) -> None:
-        if isinstance(record.view, VerificationGradedView):
-            self._graded.append(record.view)
+    def feed(self, record: PassGradedRecord) -> None:
+        self._graded.append(record)
 
-    def value(self) -> list[VerificationGradedView]:
+    def value(self) -> list[PassGradedRecord]:
         return list(self._graded)
 
 
 class _ClosedBench:
     """The last bench a run declared: its close's, which carries the run's own word on its ending."""
 
-    records: ClassVar[RecordClasses] = (PhaseRecord,)
+    records: ClassVar[RecordClasses] = (BenchScoredRecord,)
 
     def __init__(self) -> None:
         self._bench: BenchScore | None = None
 
-    def feed(self, record: PhaseRecord) -> None:
-        if isinstance(record.view, BenchScoredView):
-            self._bench = record.view.bench
+    def feed(self, record: BenchScoredRecord) -> None:
+        self._bench = record.bench
 
     def value(self) -> BenchScore | None:
         return self._bench
@@ -620,7 +629,7 @@ def scan_closed_bench(ledger_path: Path) -> BenchScore | None:
     return _view(ledger_path, _ClosedBench)
 
 
-def _graded(spans: Iterable[LedgerSpan], kind: MeasurementRole) -> Iterator[VerificationGradedView]:
+def _graded(spans: Iterable[LedgerSpan], kind: MeasurementRole) -> Iterator[PassGradedRecord]:
     for span in spans:
         for view in LedgerIndex.of(span.path).view(_Verification, span.until):
             if view.verification.kind == kind:
@@ -642,8 +651,8 @@ class _BenchOpen:
         self._open = False
 
     def feed(self, record: PhaseRecord) -> None:
-        if record.phase == CampaignPhase.BENCH and record.event in ("enter", "exit"):
-            self._open = record.event == "enter"
+        if record.phase == CampaignPhase.BENCH:
+            self._open = record.step == "enter"
 
     def value(self) -> bool:
         return self._open
@@ -687,7 +696,7 @@ class _Timeline:
         held = self._held
         match record:
             case PhaseRecord():
-                held.phases.append((at, record.phase, record.round, record.event))
+                held.phases.append((at, record.phase, record.round, record.step))
             case RunPhaseRecord():
                 held.gates.append((at, isinstance(record.state, ArmsGate)))
             case RoundClosedRecord():

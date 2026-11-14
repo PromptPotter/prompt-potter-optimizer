@@ -13,9 +13,8 @@ from promptpotter.domain.phases import (
     StopReason,
 )
 from promptpotter.domain.records.run_records import FlightRecord, FlightWaiting, PhaseRecord
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SpendBook
-from promptpotter.infrastructure.llm.telemetry import bound_round
+from promptpotter.infrastructure.llm.telemetry import append_record, bound_round
 from promptpotter.infrastructure.producer_lock import (
     hold_cycle,
     hold_pass,
@@ -48,8 +47,7 @@ class Flight:
 class FlightGauge:
     """Read at most once per ``every`` seconds: a full horizon is a bounds sweep, too dear per launch."""
 
-    def __init__(self, ledger: CycleEventLog, *, every: float = 0.5) -> None:
-        self._ledger = ledger
+    def __init__(self, *, every: float = 0.5) -> None:
         self._every = every
         self._reader: Callable[[], Flight] | None = None
         self._published = Flight()
@@ -76,7 +74,7 @@ class FlightGauge:
         reading = self._reader() if self._reader is not None else Flight()
         if reading != self._published:
             self._published = reading
-            self._ledger.append(
+            append_record(
                 FlightRecord(
                     round=bound_round(),
                     out=int(reading.out),
@@ -93,10 +91,10 @@ class FlightGauge:
             )
 
 
-def close_dead_bench(ledger: CycleEventLog) -> None:
+def close_dead_bench(stores: Stores, hop: CycleHop) -> None:
     """Every holder calls it as it takes the cycle: a bench bracket still open is a dead one's."""
-    if scan_bench_open(ledger.path):
-        ledger.append(PhaseRecord(phase=CampaignPhase.BENCH, event="exit"))
+    if scan_bench_open(stores.campaigns.ledger(hop)):
+        stores.campaigns.append(hop, PhaseRecord(phase=CampaignPhase.BENCH, step="exit"))
 
 
 @dataclass(frozen=True)

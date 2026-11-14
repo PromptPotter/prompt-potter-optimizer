@@ -22,6 +22,7 @@ from promptpotter.application.jobs.machine_status import MachineStatusResponse
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.read_params import (
     PARAMS_FOR_READ,
+    CycleDashboardParams,
     CycleExportParams,
     EvidenceParams,
     HeadToHeadPriceParams,
@@ -29,6 +30,7 @@ from promptpotter.application.read_params import (
     MachineStatusParams,
     ReadParams,
 )
+from promptpotter.application.served_dashboard import ServedDashboard, WarmingDashboard
 from promptpotter.application.views.evidence import evidence_lines
 from promptpotter.application.views.render.export import ExportFiles
 from promptpotter.application.views.trail import trail_notes, trail_rows
@@ -36,6 +38,7 @@ from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.cycle_paths import Subject
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCourse, HierarchyResponse
+from promptpotter.domain.phases import RUN_PHASE_INFO
 from promptpotter.domain.spend import usd_text
 from promptpotter.presentation.cli.commands.launch import head_to_head_command
 from promptpotter.presentation.cli.main import VERB_PACKAGE, VERBS, CommandResult, said_text
@@ -105,12 +108,7 @@ def _line(course: HierarchyCourse, *, active: bool) -> str:
     state = course.state
     return (
         course.address
-        + (
-            f"  paused by {state.pause.cause.value}"
-            + (f": {state.pause.detail}" if state.pause.detail else "")
-            if state.pause
-            else ""
-        )
+        + ("" if state.pause is None else f"  {state.pause.said}")
         + (
             f"  next: {state.admission.offers}"
             if state.admission.offers
@@ -235,6 +233,24 @@ def price_human(
     _caller: Caller,
 ) -> CommandResult:
     return CommandResult(data=price.model_dump(mode="json"), human=_human(price))
+
+
+def dashboard_human(
+    _params: CycleDashboardParams,
+    dash: ServedDashboard | WarmingDashboard,
+    _args: argparse.Namespace,
+    _caller: Caller,
+) -> CommandResult:
+    admission = dash.admission
+    lines = [f"{dash.campaign_id}/{dash.cycle_id}: {RUN_PHASE_INFO[dash.run_phase].label}"]
+    if isinstance(dash, ServedDashboard):
+        lines[0] += f" · round {dash.round} · {len(dash.rounds)} closed"
+        if dash.said is not None:
+            lines.append(said_text(dash.said))
+    if dash.pause is not None:
+        lines.append(dash.pause.said)
+    lines.append(f"next: {admission.offers}" if admission.offers else f"({admission.refusal})")
+    return CommandResult(data=dash.model_dump(mode="json"), human="\n".join(lines))
 
 
 def machine_status_human(

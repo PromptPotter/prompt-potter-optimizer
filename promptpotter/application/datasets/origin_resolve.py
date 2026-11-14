@@ -36,6 +36,7 @@ from promptpotter.domain.draft_edit import EditDraftPatch
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_schema import PipelineNode
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.stores import Stores
 
 _PREVIEW_ROWS = 10
@@ -135,14 +136,14 @@ async def resolve_origin_turn(
     consultation = build_origin_consultation(draft, pipeline)
 
     # No launch admitted this call and no run's book watches it; a check-in has no producer.
-    async with paid_call(stores=stores, bucket="turn", provider=checkin_provider()):
-        raw, repair_attempts = await run_checkin(
-            response_model=consultation.response_model,
-            consultation_instruction=consultation.instruction,
-            user_content=consultation.user_content,
-            stores=stores,
-            ledger=draft_ledger(stores, draft.draft_id),
-        )
+    with scoped(ledger=draft_ledger(stores, draft.draft_id)):
+        async with paid_call(stores=stores, bucket="turn", provider=checkin_provider()):
+            raw, repair_attempts = await run_checkin(
+                response_model=consultation.response_model,
+                consultation_instruction=consultation.instruction,
+                user_content=consultation.user_content,
+                stores=stores,
+            )
 
     raised = raised_commands(draft, raw)
     updated = _apply_findings(draft, raw, raised, pipeline.chain.prompt_nodes())

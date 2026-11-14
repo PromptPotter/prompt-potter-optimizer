@@ -80,7 +80,7 @@ export function VerifyAction({
             },
             commandId,
           ),
-        (answer) => setSaturated(answer.kind === "verify_saturated" ? answer : null),
+        (answer) => setSaturated("kind" in answer ? answer : null),
       )
       .finally(() => setActing(null));
   }

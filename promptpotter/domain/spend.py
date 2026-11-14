@@ -902,6 +902,25 @@ class MeteredSpend(StrictModel):
         )
 
 
+class StopSpend(FrozenModel):
+    """A stop's spend: the caps bound the CAMPAIGN, so they pair with its metered spend; the cycle's beside."""
+
+    spent: MeteredSpend
+    campaign: Budget
+    cap: Budget
+    # This cycle's part of the caps, what its run's book bound at the stop.
+    share: Budget
+
+    def meter_lines(self) -> list[str]:
+        """The metered line, then the cap lines beside it."""
+        meter, spent = self.spent.meter, self.spent
+        metered = Budget.amount(spent.metered_usd, spent.metered_tokens)
+        return [
+            metered_line(meter, metered=metered, cap=self.cap, share=self.share),
+            *campaign_cap_lines(meter, campaign=self.campaign, cap=self.cap),
+        ]
+
+
 # The spend that FINDS a result, which a lift is priced in; a bench pass and a diagnostic grade it.
 SEARCH_KINDS: tuple[TokenUsageKind, ...] = ("optimizer", "backend", "judge")
 

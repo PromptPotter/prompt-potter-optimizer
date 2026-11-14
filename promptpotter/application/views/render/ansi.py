@@ -19,33 +19,31 @@ from promptpotter.application.views.render.primitives import (
     fmt_coverage,
     fmt_fitness,
 )
-from promptpotter.domain.arm_reading import fold_fitness_text
+from promptpotter.domain.arm_reading import DisplayMetric, fold_fitness_text
 from promptpotter.domain.candidate_diff import group_diff_keys
 from promptpotter.domain.paired_reading import READING_STATE_INFO, level_text
-from promptpotter.domain.phase_views import (
-    BenchScoredView,
-    CandidatesGeneratedView,
-    InitEnterView,
-    InitExitView,
-    MeasureEnterView,
-    OptimizerStepEnterView,
-    OptimizerStepExitView,
-    PhaseView,
-    RoundCompleteView,
-    RoundStartView,
-    RunSpendView,
-    SpDiffView,
-    VerificationEnterView,
-    VerificationGradedView,
+from promptpotter.domain.phase_acts import (
+    CellFormula,
+    InitClosed,
+    InitOpened,
+    MeasureOpened,
+    PassOpened,
+    ProposeClosed,
+    ProposeOpened,
+    StepClosed,
+    StepOpened,
 )
+from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
+from promptpotter.domain.records.run_records import PhaseRecord, RoundStatement
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, SeriesReading, ThetaCaveat
-from promptpotter.domain.spend import RATE_PRICED_LABEL, usd_text
+from promptpotter.domain.spend import RATE_PRICED_LABEL, StopSpend, usd_text
 from promptpotter.domain.verification import NoiseBand, VerifyReading
-from promptpotter.domain.wounds import COLLAPSE_WORDS
+from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_reason
+from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.composite import render_composite_fitness_block
 
 
-def _render_init_enter(v: InitEnterView) -> str:
+def _render_init_enter(v: InitOpened) -> str:
     if not v.warnings:
         return ""
     out = [""]
@@ -55,19 +53,16 @@ def _render_init_enter(v: InitEnterView) -> str:
     return "\n".join(out)
 
 
-def _render_init_exit(v: InitExitView) -> str:
+def _render_init_exit(v: InitClosed) -> str:
     out = [
         f"  {GREEN}✓{RESET} Initialized  origin fitness={fmt_fitness(v.origin_fitness)}  "
-        f"cycle={v.cycle_id_short}  samples={v.samples}  bench={v.bench_samples} held out"
+        f"cycle={v.cycle_id[:12]}  samples={v.samples}  bench={v.bench_samples} held out"
     ]
-    parts: list[str] = []
-    if v.task_context_keys:
-        parts.append(f"task_context={v.task_context_keys} keys")
-    suffix = f"  ({', '.join(parts)})" if parts else ""
-    if v.cached_rounds_count > 0:
+    suffix = f"  (task_context={v.framing_keys} keys)" if v.framing_keys else ""
+    if v.cached_rounds > 0:
         out.append(
             f"    Resuming round {v.resumed_from_round} "
-            f"({v.cached_rounds_count} prior rounds cached){suffix}"
+            f"({v.cached_rounds} prior rounds cached){suffix}"
         )
     else:
         tail = f"  — starting at round {v.resumed_from_round}{suffix}"
@@ -75,16 +70,19 @@ def _render_init_exit(v: InitExitView) -> str:
     return "\n".join(out)
 
 
-def _render_round_start(v: RoundStartView) -> str:
+def _render_round_start(v: ProposeOpened, round_num: int | None) -> str:
     standing = v.run_standing
     round_label = (
-        f"ROUND {v.round}  {standing.lives.bar}"
+        f"ROUND {round_num}  {standing.lives.bar}"
         if standing is not None and standing.lives is not None
-        else f"ROUND {v.round}"
+        else f"ROUND {round_num}"
         if v.budget_rounds is None
-        else f"ROUND {v.round}/{v.budget_rounds}"
+        else f"ROUND {round_num}/{v.budget_rounds}"
     )
     arms = "?" if v.arms is None else str(v.arms)
+    # The header renders before candidates exist: it describes the parent.
+    preview = v.parent_prompt.replace("\n", " ").strip()
+    preview = "(empty)" if not preview else truncate(preview, 50, "...")
     return "\n".join(
         [
             "",
@@ -93,37 +91,50 @@ def _render_round_start(v: RoundStartView) -> str:
             _node_block(
                 "GENERATE",
                 f"Parent fitness  {fmt_fitness(v.parent_fitness)}",
-                f"Parent prompt   {v.prompt_preview}",
+                f"Parent prompt   {preview}",
                 f"Candidates      {arms}" + (f"   {v.note}" if v.note else ""),
-                f"Model           {v.model}",
+                f"Model           {v.model or '(default)'}",
             ),
         ]
     )
 
 
-def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
-    src = "loaded from disk" if v.source == "disk" else "from LLM"
+def _render_candidates_generated(v: ProposeClosed, round_num: int | None) -> str:
+    src = "loaded from disk" if v.replayed else "from LLM"
     return "\n".join(
         [
-            f"  {GREEN}✓{RESET} {v.n_candidates} candidates generated ({src})",
+            f"  {GREEN}✓{RESET} {len(v.columns) - 2} candidates generated ({src})",
             "",
-            render_sp_diff(v.sp_diff),
+            render_sp_diff(v, round_num),
         ]
     )
 
 
-def _render_measure_enter(v: MeasureEnterView) -> str:
-    return "\n" + _node_top("MEASURE", f"{v.n_candidates} candidates on {v.n_samples} cells")
+def _render_measure_enter(v: MeasureOpened) -> str:
+    return "\n" + _node_top("MEASURE", f"{v.candidates} candidates on {v.cells} cells")
 
 
 def render_round_verdict(
-    v: RoundCompleteView, basis: Sequence[str], level: SeriesReading | None
+    v: RoundStatement,
+    basis: Sequence[str],
+    level: SeriesReading | None,
+    *,
+    cell_formula: CellFormula | None,
+    display_metric: DisplayMetric,
 ) -> str:
+    """Never re-chosen by a point estimate here, which could name another arm than the one kept."""
+    # Less the proposals an invariant collapsed: they burned no call.
+    arms = [
+        row.reading
+        for row in v.ranked()
+        if collapse_reason(v.arms[row.reading.arm.key].validation_failures) is None
+    ]
     out: list[str] = [""]
-    if board := _scoreboard(v.arms):
+    if board := _scoreboard(arms):
         out.append(board)
 
-    formula = v.composite_fitness_formula_short or v.composite_fitness_formula
+    short = None if cell_formula is None else cell_formula.short
+    formula = short or (None if cell_formula is None else cell_formula.formula)
     show_inline = not formula
     fold = v.fold
     fitness = None if fold is None else fold.fitness
@@ -138,13 +149,13 @@ def render_round_verdict(
     # A cold θ is logit-fitness, so the headline stays fitness.
     theta = (
         level.reading.theta
-        if v.display_metric == "ability" and level is not None and not level.reading.ruler.cold
+        if display_metric == "ability" and level is not None and not level.reading.ruler.cold
         else None
     )
     headline = fitness_txt if theta is None else f"θ {theta:+.3f}"
     detail = [] if theta is None else [fitness_txt]
 
-    selected = next((s.vs_reference for s in v.arms if s.election.selected), None)
+    selected = next((s.vs_reference for s in arms if s.election.selected), None)
     if v.improved:
         # An arm that stopped short gets no reference rate: over a prefix it is a lift nobody measured.
         lift = selected.on_whole_set if selected else None
@@ -153,20 +164,21 @@ def render_round_verdict(
             if lift is not None
             else "no matched reference — stopped before covering its reference's cells"
         )
+        ended_on = "" if (head := v.head) is None else head.label
         out.append(
-            f"  {GREEN}{BOLD}✓ SELECTED {v.ended_on}{RESET}  {headline}"
+            f"  {GREEN}{BOLD}✓ SELECTED {ended_on}{RESET}  {headline}"
             f" ({', '.join(detail)}){comp_tag}"
         )
     else:
         detail += ["the best-so-far held", f"n={0 if fold is None else fold.total}"]
         out.append(f"  {YELLOW}{BOLD}· HELD{RESET}  {headline} ({', '.join(detail)}){comp_tag}")
-    if v.verdict_reason:
-        out.append(f"  {DIM}why: {v.verdict_reason}{RESET}")
+    if (election := v.election) is not None and election.verdict_reason:
+        out.append(f"  {DIM}why: {election.verdict_reason}{RESET}")
     # Every number above still renders under a SILENT caveat: this line is the terminal's only notice.
     caveats: dict[ThetaCaveat, list[str]] = {}
     if level is not None and level.caveat is not None:
         caveats[level.caveat] = []
-    for arm in v.arms:
+    for arm in arms:
         if arm.ability is not None and arm.ability.caveat is not None:
             caveats.setdefault(arm.ability.caveat, []).append(arm.arm.label)
     for caveat, labels in caveats.items():
@@ -183,17 +195,17 @@ def render_round_verdict(
             fold.evaluators,
             formula,
             reference=selected.reference_level("objective") if selected else None,
-            use_short_names=bool(v.composite_fitness_formula_short),
+            use_short_names=bool(short),
         ):
             out.append(f"  {line}")
     return "\n".join(out)
 
 
-def _render_step_enter(v: OptimizerStepEnterView) -> str:
+def _render_step_enter(v: StepOpened) -> str:
     return "\n" + _node_block(v.title, *v.lines, label_right=v.tag)
 
 
-def _render_step_exit(v: OptimizerStepExitView) -> str:
+def _render_step_exit(v: StepClosed) -> str:
     if not v.headline:
         return ""
     out = [f"  {GREEN}✓{RESET} {v.headline}", *(f"    {line}" for line in v.details)]
@@ -206,53 +218,49 @@ def _render_step_exit(v: OptimizerStepExitView) -> str:
     return "\n".join(out)
 
 
-def to_text(view: PhaseView) -> str:
-    """``RoundCompleteView`` renders nothing here: the readout holds it for ``render_round_verdict``."""
-    match view:
-        case InitEnterView():
-            return _render_init_enter(view)
-        case InitExitView():
-            return _render_init_exit(view)
-        case RoundStartView():
-            return _render_round_start(view)
-        case CandidatesGeneratedView():
-            return _render_candidates_generated(view)
-        case MeasureEnterView():
-            return _render_measure_enter(view)
-        case OptimizerStepEnterView():
-            return _render_step_enter(view)
-        case OptimizerStepExitView():
-            return _render_step_exit(view)
-        case VerificationEnterView():
-            return _render_pass_enter(view)
-        case VerificationGradedView():
-            return _render_pass_graded(view)
-        case BenchScoredView():
-            return _render_bench_scored(view)
-        case RoundCompleteView():
+def to_text(record: PhaseRecord) -> str:
+    match act := record.act:
+        case None:
             return ""
+        case InitOpened():
+            return _render_init_enter(act)
+        case InitClosed():
+            return _render_init_exit(act)
+        case ProposeOpened():
+            return _render_round_start(act, record.round)
+        case ProposeClosed():
+            return _render_candidates_generated(act, record.round)
+        case MeasureOpened():
+            return _render_measure_enter(act)
+        case StepOpened():
+            return _render_step_enter(act)
+        case StepClosed():
+            return _render_step_exit(act)
+        case PassOpened():
+            return _render_pass_enter(act)
         case _:
-            assert_never(view)
+            assert_never(act)
 
 
-def render_run_spend(v: RunSpendView) -> str:
+def render_run_spend(v: StopSpend) -> str:
+    spent = v.spent
     bits = [
-        f"billed {usd_text(v.billed_usd)} (what the provider reported it charged)",
-        f"{RATE_PRICED_LABEL} {usd_text(v.rate_priced_usd)} (calls no provider reported a charge for)",
-        f"incurred {usd_text(v.incurred_usd)} (every cell priced, replays included)",
+        f"billed {usd_text(spent.billed_usd)} (what the provider reported it charged)",
+        f"{RATE_PRICED_LABEL} {usd_text(spent.rate_priced_usd)} (calls no provider reported a charge for)",
+        f"incurred {usd_text(spent.incurred_usd)} (every cell priced, replays included)",
     ]
     bits.extend(v.meter_lines())
     return f"  {DIM}spend: {' · '.join(bits)}{RESET}"
 
 
-def _render_pass_enter(v: VerificationEnterView) -> str:
+def _render_pass_enter(v: PassOpened) -> str:
     if v.verification == "verify":
         return f"  {DIM}verify {v.arm.label}: {v.rows} unseen cells, {v.strategy}{RESET}"
     subject = "the origin" if v.subject == "origin" else f"the R{v.arm.round} selection"
     return f"  {DIM}bench pass: {subject} on {v.rows} held-out rows{RESET}"
 
 
-def _render_pass_graded(v: VerificationGradedView) -> str:
+def render_pass_graded(v: PassGradedRecord) -> str:
     reading = v.reading
     if isinstance(reading, VerifyReading):
         return _render_verify_graded(reading)
@@ -275,7 +283,7 @@ def _render_pass_graded(v: VerificationGradedView) -> str:
     )
 
 
-def render_noise_band(v: VerificationGradedView) -> str:
+def render_noise_band(v: PassGradedRecord) -> str:
     band = v.reading
     assert isinstance(band, NoiseBand), "a noise-floor pass reads a band"
     recorded = band.recorded.composite
@@ -302,7 +310,7 @@ def _render_verify_graded(r: VerifyReading) -> str:
     )
 
 
-def _render_bench_scored(v: BenchScoredView) -> str:
+def render_bench_scored(v: BenchScoredRecord) -> str:
     bench = v.bench
     column = bench.headline
     graded = bench.graded
@@ -328,12 +336,13 @@ _SP_DIFF_UNCHANGED = "·"
 _SP_DIFF_VAL_INLINE_MAX = 12
 
 
-def render_sp_diff(view: SpDiffView) -> str:
+def render_sp_diff(view: ProposeClosed, round_num: int | None) -> str:
     columns_in = list(view.columns)
     if len(columns_in) < 2:
         return ""
 
-    clone_labels = set(view.clone_labels)
+    parent = columns_in[1][1]
+    clone_labels = {label for label, flat in columns_in[2:] if flat == parent}
     columns: list[tuple[str, dict[str, str]]] = [
         (
             f"{label}[clone]" if label in clone_labels else label,
@@ -342,8 +351,6 @@ def render_sp_diff(view: SpDiffView) -> str:
         for label, flat in columns_in
     ]
     node_param_keys = view.node_param_keys
-    round_num = view.round_num
-
     warning_lines: list[str] = []
     bits = [f"{view.collapses[r]} {w}" for r, w in COLLAPSE_WORDS.items() if view.collapses.get(r)]
     if bits:

@@ -16,7 +16,7 @@ from offline_world import FakeBackend, Router
 
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext, SliceMap
 from promptpotter.application.bench.difficulty import DifficultyView
-from promptpotter.application.bench.node_context import stated_line
+from promptpotter.application.bench.node_context import closed_round
 from promptpotter.application.datasets.authored import (
     ConfigLayers,
     dataset_campaign_block,
@@ -122,7 +122,6 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
     RoundArm,
 )
-from promptpotter.domain.phase_views import ViewAnchors
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import (
@@ -142,7 +141,6 @@ from promptpotter.domain.records.run_records import (
     ForkSpec,
     Hold,
     PipelineRead,
-    RoundClosedRecord,
     RoundEnteredRecord,
     Running,
     RunPhaseRecord,
@@ -623,7 +621,7 @@ def seat(
         }
     )
     hop = hop or CycleHop(campaign_id="seats", cycle_id=f"seat{next(_SEATS)}")
-    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     session = loop_session(
         stores,
         schema,
@@ -663,7 +661,7 @@ def seat(
             optimizer=selected,
             survey=CampaignSurvey(stores.campaigns),
         )
-    return RoundContext(seated, round_num, ledger=ledger)
+    return RoundContext(seated, round_num)
 
 
 LAUNCHED_DATASET = "justlogic/d234"
@@ -772,7 +770,7 @@ async def launched_round(
         with (
             scoped(
                 round=0,
-                ledger=observers.ledger,
+                ledger=CycleEventLog.open(observers.cycle_dir),
                 account=running.store,
                 determinism=run_clamp(determinism, running.purpose),
             ),
@@ -786,15 +784,13 @@ async def launched_round(
                 budget=held,
                 optimizer=optimizer,
             )
-            cycle, _ = await open_cycle(
-                prep, session=running, ledger=observers.ledger, mode=RunMode()
-            )
-            close_init(cycle, observers.ledger)
+            cycle, _ = await open_cycle(prep, session=running, mode=RunMode())
+            close_init(cycle)
             # Round 0's walk, as its door takes it; its close is the round's caller's.
-            await walk_round_zero(cycle, prep.dataset, observers.ledger)
+            await walk_round_zero(cycle, prep.dataset)
     finally:
         observers.release()
-    ctx = RoundContext(cycle, round_num, ledger=cycle_ledger(cycle))
+    ctx = RoundContext(cycle, round_num)
     return ctx, cycle_result([], None, [], cost=0.0)
 
 
@@ -962,16 +958,7 @@ def close_round(
             ledger.append(ArmRecord(round=n, arm=key, state=arm))
     assert rr.election is not None, "a closed round elects"
     ledger.append(ElectionRecord(round=n, **dict(rr.election)))
-    stated, series, standing = stated_line(
-        rr,
-        line,
-        cycle.difficulty,
-        lives=cycle.config.optimization.lives,
-        outlay=LineOutlay(search_usd=None, worked_s=None),
-    )
-    ledger.append(
-        RoundClosedRecord.of(stated, cycle.session.bank.slot_of, series, standing, ViewAnchors())
-    )
+    ledger.append(closed_round(rr, line, cycle, outlay=LineOutlay(search_usd=None, worked_s=None)))
 
 
 SANDBOX_CAMPAIGN = "testds__20260101-000000"

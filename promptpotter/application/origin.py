@@ -40,7 +40,7 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.store.dataset_access import ORIGIN_FILE, ResolvedDataset
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.errors import PayloadInvalidError
@@ -61,7 +61,7 @@ class CampaignOrigin(NamedTuple):
     framing: TaskDecomposition
 
 
-def lock_criterion(cycle: Cycle, read: ReadArm, ledger: CycleEventLog) -> ReadArm:
+def lock_criterion(cycle: Cycle, read: ReadArm) -> ReadArm:
     """Locked once, at round 0's close, on the rows its walk read; *read* comes back re-GRADED
     under it, nothing re-measured. ``pipeline_resolve.py::cycle_config`` reads the record back."""
     session = cycle.session
@@ -73,7 +73,7 @@ def lock_criterion(cycle: Cycle, read: ReadArm, ledger: CycleEventLog) -> ReadAr
         parse_dials(block[DIALS_KEY], terms), origin_anchors(read.rows, terms), terms
     )
     locked = {k: v for k, v in block.items() if k != DIALS_KEY} | {"per_cell": formula}
-    ledger.append(ScoringLockedRecord(declared=dict(block), locked=locked))
+    append_record(ScoringLockedRecord(declared=dict(block), locked=locked))
     cycle.config = cycle.config.model_copy(update={"scoring": locked})
     session.state.scoring = scorer_setup(
         session, cycle.config, partition=session.state.scoring.partition

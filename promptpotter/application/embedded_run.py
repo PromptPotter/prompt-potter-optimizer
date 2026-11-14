@@ -9,6 +9,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from dataclasses import replace
 
 from promptpotter.application.account import local_stores
+from promptpotter.application.caller import Caller
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.datasets.authored import ConfigLayers, effective_config
 from promptpotter.application.initialization.session import Session
@@ -37,6 +38,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
 from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.pipeline_resolve import cycle_config, laid_session
+from promptpotter.application.read_params import CycleDashboardParams, ReadParams
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.campaign import Optimize, RunDeclaration
@@ -53,10 +55,13 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import PayloadInvalidError
 
 # This module IS the embedded surface: a capability it does not name is one a host cannot find.
-# Every verb but the run is a command the host files through `host_dispatcher`, as every door does.
+# Every verb but the run is a command the host files through `host_dispatcher`, and every read a
+# `ReadKind` row it answers through `answer_read` (a cycle's dashboard: `CycleDashboardParams`).
 __all__ = [
     "CommandCall",
+    "CycleDashboardParams",
     "Door",
+    "answer_read",
     "enter",
     "host_dispatcher",
     "reindex_measurement_archive",
@@ -76,6 +81,11 @@ async def enter(stores: Stores | None = None) -> Stores:
 async def host_dispatcher(stores: Stores | None = None) -> CommandDispatcher:
     """What a host files every command through, past `enter`."""
     return CommandDispatcher(await enter(stores))
+
+
+async def answer_read(params: ReadParams, stores: Stores | None = None) -> object:
+    """*params*' read answered as every door answers it (the body its route serves), past `enter`."""
+    return await params.answered(Caller(await enter(stores)))
 
 
 @asynccontextmanager

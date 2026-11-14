@@ -5,6 +5,7 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import Field
 
+from promptpotter.application.jobs.launcher.admission import admitted
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
@@ -517,6 +518,7 @@ def _serve(
     *,
     hop: CycleHop,
     run: RunState,
+    admission: RunAdmission,
     meter: CeilingMeter | None,
     run_limits: RunLimits,
     standing: _Standing | None,
@@ -554,7 +556,7 @@ def _serve(
         cycle_id=hop.cycle_id,
         run_phase=run.run_phase,
         producer=run.producer,
-        admission=run.admission,
+        admission=admission,
         pause=run.pause,
         overlap_line_round=None if line_round is None else line_round.round,
         overlap_line_n=None if line_round is None else len(line_round.overlap.positions),
@@ -609,6 +611,8 @@ def served_dashboard(
     run = stores.run_state(hop)
     campaign = stores.campaigns.load_campaign(hop.campaign_id)
     meter = None if campaign is None else ceiling_meter(campaign.declaration.purpose)
+    # The read's own join, never the checkout's: the campaign's refusal moves no ledger.
+    admission = admitted(stores, campaign, run)
 
     state = fold_at(Cut(cycle=CycleDir(cycle_path), hop=hop, offset=at))
     if state is None:
@@ -617,13 +621,21 @@ def served_dashboard(
             cycle_id=hop.cycle_id,
             run_phase=run.run_phase,
             producer=run.producer,
-            admission=run.admission,
+            admission=admission,
             pause=run.pause,
         )
     folded = stores.campaigns.run_limits(hop, at=at)
     assert folded is not None, "a folded state stands on its wiring"
     if at is not None:
-        return _serve(state, hop=hop, run=run, meter=meter, run_limits=folded, standing=None)
+        return _serve(
+            state,
+            hop=hop,
+            run=run,
+            admission=admission,
+            meter=meter,
+            run_limits=folded,
+            standing=None,
+        )
     config = None if campaign is None else cycle_config(stores, campaign, hop).config
     limits = _binding(stores, hop, config, run, folded)
     armed = stores.inbox(hop)
@@ -631,6 +643,7 @@ def served_dashboard(
         state,
         hop=hop,
         run=run,
+        admission=admission,
         meter=meter,
         run_limits=limits,
         standing=_Standing(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
@@ -11,7 +12,6 @@ from promptpotter.application.pipeline_resolve import campaign_admits, defaults_
 from promptpotter.application.run_phase_control import CycleHold, close_dead_bench
 from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
-from promptpotter.application.views.ingress import run_spend_view
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
 from promptpotter.domain.campaign import Campaign, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -30,9 +30,9 @@ from promptpotter.domain.records.run_records import (
     RunPhaseRecord,
     RunWiringRecord,
 )
-from promptpotter.domain.spend import MONEY_AXES, Budget
-from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.domain.spend import MONEY_AXES, Budget, StopSpend
 from promptpotter.infrastructure.llm.spend_book import SpendBook
+from promptpotter.infrastructure.llm.telemetry import billing_ledger
 from promptpotter.infrastructure.projections.cycle_index import CycleIndexProjection
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import rescope, run_scope
@@ -58,11 +58,10 @@ def declare_run_stop(
     meter = ceiling_meter(session.purpose)
     # The cycle's share record, which its book reads live; none lands before admission's.
     held = session.store.campaigns.last(session.hop, CycleShareRecord)
-    spend = run_spend_view(
-        observers.dashboard.live.spend_metered(meter),
-        campaign_metered=session.store.campaigns.metered_spend(session.campaign_id, meter),
-        usd_cap=budget.usd,
-        token_cap=budget.tokens,
+    spend = StopSpend(
+        spent=observers.dashboard.live.spend_metered(meter),
+        campaign=session.store.campaigns.metered_spend(session.campaign_id, meter),
+        cap=Budget(usd=budget.usd, tokens=budget.tokens),
         share=Budget() if held is None else held.allotment.only(MONEY_AXES),
     )
     if stop_reason_outcome(stop_reason) is not StopOutcome.PAUSED:
@@ -76,13 +75,14 @@ def declare_run_stop(
 def declare_run_wiring(
     session: Session,
     campaign_config: CampaignConfig,
-    ledger: CycleEventLog,
     *,
     campaign: Campaign,
     selected: SelectedOptimizer,
 ) -> None:
-    """The one writer of ``RunWiringRecord``."""
-    ledger.append(
+    """The one writer of ``RunWiringRecord``, on the cycle *session* is bound to: a mint's, a
+    launch's or a fork's."""
+    session.store.campaigns.append(
+        session.hop,
         RunWiringRecord(
             round_cells_ceiling=selected.round_cells_ceiling(len(session.bank.samples)),
             display_metric=campaign_config.display_metric,
@@ -103,7 +103,7 @@ def declare_run_wiring(
                 ),
             ),
             backend_revision=session.backend_revision,
-        )
+        ),
     )
 
 
@@ -111,14 +111,13 @@ def declare_run_wiring(
 class RunObservers:
     store: Stores
     hop: CycleHop
-    ledger: CycleEventLog
     dashboard: DashboardCheckout
     readout: ReadoutProjection
     projecting: Projecting
     hold: CycleHold
 
     def arm_spend_book(self, book: SpendBook) -> None:
-        book.ledger = self.ledger
+        book.ledger = billing_ledger("the run's book")
         # A nested run (an L4 inner cell) admits each send against its own book AND its root's.
         if instrument_depth() > 0:
             book.enclosing = run_scope().book
@@ -130,8 +129,13 @@ class RunObservers:
         """Drains only: the release is the run's `finally` and the fork handoff's."""
         self.projecting.close()
         # The SSE stream is no projection — it tails the on-disk ledger — so nothing drains it.
-        if (book := run_scope().book) is not None and book.ledger is self.ledger:
+        book = run_scope().book
+        if book is not None and book.ledger is not None and book.ledger.path == self.ledger_path:
             rescope(book=book.enclosing)
+
+    @property
+    def ledger_path(self) -> Path:
+        return self.store.campaigns.ledger(self.hop)
 
     @property
     def cycle_dir(self) -> CycleDir:
@@ -155,13 +159,11 @@ def build_run_observers(
     cycle_dir = CycleDir(session.store.campaigns.cycle_dir(session.hop))
     # Before the ledger opens: from here a second launch of the cycle is refused, not interleaved.
     hold = CycleHold(session.store, session.hop, scoring_pass=False)
-    ledger = CycleEventLog.open(cycle_dir)
-    projecting = LedgerIndex.of(ledger.path).projecting()
+    projecting = LedgerIndex.of(session.store.campaigns.ledger(session.hop)).projecting()
     try:
         prior = session.store.campaigns.last(session.hop, RunPhaseRecord)
         observers = _bind_observers(
             cycle_dir,
-            ledger,
             projecting,
             hold,
             session=session,
@@ -170,7 +172,7 @@ def build_run_observers(
             readout_sink=readout_sink,
         )
         # Any declaration after a `terminal` one retires that ending (`ledger_scan.py::_CycleFacts`).
-        observers.ledger.append(RunPhaseRecord(state=Running()))
+        session.store.campaigns.append(session.hop, RunPhaseRecord(state=Running()))
         # A launch is a run boundary, sparing what was asked of its own hold, a QUEUED claim's
         # included; the run a gate held resumes, what it was asked standing.
         if prior is None or not isinstance(prior.state, ArmsGate):
@@ -182,13 +184,12 @@ def build_run_observers(
         hold.release()
         raise
     session.state.observers = observers
-    close_dead_bench(observers.ledger)
+    close_dead_bench(session.store, session.hop)
     return observers
 
 
 def _bind_observers(
     cycle_dir: CycleDir,
-    ledger: CycleEventLog,
     projecting: Projecting,
     hold: CycleHold,
     *,
@@ -218,7 +219,6 @@ def _bind_observers(
     return RunObservers(
         store=session.store,
         hop=session.hop,
-        ledger=ledger,
         dashboard=dashboard,
         readout=readout,
         projecting=projecting,

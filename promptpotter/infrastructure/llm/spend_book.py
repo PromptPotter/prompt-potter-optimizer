@@ -40,7 +40,6 @@ from promptpotter.domain.spend import (
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.telemetry import (
-    append_record,
     billing_ledger,
     call_price,
     campaign_priced,
@@ -565,11 +564,11 @@ class SpendBook:
         return self.enclosing is not None
 
     def file(self, record: TokenUsageRecord, ledger: CycleEventLog) -> None:
-        """A call's usage on *ledger*, a replay's included; a nested run's lands on its root's
-        ledger first, the copy money is summed off."""
+        """A call's usage on *ledger*, the scope's as its send was admitted, a replay's included;
+        a nested run's lands on its root's ledger first, the copy money is summed off."""
         if self.nested:
             self.root().mirror(record)
-        append_record(record, ledger=ledger)
+        ledger.append(record)
 
     def mirror(self, record: TokenUsageRecord) -> None:
         """The root ledger's copy of a nested run's call, which its meter counts."""

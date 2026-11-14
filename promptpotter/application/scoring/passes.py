@@ -52,8 +52,9 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
 )
 from promptpotter.domain.pass_kinds import PASSES, individual_cells
-from promptpotter.domain.phase_views import VerificationEnterView, VerificationGradedView
+from promptpotter.domain.phase_acts import PassOpened
 from promptpotter.domain.phases import STOP_REASON_INFO
+from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import PhaseRecord, VerifySaturated
 from promptpotter.domain.sample import Sample
@@ -68,9 +69,9 @@ from promptpotter.domain.verification import (
     VerifyReading,
     VerifyStrategy,
 )
-from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
-from promptpotter.infrastructure.llm.telemetry import active_cycle_ledger
+from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -107,21 +108,14 @@ def rounds_since_verified(verified_rounds: Iterable[int], *, round_num: int) -> 
 
 
 @contextmanager
-def _bracketed(enter: VerificationEnterView) -> Iterator[CycleEventLog]:
+def _bracketed(enter: PassOpened) -> Iterator[None]:
     """A pass on its cycle's ledger: entered here, graded by the caller, exited whatever ends it."""
-    ledger = active_cycle_ledger()
-    assert ledger is not None
     phase = PASSES[enter.verification].bracket
-    ledger.append(PhaseRecord(phase=phase, event="enter", view=enter))
+    append_record(PhaseRecord(phase=phase, step="enter", act=enter))
     try:
-        yield ledger
+        yield
     finally:
-        ledger.append(PhaseRecord(phase=phase, event="exit"))
-
-
-def _graded(ledger: CycleEventLog, graded: VerificationGradedView) -> None:
-    phase = PASSES[graded.verification.kind].bracket
-    ledger.append(PhaseRecord(phase=phase, event="graded", view=graded))
+        append_record(PhaseRecord(phase=phase, step="exit"))
 
 
 def pick_fresh(
@@ -288,7 +282,7 @@ async def verify_candidate(
     strategy: VerifyStrategy,
     seed: int | None,
     acting: str | None = None,
-) -> VerificationGradedView | VerifySaturated:
+) -> PassGradedRecord | VerifySaturated:
     """The graded pass, or what was already measured where that is every sample."""
     round_num, entry = _scored_candidate(stores, hop, candidate_id)
     arm = arm_name(ArmKey(candidate_id), entry, round_num)
@@ -359,7 +353,7 @@ async def verify_candidate(
             len(measured_keys),
         )
         # Bound at the candidate's round: each cell's record names one, and the pass bills there.
-        enter = VerificationEnterView(
+        enter = PassOpened(
             verification=MeasurementRole.VERIFY,
             subject=None,
             arm=arm,
@@ -367,7 +361,7 @@ async def verify_candidate(
             rows=len(picked),
             strategy=strategy,
         )
-        with verb_ledger(stores, hop), scoped(round=round_num), _bracketed(enter) as ledger:
+        with verb_ledger(stores, hop), scoped(round=round_num), _bracketed(enter):
             scored = await diagnostic_pass(
                 score_search_point(
                     jsp, picked, session, kind=MeasurementRole.VERIFY, measured=candidate_id
@@ -398,7 +392,7 @@ async def verify_candidate(
                     f"the fresh cells of {label!r} produced no scoreable sample — there is "
                     "nothing to read beside the recorded measurement."
                 )
-            graded = VerificationGradedView(
+            graded = PassGradedRecord(
                 verification=banked,
                 subject=None,
                 tolerance=None,
@@ -408,7 +402,7 @@ async def verify_candidate(
                 state=ReadingState.READ,
                 refusal=None,
             )
-            _graded(ledger, graded)
+            append_record(graded)
         return graded
 
 
@@ -420,7 +414,6 @@ async def verify_on_saturation(
     fitness: float | None,
     winner_id: str | None,
     seed: int,
-    ledger: CycleEventLog,
 ) -> None:
     """A verify the round owed and could not send banks its refusal on the pass, never stopping the run."""
     if fitness is None or fitness < 1.0 or not winner_id:
@@ -453,9 +446,8 @@ async def verify_on_saturation(
             strategy="random",
             seed=seed,
         )
-        _graded(
-            ledger,
-            VerificationGradedView(
+        append_record(
+            PassGradedRecord(
                 verification=refused,
                 subject=None,
                 tolerance=None,
@@ -470,7 +462,7 @@ async def verify_on_saturation(
 
 async def measure_noise_floor(
     session: Session, origin_sp: JobSearchPoint, k: int
-) -> VerificationGradedView:
+) -> PassGradedRecord:
     """Round 0's origin re-scored *k* times fresh on the rows it recorded, one pass on the run's
     ledger; a band it cannot read banks its refusal on the pass, never stopping the run."""
     stores = session.store
@@ -492,7 +484,7 @@ async def measure_noise_floor(
     cells: list[WalkedCell] = []
     composites: list[float] = []
     fitnesses: list[float] = []
-    enter = VerificationEnterView(
+    enter = PassOpened(
         verification=MeasurementRole.NOISE_FLOOR,
         subject=None,
         arm=arm,
@@ -500,7 +492,7 @@ async def measure_noise_floor(
         rows=k * len(scoring_set),
         strategy=None,
     )
-    with _bracketed(enter) as ledger:
+    with _bracketed(enter):
         for _ in range(k):
             scored = await score_search_point(
                 origin_sp, scoring_set, session, kind=MeasurementRole.NOISE_FLOOR, measured=arm.key
@@ -514,7 +506,7 @@ async def measure_noise_floor(
         band = paired_mean_t(composites, [0.0] * k) if len(composites) == k else None
 
         unread = band is None or recorded.composite is None
-        graded = VerificationGradedView(
+        graded = PassGradedRecord(
             verification=NoiseFloorPass(
                 arm=arm,
                 sp_hash=sp_hash,
@@ -560,7 +552,7 @@ async def measure_noise_floor(
             if unread
             else None,
         )
-        _graded(ledger, graded)
+        append_record(graded)
     return graded
 
 
@@ -619,11 +611,10 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                         origin_sp,
                         origin_id=rounds[0].origin.individual.id,
                         spend=dashboard.spend,
-                        ledger=ledger,
                     )
                     assert banked is not None, "the line holder holds its origin's pass"
                     banked = await bench_selection(
-                        session, rounds, points=opened.points, banked=banked, ledger=ledger
+                        session, rounds, points=opened.points, banked=banked
                     )
                 except (KeyboardInterrupt, asyncio.CancelledError) as stop:
                     # The pass banked itself stopped, so the line's reading over it is the answer.
@@ -633,7 +624,6 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                 score = declare_line_bench(
                     session,
                     config,
-                    ledger,
                     passes=banked,
                     selecting=False,
                     ending=line_run(stores, hop).ending,
@@ -647,7 +637,6 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                     bank_campaign_result(
                         stores,
                         hop,
-                        ledger=ledger,
                         clock=clock,
                         finished_at=utcnow_iso(),
                         optimizer_phases=optimizer.phases,

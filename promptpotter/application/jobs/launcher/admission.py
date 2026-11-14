@@ -31,7 +31,7 @@ from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import Campaign, CampaignRefusedError
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.connector import BackendUnreachableError
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
@@ -47,7 +47,9 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import (
     PauseCause,
+    RunAdmission,
     RunPhase,
+    RunState,
     StopOutcome,
     StopReason,
     stop_reason_outcome,
@@ -61,7 +63,6 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     HeldBudget,
 )
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import LiveCycle, SpendBook, draws_on
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.run_scope import run_scope, scoped
@@ -231,6 +232,12 @@ def campaign_refusal(stores: Stores, campaign: Campaign) -> CampaignRefusedError
             "or start a fresh campaign on it; this one is preserved.",
         )
     return None
+
+
+def admitted(stores: Stores, campaign: Campaign | None, run: RunState) -> RunAdmission:
+    """*run*'s admission with its campaign's refusal joined: the acts every served read offers."""
+    refused = None if campaign is None else campaign_refusal(stores, campaign)
+    return RunAdmission.of(run, campaign_refusal="" if refused is None else str(refused))
 
 
 def refuse_campaign(stores: Stores, campaign: Campaign) -> None:
@@ -797,8 +804,7 @@ def _open_pass(
             # What a producer gone since was asked stands no more, as a launch's RUNNING record voids it.
             stores.void_inbox(hop)
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
-            cycle_dir = CycleDir(stores.campaigns.cycle_dir(hop))
-            close_dead_bench(CycleEventLog.open(cycle_dir))
+            close_dead_bench(stores, hop)
             declared = _campaign_ceiling(stores, hop).over(declared)
         held = admit_and_share(
             declared,

@@ -557,6 +557,8 @@ export interface PauseReading {
   /** Who or what asked, in the declarer's own words. */
   detail: string;
   at: string;
+  /** SERVED: the cause as every door words it (`paused_by`). */
+  said: string;
 }
 
 /** Which run verbs a cycle admits now: the one answer the run control and the
@@ -575,6 +577,10 @@ export interface RunAdmission {
    * run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent
    * as served. */
   payload: Record<string, Record<string, string>>;
+  /** Why the cycle's campaign refuses every launch (archived, its definition
+   * moved), so its stop's `start-run` acts are not offered; empty where a
+   * launch is admitted. */
+  launch_refusal: string;
 }
 
 /** When an entry opened and last moved. */
@@ -1990,7 +1996,6 @@ export interface LiveCandidate {
   validation_failures: ValidationFailure[];
   pipeline_overlay: Record<string, Record<string, unknown>> | null;
   samples: DashboardSample[];
-  composite_fitness_formula_short: string | null;
 }
 
 /** One prompt node's loci: its fields by name and its shots, both written only
@@ -2427,7 +2432,7 @@ export interface LoopWarning {
  * signal. */
 export interface ProjectionEnvelope {
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
-  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
+  kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'bench_scored' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'pass_graded' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
    * stamped per-frame for fan-in demux. */
   cycle_id: string;
@@ -4540,8 +4545,8 @@ export interface LaunchAnswer {
 
 /** The pass is the fact, the reading a cache of one grading of it; ``reading`` is
  * ``None`` exactly where ``state`` is not ``read``. */
-export interface VerificationGradedView {
-  kind: 'verification_graded';
+export interface PassGradedRecord {
+  record_type: 'pass_graded';
   verification: VerifyPass | BenchPass | NoiseFloorPass;
   subject: 'origin' | 'selected' | null;
   tolerance: number | null;
@@ -4550,6 +4555,7 @@ export interface VerificationGradedView {
   reading: VerifyReading | BenchReading | NoiseBand | null;
   state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
   refusal: string | null;
+  timestamp: string;
 }
 
 export interface VerifyPass {
@@ -5327,7 +5333,7 @@ export interface CommandResponses {
   "start-run": LaunchAnswer;
   "submit-arms": CommandAcceptedBody;
   "unarchive-campaign": CommandAcceptedBody;
-  "verify-candidate": VerificationGradedView | VerifySaturated;
+  "verify-candidate": PassGradedRecord | VerifySaturated;
 }
 
 // Each read's route (application/read_params.py::ReadParams.route): a URL fills it, never spells it.
@@ -5998,12 +6004,12 @@ export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {
 
 // Mirror of domain/phases.py::RUN_PHASE_INFO, in display order.
 export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
-  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, no_action: "Queued — it starts by itself when a slot frees.", parked: "waiting for a machine slot" },
-  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, no_action: "Starting up…", parked: "coming up" },
+  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, no_action: "Queued — it starts by itself when a slot frees.", parked: "" },
+  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, no_action: "Starting up…", parked: "" },
   "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
   "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
   "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", no_action: "", parked: "stopping at its next checkpoint" },
-  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, no_action: "Holding for you — the chat says what it waits on.", parked: "awaiting your decision" },
+  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, no_action: "Holding for you — the chat says what it waits on.", parked: "" },
   "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "producer gone" },
   "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "writing its last files" },
 };

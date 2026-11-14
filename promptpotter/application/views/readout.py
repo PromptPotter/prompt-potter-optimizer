@@ -8,6 +8,8 @@ from pathlib import Path
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.views.render.ansi import (
+    render_bench_scored,
+    render_pass_graded,
     render_round_verdict,
     render_run_spend,
     to_text,
@@ -40,7 +42,7 @@ from promptpotter.application.views.render.primitives import (
     display_tags,
 )
 from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.domain.arm_reading import ScoreboardRankKey, scoreboard_rank_key
+from promptpotter.domain.arm_reading import DisplayMetric, ScoreboardRankKey, scoreboard_rank_key
 from promptpotter.domain.arms import (
     Concluded,
     Cut,
@@ -55,18 +57,13 @@ from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.narration import NarratedRecord, Narration
 from promptpotter.domain.paired_reading import level_text, lift_text
-from promptpotter.domain.phase_views import (
-    InitExitView,
-    RoundCompleteView,
-    RoundStartView,
-    ViewAnchors,
-)
+from promptpotter.domain.phase_acts import CellFormula, InitClosed, InitOpened, ProposeOpened
 from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.cell_beat import CellBeatRecord
+from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
-    ArmsGate,
     ElectionRecord,
     Ended,
     LLMCallProgressRecord,
@@ -122,7 +119,9 @@ class ReadoutProjection(Projection):
         # Each round's LAST close, so a round re-closed on a warmed ruler shows the θ that stands.
         self._closed: dict[int, RoundStatement] = {}
         self.sample_counter = 0
-        self._anchors = ViewAnchors()
+        # Folded off the launch's INIT, and the wiring's display metric.
+        self._formula: CellFormula | None = None
+        self._display_metric: DisplayMetric = "fitness"
         self._sample_lookahead_depth: int | None = None
         self._round_best_key: ScoreboardRankKey | None = None
         self._round_best_fitness: float | None = None
@@ -136,7 +135,6 @@ class ReadoutProjection(Projection):
         self._headed: set[int] = set()
         self._readout: Path | None = None
         self._cycle_dir: Path | None = None
-        self._verdict: RoundCompleteView | None = None
         # The election and a race speak in keys; the narration names each arm as announced.
         self._narration = Narration()
         self._order_shown: list[int] = []
@@ -180,54 +178,57 @@ class ReadoutProjection(Projection):
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         self._narration.read(self.at_offset, record)
-        if record.phase == CampaignPhase.ORIGIN and record.event == "enter":
+        if record.phase == CampaignPhase.ORIGIN and record.step == "enter":
             self._write("\n" + _round_rule("ROUND 0 — ORIGIN", "C0 · campaign root"))
-        view = record.view
-        if isinstance(view, RoundCompleteView):
-            # Held, not printed: the panel gate can still unwind this round.
-            self._verdict = view
-        elif view is not None and (rendered := to_text(view)):
+        act = record.act
+        if isinstance(act, InitOpened | InitClosed):
+            self._formula = act.formula
+        if rendered := to_text(record):
             self._write(rendered)
         if record.round is not None:
             self._round_num = record.round
-        if isinstance(view, RoundStartView):
+        if isinstance(act, ProposeOpened):
             self._round_best_key = None
             self._round_best_fitness = None
             self._round_best_label = None
             self._round_started_at = time.monotonic()
         # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
-        if isinstance(view, InitExitView) and self._cycle_dir is not None:
+        if isinstance(act, InitClosed) and self._cycle_dir is not None:
             standing = scan_standing_rounds(
                 ledger_chain(CycleDir(self._cycle_dir), moment=None)
             ).rounds
             self._closed = {n: held.close for n, held in standing.items()}
 
     def _handle_run_phase(self, record: RunPhaseRecord) -> None:
-        self._narration.read(self.at_offset, record)
         if record.spend is not None:
             self._write(render_run_spend(record.spend))
         state = record.state
-        if isinstance(state, Paused | Ended):
-            # Every entry point's readout ends on why, so no completion box repeats it.
-            detail = state.detail if isinstance(state, Paused) else ""
-            head, *rest = stop_lines(state.stop_reason, detail=detail)
-            ink = DIM if stop_reason_outcome(state.stop_reason) is StopOutcome.SUCCESS else YELLOW
-            self._write(f"\n  {ink}■ {head}{RESET}")
-            for line in rest:
-                self._write(f"    {line}")
-        if isinstance(state, ArmsGate):
-            # ASCII-only: a cp1252 console is one of this line's sinks.
-            n = self._round_num
-            self._write(f"\n  [ARM GATE] round {n} holds for the operator's arms")
-            for idx, draft in enumerate(state.drafts):
-                lineage = draft.individual.lineage
-                said = lineage.changes_description.encode("ascii", "replace").decode()
-                self._write(f"    draft {idx} ({lineage.source or 'unsourced'}): {said or '-'}")
-            if not state.drafts:
-                self._write("    no proposer ran: every arm this round measures is the operator's")
-            self._write("    answer: python -m promptpotter submit-arms --arms <arms.yaml>")
+        if not isinstance(state, Paused | Ended):
+            # The arms gate is its narration row.
+            self._say(record)
+            return
+        # Every entry point's readout ends on why, so no completion box repeats it; this block is
+        # the stop's narration row.
+        self._narration.read(self.at_offset, record)
+        paused = state if isinstance(state, Paused) else None
+        head, *rest = stop_lines(
+            state.stop_reason,
+            detail="" if paused is None else paused.detail,
+            cause=None if paused is None else paused.cause,
+        )
+        ink = DIM if stop_reason_outcome(state.stop_reason) is StopOutcome.SUCCESS else YELLOW
+        self._write(f"\n  {ink}■ {head}{RESET}")
+        for line in rest:
+            self._write(f"    {line}")
+
+    def _handle_pass_graded(self, record: PassGradedRecord) -> None:
+        self._write(render_pass_graded(record))
+
+    def _handle_bench_scored(self, record: BenchScoredRecord) -> None:
+        self._write(render_bench_scored(record))
 
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
+        self._display_metric = record.display_metric
         if (drift := record.defaults_drift) is not None:
             self._write(
                 f"  {YELLOW}⚠ what this campaign's declaration is a delta over moved since it was "
@@ -237,11 +238,7 @@ class ReadoutProjection(Projection):
             self._write(f"  {YELLOW}⚠ {said}: this launch measures on it as it is{RESET}")
 
     def _handle_round_proposed(self, record: RoundProposedRecord) -> None:
-        if record.submitted:
-            self._write(
-                f"  [ARM GATE] round {record.round}: the operator answered with "
-                f"{len(record.proposals)} arm(s); each is a round_proposed record on the ledger"
-            )
+        self._say(record)
 
     def _handle_round_restated(self, record: RoundRestatedRecord) -> None:
         self._closed[record.round] = record
@@ -256,7 +253,6 @@ class ReadoutProjection(Projection):
     def _handle_round_closed(self, record: RoundClosedRecord) -> None:
         self._narration.read(self.at_offset, record)
         self._closed[record.round] = record
-        self._anchors = record.anchors
         self.on_round_complete(record)
 
     def _say(self, record: NarratedRecord) -> None:
@@ -349,7 +345,6 @@ class ReadoutProjection(Projection):
                 self.on_sample_order(state.sample_order, state.n_priors)
                 self.on_arm_measuring(state)
             case Cut() | Measured():
-                self._anchors = record.anchors
                 self.on_arm_concluded(state, self._narration.fold(record.round, record.arm))
 
     def _handle_race_standing(self, record: RaceStandingRecord) -> None:
@@ -469,10 +464,17 @@ class ReadoutProjection(Projection):
             elapsed = time.monotonic() - self._round_started_at
             elapsed_label = f" — {fmt_elapsed(elapsed)}"
         self._round_started_at = None
-        verdict, self._verdict = self._verdict, None
-        if verdict is not None:
+        # Round 0 is the origin's read, no election's verdict.
+        verdict = rn > 0
+        if verdict:
             self._write(
-                render_round_verdict(verdict, round_verdict_basis(round_result), series.reading(rn))
+                render_round_verdict(
+                    round_result,
+                    round_verdict_basis(round_result),
+                    series.reading(rn),
+                    cell_formula=self._formula,
+                    display_metric=self._display_metric,
+                )
             )
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
@@ -486,12 +488,12 @@ class ReadoutProjection(Projection):
         for line in self._render_block_lines():
             self._write(_node_line(line))
         self._block_racing, self._block_decided, self._headed = {}, {}, set()
-        formula_short = self._anchors.composite_fitness_formula_short
-        formula_full = self._anchors.composite_fitness_formula
+        formula_short = None if self._formula is None else self._formula.short
+        formula_full = None if self._formula is None else self._formula.formula
         fold, election = round_result.fold, round_result.election
         composite = None if fold is None else fold.composite_fitness
         if (
-            verdict is None
+            not verdict
             and fold is not None
             and election is not None
             and composite is not None

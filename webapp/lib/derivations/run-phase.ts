@@ -1,10 +1,10 @@
 import {
   type DashboardState,
+  type HierarchyState,
   type LookaheadDepth,
   type NextAct,
   type PauseReading,
   type RunPhase,
-  type RunStatus,
   type SampleLookahead,
   type StopReason,
   DASHBOARD_STATE_PAUSE_WORDS,
@@ -44,21 +44,26 @@ function actText(act: NextAct): string {
   return [act.kind && ACT_CONTROL[act.kind], field].filter(Boolean).join(" ");
 }
 
-/** A stop's step and its acts, as one line. */
-function stopNextStep(reason: StopReason): string {
+/** A stop's step and the acts the cycle's admission offers, as one line: a campaign that
+ * refuses a launch (served `launch_refusal`) offers no `start-run`. */
+function stopNextStep(reason: StopReason, launchRefusal: string): string {
   const info = STOP_REASON_INFO[reason];
-  const acts = [...new Set(info.next_acts.map(actText))];
+  const offered = info.next_acts.filter((act) => !(launchRefusal && act.kind === "start-run"));
+  const acts = [...new Set(offered.map(actText))];
   return acts.length > 0 ? `${info.next_step} Next: ${acts.join("; ")}.`.trim() : info.next_step;
 }
 
 /** What the operator does now, as the run's stop reason states it; empty where it owes nothing. */
-export function runNextStep(status: RunStatus): string {
-  return status.stop_reason === null ? "" : stopNextStep(status.stop_reason);
+export function runNextStep(state: HierarchyState): string {
+  const reason = state.status.stop_reason;
+  return reason === null ? "" : stopNextStep(reason, state.admission.launch_refusal);
 }
 
 /** A pause's next step: its stop reason's, or — asked, not yet reached — where the run stops. */
-export function pauseNextStep(pause: PauseReading): string {
-  return pause.stop_reason === null ? RUN_PHASE_INFO.paused.parked : stopNextStep(pause.stop_reason);
+export function pauseNextStep(pause: PauseReading, launchRefusal: string): string {
+  return pause.stop_reason === null
+    ? RUN_PHASE_INFO.paused.parked
+    : stopNextStep(pause.stop_reason, launchRefusal);
 }
 
 /** How many more cells the spend limits admit, where money holds the walk. */

@@ -31,7 +31,14 @@ from promptpotter.domain.origin_panel import (
     StallEffect,
 )
 from promptpotter.domain.paired_reading import level_text
-from promptpotter.domain.phases import STOP_REASON_INFO, NextAct, StopOutcome, StopReason
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    NextAct,
+    PauseCause,
+    StopOutcome,
+    StopReason,
+    paused_by,
+)
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import RoundClosedRecord
 from promptpotter.domain.results import RoundOutcome
@@ -64,11 +71,15 @@ def stop_next_lines(stop_reason: StopReason) -> list[str]:
     ]
 
 
-def stop_lines(stop_reason: StopReason, *, detail: str = "") -> list[str]:
-    """A stop at every surface that names one: its outcome, label, what said so, then ``stop_next_lines``."""
+def stop_lines(
+    stop_reason: StopReason, *, detail: str = "", cause: PauseCause | None = None
+) -> list[str]:
+    """A stop at every surface that names one: its outcome, label (a pause's, its cause), what said
+    so, then ``stop_next_lines``."""
     info = STOP_REASON_INFO[stop_reason]
+    label = info.label if cause is None else paused_by(cause, "")
     said = f" — {detail}" if detail else ""
-    return [f"{info.outcome.value.upper()} · {info.label}{said}", *stop_next_lines(stop_reason)]
+    return [f"{info.outcome.value.upper()} · {label}{said}", *stop_next_lines(stop_reason)]
 
 
 def fmt_elapsed(seconds: float) -> str:

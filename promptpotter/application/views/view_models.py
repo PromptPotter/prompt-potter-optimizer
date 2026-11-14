@@ -3,36 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import HardSampleOrder, HardSamples
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.origin_panel import OverlapReading
-from promptpotter.domain.phase_views import ViewAnchors
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.ruler import SeriesReading
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import LedgerSpend
-
-
-@dataclass
-class ViewContext:
-    composite_fitness_formula: str | None = None
-    composite_fitness_formula_short: str | None = None
-    display_metric: DisplayMetric = "fitness"
-    original_sp_flat: dict[str, str] = field(default_factory=dict)
-    current_sp_flat: dict[str, str] = field(default_factory=dict)
-    node_param_keys: dict[str, list[str]] | None = None
-
-    def anchors(self) -> ViewAnchors:
-        """Not the whole context: both ``*_sp_flat`` prompts would ride every candidate and round."""
-        return ViewAnchors(
-            composite_fitness_formula=self.composite_fitness_formula,
-            composite_fitness_formula_short=self.composite_fitness_formula_short,
-            display_metric=self.display_metric,
-        )
 
 
 @dataclass(frozen=True)

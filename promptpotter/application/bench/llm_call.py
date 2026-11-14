@@ -19,7 +19,6 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat, silence_detail
 from promptpotter.infrastructure.llm.json_parse import (
@@ -34,6 +33,7 @@ from promptpotter.infrastructure.llm.send_pacing import (
     throttle_stall_given_to,
 )
 from promptpotter.infrastructure.llm.spend_book import CallLabel
+from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.llm.wallet import keyed_client
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
@@ -135,7 +135,6 @@ class LLMCallContext:
     cache: LLMReuseCache
     # Drawn per call off the run's clamp (`Cycle.rng`); it keys the reuse cache. None outside a run.
     seed: int | None
-    ledger: CycleEventLog | None = None
     round_num: int | None = None
     candidate_idx: int | None = None
 
@@ -242,8 +241,7 @@ def _announce(call: _Call) -> None:
         injection_chars=dict(injections.chars),
         injection_dropped=dict(injections.dropped),
     )
-    if context.ledger is not None:
-        context.ledger.append(start_record)
+    append_record(start_record)
     # The alarm is a REFUSED panel, never the prompt's size: the mandatory floor is admitted at any cost.
     no_room = start_record.refused_panels
     log = logger.warning if no_room else logger.info
@@ -279,7 +277,6 @@ async def _provider_reply(call: _Call) -> LLMResponse:
     # Unconditional: `on_suspend` guards a deadline, not telemetry, so a ledger-less call needs it too.
     heartbeat_task: asyncio.Task[None] = asyncio.create_task(
         heartbeat(
-            context.ledger,
             CallBeat(call.call_id, label),
             round_num=context.round_num,
             start_monotonic=call.started,
@@ -372,7 +369,7 @@ async def llm_call(
         context=context,
         injections=injections,
         started=time.monotonic(),
-        call_id=uuid.uuid4().hex if context.ledger is not None else "",
+        call_id=uuid.uuid4().hex,
     )
 
     async def send() -> LLMResponse:
@@ -388,16 +385,15 @@ async def llm_call(
         model=merged.model,
     )
     response = answered.response
-    if context.ledger is not None:
-        context.ledger.append(
-            _call_record(
-                call,
-                response,
-                answered.duration_s,
-                cached=answered.replayed,
-                trace_meta=trace_meta,
-            )
+    append_record(
+        _call_record(
+            call,
+            response,
+            answered.duration_s,
+            cached=answered.replayed,
+            trace_meta=trace_meta,
         )
+    )
 
     return response
 

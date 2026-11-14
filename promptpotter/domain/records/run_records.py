@@ -36,7 +36,7 @@ from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.optimizer_state import STATE_KINDS, OptimizerState, StatePart
 from promptpotter.domain.paired_reading import ArmKey, ArmName, RoundArm
 from promptpotter.domain.pass_kinds import PASSES
-from promptpotter.domain.phase_views import PhaseView, RunSpendView, ViewAnchors
+from promptpotter.domain.phase_acts import PhaseAct
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     PauseCause,
@@ -65,6 +65,7 @@ from promptpotter.domain.spend import (
     Budget,
     CeilingMeter,
     KeySource,
+    StopSpend,
     TokenAccount,
     TokenUsageKind,
     UserSpend,
@@ -108,11 +109,13 @@ class ResumeCheckpointRecord(CycleRecord):
 
 
 class PhaseRecord(CycleRecord):
+    """A phase's bracket; ``act`` is what the step said on it, worded at render."""
+
     record_type: Literal["phase"] = "phase"
     phase: str
-    event: str
+    step: Literal["enter", "exit"]
     round: int | None = None
-    view: PhaseView | None = None
+    act: PhaseAct | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -150,7 +153,7 @@ class RunPhaseRecord(CycleRecord):
     forks_inherit: ClassVar[bool] = False
     record_type: Literal["run_phase"] = "run_phase"
     state: DeclaredPhase
-    spend: RunSpendView | None = None
+    spend: StopSpend | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @classmethod
@@ -160,7 +163,7 @@ class RunPhaseRecord(CycleRecord):
         *,
         cause: PauseCause | None = None,
         detail: str = "",
-        spend: RunSpendView | None = None,
+        spend: StopSpend | None = None,
     ) -> RunPhaseRecord:
         if STOP_REASON_INFO[stop_reason].outcome is not StopOutcome.PAUSED:
             return cls(state=Ended(stop_reason=stop_reason), spend=spend)
@@ -228,7 +231,6 @@ class RoundStatement(RoundOutcome):
     run_standing: RunStanding
     # Leading arm against the ORIGIN's rows: a pairing across two rounds of the closing line.
     panel_precision: PanelPrecision | None
-    anchors: ViewAnchors
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @classmethod
@@ -238,7 +240,6 @@ class RoundStatement(RoundOutcome):
         slot_of: Mapping[str, int],
         level_series: LevelSeries,
         run_standing: RunStanding,
-        anchors: ViewAnchors,
         **own: Any,
     ) -> Self:
         rr = line[-1]
@@ -253,7 +254,6 @@ class RoundStatement(RoundOutcome):
             panel_precision=None
             if leading is None
             else panel_precision(rr.rows(leading).cells, line[0].results.cells),
-            anchors=anchors,
             **own,
         )
 
@@ -344,7 +344,6 @@ class ArmRecord(CycleRecord):
     round: int
     arm: ArmKey
     state: ArmState
-    anchors: ViewAnchors = Field(default_factory=ViewAnchors)
     timestamp: str = Field(default_factory=utcnow_iso)
 
 

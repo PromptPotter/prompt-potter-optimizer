@@ -55,7 +55,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     require_spend_book,
 )
 from promptpotter.infrastructure.llm.telemetry import (
-    active_cycle_ledger,
     call_price,
     current_round,
     emit_replay_usage,
@@ -612,7 +611,6 @@ async def _send_cell(
     # Unconditional and OUTSIDE the envelope scope: the envelope's only sighting of a machine sleep rides it.
     heartbeat_task = asyncio.create_task(
         heartbeat(
-            active_cycle_ledger(),
             CellBeat(sample.id),
             round_num=current_round(),
             start_monotonic=time.monotonic(),

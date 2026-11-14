@@ -25,7 +25,6 @@ from promptpotter.domain.optimizer_template import (
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     readable_task_context,
@@ -230,16 +229,15 @@ async def run_checkin(
     consultation_instruction: str,
     user_content: str,
     stores: Stores,
-    ledger: CycleEventLog,
 ) -> tuple[CheckinOutput, int]:
-    """Every record the call writes lands on *ledger*, bound for it: no run scope stands at a turn."""
-    with scoped(ledger=ledger):
-        return await answer(
-            checkin_call_context(stores, ledger),
-            response_model,
-            FilledPrompt({}, {"consultation_instruction": consultation_instruction}),
-            user_content=user_content,
-        )
+    """Every record the call writes lands on the scope's ledger, which its door binds over the
+    draft's (`draft_ledger`): no run scope stands at a turn."""
+    return await answer(
+        checkin_call_context(stores),
+        response_model,
+        FilledPrompt({}, {"consultation_instruction": consultation_instruction}),
+        user_content=user_content,
+    )
 
 
 def draft_ledger(stores: Stores, draft_id: str) -> CycleEventLog:
@@ -247,12 +245,11 @@ def draft_ledger(stores: Stores, draft_id: str) -> CycleEventLog:
     return CycleEventLog.open(CycleDir(stores.drafts.draft_dir(draft_id)))
 
 
-def checkin_call_context(stores: Stores, ledger: CycleEventLog) -> LLMCallContext:
+def checkin_call_context(stores: Stores) -> LLMCallContext:
     return LLMCallContext(
         node=CHECKIN_NODE,
         config=checkin_manifest().config,
         template=checkin_template(),
-        ledger=ledger,
         round_num=0,
         cache=stores.optimizer_reuse,
         seed=None,
@@ -265,7 +262,6 @@ async def commit_task_framing(
     description: str,
     *,
     prompt_fields: Iterable[str],
-    ledger: CycleEventLog,
 ) -> None:
     """*prompt_fields*: each the chain's prompt nodes declare, once per node declaring it."""
     result, _ = await run_checkin(
@@ -279,7 +275,6 @@ async def commit_task_framing(
             f"Context:\n{description}"
         ),
         stores=stores,
-        ledger=ledger,
     )
     stores.tenant_datasets.save_task_context(
         dataset_name,

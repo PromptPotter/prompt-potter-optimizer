@@ -399,7 +399,14 @@ export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchySta
     status: { run_phase: "terminal", stop_reason: null, mark: "unknown" },
     attached: false,
     pause: null,
-    admission: { offers: null, refusal: "", skip_refusal: "", lookahead_refusal: "", payload: {} },
+    admission: {
+      offers: null,
+      refusal: "",
+      skip_refusal: "",
+      lookahead_refusal: "",
+      payload: {},
+      launch_refusal: "",
+    },
     intervened: false,
     ...over,
   };
@@ -491,7 +498,6 @@ export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
     pipeline_overlay: null,
     samples: [],
     validation_failures: [],
-    composite_fitness_formula_short: null,
     ...over,
   };
 }
@@ -573,6 +579,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
       skip_refusal: "",
       lookahead_refusal: "",
       payload: {},
+      launch_refusal: "",
     },
     backpressure: null,
     measured_unit: "sample",
