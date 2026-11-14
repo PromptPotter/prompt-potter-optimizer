@@ -10,11 +10,9 @@ import type {
   ServedArm,
 } from "@/lib/api/types";
 import type { ArmRow } from "@/lib/types";
+import { OBSERVE_STATES, type ObserveState } from "@/lib/address";
 import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
-
-// The Leader shows the leader: the pick renders in the inspector alone (`ScoringInspector`).
-export type ObserveState = "best" | "latest" | "round";
 
 const OBSERVE_LABELS: Record<ObserveState, string> = {
   best: "Best",
@@ -26,8 +24,7 @@ export function observeOptions(
   avail: Record<ObserveState, boolean>,
   round: number | null = null,
 ): { value: ObserveState; label: string }[] {
-  const order: ObserveState[] = ["best", "latest", "round"];
-  return order
+  return OBSERVE_STATES
     .filter((s) => avail[s])
     .map((s) => ({
       value: s,

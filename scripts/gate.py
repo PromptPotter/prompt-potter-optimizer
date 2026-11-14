@@ -1970,6 +1970,11 @@ def _parser() -> argparse.ArgumentParser:
         help="a landing's parity (`equals-main`): the offline run's traces against this home's",
     )
     parser.add_argument(
+        "--walk-world",
+        action="store_true",
+        help="answer this tree's walk world on stdout, building it when absent (`npm run e2e` asks)",
+    )
+    parser.add_argument(
         "--commit-msg",
         metavar="FILE",
         help="the commit-msg hook: a subject opening on ASCII",
@@ -1991,6 +1996,11 @@ def main() -> int:
             return 1
         return 0
 
+    answer = sys.stdout
+    if args.walk_world:
+        # The path alone on stdout, which `playwright.config.ts` reads; the check reports on stderr.
+        args.only = ["walk-world"]
+        sys.stdout = sys.stderr
     asked = _asked(args)
     if unknown := sorted(asked - _NAMED.keys()):
         parser.error(f"no such check: {', '.join(unknown)} (have: {', '.join(_NAMED)})")
@@ -2055,6 +2065,8 @@ def main() -> int:
         print(f"\ngate[{label}]: {len(results)} checks, {len(failed)} failed{unchanged}, {timed}")
         return 1
     print(f"gate[{label}]: {len(results)} checks green in {timed}{unchanged}")
+    if args.walk_world:
+        print(sel.world, file=answer)
     return 0
 
 

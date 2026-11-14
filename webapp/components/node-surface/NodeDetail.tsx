@@ -7,10 +7,10 @@ import {
   NODE_KIND_INFO,
   type PipelineViewNode,
 } from "@/lib/api/types";
-import type { SelectedNode } from "@/lib/address";
+import type { ObserveState, SelectedNode } from "@/lib/address";
 import { useSelection } from "@/lib/state/selection";
 import { useCheckinDraft, useIngest } from "@/lib/state/ingest-flow";
-import { draftPrompts, interiorNodes, type ObserveState, type ObserveSubject } from "@/lib/derivations";
+import { draftPrompts, interiorNodes, type ObserveSubject } from "@/lib/derivations";
 import { useWorkspace } from "@/lib/state/workspace";
 import { cx } from "@/lib/cx";
 import { useConnector } from "@/lib/hooks/useConnector";

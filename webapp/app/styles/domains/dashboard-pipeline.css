@@ -176,6 +176,8 @@
 .wf-hero-multi-node .node-label{font-size:var(--text-xs);font-weight:500;fill:var(--color-text-primary);font-family:var(--font-mono);pointer-events:none}
 .wf-hero-multi-node .node-sub{font-size:var(--text-xs);fill:var(--color-text-secondary);font-family:var(--font-mono);pointer-events:none}
 .wf-hero-multi-tag{font-size:var(--text-xs);font-weight:600;letter-spacing:.14em;text-transform:uppercase;color:var(--color-text-secondary);text-align:center;padding-bottom:4px;font-family:var(--font-mono)}
+.wf-hero-multi-tag.names-dataset{color:var(--color-text-primary)}
+.wf-hero-multi-tag-sub{display:block;padding-top:var(--space-4);color:var(--color-text-secondary);font-weight:400}
 .wf-hero-multi-node.muted{opacity:.42}
 .wf-hero-multi-node.muted:hover,
 .wf-hero-multi-node.muted:focus-visible{opacity:1}

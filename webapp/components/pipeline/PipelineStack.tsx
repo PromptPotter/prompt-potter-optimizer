@@ -83,6 +83,7 @@ export function PipelineStack({ datasetName }: Props) {
       label: l.dataset,
       view: l.view,
       read: l.read,
+      dataset: l.dataset,
       connector: l.connector,
       reach: l.reach,
       // Read-only: an id collision in another dataset's namespace would light a node not running.

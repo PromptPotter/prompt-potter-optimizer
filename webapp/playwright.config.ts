@@ -1,13 +1,25 @@
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
+import { PYTHON, PYTHON_ENV, REPO } from "./e2e/python.mjs";
 import { COLD_HOME, WALK_HOME } from "./e2e/world";
 
 // Two servers: cold and spend share a throwaway PROMPTPOTTER_HOME, which binds at import; walk reads a
-// copy of PP_E2E_WALK_WORLD (a run such as `scripts/offline_run.py` makes), else the operator's workspace.
+// copy of PP_E2E_WALK_WORLD (a run such as `scripts/offline_run.py` makes).
 
 const WALK_PORT = process.env.PP_E2E_PORT || "8123";
 const COLD_PORT = process.env.PP_E2E_COLD_PORT || "8124";
-const WALK_WORLD = process.env.PP_E2E_WALK_WORLD;
+
+// Unset, the world is this tree's, which the gate answers and builds when absent; stored in this
+// process's env, so Playwright's workers inherit it rather than ask again.
+function walkWorld(): string {
+  process.env.PP_E2E_WALK_WORLD ||= execFileSync(
+    PYTHON,
+    [path.join(REPO, "scripts", "gate.py"), "--walk-world"],
+    { cwd: REPO, encoding: "utf8", env: PYTHON_ENV, stdio: ["ignore", "pipe", "inherit"] },
+  ).trim();
+  return process.env.PP_E2E_WALK_WORLD;
+}
 
 // Set to walk a server already up; the walk server then never starts.
 const WALK_URL = process.env.PP_E2E_BASE_URL || `http://127.0.0.1:${WALK_PORT}`;
@@ -32,18 +44,11 @@ function runs(project: string) {
 }
 
 // `spend` measures against the real backend, so a run holding it serves the throwaway world live.
-function server(
-  port: string,
-  backend: "offline" | "live",
-  env: Record<string, string>,
-  reusable: boolean,
-  world?: string,
-) {
+// Never a server already up: each binds a throwaway home it stocks at startup, which adopting one skips.
+function server(port: string, backend: "offline" | "live", env: Record<string, string>, world?: string) {
   return {
     command: `node e2e/serve.mjs --auth=off --backend=${backend}`,
     url: `http://127.0.0.1:${port}/api/v1/health`,
-    // The COLD server is never reused: `serve.mjs` resets the workspace at startup, and adopting a running one silently skips it.
-    reuseExistingServer: reusable && !process.env.CI,
     timeout: 120_000,
     stdout: "pipe" as const,
     stderr: "pipe" as const,
@@ -102,10 +107,8 @@ export default defineConfig({
   webServer: [
     ...((runs("walk") || runs("touch")) && !process.env.PP_E2E_BASE_URL
       ? [
-          // A named world is synthetic, so its backend is too; a server already up may serve another one.
-          WALK_WORLD
-            ? server(WALK_PORT, "offline", { PROMPTPOTTER_HOME: WALK_HOME }, false, WALK_WORLD)
-            : server(WALK_PORT, "live", {}, true),
+          // A world is synthetic, so its backend is too.
+          server(WALK_PORT, "offline", { PROMPTPOTTER_HOME: WALK_HOME }, walkWorld()),
         ]
       : []),
     ...(runs("cold") || runs("spend")
@@ -114,7 +117,6 @@ export default defineConfig({
             COLD_PORT,
             runs("spend") ? "live" : "offline",
             { PROMPTPOTTER_HOME: COLD_HOME, PP_E2E_RESET: "1" },
-            false,
           ),
         ]
       : []),

@@ -751,16 +751,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   dataset's file; both refuse when absent. **Rides with:** xconn 2 (named endpoints per connector).
   **Re-test:** `git grep -cE "_DB_DEFAULT_URLS|skill_delivery.*or " -- promptpotter/connectors` is 0.
 
-### mob-3 (what mob 2 left at landing 53)
-
-mob 2 landed the phone's ⋯ fold for a one-row toolbar, the masthead setup line as a tap-expandable
-Toolbar, and the phone walk's back step. Left:
-
-- **The walk server takes its world by a hand-set hash**: `webapp/e2e/serve.mjs` reads
-  `PP_E2E_WORLD`, a `.gate_cache/walk-world/<hash>` path a person copies from the gate, so a gate
-  rebuild removes the hash and the server exits "no workspace". Root: the server asks the gate for
-  the current world. **Rides with:** mob-3.
-
 ### webb-5 (what webb-4 left at its landing)
 
 - **The output contract is flattened in the browser**: `lib/derivations/output-contract.ts::outputContract`
@@ -779,20 +769,15 @@ Toolbar, and the phone walk's back step. Left:
   serves its lift's name, which `RoundFileView` and `searchpoint/SearchpointDrillIn.tsx` read;
   `liftVersus` and the hint's fixed wording go. **Rides with:** webb-5. **Re-test:**
   `git grep -n "liftVersus" -- webapp` is empty.
-- **An L4 panel draws its inner datasets as identical cards** (operator, 2026-11-14):
-  `pipeline/PipelineStack.tsx` lays one layer per dataset the panel measures
-  (`pipeline_resolve.py::_nests`), but `pipeline/PipelineFlow.tsx` tags a card with its `connector`
-  alone, so hotpotqa-distractor, justlogic/d234 and legalbench-fods each read "TERMNORM · LLM_ONLY";
-  the served `NestedPipelineRef.dataset` reaches only the zoom button's title. Action: a nested card
-  names its dataset, the connector beneath it. **Rides with:** webb-5. **Re-test:**
-  promptpotter-self/panel's stack names three datasets.
-- **The theme key is spelled twice** (lw's landing): `webapp/public/theme-init.js:4` reads
-  `"promptpotter.theme"` beside `lib/storage-keys.ts::STORAGE_KEYS.theme`, since the pre-paint script
-  cannot import the table. Action: the build generates the script's key from the table. **Rides with:**
-  webb-5. **Re-test:** `git grep -c '"promptpotter.theme"' -- webapp ':!webapp/lib/storage-keys.ts'` is 0.
-- **`lib/address.ts:6` imports `./derivations/search-point` past the barrel** (lw's landing; type-only):
-  the cycle the hierarchy import's row closed, met again. **Rides with:** webb-5. **Re-test:**
-  `git grep -n "derivations/" -- webapp/lib/address.ts` is empty.
+- **The gate's bootstrap assumes the pinned interpreter**: `scripts/gate.py::_editable_target` calls
+  `Path.from_uri` (3.13+) in `_reexec_pinned`, before the re-exec, while `.githooks/pinned-python`
+  tells a desk to build the venv with `python3 scripts/gate.py`; a 3.11 `python3` dies there.
+  Action: the code before the re-exec runs on any `python3` the hook names, or refuses first with the
+  floor. **Re-test:** a 3.11 `python3 scripts/gate.py --only doc-claims` reaches the re-exec.
+- **The walk's world has two names**: `playwright.config.ts::server` hands `PP_E2E_WALK_WORLD` to
+  `serve.mjs` as `PP_E2E_WORLD`, and `e2e/fake_issuer.ts` deletes it so a third server inherits none.
+  Action: `serve.mjs --world=<path>` takes it as an argument, as it takes `--auth` and `--backend`.
+  **Re-test:** `git grep -c PP_E2E_WORLD -- webapp` is 0.
 
 ### batch/27 · rec
 

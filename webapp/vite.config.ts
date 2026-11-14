@@ -2,6 +2,7 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from "vite";
 import { brandOf, softwareApplicationLd, type Brand } from "./lib/brand-of.ts";
+import { STORAGE_KEYS } from "./lib/storage-keys.ts";
 
 const WEBAPP = import.meta.dirname;
 const APP = path.join(WEBAPP, "app");
@@ -12,6 +13,18 @@ const CARD_TITLE = "PromptPotter — automatic prompt optimizer for better AI an
 const CARD_DESC =
   "Give PromptPotter the prompt you used on your AI provider. It critiques and " +
   "improves it on its own, then shows a significant, measured gain — in about five minutes.";
+
+// Stamps `data-theme` before the first paint: a classic script outside the bundle, so it runs
+// before any module, and a file, so the page CSP needs no inline script. Its key is the table's.
+const THEME_INIT = "theme-init.js";
+const THEME_INIT_SOURCE = `(function () {
+  var s = null;
+  try {
+    s = localStorage.getItem(${JSON.stringify(STORAGE_KEYS.theme)});
+  } catch (_) {}
+  if ((s || "light") === "light") document.documentElement.setAttribute("data-theme", "light");
+})();
+`;
 
 function head(brand: Brand): HtmlTagDescriptor[] {
   const meta = (attrs: Record<string, string>): HtmlTagDescriptor => ({ tag: "meta", attrs });
@@ -44,8 +57,7 @@ function head(brand: Brand): HtmlTagDescriptor[] {
         href: `/brand/tab-icon-pot-32${scheme === "dark" ? "-dark" : ""}.png`,
       },
     })),
-    // Stamps `data-theme` before the first paint; a file, so the page CSP needs no inline script.
-    { tag: "script", attrs: { src: "/theme-init.js" } },
+    { tag: "script", attrs: { src: `/${THEME_INIT}` } },
     {
       tag: "script",
       attrs: { type: "application/ld+json" },
@@ -63,13 +75,20 @@ export function defines(brand: Brand, build: string | null): Record<string, stri
   };
 }
 
-// What every page shares and the server reads beside them: the head, the manifest, the build id.
+// What every page shares and the server reads beside them: the head, the theme script, the manifest, the build id.
 function shell(brand: Brand, build: string | null): Plugin {
   return {
     name: "promptpotter-shell",
     // After the page's own `<meta charset>`, which must open the head.
     transformIndexHtml: () => head(brand).map((tag) => ({ ...tag, injectTo: "head" as const })),
+    configureServer(server) {
+      server.middlewares.use(`/${THEME_INIT}`, (_req, res) => {
+        res.setHeader("Content-Type", "text/javascript");
+        res.end(THEME_INIT_SOURCE);
+      });
+    },
     generateBundle() {
+      this.emitFile({ type: "asset", fileName: THEME_INIT, source: THEME_INIT_SOURCE });
       const manifest = {
         name: brand.name,
         short_name: brand.shortName,

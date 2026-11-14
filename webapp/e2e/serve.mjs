@@ -1,34 +1,12 @@
 // It does not build — `npm run e2e` builds once, since two servers start at once.
 
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { PYTHON, PYTHON_ENV, REPO, WEBAPP } from "./python.mjs";
 
-const WEBAPP = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const REPO = path.resolve(WEBAPP, "..");
 const PORT = process.env.PP_E2E_PORT || "8123";
-
-// Never a bare `python`: a system interpreter imports promptpotter but not its deps. The venv is the
-// clone's one (`scripts/processes.py::clone_root`), which a worktree or a pushed tip reads in place.
-const CLONE = path.dirname(
-  execFileSync("git", ["rev-parse", "--path-format=absolute", "--git-common-dir"], {
-    cwd: REPO,
-    encoding: "utf8",
-  }).trim(),
-);
-const PYTHON =
-  process.platform === "win32"
-    ? path.join(CLONE, ".venv", "Scripts", "python.exe")
-    : path.join(CLONE, ".venv", "bin", "python");
-// That venv's editable install names its owner; the walk serves this tree.
-const PYTHON_ENV = {
-  ...process.env,
-  PYTHONPATH: [REPO, process.env.PYTHONPATH].filter(Boolean).join(path.delimiter),
-  // This interpreter is cp1252; the live display writes box-drawing characters.
-  PYTHONUTF8: "1",
-};
 
 // Auth posture is what tells the worlds apart, so it is an argument: an inherited or `.env` value would decide it unseen.
 const AUTH = process.argv.find((arg) => arg.startsWith("--auth="))?.slice("--auth=".length);

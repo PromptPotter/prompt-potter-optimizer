@@ -3,7 +3,6 @@
 
 import { CYCLE_PATH_UNIT_SEP } from "@/lib/api/types";
 import { decodeCyclePath, encodeCyclePath, validIdComponent, type CyclePath } from "./ids";
-import type { ObserveState } from "./derivations/search-point";
 
 // A client-side closed set on purpose: no route names a view. `components/shell/families.tsx` labels each.
 export const FAMILY_IDS = [
@@ -77,6 +76,11 @@ export type ViewedSubject =
   | null;
 
 // What rides beside the subject on the viewed leaf; a subject switch clears them.
+// The `;observe=` key, in the order its picker offers it. The Leader shows the leader: the pick
+// renders in the inspector alone (`ScoringInspector`).
+export const OBSERVE_STATES = ["best", "latest", "round"] as const;
+export type ObserveState = (typeof OBSERVE_STATES)[number];
+
 export interface ViewKeys {
   // null follows live; a pick reads its own round.
   round: number | null;
@@ -109,7 +113,6 @@ const RETIRED_CYCLE_SEG = "c";
 const DRAFT_SEG = "d";
 const NEW_SEG = "new";
 const KEY_SEP = "=";
-const OBSERVE: readonly ObserveState[] = ["best", "latest", "round"];
 
 export const DEFAULT_VIEWS: readonly View[] = [{ family: "chat", key: null }];
 
@@ -201,7 +204,7 @@ export function parseAddress(hash: string): Address | RefusedAddress {
     seen.add(name);
     if (name === "at" && COUNT_RE.test(value) && subject !== null && "path" in subject) at = Number(value);
     else if (name === "round" && COUNT_RE.test(value)) keys.round = Number(value);
-    else if (name === "observe" && (OBSERVE as readonly string[]).includes(value)) keys.observe = value as ObserveState;
+    else if (name === "observe" && (OBSERVE_STATES as readonly string[]).includes(value)) keys.observe = value as ObserveState;
     else if (name === "samples" && /^(\d+(,\d+)*)?$/.test(value)) keys.samples = value ? value.split(",").map(Number) : [];
     else return MALFORMED;
   }

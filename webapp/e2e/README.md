@@ -16,13 +16,13 @@ First time on a machine: `npx playwright install chromium`.
 
 **`gate.py` runs `cold`, `walk` and `touch`**, the walk (and `touch`, the same specs on a 390px touch
 phone) against the `walk-world` check's run
-(`scripts/gate.py::_playwright`); `spend` needs money. `walk` reads no operator campaign when
+(`scripts/gate.py::_playwright`); `spend` needs money. `walk` reads no operator campaign:
 `PP_E2E_WALK_WORLD` (resolved to an absolute path and handed to `serve.mjs` as `PP_E2E_WORLD`) names a run — potter's straight run, with the L4 fixture's outer campaign nested in its data root
 (`offline_run.py --straight --l4`), is what `gate.py --only walk-world` leaves
 at `.gate_cache/walk-world/<key>/potter/data`, under that check's own key so a world is walked only
 by a tree whose engine built it, and building one removes every other world beside it — and `walk_world.py` serves a throwaway copy of it (its projects and the inner runs' sandbox registry) whose
-account agreed to the live terms, with the `offline` backend. Unset, `walk` reads the checkout's
-own workspace, a desk tier run by hand.
+account agreed to the live terms, with the `offline` backend. Unset, `playwright.config.ts` asks
+`gate.py --walk-world` for this tree's world, which builds it when absent.
 
 **The backend is a posture too, argued like auth** (`serve.mjs --backend=offline|live`). A run
 without `spend` serves the throwaway world `offline`: `serve_app.py` answers `TERMNORM_URL` with
@@ -33,7 +33,7 @@ TermNorm at :8000 once turned a CI-red spec green at the push hook.
 
 | Project | Workspace | Covers |
 |---|---|---|
-| `walk` | a copy of `PP_E2E_WALK_WORLD`, else the checkout's `.promptpotter/`, **read-only** | every view against real campaigns and rounds — the only world where Dashboard, Compare, Verify and Files have anything to draw. Issues no write. |
+| `walk` | a copy of `PP_E2E_WALK_WORLD`, **read-only** | every view against real campaigns and rounds — the only world where Dashboard, Compare, Verify and Files have anything to draw. Issues no write. |
 | `touch` | the walk's | the walk's specs at 390px with `hasTouch` + `isMobile`, so `(pointer:coarse)` matches; a spec that walks the desktop layout says so in its `test.skip(isMobile, …)` |
 | `cold` | a throwaway `PROMPTPOTTER_HOME` | the zero-campaign path a new account meets: consent gate, empty reads, dataset picker. |
 | `spend` | the same throwaway world | two campaigns taken to a measured round, each under `PP_E2E_BUDGET_USD`. **Real money** — `PP_E2E_SPEND=1`, and the dataset's backend must be up. `run.spec.ts` is the browser ingest path, `l4.spec.ts` the recursion; each spec's header states why it is minted the way it is. |
@@ -43,8 +43,7 @@ cannot hold both. **Neither binds 8001** — that port is the operator's.
 
 **A run boots only the servers its projects need** (`playwright.config.ts::runs`, read off
 `--project`): `walk` or `touch` starts the walk server, `cold` and `spend` the throwaway one, and no
-`--project` at all — `npm run e2e` — starts both. The gate's `walk` reads its `PP_E2E_WALK_WORLD`
-copy, so the gate never opens the operator's workspace.
+`--project` at all — `npm run e2e` — starts both. No walk opens the operator's workspace.
 
 **One spec inside `cold` brings a THIRD**, and it is not a fourth world: `onboarding-signed-in`
 needs an identity that is signed in and is not the host, which neither server above can produce
@@ -59,7 +58,7 @@ without it rather than inherit one.
 | `PP_E2E_COLD_PORT` | `8124` | the throwaway server |
 | `PP_E2E_FAKEAUTH_PORT` | `8125` | the auth-CLOSED server `onboarding-signed-in.spec.ts` raises for itself |
 | `PP_E2E_COLD_HOME` | `<tmp>/promptpotter-e2e` | where the throwaway world lives; it must sit under the system temp dir or `reset_world.py` refuses to wipe it |
-| `PP_E2E_WALK_WORLD` | — | the run `walk` serves a copy of, at `PP_E2E_WALK_HOME`, with the `offline` backend (`walk-world`'s `.gate_cache/walk-world/<key>/potter/data`, say); never reuses a server already up |
+| `PP_E2E_WALK_WORLD` | `gate.py --walk-world` | the run `walk` serves a copy of, at `PP_E2E_WALK_HOME`, with the `offline` backend; never reuses a server already up |
 | `PP_E2E_WALK_HOME` | `<tmp>/promptpotter-e2e-walk` | where that copy lives; the gate hands each run its own, so two gates never walk one copy |
 | `PP_E2E_BASE_URL` | — | walk a server already up (your `:8001`, a deployed box); the walk server then never starts |
 | `PP_E2E_SPEND` | — | `1` arms the spend tier |

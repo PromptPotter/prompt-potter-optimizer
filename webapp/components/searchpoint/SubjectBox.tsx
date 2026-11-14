@@ -7,7 +7,7 @@ import { useSearchpointRead } from "@/lib/hooks/useSearchpointRead";
 import { useSelection } from "@/lib/state/selection";
 import { useSearchpointCopy } from "@/lib/hooks/useSearchpointCopy";
 import { useWorkspace } from "@/lib/state/workspace";
-import type { ObserveState } from "@/lib/derivations";
+import type { ObserveState } from "@/lib/address";
 import { CopyButton, Empty, FailureLine, Loading, SegmentedControl } from "@/components/ui";
 import { RoundFacts, RoundVerdict } from "./RoundFacts";
 import { SubjectDiff } from "./SubjectDiff";

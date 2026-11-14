@@ -148,6 +148,8 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 68, rec:** an arm's act is one record, run phase and held-out pass are unions, a missing
   provider count stays unknown, unread fields go under a gate ceiling, and a cold server reads its
   ledgers from a fold snapshot.
+- **landed 69, webb-5a:** an L4 panel's nested card names its dataset, the theme key has one home,
+  and `npm run e2e` walks the gate's world, never the operator's workspace.
 - **readings:** one reading for every comparison, the 31 `*Reading` classes folded; key-neutral
   behind the behaviour keys.
 - **then:** faults; narr (the stored dashboard views go, renderers reading the records), ren (the two

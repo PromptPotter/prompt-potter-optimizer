@@ -85,6 +85,8 @@ export interface PipelineLayer {
   view: PipelineView | null;
   // The read that served `view`: an empty view under a pending read is in flight, never empty.
   read: ReadResult<unknown>;
+  // A nested level's own (`NestedPipelineRef.dataset`); absent on the campaign's levels, which the masthead names.
+  dataset?: string;
   connector: string | null;
   // A node absent from the map is UNKNOWN — never draw it as shut.
   reach: Record<string, NodeReach> | null;
@@ -92,6 +94,17 @@ export interface PipelineLayer {
   nestsNode: string | null;
   activeNode: string | null;
   isLive: boolean;
+}
+
+// The card's tag: its dataset, the connector beneath it; the connector alone where no dataset is the layer's own.
+function CardTag({ layer: { dataset, connector } }: { layer: PipelineLayer }) {
+  if (dataset === undefined) return connector && <div className="wf-hero-multi-tag">{connector}</div>;
+  return (
+    <div className="wf-hero-multi-tag names-dataset">
+      {dataset}
+      {connector && <span className="wf-hero-multi-tag-sub">{connector}</span>}
+    </div>
+  );
 }
 
 interface BoxProps {
@@ -111,7 +124,7 @@ interface Mark {
 }
 
 function PipelineBox({ view, layer, compact }: BoxProps) {
-  const { connector, activeNode, isLive, reach: reachByNode, scope, nestsNode } = layer;
+  const { activeNode, isLive, reach: reachByNode, scope, nestsNode } = layer;
   const selected = useViewedNode();
   const { open, close } = useWorkspace();
   const served = shownData(useConnector());
@@ -165,7 +178,7 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
     const soleModel = model(sole.id);
     return (
       <div className={cx("wf-hero-node", "llm", isSelected && "selected")}>
-        {connector && <div className="wf-hero-multi-tag">{connector}</div>}
+        <CardTag layer={layer} />
         <button
           type="button"
           className="wf-hero-sole"
@@ -298,7 +311,7 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
         isRing && "is-ring",
       )}
     >
-      {connector && <div className="wf-hero-multi-tag">{connector}</div>}
+      <CardTag layer={layer} />
       <div className="wf-hero-multi-rail" ref={boxRef}>
       {/* min-width floors the scaling: below ~44px a cell is unreadable, so the rail scrolls. */}
       <svg
