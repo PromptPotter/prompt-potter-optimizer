@@ -45,27 +45,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-def _run_mode(args: argparse.Namespace, *, fork_on_divergence: bool) -> RunMode:
+def _run_mode(args: argparse.Namespace) -> RunMode:
     """`--from`'s bound is `RunMode.from_round`'s, refused as every door refuses a payload."""
     return PayloadInvalidError.validating(
-        RunMode,
-        {
-            "from_round": args.resume_from_round,
-            "no_divergence_check": args.no_divergence_check,
-            "fork_on_divergence": fork_on_divergence,
-        },
+        RunMode, {"from_round": args.resume_from_round, "on_divergence": args.on_divergence}
     )
 
 
-def _start_run(
-    args: argparse.Namespace, hop: CycleHop, *, fork_on_divergence: bool
-) -> StartRunPayload:
+def _start_run(args: argparse.Namespace, hop: CycleHop) -> StartRunPayload:
     return StartRunPayload(
         campaign_id=hop.campaign_id,
         cycle_id=hop.cycle_id,
         budget=budget_from_args(args),
         step_rounds=args.step_rounds,
-        mode=_run_mode(args, fork_on_divergence=fork_on_divergence),
+        mode=_run_mode(args),
     )
 
 
@@ -104,7 +97,7 @@ async def _dispatch_fork(
                 "budget": budget_from_args(args),
                 "keep_rounds": keep_rounds,
                 "reason": reason,
-                "mode": _run_mode(args, fork_on_divergence=args.fork_on_divergence),
+                "mode": _run_mode(args),
             },
         ),
     )
@@ -212,9 +205,7 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
         elif steering:
             held = await _fork_operator_steer(args, ctx)
         else:
-            held = await _dispatch_held(
-                args, ctx, _start_run(args, ctx.hop, fork_on_divergence=args.fork_on_divergence)
-            )
+            held = await _dispatch_held(args, ctx, _start_run(args, ctx.hop))
     except ConfigDriftError as drift:
         return await _pivot_to_fresh(args, ctx, drift)
 
@@ -234,7 +225,5 @@ async def _resume(args: argparse.Namespace) -> CommandResult:
     logger.info("Campaign: %s", session.store.campaigns.campaign_root_dir(ctx.campaign_id))
 
     # A halt on divergence is the run's DIVERGED stop: its `next_acts` name the fork.
-    cycle_result = await run_inline(
-        held, mode=_run_mode(args, fork_on_divergence=args.fork_on_divergence)
-    )
+    cycle_result = await run_inline(held, mode=_run_mode(args))
     return cycle_result_command(session, cycle_result)

@@ -388,8 +388,9 @@ class CampaignConfig(StrictModel):
     run_seed: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         description="The run's one seed. It seeds which rows fall where and the order the search "
         "pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, "
-        "so a reordered bank holds out the same rows and reads them in the same order. An L4 "
-        "seat seeds its determinism clamp and its solver node from it too.",
+        "so a reordered bank holds out the same rows and reads them in the same order; it keys "
+        "every draw the optimizer makes (`Cycle.rng`). An L4 seat seeds its solver node from "
+        "it too.",
     )
     bench_trigger: Annotated[BenchTrigger, Knob(Estimand.SPEND)] = Field(
         description="When the line's bench passes are sent — each a cell per bench row, the "

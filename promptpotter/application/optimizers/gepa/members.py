@@ -211,10 +211,6 @@ class GepaReflect(nodes.Proposer):
     def parent_read(self, panel: nodes.PanelSize) -> int:
         return panel.block_size
 
-    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
-        # The parent a round reflects on is drawn off every earlier round's Pareto-set scores.
-        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
-
     async def propose(self, ctx: NodeContext, panel: Panel, _proposals: Proposals) -> Proposals:
         candidates = ctx.slice(ParetoScores)
         parent_id = candidates.parent_id

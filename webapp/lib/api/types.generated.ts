@@ -3429,8 +3429,8 @@ export interface CampaignConfig {
   /** The run's one seed. It seeds which rows fall where and the order the search
    * pool reads in: each row ranks by this and its content (`Sample.key`),
    * never its slot, so a reordered bank holds out the same rows and reads
-   * them in the same order. An L4 seat seeds its determinism clamp and its
-   * solver node from it too. */
+   * them in the same order; it keys every draw the optimizer makes
+   * (`Cycle.rng`). An L4 seat seeds its solver node from it too. */
   run_seed: number;
   /** When the line's bench passes are sent — each a cell per bench row, the ranked
    * `dataset_split.bench` and every bench-only row the bank declares.
@@ -4122,8 +4122,8 @@ export interface ConfigEdit {
   /** The run's one seed. It seeds which rows fall where and the order the search
    * pool reads in: each row ranks by this and its content (`Sample.key`),
    * never its slot, so a reordered bank holds out the same rows and reads
-   * them in the same order. An L4 seat seeds its determinism clamp and its
-   * solver node from it too. */
+   * them in the same order; it keys every draw the optimizer makes
+   * (`Cycle.rng`). An L4 seat seeds its solver node from it too. */
   run_seed: number | null;
   /** When the line's bench passes are sent — each a cell per bench row, the ranked
    * `dataset_split.bench` and every bench-only row the bank declares.
@@ -4780,10 +4780,9 @@ export interface ForkCyclePayload {
 export interface RunMode {
   /** Rewind in place to this round before running; unset continues the ledger. */
   from_round: number | null;
-  /** Accept a replay that diverges from the record. */
-  no_divergence_check: boolean;
-  /** Branch a sibling cycle where the replay diverges, and run it. */
-  fork_on_divergence: boolean;
+  /** Where the replay departs the record: `halt`, `accept` the departure and run
+   * on, or `fork` a sibling cycle there and run it. */
+  on_divergence: 'halt' | 'accept' | 'fork';
 }
 
 /** A fork's `CycleSeed` as sent: the applier freezes `node_narrowing` on the
@@ -4933,8 +4932,8 @@ export interface CampaignLayer {
   /** The run's one seed. It seeds which rows fall where and the order the search
    * pool reads in: each row ranks by this and its content (`Sample.key`),
    * never its slot, so a reordered bank holds out the same rows and reads
-   * them in the same order. An L4 seat seeds its determinism clamp and its
-   * solver node from it too. */
+   * them in the same order; it keys every draw the optimizer makes
+   * (`Cycle.rng`). An L4 seat seeds its solver node from it too. */
   run_seed: number | null;
   /** When the line's bench passes are sent — each a cell per bench row, the ranked
    * `dataset_split.bench` and every bench-only row the bank declares.
@@ -6053,7 +6052,7 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "not_admitted": { label: "Not admitted", outcome: "halted", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
   "producer_vanished": { label: "Producer vanished", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
   "render_error": { label: "Render error", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: true, next_step: "", grades_selection: true, next_acts: [] },
-  "diverged": { label: "Diverged", outcome: "failed", category: "failure", halts_mid_round: false, has_traceback: false, next_step: "A recorded decision no longer replays under the edited config: fork here to branch under it, or revert the edit to continue.", grades_selection: false, next_acts: [{ kind: "start-run", field: "mode.fork_on_divergence", value: "", reads: "" }] },
+  "diverged": { label: "Diverged", outcome: "failed", category: "failure", halts_mid_round: false, has_traceback: false, next_step: "A recorded decision no longer replays under the edited config: fork here to branch under it, or revert the edit to continue.", grades_selection: false, next_acts: [{ kind: "start-run", field: "mode.on_divergence", value: "fork", reads: "" }] },
   "optimizer_timeout": { label: "Optimizer timeout", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
 };
 

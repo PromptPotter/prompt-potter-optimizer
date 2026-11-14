@@ -505,9 +505,6 @@ class LeviSeed(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, LeviSeedKnobs).n_diverse_seeds
 
-    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
-        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
-
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         origin = ctx.read(Lineage).origin
         node, calls = ctx.read(Target).prompt_node, ctx.read(Calls)
@@ -539,9 +536,6 @@ class LeviParadigmShift(nodes.Proposer):
 
     def arms(self, _selected: SelectedOptimizer) -> int:
         return 1
-
-    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
-        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -639,9 +633,6 @@ class LeviRefine(nodes.Proposer):
 
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.reached_knobs(self, LeviParadigmShiftKnobs).interval - 1
-
-    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
-        return {self.name: nodes.rows_read(ctx.read(Lineage).rounds, ctx.round_num)}
 
     async def propose(self, ctx: NodeContext, _panel: Panel, _proposals: Proposals) -> Proposals:
         calibration = ctx.slice(DescriptorCalibration).calibration

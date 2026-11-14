@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Sequence
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.bench.difficulty import DifficultyView
@@ -18,7 +18,7 @@ from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.selection import banked_lift_prior
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
-from promptpotter.domain.campaign import run_clamp
+from promptpotter.domain.campaign import Compare
 from promptpotter.domain.cell_fold import ScoreSummary, merge_known_outcomes
 from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleHop
@@ -222,9 +222,11 @@ class Cycle:
         self.difficulty = DifficultyView.open(self.session, self.config, origin=origin.sp_hash)
 
     def rng(self, round_num: int, tag: str) -> random.Random:
-        """A function of the run's seed, *round_num* and *tag* alone, so a resume redraws the same."""
-        clamp = run_clamp(self.config.optimization.determinism, self.session.purpose)
-        seed = self.session.campaign_id if clamp is None or clamp.seed is None else clamp.seed
+        """A function of ``run_seed``, the arm's replicate, *round_num* and *tag* alone, so a resume
+        redraws the same and two replicates of one head-to-head treatment draw apart."""
+        purpose, seed = self.session.purpose, f"{self.config.run_seed}"
+        if isinstance(purpose, Compare):
+            seed = f"{seed}:{purpose.arm.replicate}"
         return random.Random(f"{seed}:{round_num}:{tag}")
 
     @property
@@ -307,23 +309,6 @@ class Cycle:
         self.population = list(closed.population)
         self.slices.seat(closed)
         self.difficulty.seat(self.elected[1].ruler)
-
-    def seated(self, priors: list[RoundResult]) -> Cycle:
-        """A view of this cycle as it stood once *priors* closed, which a member reads in a past round."""
-        view = replace(
-            self,
-            _rounds=list(self._rounds),
-            slices=SliceMap(self.optimizer.slices),
-            difficulty=replace(self.difficulty),
-            outputs={},
-            pending_decisions=[],
-            _axes=None,
-            _pool=None,
-            _pool_theta={},
-            _sealed=None,
-        )
-        view.replay_priors(priors)
-        return view
 
     def reopen_origin(self) -> None:
         """A fork cut at round 0 keeps the origin's measurement and none of what its close banked."""

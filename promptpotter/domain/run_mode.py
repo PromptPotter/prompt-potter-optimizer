@@ -1,8 +1,18 @@
 from __future__ import annotations
 
+from enum import StrEnum
+
 from pydantic import Field
 
 from promptpotter.domain.strict_model import FrozenModel, WireInt
+
+
+class OnDivergence(StrEnum):
+    """What a resume does where its replay departs the record: ONE answer, never two flags."""
+
+    HALT = "halt"
+    ACCEPT = "accept"
+    FORK = "fork"
 
 
 class RunMode(FrozenModel):
@@ -13,9 +23,8 @@ class RunMode(FrozenModel):
         ge=0,
         description="Rewind in place to this round before running; unset continues the ledger.",
     )
-    no_divergence_check: bool = Field(
-        default=False, description="Accept a replay that diverges from the record."
-    )
-    fork_on_divergence: bool = Field(
-        default=False, description="Branch a sibling cycle where the replay diverges, and run it."
+    on_divergence: OnDivergence = Field(
+        default=OnDivergence.HALT,
+        description="Where the replay departs the record: `halt`, `accept` the departure and run "
+        "on, or `fork` a sibling cycle there and run it.",
     )

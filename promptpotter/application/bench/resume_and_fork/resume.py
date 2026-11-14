@@ -1,20 +1,18 @@
-"""``repair.py`` runs regardless of the defaults pin; only the divergence check short-circuits on it."""
+"""A resume asks the one validity question ``ab`` asks (`ab_replay.py::replay_verdict`)."""
 
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.bench.resume_and_fork.ab_replay import line_divergence
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
-from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
-from promptpotter.application.bench.resume_and_fork.replayers import (
-    ReplayMismatch,
-    replay_decisions,
-)
-from promptpotter.application.pipeline_resolve import campaign_admits, defaults_drift
+from promptpotter.application.bench.resume_and_fork.repair import apply_correction
+from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.results import round_document_digest
+from promptpotter.domain.run_mode import OnDivergence
 from promptpotter.domain.run_records import ComparisonExit, ForkTrigger
 from promptpotter.shared.errors import ResumeDivergenceError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
@@ -23,7 +21,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.results import RoundResult
-    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.domain.run_mode import RunMode
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 
 logger = logging.getLogger(__name__)
@@ -65,42 +63,8 @@ def _stale_generation(
     )
 
 
-def _optimizer_mismatches(
-    prior: list[RoundResult], selected: SelectedOptimizer
-) -> dict[int, ReplayMismatch]:
-    """Asked PER ROUND so an edit forks from where it bites."""
-
-    current = selected.prompt_hashes()
-    out: dict[int, ReplayMismatch] = {}
-    for t in prior:
-        recorded = t.closed_state.prompt_hashes
-        moved = sorted(n for n, h in recorded.items() if current.get(n) != h)
-        if not moved:
-            continue
-        out[t.round] = ReplayMismatch(
-            round_num=t.round,
-            kind=f"optimizer_identity:{','.join(moved)}",
-            recorded_outcome={n: recorded[n] for n in moved},
-            current_outcome={n: current.get(n) for n in moved},
-            inputs_ref={"nodes": moved},
-        )
-        logger.warning(
-            "Round %d was produced by a different optimizer than the one loaded now — %s "
-            "changed (template, injection layout or resolved model/config).",
-            t.round,
-            ", ".join(moved),
-        )
-    return out
-
-
 async def resume_with_divergence_check(
-    cycle: Cycle,
-    dataset: list[Any],
-    ledger: CycleEventLog,
-    *,
-    skip_divergence_check: bool,
-    fork_on_divergence: bool,
-    rewind: int | None,
+    cycle: Cycle, dataset: list[Any], mode: RunMode
 ) -> str | None:
     """The cycle opens on the standing the last close of the line it continues stated, a fork's included."""
     session = cycle.session
@@ -108,17 +72,15 @@ async def resume_with_divergence_check(
     resumed_from_round = session.state.resumed_from_round
     scorer = session.state.scoring.scorer
     prior = closed_rounds(session.store, hop, scorer, before_round=resumed_from_round, moment=None)
-
-    # Fingerprinted BEFORE the repair, so the corrected set differs by exactly what it changed.
-    packages_before = round_packages(cycle, prior, ledger)
     cycle.replay_priors(prior)
 
     # Decided on the round this run enters, before its rewind is written: a halt displaces nothing.
+    rewind, accept = mode.from_round, mode.on_divergence == OnDivergence.ACCEPT
     standing = campaign_store.standing_rounds(hop, moment=None)
     if rewind is not None:
         standing = standing.displaced(resumed_from_round, resumed_from_round)
-    found = None if skip_divergence_check else _divergence(cycle, prior, standing)
-    if found is not None and not found[1] and not fork_on_divergence:
+    found = None if accept else _divergence(cycle, prior, standing)
+    if found is not None and not found[1] and mode.on_divergence == OnDivergence.HALT:
         div = found[0]
         raise ResumeDivergenceError(
             round_num=div.round_num,
@@ -130,10 +92,10 @@ async def resume_with_divergence_check(
     if rewind is not None:
         campaign_store.rewind_to_round(hop, rewind)
         campaign_store.leave_comparison(hop, ComparisonExit.REWIND)
-    if skip_divergence_check:
+    if accept:
         campaign_store.leave_comparison(hop, ComparisonExit.NO_DIVERGENCE_CHECK)
 
-    fork = await apply_correction(cycle, prior, packages_before, dataset, ledger)
+    fork = await apply_correction(cycle, prior, dataset)
     if fork is None and found is not None:
         fork = _branch(cycle, prior, *found)
     line = hop if fork is None else CycleHop(campaign_id=hop.campaign_id, cycle_id=fork)
@@ -179,23 +141,9 @@ def _divergence(
 ) -> tuple[ReplayMismatch, bool] | None:
     """The first divergence of the line, and whether this resume CAUSED it."""
     session = cycle.session
-    optimizer_mismatches = _optimizer_mismatches(prior, cycle.optimizer)
+    div = line_divergence(session, cycle.config, cycle.optimizer, prior, standing.decisions)
+    if div is not None:
+        return div, False
+    # The round about to run has no round file, so the walk cannot visit it.
     stale = _stale_generation(standing, prior, session.state.resumed_from_round, cycle.optimizer)
-    campaign = session.store.campaigns.load_campaign(session.campaign_id)
-    # The declaration never moves; the defaults it is a delta over can, under the same name.
-    running = cycle.optimizer.treatment(
-        campaign_admits(cycle.config, session.pipeline_schema), session.store.block_packs
-    )
-    drifted = campaign is not None and defaults_drift(campaign, running=running) is not None
-    if not optimizer_mismatches and stale is None and not drifted:
-        return None
-    for t in prior:
-        div = optimizer_mismatches.get(t.round) or replay_decisions(
-            t,
-            standing.decisions.get(t.round, []),
-            ruler=cycle.difficulty.ruler_of(t.ruler),
-        )
-        if div is not None:
-            return div, False
-    # The round about to run has no round file, so the loop above cannot visit it.
     return None if stale is None else (stale, True)

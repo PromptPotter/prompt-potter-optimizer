@@ -109,7 +109,7 @@ from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_r
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.ruler import RulerOwn
-from promptpotter.domain.run_mode import RunMode
+from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.run_records import CycleSeed, OriginGatePass
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.spend import Budget, SpendRollup
@@ -627,7 +627,7 @@ def campaign_config(
     opt = raw["optimization"]
     # The template's node overlay is written for the optimizer it selects, and only that one.
     templated = opt["optimizer"]
-    # Draws follow the campaign's id unless a clamp seeds them, and every run mints an id.
+    # The clamp's seed is what each send carries; the draws follow `run_seed` (`Cycle.rng`).
     opt.update(
         budget={"usd": 1000.0, "rounds": rounds},
         origin_gate="off",
@@ -845,7 +845,7 @@ async def run_one(
                 stores=stores,
                 readout_sink=print,
                 budget=Budget(),
-                mode=RunMode(fork_on_divergence=diverge),
+                mode=RunMode(on_divergence=OnDivergence.FORK if diverge else OnDivergence.HALT),
             )
             if diverge:
                 forked_at_init(stores, paused, session.hop)

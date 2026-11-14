@@ -46,7 +46,7 @@ python scripts/gate.py                       # every CI check in the locked env 
 python scripts/gate.py --release             # before a release: npm advisories + open Dependabot alerts
 git config core.hooksPath .githooks          # once per clone
 python -m promptpotter new <name>            # fresh campaign from promptpotter/assets/datasets/<name>/
-python -m promptpotter resume                # Ctrl+C once pauses (exit 130), twice force-quits; --from N rewinds; --fork-on-divergence
+python -m promptpotter resume                # Ctrl+C once pauses (exit 130), twice force-quits; --from N rewinds; --on-divergence fork
 python -X utf8 -m uvicorn promptpotter.main:app --port 8001   # API + webapp; -X utf8 is load-bearing
 ```
 

@@ -4,19 +4,16 @@ import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.bench.node_context import NodeContext, restated_round
+from promptpotter.application.bench.node_context import restated_round
+from promptpotter.application.bench.resume_and_fork.ab_replay import line_divergence
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_fork
-from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.bench.round_analysis import mended_round
-from promptpotter.application.optimizers.nodes import RoundContext
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmState, Concluded, is_leader_eligible
 from promptpotter.domain.cell_fold import repairable_holes
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.run_records import ForkDirection, ForkTrigger
-from promptpotter.infrastructure.llm.telemetry import at_round
-from promptpotter.shared.errors import ConflictError
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -24,10 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
     from promptpotter.application.bench.cycle import Cycle
-    from promptpotter.domain.optimizer_state import OptimizerState, StatePart
     from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.run_records import RoundProposedRecord
-    from promptpotter.infrastructure.ledger import CycleEventLog
     from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
         StandingRound,
         StandingRounds,
@@ -178,108 +172,13 @@ async def repair_incomplete_rounds(
     return corrected
 
 
-def _seat_on(
-    cycle: Cycle, rounds: list[RoundResult], rr: RoundResult, ledger: CycleEventLog
-) -> RoundContext:
-    """*rr*'s round as the run stood in it, a view: the trajectory up to it, *rr* closed."""
-    seated = cycle.seated([*(p for p in rounds if p.round < rr.round), rr])
-    return RoundContext(cycle=seated, round_num=rr.round, ledger=ledger)
-
-
-def round_packages(
-    cycle: Cycle, rounds: list[RoundResult], ledger: CycleEventLog
-) -> dict[int, dict[str, str]]:
-    """``{round: {node: fingerprint}}``, each member asked in ITS OWN round's seat."""
-    out: dict[int, dict[str, str]] = {}
-    for rr in rounds:
-        seat = _seat_on(cycle, rounds, rr, ledger)
-        out[rr.round] = {
-            node: fingerprint
-            for member in cycle.optimizer.members
-            for node, fingerprint in member.round_packages(NodeContext(seat, member)).items()
-        }
-    return out
-
-
-async def _rederived(
-    cycle: Cycle, rounds: list[RoundResult], drifted: list[int], ledger: CycleEventLog
-) -> dict[int, OptimizerState]:
-    """A repair, not a rewind: measurements and winner untouched; round 0's state is the origin path's. Before the branch exists, so a member that cannot re-derive refuses the repair rather than leave the branch graded on a hole."""
-    restated = list(rounds)
-    states: dict[int, OptimizerState] = {}
-    for slot, rr in enumerate(rounds):
-        if rr.round not in drifted or rr.round == 0:
-            continue
-        seat = _seat_on(cycle, restated, rr, ledger)
-        # Outside the round loop this ContextVar still holds whatever the last round set.
-        parts: list[StatePart] = []
-        for member in cycle.optimizer.members:
-            try:
-                with at_round(rr.round):
-                    parts.extend(await member.rederive(NodeContext(seat, member)))
-            except Exception as exc:
-                raise ConflictError(
-                    f"The repair refused: round {rr.round}'s {member.name} read evidence the "
-                    f"repair moved and could not re-derive what it recorded ({exc}). "
-                    f"`resume --from {rr.round - 1}` re-runs that round instead.",
-                    code="repair_refused",
-                ) from exc
-        if not parts:
-            continue
-        states[rr.round] = rr.closed_state.holding(*parts)
-        restated[slot] = rr.model_copy(update={"optimizer_state": states[rr.round]})
-        logger.warning(
-            "Round %d %s re-derived: its input package drifted when the round was "
-            "repaired, so what it recorded described evidence that no longer exists.",
-            rr.round,
-            ", ".join(part.kind for part in parts),
-        )
-    return states
-
-
-def _package_drift(
-    before: dict[int, dict[str, str]],
-    after: dict[int, dict[str, str]],
-    closed: set[int],
-    proposed: Mapping[int, object],
-) -> tuple[dict[int, ReplayMismatch], list[int]]:
-    """A mismatch is raised at the CONSUMER (``rn + 1``), never the producer, and only where it owns something."""
-    mismatches: dict[int, ReplayMismatch] = {}
-    drifted: list[int] = []
-    for rn, now in sorted(after.items()):
-        moved = sorted(n for n, h in now.items() if before.get(rn, {}).get(n) != h)
-        if not moved:
-            continue
-        drifted.append(rn)
-        logger.warning(
-            "Round %d package drifted after repair — %s now read different evidence.",
-            rn,
-            ", ".join(moved),
-        )
-        nxt = rn + 1
-        owns = nxt in closed or nxt in proposed
-        if owns and nxt not in mismatches:
-            mismatches[nxt] = ReplayMismatch(
-                round_num=nxt,
-                kind=f"node_package:{','.join(moved)}",
-                recorded_outcome={n: before.get(rn, {}).get(n) for n in moved},
-                current_outcome={n: now[n] for n in moved},
-                inputs_ref={"drifted_round": rn, "nodes": moved},
-            )
-    return mismatches, drifted
-
-
 def origin_only(rounds: Sequence[RoundResult], standing: StandingRounds) -> bool:
     """No round has read the origin yet: none closed past it, none walked on it."""
     return [t.round for t in rounds] == [0] and 1 not in standing.proposals
 
 
 async def apply_correction(
-    cycle: Cycle,
-    prior: list[RoundResult],
-    packages_before: dict[int, dict[str, str]],
-    dataset: list[Any],
-    ledger: CycleEventLog,
+    cycle: Cycle, prior: list[RoundResult], dataset: list[Any]
 ) -> str | None:
     """*cycle* is seated on *prior*, and is seated on what the branch carries where one is cut."""
     session = cycle.session
@@ -302,17 +201,12 @@ async def apply_correction(
         return None
     # The whole trajectory: a round above the cut reads those below, so its package shows the reach.
     corrected = [*mended, *prior[cut.resume_at :]]
-    proposed: dict[int, RoundProposedRecord] = {
-        n: held.record for n, held in standing.proposals.items()
-    }
-    mismatches, drifted = _package_drift(
-        packages_before,
-        round_packages(cycle, corrected, ledger),
-        {t.round for t in corrected},
-        proposed,
-    )
-    rederived = await _rederived(
-        cycle, corrected, [rn for rn in drifted if rn < cut.resume_at], ledger
+    # Graded by the one validity check; a round banked off the re-measured one was generated off
+    # its hole, so it is reached by construction.
+    equivalent = (
+        cut.resume_at not in standing.proposals
+        and line_divergence(session, cycle.config, cycle.optimizer, corrected, standing.decisions)
+        is None
     )
     fork_cut = cut_fork(
         session.store,
@@ -348,24 +242,14 @@ async def apply_correction(
             len(cut.retirements),
             repair_target,
         )
-    carried_closes = campaign_store.standing_rounds(branch, moment=None).rounds
-    for slot, rr in enumerate(corrected):
-        if (state := rederived.get(rr.round)) is not None:
-            corrected[slot] = rr.model_copy(update={"optimizer_state": state})
-            campaign_store.rebank_round(branch, carried_closes[rr.round].close.restated(state))
-
-    equivalent = not mismatches
     campaign_store.grade_fork(
         branch, ForkDirection.EQUIVALENT if equivalent else ForkDirection.SUPERSEDE
     )
     if equivalent:
-        if (carried := proposed.get(cut.resume_at)) is not None:
-            campaign_store.propose_round(branch, carried)
         logger.warning(
-            "The correction reached nothing any node reads — cut %s marked EQUIVALENT "
-            "and carries round %d's candidates across unchanged; the line continues on it.",
+            "The correction reached no recorded decision — cut %s marked EQUIVALENT; the line "
+            "continues on it.",
             repair_target,
-            cut.resume_at,
         )
     cycle.replay_priors(corrected[: cut.resume_at])
     return repair_target

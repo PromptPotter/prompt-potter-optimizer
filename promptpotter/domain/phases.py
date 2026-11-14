@@ -774,7 +774,7 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             "A recorded decision no longer replays under the edited config: fork here to branch "
             "under it, or revert the edit to continue.",
             False,
-            (NextAct("start-run", "mode.fork_on_divergence"),),
+            (NextAct("start-run", "mode.on_divergence", "fork"),),
         ),
         StopReason.OPTIMIZER_TIMEOUT: StopReasonInfo(
             "Optimizer timeout",

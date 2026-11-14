@@ -113,7 +113,7 @@ A failed cell's `ErrorCategory` and message land in the latest `rounds/round_NNN
 | Resume | `resume` | Continue the active cycle from its latest closed round. |
 | Rewind | `resume --from N` | Same `cycle_id`; rounds after N displaced; resume at N+1. Admissible only if round N closed. |
 | Operator rewind | `resume --rewind N` | Fork a sibling lifting rounds `0..N-1`, continue at N under the fork's overrides. |
-| Fork on divergence | `resume --fork-on-divergence` | Mint a sibling cycle rooted at the divergent round and continue. |
+| Fork on divergence | `resume --on-divergence fork` | Mint a sibling cycle rooted at the divergent round and continue (`accept` runs on past it; `halt`, the default, stops). |
 
 Until an L1 round closes, a resume re-enters round 0 and asks the origin gate again; an origin the gate halted, resumed still unhealthy, passes on that resume. Refusals, from every way in: `409 cycle_busy`; `409 config_drift` (the dataset no longer resolves to the minted origin, unless policy-only); `409 ledger_unreadable` (remedy `delete-campaign <campaign>`, which keeps the caches). **Which edits need a fork** is a knob's `Scope`: `POLICY` resumes in place; `DATA` and `IDENTITY` run divergence detection and halt rather than drift — revert, or fork. **A panel fork off a candidate that edits nothing inherits that candidate's measured C0** and buys no origin re-measure; a steer or seed re-measures it.
 
@@ -133,7 +133,7 @@ The measurement key is `node_configs` (overlay-merged `pipeline_params`, model i
 
 ## Changing the composite formula — fork, never swap
 
-The scorer compiles once at run init: edit `campaign.json::scoring`, then `resume --fork-on-divergence`; a mid-cycle swap makes the composite incomparable to its own past. A `per_cell` formula is what θ is fit on, the only route a latency, cost or reliability term reaches the election; keep correctness `per_sample`. `target_prompt_chars` is a fact about the CANDIDATE, so a length penalty's normaliser is a constant in the formula — the scorer id hashes formula text alone.
+The scorer compiles once at run init: edit `campaign.json::scoring`, then `resume --on-divergence fork`; a mid-cycle swap makes the composite incomparable to its own past. A `per_cell` formula is what θ is fit on, the only route a latency, cost or reliability term reaches the election; keep correctness `per_sample`. `target_prompt_chars` is a fact about the CANDIDATE, so a length penalty's normaliser is a constant in the formula — the scorer id hashes formula text alone.
 
 ## Lifecycle — archive, delete
 

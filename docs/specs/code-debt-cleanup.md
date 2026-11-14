@@ -618,11 +618,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### valid (after rk-dec, before the behaviour keys)
 
-- **A resume asks "is this still valid" five ways**: `resume.py`'s consumed set and prompt hashes,
-  `jobs/mint.py`'s defaults drift, seven members' `replay()` (capo, gepa, levi, the election, the race)
-  and `round_packages` / `rederive`. Action: one validity check: `resume.py::_divergence` becomes
-  `ab_replay`'s verdict, walked by `find_divergences`; ≈−250 lines. The round a fork is cut at can
-  move: name it. **Rides with:** valid 1.
 - **A cycle's mint is written before it is minted**: the root mint writes its partition, seed and
   resolved run before `CycleMintedRecord`, against `run_records.py`'s own docstring. Action: one
   `mint_cycle` writer. **Rides with:** valid 2.
@@ -637,14 +632,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   breach found in the sites sampled. Action: `StrictModel.model_copy` revalidates whenever `update` is
   given, and a probe keeps the count from rising. **Rides with:** valid 3. **Re-test:** a copy with a
   stale key or a state its validator refuses raises.
-- **`RunMode` is four independent bools** (✓): `--no-check` makes `--fork-on-divergence` inert
-  (`resume.py:120`); `--from` with a fork rewinds the parent in place (`:131`) and then branches (`:138`);
-  reported, `resume --rewind N --from M` cuts the fork and then dies (`fork_cycle` never checks
-  `from_round`, `launching.py:320-334`). Action: one `on_divergence: halt | accept | fork`, and
-  `ForkCyclePayload` refuses `mode.from_round`. **Rides with:** valid 1.
-- **Two seeds** (✓): `Cycle.rng` seeds on the campaign id or the clamp seed (`cycle.py:204`), never
-  `run_seed`; L4 bridges the two only when a temperature is set (`tasks.py:523`). Action: `Cycle.rng`
-  keyed on `run_seed`. **Rides with:** valid.
 - **A mint or a fork lands as several appends** (reported): `CycleMintedRecord`, the rewound
   `RoundEnteredRecord`, `CycleSeedRecord` and `InterventionRecord` are separate appends (`store.py:215`
   loops single appends; `:535`, `:544`, `fork_siblings.py:93,96`), so a resumed torn fork stands on all
@@ -665,7 +652,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `ForkCyclePayload` laid); reported, the CLI re-derives `RunMode` for an inline run (`new.py:481`,
   `resume_command.py:242-244`) where `HeldRun` should carry the admitted mode; the browser's "Resume run"
   sends start-run with no mode (`useRunControl.ts:54,59`) while `phases.py:793` serves
-  `NextAct("start-run", "mode.fork_on_divergence")`, so a diverged cycle diverges again; the
+  `NextAct("start-run", "mode.on_divergence", "fork")`, so a diverged cycle diverges again; the
   `arm_gate: author` hold offers keep-only buttons (`LiveSegment.tsx:32`, `activity.py:134-157`) though
   `command_kinds.py:140-145` says the browser presses submit-arms. Root for the browser: a served act
   carries the payload it fills. **Rides with:** valid 2 (one way onto a fork) with the `RunMode` row.
@@ -1182,14 +1169,12 @@ Toolbar, and the phone walk's back step. Left:
 - **A refusal carries prose, a stop carries acts** (✓, a refusal census: 337 `PotterError` raises): a
   refusal is `domain/refusal.py::Refusal` {code, message, details} while a run stop carries
   `next_acts: tuple[NextAct]` (`phases.py:495-522`) each door spells, so 20 served refusals spell CLI flags
-  or verbs (`repair.py:230` `resume --from N`, which the browser lacks; `passes.py:333` `--samples`;
+  or verbs (`passes.py:333` `--samples`;
   `store.py:592` `--from`; `entry.py:477` `--diag`; `cycle_addressing.py:134`, `loaders.py:575`,
   `preflight.py:212-213` and `:308` say `mint-campaign`, wrong at the terminal too, where the CLI verb is `new`), and ~12 of 74 409s name no next step (`session.py:154`,
   `fork_siblings.py:141`, `store.py:523`, `passes.py:512-531`, `passes.py:639`, `scoring_scope.py:148`).
   Root: `Refusal` carries `next_acts`, each door spells the act, and no message names a verb or flag
-  (`phases.py:522`'s rule extended); this subsumes the `ConfigDriftError` row. Beside it (✓):
-  `repair.py:226`'s `except Exception` wraps any rederive failure, bugs included, as a 409 telling the
-  operator to `resume --from` (root: catch the declared rederive refusal only); a definition whose
+  (`phases.py:522`'s rule extended); this subsumes the `ConfigDriftError` row. Beside it (✓): a definition whose
   `source:` lacks recipe or rev raises a bare `ValueError` (`loaders.py:87,104`), swallowed by the listing
   into "Its samples could not be read on this install" (`startability.py:143-145`) and a 500 at start
   (`main.py:270-279`) (root: `Source.of` raises a refusal naming the field); ✓ `OPTIMIZER_ABORT` has an

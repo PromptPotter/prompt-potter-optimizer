@@ -2323,7 +2323,7 @@
             "type": "object"
           },
           "run_seed": {
-            "description": "The run's one seed. It seeds which rows fall where and the order the search pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows and reads them in the same order. An L4 seat seeds its determinism clamp and its solver node from it too.",
+            "description": "The run's one seed. It seeds which rows fall where and the order the search pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows and reads them in the same order; it keys every draw the optimizer makes (`Cycle.rng`). An L4 seat seeds its solver node from it too.",
             "title": "Run Seed",
             "type": "integer"
           },
@@ -2616,7 +2616,7 @@
                 "type": "null"
               }
             ],
-            "description": "The run's one seed. It seeds which rows fall where and the order the search pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows and reads them in the same order. An L4 seat seeds its determinism clamp and its solver node from it too.",
+            "description": "The run's one seed. It seeds which rows fall where and the order the search pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows and reads them in the same order; it keys every draw the optimizer makes (`Cycle.rng`). An L4 seat seeds its solver node from it too.",
             "title": "Run Seed"
           },
           "scoring": {
@@ -4366,7 +4366,7 @@
                 "type": "null"
               }
             ],
-            "description": "The run's one seed. It seeds which rows fall where and the order the search pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows and reads them in the same order. An L4 seat seeds its determinism clamp and its solver node from it too.",
+            "description": "The run's one seed. It seeds which rows fall where and the order the search pool reads in: each row ranks by this and its content (`Sample.key`), never its slot, so a reordered bank holds out the same rows and reads them in the same order; it keys every draw the optimizer makes (`Cycle.rng`). An L4 seat seeds its solver node from it too.",
             "title": "Run Seed"
           },
           "scoring": {
@@ -7303,8 +7303,7 @@
           "mode": {
             "$ref": "#/components/schemas/RunMode",
             "default": {
-              "fork_on_divergence": false,
-              "no_divergence_check": false
+              "on_divergence": "halt"
             }
           },
           "reason": {
@@ -11486,6 +11485,16 @@
         "title": "NoiseBand",
         "type": "object"
       },
+      "OnDivergence": {
+        "description": "What a resume does where its replay departs the record: ONE answer, never two flags.",
+        "enum": [
+          "halt",
+          "accept",
+          "fork"
+        ],
+        "title": "OnDivergence",
+        "type": "string"
+      },
       "OpenDatasetDraftPayload": {
         "additionalProperties": false,
         "description": "Open an authored dataset's files as a prefilled check-in draft; nothing runs until ``start-checkin``.",
@@ -14571,12 +14580,6 @@
         "additionalProperties": false,
         "description": "The SHAPE a run takes, on the wire and in the runner alike. How far it goes is its ``Budget``.",
         "properties": {
-          "fork_on_divergence": {
-            "default": false,
-            "description": "Branch a sibling cycle where the replay diverges, and run it.",
-            "title": "Fork On Divergence",
-            "type": "boolean"
-          },
           "from_round": {
             "anyOf": [
               {
@@ -14590,11 +14593,10 @@
             "description": "Rewind in place to this round before running; unset continues the ledger.",
             "title": "From Round"
           },
-          "no_divergence_check": {
-            "default": false,
-            "description": "Accept a replay that diverges from the record.",
-            "title": "No Divergence Check",
-            "type": "boolean"
+          "on_divergence": {
+            "$ref": "#/components/schemas/OnDivergence",
+            "default": "halt",
+            "description": "Where the replay departs the record: `halt`, `accept` the departure and run on, or `fork` a sibling cycle there and run it."
           }
         },
         "title": "RunMode",
@@ -16229,8 +16231,7 @@
           "mode": {
             "$ref": "#/components/schemas/RunMode",
             "default": {
-              "fork_on_divergence": false,
-              "no_divergence_check": false
+              "on_divergence": "halt"
             }
           },
           "step_rounds": {

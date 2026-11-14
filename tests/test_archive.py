@@ -21,7 +21,6 @@ from types import SimpleNamespace
 from typing import Any, NamedTuple
 from unittest import mock
 
-import httpx
 import pytest
 from factories import (
     LLM_ONLY,
@@ -55,7 +54,6 @@ from factories import (
     stored_campaign,
     workspace,
 )
-from offline_world import Router
 
 from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle
@@ -65,8 +63,8 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     cut_operator_fork,
     fork_edge,
 )
-from promptpotter.application.bench.resume_and_fork.repair import apply_correction, round_packages
-from promptpotter.application.bench.resume_and_fork.replayers import replay_decisions
+from promptpotter.application.bench.resume_and_fork.repair import apply_correction
+from promptpotter.application.bench.resume_and_fork.replayers import replay_all_mismatches
 from promptpotter.application.bench.resume_and_fork.resume import resume_with_divergence_check
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import parse_cycle_seed
@@ -150,6 +148,7 @@ from promptpotter.domain.phases import PauseCause, RunPhase, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_records import (
     AnnouncedArms,
     ArmRecord,
@@ -209,6 +208,7 @@ from promptpotter.shared.errors import (
     FileKind,
     FileUnreadableError,
     LedgerUnreadableError,
+    PayloadInvalidError,
     PotterError,
     ResumeDivergenceError,
 )
@@ -839,7 +839,7 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     [cut] = racing.cycle.pending_decisions
     assert isinstance(cut.inputs_ref, EliminationCut)
     assert cut.inputs_ref.candidate_cells == [str(i) for i in range(8) if i != 2]
-    assert replay_decisions(_round(round=3, cells={ArmKey("c1"): walked}), [cut]) is None, (
+    assert replay_all_mismatches(_round(round=3, cells={ArmKey("c1"): walked}), [cut]) == [], (
         "the cut the live rule made is not the cut its own record replays"
     )
     # Every replayer that reads an arm replays an absent one as no cut, no gain and no winner.
@@ -871,11 +871,11 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
         (winner, unwalked),
         (kept, [unwalked]),
     ):
-        gone = replay_decisions(
+        [gone] = replay_all_mismatches(
             _round(round=3, cells={}),
             [ResumeCheckpointRecord(kind=inputs.kind, inputs_ref=inputs, outcome=recorded)],
         )
-        assert gone is not None and gone.current_outcome in (False, None, []), (
+        assert gone.current_outcome in (False, None, []), (
             f"{inputs.kind}: an absent arm's decision replayed"
         )
     # Two survivors walked on disjoint cells share no reading: neither is ranked above the other.
@@ -883,11 +883,11 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     apart = sheet(measurements([1.0] * 4, sample_ids=[10, 11, 12, 13], pipeline_data=chars))
     bar = sheet(measurements([0.0] * 4, pipeline_data=chars))
     survived = PopulationKept(objective=paired.objective, survivors=[unwalked, bar_arm])
-    disjoint = replay_decisions(
+    [disjoint] = replay_all_mismatches(
         _round(round=3, cells={unwalked: apart, bar_arm: bar}),
         [ResumeCheckpointRecord(kind=survived.kind, inputs_ref=survived, outcome=[unwalked])],
     )
-    assert disjoint is not None and disjoint.current_outcome == [], (
+    assert disjoint.current_outcome == [], (
         "population_kept ranked arms that share no cell, reading each as a 0.0 mean"
     )
 
@@ -962,7 +962,7 @@ def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
     )
     [closed_on_disk] = closed_rounds(stores, charged, scorer, moment=None)
     [decided] = electing.cycle.pending_decisions
-    assert replay_decisions(closed_on_disk, [decided]) is None, (
+    assert replay_all_mismatches(closed_on_disk, [decided]) == [], (
         "the replay read the parent's charged error as a cell nobody scored"
     )
 
@@ -1064,16 +1064,7 @@ def test_a_resume_from_3_that_halts_on_a_divergence_below_it_displaces_no_round_
         scoped(book=spend_book()),
         pytest.raises(ResumeDivergenceError),
     ):
-        asyncio.run(
-            resume_with_divergence_check(
-                resuming.cycle,
-                [],
-                resuming.ledger,
-                skip_divergence_check=False,
-                fork_on_divergence=False,
-                rewind=3,
-            )
-        )
+        asyncio.run(resume_with_divergence_check(resuming.cycle, [], RunMode(from_round=3)))
     assert stores.campaigns.standing_rounds(halted, moment=None).last_closed == 4, (
         "a resume its divergence halted had already rewound the line"
     )
@@ -1518,6 +1509,28 @@ def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_b
     assert cycle_config(stores, campaign, reset_fork).seed_overlay == {
         "a": {"model": "m", "provider": "p"}
     }, "a cleared field forked with the candidate's value"
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_rewind_fork_asked_to_rewind_its_parent_too_refuses_before_any_cut(
+    built_stores: Stores, scenario_line: _Scenario
+) -> None:
+    stores, scenario = built_stores, scenario_line.hop
+    before = [hop.cycle_id for hop, _ in stores.campaigns.campaign_cycles(scenario.campaign_id)]
+    # `resume --rewind 2 --from 1`, as the terminal lays it.
+    with pytest.raises(PayloadInvalidError):
+        PayloadInvalidError.validating(
+            ForkCyclePayload,
+            {
+                "campaign_id": scenario.campaign_id,
+                "cycle_id": scenario.cycle_id,
+                "round": 2,
+                "keep_rounds": True,
+                "mode": RunMode(from_round=1),
+            },
+        )
+    after = [hop.cycle_id for hop, _ in stores.campaigns.campaign_cycles(scenario.campaign_id)]
+    assert after == before, "a fork whose run would rewind its parent in place was cut"
 
 
 # It goes ahead on its own authority over the parent (bl1.B5).
@@ -2284,7 +2297,8 @@ class _Repair(NamedTuple):
 @pytest.fixture
 def repair(built_stores: Stores) -> _Repair:
     """A repair re-measures a holed round onto a branch, graded by whether any later round read the
-    hole: its fingerprints decide EQUIVALENT against SUPERSEDE."""
+    hole: the one validity check, and a round banked off the hole, decide EQUIVALENT against
+    SUPERSEDE."""
     stores = built_stores
     repair_bank = samples(4, "g")
     repair_origin, holed = prompted(instruction="origin"), ArmKey(prompted(instruction="c1").id)
@@ -2357,8 +2371,7 @@ def repair(built_stores: Stores) -> _Repair:
             mock.patch.object(query_loop, "measure_sample", _answered),
             scoped(book=spend_book()),
         ):
-            before = round_packages(cycle, line, ledger)
-            branch_id = asyncio.run(apply_correction(cycle, line, before, repair_bank, ledger))
+            branch_id = asyncio.run(apply_correction(cycle, line, repair_bank))
         assert branch_id is not None, "a holed round was carried as it ran"
         return hop, hop.model_copy(update={"cycle_id": branch_id})
 
@@ -2376,46 +2389,19 @@ def repair(built_stores: Stores) -> _Repair:
     return _Repair(repaired, fork_direction, critique_of)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_round_its_member_cannot_rederive_is_never_graded_on_a_branch(
-    built_stores: Stores, offline: Router, repair: _Repair
-) -> None:
-    stores, repaired = built_stores, repair.repaired
-    offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
-    with pytest.raises(ConflictError):
-        repaired("cycle_unrederived", consumed=False)
-    cycles = Path(
-        stores.campaigns.cycle_dir(
-            CycleHop(campaign_id="cycle_unrederived__20260101-000000", cycle_id="cycle_unrederived")
-        )
-    ).parent
-    assert [d.name for d in cycles.iterdir()] == ["cycle_unrederived"], (
-        "a round its member could not re-derive was graded on a branch holding the stale state"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_correction_no_later_round_read_branches_equivalent_with_a_fresh_critique(
-    offline: Router, repair: _Repair
-) -> None:
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_correction_no_later_round_read_branches_equivalent(repair: _Repair) -> None:
     repaired, fork_direction, critique_of = repair
-    offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
     ran, unread_branch = repaired("cycle_unread", consumed=False)
     assert fork_direction(unread_branch) is ForkDirection.EQUIVALENT, (
-        "a correction no later round read forked the line off its parent"
-    )
-    assert critique_of(unread_branch) == "framing: re-read the claim", (
-        "the branch kept a critique distilled from the cell the repair re-measured"
+        "a correction no recorded decision reads forked the line off its parent"
     )
     assert critique_of(ran) == "framing: as recorded", "the repair rewrote the round its parent ran"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_correction_a_later_round_read_supersedes_its_parent(
-    offline: Router, repair: _Repair
-) -> None:
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_correction_a_later_round_read_supersedes_its_parent(repair: _Repair) -> None:
     repaired, fork_direction, _ = repair
-    offline.llm.says = lambda _body: json.dumps({"priority_fix": "framing: re-read the claim"})
     _, read_branch = repaired("cycle_read", consumed=True)
     assert fork_direction(read_branch) is ForkDirection.SUPERSEDE, (
         "round 2's banked candidates were generated off the hole and carried across as equivalent"

@@ -31,7 +31,6 @@ from promptpotter.application.optimizers.potter.dispatch.facade import (
     VIEW_SEES,
     PotterView,
     fingerprinted_modules,
-    node_packages,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     LayoutNode,
@@ -382,15 +381,6 @@ class L1Critique(LayoutNode, nodes.Adapter):
         self, _selected: SelectedOptimizer, round_result: RoundResult
     ) -> list[OptimizerFact]:
         return critique_facts(round_result)
-
-    def round_packages(self, ctx: NodeContext) -> dict[str, str]:
-        """Every layout node's: one view feeds them all, and it carries the trajectory up to *ctx*'s round."""
-        return node_packages(PotterView(ctx, ctx.slice(Ladder)))
-
-    async def rederive(self, ctx: NodeContext) -> tuple[StatePart, ...]:
-        if ctx.recall(Critique, ctx.round_num).readout is None:
-            return ()
-        return (await distil_critique(ctx),)
 
     async def adapt(self, ctx: NodeContext) -> None:
         ctx.emit(await distil_critique(ctx))

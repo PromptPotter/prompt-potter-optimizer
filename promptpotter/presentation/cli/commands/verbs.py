@@ -18,6 +18,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
 from promptpotter.domain.hierarchy import ListingLifecycle
+from promptpotter.domain.run_mode import OnDivergence
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import VerifyStrategy
 from promptpotter.presentation.cli.parsers import (
@@ -174,7 +175,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "resume",
         "resume_command:cmd_resume",
         unspelled={
-            "mode": "`--no-check` and `--fork-on-divergence` compose it",
+            "mode": "`--from ROUND` and `--on-divergence`",
             "round": "`--rewind ROUND`",
             "reason": "`--rewind-reason`",
             "keep_rounds": "`--rewind` keeps them, `--steer` does not",
@@ -205,17 +206,11 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "Omit to pick up from the latest completed round.",
             ),
             Arg(
-                "--no-check",
-                dest="no_divergence_check",
-                action="store_true",
-                help="On resume, rescore but skip the decision-replay halt.",
-            ),
-            Arg(
-                "--fork-on-divergence",
-                dest="fork_on_divergence",
-                action="store_true",
-                help="On divergence, mint a sibling cycle (with parent_cycle_id) "
-                "and re-run the divergent round under the current scorer.",
+                "--on-divergence",
+                choices=[o.value for o in OnDivergence],
+                default=OnDivergence.HALT.value,
+                help="Where the replay departs the record: `halt` (the default), `accept` it and "
+                "run on, or `fork` a sibling cycle at the divergent round and run that.",
             ),
             Arg(
                 "--rewind",

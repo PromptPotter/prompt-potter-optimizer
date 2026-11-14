@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, NamedTuple
 from promptpotter.application.bench.llm_call import FilledPrompt, InjectionBreakdown
 from promptpotter.application.bench.node_context import (
     Bounds,
-    Calls,
     Frontier,
     Lineage,
     Ruler,
@@ -57,7 +56,6 @@ from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.infrastructure.llm.telemetry import emit_round_warning
 from promptpotter.shared.errors import PromptCompositionError
-from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.run_scope import RunScope, scoped
 
 if TYPE_CHECKING:
@@ -215,22 +213,6 @@ class DispatchHub:
 def _no_round_warnings() -> contextlib.AbstractContextManager[RunScope]:
     """A probe render must not emit: the operator would read a fresh warning about a truncation from rounds ago."""
     return scoped(ledger=None)
-
-
-def node_packages(view: PotterView) -> dict[str, str]:
-    """Compare two of these, never one against a stored value: an absolute fingerprint cannot be reproduced later."""
-    out: dict[str, str] = {}
-    with _no_round_warnings():
-        for node in NODE_LAYOUTS:
-            template = view.ctx.read(Calls).prompt(node)
-            filled = DispatchHub.fill(template, view, node=node)
-            out[node] = stable_hash(
-                [
-                    template.model_copy(update=filled.fields).render(),
-                    sorted(filled.prompt_vars.items()),
-                ]
-            )
-    return out
 
 
 def _sample_keys(round_result: RoundResult) -> frozenset[str]:

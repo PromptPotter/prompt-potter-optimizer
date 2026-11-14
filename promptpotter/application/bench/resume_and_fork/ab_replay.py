@@ -18,14 +18,19 @@ from promptpotter.application.mask.divergence import (
     find_divergences,
 )
 from promptpotter.application.mask.load import load_mask_record
-from promptpotter.application.mask.record import MaskRound
+from promptpotter.application.mask.record import MaskCycle, MaskRecord, MaskRound
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.shared.errors import DiagnosticError
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping, Sequence
+
     from promptpotter.application.initialization.session import Session
+    from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.domain.campaign_config import CampaignConfig
     from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.run_records import ResumeCheckpointRecord
     from promptpotter.domain.scoring import CellSheet, Scorer
 
 logger = logging.getLogger(__name__)
@@ -95,30 +100,53 @@ def _regraded(rd: RoundResult, scorer: Scorer) -> RoundResult:
     )
 
 
-def _make_replay_verdict(
+def _identity(rd: RoundResult, current: Mapping[str, str]) -> list[ReplayMismatch]:
+    """Asked PER ROUND so an edit to the optimizer forks from where it bites."""
+    recorded = rd.closed_state.prompt_hashes
+    moved = sorted(n for n, h in recorded.items() if current.get(n) != h)
+    if not moved:
+        return []
+    return [
+        ReplayMismatch(
+            round_num=rd.round,
+            kind=f"optimizer_identity:{','.join(moved)}",
+            recorded_outcome={n: recorded[n] for n in moved},
+            current_outcome={n: current.get(n) for n in moved},
+            inputs_ref={"nodes": moved},
+        )
+    ]
+
+
+def replay_verdict(
     session: Session,
     campaign_config: CampaignConfig,
+    optimizer: SelectedOptimizer,
     sink: list[ReplayMismatch],
 ) -> Verdict:
-    """Rescored HERE, each round on the scale its election read, its every row re-graded under
-    the current scorer: the fold asks only of carried-over rounds."""
+    """THE validity check, a resume's and ``ab``'s alike: a round stands while the optimizer that
+    produced it is the one loaded and every decision it recorded re-derives off its rows, each
+    re-graded under the current scorer on the scale its election read."""
     scorer = session.state.scoring.scorer
     opt = campaign_config.optimization
+    current = optimizer.prompt_hashes()
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
         if rnd.round_data is None:
             return VerdictOutcome(diverged=False)
         rd = _regraded(rnd.round_data, scorer)
-        if rd.election is None:
-            return VerdictOutcome(diverged=False)
-        ruler = regraded_ruler(
-            session.store,
-            rd.election.ruler,
-            scorer,
-            n_min=opt.elimination_n_min,
-            enable_2pl=opt.enable_2pl_graduation,
+        stamp = rd.ruler
+        ruler = (
+            None
+            if stamp is None or stamp.cold
+            else regraded_ruler(
+                session.store,
+                stamp,
+                scorer,
+                n_min=opt.elimination_n_min,
+                enable_2pl=opt.enable_2pl_graduation,
+            )
         )
-        found = replay_all_mismatches(rd, rnd.decisions, ruler=ruler)
+        found = [*_identity(rd, current), *replay_all_mismatches(rd, rnd.decisions, ruler=ruler)]
         if not found:
             return VerdictOutcome(diverged=False)
         sink.extend(found)
@@ -133,6 +161,34 @@ def _make_replay_verdict(
         return VerdictOutcome(diverged=True, alternative_candidate_id=alternative)
 
     return verdict
+
+
+def line_divergence(
+    session: Session,
+    campaign_config: CampaignConfig,
+    optimizer: SelectedOptimizer,
+    rounds: Sequence[RoundResult],
+    decisions: Mapping[int, list[ResumeCheckpointRecord]],
+) -> ReplayMismatch | None:
+    """The first round of one line *replay_verdict* refuses, walked as ``ab`` walks a campaign."""
+    cid = session.hop.cycle_id
+    line = MaskCycle(
+        cycle_id=cid,
+        rounds=[
+            MaskRound(
+                cycle_id=cid, round=t.round, round_data=t, decisions=decisions.get(t.round, [])
+            )
+            for t in rounds
+        ],
+    )
+    found: list[ReplayMismatch] = []
+    walked = find_divergences(
+        MaskRecord(cycles=[line]), replay_verdict(session, campaign_config, optimizer, found)
+    )
+    if not walked.divergences:
+        return None
+    at = walked.divergences[0].round
+    return next(m for m in found if m.round_num == at)
 
 
 def ab_replay_cycle(
@@ -160,7 +216,10 @@ def ab_replay_cycle(
             "every replayed decision would be read against nothing."
         )
     mismatches: list[ReplayMismatch] = []
-    result = find_divergences(record, _make_replay_verdict(session, campaign_config, mismatches))
+    optimizer = select_optimizer(campaign_config.optimization)
+    result = find_divergences(
+        record, replay_verdict(session, campaign_config, optimizer, mismatches)
+    )
     n_rounds = sum(len(c.rounds) for c in record.cycles)
     logger.info(
         "A/B replay: campaign %s, %d cycle(s), %d round(s), %d mismatch(es), %d divergence(s)",

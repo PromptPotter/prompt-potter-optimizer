@@ -104,7 +104,7 @@ Parse failures, no-ops and verbatim duplicates were measured absent: no edit the
    real `param_keys`. Report violations at the TOP of the reply (`✗ peaked_axis_violation (C1.1: …)` ·
    `⚠ intra_round_paraphrase (C1.2 ↔ C1.4 Jaccard 0.58)`).
 4. **Propose, predict, re-run one round**: a unified diff against `l1_generate/1`, a one-line prediction,
-   `resume` (`--fork-on-divergence` keeps prior runs comparable). Held → lock it in; else reclassify —
+   `resume` (`--on-divergence fork` keeps prior runs comparable). Held → lock it in; else reclassify —
    **never reword a failed edit**.
 
 **Edit etiquette.** One edit per pass; no hidden defaults. No new response field from the prompt side

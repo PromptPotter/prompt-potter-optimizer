@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import functools
-import hashlib
-import json
 import pkgutil
 import sys
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -198,14 +196,6 @@ class NodeMember(Protocol):
     def refuse_pipeline(self, _schema: PipelineSchema) -> None:
         """Raise where the pipeline holds nothing this member can edit."""
         return None
-
-    def round_packages(self, _ctx: NodeContext) -> dict[str, str]:
-        """``{node: fingerprint}`` of what the nodes it speaks for were handed in *ctx*'s round; a repair moving one forks the rounds after it."""
-        return {}
-
-    async def rederive(self, _ctx: NodeContext) -> tuple[StatePart, ...]:
-        """What it wrote in *ctx*'s round, re-derived off the repaired rows; the bench restates it on the branch."""
-        return ()
 
     def complete(self) -> None:
         """Run where the bench completes every registry (``wiring.py::complete_registries``), never at import."""
@@ -403,26 +393,6 @@ def _source_digest(
     # schemas and helpers by name, so a reached unit needs no mark.
     foreign = frozenset(f"{_PACKAGE}.{package}" for package in BUILTIN_PACKAGES - roster)
     return prompt_source_digest((*spoken, *own), covered=covered, foreign=foreign)
-
-
-def rows_read(rounds: Sequence[RoundResult], round_num: int) -> str:
-    """Every row of the rounds before *round_num*, so a repair drifts every round after the one it hit."""
-    digest = hashlib.sha256()
-    for rr in sorted(rounds, key=lambda r: r.round):
-        if rr.round >= round_num:
-            break
-        for sheet in rr.cells.values():
-            seen = [
-                [
-                    cell.facts.sample_key,
-                    cell.facts.predicted,
-                    cell.grade.fitness,
-                    cell.grade.objective,
-                ]
-                for cell in sheet
-            ]
-            digest.update(json.dumps(seen, default=str).encode("utf-8"))
-    return digest.hexdigest()[:16]
 
 
 @dataclass(frozen=True)

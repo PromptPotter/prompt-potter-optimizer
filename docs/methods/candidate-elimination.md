@@ -110,7 +110,7 @@ The manifest (`assets/optimizers/capo/pipeline.yaml`, every value cited there): 
 - **The 5M-input-token budget** (§5) is `budget.tokens`, which counts output too.
 - **A reply without `<prompt>` markers** is an invalid arm costing no cell.
 - **The incumbent is re-scored** each round on `Selector.parent_cells`; from round 2 it races as a member, and round 1's (the origin) is read on the first block alone, so a round-1 lift pairs on one block.
-- **A repeated request samples afresh** (the paper's T = 1.0): each call is seeded by round, node and call off the run's seed (the determinism clamp's, else the campaign id), so only a resume or fork replays a reply; a clamped seed pins every call.
+- **A repeated request samples afresh** (the paper's T = 1.0): each call is seeded by round, node and call off the run's `run_seed` (`Cycle.rng`), so only a resume or fork replays a reply; a clamped seed pins every call.
 
 ## LEVI mapping and deviations
 

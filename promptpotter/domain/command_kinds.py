@@ -683,6 +683,11 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
 
     @model_validator(mode="after")
     def _rewinds_past_its_origin(self) -> ForkCyclePayload:
+        if self.mode.from_round is not None:
+            raise ValueError(
+                "a fork's cut is `round`; `mode.from_round` would rewind its parent in place too, "
+                "so it is refused here: cut at the round instead"
+            )
         if self.keep_rounds and self.round == 0:
             raise ValueError(
                 "keep_rounds at round 0 lifts no round to continue from; fork without "

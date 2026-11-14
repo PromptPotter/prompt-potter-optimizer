@@ -385,15 +385,10 @@ def inner_instrument_config(
     )
     opt_update |= {"nodes": inner.nodes, "arm_gate": inner.arm_gate}
     if spec.inner_optimizer_temperature is not None:
-        # The clamp's seed is the CELL's, so every candidate measured on a cell draws one random stream (CRN).
+        # The cell's draws key on its `run_seed` (`Cycle.rng`), so every candidate measured on a cell draws one random stream (CRN).
         opt_update["determinism"] = (
             base.optimization.determinism or DeterminismClamp()
-        ).model_copy(
-            update={
-                "temperature": spec.inner_optimizer_temperature,
-                "seed": spec.run_seed,
-            }
-        )
+        ).model_copy(update={"temperature": spec.inner_optimizer_temperature})
     if not solver:
         raise ValueError("the inner pipeline declares no prompt node: no solver to pin")
     po = dict(base.pipeline_overlay)

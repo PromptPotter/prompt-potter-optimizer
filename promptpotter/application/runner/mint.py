@@ -409,14 +409,7 @@ async def open_cycle(
     )
     forked_from: CycleHop | None = None
     if replays:
-        fork = await resume_with_divergence_check(
-            cycle,
-            dataset,
-            ledger,
-            skip_divergence_check=mode.no_divergence_check,
-            fork_on_divergence=mode.fork_on_divergence,
-            rewind=mode.from_round,
-        )
+        fork = await resume_with_divergence_check(cycle, dataset, mode)
         if fork is not None:
             forked_from = session.hop
             cycle.session = session.bound(

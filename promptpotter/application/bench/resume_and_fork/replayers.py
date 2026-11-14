@@ -53,14 +53,6 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
             )
 
 
-def replay_decisions(
-    round_data: RoundResult,
-    decisions: list[ResumeCheckpointRecord],
-    ruler: DeltaRuler | None = None,
-) -> ReplayMismatch | None:
-    return next(_iter_mismatches(ReplayContext(round_data, decisions, ruler)), None)
-
-
 def replay_all_mismatches(
     round_data: RoundResult,
     decisions: list[ResumeCheckpointRecord],
