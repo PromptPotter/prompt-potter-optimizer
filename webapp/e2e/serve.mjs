@@ -43,11 +43,11 @@ if (home && process.env.PP_E2E_RESET === "1" && process.env.PP_E2E_KEEP !== "1")
   if (reset.status !== 0) process.exit(reset.status ?? 2);
 }
 
-// `PP_E2E_WORLD` (an environment value, so no shell parses the path) names a run's workspace this home
-// becomes a copy of (`walk_world.py`); never served itself.
-const WORLD = process.env.PP_E2E_WORLD;
+// `PP_E2E_WALK_WORLD` (an environment value, so no shell parses the path) names a run's workspace this
+// home becomes a copy of (`walk_world.py`); never served itself.
+const WORLD = process.env.PP_E2E_WALK_WORLD;
 if (WORLD && !home) {
-  console.error("[e2e] PP_E2E_WORLD needs PROMPTPOTTER_HOME: the world is copied there, never served in place");
+  console.error("[e2e] PP_E2E_WALK_WORLD needs PROMPTPOTTER_HOME: the world is copied there, never served in place");
   process.exit(2);
 }
 if (home && WORLD) {

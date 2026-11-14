@@ -54,7 +54,7 @@ function server(port: string, backend: "offline" | "live", env: Record<string, s
     stderr: "pipe" as const,
     // Set on EVERY server (Playwright hands each the whole shell env, so one left unset would inherit it).
     // Absolute: the README starts in `webapp/`, `serve.mjs` spawns its helpers from the repo root.
-    env: { PP_E2E_PORT: port, PP_E2E_WORLD: world ? path.resolve(world) : "", ...env },
+    env: { PP_E2E_PORT: port, PP_E2E_WALK_WORLD: world ? path.resolve(world) : "", ...env },
   };
 }
 

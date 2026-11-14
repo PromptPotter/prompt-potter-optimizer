@@ -774,10 +774,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   tells a desk to build the venv with `python3 scripts/gate.py`; a 3.11 `python3` dies there.
   Action: the code before the re-exec runs on any `python3` the hook names, or refuses first with the
   floor. **Re-test:** a 3.11 `python3 scripts/gate.py --only doc-claims` reaches the re-exec.
-- **The walk's world has two names**: `playwright.config.ts::server` hands `PP_E2E_WALK_WORLD` to
-  `serve.mjs` as `PP_E2E_WORLD`, and `e2e/fake_issuer.ts` deletes it so a third server inherits none.
-  Action: `serve.mjs --world=<path>` takes it as an argument, as it takes `--auth` and `--backend`.
-  **Re-test:** `git grep -c PP_E2E_WORLD -- webapp` is 0.
 
 ### batch/27 · rec
 
@@ -1154,10 +1150,6 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   left but nothing once overdrawn, so it cannot fold into `less` unchanged. Action: one typed remainder
   that carries the overdraft, read by both. **Rides with:** small 2. **Re-test:**
   `git grep -c "_at_least_nothing" -- promptpotter` is 0.
-- **A read answers for any inode kind** (small-1's landing): `cycle_files.py:116`'s
-  `stat_optional` treats a directory as a file, so a directory path reached `read_bytes_optional`
-  until small-1 refused it at the read. Action: `stat_optional` answers for regular files only.
-  **Rides with:** small 2.
 - **The paper harness tracks no named tree** (small-1's landing): `paper/bbeh-comparison/bbeh_potter_runner.py:1`
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
   harness names the release it runs against, and a fix to it targets that release. **Rides with:** the
