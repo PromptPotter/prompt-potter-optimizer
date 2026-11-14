@@ -331,6 +331,8 @@ class ServedPipeline:
     """What a connector serves of its pipeline; each reader lays its own local definition on it."""
 
     connector: str
+    # The connector endpoint it was read at (`DatasetDefinition.endpoint`).
+    endpoint: str | None
     # `None`: the connector serves none, so the local definition is the whole of it.
     doc: Mapping[str, Any] | None
 
@@ -339,17 +341,23 @@ class ServedPipeline:
 
 
 async def served_pipeline(
-    stores: Stores, connector: Connector, *, experiment: Mapping[str, Any] | None
+    stores: Stores,
+    connector: Connector,
+    *,
+    endpoint: str | None,
+    experiment: Mapping[str, Any] | None,
 ) -> ServedPipeline:
     """Read live at every moment that needs it; raises ``BackendUnreachableError``, never a stand-in."""
     served: Mapping[str, Any] | None = None
     if connector.serves_pipeline:
-        probe = BackendClient(connector, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir)
+        probe = BackendClient(
+            connector, endpoint=endpoint, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
+        )
         async with aclosing(probe) as client:
             served = await client.fetch_pipeline()
     elif connector.pipeline_declaration is not None:
         served = connector.pipeline_declaration(stores, experiment)
-    return ServedPipeline(connector.name, served)
+    return ServedPipeline(connector.name, endpoint, served)
 
 
 def _draft_dataset(stores: Stores, draft: DraftFile) -> ResolvedDataset | None:
@@ -376,21 +384,25 @@ def _draft_local(stores: Stores, draft: DraftFile) -> dict[str, Any]:
             assert_never(draft.basis)
 
 
-def draft_connector(stores: Stores, draft: DraftFile) -> str:
-    """The backend the draft's Start runs: an upload's pick, else the one its definition names."""
+def draft_backend(stores: Stores, draft: DraftFile) -> tuple[str, str | None]:
+    """The connector and endpoint the draft's Start runs: an upload's pick and its connector's one
+    endpoint, else the pair its definition names."""
     match draft.basis:
         case UploadBasis(connector=connector):
-            return connector
+            return connector, None
         case DatasetBasis(dataset=name):
-            return runnable_definition(resolve_dataset(stores, name)).connector
+            definition = runnable_definition(resolve_dataset(stores, name))
+            return definition.connector, definition.endpoint
         case _:
             assert_never(draft.basis)
 
 
 async def draft_served(stores: Stores, draft: DraftFile) -> ServedPipeline:
+    connector, endpoint = draft_backend(stores, draft)
     return await served_pipeline(
         stores,
-        connectors.CONNECTORS.get(draft_connector(stores, draft)),
+        connectors.CONNECTORS.get(connector),
+        endpoint=endpoint,
         experiment=experiment_outside_run(stores, _draft_dataset(stores, draft)),
     )
 
@@ -401,7 +413,9 @@ async def dataset_pipeline(
     """A dataset's pipeline outside a run, over the experiment its panel holds today."""
     definition = runnable_definition(dataset)
     connector = connectors.CONNECTORS.get(definition.connector)
-    served = await served_pipeline(stores, connector, experiment=experiment)
+    served = await served_pipeline(
+        stores, connector, endpoint=definition.endpoint, experiment=experiment
+    )
     return served.over(definition.pipeline)
 
 
@@ -421,13 +435,16 @@ def identity_layer(
     experiment: Mapping[str, Any] | None,
     judges: Mapping[str, JudgeSpec] | None,
     chain: Sequence[str],
+    *,
+    base_url: str,
 ) -> dict[str, dict[str, Any]]:
-    """The connector's and the judges' ONE channel into the archive key."""
+    """The connector's and the judges' ONE channel into the archive key; *base_url* is the
+    address its cells were sent to."""
     out: dict[str, dict[str, Any]] = {}
     if connector is not None and connector.identity_config is not None:
         if stores is None:
             raise ValueError(f"{connector.name}: its identity needs the stores")
-        out.update(connector.identity_config(stores, experiment))
+        out.update(connector.identity_config(stores, experiment, base_url))
     if judges and chain:
         # The TERMINAL step: a judge grades the answer that node emits.
         out.setdefault(chain[-1], {})[JUDGE_INSTRUMENT_KEY] = judge_instrument(judges)
@@ -625,7 +642,7 @@ def draft_config(stores: Stores, draft: DraftFile) -> CampaignConfig:
     return laid_config(
         stores,
         draft_layers(stores, draft),
-        connector=draft_connector(stores, draft),
+        connector=draft_backend(stores, draft)[0],
         schema=None,
     ).config
 
@@ -636,7 +653,7 @@ def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
 
 def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
     """What a Start sends, and who pays each."""
-    return sends_on(stores, draft_config(stores, draft), draft_connector(stores, draft))
+    return sends_on(stores, draft_config(stores, draft), draft_backend(stores, draft)[0])
 
 
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
@@ -693,6 +710,8 @@ class _CampaignMerge(_Merge):
     hop: CycleHop
     # The panel its mint recorded run init measured.
     experiment: dict[str, Any] | None
+    # The connector endpoint its run init read (`PipelineRead.endpoint`).
+    endpoint: str | None
 
 
 @dataclass(frozen=True)
@@ -731,7 +750,9 @@ def merge_outside_run(
             dataset=pipeline_node_overlay(templated),
             campaign=cfg.pipeline_overlay,
             free_tier=free_tier_overlay(cfg, declared, fence),
-            identity=identity_layer(None, None, None, cfg.judges, filtered.active_steps),
+            identity=identity_layer(
+                None, None, None, cfg.judges, filtered.active_steps, base_url=""
+            ),
         ),
         free=_task_fenced(fence),
         steer_bound=False,
@@ -774,6 +795,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
         knob_layers=cycle.knob_layers(read.knob_layers),
         hop=hop,
         experiment=resolved.experiment,
+        endpoint=read.endpoint,
     )
 
 
@@ -963,10 +985,11 @@ def resolve_pipeline_for_campaign(
         # The recorded roster alone: a live resolve recomputes a banked identity off one it never ran.
         identity=identity_layer(
             stores,
-            connectors.CONNECTORS.get(campaign.connector),
+            connector := connectors.CONNECTORS.get(campaign.connector),
             m.experiment,
             m.cfg.judges,
             m.filtered.active_steps,
+            base_url=connector.base_url(m.endpoint),
         ),
         evolved=evolved,
         recorded=measured,
@@ -1229,6 +1252,7 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
             session.backend_client.workload.experiment,
             campaign_config.judges,
             filtered.active_steps,
+            base_url=session.backend_client.base_url,
         ),
     ).fold()
     pipeline_params = folded.params

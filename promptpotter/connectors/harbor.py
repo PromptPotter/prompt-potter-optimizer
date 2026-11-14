@@ -1,9 +1,9 @@
 """One containerized Harbor trial per cell, graded by the task's verifier.
 
-The candidate prompt ships as ONE Agent Skill per episode with a FIXED frontmatter ``description``,
-its body within the spec's limits (``docs/research/external-constraints.md`` § SKILL);
-``nodes.agent.config.skill_delivery: system_prompt`` is the second channel, fixed per campaign and
-never in ``param_keys``. The Skill reaches the model only if opened, so arrival is MEASURED
+The candidate prompt ships as ONE Agent Skill per episode (``nodes.agent.config.skill_delivery:
+agent_skill``) with a FIXED frontmatter ``description``, its body within the spec's limits
+(``docs/research/external-constraints.md`` § SKILL); ``system_prompt`` is the second channel. The
+dataset names one, fixed per campaign and never in ``param_keys``. The Skill reaches the model only if opened, so arrival is MEASURED
 (``_skill_opened`` / ``_skill_in_first_request`` fill ``SKILL_KEY``); no core ``turn_scalars``
 member carries it, since it would be constant ``1.0`` elsewhere.
 
@@ -227,11 +227,11 @@ SkillDelivery = Literal["agent_skill", "system_prompt"]
 
 
 def _skill_delivery(cfg: Mapping[str, Any]) -> SkillDelivery:
-    value = cfg.get(SKILL_DELIVERY_KEY, "agent_skill")
+    value = cfg.get(SKILL_DELIVERY_KEY)
     if value not in get_args(SkillDelivery):
         raise ValueError(
-            f"harbor connector: `{SKILL_DELIVERY_KEY}: {value}` names no channel; the channels "
-            f"are {list(get_args(SkillDelivery))}."
+            f"harbor connector: `nodes.{AGENT_NODE}.config.{SKILL_DELIVERY_KEY}` is {value!r}, no "
+            f"channel; the dataset names one of {list(get_args(SkillDelivery))}."
         )
     return cast(SkillDelivery, value)
 
@@ -498,7 +498,7 @@ def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _identity_config(
-    _stores: Stores, experiment: Mapping[str, Any] | None
+    _stores: Stores, experiment: Mapping[str, Any] | None, _base_url: str
 ) -> dict[str, dict[str, Any]]:
     if experiment is None:
         raise ValueError("harbor connector: no panel on this machine to fingerprint.")

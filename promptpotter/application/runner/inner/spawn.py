@@ -436,7 +436,7 @@ def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) 
 
 
 def _identity_config(
-    stores: Stores, experiment: Mapping[str, Any] | None
+    stores: Stores, experiment: Mapping[str, Any] | None, _base_url: str
 ) -> dict[str, dict[str, Any]]:
     """What reads every cell's number alike; what measures ONE cell is in its pin (`InnerTaskSpec.key`)."""
     cells = _inner_cells(stores, experiment)

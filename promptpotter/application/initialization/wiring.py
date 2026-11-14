@@ -222,6 +222,7 @@ async def _session(
     _verify_package_cache_scope(connector, experiment, dataset_name)
     client = BackendClient(
         connector,
+        endpoint=definition.endpoint,
         workload=InProcessWorkload(
             experiment=experiment,
             experiment_dir=None if panel is None else panel.directory,
@@ -233,7 +234,9 @@ async def _session(
     logger.info("Backend: %s %s", connector.name, client.base_url)
     try:
         if served is None:
-            served = await served_pipeline(stores, connector, experiment=experiment)
+            served = await served_pipeline(
+                stores, connector, endpoint=definition.endpoint, experiment=experiment
+            )
         declaration = served.over(definition.pipeline)
         pipeline_schema = parse_pipeline_response(declaration)
         logger.info("Pipeline: %s (%d nodes)", dataset.name, len(pipeline_schema.nodes))
@@ -255,6 +258,7 @@ async def _session(
             pipeline_read=PipelineRead(
                 declaration=declaration,
                 dataset_overlay=pipeline_node_overlay(definition.pipeline),
+                endpoint=definition.endpoint,
             ),
             backend_revision=backend_revision,
             bank=bank,

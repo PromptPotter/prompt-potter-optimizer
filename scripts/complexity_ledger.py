@@ -36,7 +36,9 @@ from processes import REPO, clone_cache, git, replace_changed, run
 BASELINE = {
     # Lines of the package's own Python: a change removes more than it adds (operator, 2026-11-13),
     # judged, not counted (2026-11-14): a raise names the substance its lines carry.
-    "package_lines": 110339,
+    # xconn (+110): a node's wire keys and their refusal; named endpoints threaded from the
+    # dataset to every client, probe and identity.
+    "package_lines": 110449,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -77,7 +79,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes.
     "p_member": 12,
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
-    "p_reads": 315,
+    "p_reads": 317,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 7,
     # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).

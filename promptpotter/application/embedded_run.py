@@ -88,7 +88,8 @@ async def _dataset_session(
 ) -> AsyncIterator[Session]:
     """Raises what ``probe_backend`` refuses a launch on; *rows* replace the definition's bank,
     which the mint labels."""
-    await refuse_unreachable(runnable_definition(resolve_dataset(stores, dataset_name)).connector)
+    definition = runnable_definition(resolve_dataset(stores, dataset_name))
+    await refuse_unreachable(definition.connector, definition.endpoint)
     async with init_services(
         dataset_name=dataset_name, identity=stores.identity, stores=stores, program=program
     ) as session:

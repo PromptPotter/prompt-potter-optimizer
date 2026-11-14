@@ -1,6 +1,6 @@
 """One n8n eval-harness execution per cell: a webhook holding a copy of a production LLM node.
 
-The wire is the harness's, not ``/matches``: ``POST N8N_HARNESS_URL`` with
+The wire is the harness's, not ``/matches``: a POST to the dataset's ``N8N_HARNESS_ENDPOINTS`` URL with
 ``{case_id, input, expected, prompt, params}`` answers ``{case_id, answer, raw}``; a row value that
 is JSON object text rides as the object. The model is the n8n node's own, so the graph declares no
 model and the wire sends none; n8n reports no usage, so a cell is unbounded and unpriced, and only
@@ -96,9 +96,9 @@ def _pipeline_declaration(_stores: Stores, _experiment: Mapping[str, Any] | None
 
 
 def _identity_config(
-    _stores: Stores, _experiment: Mapping[str, Any] | None
+    _stores: Stores, _experiment: Mapping[str, Any] | None, base_url: str
 ) -> dict[str, dict[str, Any]]:
-    return {HARNESS_NODE: {INSTRUMENT_KEY: stable_hash(CONNECTOR.base_url())}}
+    return {HARNESS_NODE: {INSTRUMENT_KEY: stable_hash(base_url)}}
 
 
 async def _preflight(backend_url: str) -> str | None:
@@ -110,10 +110,6 @@ async def _preflight(backend_url: str) -> str | None:
         # Reachability, not health: n8n answers a GET on a POST webhook with a 404.
         await http.get(backend_url)
     return None
-
-
-def _endpoint() -> str:
-    return settings.N8N_HARNESS_URL
 
 
 def _auth_token() -> str | None:
@@ -139,7 +135,7 @@ CONNECTOR = Connector(
     pipeline_declaration=_pipeline_declaration,
     identity_config=_identity_config,
     preflight=_preflight,
-    endpoint=Endpoint("N8N_HARNESS_URL", _endpoint),
+    endpoint=Endpoint("N8N_HARNESS_ENDPOINTS", lambda: settings.N8N_HARNESS_ENDPOINTS),
     auth_token=_auth_token,
     auth_scheme=_auth_scheme,
 )

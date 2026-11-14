@@ -1,5 +1,5 @@
 """The app a browser world walks, behind the backend its posture names: ``live`` reaches whatever
-``TERMNORM_URL`` names, ``offline`` answers it with ``scripts/offline_world.py::FakeBackend`` — so a
+``TERMNORM_ENDPOINTS`` names, ``offline`` answers it with ``scripts/offline_world.py::FakeBackend`` — so a
 check-in reads the same backend schema on every machine, CI's included, whether or not one runs."""
 
 from __future__ import annotations
@@ -46,15 +46,16 @@ class _Backend(BaseHTTPRequestHandler):
 
 
 def _serve_offline_backend() -> None:
-    # Bound before `promptpotter` imports: settings read `TERMNORM_URL` once, at import.
+    # Bound before `promptpotter` imports: settings read `TERMNORM_ENDPOINTS` once, at import.
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Backend)
-    os.environ["TERMNORM_URL"] = f"http://127.0.0.1:{server.server_address[1]}"
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    os.environ["TERMNORM_ENDPOINTS"] = f'{{"offline": "{url}"}}'
     sys.path.insert(0, str(REPO / "scripts"))
     from offline_world import FakeBackend
 
     _Backend.world = FakeBackend([])
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"[e2e] offline backend at {os.environ['TERMNORM_URL']}", flush=True)
+    print(f"[e2e] offline backend at {url}", flush=True)
 
 
 def main(argv: list[str]) -> int:

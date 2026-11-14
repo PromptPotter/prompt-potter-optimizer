@@ -381,6 +381,8 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "current_config": dict(nc),
             "spend_bound": node.get("spend_bound"),
         }
+        if "accepts" in node:
+            step_kwargs["wire_keys"] = frozenset({*nc, *pk, *_names(node["accepts"], where)})
         if "nested_datasets" in node:
             if kind is not NodeKind.GATEWAY:
                 _refuse(
@@ -472,20 +474,25 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             }
 
         # Synthesized, never connector-declared: whether a request carries a schema is ours to decide.
+        # Offered only where the node's door reads it: elsewhere every cell is a 400.
+        toggled = step_kwargs["tunes_llm"] and SCHEMA_TOGGLE_PARAM in step_kwargs.get(
+            "wire_keys", {SCHEMA_TOGGLE_PARAM}
+        )
         if step_kwargs["tunes_llm"]:
-            modes = [ANSWER_AS_TEXT, ANSWER_AS_JSON] if out_schema else [ANSWER_AS_TEXT]
-            # Several graded slots have no prose form: the toggle is pinned to the schema.
-            if out_schema and len(nc.get(ANSWER_FIELDS_KEY) or ()) > 1:
-                modes = [ANSWER_AS_JSON]
-            step_kwargs["param_keys"] = step_kwargs["param_keys"] | {SCHEMA_TOGGLE_PARAM}
             # Types only: outside `param_keys`, so no layer's `narrow` can intersect the row away.
             # `route_order` too: the resolve pins a routed node's host (`pin_default_routes`), so a
             # seed copied off a run's resolved config names it.
             step_kwargs["param_types"] = {
                 **step_kwargs["param_types"],
-                SCHEMA_TOGGLE_PARAM: "string",
+                **({SCHEMA_TOGGLE_PARAM: "string"} if toggled else {}),
                 **{k: WELL_KNOWN_PARAM_TYPES[k] for k in (*OUTPUT_CONTRACT_KEYS, "route_order")},
             }
+        if toggled:
+            modes = [ANSWER_AS_TEXT, ANSWER_AS_JSON] if out_schema else [ANSWER_AS_TEXT]
+            # Several graded slots have no prose form: the toggle is pinned to the schema.
+            if out_schema and len(nc.get(ANSWER_FIELDS_KEY) or ()) > 1:
+                modes = [ANSWER_AS_JSON]
+            step_kwargs["param_keys"] = step_kwargs["param_keys"] | {SCHEMA_TOGGLE_PARAM}
             step_kwargs["param_allowed_values"] = {
                 **step_kwargs["param_allowed_values"],
                 SCHEMA_TOGGLE_PARAM: modes,

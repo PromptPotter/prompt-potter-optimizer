@@ -5997,6 +5997,18 @@
             "title": "Declaration",
             "type": "object"
           },
+          "endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Endpoint"
+          },
           "free_tier_overlay": {
             "additionalProperties": {
               "additionalProperties": true,

@@ -132,18 +132,19 @@ class Settings(BaseSettings):
     RATE_LIMITS: dict[str, list[int | None]] = {}
 
     # Read ONLY by the termnorm connector's `endpoint` and `auth_token` hooks: a second backend
-    # declares its own. The URL is the operator's alone, so the token never travels elsewhere.
-    TERMNORM_URL: str = ""
+    # declares its own. Each URL is the operator's alone, by the name a dataset's
+    # `pipeline.endpoint` gives, so the token never travels elsewhere.
+    TERMNORM_ENDPOINTS: dict[str, str] = {}
     TERMNORM_TOKEN: SecretStr = SecretStr("")
 
-    # Read only by `connectors/n8n.py`: ONE eval-harness webhook per install, and its secret,
+    # Read only by `connectors/n8n.py`: the eval-harness webhooks by name, and their one secret,
     # sent as `<N8N_HARNESS_AUTH_HEADER>: <N8N_HARNESS_AUTH_PREFIX><N8N_HARNESS_TOKEN>`.
-    N8N_HARNESS_URL: str = ""
+    N8N_HARNESS_ENDPOINTS: dict[str, str] = {}
     N8N_HARNESS_TOKEN: SecretStr = SecretStr("")
     N8N_HARNESS_AUTH_HEADER: str = "X-Eval-Secret"
     N8N_HARNESS_AUTH_PREFIX: str = ""
 
-    # Empty is upstream's local compose stack; read only by `connectors/dbllmbench.py::harness_config`.
+    # Read only by `connectors/dbllmbench.py`, whose probe refuses an empty URL.
     DBLLMBENCH_DB_URL: str = ""
     DBLLMBENCH_DB_USERNAME: str = ""
     DBLLMBENCH_DB_PASSWORD: SecretStr = SecretStr("")

@@ -153,12 +153,18 @@ class MachineSlots:
 
 class BackendClient:
     def __init__(
-        self, connector: Connector, *, workload: InProcessWorkload, jobs_dir: Path
+        self,
+        connector: Connector,
+        *,
+        endpoint: str | None,
+        workload: InProcessWorkload,
+        jobs_dir: Path,
     ) -> None:
-        if (unset := connector.unconfigured()) is not None:
+        if (unset := connector.unconfigured(endpoint)) is not None:
             raise BackendUnreachableError(connector.name, "", unset)
         self._connector = connector
-        self.base_url = connector.base_url()
+        self._endpoint = endpoint
+        self.base_url = connector.base_url(endpoint)
         self.workload = workload
         self.backpressure = Backpressure("cells")
         self._guard = connector.session_factory()
@@ -212,7 +218,7 @@ class BackendClient:
                 raise asyncio.CancelledError("backend outage wait aborted")
             started = loop_now()
             await asyncio.sleep(_OUTAGE_POLL_S)
-            answered = await self._connector.unreachable() is None
+            answered = await self._connector.unreachable(self._endpoint) is None
             report_throttle_stall(loop_now() - started)
             if answered:
                 return True

@@ -86,12 +86,6 @@ _WORK = "/work"
 _KEY_ENV = "DBLLMBENCH_API_KEY"
 _ANTHROPIC = "anthropic"
 
-# Upstream's own compose stack, reached from inside the runner's container.
-_DB_DEFAULT_URLS = {
-    "typedb": "http://host.docker.internal:1729",
-    "neo4j": "bolt://host.docker.internal:7687",
-}
-
 _CELL_ENVELOPE_S = 3600.0
 _NOTE_CAP = 300
 _TURN_CAP = 1200
@@ -209,7 +203,7 @@ def harness_config(cfg: NodeCall, prompt: str) -> tuple[dict[str, Any], dict[str
     db = str(backend["db"])
     entry: dict[str, Any] = {
         "prompts": f"{_WORK}/template.txt",
-        "url": settings.DBLLMBENCH_DB_URL or _DB_DEFAULT_URLS.get(db) or "",
+        "url": settings.DBLLMBENCH_DB_URL,
         "schema": _asset(cfg, "schema"),
     }
     if database := backend.get("database"):
@@ -343,6 +337,8 @@ def _outcome_note(first: list[dict[str, Any]]) -> str | None:
 
 
 async def _preflight(_backend_url: str) -> str | None:
+    if not settings.DBLLMBENCH_DB_URL:
+        return "DBLLMBENCH_DB_URL is unset: name the database the runner reaches in .env."
     return await docker_daemon_fault()
 
 

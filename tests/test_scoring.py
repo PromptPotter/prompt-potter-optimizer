@@ -1002,7 +1002,9 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
             stores,
             pipeline_schema(nodes=[observed]),
             samples(2),
-            client=BackendClient(reporting, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir),
+            client=BackendClient(
+                reporting, endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
+            ),
         )
         spec = JudgeSpec(name="sealqa", stages=[JudgeStage(model="m", provider="openai")])
         config = defaulted_config(
@@ -5386,7 +5388,7 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
 def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    monkeypatch.setattr(settings, "N8N_HARNESS_URL", FakeHarness.URL)
+    monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": FakeHarness.URL})
     monkeypatch.setattr(settings, "N8N_HARNESS_TOKEN", SecretStr("harness-secret"))
     stores = workspace(tmp_path)
     harness = n8n.CONNECTOR
@@ -5396,7 +5398,9 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
         stores,
         parse_pipeline_response(graph),
         [],
-        client=BackendClient(harness, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir),
+        client=BackendClient(
+            harness, endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
+        ),
     )
     gold = '{"requires_action": ["true"]}'
     row = Sample(id=0, query='{"subject": "Invoice 1023"}', ground_truth=gold)

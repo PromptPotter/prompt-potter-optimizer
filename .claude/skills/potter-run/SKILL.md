@@ -93,8 +93,8 @@ never retune `epsilon`; a `vs_reference` rate where `panel.scored < panel.expect
 - Configs are the source of truth: `{dataset}/README.md`, `{dataset}/dataset.yaml::campaign` and `::pipeline`
   (CHECK a campaign's `pipeline_overlay` against [`datasets.md`](../../../docs/operations/datasets.md) § The model a
   dataset runs). No parameter tweaks unbidden.
-- **Warn only from this allowlist**: backend `/status` non-200 or refused (`TERMNORM_URL` in `.env`,
-  default `:8000`); the active pointer naming another dataset than requested; recent
+- **Warn only from this allowlist**: backend `/status` non-200 or refused (`TERMNORM_ENDPOINTS` in `.env`,
+  locally `:8000`); the active pointer naming another dataset than requested; recent
   `measurements/cells/{config_key}.jsonl` with empty `predicted` strings.
 - A propagated backend 5xx means halt. **A `⚠ RATE-LIMITED` readout line is told to the operator at
   once**; `✓ … answers again` ends the hold.

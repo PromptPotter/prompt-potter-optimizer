@@ -119,7 +119,7 @@ The optimizer drives a separate backend over `/matches` — clone it as a **git 
 git clone <backend>.git ~/potter/<backend>; cd ~/potter/<backend>/backend-api
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && cp .env.example .env && $EDITOR .env
 ```
-Wrap it in a systemd unit like `install-service.sh` (`ExecStart … uvicorn main:app --port 8000`). PromptPotter reaches it at `.env`'s `TERMNORM_URL` (`http://127.0.0.1:8000` on one box; unset, TermNorm is not configured). Set `BACKEND_DIR` / `BACKEND_SERVICE` in `deploy.config` **before** `./bootstrap.sh`, so bootstrap writes the shared `TERMNORM_TOKEN` into both `.env` files and `update.sh` keeps the backend in lockstep; otherwise copy the token into the backend's `.env` by hand, with `TERMNORM_REQUIRE_AUTH=true`. `update.sh` syncs the backend checkout, reinstalls its requirements and restarts its unit beside the optimizer, so a pushed backend change ships with the ordinary update.
+Wrap it in a systemd unit like `install-service.sh` (`ExecStart … uvicorn main:app --port 8000`). PromptPotter reaches it at `.env`'s `TERMNORM_ENDPOINTS` (`{"local": "http://127.0.0.1:8000"}` on one box; a dataset names another as `pipeline.endpoint`; unset, TermNorm is not configured). Set `BACKEND_DIR` / `BACKEND_SERVICE` in `deploy.config` **before** `./bootstrap.sh`, so bootstrap writes the shared `TERMNORM_TOKEN` into both `.env` files and `update.sh` keeps the backend in lockstep; otherwise copy the token into the backend's `.env` by hand, with `TERMNORM_REQUIRE_AUTH=true`. `update.sh` syncs the backend checkout, reinstalls its requirements and restarts its unit beside the optimizer, so a pushed backend change ships with the ordinary update.
 
 ## Defaults you can override
 

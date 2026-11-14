@@ -41,23 +41,23 @@ class Probe(NamedTuple):
     fix: str
 
 
-def _backend(name: str) -> Probe:
+def _backend(name: str, endpoint: str | None) -> Probe:
     connector = connectors.CONNECTORS.get(name)
 
     async def check() -> Reading:
         # No address is no answer: said on every check, never recorded or told as broken.
-        if (unset := connector.unconfigured()) is not None:
+        if (unset := connector.unconfigured(endpoint)) is not None:
             return Reading("unverified", unset)
         # Any refusal a launch would get is broken: a missing extra refuses it as surely.
-        refused = await probe_backend(name)
+        refused = await probe_backend(name, endpoint)
         if refused is None:
             return Reading("held", BACKEND_REACHABILITY_INFO["live"].label)
         return Reading("broken", str(refused))
 
     return Probe(
-        f"backend:{name}",
+        f"backend:{name}" + (f":{endpoint}" if endpoint else ""),
         check,
-        connector.unconfigured() or f"bring {name} up at {connector.base_url()}",
+        connector.unconfigured(endpoint) or f"bring {name} up at {connector.base_url(endpoint)}",
     )
 
 
@@ -157,7 +157,7 @@ def _operator_channel(token: str) -> Probe:
 
 
 def probes() -> list[Probe]:
-    """The roster: every remote backend service, an unaddressed one included, every configured
+    """The roster: every remote backend endpoint, an unaddressed backend included, every configured
     sign-in provider, every LLM key, and the operator's channel where one is configured."""
     paths = default_identity_paths()
     bundle = build_identity_bundle(paths)
@@ -167,9 +167,10 @@ def probes() -> list[Probe]:
     }
     return [
         *(
-            _backend(name)
+            _backend(name, endpoint)
             for name, connector in connectors.CONNECTORS.table.items()
             if connector.execution == "remote_http"
+            for endpoint in connector.probed_endpoints()
         ),
         *(_signin(provider, call, paths.provider_config) for provider, call in redeem.items()),
         *(_llm_key(provider, spec, key) for provider, (spec, key) in keyed_specs().items()),

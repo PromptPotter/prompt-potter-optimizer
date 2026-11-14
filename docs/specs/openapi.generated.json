@@ -1246,11 +1246,6 @@
       "BackendHealthResponse": {
         "additionalProperties": false,
         "properties": {
-          "base_url": {
-            "description": "Backend API base URL probed",
-            "title": "Base Url",
-            "type": "string"
-          },
           "checked_at": {
             "description": "ISO 8601 probe timestamp",
             "title": "Checked At",
@@ -1280,7 +1275,6 @@
           }
         },
         "required": [
-          "base_url",
           "status",
           "checked_at"
         ],
@@ -1302,15 +1296,18 @@
             "description": "The header the operator's credential rides in on every request; null where operator config holds none",
             "title": "Auth Header"
           },
-          "base_url": {
-            "description": "Where the operator configured it; empty where none is",
-            "title": "Base Url",
-            "type": "string"
-          },
           "configured": {
             "description": "False where a `remote_http` one names no address, so every call refuses",
             "title": "Configured",
             "type": "boolean"
+          },
+          "endpoints": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Each address the operator configured, by the name a dataset's `pipeline.endpoint` gives; empty where none is",
+            "title": "Endpoints",
+            "type": "object"
           },
           "execution": {
             "description": "Its wire kind: only a `remote_http` one has a connection to secure",
@@ -1331,7 +1328,7 @@
           "id",
           "execution",
           "configured",
-          "base_url",
+          "endpoints",
           "auth_header"
         ],
         "title": "BackendResponse",

@@ -1147,6 +1147,8 @@ class PipelineRead(FrozenModel):
     declaration: dict[str, Any]
     # The definition's half of that read, which a campaign outliving its dataset dir still folds.
     dataset_overlay: dict[str, NodeCall]
+    # The connector endpoint it named (`DatasetDefinition.endpoint`); `None`: the connector's one.
+    endpoint: str | None = None
     # The free tier's launch defaults its mint laid (`free_tier.py::free_tier_overlay`).
     free_tier_overlay: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # Per optimizer-node knob the declaration holds, the last layer that set it (`laid_config`).

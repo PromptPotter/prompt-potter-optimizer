@@ -735,13 +735,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `openai_compat.py`, a record payload in `audit_trail.py`, a model menu, dspy's `LM.kwargs`), which
   the action leaves alone. Action: type `current_config` as `NodeCall` and read its fields.
   **Re-test:** `git grep -cE "current_config\.get\(" -- promptpotter` is 0.
-- **Two connectors still default in code** (rn-conn's landing): `connectors/dbllmbench.py::_DB_DEFAULT_URLS`
-  maps a database to upstream's compose address when `DBLLMBENCH_DB_URL` is unset, and
-  `connectors/harbor.py:229` defaults `skill_delivery` to `agent_skill`, against §0.5. Deleting the map
-  breaks a TypeQL run on an `.env` without the URL, so the address's home is the decision. Action: the
-  address is operator config (the install's `.env.example` names it) and `skill_delivery` sits in the
-  dataset's file; both refuse when absent. **Rides with:** xconn 2 (named endpoints per connector).
-  **Re-test:** `git grep -cE "_DB_DEFAULT_URLS|skill_delivery.*or " -- promptpotter/connectors` is 0.
 
 ### webb-5 (what webb-4 left at its landing)
 
@@ -956,29 +949,20 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/29 · xconn
 
-- **PromptPotter does not read TermNorm's served contract, so a wire skew surfaces as a 100% degraded
-  origin, not a refusal at check-in**: the box's TermNorm read `answer_field` while PromptPotter sent
-  `answer_fields` (2026-10-31). A TermNorm schema edit lays keys only `llm_only` accepts:
-  `datasets/draft_patch.py::_authored_contract` writes `answer_fields` and `response_format: json` on
-  whichever node the edit names, and `domain/pipeline_parsing.py::parse_pipeline_response` offers the
-  `response_format` axis on every `tunes_llm` node; TermNorm's `xconn` branch refuses both on
-  `entity_profiling` and `llm_ranking` (400 `wire_key_unknown`), and `top_p` on any node. And the probe
-  reads `/status` while that branch serves `GET /version` (`{revision, contract}`): `connectors/termnorm.py`
+- **PromptPotter does not read TermNorm's served wire contract**: the probe reads `/status` while
+  TermNorm's `xconn` branch serves `GET /version` (`{revision, contract}`); `connectors/termnorm.py`
   probes `/status` and `::_EXPECTED_REVISION` is `None`, so a co-owned backend fix replays stale results;
-  on the `xconn` branch `/status` loses its version word, so `_termnorm_version_check`
-  (`termnorm.py:120-127`) reads None there. Action: the probe reads `/version`; the connector serves the
-  wire contract and each node's accepted keys; the check-in refuses a node config that contract rejects,
-  a node's accepted keys bound what an edit lays and what an axis offers (refused at the mint); and the
-  revision folds into the measurement-cache key. **Rides with:** xconn 1 and 3, before TermNorm's
-  `xconn` reaches the box. **Re-test:** a launch against a backend one wire rename behind fails at the
-  probe, naming the key; a check-in schema edit on `llm_ranking` mints and its first cell answers;
-  `connectors/termnorm.py` probes `/version` and `_EXPECTED_REVISION` is not `None`.
-- **A connector's endpoint is one per install**: `config/settings.py` `TERMNORM_URL`, `N8N_HARNESS_URL`;
-  a second workflow edits `.env` and re-keys every banked cell of the first (`n8n.py::_identity_config`,
-  `:94`, hashes `CONNECTOR.base_url()`). Action: operator config holds named endpoints per connector, and a dataset names one;
-  the credential never leaves operator config ([`connectors/CLAUDE.md`](../../promptpotter/connectors/CLAUDE.md)
-  § The credential rides the connector). **Rides with:** xconn 2. **Re-test:** two n8n datasets on two
-  workflows both run, no `.env` edit between them.
+  on the `xconn` branch `/status` loses its version word, so `_termnorm_version_check` reads None there.
+  Action: the probe reads `/version` and refuses another contract; the revision folds into TermNorm's
+  answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
+  launch against a backend one contract behind fails at the probe, naming both numbers;
+  `connectors/termnorm.py` probes `/version`.
+- **An identity re-key moves offline decisions**: an arm's content id carries identity-only keys
+  (`pipeline_resolve.py::identity_layer`). A pure re-key therefore changes which cells are drawn and
+  raced. xconn 3's revision leaf alone moved potter's crossed leader (C2.6 → C2.7) and p_best/θ in
+  capo-pobb, levi and potter (`wip/xconn` f70980fe7). Action: an arm's id derives from what the arm
+  sends, never from its identity keys. **Rides with:** xconn 3, before it lands. **Re-test:**
+  `wip/xconn`'s run against its base moves only `backend_revision` leaves.
 - **A moved capability or backend revision alone passes a resume**: it is a drift cause only when the
   origin hash also mismatches (`jobs/mint.py::resolve_resume`, `::_revision_moved`). Action: a resume
   refuses a moved capability or backend revision. **Rides with:** xconn 3. **Re-test:** a resume after a

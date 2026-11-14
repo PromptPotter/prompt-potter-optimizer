@@ -44,6 +44,7 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_FIELDS_KEY,
     OUTPUT_SCHEMA_KEY,
     SCHEMA_TOGGLE_PARAM,
+    PipelineNode,
     description_key,
     description_path,
     description_paths,
@@ -119,7 +120,11 @@ async def plan_draft_patch(
                 was.config.scoring, sent["scoring"], campaign_terms(served.connector)
             )
     if patch.node_output is not None:
-        config = _authored_contract(config, was.params, patch.node_output)
+        if (declared := was.chain.get_node(patch.node_output.node)) is None:
+            raise PayloadInvalidError(
+                f"patch.node_output.node {patch.node_output.node!r} is no node of the pipeline."
+            )
+        config = _authored_contract(config, was.params, patch.node_output, declared)
     if patch.node_narrowing is not None:
         narrowed = _block(config.get("optimizer_narrowing"))
         for node, intents in patch.node_narrowing.items():
@@ -243,10 +248,14 @@ def _folded_scoring(
 
 
 def _authored_contract(
-    config: dict[str, Any], params: PipelineParams, edit: NodeOutputEdit
+    config: dict[str, Any],
+    params: PipelineParams,
+    edit: NodeOutputEdit,
+    declared: PipelineNode,
 ) -> dict[str, Any]:
     """*params*, what the node runs before this edit, says whether it already declares a contract:
-    a reused dataset's own counts."""
+    a reused dataset's own counts. A key *declared*'s door does not read is laid only where the
+    edit names it, so the mint refuses it by name (`preflight.py::refuse_off_contract`)."""
     overlay = _block(config.get("pipeline_overlay"))
     node = _block(overlay.get(edit.node))
     running = params.node(edit.node).laid_keys()
@@ -258,10 +267,10 @@ def _authored_contract(
     inferred = ["answer"] if "answer" in fields else fields[-1:]
     node[OUTPUT_SCHEMA_KEY] = edit.output_schema
     node.pop(ANSWER_FIELDS_KEY, None)
-    if answers := authored or kept or inferred:
+    if answers := authored or (kept or inferred if declared.reads(ANSWER_FIELDS_KEY) else None):
         node[ANSWER_FIELDS_KEY] = answers
     out = {**config, "pipeline_overlay": {**overlay, edit.node: node}}
-    if not first:
+    if not first or not declared.reads(SCHEMA_TOGGLE_PARAM):
         return out
     # A narrowing written before any schema existed could only tick `text`: re-open the axis.
     node[SCHEMA_TOGGLE_PARAM] = "json"

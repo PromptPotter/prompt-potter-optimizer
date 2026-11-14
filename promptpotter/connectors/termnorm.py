@@ -127,10 +127,6 @@ async def _termnorm_version_check(
 _EXPECTED_REVISION: str | None = None
 
 
-def _termnorm_endpoint() -> str:
-    return settings.TERMNORM_URL
-
-
 def _termnorm_auth_token() -> str | None:
     return settings.TERMNORM_TOKEN.get_secret_value() or None
 
@@ -147,7 +143,7 @@ CONNECTOR = Connector(
     expected_revision=_EXPECTED_REVISION,
     version_check=_termnorm_version_check,
     preflight=_termnorm_preflight,
-    endpoint=Endpoint("TERMNORM_URL", _termnorm_endpoint),
+    endpoint=Endpoint("TERMNORM_ENDPOINTS", lambda: settings.TERMNORM_ENDPOINTS),
     auth_token=_termnorm_auth_token,
     # The knee on `llm_only`: past it the wall clock stops falling and the call tail grows.
     max_cells_in_flight=16,

@@ -151,7 +151,9 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     connector = connectors.CONNECTORS.get(definition.connector)
     panel = dataset_experiment(stores, dataset, connector)
     experiment = None if panel is None else panel.experiment
-    served = await served_pipeline(stores, connector, experiment=experiment)
+    served = await served_pipeline(
+        stores, connector, endpoint=definition.endpoint, experiment=experiment
+    )
     layers = ConfigLayers.of(dataset, None)
     # Each arm's as its mint lays it (`mint.py::arm_config`), in *heads*' order.
     merges = [

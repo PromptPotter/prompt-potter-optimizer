@@ -433,7 +433,7 @@ def fake_connector(name: str = "fake", **declared: Any) -> Connector:
         name,
         termnorm_wire_adapter,
         **{
-            "endpoint": Endpoint("FAKE_URL", lambda: f"http://{FakeBackend.AT}"),
+            "endpoint": Endpoint("FAKE_ENDPOINTS", lambda: {"fake": f"http://{FakeBackend.AT}"}),
             "cell_envelope_s": cell_envelope_of(600.0),
             "cell_payer": "host",
             "sent_spend_bound": None,
@@ -444,7 +444,9 @@ def fake_connector(name: str = "fake", **declared: Any) -> Connector:
 
 
 def backend_client(jobs_dir: Path, **declared: Any) -> BackendClient:
-    return BackendClient(fake_connector(**declared), workload=PROBE_WORKLOAD, jobs_dir=jobs_dir)
+    return BackendClient(
+        fake_connector(**declared), endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=jobs_dir
+    )
 
 
 def workspace(root: Path, identity: IdentityContext | None = None) -> Stores:

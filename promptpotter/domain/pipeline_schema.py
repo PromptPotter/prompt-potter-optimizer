@@ -380,6 +380,12 @@ class PipelineNode(FrozenModel):
     spend_bound: NodeSpendBound | None = None
     # A member's knob model as JSON Schema, each property's `default` what its manifest declares.
     knob_schema: dict[str, Any] | None = None
+    # The keys its backend's door reads (`config` ∪ `optimizer.param_keys` ∪ the served `accepts`);
+    # `None`: the backend serves no `accepts`, a declared absence that bounds nothing.
+    wire_keys: frozenset[str] | None = None
+
+    def reads(self, key: str) -> bool:
+        return self.wire_keys is None or key in self.wire_keys
 
     @property
     def output_keys(self) -> list[str]:

@@ -26,7 +26,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 **What to try:**
 - Check the backend is up: `curl http://127.0.0.1:8000/status` (substitute your URL).
 - If running a local TermNorm backend, start it in its own terminal first.
-- Check `.env`'s `TERMNORM_URL` points at it.
+- Check `.env`'s `TERMNORM_ENDPOINTS` names it under the dataset's `pipeline.endpoint`.
 - Then `python -m promptpotter resume`: the samples it missed are measured on resume.
 
 ---
