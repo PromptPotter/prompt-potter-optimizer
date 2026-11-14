@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { buildIsStale } from "@/lib/api";
-import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
+import { STORAGE_KEYS } from "@/lib/storage-keys";
 import s from "./ErrorBoundary.module.css";
 
 interface Props {

@@ -1,7 +1,7 @@
 import { Activity, useEffect, useRef, useState, type RefObject } from "react";
 import { Button, IconClose } from "@/components/ui";
 import type { FamilyId } from "@/lib/address";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { FAMILIES, openColumns } from "./families";
 
 // The row scrolls, never `scrollIntoView`: that moves where Tab starts, past the skip link.

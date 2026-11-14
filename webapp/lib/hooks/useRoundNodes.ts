@@ -1,9 +1,9 @@
 import { useMemo } from "react";
 import { roundAuditRead } from "@/lib/api";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/state/poll";
 import { useObserveSubject } from "./useObserveSubject";
 import { readyData, useRead } from "./useRead";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import type { NodeBlock, RoundAudit } from "@/lib/api/types";
 import type { ReadResult } from "@/lib/read-cache";
 

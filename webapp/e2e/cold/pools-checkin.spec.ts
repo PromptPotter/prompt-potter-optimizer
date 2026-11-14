@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import type { APIRequestContext, Page } from "@playwright/test";
 import { SETUP_STEP_TITLES, type DraftCampaignWire } from "@/lib/api/types";
-import { promptField } from "@/lib/prompt-fields";
+import { promptField } from "@/lib/derivations";
 import { test, expect, open, command, datasetNames, drafts, passConsent, type Draft } from "../harness";
 import { COLD_HOME } from "../world";
 

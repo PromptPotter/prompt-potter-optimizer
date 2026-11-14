@@ -1,11 +1,10 @@
 import type { ReactNode } from "react";
 import type { DraftCampaignWire, DraftPatch } from "@/lib/api/types";
 import { CopyButton, ReadState, Select } from "@/components/ui";
-import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
-import { NodeSurface } from "@/components/shell/node-surface/NodeSurface";
-import { interiorNodes, nodeSchemaReading, searchPoint } from "@/lib/derivations";
+import { PipelineFlow } from "@/components/pipeline/PipelineFlow";
+import { NodeSurface } from "@/components/node-surface/NodeSurface";
+import { draftPrompts, interiorNodes, searchPoint } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
-import { draftPrompts } from "@/lib/prompt-fields";
 
 function stepCount(n: number): string {
   return n === 1 ? "1 step" : `${n} steps`;
@@ -27,7 +26,6 @@ export function PipelineSetupSection({
   children: ReactNode;
 }) {
   const read = useConnector();
-  const schema = nodeSchemaReading(read);
   const single = draft.active_steps.length === 1;
 
   return (
@@ -86,7 +84,7 @@ export function PipelineSetupSection({
               <PipelineFlow
                 layer={{
                   view: pipeline.view,
-                  read: schema.read,
+                  read,
                   connector: pipeline.connector,
                   reach: pipeline.reach,
                   scope: "target",

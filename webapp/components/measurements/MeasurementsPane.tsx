@@ -15,7 +15,7 @@ import { fmtLogits, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { setCellsView, useCells, useCellsView, type CellsPreset } from "@/lib/hooks/useCells";
 import { failureOf, shownData } from "@/lib/hooks/useRead";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import {
   Chip,
   DataTable,

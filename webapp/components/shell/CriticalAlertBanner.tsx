@@ -5,9 +5,9 @@ import { cx } from "@/lib/cx";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useBackend } from "@/lib/hooks/useConnector";
 import { failureOf } from "@/lib/hooks/useRead";
-import { connectionSaid, useViewedDashboard } from "@/lib/poll";
+import { connectionSaid, useViewedDashboard } from "@/lib/state/poll";
 import { useActivePointer, useRegistry } from "@/lib/hooks/useRegistry";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 
 // The pinned line: the connection's own row, else the louder of the run's served `said` and its
 // backend probe's. A connection row is the one said row the client makes.

@@ -1,6 +1,6 @@
 // Only a drill-in reads the pipeline: an inner cycle's `.inner/` sandbox is absent from `/hierarchy`.
 
-import { useViewedDatasetName, useWorkspace } from "../workspace";
+import { useViewedDatasetName, useWorkspace } from "@/lib/state/workspace";
 import { useCampaignPipeline, useLeafSubject } from "./useConnector";
 import { readyData } from "./useRead";
 

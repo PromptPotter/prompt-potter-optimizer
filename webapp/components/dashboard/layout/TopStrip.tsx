@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { useViewedCourse } from "@/lib/lineage";
+import { useViewedCourse } from "@/lib/state/lineage";
 import { figureOf } from "@/lib/derivations";
 import { Hearts } from "@/components/ui";
 

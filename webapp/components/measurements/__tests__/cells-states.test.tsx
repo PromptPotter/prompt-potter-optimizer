@@ -5,9 +5,9 @@ import type { PairwiseComparison } from "@/lib/api/types";
 import { clearReadCache } from "@/lib/read-cache";
 import { AuthProvider } from "@/lib/state/auth";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/workspace";
+import { WorkspaceProvider } from "@/lib/state/workspace";
 import { courseTags, pairedReading, subtreeCampaign, subtreeCourse } from "@/lib/test-fixtures";
-import { SubjectFlips } from "@/components/shell/searchpoint/SubjectFlips";
+import { SubjectFlips } from "@/components/searchpoint/SubjectFlips";
 import { MeasurementsPane } from "../MeasurementsPane";
 import { RosterNote } from "../RosterNote";
 

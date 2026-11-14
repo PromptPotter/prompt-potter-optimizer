@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { FileSelection, FileTree, type FilePick } from "./FileTree";
 import { FileViewer } from "./FileViewer";
 

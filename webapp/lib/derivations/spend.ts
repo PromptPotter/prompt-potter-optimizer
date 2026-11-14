@@ -11,7 +11,7 @@ import {
 import { wordRows } from "@/lib/api/words";
 import { fmtUnit, fmtUsd } from "@/lib/format";
 
-export interface SpendLine {
+interface SpendLine {
   key: TokenUsageKind;
   label: string;
   kind: KindSpend;

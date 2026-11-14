@@ -1,10 +1,10 @@
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/state/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData } from "@/lib/hooks/useRead";
 import type { HierarchyCourse } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { runNextStep } from "@/lib/derivations";
-import { SummaryBlock } from "@/components/shell/SummaryBlock";
+import { SummaryBlock } from "@/components/chat/SummaryBlock";
 import { HardSamplesPreview } from "@/components/chat/HardSamplesPreview";
 
 // The chat's one run block, the sample walk: the leader and the heatmap are the dashboard's.

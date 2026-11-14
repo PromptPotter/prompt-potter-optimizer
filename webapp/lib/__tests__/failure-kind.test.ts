@@ -9,7 +9,7 @@ import {
 } from "@/lib/api";
 import { toApiError } from "@/lib/api/client";
 import { clearIncidents, formatDiagnostics, getIncidents, reportIncident } from "@/lib/diagnostics";
-import { connectionSaid } from "@/lib/poll";
+import { connectionSaid } from "@/lib/state/poll";
 
 describe("failureKind", () => {
   it("maps the statuses whose reactions differ", () => {

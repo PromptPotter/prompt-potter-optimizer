@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { FAMILY_IDS, nodeOfKey, type FamilyId, type View } from "@/lib/address";
 import type { FigureKey } from "@/lib/derivations";
 import { Empty } from "@/components/ui";
-import { NodeDetail } from "@/components/shell/node-surface/NodeDetail";
+import { NodeDetail } from "@/components/node-surface/NodeDetail";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import {
   CandidatesPane,

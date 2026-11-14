@@ -9,7 +9,7 @@ import {
   type DraftCampaignWire,
   type DraftReopenResponse,
 } from "@/lib/api/types";
-import { ThreadProvider } from "@/lib/chat/thread";
+import { ThreadProvider } from "@/lib/state/chat-thread";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { useQueuedStart } from "@/lib/hooks/useQueuedStart";
 import { clearReadCache } from "@/lib/read-cache";

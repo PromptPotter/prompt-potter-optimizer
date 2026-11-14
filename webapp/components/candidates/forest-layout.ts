@@ -9,8 +9,7 @@ import type {
   SubtreeCourse,
 } from "@/lib/api/types";
 import { candidatesOf, descentOf, tagValue } from "@/lib/derivations";
-import type { CyclePath } from "@/lib/ids";
-import { pathOfAddress } from "@/lib/ids";
+import { type CyclePath, pathOfAddress } from "@/lib/ids";
 import { fmtUnit } from "@/lib/format";
 
 export interface Density {

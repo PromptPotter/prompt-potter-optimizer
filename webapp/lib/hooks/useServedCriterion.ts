@@ -1,6 +1,6 @@
 import { useMemo } from "react";
-import { useViewedDashboard } from "@/lib/poll";
-import { servedMask, type ScoringMask } from "@/lib/scoring-mask";
+import { useViewedDashboard } from "@/lib/state/poll";
+import { servedMask, type ScoringMask } from "@/lib/state/scoring-mask";
 
 interface ServedCriterion {
   formula: string | null;

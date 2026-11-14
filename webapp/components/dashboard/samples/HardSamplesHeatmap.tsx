@@ -2,8 +2,8 @@ import { useState } from "react";
 import { fitnessStyle } from "@/lib/derivations";
 import { useCells } from "@/lib/hooks/useCells";
 import { failureOf, shownData } from "@/lib/hooks/useRead";
-import { useViewedDashboard } from "@/lib/poll";
-import { useWorkspace } from "@/lib/workspace";
+import { useViewedDashboard } from "@/lib/state/poll";
+import { useWorkspace } from "@/lib/state/workspace";
 import { RosterNote } from "@/components/measurements/RosterNote";
 import { SampleTrajectory, SampleTrajectoryMiniButton } from "./SampleTrajectory";
 

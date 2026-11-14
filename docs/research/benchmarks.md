@@ -94,6 +94,10 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   [−0.016, +0.096], CAPO −0.030.
 - L4 inner cells: nothing separated; between-run SD 0.104 per pair, so ±0.05 needs ≈ 17 cells vs the
   5 a round draws; search θ predicts held-out lift weakly (Spearman ≈ 0.3).
+- L4 panel C0 (`promptpotter-self/panel`, f589cbe9a, 2026-11-14, $0.24 billed): `composite_fitness`
+  **0.533** over six cells, each cell's held-out lift on 20 rows: 0 on hotpotqa-distractor ×2 and
+  justlogic-d234 ×2, +5 and +15 pts on legalbench-fods; in three legalbench-fods rounds L1 proposed
+  only no-op variants.
 
 ## Protocol
 

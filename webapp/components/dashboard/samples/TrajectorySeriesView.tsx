@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { HoverCard, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import {
   MOVEMENT_CLASS,
   orderAtStep,

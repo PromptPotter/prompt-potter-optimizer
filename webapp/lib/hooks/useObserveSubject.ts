@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { resolveObserveSubject, type ObserveSubject } from "@/lib/derivations";
-import { useViewedCourse } from "@/lib/lineage";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedDashboard } from "@/lib/state/poll";
 import { useSelection } from "@/lib/state/selection";
 
 export function useObserveSubject(): ObserveSubject {

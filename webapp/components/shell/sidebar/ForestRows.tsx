@@ -21,8 +21,8 @@ import type {
   SubtreeCourse,
   UnstartedCampaign,
 } from "@/lib/api/types";
-import { useLineageTree } from "@/lib/lineage";
-import { useWorkspace } from "@/lib/workspace";
+import { useLineageTree } from "@/lib/state/lineage";
+import { useWorkspace } from "@/lib/state/workspace";
 import { PLACEHOLDER } from "@/lib/format";
 import { HoverCard, ReadState } from "@/components/ui";
 import { CampaignMenu } from "./CampaignMenu";

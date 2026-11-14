@@ -4,7 +4,7 @@ import { ConsentGate } from "@/components/onboarding/ConsentGate";
 import { WelcomeLockoutModal } from "@/components/onboarding/WelcomeLockoutModal";
 import { ErrorBoundary } from "@/components/ui";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/workspace";
+import { WorkspaceProvider } from "@/lib/state/workspace";
 import { mount } from "./mount";
 
 mount(

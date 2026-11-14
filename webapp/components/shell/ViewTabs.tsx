@@ -1,5 +1,5 @@
 import { Icon, SegmentedControl } from "@/components/ui";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { PRESETS } from "./families";
 import { preloadLazyPanes } from "./lazy-panes";
 

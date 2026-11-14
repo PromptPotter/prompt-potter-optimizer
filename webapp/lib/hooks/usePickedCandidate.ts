@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { useRound } from "./useRound";
 
 // The hash's pick as its round serves it: null until that round's reading of the arm lands, so a

@@ -3,7 +3,7 @@ import type { CellStatus, CellsResponse, HardSampleOrder, HardSamplesScope } fro
 import type { CyclePath } from "../ids";
 import type { ReadResult } from "../read-cache";
 import { createModuleStore } from "../state/module-store";
-import { useMomentAt, useWorkspace } from "../workspace";
+import { useMomentAt, useWorkspace } from "@/lib/state/workspace";
 import { useLeafDatasetName } from "./useLeafDatasetName";
 import { useRead } from "./useRead";
 

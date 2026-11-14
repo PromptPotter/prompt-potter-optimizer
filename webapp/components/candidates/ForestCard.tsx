@@ -12,14 +12,14 @@ import {
   Toolbar,
   ToolbarSpacer,
 } from "@/components/ui";
-import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/poll";
-import { useWorkspace } from "@/lib/workspace";
+import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/state/poll";
+import { useWorkspace } from "@/lib/state/workspace";
 import { pickOf } from "@/lib/derivations";
 import { shortFamilyTail } from "@/lib/ids";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { Forest, type CladogramCtx } from "./Forest";
 import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
-import { useViewedCourse } from "@/lib/lineage";
+import { useViewedCourse } from "@/lib/state/lineage";
 
 export function ForestCard() {
   const { dash } = useViewedDashboard();

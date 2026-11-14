@@ -3,7 +3,7 @@ import type { ManifestNodeOverlay, OptimizerSetup } from "@/lib/api/types";
 import { knobGroups, type KnobGroup } from "@/lib/derivations";
 import { useRead } from "@/lib/hooks/useRead";
 import { Button, CommitInput, ReadState, SegmentedControl } from "@/components/ui";
-import { KnobItem } from "@/components/dashboard/pipeline/NodeKnobsPanel";
+import { KnobItem } from "@/components/pipeline/NodeKnobsPanel";
 
 /** One arm as declared: what it runs unlike the setup above, and nothing else. */
 export interface ArmDraft {

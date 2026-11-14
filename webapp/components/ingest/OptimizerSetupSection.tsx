@@ -4,10 +4,10 @@ import { BRAND } from "@/lib/brand";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData, useRead } from "@/lib/hooks/useRead";
 import { heldRead } from "@/lib/read-cache";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { ReadState, SegmentedControl } from "@/components/ui";
-import { PipelineFlow } from "@/components/dashboard/pipeline/PipelineFlow";
-import { NodeKnobsPanel } from "@/components/dashboard/pipeline/NodeKnobsPanel";
+import { PipelineFlow } from "@/components/pipeline/PipelineFlow";
+import { NodeKnobsPanel } from "@/components/pipeline/NodeKnobsPanel";
 
 // Reads the connector read its knobs panel and graph read: a check-in's draft is its transport.
 export function OptimizerSetupSection({ onApply }: { onApply: (patch: DraftPatch) => void }) {

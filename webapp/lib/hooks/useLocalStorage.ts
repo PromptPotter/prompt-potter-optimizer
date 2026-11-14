@@ -1,20 +1,5 @@
 import { useCallback, useRef, useSyncExternalStore } from "react";
-
-export const STORAGE_KEYS = {
-  theme: "promptpotter.theme",
-  diagnostics: "promptpotter.diagnostics.incidents",
-  viewMemory: "promptpotter.view.byCampaign",
-  sidebarCollapsed: "promptpotter.sidebar.collapsed",
-  sidebarWidth: "promptpotter.sidebar.width",
-  treeShowCandidates: "promptpotter.tree.showCandidates",
-  chunkReloadAt: "promptpotter.chunk-reload-at",
-} as const;
-
-export const sidePanelKey = (panelId: string) => `side-panel:${panelId}` as const;
-
-type StorageKey =
-  | (typeof STORAGE_KEYS)[keyof typeof STORAGE_KEYS]
-  | ReturnType<typeof sidePanelKey>;
+import type { StorageKey } from "@/lib/storage-keys";
 
 export const BOOL = {
   serialize: (v: boolean) => (v ? "1" : "0"),

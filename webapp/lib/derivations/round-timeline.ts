@@ -1,6 +1,6 @@
 export type SelectMode = "measured" | "all";
 
-export interface StepOrder {
+interface StepOrder {
   computed: number[];
   current: number;
   planned: number[];

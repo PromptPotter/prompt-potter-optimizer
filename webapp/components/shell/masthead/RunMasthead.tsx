@@ -12,7 +12,7 @@ import {
 import { familyOfGlance, openColumns } from "@/components/shell/families";
 import { Figure, FigureRow, ViewDoor } from "@/components/shell/FigureRow";
 import type { FamilyId } from "@/lib/address";
-import { CriterionLine } from "@/components/shell/scoring/Criterion";
+import { CriterionLine } from "@/components/criterion/Criterion";
 import { SpendBuckets } from "@/components/shell/SpendBuckets";
 import type { HierarchyCampaign, Figure as FigureType } from "@/lib/api/types";
 import { BRAND } from "@/lib/brand";
@@ -21,11 +21,11 @@ import { tagValue, type FigureKey } from "@/lib/derivations";
 import { fmtAgo } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf, type CyclePath } from "@/lib/ids";
-import { useViewedCourse } from "@/lib/lineage";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedDashboard } from "@/lib/state/poll";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import { TERMS } from "@/lib/terms";
-import { useViewedListing, useWorkspace } from "@/lib/workspace";
+import { useViewedListing, useWorkspace } from "@/lib/state/workspace";
 
 // "Where is this run", over every subject: its title row, and under a run its setup and the viewed
 // course's served figures, each the door to the view that reads it; any other open view gets a door

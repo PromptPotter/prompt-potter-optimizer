@@ -1,8 +1,8 @@
 import type { Evidence, PairwiseComparison, SubjectReading } from "@/lib/api/types";
 import { armAt, individualOf, type ObservePoint } from "@/lib/derivations";
-import { useViewedLineage } from "@/lib/lineage";
-import { useViewedDashboard } from "@/lib/poll";
-import { useWorkspace } from "@/lib/workspace";
+import { useViewedLineage } from "@/lib/state/lineage";
+import { useViewedDashboard } from "@/lib/state/poll";
+import { useWorkspace } from "@/lib/state/workspace";
 import { useCompareWithOrigin } from "./useCompareWithOrigin";
 import { useEvidence, type EvidenceAsk } from "./useEvidence";
 import { readyData } from "./useRead";

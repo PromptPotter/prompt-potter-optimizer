@@ -4,7 +4,7 @@ import type { ListedCampaign } from "@/lib/api/types";
 import { tagValue } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useIngest } from "@/lib/state/ingest-flow";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { Button, Dialog, FailureLine, Menu, MenuItem } from "@/components/ui";
 
 export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {

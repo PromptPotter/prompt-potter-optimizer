@@ -10,7 +10,7 @@ import type {
   ListedCampaign,
   UnstartedCampaign,
 } from "@/lib/api/types";
-import { campaignAt, runningCourses } from "../derivations/hierarchy";
+import { campaignAt, runningCourses } from "@/lib/derivations";
 import type { ReadResult } from "@/lib/read-cache";
 import { shownData, useRead } from "./useRead";
 

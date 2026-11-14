@@ -24,7 +24,7 @@ import { cssPct, filled, fmtAgo } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { couponRead, quotaRead, commands } from "@/lib/api";
 
 const SEGMENTED_MAX = 8;

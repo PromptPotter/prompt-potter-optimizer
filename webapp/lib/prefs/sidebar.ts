@@ -1,4 +1,5 @@
-import { BOOL, STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { BOOL, useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { STORAGE_KEYS } from "@/lib/storage-keys";
 
 export const SIDEBAR_WIDTH = { initial: 200, min: 160, max: 480 } as const;
 

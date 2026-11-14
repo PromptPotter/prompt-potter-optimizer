@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Badge, CardFrame, DataTable, FailureLine, Term, type Column } from "@/components/ui";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
-import { PairedLift } from "@/components/shell/PairedLift";
+import { PairedLift } from "@/components/searchpoint/PairedLift";
 import type { PairedReading, ServedArm } from "@/lib/api/types";
 import { liftVersus } from "@/lib/derivations";
 import { fmtLiftBand, fmtSigned, fmtUnit, PLACEHOLDER } from "@/lib/format";

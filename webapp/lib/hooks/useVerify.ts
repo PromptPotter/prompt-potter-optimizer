@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import type { MeasuredUnit, VerificationMark, VerifyReading } from "@/lib/api/types";
 import type { CyclePath } from "@/lib/ids";
-import { useDashboard } from "@/lib/poll";
+import { useDashboard } from "@/lib/state/poll";
 
 interface VerifyState {
   readings: ReadonlyMap<string, VerifyReading>;

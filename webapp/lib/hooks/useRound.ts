@@ -14,10 +14,10 @@ import {
   type ObserveConfig,
 } from "../derivations";
 import type { CyclePath } from "../ids";
-import { useDashboard } from "../poll";
+import { useDashboard } from "@/lib/state/poll";
 import type { ReadResult } from "../read-cache";
 import type { ArmRow } from "../types";
-import { useMomentAt } from "../workspace";
+import { useMomentAt } from "@/lib/state/workspace";
 import { readyData, useRead } from "./useRead";
 
 interface Round {

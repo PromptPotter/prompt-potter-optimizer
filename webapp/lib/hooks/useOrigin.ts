@@ -2,9 +2,9 @@
 
 import { useMemo } from "react";
 import { originAt, originPoint, type ObservePoint } from "@/lib/derivations";
-import { useViewedLineage } from "@/lib/lineage";
-import { useViewedDashboard } from "@/lib/poll";
-import { useWorkspace } from "@/lib/workspace";
+import { useViewedLineage } from "@/lib/state/lineage";
+import { useViewedDashboard } from "@/lib/state/poll";
+import { useWorkspace } from "@/lib/state/workspace";
 
 export function useOrigin(): ObservePoint | null {
   const { dash } = useViewedDashboard();

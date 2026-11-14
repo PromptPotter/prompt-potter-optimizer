@@ -3,7 +3,7 @@ import type { ObserveConfig, ObservePoint } from "@/lib/derivations";
 import { useRound } from "@/lib/hooks/useRound";
 import type { RoundView } from "@/lib/api/types";
 import type { ReadResult } from "@/lib/read-cache";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 
 export interface SearchpointRead {
   cfg: ObserveConfig | null;

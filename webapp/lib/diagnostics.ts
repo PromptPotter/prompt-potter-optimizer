@@ -2,7 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 import { ApiError, failureKind, type FailureKind } from "@/lib/api";
-import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
+import { STORAGE_KEYS } from "@/lib/storage-keys";
 import { PLACEHOLDER } from "@/lib/format";
 
 // Bumping DROPS the stored ring; never migrate it.

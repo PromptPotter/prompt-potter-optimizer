@@ -2,7 +2,7 @@ import type { Column } from "@/components/ui";
 import type { MeasuredLift, PairedReading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { readPaired } from "@/lib/derivations";
-import { PairedLift } from "@/components/shell/PairedLift";
+import { PairedLift } from "@/components/searchpoint/PairedLift";
 import { fmtLift, fmtLiftInterval, PLACEHOLDER, sideTone } from "@/lib/format";
 
 // Null where the pair was not read; its sentence fills the lift column.

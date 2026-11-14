@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { pickOf } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
 import type { HierarchyCandidate } from "@/lib/api/types";

@@ -3,10 +3,9 @@
 .chat-content > .wf-hero{flex:0 0 auto}
 .chat-content .chat-grid{flex:1 0 auto}
 .chat-content .chat-panel{background:transparent;border:0;border-radius:0;overflow:visible}
-.chat-content .chat-messages{flex:1 0 auto;overflow:visible;padding-bottom:calc(var(--space-18) + var(--remote-dock-h))}
-.chat-content .chat-input-row{position:sticky;bottom:0;z-index:3;background:var(--color-background-tertiary)}
-.chat-content::after{display:none}
-.shell:has(.chat-content) > .remote-control{bottom:calc(var(--nav-dock-h) + var(--chat-composer-h,0px) + env(safe-area-inset-bottom,0px))}
+.chat-content .chat-messages{flex:1 0 auto;overflow:visible}
+/* The remote sits on the tab bar on every view; the composer rides above it, over the pane's spacer. */
+.chat-content .chat-input-row{position:sticky;bottom:calc(var(--remote-dock-h) + var(--remote-dock-lift) + var(--safe-bottom));z-index:3;background:var(--color-background-tertiary)}
 .chat-grid{display:grid;grid-template-columns:minmax(0,var(--reading-measure));gap:var(--space-24);justify-content:center;flex:1 0 240px;min-height:0;padding:0 var(--space-18)}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:0;min-width:0}
 .chat-messages{flex:1;overflow-y:auto;padding:var(--space-18);display:flex;flex-direction:column;gap:var(--space-12)}

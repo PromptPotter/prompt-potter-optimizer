@@ -31,7 +31,7 @@ import {
   SCORE_LENS_LABELS,
 } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
-import { setScoringMask } from "@/lib/scoring-mask";
+import { setScoringMask } from "@/lib/state/scoring-mask";
 
 const lensOptions = (labels: Record<string, string>) =>
   wordRows(labels).map(([value, label]) => ({ value, label }));

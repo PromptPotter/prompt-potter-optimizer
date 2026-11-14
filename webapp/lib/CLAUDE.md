@@ -1,6 +1,6 @@
 # webapp/lib — CLAUDE.md
 
-A module lives by what it IS: `api/` the wire, `state/` one provider or store per file, `prefs/` one hook per `STORAGE_KEYS` entry, `derivations/` a pure reading of served data, `hooks/`, `types/`. A context one surface alone consumes lives in that surface.
+A module lives by what it IS: `api/` the wire, `state/` one provider or store per file, `prefs/` one hook per display preference (every stored key is one `storage-keys.ts::STORAGE_KEYS` row, prefixed `promptpotter.`), `derivations/` a pure reading of served data, `hooks/`, `types/`. A context one surface alone consumes lives in that surface.
 
 ## Display-data sources
 
@@ -8,9 +8,9 @@ A module lives by what it IS: `api/` the wire, `state/` one provider or store pe
 
 | Surface | Reached by | Sole source for |
 |---|---|---|
-| `dashboard.json` | `lib/poll.tsx` → `useViewedDashboard()` | in-flight `current_round` + `rounds[]`: FitnessChart and the SPEND breakdown |
+| `dashboard.json` | `lib/state/poll.tsx` → `useViewedDashboard()` | in-flight `current_round` + `rounds[]`: FitnessChart and the SPEND breakdown |
 | `/hierarchy` | `lib/hooks/useRegistry.ts` | every surface that lists, switches, docks or heads a run |
-| `/hierarchy/{address}` | `lib/lineage.tsx` | the genealogy at any depth |
+| `/hierarchy/{address}` | `lib/state/lineage.tsx` | the genealogy at any depth |
 | `/campaigns/{id}/cycles/{id}/rounds/{n}` | `lib/hooks/useRound.ts` | the round; `round_NNNN.json` only as raw text in Files |
 | `…/rounds/{n}/audit` | `lib/hooks/useRoundNodes.ts` | per-node LLM I/O |
 | `/datasets/{name}/cells` | `lib/hooks/useCells.ts::useCells` | every list of measured cells |
@@ -26,7 +26,7 @@ A module lives by what it IS: `api/` the wire, `state/` one provider or store pe
 
 ## Viewed identity — one address (CyclePath)
 
-**"What am I looking at?" is `viewed`, owned by `lib/workspace.tsx`; no surface keeps a second or re-derives a hop**, and a surface reads `useWorkspace()` itself, never a callback handed down. Display re-roots to the LEAF hop; ingest and Files stay on the ROOT. A command is addressed by the whole path; whether a kind acts on an inner run is the server's. **The deep link is the whole address in the HASH** (a static export has no SPA fallback), spelled in `Subject`'s hierarchy grammar (`address.ts`), and the view keys (round, sample set, observe) ride it as `;name=value`, written through `workspace.tsx::setViewKeys` alone; `ids.ts::encodeCyclePath` is also the server's `?descend=` format, byte-exact. **The one candidate pick is `workspace.tsx::pick`**, its one writer `workspace.tsx::pickCandidate`; one 95% band per channel, a bar-chart channel declared once in `components/candidates/series.ts`.
+**"What am I looking at?" is `viewed`, owned by `lib/state/workspace.tsx`; no surface keeps a second or re-derives a hop**, and a surface reads `useWorkspace()` itself, never a callback handed down. Display re-roots to the LEAF hop; ingest and Files stay on the ROOT. A command is addressed by the whole path; whether a kind acts on an inner run is the server's. **The deep link is the whole address in the HASH** (a static export has no SPA fallback), spelled in `Subject`'s hierarchy grammar (`address.ts`), and the view keys (round, sample set, observe) ride it as `;name=value`, written through `workspace.tsx::setViewKeys` alone; `ids.ts::encodeCyclePath` is also the server's `?descend=` format, byte-exact. **The one candidate pick is `workspace.tsx::pick`**, its one writer `workspace.tsx::pickCandidate`; one 95% band per channel, a bar-chart channel declared once in `components/candidates/series.ts`.
 
 ## Reads and failure
 

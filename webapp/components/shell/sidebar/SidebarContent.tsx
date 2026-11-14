@@ -11,7 +11,7 @@ import {
 } from "@/lib/state/listed-lifecycle";
 import { useShowCandidates } from "@/lib/prefs/tree";
 import { useNodeToggle } from "@/lib/state/view-memory";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { ForestRows, type TreeCtx } from "./ForestRows";
 import { SidebarFilterPopover } from "./SidebarFilterPopover";
 

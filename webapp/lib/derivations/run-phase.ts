@@ -15,14 +15,8 @@ import {
 import { filled } from "@/lib/format";
 
 // served: `RUN_PHASE_INFO` is `domain/phases.py`
-type PhaseFact = "settled" | "awaits_operator";
-
 export function phaseWalks(runPhase: RunPhase | null | undefined): boolean {
   return runPhase != null && RUN_PHASE_INFO[runPhase].walks;
-}
-
-export function phaseIs(runPhase: RunPhase | null | undefined, fact: PhaseFact): boolean {
-  return runPhase != null && RUN_PHASE_INFO[runPhase][fact];
 }
 
 export function dockPriority(runPhase: RunPhase): number {

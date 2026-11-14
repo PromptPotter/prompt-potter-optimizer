@@ -6,7 +6,7 @@ import { encodeCyclePath } from "@/lib/ids";
 import { clearReadCache } from "@/lib/read-cache";
 import { AuthProvider } from "@/lib/state/auth";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/workspace";
+import { WorkspaceProvider } from "@/lib/state/workspace";
 import {
   armReading,
   currentRound,

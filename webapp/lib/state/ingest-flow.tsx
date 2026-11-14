@@ -6,7 +6,7 @@ import {
   type IngestFlow,
 } from "@/lib/hooks/useIngestFlow";
 import type { DraftCampaignWire } from "@/lib/api/types";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 
 // The viewed check-in: a draft id, `NEW_CHECKIN` before one is minted, null while a run is viewed.
 // Nothing viewed at all (no run yet, or none followed) is a fresh check-in too.

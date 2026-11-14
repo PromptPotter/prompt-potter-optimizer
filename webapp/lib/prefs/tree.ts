@@ -1,4 +1,5 @@
-import { BOOL, STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { BOOL, useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { STORAGE_KEYS } from "@/lib/storage-keys";
 
 // Default off, so the `/hierarchy/{address}` read behind it never fires.
 export function useShowCandidates(): [boolean, (next: boolean) => void] {

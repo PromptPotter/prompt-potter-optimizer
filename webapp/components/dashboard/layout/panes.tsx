@@ -2,26 +2,26 @@
 import { memo, useMemo } from "react";
 import { CardFrame, Said } from "@/components/ui";
 import { HEALTH_GRADE_INFO } from "@/lib/api/types";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/state/poll";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { shownData } from "@/lib/hooks/useRead";
 import { useViewMemory } from "@/lib/state/view-memory";
 import { usePickedCandidate } from "@/lib/hooks/usePickedCandidate";
 import { hasTag } from "@/lib/derivations";
 import { useEntry } from "@/lib/hooks/useRegistry";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { TopStrip } from "./TopStrip";
 import { TimeRay } from "./TimeRay";
 import { CandidatesCard } from "@/components/shell/lazy-panes";
 import { ForestCard } from "@/components/candidates/ForestCard";
-import { BackendRetries } from "@/components/dashboard/pipeline/BackendRetries";
-import { BackendRevisionDrift } from "@/components/dashboard/pipeline/BackendRevisionDrift";
-import { OptimizerCard } from "@/components/dashboard/pipeline/OptimizerCard";
+import { BackendRetries } from "@/components/pipeline/BackendRetries";
+import { BackendRevisionDrift } from "@/components/pipeline/BackendRevisionDrift";
+import { OptimizerCard } from "@/components/pipeline/OptimizerCard";
 import { HardSamplesHeatmap } from "@/components/dashboard/samples/HardSamplesHeatmap";
 import { OuterSignalPanel } from "@/components/dashboard/scoring/OuterSignalPanel";
 import { ScoringInspector } from "@/components/dashboard/scoring/ScoringInspector";
-import { BenchGradeAction } from "@/components/shell/searchpoint/BenchGradeAction";
-import { SubjectBox } from "@/components/shell/searchpoint/SubjectBox";
+import { BenchGradeAction } from "@/components/searchpoint/BenchGradeAction";
+import { SubjectBox } from "@/components/searchpoint/SubjectBox";
 
 export function TimelinePane() {
   return (

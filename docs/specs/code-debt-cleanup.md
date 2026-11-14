@@ -139,7 +139,7 @@ row it closes.
   `measuring:grade_bench`, `anyone("bench")`), `cli/commands/bench.py`, `webapp/lib/api/commands.ts`,
   `domain/campaign_config.py:421`,
   `infrastructure/projections/live_dashboard/projection.py:255`, `domain/bench.py:359` (`can_run`'s
-  description) and `webapp/components/shell/searchpoint/BenchGradeAction.tsx:29` ("Grade on bench"). Action: "held-out" at
+  description) and `webapp/components/searchpoint/BenchGradeAction.tsx:29` ("Grade on bench"). Action: "held-out" at
   all five doors, at once. **Rides with:** passb-2 2, whose Owns gain those files. **Re-test:**
   `git grep -n "grade_bench" -- promptpotter webapp scripts` is empty (8 hits in 5 files today).
 - **`restate_export_bench` rewrites `export.json` outside the roster**: `campaign_store/store.py::restate_export_bench`
@@ -791,7 +791,7 @@ Toolbar, and the phone walk's back step. Left:
 
 - **The output contract is flattened in the browser**: `lib/derivations/output-contract.ts::outputContract`
   walks a JSON Schema with its own `MAX_DEPTH = 3`. Action: `domain/pipeline_schema.py::NodeOutputSchema`
-  serves the flattened contract rows and `shell/node-surface/NodeSurface.tsx` draws them. **Rides with:**
+  serves the flattened contract rows and `node-surface/NodeSurface.tsx` draws them. **Rides with:**
   webb-5, after rk-run (which holds `pipeline_schema.py`); its Owns gain both files. **Re-test:**
   `git grep -n "MAX_DEPTH" -- webapp` is empty.
 - **Adapters over a flat served shape**: `useCandidatesModel.ts` joins about twelve sources; `.facts.` is
@@ -802,14 +802,23 @@ Toolbar, and the phone walk's back step. Left:
   not), because the round read serves no label (`RoundView.candidates[].reading.vs_reference`). In
   `components/files/RoundFileView.tsx` the lift column's name comes from the first served arm's cell
   set alone, and its hint reads "on the cells both measured" whatever that set is. Action: the reading
-  serves its lift's name, which `RoundFileView` and `shell/searchpoint/SearchpointDrillIn.tsx` read;
+  serves its lift's name, which `RoundFileView` and `searchpoint/SearchpointDrillIn.tsx` read;
   `liftVersus` and the hint's fixed wording go. **Rides with:** webb-5. **Re-test:**
   `git grep -n "liftVersus" -- webapp` is empty.
-- **A ChannelMap deselect snaps back to the seed** (webb-4's landing, reported): with the seed read as
-  `picked ?? seed`, clearing the pick shows the seed again. Action: a deselect is a pick of nothing,
-  held apart from no pick. **Rides with:** webb-5. **Re-test:** deselect a channel; none stays shown.
-- **Compare at 375 floats the remote bar above the tab bar** (webb-4's landing; base too). **Rides
-  with:** mob-3. **Re-test:** a 375 shot of Compare shows the bar flush with the tab bar.
+- **An L4 panel draws its inner datasets as identical cards** (operator, 2026-11-14):
+  `pipeline/PipelineStack.tsx` lays one layer per dataset the panel measures
+  (`pipeline_resolve.py::_nests`), but `pipeline/PipelineFlow.tsx` tags a card with its `connector`
+  alone, so hotpotqa-distractor, justlogic/d234 and legalbench-fods each read "TERMNORM · LLM_ONLY";
+  the served `NestedPipelineRef.dataset` reaches only the zoom button's title. Action: a nested card
+  names its dataset, the connector beneath it. **Rides with:** webb-5. **Re-test:**
+  promptpotter-self/panel's stack names three datasets.
+- **The theme key is spelled twice** (lw's landing): `webapp/public/theme-init.js:4` reads
+  `"promptpotter.theme"` beside `lib/storage-keys.ts::STORAGE_KEYS.theme`, since the pre-paint script
+  cannot import the table. Action: the build generates the script's key from the table. **Rides with:**
+  webb-5. **Re-test:** `git grep -c '"promptpotter.theme"' -- webapp ':!webapp/lib/storage-keys.ts'` is 0.
+- **`lib/address.ts:6` imports `./derivations/search-point` past the barrel** (lw's landing; type-only):
+  the cycle the hierarchy import's row closed, met again. **Rides with:** webb-5. **Re-test:**
+  `git grep -n "derivations/" -- webapp/lib/address.ts` is empty.
 
 ### batch/27 · rec
 
@@ -933,23 +942,6 @@ Toolbar, and the phone walk's back step. Left:
   **Rides with:** la 1, the presentation's reshape; its Owns gain `application/notices.py`,
   `presentation/admin_bot.py` and that `scripts/gate.py` line (rel's file, named shared). **Re-test:**
   `git grep -n "answer_operator" -- promptpotter` is empty.
-
-### batch/27 · lw
-
-- **Modules off `webapp/lib/CLAUDE.md`'s "a module lives by what it IS" rule**: to `state/` — `lineage`, `poll`,
-  `workspace`, `scoring-mask`, `chat/thread` (`hard-samples` and `useConnector`'s provider are gone,
-  c714ec217); to `derivations/` — `cell-means`, `prompt-fields`. Chrome holding a surface: `shell/searchpoint/`,
-  `shell/scoring/`, `shell/node-surface/`, root `PairedLift` / `SummaryBlock`; a surface holding chrome:
-  `dashboard/pipeline/`. **Rides with:** lw 1. **Re-test:** `git ls-files ':(glob)webapp/lib/*.tsx'` lists none.
-- **The derivations barrel reaches the network layer**: `derivations/connector-state.ts::nodeSchemaReading`
-  imports `hooks/useRead::shownData`. Action: it takes the read's body, not the `ReadResult`. **Rides
-  with:** lw 1, after webb-4's `NodeSchemaReading` row (same function, webb-4 first). **Re-test:** `git grep -n "shownData\|read-cache" -- webapp/lib/derivations ':!*__tests__*'` is empty.
-- **`lib/hooks/useRegistry.ts:13` and `lib/workspace.tsx:41` import `derivations/hierarchy` past the
-  barrel**; the cycle that justified it (barrel → search-point → poll → workspace) is gone (a96880754), so
-  the deep imports dodge nothing. Action: both re-point at the barrel. **Rides with:** lw 1.
-- **`hooks/useLocalStorage.ts::STORAGE_KEYS` mixes hook and non-hook keys**, and `sidePanelKey`'s
-  `side-panel:*` has no `promptpotter.` prefix. Action: one key table, every key prefixed. **Rides with:**
-  lw 1. **Re-test:** `` git grep -n '`side-panel:' -- webapp/lib `` is empty.
 
 ### webd (the edge tail, after lw)
 

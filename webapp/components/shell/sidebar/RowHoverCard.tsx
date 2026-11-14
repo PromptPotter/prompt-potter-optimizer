@@ -9,7 +9,7 @@ import type {
   UnstartedCampaign,
 } from "@/lib/api/types";
 import { LeafSplit } from "@/components/account/LeafSplit";
-import { SummaryBlock } from "@/components/shell/SummaryBlock";
+import { SummaryBlock } from "@/components/chat/SummaryBlock";
 import { entryAlone } from "@/lib/derivations";
 import { fmtAgo, fmtBytes, fmtDateTime, fmtValue, PLACEHOLDER } from "@/lib/format";
 

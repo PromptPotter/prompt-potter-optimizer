@@ -2,15 +2,15 @@ import { useRound } from "@/lib/hooks/useRound";
 import type { CellsPreset } from "@/lib/hooks/useCells";
 import { failureOf } from "@/lib/hooks/useRead";
 import { useSearchpointCopy } from "@/lib/hooks/useSearchpointCopy";
-import { useViewedDashboard } from "@/lib/poll";
-import { useWorkspace } from "@/lib/workspace";
+import { useViewedDashboard } from "@/lib/state/poll";
+import { useWorkspace } from "@/lib/state/workspace";
 import type { SelectedCandidate } from "@/lib/types";
 import { COPY_WITHOUT_CELLS } from "@/lib/derivations";
 import { CopyButton, FailureLine, Toolbar, ToolbarSpacer } from "@/components/ui";
-import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
-import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
-import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
-import { CompareOriginAction } from "@/components/shell/searchpoint/CompareOriginAction";
+import { SearchpointDrillIn } from "@/components/searchpoint/SearchpointDrillIn";
+import { SteerForkAction } from "@/components/searchpoint/SteerForkAction";
+import { VerifyAction } from "@/components/searchpoint/VerifyAction";
+import { CompareOriginAction } from "@/components/searchpoint/CompareOriginAction";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 
 interface Props {

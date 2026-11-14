@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/state/poll";
 import type { ServedRound } from "@/lib/api/types";
 import { useSelection } from "@/lib/state/selection";
 import {
@@ -10,7 +10,7 @@ import {
   liveCandidates,
   type LineageIndex,
 } from "@/lib/derivations";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import type { CandidateBar } from "@/lib/types";
 
 export function useCandidateBars(index: LineageIndex) {

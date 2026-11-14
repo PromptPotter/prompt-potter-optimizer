@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ObserveState } from "@/lib/derivations";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 
 // The view keys riding the hash beside the pick (`workspace.tsx::keys`), under their readers' names.
 interface Selection {

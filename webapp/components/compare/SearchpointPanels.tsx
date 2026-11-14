@@ -6,7 +6,7 @@ import type { LineageIndex } from "@/lib/derivations";
 import { pathOfAddress } from "@/lib/ids";
 import { shortId } from "@/lib/format";
 import { shownData } from "@/lib/hooks/useRead";
-import { lineageIndexOf, useLineageTree } from "@/lib/lineage";
+import { lineageIndexOf, useLineageTree } from "@/lib/state/lineage";
 import { seriesVar } from "@/lib/theme";
 import { ChannelRestore, ConfigCell, pointKeyOf } from "./config-edit";
 

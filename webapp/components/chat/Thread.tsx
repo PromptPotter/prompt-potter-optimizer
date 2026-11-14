@@ -7,7 +7,7 @@ import {
   useRef,
   type ReactNode,
 } from "react";
-import type { MessageItem, ThreadItem } from "@/lib/chat/thread";
+import type { MessageItem, ThreadItem } from "@/lib/state/chat-thread";
 
 function FileChip({ name, detail }: { name: string; detail: string | null }) {
   return (

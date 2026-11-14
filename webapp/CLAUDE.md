@@ -5,7 +5,7 @@ A React app built by Vite into `out/`, mounted at `/` by FastAPI beside `/api/v1
 ## Scoring authority
 
 - **No local re-sort, no recomputed mask.** An ordering is a score; masked values, the criterion's dials and anchors and the lens vocabulary are served. `lib/derivations/*` group, lay out and format, and introduce no number.
-- **A criterion is ONE rendering** (`components/shell/scoring/Criterion`); `lensOf` alone mints `?lens=` / `;lens=`. A dial is a weight only; a served lens re-opens in Expression mode, never decomposed into weights. Say **mask** and **lens**.
+- **A criterion is ONE rendering** (`components/criterion/Criterion`); `lensOf` alone mints `?lens=` / `;lens=`. A dial is a weight only; a served lens re-opens in Expression mode, never decomposed into weights. Say **mask** and **lens**.
 - **No number kept alive under a changed setup: render `?`**: an edited node parameter, model or prompt field invalidates every measurement at that searchpoint and its `lib/derivations/lineage-descendants.ts::descendantsOf` closure, the one client fold until the address serves it. **invalidated** ≠ **divergent** (server counterfactual) ≠ **retired** (what ran). `NodeSurface` emits the WHOLE running config: diff against the seed first.
 - **A new served field lands on the record that owns it**: per arm `domain/arm_reading.py::ArmReading`, per round `domain/dashboard_rows.py::RoundSummary`. **A display field is not done until you have SEEN it render**: a field nothing writes passes every check.
 - **Never `?? <default>` on an index miss** (`noUncheckedIndexedAccess` does not enforce it): handle the miss.
@@ -38,7 +38,7 @@ A data-backed surface is `anon` (public preview, demo content), `auth_empty` (no
 
 ## State reset on prop change
 
-When an identity prop changes, reset in the render phase (`if (key !== prevKey) { … }`), **never in a `useEffect`**, which paints one stale frame. View memory (`lib/state/view-memory.tsx`) holds ids, flags and UI keys, never a measurement or a mask; a display preference is one `STORAGE_KEYS` entry (`lib/prefs/`).
+When an identity prop changes, reset in the render phase (`if (key !== prevKey) { … }`), **never in a `useEffect`**, which paints one stale frame. View memory (`lib/state/view-memory.tsx`) holds ids, flags and UI keys, never a measurement or a mask; a display preference is one `storage-keys.ts::STORAGE_KEYS` row and one `lib/prefs/` hook.
 
 ## Testing posture
 

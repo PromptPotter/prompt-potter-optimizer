@@ -1,5 +1,5 @@
 import { memo, useMemo } from "react";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/state/poll";
 import {
   type MeasuredLift,
   type RoundAdvance,

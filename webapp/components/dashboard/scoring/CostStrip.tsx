@@ -4,7 +4,7 @@ import { barChartDefaults, ensureChartRegistered } from "@/lib/chart";
 import { seriesColor, useThemeVersion } from "@/lib/theme";
 import { CardFrame } from "@/components/ui";
 import { costSeries, roundCosts } from "@/lib/derivations";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/state/poll";
 
 ensureChartRegistered();
 

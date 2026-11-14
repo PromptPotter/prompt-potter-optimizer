@@ -9,7 +9,7 @@ import {
 } from "@/lib/derivations";
 import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
-import { useViewedLineage } from "@/lib/lineage";
+import { useViewedLineage } from "@/lib/state/lineage";
 import { useViewMemory } from "@/lib/state/view-memory";
 import { useMetrics } from "@/lib/state/candidates";
 

@@ -1,5 +1,5 @@
 import { useRegistry } from "@/lib/hooks/useRegistry";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { cx } from "@/lib/cx";
 import { decodeCyclePath, encodeCyclePath } from "@/lib/ids";
 import { fmtAgo } from "@/lib/format";

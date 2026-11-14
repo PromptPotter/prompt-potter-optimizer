@@ -2,10 +2,9 @@ import { useCallback, useMemo } from "react";
 import { candidateSubject } from "@/lib/api/reads";
 import { useCompareSelection, type CompareChannel } from "@/lib/state/compare-selection";
 import { armAt, individualOf, originAt, originOf } from "@/lib/derivations";
-import type { CyclePath } from "@/lib/ids";
-import { pathOfAddress } from "@/lib/ids";
-import { useViewedLineage } from "@/lib/lineage";
-import { useWorkspace } from "@/lib/workspace";
+import { type CyclePath, pathOfAddress } from "@/lib/ids";
+import { useViewedLineage } from "@/lib/state/lineage";
+import { useWorkspace } from "@/lib/state/workspace";
 
 interface CompareWithOrigin {
   run: (() => void) | null;

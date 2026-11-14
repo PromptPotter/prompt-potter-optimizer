@@ -133,17 +133,16 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   shipped-off knobs hard-wired (`pobb.lock_in`, `origin_gate: critical_only`, `convergence_patience`;
   operator, 2026-11-12); the race cuts by a family-wise p_best (ε 0.05), races through the top-up and
   walks the origin panel in order; μ0, τ and hold-up are served every round.
-- **valid:** one validity check for resume and fork (`ab_replay`'s verdict), one mint writer, one way
-  onto a fork, and a copy that revalidates.
-- **hubs:** record kinds in family modules and round facts as kind-keyed slices, so a feature adds a
-  file instead of editing `runner/entry.py`, `domain/results.py`, `domain/run_records.py`,
-  `campaign_store/store.py` or `runner/round.py`.
-- **layers:** a gate check holds the lazy imports that close a package cycle to a falling baseline,
-  each knot is cut at its root, and `RunScope` moves into `application/` (members' imports move: the
-  last re-key before the keys).
-- **behaviour keys:** generated keys, then the switch, which is the last re-key. §0.5's bullet is
-  accepted (operator, 2026-11-12).
-- **L4:** re-measure C0.
+- **landed 61–64, valid, rel, hubs, layers:** one validity check for resume and fork (`ab_replay`'s
+  verdict), one mint writer, one way onto a fork, and a copy that revalidates; record kinds in family
+  modules and round facts as kind-keyed slices; a gate check holds the lazy imports that close a package
+  cycle to a falling baseline, and `RunScope` moves into `application/`.
+- **landed 65, behaviour keys** with narr-1, small-1, webb-4 and faults-w: the keys replace the digest
+  walk, so a refactor re-keys nothing (§0.5's bullet accepted, operator, 2026-11-12).
+- **L4 C0 re-measured** at landing 65: composite 0.533 over six cells
+  ([`../research/benchmarks.md`](../research/benchmarks.md) § Every dataset we measured).
+- **landed 66, lw:** every webapp module lives by what it is, one storage-key table, a deselect shows
+  none, the Compare bar flush under an open chat.
 - **readings:** one reading for every comparison, the 31 `*Reading` classes folded; key-neutral
   behind the behaviour keys.
 - **then:** faults; narr (the stored dashboard views go, renderers reading the records), rec (a
@@ -519,6 +518,6 @@ skill routing before the library grows.
   (operator):** an optimizer axis or an operator setting.
 - **Arrangeable workspace (A4):** panels resize, collapse, pop out and dock back; on a phone they stack.
   Owed: one view, one panel (`components/dashboard/layout/panes.tsx`); the arrangement as data on the
-  address (`lib/workspace.tsx`); one panel-chrome primitive; the tapped candidate's before/after.
+  address (`lib/state/workspace.tsx`); one panel-chrome primitive; the tapped candidate's before/after.
   **Closes when** an arrangement survives a reload on a phone and a desktop.
 - **Run card:** the chat's sample walk alone. Owed: the round that changed each key ("changed in C7.3").

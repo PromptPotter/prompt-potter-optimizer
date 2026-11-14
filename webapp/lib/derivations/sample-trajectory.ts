@@ -1,6 +1,6 @@
 import type { ServedRound } from "@/lib/api/types";
 
-export type SampleMovement = ServedRound["selection_movement"][number];
+type SampleMovement = ServedRound["selection_movement"][number];
 
 // The ink class every trajectory view paints a movement with; a re-added sample reads as new.
 export const MOVEMENT_CLASS: Record<SampleMovement, string> = {

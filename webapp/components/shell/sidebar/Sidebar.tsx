@@ -1,5 +1,5 @@
 // The disabled footer search icon is an INTENTIONAL placeholder: never sweep it as non-functional.
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { useAuth } from "@/lib/state/auth";
 import { postLogout } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";

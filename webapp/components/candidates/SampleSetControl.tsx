@@ -3,7 +3,7 @@ import type { MeasuredUnit, OverlapReading, SampleCoverage, ServedRound } from "
 import { fmtSampleTag, unitCount } from "@/lib/format";
 import { cx } from "@/lib/cx";
 import { useSelection } from "@/lib/state/selection";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { roundMeasuredSets, sameSampleSet, toggleInSet } from "@/lib/derivations";
 import { Button, Chip, ChipGroup, HoverCard, SegmentedControl, type Segment } from "@/components/ui";
 import { SampleTrajectorySeries } from "@/components/dashboard/samples/SampleTrajectory";

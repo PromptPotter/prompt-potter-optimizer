@@ -1,5 +1,6 @@
 export * from "./candidate-search-point";
 export * from "./candidate-views";
+export * from "./cell-means";
 export * from "./compare-items";
 export * from "./connector-state";
 export * from "./fitness";
@@ -14,6 +15,7 @@ export * from "./output-contract";
 export * from "./paired-reading";
 export * from "./pipeline-layout";
 export * from "./pipeline-nodes";
+export * from "./prompt-fields";
 export * from "./prompt-segments";
 export * from "./round-candidates";
 export * from "./round-reading";

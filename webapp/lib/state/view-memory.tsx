@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
-import { STORAGE_KEYS, useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
+import { STORAGE_KEYS } from "@/lib/storage-keys";
 import { ownerOfAddress } from "@/lib/ids";
 
 // Bumping this DROPS every stored record rather than migrating it.

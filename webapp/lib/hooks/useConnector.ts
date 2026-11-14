@@ -11,13 +11,13 @@ import type {
 import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
 import { useCheckinDraft } from "@/lib/state/ingest-flow";
 import { heldRead, type ReadResult } from "@/lib/read-cache";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import type { NodeScope } from "@/lib/address";
 import { nodeSchemaReading } from "@/lib/derivations";
 import type { NodeSchemaReading } from "@/lib/types";
 
 // The registered backends beside the one the viewed pipeline runs on.
-export interface BackendReading {
+interface BackendReading {
   active: BackendResponse | null;
   others: BackendResponse[];
   // Real reachability, distinct from the stream's `isLive` (is the optimizer scoring through it now).
@@ -65,11 +65,13 @@ export interface PipelineAt {
 }
 
 // The node rows of the pipeline a surface names, for one scope: the one door every node surface
-// reads, so a host hands identity, never the rows.
+// reads, so a host hands identity, never the rows. The read rides beside its rows: a pending read
+// is never an empty node.
 export function useNodeSchema(at: PipelineAt | null, scope: NodeScope): NodeSchemaReading {
   const viewed = useConnector();
   const picked = useCampaignPipeline(at?.campaignId ?? null, at?.subject ?? null);
-  return nodeSchemaReading(at ? picked : viewed, scope);
+  const read = at ? picked : viewed;
+  return useMemo(() => ({ read, ...nodeSchemaReading(shownData(read), scope) }), [read, scope]);
 }
 
 export function useBackend(): BackendReading {

@@ -6,14 +6,14 @@ import { ThetaCaveats } from "./AbilityInfo";
 import { CandidatesToolbar } from "./CandidatesToolbar";
 import { useCandidatesModel, type CandidatesModel } from "./useCandidatesModel";
 import { CardFrame, Chip, HoverCard, IconTree, Loading, ReadState } from "@/components/ui";
-import { Criterion } from "@/components/shell/scoring/Criterion";
+import { Criterion } from "@/components/criterion/Criterion";
 import { ApplyScenarioPanel } from "@/components/candidates/ApplyScenarioPanel";
-import { setScoringMask } from "@/lib/scoring-mask";
+import { setScoringMask } from "@/lib/state/scoring-mask";
 import { FitnessRankSummary } from "./FitnessRankSummary";
 import { SampleSetControl } from "./SampleSetControl";
 import { cx } from "@/lib/cx";
-import { useViewedLineage } from "@/lib/lineage";
-import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/poll";
+import { useViewedLineage } from "@/lib/state/lineage";
+import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/state/poll";
 
 function ForestToggle({ model: m }: { model: CandidatesModel }) {
   const { showForest, totalDescendants } = m;

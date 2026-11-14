@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { maskedSubject } from "@/lib/api/reads";
 import type { SubjectReading } from "@/lib/api/types";
-import { Criterion } from "@/components/shell/scoring/Criterion";
+import { Criterion } from "@/components/criterion/Criterion";
 import type { ReadFailure } from "@/lib/read-cache";
 import { useCellTerms } from "@/lib/hooks/useConnector";
-import { NO_DIALS, lensOf, type ScoringMask } from "@/lib/scoring-mask";
+import { NO_DIALS, lensOf, type ScoringMask } from "@/lib/state/scoring-mask";
 
 export function ChannelMask({
   subject,

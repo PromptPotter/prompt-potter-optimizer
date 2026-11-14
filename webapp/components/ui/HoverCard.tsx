@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HOVER_CLOSE_GRACE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";

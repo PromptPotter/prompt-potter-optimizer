@@ -1,21 +1,21 @@
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/roadmap.md` § Host assistant): never hide them.
 import { useState } from "react";
 import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
-import { useViewedCourse } from "@/lib/lineage";
-import { useWorkspace } from "@/lib/workspace";
+import { useViewedCourse } from "@/lib/state/lineage";
+import { useWorkspace } from "@/lib/state/workspace";
 import { entryAlone } from "@/lib/derivations";
 import { NEW_CHECKIN } from "@/lib/hooks/useIngestFlow";
 import { useCheckinSubject } from "@/lib/state/ingest-flow";
 import { IngestComposer, useIngestItems } from "@/components/ingest/IngestConversation";
 import type { HierarchyCourse } from "@/lib/api/types";
-import { PipelineStack } from "@/components/dashboard/pipeline/PipelineStack";
+import { PipelineStack } from "@/components/pipeline/PipelineStack";
 import { useCycleEvents } from "@/lib/hooks/useCycleEvents";
 import {
   checkinThreadKey,
   runThreadKey,
   useThreads,
   type ThreadItem,
-} from "@/lib/chat/thread";
+} from "@/lib/state/chat-thread";
 import { Thread } from "@/components/chat/Thread";
 import { LiveSegment } from "@/components/chat/LiveSegment";
 import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";

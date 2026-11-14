@@ -3,11 +3,11 @@ import { FailureLine, HoverCard } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { HEARTBEAT_INTERVAL_S } from "@/lib/api/types";
 import { fmtGap } from "@/lib/format";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { useSelection } from "@/lib/state/selection";
-import { useTimeRay } from "@/lib/poll";
+import { useTimeRay } from "@/lib/state/poll";
 import { useSelectNode } from "@/lib/hooks/useSelectNode";
-import { useViewedLineage } from "@/lib/lineage";
+import { useViewedLineage } from "@/lib/state/lineage";
 import { armAt, raySteps, type RayStep } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 

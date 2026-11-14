@@ -1,6 +1,6 @@
 import { commands, cycleAddress } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { cx } from "@/lib/cx";
 import type { CyclePath } from "@/lib/ids";
 import { FailureLine, Said } from "@/components/ui";

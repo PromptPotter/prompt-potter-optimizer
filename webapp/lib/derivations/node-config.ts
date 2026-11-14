@@ -74,7 +74,7 @@ function asRowValue(kind: string, value: unknown): string {
   return kind === "nested" ? JSON.stringify(value, null, 1) : String(value);
 }
 
-export function parseNested(raw: string): unknown {
+function parseNested(raw: string): unknown {
   if (raw.trim() === "") return "";
   try {
     return JSON.parse(raw);

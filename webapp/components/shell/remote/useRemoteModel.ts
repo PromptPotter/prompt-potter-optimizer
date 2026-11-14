@@ -1,9 +1,9 @@
 import { commands, cycleAddress } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/state/poll";
 import { encodeCyclePath } from "@/lib/ids";
 import { useEntry } from "@/lib/hooks/useRegistry";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 
 export type RemoteModel = NonNullable<ReturnType<typeof useRemoteModel>>;
 

@@ -9,11 +9,11 @@ import {
   useMetrics,
 } from "@/lib/state/candidates";
 import { useCandidateBars } from "./useCandidateBars";
-import { useViewedDashboard } from "@/lib/poll";
+import { useViewedDashboard } from "@/lib/state/poll";
 import { candidateSubject, withMask } from "@/lib/api/reads";
 import { useCompareSelection } from "@/lib/state/compare-selection";
 import { useSelection } from "@/lib/state/selection";
-import { lensOf, useMaskState } from "@/lib/scoring-mask";
+import { lensOf, useMaskState } from "@/lib/state/scoring-mask";
 import { useCellTerms } from "@/lib/hooks/useConnector";
 import type { HierarchyCourse, ServedDashboard, DisplayMetric } from "@/lib/api/types";
 import {
@@ -22,10 +22,10 @@ import {
   type LineageIndex,
 } from "@/lib/derivations";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
-import { useViewedCourse, useViewedLineage } from "@/lib/lineage";
+import { useViewedCourse, useViewedLineage } from "@/lib/state/lineage";
 import type { CandidateBar } from "@/lib/types";
 import { barRound } from "./dendrogram";
 

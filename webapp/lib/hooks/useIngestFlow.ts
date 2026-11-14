@@ -18,12 +18,11 @@ import type {
   Tone,
 } from "@/lib/api/types";
 import { draftRead } from "@/lib/api/reads";
-import { checkinThreadKey, useThreads } from "@/lib/chat/thread";
+import { checkinThreadKey, useThreads } from "@/lib/state/chat-thread";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useQueuedStart } from "@/lib/hooks/useQueuedStart";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-import type { ReadFailure } from "@/lib/read-cache";
-import { dropCachedRead } from "@/lib/read-cache";
+import { type ReadFailure, dropCachedRead } from "@/lib/read-cache";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
 type IngestPhase =

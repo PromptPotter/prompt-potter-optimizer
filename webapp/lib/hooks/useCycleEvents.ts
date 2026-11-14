@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { cyclePathUrl } from "@/lib/api";
 import { reportIncident } from "@/lib/diagnostics";
 import { encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import type { ActivityState, ProjectionEnvelope } from "@/lib/api/types";
 
 interface CycleEventsState extends ActivityState {

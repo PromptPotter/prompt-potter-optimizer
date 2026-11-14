@@ -2,8 +2,8 @@ import { Figure, FigureRow } from "@/components/shell/FigureRow";
 import { Empty, Loading, ReadState, Said } from "@/components/ui";
 import { figureOf, type FigureKey } from "@/lib/derivations";
 import { useActivePointer } from "@/lib/hooks/useRegistry";
-import { useViewedCourse } from "@/lib/lineage";
-import { useViewedListing } from "@/lib/workspace";
+import { useViewedCourse } from "@/lib/state/lineage";
+import { useViewedListing } from "@/lib/state/workspace";
 
 // The live round's figures, then the lift, as the masthead's row serves them.
 const SHOWN: readonly FigureKey[] = ["state", "rounds", "lift"];

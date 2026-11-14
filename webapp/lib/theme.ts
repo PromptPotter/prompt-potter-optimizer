@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { STORAGE_KEYS } from "@/lib/hooks/useLocalStorage";
+import { STORAGE_KEYS } from "@/lib/storage-keys";
 
 export function getCss(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();

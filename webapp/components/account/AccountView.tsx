@@ -14,7 +14,7 @@ import { meRead } from "@/lib/api";
 import { ACCOUNT_TAB_INFO, type AccountTab } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { readyData, useRead } from "@/lib/hooks/useRead";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 
 // Each served tab's body; its label and group are `ACCOUNT_TAB_INFO`'s, which refusals name too.
 const BODIES: Record<AccountTab, ComponentType> = {

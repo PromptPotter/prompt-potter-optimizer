@@ -14,7 +14,7 @@ import { budgetAxis } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtUnit, fmtUsd } from "@/lib/format";
 import { capInput, capText, parseCapIn, type Cap } from "@/lib/run-limits";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { Button, Dialog, FailureLine, Switch } from "@/components/ui";
 
 const AXES = wordKeys(CAP_AXIS_INFO);

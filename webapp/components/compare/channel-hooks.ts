@@ -13,7 +13,7 @@ import {
 import type { CellsPreset } from "@/lib/hooks/useCells";
 import { shownData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
-import { lineageIndexOf, useLineageTree } from "@/lib/lineage";
+import { lineageIndexOf, useLineageTree } from "@/lib/state/lineage";
 import { fmtMetric, fmtMetricInterval, type MetricFormat } from "@/lib/format";
 import { type CyclePath, decodeCyclePath, encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import { editsFor, pointKeyOf, useScenarioEdits } from "./config-edit";

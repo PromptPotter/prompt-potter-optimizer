@@ -3,7 +3,7 @@ import { HoverCard, Term } from "@/components/ui";
 import type { FamilyId } from "@/lib/address";
 import type { Said } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { FAMILIES } from "./families";
 
 // The one row of figures every entry and the masthead draw: label over value, a sub line under. It wraps.

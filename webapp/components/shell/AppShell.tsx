@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { useWorkspace } from "@/lib/workspace";
+import { useWorkspace } from "@/lib/state/workspace";
 import { SIDEBAR_WIDTH, useSidebarCollapsed, useSidebarWidth } from "@/lib/prefs/sidebar";
 import { cx } from "@/lib/cx";
 import { VendorSprite } from "@/components/ui";
@@ -7,7 +7,7 @@ import { Sidebar } from "@/components/shell/sidebar/Sidebar";
 import { SidebarResizer } from "@/components/shell/sidebar/SidebarResizer";
 import { JobsDock } from "@/components/shell/JobsDock";
 import { IngestFlowProvider } from "@/lib/state/ingest-flow";
-import { ThreadProvider } from "@/lib/chat/thread";
+import { ThreadProvider } from "@/lib/state/chat-thread";
 import { CriticalAlertBanner } from "@/components/shell/CriticalAlertBanner";
 import { RemoteControl } from "@/components/shell/remote/RemoteControl";
 import { RunMasthead } from "@/components/shell/masthead/RunMasthead";

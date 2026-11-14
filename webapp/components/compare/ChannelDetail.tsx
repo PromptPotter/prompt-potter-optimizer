@@ -1,7 +1,7 @@
-import { SteerForkAction } from "@/components/shell/searchpoint/SteerForkAction";
-import { VerifyAction } from "@/components/shell/searchpoint/VerifyAction";
-import { SearchpointDrillIn } from "@/components/shell/searchpoint/SearchpointDrillIn";
-import { SubjectSignals } from "@/components/shell/searchpoint/SubjectSignals";
+import { SteerForkAction } from "@/components/searchpoint/SteerForkAction";
+import { VerifyAction } from "@/components/searchpoint/VerifyAction";
+import { SearchpointDrillIn } from "@/components/searchpoint/SearchpointDrillIn";
+import { SubjectSignals } from "@/components/searchpoint/SubjectSignals";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { COPY_WITHOUT_CELLS, selectedNodeOf } from "@/lib/derivations";
 import { fmtUnit, PLACEHOLDER, shortId } from "@/lib/format";

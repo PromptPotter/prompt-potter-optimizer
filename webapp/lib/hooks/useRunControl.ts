@@ -3,8 +3,8 @@ import { commands, cycleAddress } from "@/lib/api";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import type { RunAdmission } from "@/lib/api/types";
 import { pauseNextStep, phasePauseLabel, phaseWalks } from "@/lib/derivations";
-import { useViewedDashboard } from "@/lib/poll";
-import { useWorkspace } from "@/lib/workspace";
+import { useViewedDashboard } from "@/lib/state/poll";
+import { useWorkspace } from "@/lib/state/workspace";
 
 interface RunControl {
   action: RunAdmission["offers"];

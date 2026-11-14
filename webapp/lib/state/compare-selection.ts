@@ -38,12 +38,12 @@ interface CompareSelection {
   clear: () => void;
 }
 
-export type Fold = "detail" | "map" | "setup";
+type Fold = "detail" | "map" | "setup";
 
 // A channel's own view: which searchpoint of its tree it highlights (an address the served tree
-// resolves, null for none) and which folds are open.
-export interface ChannelView {
-  picked: string | null;
+// resolves; null, a pick of nothing; undefined, no pick yet) and which folds are open.
+interface ChannelView {
+  picked: string | null | undefined;
   folds: Record<Fold, boolean>;
 }
 
@@ -62,12 +62,13 @@ function edit(next: (prev: readonly CompareChannel[]) => readonly CompareChannel
 }
 
 function unviewed(opensDetail: boolean): ChannelView {
-  return { picked: null, folds: { detail: opensDetail, map: false, setup: true } };
+  return { picked: undefined, folds: { detail: opensDetail, map: false, setup: true } };
 }
 
 // What a channel's card, detail and map highlight and fold. The pick is read off the channel's
 // served tree, so a pick the tree no longer holds highlights nothing; until the operator picks it
-// is the channel's seed (`channelArms`); a candidate channel opens on its detail fold.
+// is the channel's seed (`channelArms`), and a deselect shows none, never the seed again; a
+// candidate channel opens on its detail fold.
 export function useChannelView({ channel, reading, headline }: CompareItem, index: LineageIndex) {
   const subject = channel.subject;
   const opensDetail = reading?.kind === "candidate";
@@ -86,8 +87,8 @@ export function useChannelView({ channel, reading, headline }: CompareItem, inde
   }, [subject, opensDetail]);
   const view = stored ?? unviewed(opensDetail);
   const arms = useMemo(() => channelArms(index, reading, headline !== null), [index, reading, headline]);
-  const entry = view.picked === null ? undefined : index.byAddress.get(view.picked);
-  const selected = (entry?.level === "candidate" ? entry : null) ?? arms.seed;
+  const entry = view.picked ? index.byAddress.get(view.picked) : undefined;
+  const selected = view.picked === undefined ? arms.seed : entry?.level === "candidate" ? entry : null;
   return { ...view, arms, selected, ...actions };
 }
 
