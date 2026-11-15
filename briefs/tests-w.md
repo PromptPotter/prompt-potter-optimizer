@@ -8,14 +8,15 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
   this commit. Since 91 a periodic step's faults are files under `jobs/unswept/`, and a `LineFold`
   names its own `kind`.
 - **Spec:** `### batch/32 · tests-w`, every row but "The freed lineage tree overflows its card under
-  load" (ws-2's), plus rk-dec's "`hold_up` is withheld on a flat ruler". Re-run each row's Re-test
+  load" (ws-2's). rk-dec's "`hold_up` is withheld on a flat ruler" and the separating round (link 5)
+  are **held for a later chain**: build links 1–4 only, every leg UNMOVED. Re-run each row's Re-test
   at your base first; a row already closed is deleted with its evidence in the commit body. Delete
   only your own rows.
 - **The code shrinks:** `seat`, `_peer_cycle`, `close_round` and `run_init_round`'s composition go,
   the 9-tuples become one typed row, the per-door copies of one guard become one table. Run
   `git diff --shortstat <base> HEAD -- promptpotter tests scripts` after each link; tests count.
 - **Beside you:** **ws-2** (cloud, the same base) owns `webapp/`, its `e2e/` included, and touches
-  no Python. You own `tests/`, `scripts/offline_world.py`, `scripts/offline_run.py`'s path setup
+  Python only at the candidate subject's parse, if at all. You own `tests/`, `scripts/offline_world.py`, `scripts/offline_run.py`'s path setup
   and `runner/entry.py`'s line opener.
 
 ## Decisions (orchestrator; build them, do not reopen them)
@@ -34,9 +35,6 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
   the failure.
 - **The suite's 23 MB growth is attributed before any cap moves:** cut its waste; the cap is
   re-derived only from a measured peak with no waste left.
-- **The offline world banks one round whose ruler separates arms**, so `hold_up` shows. That round
-  moves traces: name each moved leg, its key and its count, and rewrite the behaviour keys in that
-  link alone.
 
 ## Links (one commit each, in order)
 
@@ -44,10 +42,9 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
 2. The line opener and `FakeBackend`'s declared answers; the hand replays gone.
 3. Per-fact homes, the guard tables, the typed door rows, the two outside tests, the zero-cell test.
 4. The hang and the suite's growth.
-5. The separating round (the only link that moves legs).
 
 ## Proof (beyond common.md)
 
-- Equals-main UNMOVED on every leg through link 4; link 5's moves named, by leg and key.
+- Equals-main UNMOVED on every leg, every link.
 - Each row's re-test, before and after. Link 1: one proof run beside a busy `pytest` reads UNMOVED.
 - The push gate's pytest peak, before and after, in MB.
