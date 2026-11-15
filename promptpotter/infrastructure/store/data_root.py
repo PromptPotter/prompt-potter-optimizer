@@ -30,6 +30,7 @@ from promptpotter.config.paths import (
     PRODUCERS_DIR,
     PROJECTS_DIR,
     READOUT_POINTER,
+    UNSWEPT_DIR,
 )
 from promptpotter.config.prompt_blocks import PACK_FILE
 from promptpotter.domain.campaign import Campaign, HeadToHeadRecord
@@ -38,7 +39,7 @@ from promptpotter.domain.command_events import COMMAND_LOG_ADAPTER
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.export import PromptExport, parse_prompt_export
 from promptpotter.domain.free_tier_file import FREE_TIER_ADAPTER
-from promptpotter.domain.job import JOB_ADAPTER, LIVE_JOB_IDS
+from promptpotter.domain.job import JOB_ADAPTER, LIVE_JOB_IDS, UNSWEPT_FAULTS
 from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.pipeline_manifest import AUTHORED_MANIFEST, CHECKIN_MANIFEST
 from promptpotter.domain.prompt_block import BlockPack
@@ -312,6 +313,7 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("admission lock", _INSTALL, f"{JOBS_DIR}/{ADMISSION_LOCK}", Fate.MACHINE, _HELD),
     Kind("producer lock", _INSTALL, f"{JOBS_DIR}/{PRODUCERS_DIR}/*.lock", Fate.MACHINE, _HELD),
     Kind("machine slot", _INSTALL, f"{JOBS_DIR}/{MACHINE_DIR}/*/*.lock", Fate.MACHINE, _HELD),
+    Kind("unswept step", _INSTALL, f"{JOBS_DIR}/{UNSWEPT_DIR}/*.json", Fate.RUN, UNSWEPT_FAULTS),
     Kind("account opening lock", _INSTALL, f"{PROJECTS_DIR}/{ACCOUNTS_LOCK}", Fate.MACHINE, _HELD),
     Kind(
         "sandbox owner",

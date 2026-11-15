@@ -10182,7 +10182,7 @@
             "type": "array"
           },
           "unswept": {
-            "description": "Each periodic step (the sweep, the route answers) whose last pass raised, with its fault: what it reclaims stands until a pass runs clean. Served where every slot is.",
+            "description": "Each periodic step (the sweep, the route answers) whose last pass, in any process, raised or left a cycle it could not read, with what: what it reclaims stands until a pass runs clean. Served where every slot is.",
             "items": {
               "type": "string"
             },

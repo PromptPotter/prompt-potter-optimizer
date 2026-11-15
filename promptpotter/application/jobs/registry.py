@@ -16,7 +16,7 @@ from typing import Any
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.interlock import AdmissionGate
 from promptpotter.application.runner.termination import run_stop_reason
-from promptpotter.config.paths import ENDED_JOBS_DIR, LIVE_JOBS_INDEX
+from promptpotter.config.paths import ENDED_JOBS_DIR, LIVE_JOBS_INDEX, UNSWEPT_DIR
 from promptpotter.config.settings import CODE_REVISION, settings
 from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
@@ -26,6 +26,7 @@ from promptpotter.domain.job import (
     LAUNCH_MOVES,
     LIVE_JOB_IDS,
     UNRESOLVED_HOP,
+    UNSWEPT_FAULTS,
     CampaignLaunch,
     Job,
     JobEnding,
@@ -40,6 +41,7 @@ from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.holders import in_flight, job_path, read_job
 from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.infrastructure.store.io import read_text_optional, unlink_robust, write_json
+from promptpotter.infrastructure.store.read_model import read_file
 from promptpotter.shared.clock import iso_z, utcnow_iso
 from promptpotter.shared.errors import (
     ConflictError,
@@ -349,6 +351,25 @@ class JobRegistry:
             except FileUnreadableError as exc:
                 named.append(f"{path.name}: {exc}")
         return named
+
+    def unswept(self) -> list[str]:
+        """Each periodic step whose last pass, in any process, left something, with what."""
+        named: list[str] = []
+        for path in sorted(self._dir.joinpath(UNSWEPT_DIR).glob("*.json")):
+            try:
+                faults = read_file(path, UNSWEPT_FAULTS.validate_json) or ()
+            except FileUnreadableError as exc:
+                faults = (str(exc),)
+            named += [f"{path.stem}: {fault}" for fault in faults]
+        return named
+
+    def record_pass(self, step: str, faults: Sequence[str]) -> None:
+        """*step*'s last pass, whole: a clean one clears what an earlier one left."""
+        path = self._dir / UNSWEPT_DIR / f"{step}.json"
+        if faults:
+            write_json(path, list(faults))
+        else:
+            unlink_robust(path)
 
     def list_running(self, *, user_id: str | None = None) -> list[Job]:
         """Oldest first, and a plain read: a job whose producer is gone is left out, never released."""

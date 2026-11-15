@@ -23,8 +23,8 @@ from promptpotter.shared.errors import FileUnreadableError, fault_said
 # Scheduling only: what counts as dead has no clock in it.
 SWEEP_EVERY_S = 900.0
 
-# The server's own: each periodic step whose last pass raised, with its fault (`machine_status`).
-UNSWEPT: dict[str, str] = {}
+# The periodic steps, each recording its last pass (`JobRegistry.record_pass`), any process's.
+SWEEP_STEP, ROUTE_ANSWERS_STEP = "sweep", "route-answers"
 
 
 def reclaim_orphan_sandboxes(projects_root: Path) -> int:
@@ -54,27 +54,32 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
     return reclaimed
 
 
-def _reap(stores: Stores) -> int:
-    """Each cycle of *stores*, then each sandbox one of its cycles owns: none nests by path."""
+def _reap(stores: Stores, unread: list[str]) -> int:
+    """Each cycle of *stores*, then each sandbox one of its cycles owns: none nests by path. A
+    cycle it cannot read is named in *unread*, and the rest are reaped all the same."""
     reaped = 0
     for campaign_id in stores.campaigns.list_campaign_ids():
         for hop in stores.campaigns.campaign_cycle_hops(campaign_id):
             try:
                 if stores.mark_producer_vanished(hop):
                     reaped += 1
-            except FileUnreadableError:
-                pass
+            except FileUnreadableError as refusal:
+                unread.append(fault_said(refusal)[0])
             if (inner := inner_sandbox_store(stores, campaign_id, hop.cycle_id)) is not None:
-                reaped += _reap(inner)
+                reaped += _reap(inner, unread)
     return reaped
 
 
 def sweep_dead_cycles(projects_root: Path) -> int:
+    """Every launch's, and the server's tick: each cycle it could not read stands in
+    `machine-status` until a pass reads it."""
+    unread: list[str] = []
     reaped = sum(
-        _reap(tenant_stores(projects_root, WorkspaceDir(tenant)))
+        _reap(tenant_stores(projects_root, WorkspaceDir(tenant)), unread)
         for tenant in sorted(projects_root.iterdir() if projects_root.is_dir() else ())
         if campaigns_root_dir_for(WorkspaceDir(tenant)).is_dir()
     )
+    JobRegistry.attach(jobs_dir(projects_root)).record_pass(SWEEP_STEP, unread)
     return reaped
 
 
@@ -91,17 +96,21 @@ async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY
     refresher (`pricing.refresh_route_answers`). At boot the answers alone, so a restart serves no
     day-old one; the reclaim waits a tick: every read derives what a dead producer left, so no first
     page waits on it."""
-    refresh = ("route answers", refresh_route_answers)
+    jobs = JobRegistry.attach(jobs_dir(projects_root))
+    refresh = (ROUTE_ANSWERS_STEP, functools.partial(_refreshed, jobs))
     steps: tuple[tuple[str, Callable[[], None]], ...] = (refresh,)
     while True:
         for name, step in steps:
             # A raising step must not END the loop, nor skip the other: each would stop for the
-            # rest of the server's uptime.
+            # rest of the server's uptime. A clean pass is each step's own to record.
             try:
                 await asyncio.to_thread(step)
             except Exception as fault:  # noqa: BLE001
-                UNSWEPT[name] = fault_said(fault)[0]
-            else:
-                UNSWEPT.pop(name, None)
+                jobs.record_pass(name, [fault_said(fault)[0]])
         await asyncio.sleep(interval_s)
-        steps = (("sweep", functools.partial(sweep, projects_root)), refresh)
+        steps = ((SWEEP_STEP, functools.partial(sweep, projects_root)), refresh)
+
+
+def _refreshed(jobs: JobRegistry) -> None:
+    refresh_route_answers()
+    jobs.record_pass(ROUTE_ANSWERS_STEP, ())

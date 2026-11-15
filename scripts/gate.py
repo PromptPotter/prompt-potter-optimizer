@@ -243,9 +243,6 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/jobs/reaper.py::reclaim_orphan_sandboxes::OSError": (
         "a sandbox it cannot delete is the next sweep's"
     ),
-    "application/jobs/reaper.py::_reap::FileUnreadableError": (
-        "each cycle is reaped on its own; every read of a refused one refuses it"
-    ),
     "application/maintenance/landing.py::last_landing::ValidationError": (
         "a stamp this build cannot read lands the root again"
     ),

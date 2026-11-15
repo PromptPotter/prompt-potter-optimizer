@@ -72,6 +72,8 @@ LANDING_FILE = ".landing"
 LIVE_JOBS_INDEX = ".live-jobs"
 PRODUCERS_DIR = "producers"
 MACHINE_DIR = "machine"
+# Each periodic step's last pass that left something, a file per step (`JobRegistry.unswept`).
+UNSWEPT_DIR = "unswept"
 # A reaped job's record as its release stamped it, read by job id alone (`JobRegistry.launched_by`).
 ENDED_JOBS_DIR = "ended"
 

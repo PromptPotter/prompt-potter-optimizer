@@ -293,10 +293,6 @@ row it closes.
   root" is the mint's `ForkSpec` (`CycleIndex.minted_as`). Action: the stub checks read the index
   they load, and the sibling id takes the campaign's root. **Rides with:** addr-2. **Re-test:**
   `git grep -n "_SIBLING_SEP_RE\|root_cycle_id(" -- promptpotter/infrastructure` is empty.
-- **The reaper swallows an unreadable cycle** (addr's report): `jobs/reaper.py::_reap` has
-  `except FileUnreadableError: pass`, so a cycle the sweep cannot read is neither reaped nor
-  reported. Action: a fault of the sweep, served. **Rides with:** faults 3. **Re-test:**
-  `git grep -n "pass$" -- promptpotter/application/jobs/reaper.py` is empty.
 
 ### passes-6 (what passes-5 and holders-3 left at landing 54)
 
