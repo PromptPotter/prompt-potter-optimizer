@@ -95,7 +95,7 @@ async def spawn_job(held: HeldRun) -> asyncio.Task[None]:
     except BaseException as exc:
         # No process took the job (its spec unbuilt among them), so nothing else will ever hand its
         # slot back or stamp its cycle.
-        start.release(exc, stamps=hop)
+        await asyncio.to_thread(start.release, exc, stamps=hop)
         raise
 
     exited = asyncio.Event()
@@ -298,7 +298,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     job_registry = JobRegistry(spec.jobs_dir, capacity=resolve_run_capacity)
     # The job, its claim with it, now lives and dies with THIS process: a run killed before it
     # declares itself leaves the cycle free.
-    if (adopted := job_registry.adopt(spec.job_id)) is None:
+    if (adopted := await asyncio.to_thread(job_registry.adopt, spec.job_id)) is None:
         return None
     start = RunStart(stores, job_registry, adopted)
     _tell_spawner()
@@ -307,7 +307,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
         refuse_campaign(stores, campaign := stores.campaigns.campaign(spec.hop.campaign_id))
     except CampaignRefusedError as refused:
         # The job's refusal, never the cycle's stop: the cycle keeps the one it had.
-        start.release(refused)
+        await asyncio.to_thread(start.release, refused)
         return StopOutcome.FAILED
     async with AsyncExitStack() as closing:
         try:
@@ -315,7 +315,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
                 ExistingCycle(spec.hop, campaign, Budget()).open(stores)
             )
         except BaseException as exc:  # noqa: BLE001
-            start.release(exc, stamps=spec.hop)
+            await asyncio.to_thread(start.release, exc, stamps=spec.hop)
             return StopOutcome.FAILED
         try:
             _, result = await run_held_job(

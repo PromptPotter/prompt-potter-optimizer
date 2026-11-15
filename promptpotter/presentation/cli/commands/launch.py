@@ -538,7 +538,7 @@ def _arm_spec(arm: ArmRequest) -> str:
         ),
         *(
             f"nodes.{node}.config.{knob}={_spelled(value)}"
-            for node, overlay in knobs.nodes.items()
+            for node, overlay in (knobs.nodes or {}).items()
             for knob, value in overlay.config.items()
         ),
     ]
