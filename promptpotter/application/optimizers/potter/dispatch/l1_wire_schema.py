@@ -25,6 +25,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     recombinations_schema,
 )
 from promptpotter.domain.l4.cells import InnerCells
+from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
@@ -93,9 +94,20 @@ def _nested_param_property(node: PipelineNode, param: str) -> dict[str, Any] | N
     return None
 
 
+def _pooled_edit(props: dict[str, Any], locus: str, block_ids: Sequence[str]) -> dict[str, Any]:
+    """A whole-field replace by an offered id: `op` and `anchor` are pinned, the id alone decides."""
+    return {
+        **props,
+        "at": {**props["at"], "enum": [locus]},
+        "op": {**props["op"], "enum": ["replace"]},
+        "anchor": {**props["anchor"], "enum": [""]},
+        "text": {**props["text"], "enum": list(block_ids)},
+    }
+
+
 # A slot whose panel produced nothing is withdrawn: L1 cannot fill a value space it was not shown.
 _SLOT_PANEL: dict[str, str] = {
-    "prompt_fields_updates": "rendered_prompt",
+    "edits": "rendered_prompt",
     "pipeline_overlay": "pipeline_param_catalogue",
     "shots": "demo_pool",
 }
@@ -182,34 +194,34 @@ def build_l1_response_schema(
             "additionalProperties": False,
         }
 
-    # Keyed by the roster's prompt nodes, each by ITS open fields; a node with none is write-only,
-    # so it is absent.
+    # The roster's prompt nodes, each by ITS open fields; under `closed` only a field the pool holds.
     prompt_nodes = pipeline_schema.prompt_nodes()
-    open_by_node = {
-        n.name: {
-            f: (
-                {"type": "string"}
-                if pooled_fields is None
-                else {"type": "string", "enum": list(pooled_fields[f])}
-            )
-            for f in n.open_prompt_fields
-            if pooled_fields is None or pooled_fields.get(f)
-        }
+    loci = {
+        Locus(n.name, f).name: f
         for n in prompt_nodes
+        for f in n.open_prompt_fields
+        if pooled_fields is None or pooled_fields.get(f)
     }
     # STRICTER than the parse twin on purpose: tolerated missing at the parse boundary, never OFFERED as `null`.
-    if open_by_node := {node: fields for node, fields in open_by_node.items() if fields}:
-        prompt_fields = variant_props["prompt_fields_updates"] = _said(
-            variant_props["prompt_fields_updates"]
-        )
-        prompt_fields["properties"] = {
-            node: {"type": "object", "properties": fields, "additionalProperties": False}
-            for node, fields in open_by_node.items()
-        }
-        if pooled_fields is not None:
-            prompt_fields["description"] = BLOCK_ID_INSTRUCTION
+    if loci:
+        edits = variant_props["edits"] = {**_said(variant_props["edits"]), "minItems": 1}
+        edit = edits["items"]
+        if pooled_fields is None:
+            edit["properties"]["at"]["enum"] = list(loci)
+        else:
+            # One branch per locus: a block id is legal only for the field whose pool lists it.
+            edits["items"] = {
+                "anyOf": [
+                    {
+                        **edit,
+                        "properties": _pooled_edit(edit["properties"], locus, pooled_fields[f]),
+                    }
+                    for locus, f in loci.items()
+                ]
+            }
+            edits["description"] = BLOCK_ID_INSTRUCTION
     else:
-        del variant_props["prompt_fields_updates"]
+        del variant_props["edits"]
     if prompt_nodes:
         shot_list = {"type": "array", "items": {"type": "integer"}}
         _arm(variant_props["shots"])["properties"] = {node.name: shot_list for node in prompt_nodes}

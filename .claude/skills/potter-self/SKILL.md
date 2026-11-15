@@ -94,7 +94,7 @@ outer round · 4 deferred. **We push the first few rounds, not the long campaign
 | Params overreach | `param_scope_discipline` fires. | Name the prompt-field evidence exhausted first. |
 | Critique-score divergence | Critique says A, composite says B. | Not L1: `campaign.scoring`. |
 
-Parse failures, no-ops and verbatim duplicates were measured absent: no edit there without `l1_yield` below 1.00.
+Parse failures, no-ops, missed anchors and verbatim duplicates: no edit there without `l1_yield` below 1.00.
 
 3. **Round-trace checklist**, beyond what `validators.py` and `overlay_failures()` enforce: `runtime_failures`
    empty in round 1 while sibling forks failed is broken inheritance; `l1_config_not_in_runtime_failures`

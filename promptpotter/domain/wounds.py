@@ -42,11 +42,11 @@ class ValidationReason(enum.StrEnum):
     NOT_IN_BLOCK_POOL = "not_in_block_pool"
     CITATION_NOT_IN_PANEL = "citation_not_in_panel"
     OVER_CEILING = "over_ceiling"
+    # An edit's anchor names no one span of its field's text: absent, or held twice.
+    EDIT_ANCHOR_NOT_ONE_SPAN = "edit_anchor_not_one_span"
     # The generator's own reply.
     OPTIMIZER_PROMPT_PARSE_FAILURE = "optimizer_prompt_parse_failure"
     L1_PROVIDER_EMPTY_RESPONSE = "l1_provider_empty_response"
-    # Every variant leaves its parent unchanged: a round's zero candidates, never an arm's.
-    L1_ALL_NO_OP_VARIANTS = "l1_all_no_op_variants"
     # An L4 override: stopping the inner loop, reasoning over the seed panel one level up, or
     # replacing a long prompt field with a fraction of it.
     STEERS_INNER_STOPPING = "steers_inner_stopping"

@@ -14,8 +14,6 @@ PARSE_FAILURE_MALFORMED = ValidationReason.OPTIMIZER_PROMPT_PARSE_FAILURE
 # Empty or truncated content is missing data, not a verdict: never charged, yet an L4 cell whose
 # every round reached no cell FLOORS, whatever the reason (`l4/proxies.py::floor_reason`).
 PARSE_FAILURE_TOOLING = ValidationReason.L1_PROVIDER_EMPTY_RESPONSE
-# A response whose every variant leaves its parent unchanged: zero candidates, never charged.
-PARSE_FAILURE_ALL_NO_OP = ValidationReason.L1_ALL_NO_OP_VARIANTS
 
 
 class FailureClusterReadout(TypedDict):

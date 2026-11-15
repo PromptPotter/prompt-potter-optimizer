@@ -11502,6 +11502,18 @@
         "additionalProperties": false,
         "description": "What a node's call answered.",
         "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the call failed; null on an answered call.",
+            "title": "Error"
+          },
           "reasoning": {
             "anyOf": [
               {
@@ -11520,7 +11532,8 @@
         },
         "required": [
           "response",
-          "reasoning"
+          "reasoning",
+          "error"
         ],
         "title": "NodeOutput",
         "type": "object"
@@ -18192,9 +18205,9 @@
           "not_in_block_pool",
           "citation_not_in_panel",
           "over_ceiling",
+          "edit_anchor_not_one_span",
           "optimizer_prompt_parse_failure",
           "l1_provider_empty_response",
-          "l1_all_no_op_variants",
           "steers_inner_stopping",
           "steers_across_seeds",
           "guts_inherited_contract",

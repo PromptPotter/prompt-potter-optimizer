@@ -98,8 +98,8 @@ RECOMBINATION_VALUE_STEM = 160
 # An id is shown, and answered, by its head, resolved over every individual the cycle measured.
 RECOMBINATION_ID_CHARS = 8
 BLOCK_ID_INSTRUCTION = (
-    "Per prompt node, its pooled fields: {node: {field: the id of a block the PROMPT BLOCK POOL "
-    "panel lists for that field}}."
+    "Each edit replaces its pooled field whole: `text` is the id of a block the PROMPT BLOCK "
+    "POOL panel lists for that field."
 )
 # The scorer parses these, so an edit to one scores near 0 however good its reasoning.
 L1_HELD_PROMPT_FIELDS: tuple[str, ...] = ("answer_format",)

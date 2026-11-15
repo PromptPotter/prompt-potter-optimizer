@@ -9,6 +9,42 @@
       "strict": true,
       "schema": {
         "$defs": {
+          "L1Edit": {
+            "additionalProperties": false,
+            "properties": {
+              "at": {
+                "title": "At",
+                "type": "string"
+              },
+              "op": {
+                "enum": [
+                  "replace",
+                  "insert_after",
+                  "delete"
+                ],
+                "title": "Op",
+                "type": "string"
+              },
+              "anchor": {
+                "description": "A verbatim span the field's CURRENT text holds once.",
+                "title": "Anchor",
+                "type": "string"
+              },
+              "text": {
+                "description": "The new text; empty for delete.",
+                "title": "Text",
+                "type": "string"
+              }
+            },
+            "required": [
+              "at",
+              "op",
+              "anchor",
+              "text"
+            ],
+            "title": "L1Edit",
+            "type": "object"
+          },
           "L1Recombination": {
             "additionalProperties": false,
             "properties": {
@@ -57,6 +93,11 @@
                   }
                 ]
               },
+              "mechanism": {
+                "description": "The failure mechanism this variant tests and the change that tests it.",
+                "title": "Mechanism",
+                "type": "string"
+              },
               "targets_rows": {
                 "anyOf": [
                   {
@@ -73,6 +114,20 @@
                 "description": "The rows this edit must hold for, by their `[#id]` marks — at least two, and all inside ONE critique cluster where the CRITIQUE panel lists clusters.",
                 "title": "Targets Rows"
               },
+              "edits": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/L1Edit"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Edits"
+              },
               "pipeline_overlay": {
                 "anyOf": [
                   {
@@ -88,21 +143,6 @@
                 "description": "Nested {node: {param: value}} — scalar backend tunables and `output_schema_descriptions.<path>` prose, each a param under ITS NODE, NEVER a top-level key beside the nodes. Scalar params (temperature, tokens, effort) are a last resort: at most one, and only where a panel or a runtime failure points there.",
                 "title": "Pipeline Overlay"
               },
-              "prompt_fields_updates": {
-                "anyOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {},
-                    "type": "object",
-                    "required": []
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Per prompt node, its prompt fields: {node: {field: new full text}}.",
-                "title": "Prompt Fields Updates"
-              },
               "shots": {
                 "anyOf": [
                   {
@@ -117,19 +157,15 @@
                 ],
                 "description": "Per prompt node, the shots it runs with: demo-pool ids from the DEMO POOL panel, in order. Replaces that node's list; null keeps it.",
                 "title": "Shots"
-              },
-              "changes_description": {
-                "title": "Changes Description",
-                "type": "string"
               }
             },
             "required": [
               "evidence_grounding",
+              "mechanism",
               "targets_rows",
+              "edits",
               "pipeline_overlay",
-              "prompt_fields_updates",
-              "shots",
-              "changes_description"
+              "shots"
             ],
             "title": "L1Variant",
             "type": "object"

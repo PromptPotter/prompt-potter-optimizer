@@ -74,7 +74,7 @@ from factories import (
     walking_cycle,
     workspace,
 )
-from offline_world import FakeHarness, Router
+from offline_world import FakeHarness, Router, shown_text
 from pydantic import SecretStr, ValidationError
 
 from promptpotter import connectors
@@ -284,7 +284,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint
-from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_panel import (
     OverlapReading,
@@ -336,6 +335,7 @@ from promptpotter.domain.records.run_records import (
     CampaignCeilingRecord,
     ForkSpec,
     ForkTrigger,
+    LLMCallRecord,
     RoundEnteredRecord,
     RoundWarningRecord,
     Running,
@@ -396,7 +396,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
-from promptpotter.infrastructure.store.read_model import LedgerIndex
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, scan_last
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
@@ -1392,11 +1392,14 @@ def _potter_says(*instructions: str) -> Callable[[dict[str, Any]], str]:
     def says(body: dict[str, Any]) -> str:
         if body.get("response_format", {}).get("json_schema", {}).get("name") != "L1GenerateOutput":
             return json.dumps({"priority_fix": "instruction: check each premise"})
+        anchor = shown_text(_asked(body), "solve.instruction")
         variants = [
             {
+                "mechanism": text,
                 "targets_rows": [],
-                "prompt_fields_updates": {"solve": {"instruction": text}},
-                "changes_description": text,
+                "edits": [
+                    {"at": "solve.instruction", "op": "replace", "anchor": anchor, "text": text}
+                ],
             }
             for text in instructions
         ]
@@ -3881,41 +3884,85 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_round_of_no_op_variants_measures_no_candidate_and_books_zero_candidates(
+def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_stands(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
+    member = NODE_MEMBERS.get("l1_generate")
+    assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
     with _peer_cycle(
-        workspace(tmp_path / "restated"),
+        workspace(tmp_path / "edits"),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {"l1_generate": {"config": {"n_variants": 4}}},
+        lambda _p, _s: True,
+    ) as (cycle, _):
+        parent = cycle.parent.prompts["solve"].fields["instruction"]
+
+        def edit(op: str, anchor: str, text: str) -> dict[str, Any]:
+            return {"at": "solve.instruction", "op": op, "anchor": anchor, "text": text}
+
+        edits = [
+            [edit("replace", parent, parent)],
+            [edit("replace", "a span the parent never held", "Check.")],
+            # Two edits on one field: the second anchors on the text the first left.
+            [edit("insert_after", parent, " Zq7."), edit("replace", "Zq7.", "Check twice.")],
+            # A span the text holds twice names no place to edit.
+            [edit("insert_after", parent, " Zq7. Zq7."), edit("replace", "Zq7.", "Check.")],
+        ]
+        offline.llm.says = lambda _body: json.dumps(
+            {"variants": [{"mechanism": "m", "targets_rows": [], "edits": e} for e in edits]}
+        )
+        offline.llm.sent.clear()
+        generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
+        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
+        readout = cycle.output(L1Readout, 1)
+    assert len(offline.llm.sent) == 1, "a reply the invariants refuse per arm bought a repair"
+    fatal = [
+        [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
+        for cp in proposed.proposals
+    ]
+    missed = "edit_anchor_not_one_span"
+    assert fatal == [["no_op_variant"], [missed], [], [missed]], (
+        "a restating or mis-anchored variant was not refused as its own arm"
+    )
+    assert proposed.proposals[2].individual.prompts["solve"].fields["instruction"] == (
+        f"{parent} Check twice."
+    ), "two edits on one field did not apply in order"
+    assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
+        None,
+        4,
+        {"no_op_variant": 1, missed: 2},
+    ), "a round's per-arm refusals were not booked against what L1 generated"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_optimizer_call_whose_send_raises_leaves_its_record_and_still_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # A call announced and never closed reads as one still waiting, whatever it cost.
+    member = NODE_MEMBERS.get("l1_generate")
+    assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
+    with _peer_cycle(
+        workspace(tmp_path / "refused"),
         _PEER_HOP,
         monkeypatch,
         "potter",
         {},
         lambda _p, _s: True,
-    ) as (cycle, _):
-        restated = {"solve": dict(cycle.parent.prompts["solve"].fields)}
-        variant = {
-            "evidence_grounding": {"field": "critique", "citation": "the parent"},
-            "targets_rows": [],
-            "prompt_fields_updates": restated,
-            "changes_description": "restate the parent",
-        }
-        offline.llm.says = lambda _body: json.dumps({"variants": [variant, variant]})
-        offline.llm.sent.clear()
-        generating = NodeContext(
-            RoundContext(cycle=cycle, round_num=1),
-            NODE_MEMBERS.get("l1_generate"),
-        )
-        member = NODE_MEMBERS.get("l1_generate")
-        assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
-        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
-        readout = cycle.output(L1Readout, 1)
-    assert proposed.proposals == [], "a round of no-op variants measured a candidate"
-    assert len(offline.llm.sent) == 1, "a batch the invariants read as no-ops bought a repair"
-    assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
-        PARSE_FAILURE_ALL_NO_OP,
-        0,
-        {},
-    ), "a round of no-op variants was booked as proposer wounds, not as zero candidates"
+    ) as (cycle, ledger):
+        offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
+        generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
+        with pytest.raises(httpx.HTTPStatusError):
+            asyncio.run(member.propose(generating, node_contract.Proposals([])))
+        record = scan_last([LedgerSpan(ledger.path)], LLMCallRecord)
+    assert record is not None and record.node == "l1_generate", "the failed call left no record"
+    assert (
+        "HTTPStatusError" in record.payload["error"] and "refused" in record.payload["content"]
+    ), "the record names no failure, or drops the refusal's body"
+    assert record.payload["template_fields"] and record.payload["response_schema"], (
+        "the record cannot rebuild the request that failed"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -3932,12 +3979,23 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
         {},
         lambda _p, _s: True,
     ) as (cycle, _):
-        writes = [{"answer_format": "Say anything."}, {"instruction": "Check each premise."}]
+        fields = cycle.parent.prompts["solve"].fields
+        writes = [("answer_format", "Say anything."), ("instruction", "Check each premise.")]
         offline.llm.says = lambda _body: json.dumps(
             {
                 "variants": [
-                    {"prompt_fields_updates": {"solve": fields}, "changes_description": "edit"}
-                    for fields in writes
+                    {
+                        "mechanism": "edit",
+                        "edits": [
+                            {
+                                "at": f"solve.{field}",
+                                "op": "replace",
+                                "anchor": fields.get(field, ""),
+                                "text": text,
+                            }
+                        ],
+                    }
+                    for field, text in writes
                 ]
             }
         )

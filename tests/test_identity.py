@@ -3652,9 +3652,9 @@ def test_l1s_wire_offers_the_roster_the_second_prompt_node_declares() -> None:
     wire = build_l1_response_schema(
         two, citable_fields=["critique"], inner_cells=None, field_names={}
     )
-    offered = wire["properties"]["variants"]["items"]["properties"]["prompt_fields_updates"]
-    review = offered["properties"]["review"]["anyOf"][0]
-    assert set(review["properties"]) == {"instruction", "rubric"}, (
+    edits = wire["properties"]["variants"]["items"]["properties"]["edits"]
+    offered = {at for at in edits["items"]["properties"]["at"]["enum"] if at.startswith("review.")}
+    assert offered == {"review.instruction", "review.rubric"}, (
         "L1 was offered another roster than the second prompt node declares"
     )
 

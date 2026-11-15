@@ -47,6 +47,16 @@ def draw(*parts: object) -> int:
     return int.from_bytes(hashlib.sha256("\x1f".join(map(str, parts)).encode()).digest()[:8], "big")
 
 
+def shown_text(prompt: str, locus: str) -> str:
+    """A field's first paragraph under L1's CURRENT PROMPTS, as a model copies an anchor; empty
+    where the field renders none, which anchors the empty field whole."""
+    head = f"\n[{locus}]\n"
+    shown = prompt.find(head, max(prompt.find("CURRENT PROMPTS"), 0))
+    if shown < 0:
+        return ""
+    return prompt[shown + len(head) :].split("\n\n", 1)[0]
+
+
 USAGE: dict[str, Any] = {
     "prompt_tokens": 1000,
     "completion_tokens": 200,

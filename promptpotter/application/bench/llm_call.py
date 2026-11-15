@@ -8,6 +8,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -17,6 +18,7 @@ from promptpotter.domain.records.run_records import (
     LLMCallStartRecord,
 )
 from promptpotter.domain.search_point import NodeConfig
+from promptpotter.domain.spend import TokenAccount
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat, silence_detail
@@ -35,7 +37,7 @@ from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.llm.wallet import keyed_client
 from promptpotter.infrastructure.run_scope import run_scope, scoped
-from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
+from promptpotter.infrastructure.store.llm_reuse_cache import Answered, LLMReuseCache, hash_call
 from promptpotter.shared.errors import OptimizerTimeoutError
 
 
@@ -261,43 +263,58 @@ async def _provider_reply(call: _Call) -> LLMResponse:
 
 
 def _call_record(
-    call: _Call,
-    response: LLMResponse,
-    duration_s: float,
-    *,
-    cached: bool,
-    trace_meta: dict[str, Any] | None,
+    call: _Call, trace_meta: dict[str, Any] | None, said: dict[str, Any], usage: TokenAccount | None
 ) -> LLMCallRecord:
-    payload: dict[str, Any] = {
-        "type": call.label,
-        "config": {
-            "model": call.merged.model,
-            "temperature": _sampled_at(call.merged),
-            "max_tokens": call.merged.max_tokens,
-        },
-        "response": _ledger_response_payload(response),
-        "model": response.model,
-        "duration_s": duration_s,
-        "finish_reason": response.finish_reason,
-        "schema_repair_errors": response.schema_repair_errors,
-    }
-    # EVIDENCE FOR A HUMAN: nothing downstream reads this key and nothing may start.
-    if response.reasoning:
-        payload["reasoning"] = _ledger_reasoning(response.reasoning)
-    if cached:
-        payload["cached"] = True
-    if trace_meta:
-        payload.update(trace_meta)
-    else:
-        payload["messages"] = call.request.messages
+    """Enough to rebuild the request beside what came back: the config, prompt and schema sent."""
+    merged = call.merged
+    config = {"temperature": _sampled_at(merged), "route_order": merged.route_order or None}
+    keys = ("model", "max_tokens", "reasoning_effort", "top_p", "seed")
+    asked = {"type": call.label, "config": merged.model_dump(include=set(keys)) | config}
+    asked |= trace_meta or {"messages": call.request.messages}
     return LLMCallRecord(
         node=call.label,
         round=call.context.round_num,
         candidate_idx=call.context.candidate_idx,
         call_id=call.call_id,
-        usage=response.usage,
-        payload=payload,
+        usage=usage,
+        payload=asked | {"response_schema": call.request.wire_schema} | said,
     )
+
+
+def _answered_record(
+    call: _Call, answered: Answered, trace_meta: dict[str, Any] | None
+) -> LLMCallRecord:
+    response = answered.response
+    said = {
+        "response": _ledger_response_payload(response),
+        # EVIDENCE FOR A HUMAN, as `reasoning` is: the reply as the provider sent it.
+        "content": response.content,
+        "model": response.model,
+        "duration_s": answered.duration_s,
+        "finish_reason": response.finish_reason,
+        "schema_repair_errors": response.schema_repair_errors,
+    }
+    # EVIDENCE FOR A HUMAN: nothing downstream reads this key and nothing may start.
+    if response.reasoning:
+        said["reasoning"] = _ledger_reasoning(response.reasoning)
+    if answered.replayed:
+        said["cached"] = True
+    return _call_record(call, trace_meta, said, response.usage)
+
+
+def _failed_record(
+    call: _Call, failure: BaseException, trace_meta: dict[str, Any] | None
+) -> LLMCallRecord:
+    """The reply text a failure carries: the last rung's where the repair ladder ran out, a refusal's body."""
+    parse = failure if isinstance(failure, OptimizerPromptParseError) else None
+    refused = failure.response.text if isinstance(failure, httpx.HTTPStatusError) else None
+    said = {
+        "error": f"{type(failure).__name__}: {failure}",
+        "content": refused if parse is None else parse.raw,
+        "duration_s": call.elapsed_s(),
+        "finish_reason": None if parse is None else parse.finish_reason,
+    }
+    return _call_record(call, trace_meta, said, None if parse is None else parse.usage)
 
 
 async def llm_call(
@@ -338,26 +355,21 @@ async def llm_call(
         _announce(call)
         return await _provider_reply(call)
 
-    answered = await context.cache.answer(
-        hash_call(call.request, provider=merged.provider),
-        send,
-        node=node,
-        kind="optimizer",
-        provider=merged.provider,
-        model=merged.model,
-    )
-    response = answered.response
-    append_record(
-        _call_record(
-            call,
-            response,
-            answered.duration_s,
-            cached=answered.replayed,
-            trace_meta=trace_meta,
+    try:
+        answered = await context.cache.answer(
+            hash_call(call.request, provider=merged.provider),
+            send,
+            node=node,
+            kind="optimizer",
+            provider=merged.provider,
+            model=merged.model,
         )
-    )
-
-    return response
+    # A pause's cancel included: an `llm_call_start` with no close reads as a call still waiting.
+    except BaseException as failure:
+        append_record(_failed_record(call, failure, trace_meta))
+        raise
+    append_record(_answered_record(call, answered, trace_meta))
+    return answered.response
 
 
 async def answer[M: BaseModel](

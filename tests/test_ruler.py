@@ -68,7 +68,6 @@ from promptpotter.domain.l4.proxies import (
     mean_parent_level_se,
 )
 from promptpotter.domain.optimizer_state import (
-    PARSE_FAILURE_ALL_NO_OP,
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
 )
@@ -829,7 +828,6 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     for spoiled in (
         [failed(PARSE_FAILURE_TOOLING, 1)],
         [round_result(0), failed(PARSE_FAILURE_MALFORMED, 1), failed(PARSE_FAILURE_MALFORMED, 2)],
-        [failed(PARSE_FAILURE_ALL_NO_OP, 1), failed(PARSE_FAILURE_MALFORMED, 2)],
         [round_result(1, candidates_scored=0, no_op=1, dup=1)],
         [round_result(1, candidates_scored=0, no_op=2), failed(PARSE_FAILURE_MALFORMED, 2)],
     ):

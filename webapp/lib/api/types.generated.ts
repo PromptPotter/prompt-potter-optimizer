@@ -2083,7 +2083,7 @@ export interface ValidationFailure {
   /** The accept-set the validator checked against. Empty list when the failure is
    * mode-based (parse error, forbidden axis) rather than membership-based. */
   allowed: string[];
-  reason: 'forbidden_axis' | 'unknown_param' | 'type_mismatch' | 'not_in_available_models' | 'not_in_param_allowed_values' | 'not_accepted_by_model' | 'reproposes_known_failing_config' | 'hallucinated_node' | 'dropped_mandatory_placeholder' | 'shots_without_demo_pool' | 'shot_not_in_demo_pool' | 'shot_repeated' | 'shots_over_cap' | 'not_in_block_pool' | 'citation_not_in_panel' | 'over_ceiling' | 'optimizer_prompt_parse_failure' | 'l1_provider_empty_response' | 'l1_all_no_op_variants' | 'steers_inner_stopping' | 'steers_across_seeds' | 'guts_inherited_contract' | 'layout_node_not_l4_editable' | 'l1_layout_unparseable' | 'l1_layout_missing_mandatory' | 'l1_layout_unknown_placeholder' | 'l1_layout_voids_prefix' | 'l1_layout_unchanged_from_prior' | 'no_op_variant' | 'duplicate_variant' | 'repeat_variant';
+  reason: 'forbidden_axis' | 'unknown_param' | 'type_mismatch' | 'not_in_available_models' | 'not_in_param_allowed_values' | 'not_accepted_by_model' | 'reproposes_known_failing_config' | 'hallucinated_node' | 'dropped_mandatory_placeholder' | 'shots_without_demo_pool' | 'shot_not_in_demo_pool' | 'shot_repeated' | 'shots_over_cap' | 'not_in_block_pool' | 'citation_not_in_panel' | 'over_ceiling' | 'edit_anchor_not_one_span' | 'optimizer_prompt_parse_failure' | 'l1_provider_empty_response' | 'steers_inner_stopping' | 'steers_across_seeds' | 'guts_inherited_contract' | 'layout_node_not_l4_editable' | 'l1_layout_unparseable' | 'l1_layout_missing_mandatory' | 'l1_layout_unknown_placeholder' | 'l1_layout_voids_prefix' | 'l1_layout_unchanged_from_prior' | 'no_op_variant' | 'duplicate_variant' | 'repeat_variant';
 }
 
 /** One scored sample as `dashboard.json` serves it, display-trimmed and one shape
@@ -2173,6 +2173,8 @@ export interface NodeOutput {
   /** The model's own thinking, where the provider returned one. For a human reader
    * only: nothing derives, scores, sorts or gates on it. */
   reasoning: string | null;
+  /** Why the call failed; null on an answered call. */
+  error: string | null;
 }
 
 /** The round's standing in its eliminator ``member``'s race. */
@@ -5506,7 +5508,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "5e2f6f17b00b5720";
+export const SERVED_CONTRACT = "3d7f7d2447da4dda";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

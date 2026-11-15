@@ -443,6 +443,12 @@ function CallRun({
                 <div className="opt-detail-col-body">
                   {response != null ? (
                     <pre className="opt-detail-pre">{fmtValue(response, { pretty: true })}</pre>
+                  ) : block.output.error ? (
+                    <FailureLine
+                      failure={{ message: block.output.error }}
+                      lead="The call failed:"
+                      className="opt-detail-col-empty"
+                    />
                   ) : inFlight ? (
                     <Loading className="opt-detail-col-empty">
                       In flight — response not yet written.

@@ -71,15 +71,11 @@ _PHRASE_TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
 def _variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
-    """Prose rides two carriers by campaign kind: reading one answers inverted on the other."""
-    updates = variant.get("prompt_fields_updates") or {}
-    written = {
-        Locus(n, f).name: str(v)
-        for n, fields in updates.items()
-        if isinstance(fields, dict)
-        for f, v in fields.items()
-        if v
-    }
+    """Prose rides two carriers by campaign kind: reading one answers inverted on the other. A
+    delete writes its locus too, its text empty."""
+    written: dict[str, str] = {}
+    for edit in variant.get("edits") or []:
+        written[edit["at"]] = "\n".join(t for t in (written.get(edit["at"]), edit["text"]) if t)
     for n, cfg in (variant.get("pipeline_overlay") or {}).items():
         for p, v in cfg.items() if isinstance(cfg, dict) else ():
             if p in OptimizerPromptTemplate.model_fields and v:
@@ -88,7 +84,7 @@ def _variant_prose_written(variant: dict[str, Any]) -> dict[str, str]:
 
 
 def _variant_text_blob(variant: dict[str, Any]) -> str:
-    parts = [str(variant.get("changes_description") or "")]
+    parts = [str(variant.get("mechanism") or "")]
     parts.extend(_variant_prose_written(variant).values())
     return "\n".join(parts).lower()
 
@@ -186,19 +182,19 @@ def _check_not_only_param_variants(
     return False, f"all {len(variants)} variants mutate only non-prompt-field params"
 
 
-def _check_changes_description_english(
+def _check_mechanism_english(
     variants: Variants, _audit: RoundAudit, _ctx: ValidatorContext
 ) -> tuple[bool, str]:
     offenders: list[str] = []
     for i, v in enumerate(variants):
-        letters = [c for c in str(v.get("changes_description") or "") if c.isalpha()]
+        letters = [c for c in str(v.get("mechanism") or "") if c.isalpha()]
         if letters and sum(1 for c in letters if not c.isascii()) * 2 > len(letters):
             offenders.append(f"C{i + 1}")
     if offenders:
         return False, (
-            f"{len(offenders)}/{len(variants)} descriptions are majority non-ASCII: {offenders[:3]}"
+            f"{len(offenders)}/{len(variants)} mechanisms are majority non-ASCII: {offenders[:3]}"
         )
-    return True, f"{len(variants)}/{len(variants)} descriptions readable"
+    return True, f"{len(variants)}/{len(variants)} mechanisms readable"
 
 
 def _check_targets_a_cluster(
@@ -229,7 +225,7 @@ CHECK_REGISTRY: dict[str, CheckFn[Variants]] = {
     "param_scope_discipline": _check_param_scope_discipline,
     "not_only_param_variants": _check_not_only_param_variants,
     "evidence_grounding_present": _check_evidence_grounding_present,
-    "changes_description_english": _check_changes_description_english,
+    "mechanism_english": _check_mechanism_english,
 }
 
 
@@ -291,7 +287,7 @@ def _has_peaked_rebut(variant: dict[str, Any], citation: str, ctx: ValidatorCont
     blob = " ".join(
         [
             citation,
-            str(variant.get("changes_description") or ""),
+            str(variant.get("mechanism") or ""),
         ]
     ).lower()
     return any(sig in blob for sig in _REBUT_SIGNALS)

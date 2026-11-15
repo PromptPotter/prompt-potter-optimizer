@@ -39,24 +39,8 @@ from promptpotter.domain.wounds import (
     RuntimeFailure,
     ValidationFailure,
     ValidationReason,
+    fatal_validation_failures,
 )
-
-
-def l1_blocks_in_pool(
-    updates: Mapping[str, Mapping[str, str]], *, offered: Mapping[str, Collection[str]]
-) -> list[ValidationFailure]:
-    """Under ``closed`` every value is an id of its field's active entries: free text, or a field the pool holds nothing for, is no entry."""
-    return [
-        ValidationFailure(
-            axis=Locus(node, field).name,
-            value=value[:300],
-            allowed=list(offered.get(field, ())),
-            reason=ValidationReason.NOT_IN_BLOCK_POOL,
-        )
-        for node, fields in updates.items()
-        for field, value in fields.items()
-        if value not in offered.get(field, ())
-    ]
 
 
 def l1_prompt_fields_open(
@@ -421,6 +405,9 @@ def detect_invariants(
     # Whole prompts, so a variant that only moved its shots, or dropped every one, is an edit.
     parent_fields = parent_opt_sp.prompts
     for i, cp in enumerate(proposals):
+        # Refused for its own reason, it is no collapse: a missed anchor is not also a no-op.
+        if fatal_validation_failures(failures[i]):
+            continue
         child_fields = cp.individual.prompts
         delta = candidate_delta(child_fields, parent_fields, cp.overlay, parent_pp)
         if not delta:

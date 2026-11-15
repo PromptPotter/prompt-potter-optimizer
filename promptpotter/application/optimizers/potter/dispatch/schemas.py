@@ -64,18 +64,6 @@ def _one_script_values(value: dict[str, dict[str, Any]]) -> dict[str, dict[str, 
     return value
 
 
-def _drop_blank_values(value: object) -> object:
-    if isinstance(value, dict):
-        return {k: v for k, v in value.items() if not (isinstance(v, str) and not v.strip())}
-    return value
-
-
-def _drop_blank_node_values(value: object) -> object:
-    if isinstance(value, dict):
-        return {node: _drop_blank_values(fields) for node, fields in value.items()}
-    return value
-
-
 def _truncate_marked(max_len: int) -> Callable[[Any], Any]:
     """The marker is VISIBLE: a silent mid-quote cut reads downstream as a complete-but-wrong steer."""
 
@@ -107,12 +95,28 @@ class VariantEvidenceGrounding(OptimizerResponseModel):
 # Keyed by the pipeline's nodes, so `l1_wire_schema.py` states each slot per pipeline.
 _PER_PIPELINE: dict[str, Any] = {"type": "object", "properties": {}, "additionalProperties": False}
 
+EditOp = Literal["replace", "insert_after", "delete"]
+
+
+class L1Edit(OptimizerResponseModel):
+    # Loose at the parse boundary: `l1_wire_schema.py` closes it on the open prompt fields.
+    at: str
+    op: EditOp
+    anchor: str = Field(description="A verbatim span the field's CURRENT text holds once.")
+    text: Annotated[str, AfterValidator(_one_script)] = Field(
+        description="The new text; empty for delete."
+    )
+
 
 class L1Variant(OptimizerResponseModel):
     """Slot keys stay loose so a backend-specific node name never fails the parse; a no-op variant parses beside one that edits, and `validators.py::detect_invariants` drops that arm alone."""
 
     # Field order is GENERATION order; optional at the PARSE boundary only, REQUIRED on the wire (`l1_wire_schema.py`).
     evidence_grounding: VariantEvidenceGrounding | None = None
+    # The child's `changes_description`: decided before the edits, it can only state what they carry.
+    mechanism: Annotated[
+        str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX)), AfterValidator(_one_script)
+    ] = Field(description="The failure mechanism this variant tests and the change that tests it.")
     # Rows, never a label: a name is coined freely, an id is checked against the prompt.
     targets_rows: list[int] = Field(
         default_factory=list,
@@ -122,6 +126,8 @@ class L1Variant(OptimizerResponseModel):
             "inside ONE critique cluster where the CRITIQUE panel lists clusters."
         ),
     )
+    # A field left unedited is no key, so nothing restates the parent.
+    edits: list[L1Edit] = Field(default_factory=list)
     pipeline_overlay: Annotated[
         dict[str, dict[str, Any]], WithJsonSchema(_PER_PIPELINE), AfterValidator(_one_script_values)
     ] = Field(
@@ -133,23 +139,11 @@ class L1Variant(OptimizerResponseModel):
             "last resort: at most one, and only where a panel or a runtime failure points there."
         ),
     )
-    prompt_fields_updates: Annotated[
-        dict[str, dict[str, str]],
-        WithJsonSchema(_PER_PIPELINE),
-        BeforeValidator(_drop_blank_node_values),
-        AfterValidator(_one_script_values),
-    ] = Field(
-        default_factory=dict,
-        description="Per prompt node, its prompt fields: {node: {field: new full text}}.",
-    )
     shots: Annotated[dict[str, list[int]], WithJsonSchema(_PER_PIPELINE)] = Field(
         default_factory=dict,
         description="Per prompt node, the shots it runs with: demo-pool ids from the DEMO POOL "
         "panel, in order. Replaces that node's list; null keeps it.",
     )
-    changes_description: Annotated[
-        str, BeforeValidator(_truncate_marked(VARIANT_PROSE_MAX)), AfterValidator(_one_script)
-    ]
 
 
 class L1Recombination(OptimizerResponseModel):

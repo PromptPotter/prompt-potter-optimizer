@@ -9,8 +9,9 @@ thousands of tokens upstream. Three levers:
 2. **The coordinates.** Fields are generated in schema order, each context for the next: `{answer, reasoning}`
    commits, then rationalizes; `{reasoning, answer}` puts the reasoning in context first. Nesting obeys the
    same rule. *Live example:* `L1Variant` (`application/optimizers/potter/dispatch/schemas.py`) generates
-   `evidence_grounding` **before** the delta slots it justifies. The required set binds as hard as the order:
-   the payload generates before the prose that reports it (`changes_description`), a variant that changes
+   `evidence_grounding` and then the `mechanism` it tests **before** the `edits` that carry it. The required
+   set binds as hard as the order: a map with every field a required key is a request to restate every
+   field, so the variant names only the fields it edits, a variant that changes
    nothing against its parent is rejected as `no_op_variant` by `validators.py` (over
    `domain/candidate_diff.py::candidate_delta`) — never at parse, where one rejection costs the whole batch —
    and no unbounded free-text identifier leads the object. The prompt's `answer_format` lists the fields in

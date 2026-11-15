@@ -44,7 +44,9 @@ def build_node_block(record: LLMCallRecord) -> NodeBlock:
             messages=[] if rendered else payload.get("messages") or [],
         ),
         output=NodeOutput(
-            response=payload.get("response"), reasoning=payload.get("reasoning") or None
+            response=payload.get("response"),
+            reasoning=payload.get("reasoning") or None,
+            error=payload.get("error"),
         ),
         timestamp=record.timestamp,
         config=payload.get("config") or {},

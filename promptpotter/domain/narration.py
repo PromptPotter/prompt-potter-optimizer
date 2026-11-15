@@ -321,6 +321,8 @@ class Narration:
         if replayed:
             bits.append("replayed")
         flags: list[str] = []
+        if error := payload.get("error"):
+            flags.append(f"FAILED {error[:120]}")
         if retries := len(payload.get("schema_repair_errors") or ()):
             flags.append(f"re-asked {retries}x")
         if payload.get("finish_reason") == "length":

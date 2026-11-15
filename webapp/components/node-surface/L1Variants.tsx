@@ -3,25 +3,51 @@ import { SegmentedControl } from "@/components/ui";
 import { promptFieldLabel } from "@/lib/derivations";
 import { fmtSampleTag, fmtValue } from "@/lib/format";
 
+// One edit on a prompt field of the parent: `anchor` a verbatim span of its text.
+interface Edit {
+  at?: string;
+  op?: string;
+  anchor?: string;
+  text?: string;
+}
+
 // The LLM's output as the audit twin banked it, not a served model: read defensively.
 interface Variant {
   evidence_grounding?: { field?: string; citation?: string } | null;
+  mechanism?: string | null;
   targets_rows?: number[] | null;
+  edits?: Edit[] | null;
   pipeline_overlay?: Record<string, unknown> | null;
-  // Per prompt node: its field updates, and its shots as demo-pool ids.
-  prompt_fields_updates?: Record<string, Record<string, unknown> | null> | null;
+  // Per prompt node: its shots as demo-pool ids.
   shots?: Record<string, unknown> | null;
-  changes_description?: string | null;
 }
 
-// Keyed `node.field`, one row per locus the variant writes.
-function promptLoci(v: Variant): Record<string, unknown> {
+function shotLoci(v: Variant): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [node, fields] of Object.entries(v.prompt_fields_updates ?? {})) {
-    for (const [field, text] of Object.entries(fields ?? {})) out[`${node}.${field}`] = text;
-  }
   for (const [node, ids] of Object.entries(v.shots ?? {})) out[`${node}.shots`] = ids;
   return out;
+}
+
+function Edits({ edits }: { edits: Edit[] }) {
+  if (edits.length === 0) return null;
+  return (
+    <div className="l1v-block">
+      <span className="l1v-block-head">Prompt edits</span>
+      <dl className="l1v-fields">
+        {edits.map((e, i) => (
+          <div key={i} className="l1v-field">
+            <dt>
+              {e.at ? locusLabel(e.at) : "?"} · {e.op ?? "?"}
+            </dt>
+            <dd>
+              {e.anchor ? <blockquote className="l1v-cite">{e.anchor}</blockquote> : null}
+              {e.text ? <pre>{e.text}</pre> : null}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </div>
+  );
 }
 
 function locusLabel(key: string): string {
@@ -88,9 +114,7 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
         </span>
       </div>
 
-      {shown.changes_description && (
-        <p className="l1v-lede">{shown.changes_description}</p>
-      )}
+      {shown.mechanism && <p className="l1v-lede">{shown.mechanism}</p>}
 
       {grounding && (grounding.field || grounding.citation) && (
         <div className="l1v-block">
@@ -108,7 +132,8 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
         </div>
       )}
 
-      <Overrides title="Prompt changes" map={promptLoci(shown)} />
+      <Edits edits={shown.edits ?? []} />
+      <Overrides title="Shot changes" map={shotLoci(shown)} />
       <Overrides title="Param changes" map={shown.pipeline_overlay} />
     </section>
   );

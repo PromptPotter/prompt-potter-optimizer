@@ -96,7 +96,10 @@ BASELINE = {
     # tests-w (+20): the launch's scope and its line's open, named so the harness opens as
     # `run_optimization` does (its hand copy, -30, is in tests/). tests-w 4 (+1): a home that
     # fetched no rates reads the floor's one table, never a copy keyed by its absent file.
-    "package_lines": 111006,
+    # l1-edits (+35): L1's edit list applied in one place, its missed anchor an arm's own reason,
+    # and every optimizer call's record on failure too, its error on the node's audit block; the
+    # all-no-op round and the pool twin gone.
+    "package_lines": 111041,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

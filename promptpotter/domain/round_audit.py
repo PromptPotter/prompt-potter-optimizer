@@ -39,6 +39,7 @@ class NodeOutput(FrozenModel):
         description="The model's own thinking, where the provider returned one. For a human "
         "reader only: nothing derives, scores, sorts or gates on it."
     )
+    error: str | None = Field(description="Why the call failed; null on an answered call.")
 
 
 class NodeBlock(FrozenModel):

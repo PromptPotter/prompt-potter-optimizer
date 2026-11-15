@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from typing import Any, Literal, cast
 
@@ -49,6 +49,7 @@ from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
 from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     CLUSTER_ROWS_MIN,
+    L1Edit,
     VariantEvidenceGrounding,
     build_l1_response_model,
     critique_response_model,
@@ -62,7 +63,6 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.potter.validators import (
     detect_invariants,
-    l1_blocks_in_pool,
     l1_citation_in_panel,
     l1_config_not_in_runtime_failures,
     l1_inner_layout_applies,
@@ -81,9 +81,8 @@ from promptpotter.application.optimizers.variation.members import (
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.l4.cells import InnerCells
-from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint, loci_of
+from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import (
-    PARSE_FAILURE_ALL_NO_OP,
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
     Critique,
@@ -182,16 +181,9 @@ async def l1_generate(
     children = ctx.read(Children)
     population: list[Proposal] = []
     for v in variants_list[:n_variants]:
-        updates = v.prompt_fields_updates
-        failures: list[ValidationFailure] = []
-        if pooled is not None:
-            failures += l1_blocks_in_pool(updates, offered=pooled)
-            updates = {
-                node: {f: pooled[f][i] for f, i in fields.items() if i in pooled.get(f, {})}
-                for node, fields in updates.items()
-            }
         # Unfiltered: `bench/children.py::carried_writes` fails the child on an undeclared node or field.
-        prompt_loci: dict[Locus, Any] = loci_of(updates)
+        texts, failures = applied_edits(v.edits, opt_sp, pooled=pooled)
+        prompt_loci: dict[Locus, Any] = dict(texts)
         prompt_loci.update(
             {
                 Locus(node, SHOTS_KEY): [key_of[i] for i in ids if i in key_of]
@@ -207,7 +199,7 @@ async def l1_generate(
                 overlay=v.pipeline_overlay,
                 failures=failures,
                 prompt_loci=prompt_loci,
-                changes_description=v.changes_description,
+                changes_description=v.mechanism,
                 evidence_grounding=grounding,
             )
         )
@@ -222,6 +214,51 @@ async def l1_generate(
     population.extend(_recombined(children, hosted, lineage, pipeline_schema, host="l2_context"))
 
     return L1Generation(population, None, citable, budget)
+
+
+def applied_edits(
+    edits: Sequence[L1Edit],
+    parent: OptSearchPoint,
+    *,
+    pooled: Mapping[str, Mapping[str, str]] | None,
+) -> tuple[dict[Locus, str], list[ValidationFailure]]:
+    """Each edit on its field's text so far, in order; an anchor naming no one span of it, or under
+    `closed` an id the pool lacks, is the arm's failure and changes nothing. An anchor equal to the field is it whole."""
+    texts: dict[Locus, str] = {}
+    failures: list[ValidationFailure] = []
+    for edit in edits:
+        node, _, key = edit.at.partition(".")
+        locus = Locus(node, key)
+        current = texts.get(locus, parent.prompt(node).fields.get(key, ""))
+        if pooled is not None:
+            if (block := pooled.get(key, {}).get(edit.text)) is not None:
+                texts[locus] = block
+                continue
+            failures.append(
+                ValidationFailure(
+                    axis=locus.name,
+                    value=edit.text[:300],
+                    allowed=list(pooled.get(key, ())),
+                    reason=ValidationReason.NOT_IN_BLOCK_POOL,
+                )
+            )
+            continue
+        # The empty span sits in every text, so it anchors only an empty field; one held twice, neither.
+        if edit.anchor != current and not (edit.anchor and current.count(edit.anchor) == 1):
+            failures.append(
+                ValidationFailure(
+                    axis=locus.name,
+                    value=edit.anchor[:300],
+                    allowed=[],
+                    reason=ValidationReason.EDIT_ANCHOR_NOT_ONE_SPAN,
+                )
+            )
+            continue
+        start = current.index(edit.anchor)
+        cut = start + len(edit.anchor)
+        kept = current[:cut] if edit.op == "insert_after" else current[:start]
+        texts[locus] = kept + ("" if edit.op == "delete" else edit.text) + current[cut:]
+    return texts, failures
 
 
 def _recombined(
@@ -365,12 +402,6 @@ async def propose_l1_population(ctx: NodeContext) -> Proposals:
     checked = detect_invariants(
         generation.proposals, lineage.parent, parent_point.pipeline_params, lineage.rounds
     )
-    # A batch moving none of the parent is missing data, not one proposer wound per variant.
-    if checked and all(
-        any(vf.reason == "no_op_variant" for vf in cp.validation_failures) for cp in checked
-    ):
-        checked = []
-        generation = replace(generation, parse_failure=PARSE_FAILURE_ALL_NO_OP)
     parsed = parse_population(
         checked,
         lineage.parent,
