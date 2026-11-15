@@ -470,12 +470,6 @@
             "title": "Drafts",
             "type": "array"
           },
-          "gate": {
-            "const": "arms",
-            "default": "arms",
-            "title": "Gate",
-            "type": "string"
-          },
           "run_phase": {
             "const": "gate",
             "default": "gate",

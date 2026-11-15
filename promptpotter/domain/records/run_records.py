@@ -141,7 +141,6 @@ class Ended(FrozenModel):
 
 class ArmsGate(FrozenModel):
     run_phase: Literal[RunPhase.GATE] = RunPhase.GATE
-    gate: Literal["arms"] = "arms"
     # The act that answers the hold, as a stop's acts answer it: each door spells it.
     next_acts: ClassVar[tuple[NextAct, ...]] = (
         NextAct(kind="submit-arms", field="keep", value="the draft indexes to measure"),

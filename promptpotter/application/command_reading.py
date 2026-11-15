@@ -11,7 +11,13 @@ from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
-from promptpotter.domain.phases import STOP_REASON_INFO, StopCategory, StopOutcome, StopReason
+from promptpotter.domain.phases import (
+    STOP_REASON_INFO,
+    RunPhase,
+    StopCategory,
+    StopOutcome,
+    StopReason,
+)
 from promptpotter.domain.records.run_records import LaunchedEffect, LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.stores import Stores
@@ -69,10 +75,10 @@ def job_status(job: Job, *, held: bool) -> tuple[TaskStatus, str]:
 
 
 def _held(stores: Stores, job: Job) -> bool:
-    """Its cycle holds at a gate (`RunState.gate`) while the run waits on an answer."""
+    """Its cycle holds at a gate while the run waits on an answer."""
     if job.released or job.hop == UNRESOLVED_HOP:
         return False
-    return stores.run_state(job.hop).gate is not None
+    return stores.run_state(job.hop).run_phase is RunPhase.GATE
 
 
 class CommandReading(FrozenModel):

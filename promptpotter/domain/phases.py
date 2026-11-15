@@ -101,9 +101,6 @@ class RunPhase(enum.StrEnum):
 
 LaunchStage = Literal[RunPhase.QUEUED, RunPhase.STARTING]
 
-# What a ``gate`` declaration holds for: the origin's verdict, or the arms a round measures.
-GateKind = Literal["origin", "arms"]
-
 
 class PauseCause(enum.StrEnum):
     """What paused a run, beside the stop reason that says how the cycle was left."""
@@ -264,14 +261,13 @@ INNER_SKIP_REFUSAL = (
 class RunState(NamedTuple):
     """``inner``: the cycle is an L4 inner run, which answers every run verb for itself.
 
-    ``gate`` and ``drafts`` are the standing hold's own, set only while the phase is ``gate``."""
+    ``drafts`` is the standing hold's own, set only while the phase is ``gate``."""
 
     run_phase: RunPhase
     producer: ProducerReading
     # Set where the cycle reads paused or terminal: its stop, whose next acts its relaunch fills.
     stop: StopReading | None = None
     inner: bool = False
-    gate: GateKind | None = None
     drafts: int = 0
 
     @property
@@ -318,7 +314,7 @@ class RunState(NamedTuple):
         """Why `submit-arms` keeping the drafts at *keep* is refused; empty where it is admitted."""
         if self.inner:
             return INNER_ARMS_REFUSAL
-        if self.gate != "arms":
+        if self.run_phase is not RunPhase.GATE:
             return "This cycle is not holding for a round's arms."
         if not keep:
             return ""
@@ -687,9 +683,9 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "Fix the backend, then resume: resuming re-measures the cells the origin lost, and the "
             "gate grades it again; an origin still unhealthy when resumed passes on that resume. "
-            "An edited origin is a new campaign or an operator-steered fork at round 0: resuming "
-            "refuses it.",
-            True,
+            "The resume that proceeds runs the bench pass the halt skipped. An edited origin is a "
+            "new campaign or an operator-steered fork at round 0: resuming refuses it.",
+            False,
             (NextAct(kind="start-run"), NextAct(kind="mint-campaign"), NextAct(kind="fork-cycle")),
         ),
         StopReason.BACKEND_UNREACHABLE: StopReasonInfo(

@@ -44,7 +44,7 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 **Phase 2**, in this order (operator, 2026-11-12):
 
 - **landed 29:** stream-rk, rk-run 1–3.
-- **landing 30:**
+- **landed 30:**
   - money 1–5: one charge record, one money fold, the host as one declared verified email;
   - rk-run 4–8: one model, one node-config merge, the rewrite knob, one layered config read, typed node layers.
 - **landed 31:** proof 1–4: the surface ledger fails only on a rise, `assert_never` closes every record
@@ -191,7 +191,7 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   fold; the 22 yaml lines went. No decision or request moved; the five treatment digests moved by
   the yamls' bytes. Run data wiped (drafts and campaign configs without the key). Beside it on main:
   the served contract (a bundle built against another API says so), the fold's `start=`.
-- **then:** mkey, then faults-2a beside small-3.
+- **then:** mkey, then faults-2a beside small-3, then rk-rest (the rows rk-run 4–8's landing left).
 
 The re-keys end at the behaviour-key switch.
 

@@ -2964,7 +2964,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
 
                 async def answer() -> None:
                     await held.wait()
-                    assert authored.run_state(hop).gate == "arms", (
+                    assert authored.run_state(hop).run_phase is RunPhase.GATE, (
                         "the hold never reached the ledger"
                     )
                     await submit("arms-at-the-hold")

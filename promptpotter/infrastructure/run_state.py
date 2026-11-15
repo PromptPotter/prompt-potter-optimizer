@@ -119,9 +119,7 @@ def read_run_state(
         and last is not None
         and isinstance(last.state, ArmsGate)
     ):
-        return RunState(
-            RunPhase.GATE, producer, gate=last.state.gate, drafts=len(last.state.drafts)
-        )
+        return RunState(RunPhase.GATE, producer, drafts=len(last.state.drafts))
     else:
         return RunState(RunPhase.RUNNING if producer.attached else RunPhase.DETACHED, producer)
     if run.run_phase is not RunPhase.PAUSED:
