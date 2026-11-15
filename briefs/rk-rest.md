@@ -2,7 +2,8 @@
 
 Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chain id `rk-rest`, arc `arc/rk-rest`.
 
-- **Base:** `origin/main` at `<BASE>`. This is your `<base sha>` in common.md.
+- **Base:** `origin/main` at `4874ea04c` (small-3 landed). This is your `<base sha>` in common.md.
+  mkey lands beside you (accounts, auth, `dispatcher.py`, `shared/identity.py`), in no file of yours.
 - **The code shrinks**, judged as common.md says. Two converters, a second pair binder, a re-parse at
   each reader and a registry outside its module go. Run `git diff --shortstat <base> HEAD -- promptpotter`
   after each link.
