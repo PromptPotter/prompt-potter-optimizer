@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api/reads";
 import type { Said, SubtreeCampaign, SubtreeCycle } from "@/lib/api/types";
 import { MASK_LENS_DEBOUNCE_MS } from "@/lib/cadence";
-import { cycleAt, indexLineage, type LineageIndex } from "@/lib/derivations";
+import { cycleAt, indexLineage, tagValue, type LineageIndex } from "@/lib/derivations";
 import { lensOf, useMaskState, type MaskState } from "@/lib/state/scoring-mask";
 import { useCellTerms } from "@/lib/hooks/useConnector";
 import { shownData, useRead } from "@/lib/hooks/useRead";
@@ -164,6 +164,11 @@ export function useViewedCycle(): SubtreeCycle | null {
   const { index } = useViewedLineage();
   const path = useWorkspace().viewed?.path ?? null;
   return useMemo(() => cycleAt(index, path), [index, path]);
+}
+
+// The viewed LEAF's dataset, its served subtree tag: a drilled-in inner run names its own.
+export function useViewedDatasetName(): string | null {
+  return tagValue(useViewedCycle(), "dataset");
 }
 
 // A campaign's tree by its address: the viewed campaign's under the viewed mask and moment.

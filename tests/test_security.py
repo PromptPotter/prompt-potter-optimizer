@@ -288,7 +288,7 @@ from promptpotter.infrastructure.producer_lock import hold_cycle, minted_produce
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.run_state import derive_run_state
 from promptpotter.infrastructure.store import io as store_io
-from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
+from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
 from promptpotter.infrastructure.store.data_root import Fate, classify
@@ -2094,12 +2094,11 @@ async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_
     )
     # A third subject, off the workspace tree: a cycle of the campaign's inner sandbox.
     sandbox = inner_sandbox(stores, trail_hop.campaign_id, trail_hop.cycle_id)
-    (inner_cycle,) = sandbox_cycle_dirs(sandbox)
-    inner_hop = CycleHop(campaign_id=inner_cycle.parent.parent.name, cycle_id=inner_cycle.name)
+    (inner_hop,) = stores.campaigns.in_sandbox(sandbox).cycle_hops()
     inner_subject = Subject.of((trail_hop, inner_hop)).key
     inner_run = StartRunPayload(campaign_id=inner_hop.campaign_id, cycle_id=inner_hop.cycle_id)
     stores.commands.append(_command(inner_run, "1999-01-01T00:00:00Z", inner_subject))
-    inner_line = ("start-run", f"camp-trail>{inner_cycle.parent.parent.name}/{inner_cycle.name}")
+    inner_line = ("start-run", f"camp-trail>{inner_hop.campaign_id}/{inner_hop.cycle_id}")
     trail = account.tenant_trail(stores)
     assert trail.lines[0][1:3] == inner_line, "what ran in a campaign's inner sandbox left no line"
     assert [(line.what, line.subject) for line in trail.lines[1:]] == [
@@ -2711,7 +2710,9 @@ def test_reclaim_spares_a_sandbox_whose_owner_cycle_exists_and_one_with_no_owner
     )
     (unprovable / "tenant").mkdir(parents=True)
     assert reclaim_orphan_sandboxes(built_stores.projects_root) == 0
-    assert (owned / "tenant").is_dir() and unprovable.is_dir(), "a sandbox with an owner was reaped"
+    assert (owned / built_stores.tenant_id).is_dir() and unprovable.is_dir(), (
+        "a sandbox with an owner was reaped"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
@@ -2735,7 +2736,7 @@ def test_two_campaigns_on_one_origin_share_no_sandbox_so_deleting_one_spares_the
         keep_results=False,
         inner_sandbox_root=inner_sandboxes_dir(built_stores.shared_root),
     )
-    assert not a.exists() and (b / "tenant").is_dir(), (
+    assert not a.exists() and (b / built_stores.tenant_id).is_dir(), (
         "one campaign's delete took another's sandbox"
     )
 

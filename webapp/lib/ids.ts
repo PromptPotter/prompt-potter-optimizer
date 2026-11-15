@@ -1,22 +1,5 @@
 import { CYCLE_PATH_HOP_SEP, CYCLE_PATH_UNIT_SEP, ID_COMPONENT_RE } from "@/lib/api/types";
 
-// Mirror `store/layout.py::root_cycle_id` — change both.
-const SIBLING_LAST_SEP_RE = /_(fork)_(?!.*_fork_)([^/]*)$/;
-const SIBLING_FIRST_SEP_RE = /_fork_/;
-
-export function rootCycleId(cycleId: string): string {
-  const m = cycleId.match(SIBLING_FIRST_SEP_RE);
-  return m && m.index !== undefined ? cycleId.slice(0, m.index) : cycleId;
-}
-
-export function shortFamilyTail(cycleId: string): string {
-  const m = cycleId.match(SIBLING_LAST_SEP_RE);
-  const kind = m?.[1];
-  const tail = m?.[2];
-  if (kind && tail) return `${kind.charAt(0)}·${tail}`;
-  return cycleId;
-}
-
 // A cycle_id is unique only within its campaign, so pickers key on the pair.
 const UNIT_SEP = CYCLE_PATH_UNIT_SEP;
 

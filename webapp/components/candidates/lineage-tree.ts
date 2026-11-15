@@ -8,7 +8,7 @@ import type {
   SubtreeCampaign,
   SubtreeCycle,
 } from "@/lib/api/types";
-import { candidatesOf, descentOf, tagValue, type Descent } from "@/lib/derivations";
+import { candidatesOf, descentOf, tagLabel, type Descent } from "@/lib/derivations";
 import { type CyclePath, pathOfAddress } from "@/lib/ids";
 import { fmtUnit } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
@@ -231,7 +231,8 @@ export const DIRECTION_GLYPH: Record<CycleSpawn["direction"], string> = {
 };
 
 const candidateRound = (c: HierarchyCandidate): number => c.facts.reading.arm.round;
-const retiredBy = (c: HierarchyCandidate): string | null => tagValue(c, "superseded");
+// The served `superseded` tag's words: "retired by" the card of the cycle that took its place.
+const retiredBy = (c: HierarchyCandidate): string | null => tagLabel(c, "superseded");
 
 function groupRounds(cands: readonly HierarchyCandidate[]): Map<number, HierarchyCandidate[]> {
   const byRound = new Map<number, HierarchyCandidate[]>();

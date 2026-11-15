@@ -24,10 +24,9 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store.account_spend import bank_spend, sandbox_cycle_dirs
+from promptpotter.infrastructure.store.account_spend import bank_spend
 from promptpotter.infrastructure.store.layout import (
     DRAFTS_DIR,
-    CycleLayout,
     inner_sandboxes_dir,
     read_sandbox_owner,
 )
@@ -36,6 +35,7 @@ from promptpotter.infrastructure.store.user_store import UserStore
 from promptpotter.shared.clock import epoch_seconds
 
 if TYPE_CHECKING:
+    from promptpotter.domain.cycle_paths import CycleHop
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -111,15 +111,14 @@ def _where(campaign_id: str, cycle_id: str, inside: str) -> str:
     return f"{inside}>{campaign_id}/{cycle_id}" if inside else f"{campaign_id}/{cycle_id}"
 
 
-def _cycle_lines(cycle_dir: Path, *, inside: str = "") -> list[TrailLine]:
+def _cycle_lines(hop: CycleHop, ledger: Path, *, inside: str = "") -> list[TrailLine]:
     """``inside`` names the campaign whose inner sandbox holds the cycle."""
-    campaign_id = cycle_dir.parent.parent.name
-    where = _where(campaign_id, cycle_dir.name, inside)
-    lines, _ = LedgerIndex.of(CycleLayout(cycle_dir).ledger).view(_Trail)
+    where = _where(hop.campaign_id, hop.cycle_id, inside)
+    lines, _ = LedgerIndex.of(ledger).view(_Trail)
     return [
         line._replace(
             subject=f"{where}: {line.subject}" if line.subject else where,
-            campaign_id=inside or campaign_id,
+            campaign_id=inside or hop.campaign_id,
         )
         for line in lines
     ]
@@ -151,38 +150,33 @@ def workspace_lines(stores: Stores) -> Iterator[TrailLine]:
         yield _command_line(spelled, command.timestamp, command.kind, command.issued_by.id)
     lines, _ = LedgerIndex.of(CycleEventLog.workspace_path(campaigns.workspace)).view(_Trail)
     yield from lines
-    for campaign_dir in campaigns.iter_campaign_dirs():
-        for cycle_dir in campaigns.campaign_cycle_dirs(campaign_dir.name):
-            yield from _cycle_lines(cycle_dir)
+    for campaign_id in campaigns.list_campaign_ids():
+        for hop in campaigns.campaign_cycle_hops(campaign_id):
+            yield from _cycle_lines(hop, campaigns.ledger(hop))
     inner = inner_sandboxes_dir(campaigns.workspace.parent)
     for sandbox in sorted(inner.iterdir()) if inner.is_dir() else ():
         owner = read_sandbox_owner(sandbox) if sandbox.is_dir() else None
         if owner is not None and owner.tenant_id == campaigns.workspace.name:
-            for cycle_dir in sandbox_cycle_dirs(sandbox):
-                yield from _cycle_lines(cycle_dir, inside=owner.campaign_id)
+            inner_store = campaigns.in_sandbox(sandbox)
+            for hop in inner_store.cycle_hops():
+                yield from _cycle_lines(hop, inner_store.ledger(hop), inside=owner.campaign_id)
 
 
 def bank_before_removal(
     *,
     workspace: WorkspaceDir,
-    cycle_dirs: list[Path],
+    ledgers: dict[CycleHop, Path],
+    inside: str,
     subject: Subject,
     metered: dict[CeilingMeter, Budget],
 ) -> None:
-    """A campaign destroyer's one bank; a tombstone already standing is a crashed delete's, kept for the retry."""
-    bank_spend(workspace=workspace, cycle_dirs=cycle_dirs, subject=subject, metered=metered)
-    bank_trail(workspace=workspace, cycle_dirs=cycle_dirs, subject=subject)
-
-
-def bank_trail(*, workspace: WorkspaceDir, cycle_dirs: list[Path], subject: Subject) -> None:
-    """The run stops alone: what was commanded is the account log's, which no delete reaches."""
+    """A campaign destroyer's one bank; a tombstone already standing is a crashed delete's, kept
+    for the retry. ``inside`` names the campaign whose inner sandbox holds the *ledgers*."""
+    bank_spend(workspace=workspace, ledgers=[*ledgers.values()], subject=subject, metered=metered)
     stops = [
         BankedStop(at=line.at, subject=line.subject)
-        for cycle_dir in cycle_dirs
-        # A cycle outside the workspace is an inner sandbox's, and the campaign names its owner.
-        for line in _cycle_lines(
-            cycle_dir, inside="" if cycle_dir.is_relative_to(workspace) else subject.campaign_id
-        )
+        for hop, ledger in ledgers.items()
+        for line in _cycle_lines(hop, ledger, inside=inside)
     ]
     if not stops:
         return

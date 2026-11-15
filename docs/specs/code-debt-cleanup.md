@@ -269,24 +269,6 @@ row it closes.
 
 ### batch/26 · addr
 
-- **A sibling's kind is parsed from its id**: `infrastructure/store/layout.py::sibling_kind` regexes root
-  / fork off the cycle id (`diag` is gone, a85862db3), read in `runner/output.py` and `hierarchy.py`;
-  `views/view_models.py:87-88` no longer reads it. Action: every reader takes the kind the mint
-  recorded; `sibling_kind` goes. **Rides with:** addr 1. **Re-test:**
-  `git grep -n "sibling_kind" -- promptpotter` is empty (7 hits today).
-- **`ids.ts::rootCycleId` regexes `_fork_`** to give `useCampaignForest.ts::parentId` /
-  `isInheritedSibling` what the served tree carries. Action: read parent and spawn off the tree. **Rides
-  with:** addr 1. **Re-test:** `git grep -n "rootCycleId(" -- webapp/lib webapp/components`.
-- **A workspace and a hop are re-derived from a path by parent counting**: `campaign_store/store.py`
-  (the cycle's hop beside `cycle_dir.parent.parent`) and `store/account_trail.py`. Action: read the
-  address from `Subject` / `CycleHop`: the defect sites are `store/account_trail.py:114` and
-  `campaign_store/store.py:407,835`. **Rides with:** addr 2. **Re-test:**
-  `git grep -nE "\.parents\[[0-9]\]|\.parent\.parent" -- promptpotter` names none beside the
-  data-layout and package-root sites (`read_model.py:181`, `layout.py:232`, `archive_maintenance.py:57`,
-  `config/paths.py:9`) and the landing's two (`maintenance/landing.py:256,380`);
-  the allowlist holds none of the three defect sites. `landing.py:256`'s `unit.parent.parent` is also
-  admit-2's re-test (`:64-66`), which wants it gone, so the two rows' allowlists conflict until admit-2
-  lands.
 - **Lineage spines key on `facts.individual` and on the origin**: the compare pane's spine builder
   resolves a subject by individual id across the whole tree (`hierarchy_subtree.py::_answering` picks
   one row per id; keys at `hierarchy_subtree.py:610-631`, `:620-622`) and merges a campaign's subjects
@@ -302,10 +284,6 @@ row it closes.
   `descendantsOf` and its test go, and `webapp/CLAUDE.md` `:9` and `:33` stop endorsing it. **Rides
   with:** addr 3, whose Owns gain `webapp/CLAUDE.md` and `lineage-candidates.ts`. **Re-test:** compare
   two branches of one campaign; both draw, and `git grep -n "facts.individual" -- webapp/lib/derivations` is empty.
-- **Drilled into an inner run, the masthead names the outer dataset**: `RunMasthead.tsx` reads the
-  outer campaign's, and `useLeafDatasetName` reads a pipeline for a tag the tree holds. Action: the
-  viewed dataset is the served subtree tag everywhere; the hook goes. **Rides with:** addr 3.
-  **Re-test:** open an L4 inner run; the masthead and chat name one dataset.
 - **The tree rewrites a retired arm's election**: `hierarchy_subtree.py` (`:551-555`) copies a retired
   candidate's reading with `selected=False`, `crown=None` and its `panel.cut`, against
   `store/CLAUDE.md`'s "the tree is a read model and decides nothing", though `arm_reading.py::arm_verdict`
@@ -331,12 +309,11 @@ row it closes.
   manifest, and archive-wide signatures serve as read versions (`evidence/read.py:551-554`,
   `measurement_log.py:271-280`), so any run's archive write invalidates every evidence and cells view.
   The same root: a writer-stamped version per subject.
-- **A campaign's short label is parsed three ways**: `format.ts::shortId`, `ForestRows::shortOrigin`,
-  `ids.ts::shortFamilyTail`; `EvidenceCharts.tsx:77` labels cells with `c.split("/").pop()`, so two
-  datasets' cells share one label. Action: a served short label per subject and node, on
-  `application/hierarchy.py` and `application/evidence/read.py`. **Rides with:** addr, whose Owns gain
-  `format.ts::shortId`, `compare/EvidenceCharts.tsx` and `evidence/read.py`. **Re-test:**
-  `git grep -nE "shortId\(|shortOrigin\(|shortFamilyTail\(" -- webapp/components webapp/lib`.
+- **A campaign's short label is parsed two ways**: `format.ts::shortId`, `ForestRows::shortOrigin`
+  (a cycle's is its served `label` since addr 4); `EvidenceCharts.tsx:81` labels cells with
+  `c.split("/").pop()`, so two datasets' cells share one label. Action: a served short label per
+  subject and node, on `application/hierarchy.py` and `application/evidence/read.py`. **Re-test:**
+  `git grep -nE "shortId\(|shortOrigin\(" -- webapp/components webapp/lib` (15 hits at addr 4).
 
 ### passes-6 (what passes-5 and holders-3 left at landing 54)
 

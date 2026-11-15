@@ -4930,7 +4930,7 @@ def test_a_crash_retried_between_bank_and_delete_counts_the_fork_once(
     for _crashed_attempt in range(2):
         bank_spend(
             workspace=stores.campaigns.workspace,
-            cycle_dirs=[stores.campaigns.cycle_dir(retried_hop)],
+            ledgers=[stores.campaigns.ledger(retried_hop)],
             subject=stores.subject(retried_hop),
             metered={
                 meter: stores.campaigns.cycle_metered(retried_hop, meter)
@@ -5028,8 +5028,10 @@ def test_a_reclaimed_orphan_sandbox_banks_only_the_spend_it_did_not_carry_out(
     tombstones = spent_campaign.tombstones
     # An inner sandbox is a SIBLING of the tenant tree, so no account-wide walk reaches it.
     sandbox = inner_sandbox(stores, SANDBOX_CAMPAIGN, "orphaned-outer-cycle")
-    inner_cycle = sandbox / "tenant" / "campaigns" / "innerds__20260101-000000" / "cycles"
-    inner_ledger = CycleEventLog.open(CycleDir(inner_cycle / "inner-cycle-0"))
+    inner_hop = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+    inner_ledger = CycleEventLog.open(
+        CycleDir(stores.campaigns.in_sandbox(sandbox).cycle_dir(inner_hop))
+    )
     # One call carried out, one not: only the second is still this sandbox's to bank.
     for input_tokens, cost_usd, mirrored in ((400, 0.10, True), (600, 0.15, False)):
         inner_ledger.append(

@@ -24,7 +24,6 @@ from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput, StateSlice
 from promptpotter.domain.origin_panel import OverlapReading
@@ -41,7 +40,6 @@ from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.verification import BenchPasses
 from promptpotter.domain.wounds import RuntimeFailure, rf_dedup_key
-from promptpotter.infrastructure.store.layout import campaign_cycles_dir, root_cycle_id
 from promptpotter.infrastructure.store.read_model import Moment
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -53,14 +51,11 @@ def _sibling_runtime_failures(session: Session) -> list[RuntimeFailure]:
     """Only a sibling that reached a natural conclusion carries trustworthy failures — as of this cycle's mint, so a resume reads what its first process read."""
     # This campaign's own forks under either purpose, so an arm reads only its own line.
     campaigns = session.store.campaigns
-    root = root_cycle_id(session.cycle_id)
     moment = Moment(campaigns.ledger(session.hop), 0)
     out: list[RuntimeFailure] = []
-    cycles_dir = campaign_cycles_dir(campaigns.campaign_root_dir(session.campaign_id))
-    for sibling in sorted(d.name for d in cycles_dir.iterdir() if d.is_dir()):
-        if sibling == session.cycle_id or root_cycle_id(sibling) != root:
+    for hop in campaigns.campaign_cycle_hops(session.campaign_id):
+        if hop == session.hop:
             continue
-        hop = CycleHop(campaign_id=session.campaign_id, cycle_id=sibling)
         index = campaigns.load(hop, moment=moment)
         reason = None if index is None else index.stop_reason
         if reason is None or stop_reason_outcome(reason) is not StopOutcome.SUCCESS:

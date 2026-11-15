@@ -21,7 +21,7 @@ import { tagValue, type FigureKey } from "@/lib/derivations";
 import { fmtAgo } from "@/lib/format";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
 import { pathLeaf, type CyclePath } from "@/lib/ids";
-import { useViewedCycle } from "@/lib/state/lineage";
+import { useViewedCycle, useViewedDatasetName } from "@/lib/state/lineage";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useRegistry } from "@/lib/hooks/useRegistry";
 import { TERMS } from "@/lib/terms";
@@ -35,7 +35,9 @@ export function RunMasthead() {
   const viewedPath = viewed?.path ?? null;
   const { running } = useRegistry();
   const listing = useViewedListing();
-  const dataset = tagValue(listing, "dataset");
+  // A run's is its viewed leaf's; a check-in's, its unstarted campaign's.
+  const leafDataset = useViewedDatasetName();
+  const dataset = viewed ? leafDataset : tagValue(listing, "dataset");
   return (
     <header className={cx("run-header", listing === null && viewedPath === null && "is-bare")}>
       <div className="run-header-inner">

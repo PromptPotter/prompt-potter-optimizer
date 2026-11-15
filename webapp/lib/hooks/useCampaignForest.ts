@@ -7,7 +7,7 @@ import {
   nodeOverlays,
   primaryMetric,
 } from "@/lib/derivations";
-import { pathOfAddress, rootCycleId, type CyclePath } from "@/lib/ids";
+import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useViewedLineage } from "@/lib/state/lineage";
 import { useViewMemory } from "@/lib/state/view-memory";
@@ -40,8 +40,8 @@ interface CampaignForest {
   revealLane: (cycleKey: string) => void;
   totalDescendants: number;
   viewedHasRounds: boolean;
-  isInheritedSibling: boolean;
-  parentId: string | null;
+  // The viewed fork's parent as the tree serves it (`facts.spawn.parent`); null for a root.
+  forkParent: HierarchyCycle | null;
   cleanup: LineageCleanup;
   // The viewed fork while it holds no round: `delete-cycle` removes that one stub; null otherwise.
   deleteViewed: ((then: () => void) => void) | null;
@@ -112,8 +112,8 @@ export function useCampaignForest({
   const { valueByKey, thetaByKey } = useMemo(() => nodeOverlays(index, metric), [index, metric]);
 
   const viewedHasRounds = candidatesAtPath(index, path).length > 0;
-  const parentId = cycleId ? rootCycleId(cycleId) : null;
-  const isInheritedSibling = parentId != null && parentId !== cycleId;
+  const spawn = cycleAt(index, path)?.facts.spawn ?? null;
+  const forkParent = spawn ? (index.cycles.find((c) => c.address === spawn.parent) ?? null) : null;
 
   const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup");
   const del = useCommand<"delete-cycle">("lineage-delete", { scope: cycleId });
@@ -157,11 +157,10 @@ export function useCampaignForest({
     revealLane,
     totalDescendants: Math.max(index.cycles.length - 1, 0),
     viewedHasRounds,
-    isInheritedSibling,
-    parentId,
+    forkParent,
     cleanup,
     deleteViewed:
-      campaignId && cycleId && isInheritedSibling && !viewedHasRounds
+      campaignId && cycleId && spawn && !viewedHasRounds
         ? (then) =>
             void del.run(
               "delete-cycle",

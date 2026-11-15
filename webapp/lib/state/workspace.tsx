@@ -38,8 +38,7 @@ import {
 } from "@/lib/address";
 import type { ListedCampaign } from "@/lib/api/types";
 import { GONE_NOTICE_MS } from "@/lib/cadence";
-import { tagValue } from "@/lib/derivations";
-import { useActivePointer, useCampaign, useEntry, useRegistry } from "@/lib/hooks/useRegistry";
+import { useActivePointer, useCampaign, useRegistry } from "@/lib/hooks/useRegistry";
 import { useViewMemory } from "./view-memory";
 
 type Hop = CyclePath[number];
@@ -109,12 +108,6 @@ export function useMomentAt(path: CyclePath | null): number | null {
 export function useViewedNode(): SelectedNode | null {
   const view = useWorkspace().views.find((v) => v.family === "node");
   return view?.key ? nodeOfKey(view.key) : null;
-}
-
-// The ROOT hop's dataset; a drilled-in leaf's is `useLeafDatasetName`.
-export function useViewedDatasetName(): string | null {
-  const { viewed } = useWorkspace();
-  return tagValue(useEntry(viewed ? encodeCyclePath([viewed.root]) : null), "dataset");
 }
 
 // The viewed subject's listing: a check-in's unstarted campaign by its draft id, else the run's

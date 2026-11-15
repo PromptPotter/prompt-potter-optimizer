@@ -58,14 +58,13 @@ def _reap(stores: Stores) -> int:
     """Each cycle of *stores*, then each sandbox one of its cycles owns: none nests by path."""
     reaped = 0
     for campaign_id in stores.campaigns.list_campaign_ids():
-        for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign_id):
-            hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
+        for hop in stores.campaigns.campaign_cycle_hops(campaign_id):
             try:
                 if stores.mark_producer_vanished(hop):
                     reaped += 1
             except FileUnreadableError:
                 pass
-            if (inner := inner_sandbox_store(stores, campaign_id, cycle_dir.name)) is not None:
+            if (inner := inner_sandbox_store(stores, campaign_id, hop.cycle_id)) is not None:
                 reaped += _reap(inner)
     return reaped
 

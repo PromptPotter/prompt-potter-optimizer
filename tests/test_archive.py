@@ -2052,7 +2052,7 @@ def _family(stores: Stores) -> _Family:
             ),
         )
     )
-    (inner_sandbox(stores, family.campaign_id, family.cycle_id) / stores.tenant_id).mkdir()
+    inner_sandbox(stores, family.campaign_id, family.cycle_id)
     sandbox = inner_sandbox_store(stores, family.campaign_id, family.cycle_id)
     assert sandbox is not None, "guard"
     asks = {

@@ -1,7 +1,6 @@
 // The disabled controls are INTENTIONAL placeholders (`docs/specs/roadmap.md` § Host assistant): never hide them.
 import { useState } from "react";
-import { useLeafDatasetName } from "@/lib/hooks/useLeafDatasetName";
-import { useViewedCycle } from "@/lib/state/lineage";
+import { useViewedCycle, useViewedDatasetName } from "@/lib/state/lineage";
 import { useWorkspace } from "@/lib/state/workspace";
 import { entryAlone } from "@/lib/derivations";
 import { NEW_CHECKIN } from "@/lib/hooks/useIngestFlow";
@@ -22,7 +21,7 @@ import { RunCard, RunSummaryItem } from "@/components/chat/RunCard";
 
 // The pane renders ONE subject's conversation: the viewed check-in's, or the viewed run's.
 export function ChatPane() {
-  const datasetName = useLeafDatasetName();
+  const datasetName = useViewedDatasetName();
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
   const subject = useCheckinSubject();

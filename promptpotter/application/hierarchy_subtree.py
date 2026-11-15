@@ -78,7 +78,7 @@ from promptpotter.shared.errors import NotFoundError
 
 @dataclass(frozen=True)
 class _Retired:
-    by: str
+    by: _ListedCycle
 
 
 # What a candidate IS, derived once every line is resolved: no fork writes it.
@@ -289,7 +289,7 @@ def _status(c: _Candidate, superseding: list[_ListedCycle]) -> _Status:
     """Retired iff it is off the line of a supersede fork that reached its round, else rewound."""
     by = [fork for fork in superseding if c.round <= fork.reach and not fork.head.holds(c)]
     if by:
-        return _Retired(min(by, key=lambda f: (f.index.cut_round or 0, by.index(f))).address)
+        return _Retired(min(by, key=lambda f: (f.index.cut_round or 0, by.index(f))))
     return "live" if c.read_in is c.read_in.cycle.head else "rewound"
 
 
@@ -550,8 +550,8 @@ class _Build:
         verdict = arm_verdict(reading, retired=retired)
         tags = [HierarchyTag(kind="verdict", value=verdict, label=ARM_VERDICT_LABELS[verdict])]
         if retired:
-            by = c.status.by if isinstance(c.status, _Retired) else cycle.address
-            tags.append(superseded_tag(by))
+            by = c.status.by if isinstance(c.status, _Retired) else cycle
+            tags.append(superseded_tag(by.address, by.entry.facts.mint))
         lineage = c.arm.state.individual.lineage
         standing = _standing(c, stood_on=stood_on)
         facts = CandidateFacts(

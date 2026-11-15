@@ -58,9 +58,13 @@ describe("a cells read's answer, as its panes say it", () => {
       if (path.endsWith("/sessions/active")) {
         return Response.json({ hop: { campaign_id: "c", cycle_id: "y" }, said: null });
       }
+      const cycle = subtreeCycle({ address: "c::y", tags: cycleTags("root", "ds") });
       if (path.endsWith("/hierarchy")) {
-        const cycle = subtreeCycle({ address: "c::y", tags: cycleTags("root", "ds") });
         return Response.json({ entries: [subtreeCampaign({ address: "c", children: [cycle] })] });
+      }
+      // The viewed leaf's dataset is its served subtree tag.
+      if (path.endsWith("/hierarchy/c")) {
+        return Response.json(subtreeCampaign({ address: "c", children: [cycle] }));
       }
       return new Response(null, { status: path.endsWith("/cells") ? 403 : 404 });
     });

@@ -50,10 +50,7 @@ from promptpotter.infrastructure.projections.live_dashboard import (
 )
 from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.run_state import run_state_stamps
-from promptpotter.infrastructure.store.account_spend import (
-    sandbox_cycle_dirs,
-    workspace_bank,
-)
+from promptpotter.infrastructure.store.account_spend import workspace_bank
 from promptpotter.infrastructure.store.account_trail import bank_before_removal
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     ResolvedRun,
@@ -153,6 +150,10 @@ class CampaignStore:
     def workspace(self) -> WorkspaceDir:
         return self._base_dir
 
+    def in_sandbox(self, sandbox: Path) -> CampaignStore:
+        """This account's store inside an inner *sandbox*, a sibling of the tenant tree."""
+        return CampaignStore(WorkspaceDir(sandbox / self._base_dir.name), self._jobs_dir)
+
     def campaign_root_dir(self, campaign_id: str) -> Path:
         return campaign_root_dir_for(self._base_dir, campaign_id)
 
@@ -225,9 +226,10 @@ class CampaignStore:
     def _campaigns_root(self) -> Path:
         return campaigns_root_dir_for(self._base_dir)
 
-    def _cycle_dirs(self) -> list[Path]:
+    def cycle_hops(self) -> list[CycleHop]:
         root = self._campaigns_root()
-        return sorted(p for p in root.glob("*/cycles/*") if p.is_dir()) if root.exists() else []
+        ids = sorted(p.name for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
+        return [hop for campaign_id in ids for hop in self.campaign_cycle_hops(campaign_id)]
 
     def version(self) -> tuple[object, ...]:
         """Stats only: what a read over this store's campaigns, cycles and run states stands on."""
@@ -260,6 +262,12 @@ class CampaignStore:
     def campaign_cycle_dirs(self, campaign_id: str) -> list[Path]:
         cycles = campaign_cycles_dir(self.campaign_root_dir(campaign_id))
         return sorted(p for p in cycles.glob("*") if p.is_dir())
+
+    def campaign_cycle_hops(self, campaign_id: str) -> list[CycleHop]:
+        return [
+            CycleHop(campaign_id=campaign_id, cycle_id=d.name)
+            for d in self.campaign_cycle_dirs(campaign_id)
+        ]
 
     def campaign_cycle_ledgers(self, campaign_id: str) -> list[Path]:
         return cycle_ledgers(self.campaign_root_dir(campaign_id))
@@ -393,9 +401,9 @@ class CampaignStore:
         """Each cycle a run's process holds (its producer lock, no pass's): lock probes alone, no
         ledger read, since a follower polls it."""
         return [
-            CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name)
-            for cycle_dir in self._cycle_dirs()
-            if cycle_held(cycle_dir) and not pass_held(cycle_dir)
+            hop
+            for hop in self.cycle_hops()
+            if cycle_held(cycle_dir := self.cycle_dir(hop)) and not pass_held(cycle_dir)
         ]
 
     def _release_pointer(self, campaign_id: str) -> None:
@@ -421,7 +429,8 @@ class CampaignStore:
 
     def _bank(
         self,
-        cycle_dirs: list[Path],
+        store: CampaignStore,
+        hops: list[CycleHop],
         *,
         campaign_id: str,
         cycle_id: str = "",
@@ -429,7 +438,9 @@ class CampaignStore:
     ) -> None:
         bank_before_removal(
             workspace=self._base_dir,
-            cycle_dirs=cycle_dirs,
+            ledgers={hop: store.ledger(hop) for hop in hops},
+            # A store off this workspace is an inner sandbox's, and the campaign names its owner.
+            inside="" if store is self else campaign_id,
             subject=Subject(campaign_id, cycle_id),
             metered=metered,
         )
@@ -437,7 +448,8 @@ class CampaignStore:
     def _campaign_metered_bank(self, campaign_id: str) -> None:
         # What its rows metered, never the banked part: that is a tombstone already.
         self._bank(
-            self.campaign_cycle_dirs(campaign_id),
+            self,
+            self.campaign_cycle_hops(campaign_id),
             campaign_id=campaign_id,
             metered=_ledger_meters(self.campaign_cycle_ledgers(campaign_id)),
         )
@@ -477,8 +489,10 @@ class CampaignStore:
             return
         # Keyed on the sandbox directory: inner cycle ids are content-addressed and repeat across them.
         # Metered nothing of the outer ceiling: the outer ledger carries every inner call.
+        inner = self.in_sandbox(sandbox)
         self._bank(
-            sandbox_cycle_dirs(sandbox),
+            inner,
+            inner.cycle_hops(),
             campaign_id=campaign_id,
             cycle_id=sandbox.name,
             metered=_ledger_meters([]),
@@ -580,11 +594,18 @@ class CampaignStore:
 
     def enumerate_cycles(self) -> list[tuple[CycleHop, CycleIndex]]:
         """Every cycle of every campaign in this store whose ledger folds to an index."""
-        return _indexed(self._cycle_dirs())
+        return self._indexed(self.cycle_hops())
 
     def campaign_cycles(self, campaign_id: str) -> list[tuple[CycleHop, CycleIndex]]:
         """`enumerate_cycles`, narrowed to one campaign's directory."""
-        return _indexed(self.campaign_cycle_dirs(campaign_id))
+        return self._indexed(self.campaign_cycle_hops(campaign_id))
+
+    def _indexed(self, hops: list[CycleHop]) -> list[tuple[CycleHop, CycleIndex]]:
+        return [
+            (hop, index)
+            for hop in hops
+            if (index := read_cycle_index(self.cycle_dir(hop), moment=None)) is not None
+        ]
 
     def _stub_deletion_blocked(self, hop: CycleHop) -> str | None:
         """What makes *hop* no stub; whether a run or a pass holds it is asked of each delete under
@@ -627,7 +648,8 @@ class CampaignStore:
         cycle_dir = self.cycle_dir(hop)
         # After the refusal, before the rmtree: an origin-scored stub already paid for round 0.
         self._bank(
-            [cycle_dir],
+            self,
+            [hop],
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
             metered=_ledger_meters([self.ledger(hop)]),
@@ -734,11 +756,3 @@ class CampaignStore:
             ]
             lines.append("")
         write_text(self.layout(hop).optimized_surface, "\n".join(lines))
-
-
-def _indexed(cycle_dirs: list[Path]) -> list[tuple[CycleHop, CycleIndex]]:
-    return [
-        (CycleHop(campaign_id=cycle_dir.parent.parent.name, cycle_id=cycle_dir.name), index)
-        for cycle_dir in cycle_dirs
-        if (index := read_cycle_index(cycle_dir, moment=None)) is not None
-    ]

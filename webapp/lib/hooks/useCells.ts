@@ -4,7 +4,7 @@ import type { CyclePath } from "../ids";
 import type { ReadResult } from "../read-cache";
 import { createModuleStore } from "../state/module-store";
 import { useMomentAt, useWorkspace } from "@/lib/state/workspace";
-import { useLeafDatasetName } from "./useLeafDatasetName";
+import { useViewedDatasetName } from "@/lib/state/lineage";
 import { useRead } from "./useRead";
 
 // The roster's controls. `rankedBy` moves on click, while every LABEL names the served `order`
@@ -42,7 +42,7 @@ export function useCells(preset: CellsPreset | null, status?: CellStatus): Cells
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
   const { scope, rankedBy } = useCellsView();
-  const leafDatasetName = useLeafDatasetName();
+  const leafDatasetName = useViewedDatasetName();
   const path = preset?.path ?? viewedPath;
   const datasetName = preset?.datasetName ?? leafDatasetName;
   const at = useMomentAt(path);

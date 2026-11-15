@@ -74,6 +74,11 @@ class CycleIndex(FrozenModel):
         return sibling_cycle_id(self.parent)
 
     @property
+    def minted_as(self) -> Literal["root", "fork"]:
+        """A fork's mint carries its `ForkSpec`, a root's none."""
+        return "root" if self.fork is None else "fork"
+
+    @property
     def human_intervened(self) -> bool:
         return bool(self.interventions)
 

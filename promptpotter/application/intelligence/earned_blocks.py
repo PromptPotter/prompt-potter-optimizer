@@ -44,8 +44,7 @@ class CampaignSurvey:
             return None
 
     def cycles(self, campaign: Campaign) -> Iterable[StandingRounds]:
-        for cycle_dir in self._store.campaign_cycle_dirs(campaign.campaign_id):
-            hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
+        for hop in self._store.campaign_cycle_hops(campaign.campaign_id):
             if (standing := self.standing(hop)) is not None:
                 yield standing
 

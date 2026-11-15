@@ -15,7 +15,7 @@ import {
 import { DASHBOARD_PENDING, useViewedDashboard } from "@/lib/state/poll";
 import { useWorkspace } from "@/lib/state/workspace";
 import { pickOf } from "@/lib/derivations";
-import { shortFamilyTail } from "@/lib/ids";
+import { pathOfAddress } from "@/lib/ids";
 import { CleanupConfirmModal } from "./CleanupConfirmModal";
 import { TreePairing } from "./TreePairing";
 import { Forest, type CladogramCtx } from "./Forest";
@@ -50,8 +50,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
     setTreeFreed,
     totalDescendants,
     viewedHasRounds,
-    isInheritedSibling,
-    parentId,
+    forkParent,
     cleanup,
     deleteViewed,
     deleting,
@@ -119,24 +118,20 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
         </div>
         {!viewedHasRounds && (
           <Empty className="lineage-empty">
-            {isInheritedSibling && parentId ? (
+            {forkParent ? (
               <>
                 inherited from{" "}
-                {campaignId ? (
-                  <button
-                    type="button"
-                    className="lineage-inherit-link"
-                    onClick={() => navigate({ path: [{ campaignId, cycleId: parentId }] })}
-                    title={`Switch to ${parentId}`}
-                  >
-                    {shortFamilyTail(parentId) || parentId}
-                  </button>
-                ) : (
-                  <span>{shortFamilyTail(parentId) || parentId}</span>
-                )}
+                <button
+                  type="button"
+                  className="lineage-inherit-link"
+                  onClick={() => navigate({ path: pathOfAddress(forkParent.address) })}
+                  title={`Switch to ${forkParent.label}`}
+                >
+                  {forkParent.label}
+                </button>
                 {selection ? ` · selection ${selection.label}` : ""}
                 {" · no new rounds yet"}
-                {deleteViewed && campaignId ? (
+                {deleteViewed ? (
                   <>
                     {" · "}
                     <button
@@ -144,7 +139,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
                       className="lineage-inherit-link"
                       disabled={deleting}
                       onClick={() =>
-                        deleteViewed(() => navigate({ path: [{ campaignId, cycleId: parentId }] }))
+                        deleteViewed(() => navigate({ path: pathOfAddress(forkParent.address) }))
                       }
                     >
                       {deleting ? "deleting…" : "delete this empty fork"}

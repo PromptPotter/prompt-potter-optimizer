@@ -35,10 +35,6 @@ def root_cycle_id(cycle_id: str) -> str:
     return cycle_id[: m.start()] if m else cycle_id
 
 
-def sibling_kind(cycle_id: str) -> Literal["root", "fork"]:
-    return "root" if _SIBLING_SEP_RE.search(cycle_id) is None else "fork"
-
-
 def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:
     return WorkspaceDir(projects_root / validate_path_component(tenant_id))
 

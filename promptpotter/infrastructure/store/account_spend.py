@@ -26,7 +26,6 @@ from promptpotter.domain.spend import (
     UserSpend,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
     RecordClasses,
@@ -141,11 +140,6 @@ def workspace_bank(workspace: WorkspaceDir) -> WorkspaceBank:
     return LedgerIndex.of(workspace_ledger).view(_Tombstones)
 
 
-def sandbox_cycle_dirs(sandbox: Path) -> list[Path]:
-    """The sandbox tree is a sibling of the tenant tree, so no account-wide walk reaches it."""
-    return sorted(sandbox.glob("*/campaigns/*/cycles/*")) if sandbox.is_dir() else []
-
-
 def account_usage(charges: ChargeBook, *, since: float, until: float) -> list[Bill]:
     return [
         bill
@@ -176,12 +170,12 @@ def account_bill(charges: ChargeBook, *, since: str | None = None) -> PaidSpend:
 def bank_spend(
     *,
     workspace: WorkspaceDir,
-    cycle_dirs: list[Path],
+    ledgers: list[Path],
     subject: Subject,
     metered: dict[CeilingMeter, Budget],
 ) -> PaidSpend:
     """Destroyers only (archiving keeps the rows); a tombstone already standing is a crashed delete's, kept for the retry."""
-    spent = billed_spend(CycleLayout(d).ledger for d in cycle_dirs)
+    spent = billed_spend(ledgers)
     # Written at nothing spent too: the tombstone is the delete's commit (`WorkspaceBank.deleted`).
     log = CycleEventLog.open_workspace(workspace)
     if subject in LedgerIndex.of(log.path).view(_Tombstones).subjects:

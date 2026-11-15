@@ -206,8 +206,8 @@ class FeedFrame(StrictModel):
 def _store_subjects(stores: Stores) -> Iterator[tuple[str, Stores]]:
     yield f"{_STORE}{encode_cycle_path(stores.inside)}", stores
     for campaign_id in stores.campaigns.list_campaign_ids():
-        for cycle_dir in stores.campaigns.campaign_cycle_dirs(campaign_id):
-            if (inner := inner_sandbox_store(stores, campaign_id, cycle_dir.name)) is not None:
+        for hop in stores.campaigns.campaign_cycle_hops(campaign_id):
+            if (inner := inner_sandbox_store(stores, hop.campaign_id, hop.cycle_id)) is not None:
                 yield from _store_subjects(inner)
 
 

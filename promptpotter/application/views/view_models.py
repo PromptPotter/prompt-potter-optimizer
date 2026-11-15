@@ -63,7 +63,7 @@ class HardSamplesView:
 @dataclass(frozen=True)
 class ForkSummaryView:
     cycle_id: str
-    # What the id's own separator says the cycle is (``layout.py::sibling_kind``).
+    # What its mint recorded (`CycleIndex.minted_as`).
     kind: Literal["root", "fork"]
     standing: RunStanding | None
     n_rounds: int

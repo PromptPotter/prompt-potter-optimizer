@@ -3,7 +3,7 @@ import { fmtUnit } from "@/lib/format";
 import { useWidth } from "@/lib/hooks/useWidth";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
-import { pathLeaf, pathOfAddress, shortFamilyTail } from "@/lib/ids";
+import { pathLeaf, pathOfAddress } from "@/lib/ids";
 import { figureOf, tagValue } from "@/lib/derivations";
 import {
   type CycleMint,
@@ -44,11 +44,9 @@ export interface CladogramCtx {
   invalidated?: ReadonlySet<string>;
 }
 
+// A root by its dataset, any other cycle by its served card label.
 function cycleName(cycle: HierarchyCycle): string {
-  const cycleId = pathLeaf(pathOfAddress(cycle.address)).cycleId;
-  return cycle.facts.mint === "root"
-    ? (tagValue(cycle, "dataset") ?? cycleId)
-    : shortFamilyTail(cycleId);
+  return cycle.facts.mint === "root" ? (tagValue(cycle, "dataset") ?? cycle.label) : cycle.label;
 }
 
 function SpawnGlyph({ kind, spawn }: { kind: CycleMint; spawn: CycleSpawn | null }) {
@@ -128,7 +126,7 @@ const CandidateNode = memo(function CandidateNode({
               ? "\nselected — its round has not closed yet"
               : ""}
         {retiredBy
-          ? `\nretired — the run branched to ${shortFamilyTail(retiredBy)} and continued there; kept as the record of what ran`
+          ? `\n${retiredBy} — the run branched there and continued; kept as the record of what ran`
           : ""}
         {ink ? "\na channel of the comparison — its colour here is the one its bar carries" : ""}
       </title>

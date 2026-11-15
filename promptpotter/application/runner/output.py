@@ -62,7 +62,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_text
-from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout, sibling_kind
+from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 
 if TYPE_CHECKING:
@@ -629,7 +629,7 @@ def from_disk_log(
 def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
     return ForkSummaryView(
         cycle_id=fork_index.cycle_id,
-        kind=sibling_kind(fork_index.cycle_id),
+        kind=fork_index.minted_as,
         standing=fork_index.standing,
         n_rounds=len(fork_index.rounds),
         stop_reason=fork_index.stop_reason,
@@ -717,12 +717,7 @@ def _render_campaign_log_md(session: Session) -> None:
 def _load_sibling_indices(
     store: CampaignStore, campaign_id: str, *, exclude: str
 ) -> list[CycleIndex]:
-    hops = (
-        CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
-        for cycle_dir in store.campaign_cycle_dirs(campaign_id)
-        if cycle_dir.name != exclude
-    )
-    return [index for hop in hops if (index := store.load(hop, moment=None)) is not None]
+    return [index for hop, index in store.campaign_cycles(campaign_id) if hop.cycle_id != exclude]
 
 
 def _banked_rounds(session: Session, hop: CycleHop) -> list[RoundResult]:

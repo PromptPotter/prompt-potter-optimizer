@@ -104,7 +104,7 @@ from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.crowning_bar import BarRead
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
+from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import EmbeddedRun, InnerRun
@@ -988,7 +988,7 @@ def inner_sandbox(stores: Stores, owner_campaign_id: str, owner_cycle_id: str) -
             "cycle_id": owner_cycle_id,
         },
     )
-    inner = CampaignStore(WorkspaceDir(sandbox / "tenant"), stores.jobs_dir)
+    inner = stores.campaigns.in_sandbox(sandbox)
     inner.mint_cycle(CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0"))
     return sandbox
 

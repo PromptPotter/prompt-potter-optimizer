@@ -71,7 +71,6 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
-from promptpotter.infrastructure.store.layout import sibling_kind
 from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
@@ -263,10 +262,9 @@ def candidate_figures(reading: ArmReading) -> list[Figure]:
     return rows
 
 
-def superseded_tag(successor: str) -> HierarchyTag:
+def superseded_tag(successor: str, mint: CycleMint) -> HierarchyTag:
     """Worn by a retired cycle or candidate: the cycle that took its place, named as its card."""
-    cycle_id = Subject.parse_address(successor).cycle_id
-    label = f"retired by {_cycle_label(sibling_kind(cycle_id), cycle_id)}"
+    label = f"retired by {_cycle_label(mint, Subject.parse_address(successor).cycle_id)}"
     return HierarchyTag(kind="superseded", value=successor, label=label)
 
 
@@ -302,7 +300,7 @@ def cycle_entry(
         ).spend,
         ceiling_meter(campaign.declaration.purpose),
     )
-    mint: CycleMint = sibling_kind(hop.cycle_id)
+    mint: CycleMint = index.minted_as
     # Inner by where it lives: a rebase pair in the sandbox has no `spawned_by`.
     if mint == "root" and (index.spawned_by is not None or stores.inner):
         mint = "inner"
@@ -311,7 +309,9 @@ def cycle_entry(
         HierarchyTag(kind="mint", value=mint, label=_MINT_WORDS[mint]),
     ]
     if (successor := index.superseded_by) is not None:
-        tags.append(superseded_tag(Subject(hop.campaign_id, successor, inside=inside).address))
+        # Only a fork's take files a supersede: its successor is a fork.
+        by = Subject(hop.campaign_id, successor, inside=inside).address
+        tags.append(superseded_tag(by, "fork"))
     fork, parent_id, cut = index.fork, index.parent_cycle_id, index.cut_round
     spawn = (
         None
