@@ -114,7 +114,11 @@ from promptpotter.application.library import LibraryAuthored, library
 from promptpotter.application.maintenance.landing import apply_landing, last_landing, plan_landing
 from promptpotter.application.maintenance.migrate import MIGRATIONS
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
-from promptpotter.application.optimizer_manifest import running_prompt, select_optimizer
+from promptpotter.application.optimizer_manifest import (
+    bench_choice,
+    running_prompt,
+    select_optimizer,
+)
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -137,7 +141,6 @@ from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
 from promptpotter.domain.arms import ArmPosition, Broken, Cut
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
-from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_events import (
     WORKSPACE_SUBJECT,
@@ -734,7 +737,7 @@ def test_dataset_content_reaches_the_optimizer_only_inside_the_fence(poisoned: _
     # Trusted signals stay out of it.
     view = poisoned.view()
     _, poisoned_query, poisoned_value, poisoned_warning = poisoned
-    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
+    potter = select_optimizer(bench_choice("potter"))
     generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
     with scoped(book=spend_book()):
         filled = DispatchHub.fill(generator, view, node="l1_generate")

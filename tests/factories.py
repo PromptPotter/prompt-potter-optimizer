@@ -37,7 +37,11 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.mint import declare, mint_framed_cycle
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.registry import JobRegistry
-from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
+from promptpotter.application.optimizer_manifest import (
+    SelectedOptimizer,
+    bench_choice,
+    select_optimizer,
+)
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, PoBBKnobs
 from promptpotter.application.optimizers.potter.records import (
     L1Readout,
@@ -96,11 +100,7 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import Campaign, Optimize, Purpose, run_clamp
-from promptpotter.domain.campaign_config import (
-    CampaignConfig,
-    CycleConfig,
-    OptimizerChoice,
-)
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.crowning_bar import BarRead
@@ -203,6 +203,9 @@ from promptpotter.infrastructure.store.read_model import ledger_line
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.identity import IdentityContext, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
+
+# The call target a campaign editing no optimizer runs on, for a choice laying an overlay.
+BENCH_TARGET = bench_choice("potter").call_target
 
 
 def ledger_records(ledger: CycleEventLog | Path) -> list[CycleRecord]:
@@ -1058,7 +1061,7 @@ def inner_cells(
     by_dataset: dict[str, InnerCell] = {}
     specs: dict[str, InnerTaskSpec] = {}
     for name in optimizers:
-        selected = select_optimizer(OptimizerChoice(optimizer=name))
+        selected = select_optimizer(bench_choice(name))
         treatment = selected.treatment(frozenset(Presumption), PackShelf(account=None)).digest
         by_dataset[on[name]] = InnerCell(
             campaign_config or {}, None, cell_optimizer(selected), treatment
@@ -1077,14 +1080,14 @@ def inner_cells(
 
 
 def pobb_knobs(**bend: Any) -> PoBBKnobs:
-    shipped = cast("PoBBKnobs", select_optimizer(OptimizerChoice(optimizer="potter")).knobs("pobb"))
+    shipped = cast("PoBBKnobs", select_optimizer(bench_choice("potter")).knobs("pobb"))
     return shipped.model_copy(update=bend)
 
 
 def election_knobs() -> ElectionKnobs:
     return cast(
         "ElectionKnobs",
-        select_optimizer(OptimizerChoice(optimizer="potter")).knobs("theta_election"),
+        select_optimizer(bench_choice("potter")).knobs("theta_election"),
     )
 
 

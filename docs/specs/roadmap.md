@@ -186,7 +186,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   class name is defined twice (`complexity_ledger.py`'s `class_names_twice` at 0). Every request
   byte-identical; the digests and behaviour keys moved by spelling alone (bkeys-2's rows). Run data
   wiped (tenant answer terms, cycles, banked origins).
-- **then:** mkey beside model-lines.
+- **landed 82, model-lines:** the bench's optimizer call target is one fact,
+  `optimization.call_target` in `defaults.yaml`, laid under every optimizer llm node by the one node
+  fold; the 22 yaml lines went. No decision or request moved; the five treatment digests moved by
+  the yamls' bytes. Run data wiped (drafts and campaign configs without the key). Beside it on main:
+  the served contract (a bundle built against another API says so), the fold's `start=`.
+- **then:** mkey, then faults-2a beside small-3.
 
 The re-keys end at the behaviour-key switch.
 

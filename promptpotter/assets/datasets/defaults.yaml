@@ -12,6 +12,13 @@ campaign:
   bench_trigger: manual
   optimization:
     optimizer: potter
+    # The bench runs every optimizer on one model, so a head-to-head compares optimizers alone:
+    # head-to-head jl-optmodel-1 measured MiniMax ~20x faster per call than `qwen/qwen3.7-flash`
+    # at no measured loss in held-out lift (docs/research/benchmarks.md); its host is the
+    # registry's `default_route`. Never point a schema-bearing node at a new host without one call
+    # checking it answers an instance of the schema: Cerebras behind `gpt-oss-120b` returned the
+    # schema itself, DigitalOcean behind MiniMax a skeleton of it.
+    call_target: {provider: openrouter, model: minimax/minimax-m3.1-flash}
     arm_gate: "off"
     degradation_threshold: 0.4
     degradation_fatal_fastpath: true

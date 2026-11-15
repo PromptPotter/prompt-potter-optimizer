@@ -101,9 +101,16 @@ def over_the_default(budget: Budget) -> Budget:
     return _DEFAULT_BUDGET.over(budget)
 
 
+class CallTarget(FrozenModel):
+    """Where an optimizer's llm calls go: the provider and the model it serves."""
+
+    provider: str = Field(min_length=1)
+    model: str = Field(min_length=1)
+
+
 class OptimizerChoice(StrictModel):
-    """What `optimizer_manifest.py::select_optimizer` reads: which optimizer, its overlay, and
-    the gate its roster closes under. Bare, it is the manifest as declared."""
+    """What `optimizer_manifest.py::select_optimizer` reads: which optimizer, its overlay, the
+    call target its llm nodes run on, and the gate its roster closes under."""
 
     optimizer: Annotated[str, Knob(Estimand.SEARCH)] = Field(
         min_length=1,
@@ -120,8 +127,14 @@ class OptimizerChoice(StrictModel):
         description=(
             "This campaign's overlay on the selected manifest, keyed by node name — "
             "``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An "
-            "optimizer's knobs, a paper's configuration and each llm node's ``config.model`` "
-            "all ride here; each node validates its own knobs when the optimizer is selected."
+            "optimizer's knobs and a paper's configuration ride here; each node validates its "
+            "own knobs when the optimizer is selected."
+        ),
+    )
+    call_target: Annotated[CallTarget, Knob(Estimand.SEARCH)] = Field(
+        description=(
+            "The provider and model every llm node of the optimizer calls, laid under each "
+            "node's own ``config``: a node its manifest or ``nodes`` routes elsewhere keeps it."
         ),
     )
     # A bare selection holds no round: the manifest as declared. A campaign's gate is its own.

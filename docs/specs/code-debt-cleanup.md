@@ -1066,17 +1066,16 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 
 ### batch/31 · small
 
-- **The bench's one optimizer model is spelled eleven times** (4+3+3+1: potter, levi, capo, gepa,
-  each `minimax/minimax-m3.1-flash`, each yaml saying "the bench runs every optimizer on one model").
-  Root: one bench fact every llm node reads unless it authors its own; the lines go (a swap verb
-  would patch the copies). Re-key census (small-2's landing): a node's `model` reaches
-  `optimizer_manifest.py::treatment`'s manifest hash, so all four treatment digests move, and the
-  bench pin if the fact lands in the bench defaults; no measurement key reads it. **Rides with:** its
-  own small chain after narr 3. **Re-test:** `git grep -c "model:" -- 'promptpotter/assets/optimizers/*/pipeline.yaml'` is 0.
 - **`propose` hands every optimizer the round's samples only gepa reads** (ren's report): twelve of
   thirteen `propose` signatures take `RoundSamples` and ignore it. Root: gepa reads them through
   `NodeContext` as a declared read, and the parameter goes. **Rides with:** small 3. **Re-test:** no
   `propose` signature in `promptpotter/application/optimizers/` takes `RoundSamples`.
+- **An optimizer node's model serves `source: "unset"`** (model-lines' landing): `optimization.call_target`
+  sets every optimizer llm node's `provider` and `model`, but `pipeline_resolve.py::laid_config` stamps
+  only `optimization.nodes` keys into `knob_layers`, so the row (I9) names no layer, as when the yaml
+  set it. Root: the call target's stamp is each llm node's source for the keys its config leaves to it.
+  **Rides with:** small 3. **Re-test:** `/pipeline?at=` serves each optimizer llm node's `model` with
+  the layer that set `call_target`.
 - **"panel" names two things** (ren's report): `RoundResult.panel` (a round's arms) beside the origin
   panel (its cells). Root: each named for what it holds. **Rides with:** small 3. **Re-test:** one
   meaning per `git grep -n "\.panel\b" -- promptpotter`.

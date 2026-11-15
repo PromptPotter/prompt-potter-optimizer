@@ -10,11 +10,11 @@ from promptpotter.application import optimizers
 from promptpotter.application.config_map import ConfigNodeKnobs, node_knobs
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
+    bench_choice,
     running_prompt,
     select_optimizer,
 )
 from promptpotter.application.optimizers.nodes import KnobDraw, MintFacts
-from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.pipeline_schema import (
@@ -441,7 +441,7 @@ def optimizer_roster() -> OptimizerRoster:
     origins = optimizers.MANIFESTS.origins
     entries = []
     for name in names:
-        selected = select_optimizer(OptimizerChoice(optimizer=name))
+        selected = select_optimizer(bench_choice(name))
         origin = None if origins[name] == BUILT_IN else origins[name]
         entries.append(
             OptimizerEntry(name=name, version=selected.version, paper=selected.paper, origin=origin)

@@ -3139,9 +3139,8 @@ export interface OptimizationOverrides {
   optimizer: string | null;
   /** This campaign's overlay on the selected manifest, keyed by node name —
    * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
-   * An optimizer's knobs, a paper's configuration and each llm node's
-   * ``config.model`` all ride here; each node validates its own knobs when
-   * the optimizer is selected. */
+   * An optimizer's knobs and a paper's configuration ride here; each node
+   * validates its own knobs when the optimizer is selected. */
   nodes: Record<string, ManifestNodeOverlay> | null;
   /** Hold every round, before any arm is measured, until the operator answers with
    * the arms it measures (`submit-arms`). ``off`` (default) never holds.
@@ -3455,10 +3454,13 @@ export interface OptimizationConfig {
   optimizer: string;
   /** This campaign's overlay on the selected manifest, keyed by node name —
    * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
-   * An optimizer's knobs, a paper's configuration and each llm node's
-   * ``config.model`` all ride here; each node validates its own knobs when
-   * the optimizer is selected. */
+   * An optimizer's knobs and a paper's configuration ride here; each node
+   * validates its own knobs when the optimizer is selected. */
   nodes: Record<string, ManifestNodeOverlay>;
+  /** The provider and model every llm node of the optimizer calls, laid under each
+   * node's own ``config``: a node its manifest or ``nodes`` routes elsewhere
+   * keeps it. */
+  call_target: CallTarget;
   /** Hold every round, before any arm is measured, until the operator answers with
    * the arms it measures (`submit-arms`). ``off`` (default) never holds.
    * ``review``: the proposers run, their proposals are drafts, and the
@@ -3553,6 +3555,12 @@ export interface OptimizationConfig {
    * gateway routes per call. An L4 inner cell is one caller among the rest:
    * its panel's `inner_optimizer_temperature` and its cell seed arrive here. */
   determinism: DeterminismClamp | null;
+}
+
+/** Where an optimizer's llm calls go: the provider and the model it serves. */
+export interface CallTarget {
+  provider: string;
+  model: string;
 }
 
 /** Improvement-banked round budget: banks a life each round that promotes an arm,
@@ -4973,10 +4981,13 @@ export interface OptimizationLayer {
   optimizer: string | null;
   /** This campaign's overlay on the selected manifest, keyed by node name —
    * ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes.
-   * An optimizer's knobs, a paper's configuration and each llm node's
-   * ``config.model`` all ride here; each node validates its own knobs when
-   * the optimizer is selected. */
+   * An optimizer's knobs and a paper's configuration ride here; each node
+   * validates its own knobs when the optimizer is selected. */
   nodes: Record<string, ManifestNodeOverlay> | null;
+  /** The provider and model every llm node of the optimizer calls, laid under each
+   * node's own ``config``: a node its manifest or ``nodes`` routes elsewhere
+   * keeps it. */
+  call_target: CallTarget | null;
   /** Hold every round, before any arm is measured, until the operator answers with
    * the arms it measures (`submit-arms`). ``off`` (default) never holds.
    * ``review``: the proposers run, their proposals are drafts, and the
@@ -5409,7 +5420,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "3b900a5bab43d8c5";
+export const SERVED_CONTRACT = "fbaa6304539caa07";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

@@ -2154,6 +2154,28 @@
         "title": "Budget",
         "type": "object"
       },
+      "CallTarget": {
+        "additionalProperties": false,
+        "description": "Where an optimizer's llm calls go: the provider and the model it serves.",
+        "properties": {
+          "model": {
+            "minLength": 1,
+            "title": "Model",
+            "type": "string"
+          },
+          "provider": {
+            "minLength": 1,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "model"
+        ],
+        "title": "CallTarget",
+        "type": "object"
+      },
       "CampaignConfig": {
         "additionalProperties": false,
         "properties": {
@@ -11670,6 +11692,10 @@
             "$ref": "#/components/schemas/Budget",
             "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
+          "call_target": {
+            "$ref": "#/components/schemas/CallTarget",
+            "description": "The provider and model every llm node of the optimizer calls, laid under each node's own ``config``: a node its manifest or ``nodes`` routes elsewhere keeps it."
+          },
           "crowning_bar": {
             "description": "The ONE bar a crown, an advance of the line and a promotion read (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's θ posterior capped by the discordant cells. ``sign_test``: an exact paired sign test on the discordant cells, Holm-corrected across the round's arms. ``e_process``: an anytime-valid e-process on the paired discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's banked lift prior.",
             "enum": [
@@ -11751,7 +11777,7 @@
             "additionalProperties": {
               "$ref": "#/components/schemas/ManifestNodeOverlay"
             },
-            "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs, a paper's configuration and each llm node's ``config.model`` all ride here; each node validates its own knobs when the optimizer is selected.",
+            "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs and a paper's configuration ride here; each node validates its own knobs when the optimizer is selected.",
             "title": "Nodes",
             "type": "object"
           },
@@ -11782,6 +11808,7 @@
         },
         "required": [
           "optimizer",
+          "call_target",
           "arm_gate",
           "budget",
           "crowning_bar",
@@ -11827,6 +11854,17 @@
               }
             ],
             "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
+          },
+          "call_target": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CallTarget"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The provider and model every llm node of the optimizer calls, laid under each node's own ``config``: a node its manifest or ``nodes`` routes elsewhere keeps it."
           },
           "crowning_bar": {
             "anyOf": [
@@ -11959,7 +11997,7 @@
                 "type": "null"
               }
             ],
-            "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs, a paper's configuration and each llm node's ``config.model`` all ride here; each node validates its own knobs when the optimizer is selected.",
+            "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs and a paper's configuration ride here; each node validates its own knobs when the optimizer is selected.",
             "title": "Nodes"
           },
           "optimizer": {
@@ -12058,7 +12096,7 @@
                 "type": "null"
               }
             ],
-            "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs, a paper's configuration and each llm node's ``config.model`` all ride here; each node validates its own knobs when the optimizer is selected.",
+            "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs and a paper's configuration ride here; each node validates its own knobs when the optimizer is selected.",
             "title": "Nodes"
           },
           "optimizer": {

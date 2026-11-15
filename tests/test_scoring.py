@@ -29,6 +29,7 @@ import httpx
 import pytest
 import yaml
 from factories import (
+    BENCH_TARGET,
     PARENT,
     PROMPT_INFO,
     arm_state,
@@ -118,9 +119,7 @@ from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
 )
 from promptpotter.application.maintenance.landing import complete_registries
-from promptpotter.application.optimizer_manifest import (
-    select_optimizer,
-)
+from promptpotter.application.optimizer_manifest import bench_choice, select_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers.capo.members import CapoInit, CapoObjective
 from promptpotter.application.optimizers.gepa.members import (
@@ -1955,6 +1954,7 @@ def test_potters_queue_in_a_peers_roster_sizes_its_panel_off_its_own_knobs(
     with composed(["adaptive_queue", *walk[1:]]):
         queued = select_optimizer(
             OptimizerChoice(
+                call_target=BENCH_TARGET,
                 optimizer=name,
                 nodes={"adaptive_queue": ManifestNodeOverlay(config={"sp_budget_round": 7})},
             )
@@ -4104,7 +4104,7 @@ def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_clos
     cycle_dir = CycleDir(tmp_path / "fired")
     fired_ledger = CycleEventLog.open(cycle_dir)
     # Appended here, as the store appends a restate.
-    carried = select_optimizer(OptimizerChoice(optimizer="potter")).slices
+    carried = select_optimizer(bench_choice("potter")).slices
     live = SliceMap(carried)
     closed = round_result(1, optimizer_state=optimizer_state(), cells={})
     line = [round_result(0, optimizer_state=optimizer_state(), cells={}), closed]

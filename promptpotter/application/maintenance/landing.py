@@ -26,13 +26,16 @@ from promptpotter.application.maintenance.reset import (
     resetting,
 )
 from promptpotter.application.notices import tell_landed
-from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
+from promptpotter.application.optimizer_manifest import (
+    bench_choice,
+    checkin_manifest,
+    select_optimizer,
+)
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.scoring.evaluators import connector_name_refusals
 from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root, jobs_dir, user_data_root
 from promptpotter.config.prompt_blocks import PackShelf
-from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.optimizer_state import STATE_KINDS
@@ -105,9 +108,7 @@ def complete_registries() -> None:
 def check_treatment(name: str) -> None:
     """An optimizer as every launch reads it, an install shadow included; its source digest raises
     on a prompt-shaping helper nothing hashes."""
-    select_optimizer(OptimizerChoice(optimizer=name)).treatment(
-        frozenset(Presumption), PackShelf(account=None)
-    )
+    select_optimizer(bench_choice(name)).treatment(frozenset(Presumption), PackShelf(account=None))
 
 
 def check_every_treatment() -> None:

@@ -30,6 +30,7 @@ from unittest.mock import Mock
 import openpyxl
 import pytest
 from factories import (
+    BENCH_TARGET,
     PARENT,
     PROMPT_INFO,
     arm_state,
@@ -141,6 +142,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     base_optimizer_template,
+    bench_choice,
     checkin_manifest,
     running_prompt,
     select_optimizer,
@@ -226,6 +228,7 @@ from promptpotter.domain.campaign import (
     run_clamp,
 )
 from promptpotter.domain.campaign_config import (
+    CallTarget,
     CampaignConfig,
     CycleConfig,
     LaidSpan,
@@ -452,7 +455,7 @@ def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
 def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     tmp_path: Path, built_stores: Stores, offline: Router
 ) -> None:
-    capo = select_optimizer(OptimizerChoice(optimizer="capo"))
+    capo = select_optimizer(bench_choice("capo"))
     capo_seat = jumping_clock(
         run_init_round(
             workspace(tmp_path / "capo"),
@@ -463,7 +466,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     )
     calls = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
     values = {"task_description": "sort the list", "instruction": "Sort it."}
-    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
+    potter = select_optimizer(bench_choice("potter"))
     every = frozenset(Presumption)
     sent, capo_hashes, treated = (
         calls.prompt().compile_prompt(**values),
@@ -523,6 +526,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     # A drafted prompt edit rides the overlay: the node runs it, its hash reads it, L4's still wins.
     drafted = select_optimizer(
         OptimizerChoice(
+            call_target=BENCH_TARGET,
             optimizer="capo",
             nodes={
                 "capo_mutate": ManifestNodeOverlay(config={"instruction": "Reword {{instruction}}"})
@@ -546,6 +550,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     with pytest.raises(PayloadInvalidError, match="instruction"):
         select_optimizer(
             OptimizerChoice(
+                call_target=BENCH_TARGET,
                 optimizer="capo",
                 nodes={"capo_mutate": ManifestNodeOverlay(config={"instruction": None})},
             )
@@ -572,7 +577,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
 def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimators(
     built_stores: Stores,
 ) -> None:
-    capo = select_optimizer(OptimizerChoice(optimizer="capo"))
+    capo = select_optimizer(bench_choice("capo"))
     every = frozenset(Presumption)
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
@@ -599,7 +604,7 @@ def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimat
     assert inner_campaign_id(wider, c1) != inner_campaign_id(_SPEC, c1), "a new draw continued"
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
     as_run, as_cut = (
-        select_optimizer(OptimizerChoice(optimizer="potter", nodes=n))
+        select_optimizer(OptimizerChoice(call_target=BENCH_TARGET, optimizer="potter", nodes=n))
         .treatment(every, built_stores.block_packs)
         .digest
         for n in ({}, cut)
@@ -619,15 +624,23 @@ def test_a_pool_its_readers_could_draw_nothing_from_never_runs(built_stores: Sto
     # The silent outcome is a pool-less search.
     earned_only = ManifestNodeOverlay(config={"active": [f"persona/{EARNED_SOURCE}"]})
     closed = ManifestNodeOverlay(config={"block_access": "closed"})
-    select_optimizer(OptimizerChoice(optimizer="potter", nodes={"block_pool": earned_only}))
+    select_optimizer(
+        OptimizerChoice(
+            call_target=BENCH_TARGET, optimizer="potter", nodes={"block_pool": earned_only}
+        )
+    )
     with pytest.raises(PayloadInvalidError):
         select_optimizer(
             OptimizerChoice(
-                optimizer="potter", nodes={"block_pool": earned_only, "l1_generate": closed}
+                call_target=BENCH_TARGET,
+                optimizer="potter",
+                nodes={"block_pool": earned_only, "l1_generate": closed},
             )
         )
     stray_shot = ManifestNodeOverlay(config={"active": ["not-a-sample-key"]})
-    named = select_optimizer(OptimizerChoice(optimizer="capo", nodes={"demo_pool": stray_shot}))
+    named = select_optimizer(
+        OptimizerChoice(call_target=BENCH_TARGET, optimizer="capo", nodes={"demo_pool": stray_shot})
+    )
     unranked = _unranked()
     assert named.pool_refusals(
         mint=MintFacts(
@@ -681,7 +694,9 @@ def test_a_packs_drawable_snippets_key_its_treatment(
         def drawing(names: list[str], active: list[str]) -> SelectedOptimizer:
             overlay = ManifestNodeOverlay(config={"packs": names, "active": active})
             return select_optimizer(
-                OptimizerChoice(optimizer="potter", nodes={"block_pool": overlay})
+                OptimizerChoice(
+                    call_target=BENCH_TARGET, optimizer="potter", nodes={"block_pool": overlay}
+                )
             )
 
         assert drawing(["one"], ["*"]).treatment(every, built_stores.block_packs).behaviour != (
@@ -1557,7 +1572,9 @@ def test_a_potter_template_filling_an_undeclared_slot_is_refused_by_address() ->
     typo_overlay = {"l1_generate": {"config": {"instruction": "{{typo}}"}}}
     with pytest.raises(PotterError) as typo:
         select_optimizer(
-            OptimizerChoice.model_validate({"optimizer": "potter", "nodes": typo_overlay})
+            OptimizerChoice.model_validate(
+                {"call_target": BENCH_TARGET, "optimizer": "potter", "nodes": typo_overlay}
+            )
         )
     assert (typo.value.code, typo.value.http_status) == (
         FileKind.OPTIMIZER_PROMPT.code,
@@ -2901,6 +2918,29 @@ def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(
     )
 
 
+def test_one_call_target_moves_every_optimizer_llm_node_a_node_routing_its_own_keeps_it() -> None:
+    target = CallTarget(provider="groq", model="other/model")
+    for name in ("potter", "levi", "capo", "gepa"):
+        moved = select_optimizer(bench_choice(name).model_copy(update={"call_target": target}))
+        assert {(moved.node_config(n).provider, moved.model(n)) for n in moved.llm_nodes} == {
+            ("groq", "other/model")
+        }, f"{name}: a campaign's one call target left an llm node on another model"
+        own = moved.llm_nodes[0]
+        routed = select_optimizer(
+            OptimizerChoice(
+                call_target=target,
+                optimizer=name,
+                nodes={own: ManifestNodeOverlay(config={"model": "own/model"})},
+            )
+        )
+        assert routed.model(own) == "own/model" and routed.node_config(own).provider == "groq", (
+            f"{name}: a node routing its own model lost it, or its provider, to the call target"
+        )
+        assert all(routed.model(n) == "other/model" for n in routed.llm_nodes if n != own), (
+            f"{name}: one node's own model moved another node off the call target"
+        )
+
+
 def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
     built_stores: Stores, decl: _Declared, held: _Held
 ) -> None:
@@ -3612,8 +3652,8 @@ def test_an_operators_arm_writes_the_second_prompt_node_and_nothing_off_its_rost
 
 def test_a_member_knowing_one_prompt_is_refused_pre_spend_on_a_chain_of_two() -> None:
     two = _two_prompt_nodes()
-    gepa = select_optimizer(OptimizerChoice(optimizer="gepa"))
-    capo = select_optimizer(OptimizerChoice(optimizer="capo"))
+    gepa = select_optimizer(bench_choice("gepa"))
+    capo = select_optimizer(bench_choice("capo"))
     assert optimizers.unfit_pipeline(capo, two, "termnorm") is not None, (
         "a member rewriting the one prompt node was admitted on a chain of two"
     )
@@ -3626,7 +3666,7 @@ def test_only_a_held_prompt_field_withdraws_it_from_l1() -> None:
     # The shipped defaults' config-axis narrowing leaves every prompt field to L1; only
     # `prompt_fields_held` withdraws one, and a surface with nothing open is refused pre-spend.
     two = _two_prompt_nodes()
-    gepa = select_optimizer(OptimizerChoice(optimizer="gepa"))
+    gepa = select_optimizer(bench_choice("gepa"))
     axes_only = two.narrow(
         {
             "review": NodeSearchNarrowing(
@@ -3725,7 +3765,7 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
 
 def test_a_whole_prompt_rewrite_lands_in_the_slot_the_node_declares() -> None:
     two = _two_prompt_nodes()
-    gepa = select_optimizer(OptimizerChoice(optimizer="gepa"))
+    gepa = select_optimizer(bench_choice("gepa"))
     rubric_only = pipeline_schema(
         [
             PipelineNode(
@@ -4343,7 +4383,7 @@ def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
         f"vacuous — the inner optimizer prompts ({subject_chars}c) fit inside the "
         f"discretionary allowance ({allowance}c), so nothing is being kept against a budget"
     )
-    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
+    potter = select_optimizer(bench_choice("potter"))
     generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
     with scoped(book=spend_book()):
         filled = DispatchHub.fill(generator, inner, node="l1_generate")
@@ -4359,8 +4399,8 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
 ) -> None:
     # A panel mixing two manifests; the edit it admits reaches the inner cell's request.
     fields = list(OptimizerPromptTemplate.model_fields)
-    potter = select_optimizer(OptimizerChoice(optimizer="potter"))
-    capo = select_optimizer(OptimizerChoice(optimizer="capo"))
+    potter = select_optimizer(bench_choice("potter"))
+    capo = select_optimizer(bench_choice("capo"))
     mixed = inner_cells("potter", "capo")
     mixed_schema = _outer_schema((*NODE_LAYOUTS, *capo.llm_nodes))
     mixed_view = _view(

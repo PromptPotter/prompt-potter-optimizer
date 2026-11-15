@@ -73,6 +73,7 @@ from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.maintenance.landing import check_every_treatment, plan_landing
 from promptpotter.application.optimizer_manifest import (
+    bench_choice,
     manifest_directories,
     running_prompt,
     select_optimizer,
@@ -92,10 +93,7 @@ from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Compare
-from promptpotter.domain.campaign_config import (
-    CampaignConfig,
-    OptimizerChoice,
-)
+from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.command_events import WORKSPACE_SUBJECT, CommandRecord, subject_key
 from promptpotter.domain.command_kinds import (
     ArmRequest,
@@ -649,7 +647,7 @@ def campaign_config(
         determinism={"seed": 0},
     )
     if optimizer != templated:
-        roster = select_optimizer(OptimizerChoice(optimizer=optimizer)).manifest.nodes
+        roster = select_optimizer(bench_choice(optimizer)).manifest.nodes
         opt["nodes"] = {node: block for node, block in SCALED.items() if node in roster}
     knobs = ({"escalation": SCRIPTED_L2} if optimizer == "potter" else {}) | (knobs or {})
     # The draw's host and the LLM host *crossover* names at once, drawing on one measured pool; an
@@ -1638,7 +1636,7 @@ def digests() -> dict[str, str]:
     check_every_treatment()
     out = {"estimator": estimator()}
     for name in sorted(optimizers.MANIFESTS.table):
-        selected = select_optimizer(OptimizerChoice(optimizer=name))
+        selected = select_optimizer(bench_choice(name))
         out[f"treatment:{name}"] = selected.treatment(
             frozenset(Presumption), PackShelf(account=None)
         ).digest
@@ -1765,7 +1763,7 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
     shared = imports(Path(optimizers.__file__).parent.glob("*.py"))
     out = {}
     for name in names:
-        roster = select_optimizer(OptimizerChoice(optimizer=name)).member_nodes
+        roster = select_optimizer(bench_choice(name)).member_nodes
         named = [packages[n] for n in roster] + [owned(d) for d in manifest_directories(name)]
         reached = shared | {d for d in named if d}
         todo = list(reached)

@@ -23,7 +23,7 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.campaign_config import ArmGateMode, OptimizerChoice
+from promptpotter.domain.campaign_config import ArmGateMode, CallTarget, OptimizerChoice
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -57,6 +57,7 @@ from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.search_point import NodeConfig
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.treatment import Treatment
+from promptpotter.infrastructure.store.dataset_access import campaign_defaults
 from promptpotter.infrastructure.store.io import read_json, read_yaml
 from promptpotter.shared.errors import (
     FileKind,
@@ -785,9 +786,14 @@ def _resolved(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
 
 @functools.lru_cache(maxsize=32)
 def _select(
-    name: str, _stamped: tuple[tuple[Path, int], ...], overlay_json: str, gate: ArmGateMode
+    name: str,
+    _stamped: tuple[tuple[Path, int], ...],
+    target: CallTarget,
+    overlay_json: str,
+    gate: ArmGateMode,
 ) -> SelectedOptimizer:
     manifest, schemas = _resolved(name)
+    manifest = manifest.calling(target.model_dump())
     overlay: dict[str, dict[str, Any]] = json.loads(overlay_json)
     if unknown := sorted(set(overlay) - set(manifest.nodes)):
         raise ValueError(
@@ -962,13 +968,19 @@ def _open_edges(selected: SelectedOptimizer) -> list[str]:
     return open_
 
 
+def bench_choice(optimizer: str) -> OptimizerChoice:
+    """*optimizer* as a campaign editing none of it selects it, on `defaults.yaml`'s call target."""
+    target = campaign_defaults()["optimization"]["call_target"]
+    return OptimizerChoice.model_validate({"optimizer": optimizer, "call_target": target})
+
+
 def select_optimizer(choice: OptimizerChoice) -> SelectedOptimizer:
     """The ONE selection: the roster must close as ``arm_gate`` walks it, under ``author`` the
     seat in its proposers' place."""
     name = choice.optimizer
-    overlay = {node: dict(o.config) for node, o in sorted(choice.nodes.items())}
+    overlay = json.dumps({n: dict(o.config) for n, o in choice.nodes.items()}, sort_keys=True)
     try:
-        return _select(name, _stamps(name), json.dumps(overlay, sort_keys=True), choice.arm_gate)
+        return _select(name, _stamps(name), choice.call_target, overlay, choice.arm_gate)
     except ValueError as exc:
         raise PayloadInvalidError(
             f"optimization.nodes refused by optimizer {name!r}: {exc}", code="optimizer_overlay"

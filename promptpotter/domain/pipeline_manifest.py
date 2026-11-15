@@ -83,27 +83,24 @@ class PipelineManifest(FrozenModel):
     initial_population_walks: Literal["alone", "before_default"] | None = None
     resolved_prompts: dict[str, OptimizerPromptTemplate] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def _call_keys_typed(self) -> Self:
-        # Typed as selection types them, so a landing refuses a mistyped call key (`max_tokens:
-        # 8000.0`) where a launch would; a knob is its member's to type, at selection.
-        for name, node in self.nodes.items():
-            if node.type is NodeKind.LLM:
-                try:
-                    typed_config(node.config)
-                except ValueError as exc:
-                    raise ValueError(f"llm node {name!r}: {exc}") from exc
-        return self
-
     def laid_over(self, overlay: Mapping[str, Mapping[str, Any]]) -> PipelineManifest:
-        laid = lay_nodes(
-            {name: node.config for name, node in self.nodes.items()},
-            {name: cfg for name, cfg in overlay.items() if name in self.nodes},
+        return self._laid({}, overlay)
+
+    def calling(self, target: Mapping[str, str]) -> PipelineManifest:
+        """Every llm node on *target*, laid under the node's own config."""
+        return self._laid(
+            {n: target for n, node in self.nodes.items() if node.type is NodeKind.LLM}, {}
         )
-        nodes = {
-            name: node.model_copy(update={"config": laid[name]})
-            for name, node in self.nodes.items()
-        }
+
+    def _laid(
+        self, under: Mapping[str, Mapping[str, str]], over: Mapping[str, Mapping[str, object]]
+    ) -> PipelineManifest:
+        laid = lay_nodes(
+            under,
+            {name: node.config for name, node in self.nodes.items()},
+            {name: cfg for name, cfg in over.items() if name in self.nodes},
+        )
+        nodes = {n: node.model_copy(update={"config": laid[n]}) for n, node in self.nodes.items()}
         return self.model_copy(update={"nodes": nodes})
 
 

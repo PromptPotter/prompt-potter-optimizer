@@ -37,7 +37,7 @@ nodes:
       pareto_size: 50
   # The reflection's decoding is the paper's: temperature 0.6, top-p 0.95, a 16,384-token window
   # (App. E.2). NOT the paper's: the model — Qwen3 8B ("GEPA-Qwen-Opt", Table 2) is retired on
-  # OpenRouter, and the bench runs every optimizer on one model — and its top-k 20, which an llm
+  # OpenRouter; it runs on `optimization.call_target` — and its top-k 20, which an llm
   # node's call config does not carry.
   gepa_reflect:
     type: llm
@@ -49,8 +49,6 @@ nodes:
       top_p: 0.95
       max_tokens: 16384
       reasoning_effort: none
-      provider: openrouter
-      model: minimax/minimax-m3.1-flash
       # The paper's prompt is one text: the reply replaces the whole prompt.
       rewrites: prompt
   # A child joins the candidate pool only if it beats its parent on the minibatch (Alg. 1 line 14).

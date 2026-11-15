@@ -32,8 +32,8 @@ main:
 nodes:
   # The refinement route (§3.2): most of the calls; max_tokens 16,384 (App. B, Table 5). The paper
   # states no decoding temperature; 1.0 is OpenRouter's default, which it billed through (App. C).
-  # NOT the paper's: the model — its Qwen3-8B (§4.2) is retired on OpenRouter, and the bench runs
-  # every optimizer on one model, both routes included.
+  # NOT the paper's: the model — its Qwen3-8B (§4.2) is retired on OpenRouter; both routes run on
+  # `optimization.call_target`.
   levi_refine:
     type: llm
     makes: refinements
@@ -43,8 +43,6 @@ nodes:
       temperature: 1.0
       max_tokens: 16384
       reasoning_effort: none
-      provider: openrouter
-      model: minimax/minimax-m3.1-flash
       # The paper's prompt is one text: the reply replaces the whole prompt.
       rewrites: prompt
       # The parent's softmax temperatures, one drawn per call (App. A, App. B).
@@ -56,7 +54,7 @@ nodes:
       # GEPA's reflection minibatch (arXiv 2507.19457), whose suite its prompt runs use (§4.2).
       feedback_failures: 3
   # The paradigm-shift route (§3.2, App. F): one call per period; max_tokens 4,096 (App. F). NOT
-  # the paper's: the model — its Gemini 3 Flash (App. A) costs over 20x the bench's one model.
+  # the paper's: the model — its Gemini 3 Flash (App. A) costs over 20x `optimization.call_target`.
   levi_paradigm_shift:
     type: llm
     makes: paradigm shifts
@@ -66,8 +64,6 @@ nodes:
       temperature: 1.0
       max_tokens: 4096
       reasoning_effort: none
-      provider: openrouter
-      model: minimax/minimax-m3.1-flash
       rewrites: prompt
       # Every 10 evaluations, over k = 3 clusters of the occupied cells (App. B, App. F).
       interval: 10
@@ -82,8 +78,6 @@ nodes:
       temperature: 1.0
       max_tokens: 4096
       reasoning_effort: none
-      provider: openrouter
-      model: minimax/minimax-m3.1-flash
       rewrites: prompt
       # n_diverse_seeds = 4 (App. B, Table 5): with the origin, the 5 calibration prompts (App. A).
       n_diverse_seeds: 4

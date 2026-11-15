@@ -52,13 +52,17 @@ BASELINE = {
     # browser's skip refusal served off the run, apart from the launch's admission.
     # ren (+29): `Panel` named `RoundSamples`, so twelve proposers' `propose` signatures wrap, each
     # beside a samples parameter only gepa reads (filed); net of two dead definitions deleted.
-    "package_lines": 110036,
+    # model-lines (+22): the bench's one optimizer call target, typed (`CallTarget`), laid under
+    # every llm node by the one node fold (`PipelineManifest.calling`) and read by a bare selection
+    # (`bench_choice`); net of the manifest validator selection already ran, and 22 yaml lines gone.
+    "package_lines": 110058,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
-    "config_leaf_fields": 90,
+    # model-lines (+1): `optimization.call_target`, which replaced eleven node `model` lines.
+    "config_leaf_fields": 89,
     # `Settings` fields — what the environment can set.
     "settings_env": 38,
     # Parameters annotated `Any`.
@@ -84,7 +88,8 @@ BASELINE = {
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
     # webb-5b (+1): `NodeOutputSchema.json_schema`, the backend's own document, served beside the
     # `contract` rows the browser now draws.
-    "p_served": 200,
+    # model-lines (+2): `call_target` on a served campaign config, which no surface edits yet.
+    "p_served": 192,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     "p_unread_fields": 27,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
