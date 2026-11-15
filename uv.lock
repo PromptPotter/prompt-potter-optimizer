@@ -1718,7 +1718,7 @@ wheels = [
 
 [[package]]
 name = "promptpotter"
-version = "0.8.20"
+version = "0.8.21"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

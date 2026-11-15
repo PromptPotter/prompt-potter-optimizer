@@ -261,6 +261,7 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   and the harness open one line; each fact builds its own home; a send the world never answers times
   out instead of hanging the suite; the floor's rate table is one, so the suite's peak falls 328 →
   300 MB (Linux). Legs move only on `world` and `harness.unrouted`; no wipe.
+- **v0.8.21** is cut here (operator, 2026-11-15).
 - **then (next week):** tests-w's separating round (`hold_up`), a candidate subject that names its
   round, the lineage fold, the feed's per-subject version and the inline launch's queued answer;
   the edge tail. A cold verify is timed live.

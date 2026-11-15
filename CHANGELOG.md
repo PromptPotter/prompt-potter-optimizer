@@ -6,15 +6,45 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.21] — 2026-11-15
+
+> A program acts as its account with an API token, and an MCP client drives runs over HTTP. Every refusal names the acts past it at every door, a connector reaches named endpoints, and the host can show a read-only exhibit. Upgrading wipes run data and renames two `.env` keys; accounts, API keys and the install's settings survive. 71 commits since `v0.8.20`.
+
+### Added
+
+- **API tokens.** An account mints up to ten live tokens, and a program sends one as a bearer to act as the account, held to the token's delegable scopes. (30af50704)
+- **MCP over Streamable HTTP** at `/mcp/`, on the caller's bearer: a task held at its arms gate asks its host with a form, and an accepted answer files `submit-arms` once. (5273b6adb, 23d82b69d)
+- **The host's exhibit.** `EXHIBIT_CAMPAIGN` names one of the host's campaigns, which every account with "Try & learn" on follows read-only while nothing of its own runs; the host sets a coupon from the admin bot (`/coupon`). (23d82b69d, dcbb0f66e)
+- **A refusal names its next acts**, as a stop does, and each door words them its own way: the terminal's verb and flag, the webapp's control, the MCP tool. (dcc98fd75, 2d053c7db)
+- **Charts read on hover and by keyboard**: a reading line under each chart steps on the arrow keys, and the lineage tree sits under the bars or is freed with one button. (8301ff49e, ee7a7a426)
+
 ### Changed
 
-- **A definition names its connector `pipeline.connector`** (was `pipeline.backend_type`); an account's own definition naming the old key no longer resolves until its key is renamed. An unregistered name answers a 422 naming the registered set, never a 500.
-- **A connector's address is a map of named endpoints, and a dataset names one as `pipeline.endpoint`**; a map of one answers a dataset naming none, a map of more refuses it naming the names. `TERMNORM_URL=<url>` becomes `TERMNORM_ENDPOINTS={"local": "<url>"}` and `N8N_HARNESS_URL=<url>` becomes `N8N_HARNESS_ENDPOINTS={"<name>": "<url>"}` in every install's `.env` (the box's included); an n8n cell keeps its key, since each hashes its own endpoint's URL. `GET /backends` serves `endpoints` in place of `base_url`, and `/backends/{id}/health` no `base_url`.
-- **`DBLLMBENCH_DB_URL` has no default**: a dbllmbench launch refuses without it (`.env.example` names upstream's compose addresses). A harbor dataset names `nodes.agent.config.skill_delivery` (`agent_skill` was the default); one naming none refuses at run init.
+- **The held-out pass is `held-out` at every door**: the CLI verb, command kind, host tool and button that were `grade-bench`, `bench` and "Grade on bench". (bb20cdcc2)
+- **`resume --on-divergence halt|accept|fork`** replaces `--no-check` and `--fork-on-divergence`, and a cycle's draws follow `run_seed`. (de4c0cc47)
+- **One crowning bar decides crown, advance and stop**, its statistic a switch (the posterior by default; Holm sign test, e-process, empirical Bayes). An arm is cut when its chance of being best, read jointly with its parent and the standing arms, falls under 0.05. (61ef07161, 5cf502c7b)
+- **Every level and lift is one `Estimate`**: race and election read one ruler, level bands are bounded, and a binary lift is tested by exact McNemar. (a32639135)
+- **Every campaign default lives in `defaults.yaml`**, and one wire rule holds at every door: absent leaves a field, `null` clears it, `""` is a value. A tenant budget that names no rounds gets 5, not 50. (1f7b1b8c7)
+- **One call target** (`optimization.call_target`) is what every optimizer LLM node runs on. (28956e323)
+- **A connector reaches named endpoints**, and a dataset names one as `pipeline.endpoint`: a map of one answers a dataset naming none. In every install's `.env`, `TERMNORM_URL=<url>` becomes `TERMNORM_ENDPOINTS={"local": "<url>"}` and `N8N_HARNESS_URL=<url>` becomes `N8N_HARNESS_ENDPOINTS={"<name>": "<url>"}`; `GET /backends` serves `endpoints` in place of `base_url`. A node's served wire keys bound what is sent, and an unknown key is refused at the mint. (a3312e3e1)
+- **A definition names its connector `pipeline.connector`** (was `pipeline.backend_type`); an account's own dataset naming the old key does not resolve until it is renamed, and an unregistered name answers a 422 naming the registered set. (917861717)
+- **`DBLLMBENCH_DB_URL` has no default**, so a dbllmbench launch refuses without it, and a harbor dataset names `nodes.agent.config.skill_delivery`. (a3312e3e1, 917861717)
+- **A fault is a value**: the core logs nothing, and every fault is a typed record the readout and the dashboard fold; `machine-status` words each job file that does not load and each sweep step that failed. (8c1d6ed53, 2ab437583, b33de0d2a)
+- **The embedded door is async** (`await enter()`), and a `--json` launch never prompts: it refuses at admission. (621586119, 55765dc08)
+- **Archive answers name their runs**: `compact-archive inventory` lists each entry's runs, and `compact-archive reclaim --dataset` deletes one dataset's answers, planning unless `--apply`. (146917666)
+- **Every API answer names its served contract** (`x-served-contract`), and a webapp bundle built against another API says so. (d118df305)
 
 ### Removed
 
-- The `jupyter` extra and its one renderer, `presentation/terminal/completion.py`; the BBEH notebook's runner (`paper/bbeh-comparison/bbeh_potter_runner.py`) runs against `promptpotter==0.8.20`.
+- The knobs `pobb.lock_in`, `origin_gate.critical_only` and `convergence_patience`, and the `converged` stop reason; their shipped behaviour is wired. (61ef07161, 5cf502c7b)
+- The `jupyter` extra and its one renderer, `presentation/terminal/completion.py`; the BBEH notebook's runner runs against `promptpotter==0.8.20`. (75428b66b)
+
+### Fixed
+
+- **The server's event loop never waits on a lock**, and its startup runs off the loop. (621586119)
+- **A follower reads the exhibit's tree and nothing beside it**: a `descend` chain can no longer splice in another sandbox of the host's. (206f42589)
+- **Robustness**: the origin pass's reserve holds, preflight warnings are said once, `set-limits` in the admission window answers 429 (not 500), a dataset named `café.csv` loads, a deep YAML is a typed refusal, a read on Windows rides out a concurrent replace, and the webapp's first paint no longer loads the charts. (30a4fbf68, 7c83e4ec8, dcbb0f66e, 43d6beca1, f589cbe9a, 6fa93bab0, 45db43ad5)
+- **`update.sh` fetches tags with `--force`**, so a moved tag never stops a deploy. (0e80c2b5a)
 
 ## [0.8.20] — 2026-11-13
 
