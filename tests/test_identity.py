@@ -1363,14 +1363,29 @@ def test_the_listing_reads_each_card_and_never_the_research_tier(tiered: Stores)
     }, "the listing misread a card, or listed the research tier"
 
 
-def test_the_checkouts_shipped_tiers_hold_no_name_in_common() -> None:
-    # No install name is shadowed by research and no research name by the install.
-    shipped = [
-        {p.parent.relative_to(root).as_posix() for p in root.rglob(DEFINITION_FILE)}
-        for root in (paths.install_datasets_root(), paths.research_datasets_root())
-        if root is not None
+@pytest.fixture(scope="module")
+def shipped_tiers(tmp_path_factory: pytest.TempPathFactory) -> tuple[Stores, list[set[str]]]:
+    """The checkout's stores and each shipped tier's names, read once through the listing: the
+    research tier as a store's install tier, since the listing never lists research."""
+    home = tmp_path_factory.mktemp("checkout")
+    checkout = build_stores(default_identity(), projects_root=home / "checkout")
+    research = checkout.research_datasets_root
+    assert research is not None, "this checkout lost a tier"
+    as_install = build_stores(
+        default_identity(), projects_root=home / "research", install_datasets_root=research
+    )
+    return checkout, [
+        {ref.dataset.name for ref in list_readable_datasets(stores)}
+        for stores in (checkout, as_install)
     ]
-    assert len(shipped) == 2 and all(shipped), "this checkout lost a tier"
+
+
+def test_the_checkouts_shipped_tiers_hold_no_name_in_common(
+    shipped_tiers: tuple[Stores, list[set[str]]],
+) -> None:
+    # No install name is shadowed by research and no research name by the install.
+    _, shipped = shipped_tiers
+    assert all(shipped), "this checkout lost a tier"
     assert not set.intersection(*shipped), f"both shipped tiers hold {set.intersection(*shipped)}"
 
 
@@ -3805,14 +3820,13 @@ def test_a_whole_prompt_rewrite_lands_in_the_slot_the_node_declares() -> None:
         NodePromptInfo(fields=("rubric",), rewrite_field="instruction")
 
 
-def test_every_committed_datasets_framing_reads_within_its_budget(tmp_path: Path) -> None:
+def test_every_committed_datasets_framing_reads_within_its_budget(
+    shipped_tiers: tuple[Stores, list[set[str]]],
+) -> None:
     # An over-budget field lands green and refuses every launch on its dataset at mint.
-    checkout = build_stores(default_identity(), projects_root=tmp_path / "checkout")
-    for tier_root in (checkout.install_datasets_root, checkout.research_datasets_root):
-        assert tier_root is not None, "this checkout lost a tier"
-        for definition in sorted(tier_root.rglob(DEFINITION_FILE)):
-            name = definition.parent.relative_to(tier_root).as_posix()
-            committed_task_context(checkout, resolve_dataset(checkout, name))
+    checkout, shipped = shipped_tiers
+    for name in sorted(set.union(*shipped)):
+        committed_task_context(checkout, resolve_dataset(checkout, name))
 
 
 # 3. Contamination of a scored prompt

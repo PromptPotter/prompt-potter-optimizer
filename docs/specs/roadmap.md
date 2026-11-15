@@ -256,9 +256,14 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 95, ws-2:** a chart's reading steps on the keyboard in its one reading hook; a candidate
   is matched by its address in the freed tree, the channel map and the Picked fold; a chart's canvas
   never lays its card out wider than its column. Every leg UNMOVED, digests unmoved, no wipe.
-- **then:** tests-w links 1–4 (cloud); next week, tests-w's separating round
-  (`hold_up`), a candidate subject that names its round, the lineage fold, the feed's per-subject
-  version and the inline launch's queued answer; the edge tail. A cold verify is timed live.
+- **landed 96, tests-w 1–4:** the offline run imports its own tree and the world answers the rates
+  it fetches (the world 1 → 2, so every offline digest re-keys, no run data moves); `run_optimization`
+  and the harness open one line; each fact builds its own home; a send the world never answers times
+  out instead of hanging the suite; the floor's rate table is one, so the suite's peak falls 328 →
+  300 MB (Linux). Legs move only on `world` and `harness.unrouted`; no wipe.
+- **then (next week):** tests-w's separating round (`hold_up`), a candidate subject that names its
+  round, the lineage fold, the feed's per-subject version and the inline launch's queued answer;
+  the edge tail. A cold verify is timed live.
 
 The re-keys end at the behaviour-key switch.
 

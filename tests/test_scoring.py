@@ -63,6 +63,7 @@ from factories import (
     prompted,
     round_result,
     run_init_round,
+    run_wiring,
     samples,
     score_summary,
     scorer_of,
@@ -339,7 +340,6 @@ from promptpotter.domain.records.run_records import (
     RoundWarningRecord,
     Running,
     RunPhaseRecord,
-    RunWiringRecord,
     StopLoop,
 )
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
@@ -1692,6 +1692,19 @@ _CAPO_NODES = {
 }
 
 
+def _capo_says() -> Callable[[dict[str, Any]], str]:
+    """CAPO's seed batch, three prompts, then each mutation a fresh one."""
+    minted: list[str] = []
+
+    def says(body: dict[str, Any]) -> str:
+        if "Create overall 15 prompts" in _asked(body):
+            return json.dumps(["Solve the task, A.", "Solve the task, B.", "Solve the task, C."])
+        minted.append(f"Go {len(minted)}.")
+        return f"<prompt>{minted[-1]}</prompt>"
+
+    return says
+
+
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
@@ -1702,15 +1715,6 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
     ) -> None:
         case = f"round {cut_round} cut under panel_gate={panel_gate}"
         root = tmp_path / f"cut-{cut_round}-{panel_gate}"
-        minted: list[str] = []
-
-        def capo_says(body: dict[str, Any]) -> str:
-            if "Create overall 15 prompts" in _asked(body):
-                return json.dumps(
-                    ["Solve the task, A.", "Solve the task, B.", "Solve the task, C."]
-                )
-            minted.append(f"Go {len(minted)}.")
-            return f"<prompt>{minted[-1]}</prompt>"
 
         paid: list[int] = []
         book = spend_book(None, usd_reserve=None)
@@ -1735,7 +1739,7 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
             book=book,
             panel_gate=panel_gate,
         ) as (cycle, _):
-            offline.llm.says = capo_says
+            offline.llm.says = _capo_says()
             session = cycle.session
             running.append(True)
             search = list(session.state.scoring.partition.search)
@@ -1808,15 +1812,6 @@ def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     def raced(failing: str) -> RoundResult:
-        minted: list[str] = []
-
-        def capo_says(body: dict[str, Any]) -> str:
-            if "Create overall 15 prompts" in _asked(body):
-                return json.dumps(
-                    ["Solve the task, A.", "Solve the task, B.", "Solve the task, C."]
-                )
-            minted.append(f"Go {len(minted)}.")
-            return f"<prompt>{minted[-1]}</prompt>"
 
         def misses_after_block_one(prompt: str, sample: Sample) -> bool:
             block = _PEER_READ_ORDER[sample.id] // 4
@@ -1830,7 +1825,7 @@ def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at
             _CAPO_NODES,
             misses_after_block_one,
         ) as (cycle, _):
-            offline.llm.says = capo_says
+            offline.llm.says = _capo_says()
             return asyncio.run(execute_round(cycle, 1)).result
 
     def fates(closed: RoundResult) -> dict[str, list[int]]:
@@ -2657,20 +2652,7 @@ def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
             with pytest.raises(RuntimeError):
                 asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
         dashboard = LiveDashboardProjection()
-        dashboard.feed(
-            RunWiringRecord(
-                round_cells_ceiling=1,
-                display_metric="fitness",
-                elects_on="fitness",
-                max_cells_in_flight=1,
-                measured_unit="sample",
-                measurement_node="solve",
-                budget=Budget(),
-                optimizer_limits=[],
-                defaults_drift=None,
-                backend_revision=None,
-            )
-        )
+        dashboard.feed(run_wiring("solve"))
         for at, record in enumerate(ledger_records(ledger)):
             if at >= failed_from:
                 dashboard.feed(record)

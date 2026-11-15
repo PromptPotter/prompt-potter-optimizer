@@ -52,6 +52,7 @@ from factories import (
     pipeline_schema,
     round_result,
     run_init_round,
+    run_wiring,
     samples,
     seat,
     set_cycle,
@@ -245,7 +246,6 @@ from promptpotter.domain.records.run_records import (
     Paused,
     Running,
     RunPhaseRecord,
-    RunWiringRecord,
     StandingEffect,
 )
 from promptpotter.domain.refusal import Refusal
@@ -2293,20 +2293,7 @@ def _running(cycle_dir: Path) -> Path:
     """A producer holding *cycle_dir* that banked its RUNNING phase; the cycle's ledger."""
     running = CycleEventLog.open(CycleDir(cycle_dir))
     running.append(RunPhaseRecord(state=Running()))
-    running.append(
-        RunWiringRecord(
-            round_cells_ceiling=1,
-            display_metric="fitness",
-            elects_on="fitness",
-            max_cells_in_flight=1,
-            measured_unit="sample",
-            measurement_node="l1_score",
-            budget=Budget(),
-            optimizer_limits=[],
-            defaults_drift=None,
-            backend_revision=None,
-        )
-    )
+    running.append(run_wiring())
     ledger = CycleLayout(cycle_dir).ledger
     hold_cycle(cycle_dir)
     return ledger

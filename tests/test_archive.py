@@ -2530,6 +2530,8 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
     built_stores: Stores,
 ) -> None:
     stores = built_stores
+    # The origin's cells, each one the backend refused.
+    bank = samples(8)
     dead = sheet(measurement(i, None, error="boom", error_category="SERVER") for i in range(8))
     origin = prompted(instruction="origin")
     hop = CycleHop(campaign_id="cycle_gated__20260101-000000", cycle_id="cycle_gated")
@@ -2542,6 +2544,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
         ctx = seat(
             stores,
             hop=hop,
+            bank=bank,
             origin=(origin, lambda _session: dead),
             optimization={"budget": {"rounds": 0}},
         )
@@ -2561,7 +2564,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
         resumed = scan_cycle_facts(stores.campaigns.ledger(hop)).resumed_ending
 
         async def walk() -> LoopEnd:
-            gated = await open_origin_round(cycle, [], resumed_ending=resumed)
+            gated = await open_origin_round(cycle, bank, resumed_ending=resumed)
             return gated or await run_round_loop(cycle, cycle.config, session)
 
         with scoped(account=stores):

@@ -276,6 +276,7 @@ from promptpotter.infrastructure.llm.wallet import (
     AllowanceState,
     BackendCells,
     ProviderSend,
+    Send,
     keyed_client,
     paying_key,
     provider_send,
@@ -1667,6 +1668,10 @@ class _Provider:
         return completion("ok", model="gpt-x", usage=None if self.unbilled else usage)
 
 
+# A cut of 600 input and 1500 output tokens at `_priced_wire`'s rates.
+_HOLD_USD = 600 * 1e-6 + 1500 * 2e-6
+
+
 def _priced_wire(offline: Router) -> _Provider:
     offline.rates = {"openai/gpt-x": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}}
     assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
@@ -2624,12 +2629,11 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling_and_a_killed_hold_stay
     )
     # A hard exit runs no `finally`: the hold written ahead of the call is held while its job
     # holds, and unreported at its bound once the job's hold closes.
-    hold_usd = 0.0036
     killed = Hold(
         hold_id="killed",
         parent="reaped",
         key_source="host",
-        bound=Budget(usd=hold_usd, tokens=2_100),
+        bound=Budget(usd=_HOLD_USD, tokens=2_100),
         resource="optimizer",
         node="o",
         ledger=charges.held_on(burst_ledger.path),
@@ -2644,7 +2648,7 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling_and_a_killed_hold_stay
     )
     assert account.used_usd == 0.0, "a price off our rate table was read as spent"
     assert account.rate_priced_usd == pytest.approx(recorded), "the rate-priced sum moved"
-    assert account.unreported_usd == pytest.approx(left_out + hold_usd), (
+    assert account.unreported_usd == pytest.approx(left_out + _HOLD_USD), (
         "a killed send's hold was not counted as out"
     )
     assert _unreported_sends(burst_ledger) == unreported + 1, "a killed send's hold went unread"
@@ -2654,7 +2658,6 @@ def test_no_burst_of_sends_records_spend_past_its_ceiling_and_a_killed_hold_stay
 def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_held(
     tmp_path: Path,
 ) -> None:
-    hold_usd = 0.0036
     charges = _charges()
     bare = CycleEventLog(tmp_path / "bare" / "ledger.jsonl")
     on_bare = charges.held_on(bare.path)
@@ -2663,7 +2666,7 @@ def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_he
             hold_id="bare",
             parent=None,
             key_source="host",
-            bound=Budget(usd=hold_usd, tokens=2_100),
+            bound=Budget(usd=_HOLD_USD, tokens=2_100),
             resource="optimizer",
             node="o",
             ledger=on_bare,
@@ -2672,7 +2675,7 @@ def test_a_bill_naming_no_price_closes_its_hold_in_tokens_and_keeps_its_money_he
     priceless = billed_call(node="bare", input_tokens=40, output_tokens=9, hold_id="bare").bill
     assert priceless is not None
     charges.append(priceless)
-    assert unreported_under(charges, bare.path).host.unreported_usd == pytest.approx(hold_usd), (
+    assert unreported_under(charges, bare.path).host.unreported_usd == pytest.approx(_HOLD_USD), (
         "a priceless bill freed its hold"
     )
 
@@ -2765,7 +2768,6 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
     tmp_path: Path, offline: Router
 ) -> None:
     _priced_wire(offline)
-    hold_usd = 0.0036
     root = CycleEventLog(tmp_path / "root.jsonl")
     book = spend_book(0.05)
     book.ledger = root
@@ -2798,7 +2800,7 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
         "a nested send past its ROOT's ceiling was admitted on its own book's room, or held "
         "half-way"
     )
-    cut = SendBound(input_tokens=600, output_tokens=1500, usd=hold_usd)
+    cut = SendBound(input_tokens=600, output_tokens=1500, usd=_HOLD_USD)
     with _billing_on(nested, inner):
         Admission(
             inner,
@@ -2809,7 +2811,7 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
             paid_by="host",
         ).unreported()
     assert _unreported_sends(root) == 1, "a nested send cut short lapsed nowhere"
-    assert book.spent.unreported_usd == pytest.approx(hold_usd), (
+    assert book.spent.unreported_usd == pytest.approx(_HOLD_USD), (
         "a nested send cut short stayed held on its own book and freed its root's"
     )
 
@@ -2840,8 +2842,7 @@ def test_a_send_that_left_and_named_no_price_stays_held_at_its_bound(
     tmp_path: Path, offline: Router
 ) -> None:
     wire = _priced_wire(offline)
-    hold_usd = 0.0036
-    cut = SendBound(input_tokens=600, output_tokens=1500, usd=hold_usd)
+    cut = SendBound(input_tokens=600, output_tokens=1500, usd=_HOLD_USD)
     charges = _charges()
     held_ledger = CycleEventLog(tmp_path / "held.jsonl")
     book = spend_book(0.05)
@@ -2877,7 +2878,7 @@ def test_a_send_that_left_and_named_no_price_stays_held_at_its_bound(
             paid_by="host",
         ).settle(Billed(TokenAccount(input=600, output=100), None))
     assert book.spent.sent_usd == spent_usd, "a bill naming tokens and no price read as free"
-    assert book.spent.unreported_usd == pytest.approx(held_usd + hold_usd), (
+    assert book.spent.unreported_usd == pytest.approx(held_usd + _HOLD_USD), (
         "it was not held at its bound"
     )
     after = unreported_under(charges, held_ledger.path).host
@@ -2885,7 +2886,7 @@ def test_a_send_that_left_and_named_no_price_stays_held_at_its_bound(
         sends_before + 1,
         before.unreported_tokens,
     ), "a priceless bill's hold was not counted as out"
-    assert after.unreported_usd == pytest.approx(before.unreported_usd + hold_usd), (
+    assert after.unreported_usd == pytest.approx(before.unreported_usd + _HOLD_USD), (
         "a priceless hold left its bound"
     )
 
@@ -3489,13 +3490,13 @@ def _running(stores: Stores, registry: JobRegistry, *, admitted: bool, reserve: 
         registry.move(held.job_id, LaunchMove.START)
 
 
-async def _paid_door(door: str, stores: Any) -> None:
-    match door:
-        case "turn":
-            async with paid_call(stores=stores, bucket="turn", provider="openrouter"):
-                keyed_client("openrouter")
-        case "bench":
-            await grade_line_bench(stores=stores, hop=_HELD_HOP, acting="bench")
+async def _turn(stores: Stores) -> None:
+    async with paid_call(stores=stores, bucket="turn", provider="openrouter"):
+        keyed_client("openrouter")
+
+
+async def _bench(stores: Stores) -> None:
+    await grade_line_bench(stores=stores, hop=_HELD_HOP, acting="bench")
 
 
 _SPENT_THE_COUPON = {
@@ -3547,180 +3548,121 @@ def test_a_price_off_our_rate_table_is_recorded_beside_spend_never_as_spend(
     )
 
 
-def _doors() -> tuple[tuple[Any, ...], ...]:
-    """Each paid door's admission per account: the coupon bounds only what the box's keys pay."""
+class _Door(NamedTuple):
+    """One paid door's admission on one account: what it admits (or the refusal it raises) and the
+    coupon's reserve for it."""
+
+    admits: tuple[float | None, int | None] | type[Exception]
+    reserves: tuple[float | None, float | None] | None = None
+    issuer: Any = None
+    face: Budget | None = None
+    # `None`: a backend's cells.
+    sends: tuple[Send, ...] | None = None
+    declared: float | None = None
+    running: dict[str, Any] | None = None
+    spent: dict[str, Any] | None = None
+    # `None`: a launch.
+    paid: Callable[[Stores], Coroutine[Any, Any, None]] | None = None
+
+
+def _doors() -> tuple[_Door, ...]:
+    """The coupon bounds only what the box's keys pay."""
     full = Budget(usd=_FACE.usd, tokens=_FACE.tokens)
     hand_set = Budget(usd=50.0, tokens=50_000)
-    rows: tuple[tuple[Any, ...], ...] = (
-        # door, issuer, face, sends (None: a backend's cells), declared, running, spent,
-        # admitted, reserve
+    unadmitted = {"admitted": False, "reserve": Budget()}
+    return (
         # A hand-set grant of the default face: off the free tier, whose ceiling binds below.
-        ("launch", _WEB, full, None, None, None, None, _UNBOUNDED, (0.30, _FACE.tokens)),
+        _Door(_UNBOUNDED, (0.30, _FACE.tokens), _WEB, full),
         # A USD ceiling holds no tokens: every send under it is priced, so the dollars bound it.
-        ("launch", _WEB, full, None, 0.15, None, None, (0.15, None), (0.30, None)),
-        ("launch", _WEB, full, None, 10.0, None, None, HostAllowanceExhaustedError, None),
+        _Door((0.15, None), (0.30, None), _WEB, full, declared=0.15),
+        _Door(HostAllowanceExhaustedError, issuer=_WEB, face=full, declared=10.0),
         # The free tier's ceiling bounds what a launch holds, a lift's included (bl2.B5).
-        ("launch", _WEB, None, None, None, None, None, (0.03, None), (0.06, None)),
+        _Door((0.03, None), (0.06, None), _WEB),
         # A run none of whose sends the box's keys pay is refused nothing and reserves nothing.
-        ("launch", _WEB, None, _OWN_ONLY, 10.0, None, None, (10.0, None), (0.0, 0)),
-        (
-            "launch",
-            _WEB,
-            None,
-            _OWN_ONLY,
-            None,
-            {"admitted": False, "reserve": Budget()},
-            None,
-            _UNBOUNDED,
-            (0.0, 0),
-        ),
-        (
-            "launch",
-            _WEB,
-            None,
-            None,
-            None,
-            {"admitted": True, "reserve": full},
-            None,
+        _Door((10.0, None), (0.0, 0), _WEB, sends=_OWN_ONLY, declared=10.0),
+        _Door(_UNBOUNDED, (0.0, 0), _WEB, sends=_OWN_ONLY, running=unadmitted),
+        _Door(
             HostAllowanceExhaustedError,
-            None,
+            issuer=_WEB,
+            running={"admitted": True, "reserve": full},
         ),
-        (
-            "launch",
-            _WEB,
-            None,
-            None,
-            None,
-            {"admitted": False, "reserve": Budget()},
-            None,
-            QuotaExceededError,
-            None,
-        ),
-        (
-            "launch",
-            _WEB,
-            full,
-            None,
-            None,
-            None,
-            _UNPRICEABLE,
+        _Door(QuotaExceededError, issuer=_WEB, running=unadmitted),
+        _Door(
             _UNBOUNDED,
             (settings.UNPRICED_GRACE_USD, _FACE.token_amount - 500_000),
-        ),
-        ("launch", None, None, None, None, None, None, _UNBOUNDED, _UNBOUNDED),
-        ("launch", _WEB, hand_set, None, 10.0, None, None, (10.0, None), (20.0, None)),
-        (
-            "launch",
             _WEB,
-            None,
-            None,
-            None,
-            None,
-            _SPENT_THE_COUPON,
-            HostAllowanceExhaustedError,
-            None,
+            full,
+            spent=_UNPRICEABLE,
         ),
-        ("launch", _WEB, None, _OWN_ONLY, None, None, _SPENT_THE_COUPON, _UNBOUNDED, (0, 0)),
+        _Door(_UNBOUNDED, _UNBOUNDED),
+        _Door((10.0, None), (20.0, None), _WEB, hand_set, declared=10.0),
+        _Door(HostAllowanceExhaustedError, issuer=_WEB, spent=_SPENT_THE_COUPON),
+        _Door(_UNBOUNDED, (0, 0), _WEB, sends=_OWN_ONLY, spent=_SPENT_THE_COUPON),
         # A provider no key pays is refused first, on any account, before anything is held.
-        (
-            "launch",
-            None,
-            None,
-            (*_CELLS, ProviderSend("groq", None)),
-            None,
-            None,
-            None,
-            NoApiKeyError,
-            None,
-        ),
+        _Door(NoApiKeyError, sends=(*_CELLS, ProviderSend("groq", None))),
         # Cells no rate bounds: refused under the run's dollar cap or the coupon's, never in tokens.
-        ("launch", None, None, _UNPRICED_CELLS, 10.0, None, None, BudgetUnenforceableError, None),
-        ("launch", _WEB, None, _UNPRICED_CELLS, None, None, None, BudgetUnenforceableError, None),
-        ("launch", None, None, _UNPRICED_CELLS, None, None, None, _UNBOUNDED, _UNBOUNDED),
+        _Door(BudgetUnenforceableError, sends=_UNPRICED_CELLS, declared=10.0),
+        _Door(BudgetUnenforceableError, issuer=_WEB, sends=_UNPRICED_CELLS),
+        _Door(_UNBOUNDED, _UNBOUNDED, sends=_UNPRICED_CELLS),
         # An own key frees its provider's sends, never a backend's cells.
-        (
-            "launch",
-            _WEB,
-            None,
-            (*_CELLS, *_OWN_ONLY),
-            None,
-            None,
-            _SPENT_THE_COUPON,
+        _Door(
             HostAllowanceExhaustedError,
-            None,
+            issuer=_WEB,
+            sends=(*_CELLS, *_OWN_ONLY),
+            spent=_SPENT_THE_COUPON,
         ),
         *(
-            (
-                door,
-                _WEB,
-                None,
-                None,
-                None,
-                None,
-                _SPENT_THE_COUPON,
-                HostAllowanceExhaustedError,
-                None,
-            )
-            for door in ("turn", "bench")
+            _Door(HostAllowanceExhaustedError, issuer=_WEB, spent=_SPENT_THE_COUPON, paid=paid)
+            for paid in (_turn, _bench)
         ),
     )
-    return rows
+
+
+def _launch(
+    door: _Door, user: User, stores: Stores, registry: JobRegistry
+) -> tuple[Budget, Budget]:
+    return admit_launch(
+        declared=Budget() if door.declared is None else Budget(usd=door.declared),
+        user=user,
+        stores=stores,
+        job_registry=registry,
+        job_id="job-a",
+        hop=None,
+        sends=_CELLS if door.sends is None else door.sends,
+    )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_every_paid_door_admits_its_declared_ceiling_and_holds_what_the_coupon_has_left(
     tmp_path: Path,
 ) -> None:
-    for n, (
-        door,
-        issuer,
-        face,
-        sends,
-        declared,
-        running,
-        spent,
-        admits,
-        reserves,
-    ) in enumerate(_doors()):
+    for n, door in enumerate(_doors()):
         at = tmp_path / f"door-{n}"
         at.mkdir()
         user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
-        stores = _account_stores(at, issuer=issuer, user=user, spent=spent, face=face)
+        stores = _account_stores(
+            at, issuer=door.issuer, user=user, spent=door.spent, face=door.face
+        )
         registry = JobRegistry(stores.jobs_dir, capacity=lambda _live: 1)
-        if running is not None:
-            _running(stores, registry, **cast("dict[str, Any]", running))
-        if isinstance(admits, type):
-            with pytest.raises(admits) as refused:
-                if door == "launch":
-                    admit_launch(
-                        declared=Budget() if declared is None else Budget(usd=declared),
-                        user=user,
-                        stores=stores,
-                        job_registry=registry,
-                        job_id="job-a",
-                        hop=None,
-                        sends=_CELLS if sends is None else sends,
-                    )
+        if door.running is not None:
+            _running(stores, registry, **door.running)
+
+        if isinstance(door.admits, type):
+            with pytest.raises(door.admits) as refused:
+                if door.paid is None:
+                    _launch(door, user, stores, registry)
                 else:
-                    asyncio.run(_paid_door(door, stores))
+                    asyncio.run(door.paid(stores))
             # The refusal names the ceiling that binds: only the run's own is the run's to drop.
             if isinstance(refused.value, BudgetUnenforceableError):
                 binds = refused.value.details["binds"]
-                assert binds == ("allowance" if issuer else "run"), f"door {n}: names {binds}"
+                assert binds == ("allowance" if door.issuer else "run"), f"door {n}: names {binds}"
             continue
-        knocked, reserve = admit_launch(
-            declared=Budget() if declared is None else Budget(usd=declared),
-            user=user,
-            stores=stores,
-            job_registry=registry,
-            job_id="job-a",
-            hop=None,
-            sends=_CELLS if sends is None else sends,
-        )
-        assert (knocked.usd, knocked.tokens) == admits, (
+        knocked, reserve = _launch(door, user, stores, registry)
+        assert (knocked.usd, knocked.tokens) == door.admits, (
             f"door {n}: a launch was admitted under another ceiling than its campaign declared"
         )
-        assert (reserve.usd, reserve.tokens) == pytest.approx(reserves), (
+        assert (reserve.usd, reserve.tokens) == pytest.approx(door.reserves), (
             f"door {n}: the coupon held back another amount than it has left for the run"
         )
 
@@ -3763,7 +3705,7 @@ def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
     assert own is not None and (own.paid_by, own.secret.get_secret_value()) == ("user", "sk-own"), (
         "an account's own key lost to the box's"
     )
-    asyncio.run(_paid_door("turn", spent_out))
+    asyncio.run(_turn(spent_out))
 
     async def _box_paid() -> None:
         async with paid_call(stores=spent_out, bucket="turn", provider="openai"):

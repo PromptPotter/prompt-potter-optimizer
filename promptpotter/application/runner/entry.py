@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
@@ -241,6 +243,44 @@ def _finalize_run(
         declare_run_stop(session, observers, stop_reason, interrupted_by=pause_cause, detail=detail)
 
 
+@contextmanager
+def launch_scope(
+    session: Session, observers: RunObservers, config: CampaignConfig
+) -> Iterator[None]:
+    """The launch's one scope (`run_scope.py`): round 0, outside every round the loop enters; a
+    cell's run nests its own inside the spawner's."""
+    start_launch(session)
+    with (
+        scoped(
+            round=0,
+            ledger=CycleEventLog.open(observers.cycle_dir),
+            account=session.store,
+            determinism=run_clamp(config.optimization.determinism, session.purpose),
+        ),
+        session_scope(session),
+    ):
+        yield
+
+
+async def open_line(
+    prep: PreparedRun, *, session: Session, observers: RunObservers, mode: RunMode
+) -> tuple[Cycle, RunObservers]:
+    """The line's cycle, INIT closed, and its observers: a fork run init took is a cycle of its own."""
+    cycle, cut = await open_cycle(prep, session=session, mode=mode)
+    if cut is not None:
+        # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
+        declare_run_stop(
+            session, observers, StopReason.REBASED, interrupted_by=PauseCause.INTERRUPT
+        )
+        observers.drain_all()
+        parent = observers
+        cycle.session, observers = await onto_fork(session, cut, parent, prep=prep)
+        # Held through the fork's mint, which moves the campaign's holds off it.
+        parent.release()
+    close_init(cycle)
+    return cycle, observers
+
+
 @dataclass
 class _CycleOutcome:
     """``session`` and ``observers`` are the ones the cycle ENDED on: run init may have forked it."""
@@ -272,17 +312,8 @@ async def _run_single_cycle(
     pause_cause = PauseCause.INTERRUPT
     detail = ""
     try:
-        cycle, cut = await open_cycle(prep, session=session, mode=mode)
-        if cut is not None:
-            # On the parent's own ledger, as a rebase's close ends it, before its readout names the fork.
-            declare_run_stop(session, observers, StopReason.REBASED, interrupted_by=pause_cause)
-            observers.drain_all()
-            parent = observers
-            cycle.session, observers = await onto_fork(session, cut, parent, prep=prep)
-            # Held through the fork's mint, which moves the campaign's holds off it.
-            parent.release()
+        cycle, observers = await open_line(prep, session=session, observers=observers, mode=mode)
         session = cycle.session
-        close_init(cycle)
         declare_round_allowance(session, step_rounds)
         book = require_spend_book("the bench's set-aside")
         ended = await open_origin_round(
@@ -423,19 +454,8 @@ async def run_optimization(
     if not session.cycle_id:
         raise RuntimeError("run_optimization runs a minted cycle: bind its session first")
     campaign_config = cycle.config
-    start_launch(session)
     try:
-        # Round 0 outside every round the loop enters: the origin pass, its gate and the close.
-        # The run's one scope (`run_scope.py`); a cell's run nests its own inside the spawner's.
-        with (
-            scoped(
-                round=0,
-                ledger=CycleEventLog.open(observers.cycle_dir),
-                account=session.store,
-                determinism=run_clamp(campaign_config.optimization.determinism, session.purpose),
-            ),
-            session_scope(session),
-        ):
+        with launch_scope(session, observers, campaign_config):
             try:
                 prep = await open_launch(
                     dataset,

@@ -9,7 +9,7 @@ PROMPTPOTTER_HOME=.scratch/offline-home python scripts/offline_run.py           
 python scripts/offline_run.py --digests
 ```
 
-`--help` lists the sizing and leg flags. `--straight` (each optimizer's straight run, no nested leg) is the webapp's walk world (`scripts/gate.py::_walk_world`). It refuses an interpreter whose `promptpotter` is another tree's.
+`--help` lists the sizing and leg flags. `--straight` (each optimizer's straight run, no nested leg) is the webapp's walk world (`scripts/gate.py::_walk_world`). It imports its own tree's `promptpotter`, whichever venv runs it.
 
 **The gate runs it** — `scripts/gate.py --only offline-run,offline-run-controlled`, under the default arguments and under `--controlled`, side by side, each in its own home of the clone's (`processes.py::clone_cache`) — whenever a file the engine runs from changed since it was last green; the pre-push hook runs it on a tip pushed to main (`gate.py --push`, in a throwaway worktree on the clone's venv, `gate.py::_proven_in`); pre-commit and `--changed` leave it out. A failed leg fails it; a `MOVED` never does. Each optimizer's workspace is kept green on its own, keyed by content on what that optimizer reaches (`scripts/last_green.py::OFFLINE_RUN_READS` less other optimizers' packages, `scripts/offline_run.py::unreached`) and filed inside the workspace (`scripts/offline_run.py::GREEN`), so another tree rewriting the shared home takes its green along; a green optimizer under the same arguments prints `unchanged since green`; another home reruns all.
 

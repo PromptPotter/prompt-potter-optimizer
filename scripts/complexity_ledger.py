@@ -93,7 +93,10 @@ BASELINE = {
     # retired arm read from the index, lineage keyed by address, a served short label. io (+14):
     # one read open retried past a replace's swap, for every reader (only one text read retried).
     # valid 4 (-7): a fresh mint lays the one span it writes, so `HeldRun.of` reads nothing again.
-    "package_lines": 110985,
+    # tests-w (+20): the launch's scope and its line's open, named so the harness opens as
+    # `run_optimization` does (its hand copy, -30, is in tests/). tests-w 4 (+1): a home that
+    # fetched no rates reads the floor's one table, never a copy keyed by its absent file.
+    "package_lines": 111006,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

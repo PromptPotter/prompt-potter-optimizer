@@ -759,66 +759,36 @@ and derived the knob couplings from each member's draws and the escalation ladde
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
 
-- **`run_init_round`, `seat`, `_peer_cycle` and `close_round` replay production by hand**:
-  `tests/factories.py::run_init_round` re-composes `runner/entry.py::run_optimization`'s preamble and
-  `_run_single_cycle` (`mint_framed_cycle`, `land_job`, `build_run_observers`, `start_launch`,
-  `scoped`, `session_scope`, `open_launch`, `open_cycle`, `close_init`) less the fork
-  branch, a third copy of the embedded mint; 14 `seat` sites (a custom `schema=`, `scorer=` or
-  `origin=`), 14 `close_round` sites and 12 `tests/test_scoring.py::_peer_cycle` sites (a C0 report run
-  init cannot produce) need answers `offline_world.py::FakeBackend` cannot give: it serves one
-  `llm_only` pipeline. Action: one production line opener that `run_optimization` and the harness both
-  call; `FakeBackend` serves the pipeline and answers a test declares; the sites move onto it; `seat`,
-  `_peer_cycle`, `close_round` and `run_init_round`'s composition go. **Rides with:** tests-w, whose
-  Owns gain `scripts/offline_world.py`, `tests/factories.py` (asked of ts-arch), `runner/entry.py` (the
-  opener, after lb) and each site's hunk in the four test files that hold one: `tests/test_scoring.py`
-  (ts-score's), `tests/test_archive.py` and `tests/test_identity.py` (ts-arch's) and
-  `tests/test_security.py` (ts-spend's), each named by plan § 4 and paired in § 5. **Re-test:** `git grep -c "def seat(\|close_init(" -- tests/factories.py` is 0.
-- **`tests/test_archive.py::test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launch_reads_the_pass`
-  walks zero cells**, so the halt passes on an empty origin. Action: hand it the origin's cells through
-  the `offline` fixture. **Rides with:** tests-w. **Re-test:** the test's dataset is non-empty.
-- **The offline run imports MAIN's package from a worktree**: `PYTHONPATH=.` falls through to MAIN's
-  `promptpotter`, so an equals-main leg run in a worktree measures the wrong tree unless the path is
-  absolute. Action: `scripts/offline_run.py` puts its own repo root first on `sys.path`. **Rides with:**
-  tests-w, whose Owns gain `scripts/offline_run.py`'s path setup. **Re-test:** from a worktree,
-  `PYTHONPATH=. <venv python> scripts/offline_run.py --help` imports the worktree's `promptpotter.__file__`.
-- **Smells the test-shape split left** (reported by its builders): `tests/test_security.py` writes into
-  the session-wide test home (owner-9's user file, the `host_tenant` accounts); `tests/test_spend.py`'s
-  `_paid_door` dispatches by string, its `_doors` rows are untyped 9-tuples, `hold_usd = 0.0036` is
-  spelled four times, and facts that never touch the network take the `offline` fixture only because
-  `spend_book` needs the account it binds; seven `tests/test_scoring.py` bench facts re-run the CAPO round
-  for a live cycle (the `_peer_cycle` row above), the command-door facts among them needing no bench
-  round, and `capo_says` is spelled twice; `RunWiringRecord(...)` is built by hand in
-  `tests/test_security.py::_running` and `tests/test_scoring.py` beside `factories.run_wiring`
-  (overshoot's census). Action: each fact builds into its own `tmp_path` home; the
-  doors are a typed row with one hold constant; a spend book binds an account without the offline
-  world; the bench facts share one module-scoped round. **Rides with:** tests-w. **Re-test:** the
-  session home holds no file after `tests/test_security.py` runs alone.
+- **`seat`, `_peer_cycle` and `close_round` replay production by hand**: the harness opens its line
+  through `runner/entry.py::launch_scope` and `runner/entry.py::open_line`, as `run_optimization`
+  does, but 30 `seat` sites (a custom `schema=`, `scorer=` or `origin=`), 16 `close_round` sites and
+  14 `tests/test_scoring.py::_peer_cycle` sites build a `Cycle` by hand on `factories.py::loop_session`,
+  whose connector holds its own sends, so no cell it sends gets a bound and the world cannot measure
+  it: `_peer_cycle` patches `query_loop.measure_sample` instead. Action: `FakeBackend` serves the
+  pipeline and answers a test declares, the sites open through `run_init_round` on it, and `seat`,
+  `_peer_cycle` and `close_round` go. **Rides with:** tests-w's successor, whose Owns are tests-w's.
+  **Re-test:** `git grep -c "def seat(\|def close_round(" -- tests/factories.py` is 0.
+- **Smells the test-shape split left** (reported by its builders): facts that never touch the
+  network take the `offline` fixture only because `factories.py::spend_book` needs the account it
+  binds; seven `tests/test_scoring.py` bench facts re-run the CAPO round for a live cycle (the
+  `_peer_cycle` row above), the command-door facts among them needing no bench round. Action: a spend
+  book binds an account without the offline world; the bench facts share one module-scoped round.
+  **Rides with:** tests-w's successor.
 - **One guard is tested once per door**: tests grew +2.3k lines in three days, mostly security and
   identity, a test per door of one guard; the test-shape split (landing 43) kept every assert. Action:
   a guard living at one choke point is tested once, over the table of its doors; a guard spelled at
-  more than one door is a row for the chain owning it. **Rides with:** tests-w.
-- **Two tests stand outside the harness**: `tests/test_archive.py` fakes a `HeldRun` with a
-  `SimpleNamespace`, so a renamed field passes there, and `tests/test_identity.py` `rglob`s both shipped
-  dataset tiers, a repo-wide scan per run, beside the suite's dataset reader
-  (`bench/task_context.py::committed_task_context`). Action: the real record, and the committed datasets
-  read once through that reader. **Rides with:** tests-w. **Re-test:**
-  `git grep -c "SimpleNamespace\|rglob(" -- tests/test_archive.py tests/test_identity.py` is 0.
-- **The offline world asks the internet for LiteLLM's rates on every leg** (bkeys' landing, ✓ on
-  Windows, WSL and the cloud): each trace's `harness.unrouted` holds
-  `urlopen …/model_prices_and_context_window_backup.json`, because the run's home has no fresh
-  `rates.json` and `pricing.py::refresh_rates_in_background` fires a thread the world refuses
-  (`offline_world.py::install_network`, `router.rates` is `None`). A refused thread is a race the
-  behaviour key happens to read alike. Action: the world answers the rates URL from the bundled
-  table, so every leg's `unrouted` is empty. **Rides with:** tests-w. **Re-test:** no trace's
-  `harness.unrouted` names the rates URL.
-- **The suite's peak grew 23 MB toward its tripwire** (landing 90's push gate): `gate.py`'s pytest
-  check peaked at 360 MB against its 375 MB cap, set "38 MB above a measured warm 337 MB". Action:
-  attribute the growth (per-module import weight, what the session home holds) and cut its waste; the cap moves only on a measured peak with no waste left.
-  **Rides with:** tests-w. **Re-test:** the push gate's pytest peaks at or under 345 MB.
-- **A failing test can hang the gate's pytest**: in a cloud run (hubs, 2026-11-14) a full-gate pytest
-  sat at 2% CPU for 20 minutes on a failing connector test instead of failing. Not yet reproduced.
-  Action: reproduce it, name what the test waits on, and make that wait end with the failure.
-  **Rides with:** tests-w. **Re-test:** the reproduced failure fails within its test's own timeout.
+  more than one door is a row for the chain owning it. **Rides with:** tests-w's successor.
+- **A test stands outside the harness**: `tests/test_archive.py` fakes a `HeldRun` with a
+  `SimpleNamespace` (`test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent`), so a
+  renamed field passes there; the real `Admitted.held` needs a runnable bank under the hand-built
+  scenario line (the `seat` row's root). Action: the real record. **Rides with:** tests-w's successor.
+  **Re-test:** `git grep -c "SimpleNamespace" -- tests/test_archive.py` is 0.
+- **A fact's home outlives it** (tests-w's report): `runner/mint.py` calls
+  `pricing.py::refresh_rates_in_background` per mint, a daemon thread that can outlive its fact's
+  `tmp_path` home, and pytest's `tmp_path`
+  retention keeps every home on disk. Root first: whether a refresh belongs to a mint at all, or to
+  the process that prices. **Rides with:** tests-w's successor. **Re-test:** after the suite, no
+  refresh thread alive past its fact, and no home retained beyond pytest's last run.
 
 ### batch/32 · ts-score
 

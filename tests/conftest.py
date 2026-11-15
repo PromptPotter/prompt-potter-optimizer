@@ -19,7 +19,6 @@ from pydantic import SecretStr
 
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.config.settings import settings
-from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.registry import send_pacing
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import OpenAt
@@ -29,6 +28,14 @@ from promptpotter.infrastructure.store.stores import Stores
 @pytest.fixture(autouse=True, scope="session")
 def completed_registries() -> None:
     complete_registries()
+
+
+@pytest.fixture(autouse=True)
+def own_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Each fact's data root is its own: a door that resolves the home (`paths.py::user_data_root`)
+    lands in this fact's tree, never the session's, which no fact leaves a file in. Beside
+    `tmp_path`, never in it: a fact's own data root there is one a landing proves file by file."""
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path.parent / f"{tmp_path.name}-home"))
 
 
 @pytest.fixture
@@ -53,8 +60,6 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     for key in PROVIDER_KEYS:
         monkeypatch.setattr(settings, key, SecretStr(NOT_A_KEY))
     monkeypatch.setattr(settings, "RATE_LIMITS", {})
-    # The fetched price list lands in this journey's tree, never the checkout's cache.
-    monkeypatch.setattr(pricing, "cache_path", lambda: tmp_path / "fetched_rates.json")
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
     restore = install_network(world)
     send_pacing.cache_clear()

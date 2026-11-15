@@ -32,6 +32,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, get_args
 
+# Its own tree, never the venv's editable one: a child's cwd is its workspace, so a relative
+# PYTHONPATH falls through to whichever tree installed the venv.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 import httpx
 import yaml
 from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, imported
@@ -2112,14 +2116,6 @@ def proven_home() -> None:
         )
 
 
-def refuse_another_tree() -> None:
-    if not (imported := Path(promptpotter.__file__).resolve().parent).is_relative_to(REPO):
-        raise SystemExit(
-            f"offline run: this interpreter imports {imported}, not {REPO}'s package, so the "
-            f"run would answer for that other tree; set PYTHONPATH={REPO}"
-        )
-
-
 def read_children(
     home: Path,
     children: Mapping[str, Future[int]],
@@ -2254,7 +2250,6 @@ def main() -> int:
     ap.add_argument("--terminal", choices=("new", "resume"), help=argparse.SUPPRESS)
     ap.add_argument("--interrupts", type=int, default=0, help=argparse.SUPPRESS)
     args = ap.parse_args()
-    refuse_another_tree()
     if args.digests:
         print(json.dumps(digests(), indent=1))
         return 0

@@ -25,18 +25,15 @@ from promptpotter.application.datasets.authored import (
 )
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import enter
-from promptpotter.application.initialization.scoring_scope import session_scope
 from promptpotter.application.initialization.session import LaunchState, ScorerSetup, Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.jobs.launcher.admission import (
     admit_slotless,
-    land_job,
     slotless_share,
 )
 from promptpotter.application.jobs.mint import declare, mint_framed_cycle
 from promptpotter.application.jobs.quota import sends_on
-from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     bench_choice,
@@ -53,15 +50,11 @@ from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.bench import BenchLine
+from promptpotter.application.runner.entry import launch_scope, open_line
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import cell_optimizer
 from promptpotter.application.runner.loop import walk_round_zero
-from promptpotter.application.runner.mint import (
-    close_init,
-    open_cycle,
-    open_launch,
-    start_launch,
-)
+from promptpotter.application.runner.mint import open_launch
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows
 from promptpotter.config.paths import install_datasets_root
@@ -99,7 +92,7 @@ from promptpotter.domain.bench import (
     bench_status,
     partition_bank,
 )
-from promptpotter.domain.campaign import Campaign, Optimize, Purpose, run_clamp
+from promptpotter.domain.campaign import Campaign, Optimize, Purpose
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
@@ -683,8 +676,6 @@ LAUNCHED_DATASET = "justlogic/d234"
 def launched_bank(stores: Stores, world: Router, bank: Sequence[Sample]) -> None:
     """`LAUNCHED_DATASET` installed in *stores* on *bank*, the offline *world* answering it."""
     world.backend.truth |= {s.query: s.ground_truth for s in bank}
-    if world.rates is None:
-        world.rates = {}
     # The definition's chain, root-down: the wheel's defaults, the family, the leaf.
     family = LAUNCHED_DATASET.split("/")[0]
     shutil.copytree(
@@ -733,17 +724,9 @@ async def run_init_round(
                 session.bank.samples,
                 task_text=None,
             )
-            running, cycle_config = minted.session, minted.cycle
-            await asyncio.to_thread(
-                land_job,
-                stores,
-                JobRegistry.attach(stores.jobs_dir),
-                held.job_id,
-                running.hop,
-                held.share,
-            )
+            await asyncio.to_thread(start.land, minted.session.hop, held)
             return await launched_round(
-                running, cycle_config, minted.optimizer, held, round_num=round_num
+                minted.session, minted.cycle, minted.optimizer, held, round_num=round_num
             )
 
         start, held = await asyncio.to_thread(
@@ -777,18 +760,8 @@ async def launched_round(
     observers = await asyncio.to_thread(
         build_run_observers, session=running, campaign_config=cycle_config.config
     )
-    start_launch(running)
-    determinism = cycle_config.config.optimization.determinism
     try:
-        with (
-            scoped(
-                round=0,
-                ledger=CycleEventLog.open(observers.cycle_dir),
-                account=running.store,
-                determinism=run_clamp(determinism, running.purpose),
-            ),
-            session_scope(running),
-        ):
+        with launch_scope(running, observers, cycle_config.config):
             prep = await open_launch(
                 list(running.bank.samples),
                 cycle_config,
@@ -797,8 +770,9 @@ async def launched_round(
                 budget=held,
                 optimizer=optimizer,
             )
-            cycle, _ = await open_cycle(prep, session=running, mode=RunMode())
-            close_init(cycle)
+            cycle, observers = await open_line(
+                prep, session=running, observers=observers, mode=RunMode()
+            )
             # Round 0's walk, as its door takes it; its close is the round's caller's.
             await walk_round_zero(RoundContext(cycle, 0), prep.dataset)
     finally:
@@ -866,7 +840,7 @@ def minted_campaign(
     )
 
 
-def run_wiring() -> RunWiringRecord:
+def run_wiring(measurement_node: str = "l1_score") -> RunWiringRecord:
     """A launch's wiring on one cell at a time, declaring no limit: what a dashboard folds first."""
     return RunWiringRecord(
         round_cells_ceiling=1,
@@ -874,7 +848,7 @@ def run_wiring() -> RunWiringRecord:
         elects_on="fitness",
         max_cells_in_flight=1,
         measured_unit="sample",
-        measurement_node="l1_score",
+        measurement_node=measurement_node,
         budget=Budget(),
         optimizer_limits=[],
         defaults_drift=None,

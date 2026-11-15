@@ -159,8 +159,8 @@ def refresh_rates_in_background() -> None:
     threading.Thread(target=refresh_rates, name="rates-refresh", daemon=True).start()
 
 
-def _read_rates(path: Path) -> dict[str, RateBody]:
-    raw = read_bytes_optional(path)
+def _read_rates(path: Path | None) -> dict[str, RateBody]:
+    raw = None if path is None else read_bytes_optional(path)
     return {} if raw is None else RatesFile.model_validate_json(raw).models
 
 
@@ -188,21 +188,22 @@ def _models_to_rates(models: Mapping[str, RateBody]) -> RateTable:
 
 def load_rates() -> RateTable:
     """Kept by where it reads and what the files hold: a rates file any process rewrites re-prices
-    every reader's next send."""
-    fetched = cache_path()
+    every reader's next send; a home that fetched none reads the floor's one table."""
+    fetched = None if (seen := file_sig(cache_path())) is None else cache_path()
     return derived(
         ("rates", BUNDLED_PATH, fetched),
-        sig=(file_sig(BUNDLED_PATH), file_sig(fetched)),
+        sig=(file_sig(BUNDLED_PATH), seen),
         compute=lambda: _rates_at(BUNDLED_PATH, fetched),
     )
 
 
-def _rates_at(bundled_path: Path, fetched_path: Path) -> RateTable:
+def _rates_at(bundled_path: Path, fetched_path: Path | None) -> RateTable:
     """The shipped floor refuses, the bug it is; a fetched cache that does not load is dropped, so the
     next refresh fetches it again, and the floor prices meanwhile."""
     try:
         fetched = _read_rates(fetched_path)
     except ValidationError as exc:
+        assert fetched_path is not None, "no fetch reads no row, so none refuses"
         logger.warning("spend: dropped %s, which does not load (%s)", fetched_path, exc)
         unlink_robust(fetched_path)
         fetched = {}

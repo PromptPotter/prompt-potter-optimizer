@@ -23,7 +23,7 @@ import httpx
 from promptpotter.config.settings import settings
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.infrastructure import backend as backend_wire
-from promptpotter.infrastructure.llm.pricing import UPSTREAM_URL
+from promptpotter.infrastructure.llm.pricing import BUNDLED_PATH, UPSTREAM_URL, RatesFile
 from promptpotter.infrastructure.llm.registry import keyed_specs
 from promptpotter.infrastructure.llm.telemetry import current_round
 
@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
 
 # What the world answers, by version: an edit to any edge's answer bumps it, so a trace names its world.
-WORLD = "1"
+WORLD = "2"
 NOT_A_KEY = "offline-run-not-a-key"
 PROVIDER_KEYS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY")
 LABELS = ("TRUE", "FALSE", "Uncertain")
@@ -384,10 +384,20 @@ def _key_checks() -> set[str]:
     return {spec.base_url + spec.key_check for spec, _ in keyed_specs().values()}
 
 
+def _bundled_rates() -> dict[str, dict[str, Any]]:
+    """The shipped floor in upstream's vocabulary, its `lister` upstream's `litellm_provider`."""
+    floor = RatesFile.model_validate_json(BUNDLED_PATH.read_bytes()).models
+    return {
+        name: body.model_dump(exclude={"lister"}, exclude_none=True)
+        | ({"litellm_provider": body.lister} if body.lister else {})
+        for name, body in floor.items()
+    }
+
+
 class Router:
     """The world: the backend and the n8n harness at their addresses, an LLM on any of its wires
     and its key check, an empty model catalogue, Harbor's registry once one is published, the
-    upstream price list once a journey says what it lists, a sign-in provider's token endpoint
+    upstream price list (the bundled floor unless a journey says what it lists), a sign-in provider's token endpoint
     once a journey says what it answers; anything else is named in `unrouted` and refused."""
 
     def __init__(self, llm: FakeLLM, backend: FakeBackend) -> None:
@@ -395,8 +405,9 @@ class Router:
         self.backend = backend
         self.harness = FakeHarness()
         self.registry: list[dict[str, Any]] | None = None
-        # Upstream's rows, `provider/model` -> its per-token costs, as `refresh_rates` fetches them.
-        self.rates: dict[str, dict[str, Any]] | None = None
+        # Upstream's rows, `provider/model` -> its per-token costs, as `refresh_rates` fetches them:
+        # the bundled floor, unless a journey says what upstream lists.
+        self.rates: dict[str, dict[str, Any]] = _bundled_rates()
         # `host/path` of a token endpoint -> the (status, body) it answers every code with.
         self.token_endpoints: dict[str, tuple[int, dict[str, Any]]] = {}
         # An OpenRouter model -> the hosts its gateway lists; one unnamed lists `OPENROUTER_ENDPOINTS`.
@@ -457,8 +468,18 @@ def install_network(router: Router) -> Callable[[], None]:
         answered = sent(request, await request.aread())
         if not inspect.isawaitable(answered):
             return answered
+        # The client's read timeout, as a socket meets it: an answer that never comes fails the
+        # send, never leaves the loop waiting on no timer.
+        timer = asyncio.timeout(request.extensions.get("timeout", {}).get("read"))
         try:
-            return await answered
+            async with timer:
+                return await answered
+        except TimeoutError:
+            if not timer.expired():
+                raise
+            raise httpx.ReadTimeout(
+                "offline: no answer within the read timeout", request=request
+            ) from None
         except httpx.RequestError as dropped:
             dropped.request = request
             raise
@@ -473,7 +494,7 @@ def install_network(router: Router) -> Callable[[], None]:
         if "openrouter.ai/api/v1/models/" in target and target.endswith("/endpoints"):
             model = target.partition("/models/")[2].removesuffix("/endpoints")
             return _Body(json.dumps(router.hosts.get(model, OPENROUTER_ENDPOINTS)).encode())
-        if target == UPSTREAM_URL and router.rates is not None:
+        if target == UPSTREAM_URL:
             return _Body(json.dumps(router.rates).encode())
         router.unrouted.add(f"urlopen {target}")
         raise urllib.error.URLError("offline run")
