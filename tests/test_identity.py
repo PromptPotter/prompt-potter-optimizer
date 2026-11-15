@@ -217,9 +217,9 @@ from promptpotter.connectors import upload_connector
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import (
     BankPartition,
-    BenchRefusal,
     CampaignRefusal,
     DatasetSplit,
+    PassRefusal,
     partition_bank,
 )
 from promptpotter.domain.campaign import (
@@ -3080,7 +3080,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}}
     )
     bench_read = cycle_bench(stores, held_campaign, holder, bench_config).status
-    assert (bench_read.can_run, bench_read.refusal) == (False, BenchRefusal.CONNECTOR_MOVED), (
+    assert (bench_read.can_run, bench_read.refusal) == (False, PassRefusal.CONNECTOR_MOVED), (
         "the served bench offers a grade on a connector its dataset no longer names"
     )
     write_yaml(decl_definition, as_minted)

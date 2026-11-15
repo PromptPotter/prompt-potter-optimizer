@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Button, FailureLine, Term } from "@/components/ui";
 import { commands, mintCommandId } from "@/lib/api/commands";
-import { BENCH_REFUSAL_INFO } from "@/lib/api/types";
+import { PASS_REFUSAL_INFO } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useViewedCycle } from "@/lib/state/lineage";
 import { useWorkspace } from "@/lib/state/workspace";
@@ -34,7 +34,7 @@ export function BenchGradeAction() {
       {status.refusal === null ? (
         button
       ) : (
-        <Term content={BENCH_REFUSAL_INFO[status.refusal]}>{button}</Term>
+        <Term content={PASS_REFUSAL_INFO[status.refusal]}>{button}</Term>
       )}
       {acting && (
         <Button

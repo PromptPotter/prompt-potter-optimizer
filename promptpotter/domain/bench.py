@@ -222,6 +222,8 @@ class PassOutcome(NamedTuple):
 
 class LiveCycleRun(NamedTuple):
     selecting: bool
+    # A scoring pass's own lock holds the cycle, a held-out pass's or a verify's.
+    passing: bool
     # A bench pass's bracket stands open on the cycle, and a process still holds it.
     pass_open: bool
     ending: StopReason | None
@@ -230,8 +232,9 @@ class LiveCycleRun(NamedTuple):
     rounds_closed: int
 
 
-class BenchRefusal(StrEnum):
-    """Why a bench pass cannot be asked for now."""
+class PassRefusal(StrEnum):
+    """Why a pass on the cycle cannot be asked for now: a held-out pass's, or a verify's
+    (`verify_admission` reads the shared ones)."""
 
     INNER = "inner"
     NO_MANIFEST = "no_manifest"
@@ -248,49 +251,77 @@ class BenchRefusal(StrEnum):
     NO_SELECTION = "no_selection"
 
 
-BENCH_REFUSAL_INFO: Worded[BenchRefusal, str] = Worded(
+PASS_REFUSAL_INFO: Worded[PassRefusal, str] = Worded(
     {
-        BenchRefusal.INNER: "An inner run is one cell of its outer campaign; no command grades its line.",
-        BenchRefusal.NO_MANIFEST: "This campaign has no manifest on disk.",
-        BenchRefusal.HELD_ELSEWHERE: (
+        PassRefusal.INNER: "An inner run is one cell of its outer campaign; no command grades its line.",
+        PassRefusal.NO_MANIFEST: "This campaign has no manifest on disk.",
+        PassRefusal.HELD_ELSEWHERE: (
             "Another cycle (`held_by`) holds this campaign's line, and the bench grades the "
             "campaign's result. Ask for that cycle."
         ),
-        BenchRefusal.NOT_ACTIVE: (
+        PassRefusal.NOT_ACTIVE: (
             "An archived or deleted campaign scores nothing more; restore an archived one to "
             "grade its line."
         ),
-        BenchRefusal.DEFINITION_UNREAD: (
+        PassRefusal.DEFINITION_UNREAD: (
             "This campaign's dataset no longer reads as a definition naming a connector, so "
             "nothing grades its line until it does."
         ),
-        BenchRefusal.CONNECTOR_MOVED: (
+        PassRefusal.CONNECTOR_MOVED: (
             "This campaign's dataset now names another connector than the one it was minted on, "
             "so its line grades on neither. Point the dataset back, or start a fresh campaign."
         ),
-        BenchRefusal.NO_HOLDOUT: READING_STATE_INFO[ReadingState.NO_HOLDOUT].sentence,
-        BenchRefusal.IN_FLIGHT: "A bench pass is grading now; its reading lands when it ends.",
-        BenchRefusal.SELECTING: "The run is still selecting. Pause it or let it end first.",
-        BenchRefusal.ORIGIN_UNSCORED: (
+        PassRefusal.NO_HOLDOUT: READING_STATE_INFO[ReadingState.NO_HOLDOUT].sentence,
+        PassRefusal.IN_FLIGHT: "A pass is scoring this cycle now; its reading lands when it ends.",
+        PassRefusal.SELECTING: "The run is still selecting. Pause it or let it end first.",
+        PassRefusal.ORIGIN_UNSCORED: (
             "The origin has not been scored, so there is no reference to grade against."
         ),
-        BenchRefusal.GRADED: "The line's selection is already graded.",
-        BenchRefusal.NO_SELECTION: "No round closed past the origin, so there is no selection to grade.",
+        PassRefusal.GRADED: "The line's selection is already graded.",
+        PassRefusal.NO_SELECTION: "No round closed past the origin, so there is no selection to grade.",
     }
 )
-assert BENCH_REFUSAL_INFO.keys() == set(BenchRefusal)
+assert PASS_REFUSAL_INFO.keys() == set(PassRefusal)
 
 
-class BenchStatus(FrozenModel):
+class PassAdmission(FrozenModel):
+    """Whether asking for a pass on the cycle would be admitted now: a verify's answer whole."""
+
+    can_run: bool = Field(
+        description="Whether the pass is admitted now. Every entry point reads this one answer."
+    )
+    refusal: PassRefusal | None = Field(description="Why not, exactly where `can_run` is false.")
+
+    @model_validator(mode="after")
+    def _refusal_fits(self) -> Self:
+        if self.can_run is (self.refusal is not None):
+            raise ValueError("a refusal is given exactly where the pass cannot be asked for")
+        return self
+
+
+def verify_admission(
+    *, inner: bool, refused: CampaignRefusal | None, run: LiveCycleRun
+) -> PassAdmission:
+    """Read before the verify's own pass holds the cycle, so any pass's lock is one in flight."""
+    refusal = (
+        PassRefusal.INNER
+        if inner
+        else PassRefusal(refused.value)
+        if refused is not None
+        else PassRefusal.IN_FLIGHT
+        if run.passing
+        else PassRefusal.SELECTING
+        if run.selecting
+        else None
+    )
+    return PassAdmission(can_run=refusal is None, refusal=refusal)
+
+
+class BenchStatus(PassAdmission):
     """Where a campaign's bench stands, and whether asking for its pass would be admitted."""
 
     state: ReadingState
     trigger: BenchTrigger
-    can_run: bool = Field(
-        description="Whether `bench` / `grade-bench` is admitted now. Every entry point reads "
-        "this one answer."
-    )
-    refusal: BenchRefusal | None = Field(description="Why not, exactly where `can_run` is false.")
     offered: bool = Field(
         description="Whether the grade control shows: admitted, or a pass still waited on. "
         "Never on an inner run, whose line no command grades."
@@ -309,12 +340,6 @@ class BenchStatus(FrozenModel):
         "selection's pass was sent: each one chosen off a headline spent the holdout. `None` "
         "where no pass of the selection stands."
     )
-
-    @model_validator(mode="after")
-    def _refusal_fits(self) -> Self:
-        if self.can_run is (self.refusal is not None):
-            raise ValueError("a refusal is given exactly where the pass cannot be asked for")
-        return self
 
 
 def bench_status(
@@ -358,25 +383,25 @@ def bench_status(
         state, decided = selected.state, selected
         subject = None if state is ReadingState.READ else "selected"
 
-    refusal: BenchRefusal | None = None
+    refusal: PassRefusal | None = None
     if inner:
-        refusal = BenchRefusal.INNER
+        refusal = PassRefusal.INNER
     elif not on_live_cycle:
-        refusal = BenchRefusal.NO_MANIFEST if held_by is None else BenchRefusal.HELD_ELSEWHERE
+        refusal = PassRefusal.NO_MANIFEST if held_by is None else PassRefusal.HELD_ELSEWHERE
     elif refused is not None:
-        refusal = BenchRefusal(refused.value)
+        refusal = PassRefusal(refused.value)
     elif not bench_size:
-        refusal = BenchRefusal.NO_HOLDOUT
+        refusal = PassRefusal.NO_HOLDOUT
     elif run.pass_open:
-        refusal = BenchRefusal.IN_FLIGHT
+        refusal = PassRefusal.IN_FLIGHT
     elif run.selecting:
-        refusal = BenchRefusal.SELECTING
+        refusal = PassRefusal.SELECTING
     elif run.selection is None:
-        refusal = BenchRefusal.ORIGIN_UNSCORED
+        refusal = PassRefusal.ORIGIN_UNSCORED
     elif state is ReadingState.READ:
-        refusal = BenchRefusal.GRADED
+        refusal = PassRefusal.GRADED
     elif state is ReadingState.NO_SELECTION:
-        refusal = BenchRefusal.NO_SELECTION
+        refusal = PassRefusal.NO_SELECTION
     return BenchStatus(
         state=state,
         trigger=trigger,
@@ -515,7 +540,7 @@ class BenchScore(FrozenModel):
 class CampaignRefusal(StrEnum):
     """Why every run and pass on a campaign is refused, read off it and its dataset's definition
     alone (`admission.py::campaign_refusal`): admission refuses with this code, and a served
-    can-run answer serves the same value (`BenchRefusal`)."""
+    can-run answer serves the same value (`PassRefusal`)."""
 
     NOT_ACTIVE = "campaign_not_active"
     # Its dataset resolves to no definition naming a connector: gone, unoffered, or unreadable.
@@ -524,4 +549,4 @@ class CampaignRefusal(StrEnum):
     CONNECTOR_MOVED = "connector_moved"
 
 
-assert {r.value for r in CampaignRefusal} <= {r.value for r in BenchRefusal}
+assert {r.value for r in CampaignRefusal} <= {r.value for r in PassRefusal}

@@ -12,13 +12,9 @@ import { PotterMark } from "@/components/brand/PotterMark";
 
 const POTTER_GLYPH = <PotterMark size={16} />;
 
-// A pass scoring no cycle has no status: its phase is whether it has started.
-function passMark(s: MachineSlot): "running" | "starting" {
-  return s.started_at === null ? "starting" : "running";
-}
-
+// A pass scoring no cycle has no status: its phase is its slot's stage.
 function passLabel(s: MachineSlot): string {
-  return `${s.what} · ${s.started_at === null ? "starting" : `started ${fmtAgo(s.started_at)}`}`;
+  return `${s.what} · ${s.stage === "running" ? `started ${fmtAgo(s.started_at)}` : s.stage}`;
 }
 
 export function JobsDock() {
@@ -137,9 +133,9 @@ export function JobsDock() {
                 }}
               >
                 <span className="jobs-dock-row">
-                  <span className={cx("phase-chip", `tone-${STATUS_MARK_INFO[passMark(s)].tone}`)}>
+                  <span className={cx("phase-chip", `tone-${STATUS_MARK_INFO[s.stage].tone}`)}>
                     <span className="phase-dot" aria-hidden="true" />
-                    {passMark(s)}
+                    {s.stage}
                   </span>
                   <span className="jobs-dock-item-label">{passLabel(s)}</span>
                 </span>

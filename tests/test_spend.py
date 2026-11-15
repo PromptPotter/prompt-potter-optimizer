@@ -140,7 +140,7 @@ from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import CutKind
-from promptpotter.domain.bench import BenchRefusal
+from promptpotter.domain.bench import PassRefusal
 from promptpotter.domain.campaign import Optimize, RunDeclaration
 from promptpotter.domain.campaign_config import (
     CAMPAIGN_RULE,
@@ -5008,7 +5008,7 @@ def test_a_delete_torn_at_its_tree_commits_at_its_tombstone_and_admits_nothing_a
         update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}}
     )
     served = cycle_bench(stores, torn_read, root_hop, graded_under).status
-    assert (served.can_run, served.refusal) == (False, BenchRefusal.NOT_ACTIVE), (
+    assert (served.can_run, served.refusal) == (False, PassRefusal.NOT_ACTIVE), (
         "the served bench offers a grade the pass's admission refuses"
     )
     # A campaign whose manifest is gone still deletes, and banks: nothing reads its rows as one.

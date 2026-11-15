@@ -3,6 +3,7 @@ import type { SelectedCandidate } from "@/lib/types";
 import type { CyclePath } from "@/lib/ids";
 import { commands, cycleAddress, mintCommandId, type VerifyStrategy } from "@/lib/api/commands";
 import {
+  PASS_REFUSAL_INFO,
   READING_STATE_INFO,
   VERIFY_STRATEGY_LABELS,
   VERIFY_WORDS,
@@ -11,6 +12,7 @@ import {
 import { wordKeys } from "@/lib/api/words";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
+import { useViewedCycle } from "@/lib/state/lineage";
 import { filled, unitCount } from "@/lib/format";
 import {
   Button,
@@ -53,6 +55,8 @@ export function VerifyAction({
   }
   const sending = cmd.pending !== null;
   const { readings, passes, unit } = useVerify(path);
+  // The served admission, the one the command is refused by; null under a moment.
+  const admission = useViewedCycle()?.facts.verify ?? null;
 
   if (!path || !candidate.label) return null;
 
@@ -88,8 +92,14 @@ export function VerifyAction({
   return (
     <div className="verify-action">
       <div className="verify-action-row">
-        <HoverCard content="Re-score this candidate on search cells it has never been measured on.">
-          <Button onClick={run} disabled={busy}>
+        <HoverCard
+          content={
+            admission?.refusal
+              ? PASS_REFUSAL_INFO[admission.refusal]
+              : "Re-score this candidate on search cells it has never been measured on."
+          }
+        >
+          <Button onClick={run} disabled={busy || !admission?.can_run}>
             {busy ? "Verifying…" : `Verify ${candidate.label}`}
           </Button>
         </HoverCard>

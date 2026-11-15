@@ -123,17 +123,6 @@ row it closes.
 
 ### The edge tail · passb-2 (after batch/26; `chain N` is passb's link N)
 
-- **Verify serves no can-run answer**: `domain/bench.py::BenchStatus.can_run` is the bench's, but
-  `VerifyAction.tsx` gates its button on `busy` alone, and the refusals live only in
-  `passes.verify_candidate`'s admission. Action: a served verify status (a `ReadKind` row, or a field on
-  the candidate's served reading) carries `can_run` and a refusal, as `BenchStatus` does. **Rides with:**
-  passb-2 1, whose Owns gain `VerifyAction.tsx` and the served read it rides. **Re-test:**
-  `VerifyAction.tsx` reads `can_run`.
-- **A pass's running state is derived from `started_at`**: `JobsDock::passMark` / `passLabel` and
-  `AccountUsageTab` test `started_at === null`; the served fact lives only in
-  `application/jobs/machine_status.py::MachineSlot.started_at`. Action: `MachineSlot` serves a stage
-  (`starting | running`, off `Job.stage`). **Rides with:** passb-2 1, whose Owns gain `machine_status.py`.
-  **Re-test:** `git grep -n "started_at === null" -- webapp/components` is empty.
 - **The held-out verb has three names**: `verify`, `bench`, `grade-bench` and "Grade on bench"; `bench`
   also collides with `application/bench/`. It is spelled in `domain/command_kinds.py` (`grade-bench`,
   `measuring:grade_bench`, `anyone("bench")`), `cli/commands/measure.py`, `webapp/lib/api/commands.ts`,

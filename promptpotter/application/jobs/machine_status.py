@@ -17,8 +17,9 @@ from promptpotter.domain.job import (
     Job,
     PaidCall,
     SlotHolder,
+    SlotStage,
 )
-from promptpotter.domain.phases import QUEUE_STARTS_ITSELF
+from promptpotter.domain.phases import QUEUE_STARTS_ITSELF, RunPhase
 from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.accounts import is_host
@@ -49,15 +50,18 @@ class MachineSlot(StrictModel):
         description="The CALLER's account holds it — a delegate's job is its owner's. The test "
         "a surface listing the account's own jobs filters on."
     )
+    stage: SlotStage = Field(description="Where the holder is: still starting, or running.")
     started_at: str | None = Field(
         description="ISO time the holder started running; null while it is still starting"
     )
 
     @classmethod
     def of(cls, job: Job, *, account: str) -> MachineSlot:
-        holder = job.holder
+        holder, stage = job.holder, job.stage
         assert not isinstance(holder, EmbeddedRun | InnerRun | PaidCall), "holds no slot"
+        assert stage is not RunPhase.QUEUED, "a queued job holds no slot"
         return cls(
+            stage=stage,
             job_id=job.job_id,
             what=job.what,
             holder=holder,

@@ -889,25 +889,6 @@
         "title": "BenchReading",
         "type": "object"
       },
-      "BenchRefusal": {
-        "description": "Why a bench pass cannot be asked for now.",
-        "enum": [
-          "inner",
-          "no_manifest",
-          "held_elsewhere",
-          "campaign_not_active",
-          "definition_unread",
-          "connector_moved",
-          "no_holdout",
-          "in_flight",
-          "selecting",
-          "origin_unscored",
-          "graded",
-          "no_selection"
-        ],
-        "title": "BenchRefusal",
-        "type": "string"
-      },
       "BenchScope": {
         "additionalProperties": false,
         "description": "One dataset's rows of a bench spanning several, read apart: a level is never averaged\nacross datasets.",
@@ -1077,7 +1058,7 @@
         "description": "Where a campaign's bench stands, and whether asking for its pass would be admitted.",
         "properties": {
           "can_run": {
-            "description": "Whether `bench` / `grade-bench` is admitted now. Every entry point reads this one answer.",
+            "description": "Whether the pass is admitted now. Every entry point reads this one answer.",
             "title": "Can Run",
             "type": "boolean"
           },
@@ -1124,7 +1105,7 @@
           "refusal": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BenchRefusal"
+                "$ref": "#/components/schemas/PassRefusal"
               },
               {
                 "type": "null"
@@ -1182,10 +1163,10 @@
           }
         },
         "required": [
-          "state",
-          "trigger",
           "can_run",
           "refusal",
+          "state",
+          "trigger",
           "offered",
           "subject",
           "held_by",
@@ -5630,6 +5611,25 @@
         ],
         "title": "PassOpened",
         "type": "object"
+      },
+      "PassRefusal": {
+        "description": "Why a pass on the cycle cannot be asked for now: a held-out pass's, or a verify's\n(`verify_admission` reads the shared ones).",
+        "enum": [
+          "inner",
+          "no_manifest",
+          "held_elsewhere",
+          "campaign_not_active",
+          "definition_unread",
+          "connector_moved",
+          "no_holdout",
+          "in_flight",
+          "selecting",
+          "origin_unscored",
+          "graded",
+          "no_selection"
+        ],
+        "title": "PassRefusal",
+        "type": "string"
       },
       "PassStop": {
         "additionalProperties": false,

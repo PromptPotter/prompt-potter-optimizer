@@ -26,6 +26,7 @@ from promptpotter.application.runner.bench import (
     bank_campaign_result,
     bench_origin,
     bench_selection,
+    cycle_verify,
     declare_line_bench,
     line_passes,
     live_cycle_run,
@@ -39,7 +40,7 @@ from promptpotter.application.scoring.paired import MemberRows, grade_measurands
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
-from promptpotter.domain.bench import BENCH_REFUSAL_INFO, BenchScore
+from promptpotter.domain.bench import PASS_REFUSAL_INFO, BenchScore
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -547,6 +548,15 @@ async def measure_noise_floor(
     return graded
 
 
+def refuse_unverifiable(stores: Stores, hop: CycleHop) -> None:
+    """An asked verify is admitted exactly where the served answer says so
+    (`CycleEntryFacts.verify`), read before its own pass holds the cycle; the loop's own verify
+    runs under the loop's hold and asks nothing. No manifest is `open_diagnostic`'s to refuse."""
+    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    if campaign is not None and (refusal := cycle_verify(stores, campaign, hop).refusal):
+        raise DiagnosticError(PASS_REFUSAL_INFO[refusal])
+
+
 class BenchTriggerError(ConflictError):
     """The bench pass cannot be sent for this cycle as it stands on disk."""
 
@@ -567,7 +577,7 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> Ben
         status = read_cycle_bench(stores, campaign, hop).status
         if status.refusal is not None:
             held = "" if status.held_by is None else f" Holder: {status.held_by}."
-            raise BenchTriggerError(BENCH_REFUSAL_INFO[status.refusal] + held)
+            raise BenchTriggerError(PASS_REFUSAL_INFO[status.refusal] + held)
         return await _grade(stores, hop, acting)
 
 

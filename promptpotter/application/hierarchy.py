@@ -13,7 +13,7 @@ from promptpotter.application.pipeline_resolve import (
     campaign_runs_with,
     line_config,
 )
-from promptpotter.application.runner.bench import cycle_bench
+from promptpotter.application.runner.bench import cycle_bench, cycle_verify
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
 from promptpotter.domain.arm_reading import ArmReading, fitness_terms_text
@@ -338,6 +338,7 @@ def cycle_entry(
         elects_on=index.elects_on,
         spend=spent,
         bench=bench,
+        verify=None if moment is not None else cycle_verify(stores, campaign, hop),
     )
     return HierarchyCycle(
         address=Subject(hop.campaign_id, hop.cycle_id, inside=inside).address,

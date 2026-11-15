@@ -65,7 +65,9 @@ BASELINE = {
     # YAML composed once, bounded in Python, through the one parse door capo's reply reads too.
     # mcp (+272): a held task's form elicitation and its once-filed answer; the host registry over
     # Streamable HTTP, one session per caller, a mount a declared row.
-    "package_lines": 111009,
+    # passb-2 1 (+55): a verify's served admission (`PassAdmission`, its ladder on the shared
+    # `PassRefusal`, the cycle's `verify` fact, the command refused by it); a slot's served stage.
+    "package_lines": 111064,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 158,
     # The `__init__.py` files that re-export names instead of staying empty.

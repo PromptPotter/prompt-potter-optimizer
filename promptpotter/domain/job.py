@@ -26,7 +26,8 @@ JobStage = LaunchStage | Literal[RunPhase.RUNNING]
 _JOB_STAGES: frozenset[RunPhase] = frozenset(
     stage for arm in get_args(JobStage) for stage in get_args(arm)
 )
-SLOT_STAGES: frozenset[RunPhase] = frozenset({RunPhase.STARTING, RunPhase.RUNNING})
+SlotStage = Literal[RunPhase.STARTING, RunPhase.RUNNING]
+SLOT_STAGES: frozenset[RunPhase] = frozenset(get_args(SlotStage))
 assert SLOT_STAGES < _JOB_STAGES, "a slot stage no job can be in"
 
 

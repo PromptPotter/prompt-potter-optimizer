@@ -1797,25 +1797,6 @@
         "title": "BenchReading",
         "type": "object"
       },
-      "BenchRefusal": {
-        "description": "Why a bench pass cannot be asked for now.",
-        "enum": [
-          "inner",
-          "no_manifest",
-          "held_elsewhere",
-          "campaign_not_active",
-          "definition_unread",
-          "connector_moved",
-          "no_holdout",
-          "in_flight",
-          "selecting",
-          "origin_unscored",
-          "graded",
-          "no_selection"
-        ],
-        "title": "BenchRefusal",
-        "type": "string"
-      },
       "BenchScope": {
         "additionalProperties": false,
         "description": "One dataset's rows of a bench spanning several, read apart: a level is never averaged\nacross datasets.",
@@ -2014,7 +1995,7 @@
         "description": "Where a campaign's bench stands, and whether asking for its pass would be admitted.",
         "properties": {
           "can_run": {
-            "description": "Whether `bench` / `grade-bench` is admitted now. Every entry point reads this one answer.",
+            "description": "Whether the pass is admitted now. Every entry point reads this one answer.",
             "title": "Can Run",
             "type": "boolean"
           },
@@ -2061,7 +2042,7 @@
           "refusal": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BenchRefusal"
+                "$ref": "#/components/schemas/PassRefusal"
               },
               {
                 "type": "null"
@@ -2119,10 +2100,10 @@
           }
         },
         "required": [
-          "state",
-          "trigger",
           "can_run",
           "refusal",
+          "state",
+          "trigger",
           "offered",
           "subject",
           "held_by",
@@ -5029,6 +5010,17 @@
             ],
             "description": "The outer panel cell an L4 inner cycle measures.",
             "title": "Task"
+          },
+          "verify": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PassAdmission"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether `verify-candidate` on this cycle is admitted now; null under a moment."
           }
         },
         "required": [
@@ -5039,7 +5031,8 @@
           "rounds_closed",
           "elects_on",
           "spend",
-          "bench"
+          "bench",
+          "verify"
         ],
         "title": "CycleEntryFacts",
         "type": "object"
@@ -10037,6 +10030,15 @@
             "title": "Mine",
             "type": "boolean"
           },
+          "stage": {
+            "description": "Where the holder is: still starting, or running.",
+            "enum": [
+              "starting",
+              "running"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -10067,6 +10069,7 @@
           "cycle",
           "user",
           "mine",
+          "stage",
           "started_at"
         ],
         "title": "MachineSlot",
@@ -13295,6 +13298,34 @@
         "title": "ParamIntent",
         "type": "object"
       },
+      "PassAdmission": {
+        "additionalProperties": false,
+        "description": "Whether asking for a pass on the cycle would be admitted now: a verify's answer whole.",
+        "properties": {
+          "can_run": {
+            "description": "Whether the pass is admitted now. Every entry point reads this one answer.",
+            "title": "Can Run",
+            "type": "boolean"
+          },
+          "refusal": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PassRefusal"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why not, exactly where `can_run` is false."
+          }
+        },
+        "required": [
+          "can_run",
+          "refusal"
+        ],
+        "title": "PassAdmission",
+        "type": "object"
+      },
       "PassGradedRecord": {
         "additionalProperties": false,
         "description": "The pass is the fact, the reading a cache of one grading of it; ``reading`` is ``None``\nexactly where ``state`` is not ``read``.",
@@ -13404,6 +13435,25 @@
         ],
         "title": "PassGradedRecord",
         "type": "object"
+      },
+      "PassRefusal": {
+        "description": "Why a pass on the cycle cannot be asked for now: a held-out pass's, or a verify's\n(`verify_admission` reads the shared ones).",
+        "enum": [
+          "inner",
+          "no_manifest",
+          "held_elsewhere",
+          "campaign_not_active",
+          "definition_unread",
+          "connector_moved",
+          "no_holdout",
+          "in_flight",
+          "selecting",
+          "origin_unscored",
+          "graded",
+          "no_selection"
+        ],
+        "title": "PassRefusal",
+        "type": "string"
       },
       "PassStop": {
         "additionalProperties": false,
@@ -17648,6 +17698,17 @@
             ],
             "description": "The outer panel cell an L4 inner cycle measures.",
             "title": "Task"
+          },
+          "verify": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PassAdmission"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether `verify-candidate` on this cycle is admitted now; null under a moment."
           }
         },
         "required": [
@@ -17659,6 +17720,7 @@
           "elects_on",
           "spend",
           "bench",
+          "verify",
           "lens_criterion",
           "lens_shift",
           "origin",

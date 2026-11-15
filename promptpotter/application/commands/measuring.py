@@ -22,6 +22,7 @@ async def verify_candidate(
     stores, hop, payload = dispatched.dispatcher.stores, dispatched.hop, dispatched.payload
 
     async def _apply_verify() -> PassGradedRecord | VerifySaturated:
+        passes.refuse_unverifiable(stores, hop)
         # Taken HERE, not inside `verify_candidate`: the loop's saturation check calls that under its book.
         async with paid_pass(
             stores=stores,

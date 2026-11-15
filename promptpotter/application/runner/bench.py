@@ -43,10 +43,12 @@ from promptpotter.domain.bench import (
     LiftCost,
     LiveCycleRun,
     OwnLevel,
+    PassAdmission,
     PassOutcome,
     PassStop,
     bench_split,
     bench_status,
+    verify_admission,
 )
 from promptpotter.domain.campaign import Campaign, worked_seconds
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -726,6 +728,7 @@ def live_cycle_run(stores: Stores, hop: CycleHop) -> LiveCycleRun:
     passing = attached and pass_held(stores.campaigns.cycle_dir(hop))
     return LiveCycleRun(
         selecting=attached and not passing,
+        passing=passing,
         # The bracket, not the lock alone: `grade-bench` reads this under its own pass's lock.
         pass_open=attached and scan_bench_open(stores.campaigns.ledger(hop)),
         ending=None if index is None else index.stop_reason,
@@ -784,6 +787,13 @@ def bench_line(
         ),
         run=run,
         spend=scan_ledger_spend(stores.campaigns.line_spans(campaign.root_hop)).spend,
+    )
+
+
+def cycle_verify(stores: Stores, campaign: Campaign, hop: CycleHop) -> PassAdmission:
+    """What `verify-candidate` on *hop* is admitted under, as every door serves it."""
+    return verify_admission(
+        inner=stores.inner, refused=_refused(stores, campaign), run=live_cycle_run(stores, hop)
     )
 
 

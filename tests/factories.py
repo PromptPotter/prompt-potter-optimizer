@@ -1362,6 +1362,7 @@ def bench_line(
     return BenchLine(
         run=LiveCycleRun(
             selecting=selecting,
+            passing=False,
             pass_open=False,
             ending=ending,
             selection=selection,
@@ -1459,6 +1460,7 @@ def cycle_result(
             selected=None,
             run=LiveCycleRun(
                 selecting=False,
+                passing=False,
                 pass_open=False,
                 ending=stop_reason,
                 selection=None,

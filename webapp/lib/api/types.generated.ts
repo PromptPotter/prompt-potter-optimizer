@@ -297,6 +297,8 @@ export interface MachineSlot {
   /** The CALLER's account holds it — a delegate's job is its owner's. The test a
    * surface listing the account's own jobs filters on. */
   mine: boolean;
+  /** Where the holder is: still starting, or running. */
+  stage: 'starting' | 'running';
   /** ISO time the holder started running; null while it is still starting */
   started_at: string | null;
 }
@@ -726,6 +728,8 @@ export interface CycleEntryFacts {
    * null on every other cycle (the line's reads `held_elsewhere` there) and
    * under a moment. */
   bench: BenchScore | null;
+  /** Whether `verify-candidate` on this cycle is admitted now; null under a moment. */
+  verify: PassAdmission | null;
 }
 
 /** Where a fork was born on its parent's time line: the cut, as an event. */
@@ -1020,13 +1024,12 @@ export interface BenchScore {
 /** Where a campaign's bench stands, and whether asking for its pass would be
  * admitted. */
 export interface BenchStatus {
-  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
-  trigger: 'manual' | 'at_end';
-  /** Whether `bench` / `grade-bench` is admitted now. Every entry point reads this
-   * one answer. */
+  /** Whether the pass is admitted now. Every entry point reads this one answer. */
   can_run: boolean;
   /** Why not, exactly where `can_run` is false. */
   refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
+  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  trigger: 'manual' | 'at_end';
   /** Whether the grade control shows: admitted, or a pass still waited on. Never on
    * an inner run, whose line no command grades. */
   offered: boolean;
@@ -1111,6 +1114,15 @@ export interface OwnLevel {
   /** Rows carrying a verdict — a miss the prompt caused included: the population
    * both columns are read over. */
   n: number;
+}
+
+/** Whether asking for a pass on the cycle would be admitted now: a verify's
+ * answer whole. */
+export interface PassAdmission {
+  /** Whether the pass is admitted now. Every entry point reads this one answer. */
+  can_run: boolean;
+  /** Why not, exactly where `can_run` is false. */
+  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
 }
 
 /** An open check-in, listed as a campaign: no Start has minted it, so it has no
@@ -1280,6 +1292,8 @@ export interface SubtreeCycleEntryFacts {
    * null on every other cycle (the line's reads `held_elsewhere` there) and
    * under a moment. */
   bench: BenchScore | null;
+  /** Whether `verify-candidate` on this cycle is admitted now; null under a moment. */
+  verify: PassAdmission | null;
   /** The `per_cell` formula this cycle was read under for the request's lens — a
    * `dials:` lens realized against this campaign's anchors, a `score:` one as
    * given. What a fork applying the lens carries as `scoring.per_cell`. Null
@@ -5479,7 +5493,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "39653e1fc1cc9551";
+export const SERVED_CONTRACT = "ee098960e81f604b";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5511,11 +5525,11 @@ export type DisplayMetric = 'fitness' | 'composite' | 'ability';
 // promptpotter.domain.paired_reading::MeasurandUnit
 export type MeasurandUnit = 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
 
-// promptpotter.domain.bench::BenchRefusal
-export type BenchRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection';
-
 // promptpotter.domain.bench::CostAbsence
 export type CostAbsence = 'no_lift' | 'unpriced_tokens' | 'zero_spend';
+
+// promptpotter.domain.bench::PassRefusal
+export type PassRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection';
 
 // promptpotter.domain.campaign::LifecycleStatus
 export type LifecycleStatus = 'active' | 'archived' | 'deleted';
@@ -5908,8 +5922,15 @@ export const ARM_END_INFO: Record<'invalid' | 'skipped' | 'broken' | 'refused' |
   "locked_in": { label: "locked in", tone: "quiet", sentence: "The optimizer's eliminator stopped it far enough ahead to call." },
 };
 
-// Mirror of domain/bench.py::BENCH_REFUSAL_INFO, in display order.
-export const BENCH_REFUSAL_INFO: Record<BenchRefusal, string> = {
+// Mirror of domain/bench.py::COST_ABSENCE_WORDS, in display order.
+export const COST_ABSENCE_WORDS: Record<CostAbsence, string> = {
+  "no_lift": "no lift to price",
+  "unpriced_tokens": "search tokens unpriced",
+  "zero_spend": "no search spend",
+};
+
+// Mirror of domain/bench.py::PASS_REFUSAL_INFO, in display order.
+export const PASS_REFUSAL_INFO: Record<PassRefusal, string> = {
   "inner": "An inner run is one cell of its outer campaign; no command grades its line.",
   "no_manifest": "This campaign has no manifest on disk.",
   "held_elsewhere": "Another cycle (`held_by`) holds this campaign's line, and the bench grades the campaign's result. Ask for that cycle.",
@@ -5917,18 +5938,11 @@ export const BENCH_REFUSAL_INFO: Record<BenchRefusal, string> = {
   "definition_unread": "This campaign's dataset no longer reads as a definition naming a connector, so nothing grades its line until it does.",
   "connector_moved": "This campaign's dataset now names another connector than the one it was minted on, so its line grades on neither. Point the dataset back, or start a fresh campaign.",
   "no_holdout": "The campaign's dataset_split holds no rows out, so the bench has none to grade.",
-  "in_flight": "A bench pass is grading now; its reading lands when it ends.",
+  "in_flight": "A pass is scoring this cycle now; its reading lands when it ends.",
   "selecting": "The run is still selecting. Pause it or let it end first.",
   "origin_unscored": "The origin has not been scored, so there is no reference to grade against.",
   "graded": "The line's selection is already graded.",
   "no_selection": "No round closed past the origin, so there is no selection to grade.",
-};
-
-// Mirror of domain/bench.py::COST_ABSENCE_WORDS, in display order.
-export const COST_ABSENCE_WORDS: Record<CostAbsence, string> = {
-  "no_lift": "no lift to price",
-  "unpriced_tokens": "search tokens unpriced",
-  "zero_spend": "no search spend",
 };
 
 // Mirror of domain/campaign.py::LIFECYCLE_STATUS_LABELS, in display order.
@@ -6302,8 +6316,8 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [CANDIDATE_COUNT_WORDS, ["replayed"]],
   [DISPLAY_METRIC_INFO, ["fitness", "ability", "composite"]],
   [ARM_END_INFO, ["invalid", "skipped", "broken", "refused", "eliminated", "locked_in"]],
-  [BENCH_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],
   [COST_ABSENCE_WORDS, ["no_lift", "unpriced_tokens", "zero_spend"]],
+  [PASS_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],
   [LIFECYCLE_STATUS_LABELS, ["active", "archived", "deleted"]],
   [HARD_SAMPLE_ORDER_LABELS, ["info_gain", "difficulty"]],
   [HEATMAP_SCOPE_LABELS, ["cycle", "campaign", "dataset"]],

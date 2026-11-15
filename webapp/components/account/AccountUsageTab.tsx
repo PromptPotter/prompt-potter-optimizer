@@ -226,7 +226,7 @@ const SLOT_COLUMNS: readonly Column<MachineSlot>[] = [
     label: "Since",
     width: "8rem",
     align: "end",
-    cell: (s) => (s.started_at === null ? "starting" : fmtAgo(s.started_at)),
+    cell: (s) => (s.stage === "running" ? fmtAgo(s.started_at) : s.stage),
   },
 ];
 
