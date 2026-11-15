@@ -2,7 +2,7 @@
 
 Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chain id `ws-2`, arc `arc/ws-2`.
 
-- **Base:** `origin/main` at `fdad7947d` (landed 93: addr-2, lineage spines keyed on a candidate's
+- **Base:** `origin/main` at `6fa93bab0` (landed 93: addr-2, lineage spines keyed on a candidate's
   `address` and a served short label per subject and node). Your `<base sha>` in common.md is this commit.
 - **Spec:**
   - `### batch/30 · ws` row 1 ("A painted chart has no keyboard path").
