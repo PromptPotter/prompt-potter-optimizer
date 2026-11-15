@@ -166,8 +166,11 @@ def ruler_rows(
 def regraded_ruler(
     stores: Stores, stamp: RulerStamp, scorer: Scorer, *, n_min: int, enable_2pl: bool
 ) -> DeltaRuler | None:
-    """The whole scale *stamp* names, other campaigns' rows included, every row re-graded under
-    *scorer* off the archive answer it stands for (its address's latest grade-A one)."""
+    """The whole scale *stamp* names, other campaigns' rows included, re-graded under *scorer*: the
+    rows as filed under the stamp's own (`ruler.jsonl` outlives the archive answers behind them),
+    else each row off its address's latest grade-A archive answer."""
+    if scorer.id == stamp.scope.scorer:
+        return restamped(stores.ruler, stamp, n_min=n_min, enable_2pl=enable_2pl).ruler
     entries = {entry.prompt_fields_id: entry for entry in stores.archive.list_all()}
     asked: dict[str, set[str]] = {}
     for address, key, _ in stores.ruler.rows(stamp.scope, stamp.reach):

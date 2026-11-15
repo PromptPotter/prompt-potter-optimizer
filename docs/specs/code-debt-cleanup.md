@@ -327,6 +327,12 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `jobs/launcher/admission.py::land_job`, which writes the fork's `CycleShareRecord` there, so a
   `set-limits` filed between the cut and the landing re-shares the campaign without the fork. Action:
   the share is taken against the campaign with the cut. **Rides with:** admit-2.
+- **`ab` under an edited scorer refits what the archive still holds**: `difficulty.py::regraded_ruler`
+  re-grades a ruler row off its address's archive answer, but `ruler.jsonl` is never rewritten and
+  outlives those answers (hotpotqa's tenant scale, 2026-11-15: 305 of 372 addresses, 5,840 of 7,874
+  rows, have none), so the edited-formula counterfactual reads a quarter of the scale and says
+  nothing. Action: decide what scale an edited formula replays on (the filed rows' share it
+  re-graded, served beside the verdict; or refuse below a coverage). **Rides with:** a design call.
 
 ### hubs (after valid, before layers)
 

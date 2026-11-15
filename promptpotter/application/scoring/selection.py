@@ -164,7 +164,7 @@ def bar_subjects(
 ) -> dict[ArmKey, BarSubject]:
     """Each arm's paired evidence over the parent. A θ lift the paired cells contradict is the
     prior's or the δ weighting's, never the arm's, so no reading clears it; the bar is read off no
-    cell that crowned the parent (`election_rows` leaves out `crowning_cells`)."""
+    cell that crowned the parent (the round's draw leaves out `crowning_cells`)."""
     subjects: dict[ArmKey, BarSubject] = {}
     for key, lift in lifts.items():
         wins, losses = discordant(rows[key], parent_results)

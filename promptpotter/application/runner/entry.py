@@ -42,6 +42,7 @@ from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, start_layer
 from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.paired_reading import RoundArm
 from promptpotter.domain.phases import (
     SELF_PAUSE_CAUSE,
     STOP_REASON_INFO,
@@ -390,6 +391,8 @@ def _cut_rebase_fork(
     prep = replace(prep, campaign_config=prep.campaign_config.overlaid(start_layer(overrides)))
     held = store.standing_rounds(parent, moment=None).rounds
     learned = held[max(held)].close.optimizer_state
+    hung = rebase_req.hangs_from
+    picked = hung.election.selected if hung is not None and hung.election is not None else None
     fork = cut_fork(
         session.store,
         parent=parent,
@@ -397,13 +400,11 @@ def _cut_rebase_fork(
         trigger=rebase_req.trigger,
         reason=rebase_req.reason,
         issued_by=rebase_req.issued_by,
+        named=None if picked is None else RoundArm(round=cut - 1, arm=picked),
         # No `origin_prompts`: a rebase replays its origin from the parent's round.
         start=CycleStart(config_overrides=overrides),
     )
-    branch = (
-        rebase_req.hangs_from
-        or store.standing_rounds(fork.child, moment=None).rounds[cut - 1].close
-    )
+    branch = hung or store.standing_rounds(fork.child, moment=None).rounds[cut - 1].close
     store.append(
         fork.child,
         branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices})),

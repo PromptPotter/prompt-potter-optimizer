@@ -6161,7 +6161,7 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "not_admitted": { label: "Not admitted", outcome: "halted", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
   "producer_vanished": { label: "Producer vanished", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
   "render_error": { label: "Render error", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: true, next_step: "", grades_selection: true, next_acts: [] },
-  "diverged": { label: "Diverged", outcome: "failed", category: "failure", halts_mid_round: false, has_traceback: false, next_step: "A recorded decision no longer replays under the edited config: fork here to branch under it, or revert the edit to continue.", grades_selection: false, next_acts: [{ kind: "start-run", field: "mode.on_divergence", value: "fork", reads: "" }] },
+  "diverged": { label: "Diverged", outcome: "failed", category: "failure", halts_mid_round: false, has_traceback: false, next_step: "A recorded decision no longer replays under the loaded optimizer and scorer: fork here to branch under them, or revert the change to continue.", grades_selection: false, next_acts: [{ kind: "start-run", field: "mode.on_divergence", value: "fork", reads: "" }] },
   "optimizer_timeout": { label: "Optimizer timeout", outcome: "failed", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
 };
 

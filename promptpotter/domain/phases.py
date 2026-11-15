@@ -806,8 +806,8 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             StopCategory.FAILURE,
             False,
             False,
-            "A recorded decision no longer replays under the edited config: fork here to branch "
-            "under it, or revert the edit to continue.",
+            "A recorded decision no longer replays under the loaded optimizer and scorer: fork "
+            "here to branch under them, or revert the change to continue.",
             False,
             (NextAct(kind="start-run", field="mode.on_divergence", value="fork"),),
         ),

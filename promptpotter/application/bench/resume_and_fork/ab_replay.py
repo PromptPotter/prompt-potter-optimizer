@@ -124,6 +124,7 @@ def replay_verdict(
     re-graded under the current scorer on the scale its election read."""
     scorer = session.state.scoring.scorer
     opt = campaign_config.optimization
+    n_min, two_pl = opt.elimination_n_min, opt.enable_2pl_graduation
     current = optimizer.prompt_hashes()
 
     def verdict(rnd: MaskRound) -> VerdictOutcome:
@@ -134,13 +135,7 @@ def replay_verdict(
         ruler = (
             None
             if stamp is None or stamp.cold
-            else regraded_ruler(
-                session.store,
-                stamp,
-                scorer,
-                n_min=opt.elimination_n_min,
-                enable_2pl=opt.enable_2pl_graduation,
-            )
+            else regraded_ruler(session.store, stamp, scorer, n_min=n_min, enable_2pl=two_pl)
         )
         found = [*_identity(rd, current), *replay_all_mismatches(rd, rnd.decisions, ruler=ruler)]
         if not found:
