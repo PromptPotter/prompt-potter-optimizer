@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import Counter
 from typing import cast
 
-from promptpotter.application import optimizers
 from promptpotter.application.mask.divergence import (
     Verdict,
     find_divergences,
@@ -12,7 +11,7 @@ from promptpotter.application.mask.divergence import (
 )
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.mask.record import MaskReading, MaskRecord
-from promptpotter.application.optimizers.nodes import Eliminator
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS, Eliminator
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Lens, Subject
 from promptpotter.domain.hierarchy import (
     HierarchyCandidate,
@@ -34,7 +33,7 @@ def _abort_suppress(variant: str) -> frozenset[str]:
     """Read per call: the member table completes at a declared step, never at import."""
     variants = {
         name: gates
-        for member in optimizers.NODE_MEMBERS.table.values()
+        for member in NODE_MEMBERS.table.values()
         if member.kind is NodeKind.ELIMINATOR
         for name, gates in cast("Eliminator", member).abort_lenses.items()
     }

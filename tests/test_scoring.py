@@ -77,7 +77,6 @@ from offline_world import FakeHarness, Router
 from pydantic import SecretStr, ValidationError
 
 from promptpotter import connectors
-from promptpotter.application import optimizers
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext, SliceMap
 from promptpotter.application.bench.difficulty import (
@@ -127,7 +126,7 @@ from promptpotter.application.optimizers.gepa.members import (
     MinibatchBars,
     MinibatchGate,
 )
-from promptpotter.application.optimizers.nodes import RoundSamples
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS, RoundSamples
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -2933,13 +2932,13 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             offline.llm.says = lambda _body: "ok"
             at_origin = RoundContext(cycle=cycle, round_num=0)
             origin_read = PotterView(
-                NodeContext(at_origin, optimizers.NODE_MEMBERS.get("l1_critique")), Ladder()
+                NodeContext(at_origin, NODE_MEMBERS.get("l1_critique")), Ladder()
             )
             assert [b.text for b in origin_read.block_window().get("persona", ())[:1]] == [
                 "Answer tersely."
             ], "round 0's critique composed before the block pool was seeded"
-            l1 = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("l1_generate"))
-            seed = cast("node_contract.Proposer", optimizers.NODE_MEMBERS.get("mating"))
+            l1 = cast("node_contract.Proposer", NODE_MEMBERS.get("l1_generate"))
+            seed = cast("node_contract.Proposer", NODE_MEMBERS.get("mating"))
             seeded = node_contract.RoundWalk("default", (seed,), (l1,), "author")
             blank = node_contract.RoundOpening({}, None, replayed=False)
             stated = l1.opening(NodeContext(at_origin, l1), blank)
@@ -2979,7 +2978,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             offline.llm.sent.clear()
             closed = jumping_clock(at_the_hold())
             # The critique still reads the round; every other call it made filled the seat.
-            critique_node = optimizers.NODE_MEMBERS.get("l1_critique")
+            critique_node = NODE_MEMBERS.get("l1_critique")
             assert isinstance(critique_node, node_contract.LlmNode)
             assert critique_node.response_model is not None
             critique = critique_node.response_model.__name__
@@ -2997,14 +2996,14 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             resumed = PotterView(
                 NodeContext(
                     dataclasses.replace(at_origin, round_num=2),
-                    optimizers.NODE_MEMBERS.get("l1_generate"),
+                    NODE_MEMBERS.get("l1_generate"),
                 ),
                 Ladder(),
             )
             assert [b.text for b in resumed.block_window().get("persona", ())[:1]] == [
                 "Answer tersely."
             ], "a resumed run handed its proposer a pool its banked round does not name"
-            l3: Any = optimizers.NODE_MEMBERS.get("l3_plan")
+            l3: Any = NODE_MEMBERS.get("l3_plan")
             replanning = NodeContext(at_origin, l3)
             set_cycle(cycle, slices=[L3Memory(plan="attack the default label")])
             l3.land(replanning, l3.parse(replanning, L3PlanOutput(plan="")))
@@ -3920,9 +3919,9 @@ def test_a_round_of_no_op_variants_measures_no_candidate_and_books_zero_candidat
         offline.llm.sent.clear()
         generating = NodeContext(
             RoundContext(cycle=cycle, round_num=1),
-            optimizers.NODE_MEMBERS.get("l1_generate"),
+            NODE_MEMBERS.get("l1_generate"),
         )
-        member = optimizers.NODE_MEMBERS.get("l1_generate")
+        member = NODE_MEMBERS.get("l1_generate")
         assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
         proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
         readout = cycle.output(L1Readout, 1)
@@ -3940,7 +3939,7 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # The scorer parses answer_format.
-    member = cast("L1Generate", optimizers.NODE_MEMBERS.get("l1_generate"))
+    member = cast("L1Generate", NODE_MEMBERS.get("l1_generate"))
     with _peer_cycle(
         workspace(tmp_path / "held_format"),
         _PEER_HOP,
@@ -3960,7 +3959,7 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
         )
         generating = NodeContext(
             RoundContext(cycle=cycle, round_num=1),
-            optimizers.NODE_MEMBERS.get("l1_generate"),
+            NODE_MEMBERS.get("l1_generate"),
         )
         proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
     fatal = [
@@ -3975,7 +3974,7 @@ def test_capo_inits_reply_of_only_blank_instructions_is_one_refused_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # An array of blanks seeds nothing; read as in form, it left the round without one arm or a word.
-    member = cast("CapoInit", optimizers.NODE_MEMBERS.get("capo_init"))
+    member = cast("CapoInit", NODE_MEMBERS.get("capo_init"))
     with _peer_cycle(
         workspace(tmp_path / "blank_init"),
         _PEER_HOP,
@@ -4018,7 +4017,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         ]
         forking = NodeContext(
             RoundContext(cycle=cycle, round_num=2),
-            optimizers.NODE_MEMBERS.get("l2_context"),
+            NODE_MEMBERS.get("l2_context"),
         )
         set_cycle(cycle, line=line)
         assert PotterView(forking, Ladder()).reelect_offer == {}, (
@@ -4050,7 +4049,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         )
         forking = NodeContext(
             RoundContext(cycle=cycle, round_num=3),
-            optimizers.NODE_MEMBERS.get("l2_context"),
+            NODE_MEMBERS.get("l2_context"),
         )
         stalled = PotterView(forking, Ladder())
         offer = stalled.reelect_offer
@@ -4264,7 +4263,7 @@ def test_l2s_box_banks_its_parents_fitness_in_its_scorers_unit(
     hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(40)]
     seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
     run_init(seated.cycle)
-    l2: Any = optimizers.NODE_MEMBERS.get("l2_context")
+    l2: Any = NODE_MEMBERS.get("l2_context")
     fire = Fire(cause="l1_patience", ask=None, best=_high_water(0.9, [], 0.1))
     said = l2.enter_act(NodeContext(seated, l2), fire).facts["parent fitness"]
     assert said == FitnessFact(value=0.5, unit="rate"), (

@@ -129,12 +129,12 @@ class LLMResponse(StrictModel):
     cost_usd: float | None = Field(
         None,
         description=(
-            "What the PROVIDER says the call cost, summed across a repair retry (both "
-            "round-trips are billed). Its own field rather than a ``usage`` key because "
-            "``usage`` counts tokens and this is money. ``None`` means the provider "
-            "reported nothing — the honest answer, never a zero nobody measured. The call is "
-            "then priced at our rate in its own field (``telemetry.py::rate_priced_usd``), "
-            "never in this one."
+            "What the call's admissions BOOKED across every send it made (a resend, a repair "
+            "rung): each answered send at the bill the provider reported, each send that may "
+            "have billed unreported at its held bound. Its own field rather than a ``usage`` "
+            "key because ``usage`` counts tokens and this is money. ``None`` means an answer "
+            "reported no price — the honest answer, never a zero nobody measured; our rate "
+            "prices it in its own field (``telemetry.py::rate_priced_usd``)."
         ),
     )
     served_by: str | None = Field(

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from pydantic import BaseModel
 
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.connector import (
@@ -34,7 +35,8 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class InProcessWorkload:
-    experiment: Mapping[str, Any] | None
+    # The connector's `experiment_model`, parsed once (`Connector.experiment`).
+    experiment: Any
     # Where `experiment` was read: a local path a panel names resolves against it.
     experiment_dir: Path | None
     program: object | None
@@ -68,10 +70,16 @@ class NoopSession:
         return None
 
 
-# `(workload, sample, wire_adapter payload) -> {"data": {…}}`, the shape of a `/matches` body.
-InProcessRun = Callable[[InProcessWorkload, Sample, dict[str, Any]], Awaitable[dict[str, Any]]]
+PricedPair = tuple[str | None, str | None]
+"""The ``(model, provider)`` one node's sends are priced as (``BackendClient.priced_as``)."""
 
-ExperimentResolver = Callable[["Stores", Mapping[str, Any]], dict[str, Any]]
+# `(workload, sample, payload, the cell's pairs by node) -> {"data": {…}}`, a `/matches` body.
+InProcessRun = Callable[
+    [InProcessWorkload, Sample, dict[str, Any], Mapping[str, PricedPair]],
+    Awaitable[dict[str, Any]],
+]
+
+ExperimentResolver = Callable[["Stores", Mapping[str, Any]], BaseModel]
 
 # `(http, base_url) -> the backend's self-reported revision`, `None` where it is silent.
 VersionCheck = Callable[["httpx.AsyncClient", str], Awaitable[str | None]]
@@ -94,9 +102,9 @@ class Endpoint:
     read: Callable[[], Mapping[str, str]]
 
 
-# `(node name, node config, the run's workload) -> what one run of that node can bill`; an LLM
-# node's is `capabilities.py::sent_llm_bound`'s.
-SentSpendBound = Callable[[str, NodeCall, InProcessWorkload], NodeSpendBound | None]
+# `(node name, node config, its priced pair, the run's workload) -> what one run of that node can
+# bill`; an LLM node's is `capabilities.py::sent_llm_bound`'s.
+SentSpendBound = Callable[[str, NodeCall, PricedPair, InProcessWorkload], NodeSpendBound | None]
 
 # `pipeline_params -> Delivery`, resolved from the params a run hashes.
 PromptDelivery = Callable[["PipelineParams"], Delivery]
@@ -163,12 +171,17 @@ class Connector:
     self_optimization: bool = False
     """The recursion: a campaign on it is an L4 outer loop."""
 
-    extract_experiment: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None
+    extract_experiment: Callable[[Any], list[dict[str, Any]]] | None = None
     """Set = the dataset's ``panel`` OWNS its rows, else the row ladder's. Rows in panel order:
-    ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape."""
+    ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape. Every experiment
+    hook is handed the ``experiment_model`` instance."""
+
+    experiment_model: type[BaseModel] | None = None
+    """What a panel parses to; an owned panel needs one. A pinned panel is its unset-free dump."""
 
     resolve_experiment: ExperimentResolver | None = None
-    """Applied by ``dataset_access.py::dataset_experiment`` to every read of the panel."""
+    """Applied by ``dataset_access.py::dataset_experiment`` to every read of the panel, in place
+    of ``experiment_model``'s parse."""
 
     execution: ConnectorExecution = "remote_http"
     """``BackendClient.run_query`` dispatches on this, never on ``name``."""
@@ -250,13 +263,11 @@ class Connector:
     completion_check: Callable[[], None] | None = None
     """Run where the table completes, so a raise stops the server at boot and a run at init."""
 
-    pipeline_declaration: Callable[[Stores, Mapping[str, Any] | None], dict[str, Any]] | None = None
+    pipeline_declaration: Callable[[Stores, Any], dict[str, Any]] | None = None
     """The backend's graph off the panel's experiment, read in place of ``GET /pipeline``;
     ``dataset.yaml::pipeline`` overlays it."""
 
-    identity_config: (
-        Callable[[Stores, Mapping[str, Any] | None, str], dict[str, dict[str, Any]]] | None
-    ) = None
+    identity_config: Callable[[Stores, Any, str], dict[str, dict[str, Any]]] | None = None
     """Identity-only, never on the wire: what a panel is measured WITH, never which cells it holds;
     handed the dataset's endpoint address (``base_url``)."""
 
@@ -273,6 +284,16 @@ class Connector:
     @property
     def owns_panel(self) -> bool:
         return self.extract_experiment is not None
+
+    def experiment(self, stores: Stores, declared: Mapping[str, Any]) -> BaseModel:
+        if self.resolve_experiment is not None:
+            return self.resolve_experiment(stores, declared)
+        return self.pinned(declared)
+
+    def pinned(self, doc: Mapping[str, Any]) -> BaseModel:
+        """A panel a cycle pinned, read back."""
+        assert self.experiment_model is not None, "a panel is read only where one is owned"
+        return self.experiment_model.model_validate(doc)
 
     @property
     def serves_pipeline(self) -> bool:

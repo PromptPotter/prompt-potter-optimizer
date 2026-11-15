@@ -60,7 +60,6 @@ from factories import (
     workspace,
 )
 
-from promptpotter.application import optimizers
 from promptpotter.application.bench.cycle import Cycle, ReadArm
 from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
@@ -97,7 +96,7 @@ from promptpotter.application.optimizers.capo.members import (
     PopulationKept,
 )
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
-from promptpotter.application.optimizers.nodes import MeasuredRound, RoundSamples
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, RoundSamples
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
 from promptpotter.application.optimizers.potter.pobb import EliminationGate
 from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
@@ -839,7 +838,7 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
 
     def race_of() -> PoBBRace:
         return PoBBRace(
-            NodeContext(racing, optimizers.NODE_MEMBERS.get("pobb")),
+            NodeContext(racing, NODE_MEMBERS.get("pobb")),
             RoundSamples(cells=ten, order=ten, block_size=len(ten)),
         )
 
@@ -950,7 +949,7 @@ def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
     child_arm = arm_state("child", position=ArmPosition(round=1, idx=0, total=1), individual=child)
     read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
     selection = elect_on_theta(
-        NodeContext(electing, optimizers.NODE_MEMBERS.get("theta_election")),
+        NodeContext(electing, NODE_MEMBERS.get("theta_election")),
         MeasuredRound(
             arms={walked_child: child_arm},
             rows={walked_child: arm},

@@ -33,12 +33,13 @@ from types import ModuleType
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast, get_args
 
 import httpx
+from pydantic import BaseModel, ConfigDict
 
 from promptpotter.config.settings import non_utf8_encoding
 from promptpotter.connectors.protocol import (
-    PACKAGE_CACHE_KEY,
     Connector,
     InProcessWorkload,
+    PricedPair,
     cell_envelope_of,
 )
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
@@ -170,8 +171,19 @@ _AGENTS: dict[str, _AgentDeclares] = {
 _UNDECLARED = _AgentDeclares(tools=(), logs=(), model_seam=False)
 
 
-def _agent_name(panel: Mapping[str, Any] | None) -> str:
-    return ((panel or {}).get("agent") or {}).get("name") or "terminus-2"
+class HarborPanel(BaseModel):
+    """A resolved panel. Lax on purpose: a key beyond these rides into the pin as it was spelled."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    tasks: list[dict[str, Any]]
+    agent: dict[str, Any] | None = None
+    reward_key: str | None = None
+    package_cache: str | None = None
+
+
+def _agent_name(agent: Mapping[str, Any] | None) -> str:
+    return (agent or {}).get("name") or "terminus-2"
 
 
 # `TmuxSession._detect_system_info`'s probe order, which decides the install command it runs.
@@ -328,7 +340,7 @@ def pin_roster(dataset: str, version: str) -> Path:
     return path
 
 
-def _resolve_experiment(_stores: Stores, panel: Mapping[str, Any]) -> dict[str, Any]:
+def _resolve_experiment(_stores: Stores, panel: Mapping[str, Any]) -> HarborPanel:
     agent = panel.get("agent") or {}
     kwargs = set(agent.get("kwargs") or {})
     if owned := sorted(kwargs & AGENT_KWARG_KEYS):
@@ -336,15 +348,15 @@ def _resolve_experiment(_stores: Stores, panel: Mapping[str, Any]) -> dict[str, 
             f"harbor connector: the panel sets {owned} under `agent.kwargs`, which "
             f"`pipeline.nodes.{AGENT_NODE}.config` owns and lays over it. Delete them here."
         )
-    seamed = _AGENTS.get(_agent_name(panel), _UNDECLARED).model_seam
+    seamed = _AGENTS.get(_agent_name(agent), _UNDECLARED).model_seam
     if seamed and (discarded := sorted(kwargs & _DISCARDED_SENDER_KEYS)):
         raise ValueError(
             f"harbor connector: the panel sets {discarded} under `agent.kwargs`, which configure "
             "the agent's own sender; `_AgentModel` sends in its place, so they would reach no "
             "wire. Delete them here."
         )
-    resolved = _resolve_tasks(panel)
-    for task in resolved["tasks"]:
+    resolved = HarborPanel.model_validate(_resolve_tasks(panel))
+    for task in resolved.tasks:
         _task_pin(task)
     return resolved
 
@@ -380,10 +392,10 @@ def _resolve_tasks(panel: Mapping[str, Any]) -> dict[str, Any]:
     return {**panel, "tasks": [by_id[i] for i in wanted]}
 
 
-def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, Any]]:
-    if not (experiment_data.get("agent") or {}).get("environment"):
+def _extract_experiment(panel: HarborPanel) -> list[dict[str, Any]]:
+    if not (panel.agent or {}).get("environment"):
         raise ValueError("harbor connector: the panel's `agent` declares no `environment`.")
-    tasks = [t for t in experiment_data["tasks"] if t.get("id")]
+    tasks = [t for t in panel.tasks if t.get("id")]
     labelled = [t for t in tasks if str(t.get("answer") or "").strip()]
     if labelled and len(labelled) != len(tasks):
         unlabelled = [t["id"] for t in tasks if not str(t.get("answer") or "").strip()]
@@ -451,13 +463,13 @@ def _refuse_send_faults(agent_name: str, cfg: NodeCall) -> None:
 
 
 def _sent_spend_bound(
-    node: str, cfg: NodeCall, workload: InProcessWorkload
+    node: str, cfg: NodeCall, pair: PricedPair, workload: InProcessWorkload
 ) -> LLMSpendBound | None:
     if node != AGENT_NODE:
         return None
     # What the adapter SENDS, retries excluded: each of those is admitted at its own bound.
     backend = cfg.model_extra or {}
-    _refuse_send_faults(_agent_name(workload.experiment), cfg)
+    _refuse_send_faults(_agent_name(workload.experiment.agent), cfg)
     if not cfg.model:  # an agent with no model seam sends nothing of ours
         return None
     where = f"harbor connector: `nodes.{AGENT_NODE}.config`"
@@ -466,7 +478,7 @@ def _sent_spend_bound(
     summarized = _TERMINUS_SUMMARY_CALLS if backend.get("enable_summarize", True) else 0
     # Our client holds each send at the dearest host: its gateway route falls back, capped.
     return sent_llm_bound(
-        where, (cfg.model, cfg.provider), cfg.max_tokens,
+        where, pair, cfg.max_tokens,
         workspace=workload.workspace, attempts=int(turns) * (1 + summarized),
     )  # fmt: skip
 
@@ -498,15 +510,15 @@ def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _identity_config(
-    _stores: Stores, experiment: Mapping[str, Any] | None, _base_url: str
+    _stores: Stores, experiment: HarborPanel | None, _base_url: str
 ) -> dict[str, dict[str, Any]]:
     if experiment is None:
         raise ValueError("harbor connector: no panel on this machine to fingerprint.")
     # Narrow on purpose: a task rides its own sample (`_task_pin`), so a wider panel re-keys none.
     fingerprint = stable_hash(
         [
-            experiment.get("agent") or {},
-            experiment.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
+            experiment.agent or {},
+            experiment.reward_key or DEFAULT_TASK_REWARD_KEY,
             _AGENT_SENDER,
         ]
     )
@@ -1055,8 +1067,8 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
             f"harbor task {sample.query!r} carries no pin, so it is no row of a panel.",
             spent={},
         )
-    panel = workload.experiment or {}
-    agent_cfg = panel.get("agent") or {}
+    panel: HarborPanel = workload.experiment
+    agent_cfg = panel.agent or {}
     # From the node config, never the panel's agent block (`datasets/CLAUDE.md`).
     call = NodeCall.model_validate(payload["config"])
     backend = call.model_extra or {}
@@ -1064,21 +1076,21 @@ def _episode(workload: InProcessWorkload, sample: Sample, payload: dict[str, Any
         **agent_cfg.get("kwargs", {}),
         **{k: backend[k] for k in _TERMINUS_KEYS if k in backend},
     }
-    agent_name = _agent_name(panel)
+    agent_name = _agent_name(agent_cfg)
     declared = _AGENTS.get(agent_name)
     tools, logs = (declared or _UNDECLARED).tools, (declared or _UNDECLARED).logs
     return _Episode(
         query=sample.query,
         task=task,
         task_root=_panel_dir(workload),
-        reward_key=panel.get("reward_key") or DEFAULT_TASK_REWARD_KEY,
+        reward_key=panel.reward_key or DEFAULT_TASK_REWARD_KEY,
         agent_name=agent_name,
         agent_kwargs=agent_kwargs,
         call=call,
         window=context_window(call.model, call.provider, workspace=workload.workspace),
         declared=declared,
         environment=agent_cfg["environment"],
-        cached=panel.get(PACKAGE_CACHE_KEY) in PACKAGE_CACHE_SCOPES,
+        cached=panel.package_cache in PACKAGE_CACHE_SCOPES,
         prompt=backend.get("prompt") or None,
         in_system_prompt=_skill_delivery(backend) == "system_prompt",
         # terminus-2 installs asciinema only while it records; baking it otherwise adds a tool.
@@ -1469,7 +1481,7 @@ def _episode_data(
 
 
 async def _in_process_run(
-    workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
+    workload: InProcessWorkload, sample: Sample, payload: dict[str, Any], _pairs: object
 ) -> dict[str, Any]:
     episode = _episode(workload, sample, payload)
     result, attempt_s, bill = await _run_episode(episode)
@@ -1495,6 +1507,7 @@ CONNECTOR = Connector(
     cells_priced=True,
     holds_own_sends=True,
     extract_experiment=_extract_experiment,
+    experiment_model=HarborPanel,
     in_process_run=_in_process_run,
     extra=Extra.HARBOR,
     preflight=_preflight,

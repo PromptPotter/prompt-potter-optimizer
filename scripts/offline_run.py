@@ -78,7 +78,11 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
-from promptpotter.application.optimizers.nodes import BEHAVIOUR_KEYS_FILE, BehaviourKeys
+from promptpotter.application.optimizers.nodes import (
+    BEHAVIOUR_KEYS_FILE,
+    NODE_MEMBERS,
+    BehaviourKeys,
+)
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.inner.tasks import estimator
 from promptpotter.config.paths import (
@@ -1746,7 +1750,7 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
 
     packages = {
         node: owned(Path(inspect.getfile(type(member))).parent)
-        for node, member in optimizers.NODE_MEMBERS.table.items()
+        for node, member in NODE_MEMBERS.table.items()
     }
     owners = {d for d in packages.values() if d} | {
         d for n in optimizers.MANIFESTS.table if (d := owned(optimizers.MANIFESTS.get(n).directory))

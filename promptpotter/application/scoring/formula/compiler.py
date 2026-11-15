@@ -482,6 +482,9 @@ def auto_scorer_id(
 
 # Becomes ``per_cell`` once the origin is measured (`application/origin.py::lock_criterion`).
 DIALS_KEY = "dials"
+# The pick a check-in makes: the per-sample formula is that matcher on the answer and its label.
+MATCHER_KEY = "matcher"
+SCORING_BLOCK_KEYS = frozenset({"per_sample", "per_cell", DIALS_KEY, MATCHER_KEY})
 
 
 def _refuse_dials(text: str, why: str, terms: Mapping[str, CellTerm]) -> PayloadInvalidError:
@@ -558,11 +561,12 @@ def split_scoring_block(
     block: str | dict[str, str] | None, *, judge_instrument: str | None
 ) -> ScoringSpec:
     if isinstance(block, dict):
-        unknown = set(block) - {"per_sample", "per_cell", DIALS_KEY}
+        unknown = set(block) - SCORING_BLOCK_KEYS
         if unknown:
             raise ScoringFormulaError(
                 f"campaign scoring block names {sorted(unknown)}. It carries 'per_sample' (the "
-                "cell's correctness) and 'per_cell' (the composite θ is fit on). 'id' is DERIVED "
+                "cell's correctness) or the 'matcher' it calls, and 'per_cell' (the composite θ is "
+                "fit on) or the 'dials' that declare it. 'id' is DERIVED "
                 "from both — a hand-set one naming only 'per_sample' pooled two composites' grades "
                 "onto one δ ruler. 'per_round' was the composite at ROUND scope and is gone — a "
                 "latency or reliability term meaned over a panel cannot say which prompt provoked it."
@@ -573,6 +577,13 @@ def split_scoring_block(
                 "the composite and the origin's measurement turns them into 'per_cell'; a block "
                 "naming both says two criteria."
             )
+        if (matcher := block.get(MATCHER_KEY)) is not None:
+            if "per_sample" in block or matcher not in MATCHERS:
+                raise ScoringFormulaError(
+                    f"campaign scoring block's matcher {matcher!r} must be one of "
+                    f"{sorted(MATCHERS)}, beside no 'per_sample': the pick IS the formula."
+                )
+            block = {**block, "per_sample": f"{matcher}(predicted, ground_truth)"}
         per_sample = block.get("per_sample")
         # Dials not yet locked grade on correctness alone, which is all an unmeasured origin has.
         per_cell = block.get("per_cell")

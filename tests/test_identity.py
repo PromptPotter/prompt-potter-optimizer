@@ -59,7 +59,6 @@ from factories import (
 from offline_world import LLM_ONLY_NODE, Router
 from pydantic import ValidationError
 
-from promptpotter.application import optimizers
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.children import (
@@ -149,7 +148,13 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.optimizers.capo.members import cross_shots, mutate_shots
 from promptpotter.application.optimizers.gepa.members import GepaReflect, ParetoScores
-from promptpotter.application.optimizers.nodes import MintFacts, Proposals, RoundSamples
+from promptpotter.application.optimizers.nodes import (
+    NODE_MEMBERS,
+    MintFacts,
+    Proposals,
+    RoundSamples,
+    unfit_pipeline,
+)
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.injections.panels import detectable_rows
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
@@ -464,7 +469,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
             optimization={"optimizer": "capo"},
         )
     )
-    calls = NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
+    calls = NodeContext(capo_seat, NODE_MEMBERS.get("capo_mutate")).read(Calls)
     values = {"task_description": "sort the list", "instruction": "Sort it."}
     potter = select_optimizer(bench_choice("potter"))
     every = frozenset(Presumption)
@@ -481,7 +486,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
         return jumping_clock(inner_seat(inner, offline, optimizer, overrides))
 
     mutated = arm("capo", _CAPO_MUTATED)
-    capo_calls = NodeContext(mutated, optimizers.NODE_MEMBERS.get("capo_mutate")).read(Calls)
+    capo_calls = NodeContext(mutated, NODE_MEMBERS.get("capo_mutate")).read(Calls)
     assert (
         capo_calls.prompt().compile_prompt(**values)
         == "Rephrase [Sort it.] to sort the list."
@@ -1108,7 +1113,7 @@ def test_a_harbor_panel_reads_its_pinned_roster_and_never_dials_out(
             built_stores, resolve_dataset(built_stores, harbor_dataset)
         )
         assert resolved is not None, f"{harbor_dataset} resolved no panel"
-        return list(resolved["tasks"])
+        return list(resolved.model_dump()["tasks"])
 
     for harbor_dataset, version, include in (
         ("spreadsheetbench-verified", "1.0", ["10452", "105-24"]),
@@ -1799,10 +1804,14 @@ def test_a_check_in_picks_the_criterion_as_the_server_reads_it(
     assert planned(draft, config={"scoring": {"dials": "tokens=0.08"}}).scoring == pinned, (
         "a pinned formula's anchors did not survive a round trip"
     )
-    assert planned(draft, config={"scoring": {"matcher": "em_match"}}).scoring == {
-        **pinned,
-        "per_sample": "em_match(predicted, ground_truth)",
-    }, "a matcher pick dropped the composite"
+    picked = planned(draft, config={"scoring": {"matcher": "em_match"}}).scoring
+    assert picked == {
+        **{k: v for k, v in pinned.items() if k != "per_sample"},
+        "matcher": "em_match",
+    }
+    assert draft_criterion(picked, campaign_terms(upload_connector().name)).matcher == "em_match", (
+        "a matcher pick dropped the composite"
+    )
     dials = {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}
     assert planned(draft, config={"scoring": {"dials": "cost=0.1"}}).scoring == dials, (
         "dials froze another criterion than they spell"
@@ -3655,12 +3664,10 @@ def test_a_member_knowing_one_prompt_is_refused_pre_spend_on_a_chain_of_two() ->
     two = _two_prompt_nodes()
     gepa = select_optimizer(bench_choice("gepa"))
     capo = select_optimizer(bench_choice("capo"))
-    assert optimizers.unfit_pipeline(capo, two, "termnorm") is not None, (
+    assert unfit_pipeline(capo, two, "termnorm") is not None, (
         "a member rewriting the one prompt node was admitted on a chain of two"
     )
-    assert optimizers.unfit_pipeline(gepa, two, "termnorm") is None, (
-        "GEPA was refused a chain it can walk"
-    )
+    assert unfit_pipeline(gepa, two, "termnorm") is None, "GEPA was refused a chain it can walk"
 
 
 def test_only_a_held_prompt_field_withdraws_it_from_l1() -> None:
@@ -3706,7 +3713,7 @@ def test_only_a_held_prompt_field_withdraws_it_from_l1() -> None:
             for n in two.declared_nodes
         }
     )
-    assert optimizers.unfit_pipeline(gepa, all_held, "termnorm") is not None, (
+    assert unfit_pipeline(gepa, all_held, "termnorm") is not None, (
         "a campaign leaving its optimizer nothing to edit was admitted"
     )
 
@@ -3740,7 +3747,7 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
     for _ in range(3):
         no_cells = RoundSamples(cells=[], order=[], block_size=0)
         drawn = RoundContext(reflected_on.cycle, reflected_on.round_num, no_cells)
-        reflecting = NodeContext(drawn, optimizers.NODE_MEMBERS.get("gepa_reflect"))
+        reflecting = NodeContext(drawn, NODE_MEMBERS.get("gepa_reflect"))
         with (
             scoped(
                 determinism=reflected_on.cycle.config.optimization.determinism,
@@ -3779,12 +3786,12 @@ def test_a_whole_prompt_rewrite_lands_in_the_slot_the_node_declares() -> None:
         ]
     )
     # A whole-prompt rewrite lands in the slot the node declares: none, or a held one, refuses.
-    unslotted = optimizers.unfit_pipeline(gepa, rubric_only, "termnorm")
+    unslotted = unfit_pipeline(gepa, rubric_only, "termnorm")
     assert unslotted is not None and "'review'" in unslotted and "'termnorm'" in unslotted, (
         "a peer was admitted on a node declaring no slot, or its refusal named no node or connector"
     )
     slot_held = two.narrow({"review": NodeSearchNarrowing(prompt_fields_held=["instruction"])})
-    assert optimizers.unfit_pipeline(gepa, slot_held, "termnorm") is not None, (
+    assert unfit_pipeline(gepa, slot_held, "termnorm") is not None, (
         "a peer was admitted to rewrite a slot its campaign holds"
     )
     with pytest.raises(ValidationError, match="rewrite_field"):
@@ -4027,8 +4034,10 @@ def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
 
     extract = CONNECTOR.extract_experiment
     assert extract is not None
-    seated, drawn = samples_from_dicts(extract(resolved({**task, "held_out": True}, other)))
-    searched, _ = samples_from_dicts(extract(resolved(task, other)))
+    seated, drawn = samples_from_dicts(
+        extract(CONNECTOR.pinned(resolved({**task, "held_out": True}, other)))
+    )
+    searched, _ = samples_from_dicts(extract(CONNECTOR.pinned(resolved(task, other))))
     assert seated.held_out and not searched.held_out, "a held-out environment was searched"
     assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
         "the seat entered the pin, so the held-out cell never replays once searched"
@@ -4280,7 +4289,7 @@ def _view(
     monkeypatch.setattr(node_context, "inner_cells", lambda: cells)
     seated = seat(stores, schema=schema, framing=framing, origin=(parent, lambda _s: sheet([])))
     run_init(seated.cycle)
-    return PotterView(NodeContext(seated, optimizers.NODE_MEMBERS.get("l1_generate")), Ladder())
+    return PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
 
 
 def _outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
@@ -4316,7 +4325,7 @@ def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
         voted={"ended_on": parent},
     )
     set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
-    view = PotterView(NodeContext(seated, optimizers.NODE_MEMBERS.get("l1_generate")), Ladder())
+    view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
     assert view.admission is not None and len(view.latest_sample_keys) == 20
     # Two arms of 20 coin-flip rows each: the two-proportion count at 80% power.
     z = NormalDist().inv_cdf(view.admission) + NormalDist().inv_cdf(0.8)
@@ -4437,7 +4446,7 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
             optimization={"optimizer": mixed.owners[node].name},
         )
         return (
-            NodeContext(proposing, optimizers.NODE_MEMBERS.get(node))
+            NodeContext(proposing, NODE_MEMBERS.get(node))
             .read(Children)
             .child([parent], overlay=overlay)
         )
@@ -4468,7 +4477,7 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
         )
     )
     sent = (
-        NodeContext(capo_seat, optimizers.NODE_MEMBERS.get("capo_mutate"))
+        NodeContext(capo_seat, NODE_MEMBERS.get("capo_mutate"))
         .read(Calls)
         .prompt()
         .compile_prompt(task_description="sort the list", instruction="Sort it.")

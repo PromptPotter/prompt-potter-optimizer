@@ -3,10 +3,12 @@ from __future__ import annotations
 import logging
 import os
 import secrets
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
-from typing import Any, Unpack, get_args
+from typing import Unpack, get_args
+
+from pydantic import BaseModel
 
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import (
@@ -688,11 +690,11 @@ class CampaignStore:
         hop: CycleHop,
         read: PipelineRead,
         *,
-        experiment: Mapping[str, Any] | None,
+        experiment: BaseModel | None,
         model_capabilities: CapabilityMenu,
     ) -> None:
         """Appended whenever this launch resolves other than the chain holds, a moved panel included."""
-        doc = None if experiment is None else dict(experiment)
+        doc = None if experiment is None else experiment.model_dump(mode="json", exclude_unset=True)
         held = scan_resolved_run(self.chain(hop))
         panel_moved = doc is not None and held.experiment is not None and held.experiment != doc
         if panel_moved:

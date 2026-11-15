@@ -289,48 +289,26 @@ row it closes.
   `RaceStandingRecord`s apart from the `Narration` that reads the same ledger. Root: the race standing
   is one fold every door reads. **Rides with:** the row above. **Re-test:**
   `git grep -n "_race_standings" -- promptpotter` is empty.
-- **DSPy derives its cell's priced pair beside core's**: `dspy_module.py::_in_process_run` calls
-  `pricing.py::priced_pair` off the payload's `params`, while core binds each node's pair once
-  (`sample_measurement.py::priced_pairs`); they agree only while the payload's `provider` is `NodeCall`'s.
-  Action: the cell takes the pair core bound. Fork: `InProcessRun` takes the bound pairs (every
-  in-process connector's signature, three ignoring it), or the cell's `CellBilling` carries them.
-  **Rides with:** rk-rest, which picks the fork. **Re-test:**
-  `git grep -n "priced_pair" -- promptpotter/connectors/dspy_module.py` is empty.
 - **A check-in cannot switch an upload between its connector's pipelines**: a draft edit has no chain
   key, so a mode outside the held chain is disabled (`PipelineSetupSection.tsx`), and
   `draft_build.py::_modes` ignores a definition's own `pipelines`. Action: a mode pick sets the draft's
   `pipelines.default`, its definition half. **Re-test:** pick TermNorm's `default` on an upload; the
   draft's `active_steps` is that chain.
-- **`LLMResponse.cost_usd` omits a resend `_admitted_send` made that may have billed**, so harbor's
-  `_AgentModel.cost_usd` can read below the book's. **Rides with:** rk-rest. **Re-test:** one 5xx then
-  an answer; the row's `cost_usd` against the ledger.
 - **A check-in's cycle plan selects beside its landing's refusal**: `checkin.py::_land_draft` refuses
   each overlay before landing, then `resolve_cycle_plan` selects and refuses again; planning needs the
   landed `Session`. Action: a check-in plans its cycles off the draft before landing, and a campaign's
-  cycle config carries its selection. **Rides with:** rk-rest. **Re-test:** one `select_optimizer` call
+  cycle config carries its selection. **Held:** a `Session` over a draft-held `ResolvedDataset` (rk-rest
+  cut it: `wiring.py::init_services`, `session_bank` and `dataset_experiment` read the landed
+  definition off disk). **Re-test:** one `select_optimizer` call
   between a draft's Start and its first cycle plan.
 - **A per-cell criterion naming a term no cell carries compiles** (`authored.py::scorer_of`, called at
   the check-in by `datasets/draft_patch.py`) and refuses per cell at the run. Root: `compiler.py::compile_scorer`
   refuses a name no owner holds, `evaluators.py::cell_name_owners` beside the campaign's own owners (the
   connector's terms and report keys, the observations); a check-in-only list in `draft_patch.py` would
-  be a second spelling of that roster. **Rides with:** rk-rest (the compiler is a hashed unit, so the
-  refusal moves digests); its Owns gain `scoring/formula/compiler.py` and
-  `datasets/draft_patch.py` (the `scorer_of` call). **Re-test:** a scoring edit `correct - no_such_term`
+  be a second spelling of that roster. **Held:** the owners ride the scoring spec first (rk-rest cut
+  it: no `scorer_of` reader outside the check-in holds them, and an optional owners argument is a
+  flag); the compiler is a hashed unit, so the refusal moves digests. **Re-test:** a scoring edit `correct - no_such_term`
   is refused.
-- **A scoring edit takes `matcher` and `dials`, which the compiler's block refuses**, converted by
-  `draft_patch.py::_folded_scoring` and `draft_campaign.py::draft_criterion`. Action: the compiler owns
-  the pick's spelling (`scoring/formula/`, a hashed unit), or the pick leaves
-  `config` (`domain/draft_edit.py`, `draft_build.py`, `IngestConversation.tsx`). **Rides with:** rk-rest,
-  beside the row above; its Owns gain `scoring/formula/`,
-  `draft_patch.py::_folded_scoring`, `draft_campaign.py::draft_criterion` and
-  `webapp/components/ingest/IngestConversation.tsx` (the pick's field). **Re-test:**
-  `git grep -n '"matcher"' -- promptpotter/application/datasets`.
-- **`connectors/protocol.py::InProcessWorkload.experiment` is a `Mapping`** that
-  `runner/inner/tasks.py::parse_resolved` re-parses at each reader. Action: each connector declares its
-  experiment model; the workload carries it parsed. **Rides with:** rk-rest; its Owns gain
-  `connectors/protocol.py::InProcessWorkload` and
-  `runner/inner/tasks.py::parse_resolved` with its readers. **Re-test:**
-  `git grep -n "parse_resolved(" -- promptpotter`.
 - **TermNorm serves no rewrite field**: TermNorm's `GET /pipeline` `llm_only.prompt_info` lacks
   `rewrite_field`. Action (TermNorm repo): serve `rewrite_field: instruction`, then
   `connectors/termnorm.py`'s `prompt_info` template line goes. **Re-test:**
@@ -714,10 +692,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (`scoring/closed_rounds.py` → `pipeline_resolve.py` → `jobs/quota.py` → `jobs/registry.py`). Action:
   the stop vocabulary moves to `domain/phases`. **Held:** no chain reaches `domain/phases` yet.
   **Re-test:** `git ls-files promptpotter/application/runner/termination.py` is non-empty.
-- **The optimizer registry is outside `optimizers/nodes.py`.** No digest walk holds it since the
-  behaviour keys: the fold moves `llm_nodes`, `unfit_pipeline` and `_members` with no treatment re-key.
-  **Rides with:** rk-rest.
-  **Re-test:** `promptpotter/application/optimizers/__init__.py` defines `NODE_MEMBERS`.
 
 ### batch/28 · faults
 

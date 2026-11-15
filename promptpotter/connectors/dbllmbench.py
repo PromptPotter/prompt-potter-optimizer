@@ -16,9 +16,15 @@ from typing import Any
 from uuid import uuid4
 
 import yaml
+from pydantic import BaseModel, ConfigDict
 
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
+from promptpotter.connectors.protocol import (
+    Connector,
+    InProcessWorkload,
+    PricedPair,
+    cell_envelope_of,
+)
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.sample import Sample
@@ -94,7 +100,15 @@ _TURN_CAP = 1200
 _COMMIT_LABEL = "org.promptpotter.db-llm-bench.commit"
 
 
-def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, Any]]:
+class DbllmbenchPanel(BaseModel):
+    """Lax on purpose: a key beyond the questions rides into the pin as the panel spelled it."""
+
+    model_config = ConfigDict(extra="allow", frozen=True)
+
+    questions: list[dict[str, Any]]
+
+
+def _extract_experiment(panel: DbllmbenchPanel) -> list[dict[str, Any]]:
     return [
         {
             "query": q["question"],
@@ -107,12 +121,12 @@ def _extract_experiment(experiment_data: Mapping[str, Any]) -> list[dict[str, An
                 "unanswerable": bool(q.get("unanswerable")),
             },
         }
-        for q in experiment_data["questions"]
+        for q in panel.questions
     ]
 
 
 def _upstream_question(workload: InProcessWorkload, sample: Sample) -> dict[str, Any]:
-    questions = (workload.experiment or {}).get("questions") or []
+    questions = workload.experiment.questions
     if sample.id >= len(questions) or questions[sample.id].get("question") != sample.query:
         raise CellUnscoreableError(
             f"dbllmbench question {sample.query[:80]!r} is not row {sample.id} of the "
@@ -133,7 +147,7 @@ def dbllmbench_wire_adapter(sample: Sample, pipeline_params: PipelineParams) -> 
 
 
 def _sent_spend_bound(
-    node: str, cfg: NodeCall, workload: InProcessWorkload
+    node: str, cfg: NodeCall, pair: PricedPair, workload: InProcessWorkload
 ) -> LLMSpendBound | None:
     if node != WRITER_NODE:
         return None
@@ -144,7 +158,7 @@ def _sent_spend_bound(
         raise ValueError(f"{where} declares no {absent}: its dataset's file names each value.")
     return sent_llm_bound(
         where,
-        (cfg.model, cfg.provider),
+        pair,
         cfg.max_tokens,
         workspace=workload.workspace,
         attempts=repetitions(cfg) * (max(retry_levels(cfg)) + 1),
@@ -377,7 +391,7 @@ def _failure(query: str, log: str, spent: dict[str, dict[str, object]]) -> CellU
 
 
 async def _in_process_run(
-    workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
+    workload: InProcessWorkload, sample: Sample, payload: dict[str, Any], _pairs: object
 ) -> dict[str, Any]:
     query = sample.query
     question = _upstream_question(workload, sample)
@@ -462,6 +476,7 @@ CONNECTOR = Connector(
     sent_spend_bound=_sent_spend_bound,
     cells_priced=True,
     extract_experiment=_extract_experiment,
+    experiment_model=DbllmbenchPanel,
     in_process_run=_in_process_run,
     preflight=_preflight,
     # Every cell queries the same database, so the ceiling is this machine's.

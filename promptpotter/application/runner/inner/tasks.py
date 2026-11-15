@@ -307,10 +307,6 @@ class ResolvedInnerPanel(FrozenModel):
         ]
 
 
-def parse_resolved(raw: object) -> ResolvedInnerPanel:
-    return ResolvedInnerPanel.model_validate(raw)
-
-
 def estimator() -> str:
     """What decides a cell's number, never ``APP_VERSION`` (each release would void every banked cell):
     the δ scale, what the outer model reads and this module (the seat's draw, its n rule, the
@@ -451,9 +447,8 @@ def _outer_cells(session: Session) -> InnerCells | None:
     samples and fingerprint came from."""
     if not session.backend_client.connector.self_optimization:
         return None
-    return parse_resolved(session.backend_client.workload.experiment).inner_panel.resolve_cells(
-        session.store
-    )
+    panel: ResolvedInnerPanel = session.backend_client.workload.experiment
+    return panel.inner_panel.resolve_cells(session.store)
 
 
 def inner_spawn_of(session: Session) -> InnerSpawnContext | None:

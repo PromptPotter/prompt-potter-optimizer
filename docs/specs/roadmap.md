@@ -201,7 +201,11 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   to the token's delegable scopes. A filing records its token, a stream re-checks its carrier each
   tick, the account's own act is the owner-only `account.self`, a cancel acts under the rung of what it
   stops, and the rung is checked before the target resolves. `tokens.json` is a survivor.
-- **then:** faults-2a beside rk-rest; then mcp on mkey's tip beside faults-2b; then tv-2.
+- **landed 85, rk-rest:** a cell's priced pairs reach every in-process run, a call costs what its
+  admissions booked (a resend included), each connector declares its typed experiment model, the
+  node registry lives beside its members, and the compiler owns the matcher pick. No decision or
+  request moved; the estimator, potter and capo-pobb digests moved by code alone.
+- **then:** faults-2a; then mcp on mkey's tip beside faults-2b; then tv-2.
 
 The re-keys end at the behaviour-key switch.
 

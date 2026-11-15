@@ -11,8 +11,7 @@ from pydantic import BaseModel, Field
 from pydantic.fields import FieldInfo
 from pydantic_core import to_jsonable_python
 
-from promptpotter.application import optimizers
-from promptpotter.application.optimizers.nodes import CountKnob
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CountKnob
 from promptpotter.domain.campaign import RunDeclaration
 from promptpotter.domain.campaign_config import CampaignConfig, Estimand, Knob, knob_label
 from promptpotter.domain.pipeline_schema import KnobLayer, KnobLayers
@@ -80,16 +79,14 @@ def _node_prefix(node: str) -> tuple[str, ...]:
 def _node_decls(selected: SelectedOptimizer) -> dict[tuple[str, ...], KnobDecl]:
     out: dict[tuple[str, ...], KnobDecl] = {}
     for node in selected.member_nodes:
-        for decl in _walk(optimizers.NODE_MEMBERS.get(node).knobs, _node_prefix(node)):
+        for decl in _walk(NODE_MEMBERS.get(node).knobs, _node_prefix(node)):
             out[decl.path] = decl
     return out
 
 
 def member_knob_count() -> int:
     """Every registered member's knob leaves — what the ledger's config-leaf row adds to ``KNOBS``."""
-    return sum(
-        len(_walk(m.knobs, _node_prefix(n))) for n, m in optimizers.NODE_MEMBERS.table.items()
-    )
+    return sum(len(_walk(m.knobs, _node_prefix(n))) for n, m in NODE_MEMBERS.table.items())
 
 
 def _models_in(annotation: object) -> Iterator[type[BaseModel]]:
@@ -346,8 +343,7 @@ def node_knobs(selected: SelectedOptimizer) -> list[ConfigNodeKnobs]:
     return [
         ConfigNodeKnobs(node=node, kind=str(selected.node(node).kind), keys=list(keys))
         for node in selected.member_nodes
-        if node not in initializers
-        and (keys := optimizers.NODE_MEMBERS.get(node).knobs.model_fields)
+        if node not in initializers and (keys := NODE_MEMBERS.get(node).knobs.model_fields)
     ]
 
 

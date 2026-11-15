@@ -31,6 +31,7 @@ from promptpotter.application.optimizer_manifest import (
     checkin_manifest,
     select_optimizer,
 )
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.scoring.evaluators import connector_name_refusals
 from promptpotter.application.scoring.judges import registry as judge_registry
@@ -94,7 +95,7 @@ def complete_registries() -> None:
             raise RuntimeError(f"{where}: {'; '.join(shadowed)}.")
     judge_registry.JUDGES.complete()
     optimizers.MANIFESTS.complete()
-    for member in optimizers.NODE_MEMBERS.table.values():
+    for member in NODE_MEMBERS.table.values():
         member.complete()
     STATE_KINDS.complete()
     walked(projections)

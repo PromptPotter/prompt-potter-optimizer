@@ -4,7 +4,7 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator, Callable, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,7 +13,7 @@ from typing import Any
 import httpx
 
 from promptpotter.config.paths import MACHINE_DIR
-from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload
+from promptpotter.connectors.protocol import Connector, InProcessRun, InProcessWorkload, PricedPair
 from promptpotter.domain.connector import BackendUnreachableError, ReplyReader, data_envelope
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSpendBound, PipelineNode
@@ -186,10 +186,10 @@ class BackendClient:
 
     def node_spend_bound(self, node: PipelineNode, cfg: NodeCall) -> NodeSpendBound | None:
         if (sent := self._connector.sent_spend_bound) is not None:
-            return sent(node.name, cfg, self.workload)
+            return sent(node.name, cfg, self.priced_as(cfg), self.workload)
         return node.spend_bound
 
-    def priced_as(self, cfg: NodeCall) -> tuple[str | None, str | None]:
+    def priced_as(self, cfg: NodeCall) -> PricedPair:
         return priced_pair(
             cfg.model, cfg.provider, names_provider=self._connector.model_names_provider
         )
@@ -255,6 +255,7 @@ class BackendClient:
         pipeline_params: PipelineParams,
         *,
         bound: SendBound | None,
+        pairs: Mapping[str, PricedPair],
         billed: CellBilling[S],
     ) -> tuple[dict[str, Any], S]:
         """Never resends a request the backend may still be working: a read timeout is terminal."""
@@ -263,7 +264,7 @@ class BackendClient:
 
         if self._connector.execution != "remote_http":
             return await self._in_process_until_admitted(
-                sample, payload, bound=bound, billed=billed
+                sample, payload, bound=bound, pairs=pairs, billed=billed
             )
         if bound is None:
             raise RuntimeError("a remote cell is held whole, so it needs the bound its nodes serve")
@@ -281,6 +282,7 @@ class BackendClient:
         payload: dict[str, Any],
         *,
         bound: SendBound | None,
+        pairs: Mapping[str, PricedPair],
         billed: CellBilling[S],
     ) -> tuple[dict[str, Any], S]:
         run = self._connector.in_process_run
@@ -298,7 +300,7 @@ class BackendClient:
             async with self.backpressure.send() as ticket, machine:
                 try:
                     result = await self._in_process_cell(
-                        run, sample, payload, bound=bound, billed=billed
+                        run, sample, payload, bound=bound, pairs=pairs, billed=billed
                     )
                 except CellThrottledError as exc:
                     self.backpressure.throttled(ticket, headers=None, body=str(exc))
@@ -426,6 +428,7 @@ class BackendClient:
         payload: dict[str, Any],
         *,
         bound: SendBound | None,
+        pairs: Mapping[str, PricedPair],
         billed: CellBilling[S],
     ) -> tuple[dict[str, Any], S]:
         with contextlib.ExitStack() as hold:
@@ -440,7 +443,7 @@ class BackendClient:
                 )
             started = time.monotonic()
             try:
-                result = await run(self.workload, sample, payload)
+                result = await run(self.workload, sample, payload, pairs)
             except CellUnscoreableError as exc:
                 # `spent is None`: nobody learned what it paid, so the whole bound stays held.
                 if admission is not None:

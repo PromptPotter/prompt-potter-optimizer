@@ -39,7 +39,6 @@ from promptpotter.application.runner.inner.tasks import (
     inner_spawn_context,
     panel_cell,
     parse_inner_panel,
-    parse_resolved,
     seat_draw,
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
@@ -421,22 +420,22 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
 MAX_CELLS_IN_FLIGHT = 4
 
 
-def _inner_cells(stores: Stores, experiment: Mapping[str, Any] | None) -> InnerCells:
+def _inner_cells(stores: Stores, experiment: ResolvedInnerPanel | None) -> InnerCells:
     if experiment is None:
         raise PayloadInvalidError(
             "an outer dataset's graph and identity derive from its panel, "
             "which this box does not hold.",
             code="pipeline_config_invalid",
         )
-    return parse_resolved(experiment).inner_panel.resolve_cells(stores)
+    return experiment.inner_panel.resolve_cells(stores)
 
 
-def _pipeline_declaration(stores: Stores, experiment: Mapping[str, Any] | None) -> dict[str, Any]:
+def _pipeline_declaration(stores: Stores, experiment: ResolvedInnerPanel | None) -> dict[str, Any]:
     return _inner_cells(stores, experiment).pipeline()
 
 
 def _identity_config(
-    stores: Stores, experiment: Mapping[str, Any] | None, _base_url: str
+    stores: Stores, experiment: ResolvedInnerPanel | None, _base_url: str
 ) -> dict[str, dict[str, Any]]:
     """What reads every cell's number alike; what measures ONE cell is in its pin (`InnerTaskSpec.key`)."""
     cells = _inner_cells(stores, experiment)
@@ -456,26 +455,25 @@ def promptpotter_wire_adapter(
     return payload
 
 
-def _resolve_inner_panel(stores: Stores, panel: Mapping[str, Any]) -> dict[str, Any]:
-    """Each cell's instrument beside the panel; only what was declared survives the dump, so a
-    field that gains a default re-keys no banked cell."""
+def _resolve_inner_panel(stores: Stores, panel: Mapping[str, Any]) -> ResolvedInnerPanel:
+    """Each cell's instrument beside the panel; only what was declared survives the pin's dump,
+    so a field that gains a default re-keys no banked cell."""
     parsed = parse_inner_panel(panel)
     cells = parsed.resolve_cells(stores)
-    resolved = ResolvedInnerPanel(
+    return ResolvedInnerPanel(
         inner_panel=parsed,
         instruments={t.id: cells.spec(t).key() for t in parsed.tasks},
         datasets={t.id: parsed.dataset_for(t) for t in parsed.tasks},
     )
-    return resolved.model_dump(mode="json", exclude_unset=True)
 
 
-def _extract_experiment(experiment_data: dict[str, Any]) -> list[dict[str, Any]]:
+def _extract_experiment(panel: ResolvedInnerPanel) -> list[dict[str, Any]]:
     """``ground_truth`` is ``None``: an L4 cell is graded by its outer proxies, never a label."""
-    return parse_resolved(experiment_data).samples()
+    return panel.samples()
 
 
 async def _in_process_run(
-    _workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
+    _workload: InProcessWorkload, sample: Sample, payload: dict[str, Any], _pairs: object
 ) -> dict[str, Any]:
     return await run_inner_cycle(sample, payload)
 
@@ -494,6 +492,7 @@ CONNECTOR = Connector(
     execution="in_process",
     wire_adapter=promptpotter_wire_adapter,
     extract_experiment=_extract_experiment,
+    experiment_model=ResolvedInnerPanel,
     in_process_run=_in_process_run,
     max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
     holds_own_sends=True,

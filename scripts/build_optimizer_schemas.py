@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from promptpotter.application import optimizers
 from promptpotter.application.bench.task_context import CheckinOutput
 from promptpotter.application.optimizer_manifest import authored_manifest
-from promptpotter.application.optimizers.nodes import LlmNode
+from promptpotter.application.optimizers.nodes import ENTRY_POINT_GROUP, LlmNode, llm_nodes
 from promptpotter.config.paths import checkin_assets_root
 from promptpotter.domain.pipeline_manifest import ManifestSwitch
 from promptpotter.infrastructure.store.io import read_yaml
@@ -33,7 +33,7 @@ def _example() -> tuple[list[optimizers.ManifestDir], dict[str, LlmNode]]:
     sys.path.insert(0, str(_EXAMPLE))
     points = tomllib.loads((_EXAMPLE / "pyproject.toml").read_text(encoding="utf-8"))
     groups = points["project"]["entry-points"]
-    members = [_resolved(ref) for ref in groups[optimizers.ENTRY_POINT_GROUP].values()]
+    members = [_resolved(ref) for ref in groups[ENTRY_POINT_GROUP].values()]
     stated = {m.name: m for m in members if isinstance(m, LlmNode)}
     return [
         _resolved(ref) for ref in groups[optimizers.MANIFEST_ENTRY_POINT_GROUP].values()
@@ -42,7 +42,7 @@ def _example() -> tuple[list[optimizers.ManifestDir], dict[str, LlmNode]]:
 
 def _manifests() -> dict[Path, Mapping[str, type[BaseModel]]]:
     example, example_nodes = _example()
-    stated = {**optimizers.llm_nodes(), **example_nodes}
+    stated = {**llm_nodes(), **example_nodes}
     out: dict[Path, Mapping[str, type[BaseModel]]] = {
         checkin_assets_root(): {"checkin": CheckinOutput}
     }

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import yaml
-from pydantic import Field, TypeAdapter, ValidationError
+from pydantic import BaseModel, Field, TypeAdapter, ValidationError
 
 from promptpotter import connectors
 from promptpotter.config.paths import install_datasets_root
@@ -421,23 +421,24 @@ DEFINITION_READ_ERRORS = (DatasetAccessError, FileUnreadableError, PayloadInvali
 
 @dataclass(frozen=True)
 class PanelRead:
-    experiment: dict[str, Any]
+    # The connector's `experiment_model`.
+    experiment: BaseModel
     # Where the panel was read: a local path it names resolves against it.
     directory: Path
 
 
-def _declared_panel(stores: Stores, dataset: ResolvedDataset) -> PanelRead | None:
+def _declared_panel(stores: Stores, dataset: ResolvedDataset) -> tuple[dict[str, Any], Path] | None:
     materialized = stores.tenant_datasets.materialized_panel_dir(dataset.name)
     held = read_file(
         materialized / MATERIALIZED_PANEL_FILE,
         lambda raw: MATERIALIZED_PANEL.validate_python(parse_yaml(raw)),
     )
     if held is not None:
-        return PanelRead(held, materialized)
+        return held, materialized
     definition = read_dataset_definition(dataset)
     if definition is None or definition.panel is None or definition.panel_dir is None:
         return None
-    return PanelRead(definition.panel, definition.panel_dir)
+    return definition.panel, definition.panel_dir
 
 
 def dataset_experiment(
@@ -447,14 +448,14 @@ def dataset_experiment(
     materialized on no machine yet is ``None``, not an error; a malformed one is."""
     if not connector.owns_panel:
         return None
-    declared = _declared_panel(stores, dataset)
-    if declared is None or connector.resolve_experiment is None:
-        return declared
-    return PanelRead(connector.resolve_experiment(stores, declared.experiment), declared.directory)
+    if (declared := _declared_panel(stores, dataset)) is None:
+        return None
+    panel, directory = declared
+    return PanelRead(connector.experiment(stores, panel), directory)
 
 
 def extract_panel_rows(
-    connector: Connector, dataset_name: str, experiment: dict[str, Any]
+    connector: Connector, dataset_name: str, experiment: BaseModel
 ) -> list[dict[str, Any]]:
     assert connector.extract_experiment is not None, "a panel is read only where one is owned"
     try:
@@ -477,17 +478,11 @@ def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
     return connectors.CONNECTORS.get(named)
 
 
-def dataset_panel_rows(
-    stores: Stores, dataset: ResolvedDataset, *, experiment: dict[str, Any] | None = None
-) -> list[dict[str, Any]] | None:
-    """*experiment* is the panel a cycle pinned: a campaign is read off what it measured."""
-    connector = dataset_connector(dataset)
-    if connector is None:
+def dataset_panel_rows(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]] | None:
+    if (connector := dataset_connector(dataset)) is None:
         return None
-    if experiment is None:
-        read = dataset_experiment(stores, dataset, connector)
-        experiment = None if read is None else read.experiment
-    return None if experiment is None else extract_panel_rows(connector, dataset.name, experiment)
+    read = dataset_experiment(stores, dataset, connector)
+    return None if read is None else extract_panel_rows(connector, dataset.name, read.experiment)
 
 
 def readable_task_context(stores: Stores, dataset: ResolvedDataset) -> TaskDecomposition:

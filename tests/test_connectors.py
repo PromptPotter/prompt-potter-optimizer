@@ -89,6 +89,7 @@ def _dspy_cell(program: dspy_module.DspyProgram, max_calls: int, ledger: Path) -
                 Sample(id=0, query="q", ground_truth="4"),
                 PipelineParams().with_nodes({dspy_module.PROGRAM_NODE: config}),
                 bound=SendBound(input_tokens=20_000, output_tokens=2_000, usd=0.5),
+                pairs=pairs,
                 billed=cell_billing(pipeline_schema([]), pairs, {}),
             )
 
@@ -145,6 +146,7 @@ def test_a_termnorm_reload_under_sixteen_cells_resends_the_terms_once_and_fails_
                 sample,
                 params,
                 bound=bound,
+                pairs={},
                 billed=cell_billing(pipeline_schema([]), {}, {"llm_only": bound}),
             )
 
@@ -229,7 +231,7 @@ def test_a_harbor_roster_repinned_under_a_live_server_resolves_as_pinned(
         (tmp_path / "harbor-roster.bench@1.0.json").write_text(
             json.dumps({"tasks": tasks}), encoding="utf-8"
         )
-        resolved = [t["id"] for t in resolve(stores, panel)["tasks"]]
+        resolved = [t["id"] for t in resolve(stores, panel).model_dump()["tasks"]]
         assert resolved == pinned, f"a live server resolved {resolved} off a re-pinned roster"
 
 

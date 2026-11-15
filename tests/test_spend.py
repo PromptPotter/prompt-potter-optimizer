@@ -249,7 +249,7 @@ from promptpotter.infrastructure.llm.capabilities import (
     CAPABILITY_FILE,
     resolve_model_capabilities,
 )
-from promptpotter.infrastructure.llm.openai_compat import ChatReply, billed_cost
+from promptpotter.infrastructure.llm.openai_compat import ChatReply
 from promptpotter.infrastructure.llm.pricing import (
     PriceTier,
     Rate,
@@ -266,6 +266,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
     SpendBook,
     admitted,
+    booked_sum,
     bound_account,
     replied,
     reserved,
@@ -593,7 +594,7 @@ def test_a_wire_cost_reaches_the_reply_and_a_bill_sums_the_parts_that_named_one(
         ((1e-05, None), 1e-05),
         ((None, None), None),
     ):
-        assert billed_cost(*reported) == (None if billed is None else pytest.approx(billed)), (
+        assert booked_sum(*reported) == (None if billed is None else pytest.approx(billed)), (
             f"{reported}: a bill is the sum of the parts that named one, absent only when none did"
         )
 
@@ -2859,6 +2860,29 @@ def test_a_send_that_left_and_named_no_price_stays_held_at_its_bound(
 
 
 @pytest.mark.usefixtures("run_bound")
+def test_a_resent_call_costs_what_its_admissions_booked(tmp_path: Path, offline: Router) -> None:
+    _priced_wire(offline)
+    sent: list[int] = []
+
+    def blip_then_answer(_body: dict[str, Any]) -> Said:
+        sent.append(1)
+        if len(sent) == 1:
+            return httpx.Response(500, json={"error": "blip"})
+        usage = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8, "cost": 0.0042}
+        return completion("ok", model="gpt-x", usage=usage)
+
+    offline.llm.says = blip_then_answer
+    book = spend_book(0.05)
+    with _billing_on(CycleEventLog(tmp_path / "resent.jsonl"), book):
+        reply = jumping_clock(_owned_chat("resent"))
+    booked = book.spent.sent_usd + book.spent.unreported_usd
+    assert len(sent) == 2 and book.spent.unreported_usd > 0, "the 5xx was not resent and held"
+    assert reply.cost_usd == pytest.approx(booked), (
+        "a call's cost read below what its resent sends booked"
+    )
+
+
+@pytest.mark.usefixtures("run_bound")
 def test_one_unit_of_work_resends_from_one_budget_whichever_loop_asks(offline: Router) -> None:
     wire = _priced_wire(offline)
 
@@ -2941,6 +2965,7 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
                 Sample(id=0, query="q", ground_truth=None),
                 PipelineParams(),
                 bound=whole_cell,
+                pairs={},
                 billed=cell_billing(pipeline_schema([]), {}, {"n": attempt}),
             )
 
@@ -3019,13 +3044,14 @@ def test_a_container_trial_reruns_on_the_budget_its_connector_sized(
         async with CellEnvelope(600.0, attempts=harbor.CONNECTOR.cell_attempts, label="task"):
             return await run_trial(
                 InProcessWorkload(
-                    experiment={"agent": {"environment": "docker"}},
+                    experiment=harbor.HarborPanel(tasks=[], agent={"environment": "docker"}),
                     experiment_dir=tmp_path,
                     program=None,
                     workspace=None,
                 ),
                 Sample(id=0, query="task", ground_truth=None, source_pin={}),
                 {"config": {harbor.SKILL_DELIVERY_KEY: "agent_skill"}},
+                {},
             )
 
     with pytest.raises(CellInfrastructureError):
@@ -3113,6 +3139,7 @@ def dspy_cells(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router)
                     Sample(id=0, query="q", ground_truth="4"),
                     PipelineParams().with_nodes({dspy_module.PROGRAM_NODE: config}),
                     bound=SendBound(input_tokens=20_000, output_tokens=2_000, usd=0.5),
+                    pairs=pairs,
                     billed=cell_billing(pipeline_schema([]), pairs, {}),
                 )
 
@@ -3225,7 +3252,7 @@ def agent_cells(tmp_path: Path, offline: Router) -> _AgentCells:
     cut_short = [True]
     three_answered = asyncio.Event()
 
-    async def episode_run(_workload: Any, _sample: Any, _payload: dict[str, Any]) -> dict[str, Any]:
+    async def episode_run(*_args: Any) -> dict[str, Any]:
         seams.append(
             seam := harbor._AgentModel(
                 NodeCall(model="gpt-x", provider="openai", max_tokens=100), 1000
@@ -3249,6 +3276,7 @@ def agent_cells(tmp_path: Path, offline: Router) -> _AgentCells:
                 Sample(id=sample_id, query="q", ground_truth=None),
                 PipelineParams(),
                 bound=whole,
+                pairs={},
                 billed=lambda _data: (None, None),
             )
 

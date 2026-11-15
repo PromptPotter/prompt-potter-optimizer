@@ -48,7 +48,13 @@ from promptpotter.infrastructure.llm.send_pacing import (
     raise_if_request_too_large,
     window_slot,
 )
-from promptpotter.infrastructure.llm.spend_book import Billed, CallLabel, admitted, answered
+from promptpotter.infrastructure.llm.spend_book import (
+    Billed,
+    CallLabel,
+    admitted,
+    answered,
+    booked_sum,
+)
 from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.errors import ErrorCategory, SendRefusedError, validation_reason
 
@@ -168,12 +174,6 @@ class FaultedReplyError(httpx.HTTPStatusError):
             response=reply,
         )
         self.status_code = fault["code"]
-
-
-def billed_cost(first: float | None, second: float | None) -> float | None:
-    if first is None and second is None:
-        return None
-    return (first or 0.0) + (second or 0.0)
 
 
 def _plus(a: TokenAccount | None, b: TokenAccount | None) -> TokenAccount | None:
@@ -302,9 +302,10 @@ class _ParsedReply:
     response: ChatReply
     content: str
     parsed: Any
+    # What every send of the call booked, *response*'s included.
+    booked_usd: float | None
     # What the rungs before *response* billed.
     earlier: TokenAccount | None = field(default_factory=TokenAccount)
-    earlier_cost: float | None = None
     repair_errors: list[str] = field(default_factory=list)
 
 
@@ -351,7 +352,7 @@ def _llm_response(landed: _ParsedReply, provider_name: str) -> LLMResponse:
         tool_calls=[call.parsed(provider_name) for call in choice.tool_calls or ()],
         model=response.model,
         usage=_plus(response.tokens, landed.earlier),
-        cost_usd=billed_cost(landed.earlier_cost, response.cost),
+        cost_usd=landed.booked_usd,
         served_by=response.served_by,
         finish_reason=response.finish_reason,
         parsed=landed.parsed,
@@ -417,13 +418,15 @@ class OpenAICompatibleClient:
         ceiling: RateCeiling | None,
         send: Callable[[], Awaitable[tuple[object | None, _R]]],
         billed: Callable[[_R], Billed | None],
-    ) -> _R:
-        """``billed`` answers ``None`` for a reply that reports no usage, which leaves the send unreported."""
+    ) -> tuple[_R, float | None]:
+        """``billed`` answers ``None`` for a reply that reports no usage, which leaves the send
+        unreported; beside the reply, what every attempt booked."""
         bound = send_bound(ceiling, sent=sent, max_tokens=max_tokens)
         backpressure = self._backpressure.setdefault(
             model, Backpressure(f"{self._provider_name} {model}")
         )
         budget = drawn_budget()
+        booked: float | None = None
         while True:
             # Queued for the window BEFORE it is held: one cancelled while it waits holds nothing.
             async with (
@@ -441,6 +444,7 @@ class OpenAICompatibleClient:
                     except Exception as exc:
                         outcome = failed_send(exc, credit_statuses=self.CREDIT_REFUSAL_STATUSES)
                         admission.close(outcome)
+                        booked = booked_sum(booked, admission.booked_usd)
                         if outcome.failure is ErrorCategory.PROVIDER_CREDIT:
                             raise SendRefusedError(
                                 f"{self._provider_name} refused the call for lack of credit: "
@@ -476,7 +480,7 @@ class OpenAICompatibleClient:
                         admission.close(answered(spent))
                         if spent is not None:
                             slot.billed(spent.usage.total)
-                        return reply
+                        return reply, booked_sum(booked, admission.booked_usd)
             await held_wait(wait, f"{label.node} {self._provider_name}")
 
     async def _post(self, body: dict[str, Any]) -> httpx.Response:
@@ -492,11 +496,13 @@ class OpenAICompatibleClient:
         # One read per call: the price its body caps a host at is the one each send is admitted on.
         ceiling = await hold_ceiling(request.model, self._provider)
         request_params = self._request_params(request, ceiling)
-        response, content, validation_err, parsed = await self._one_attempt(
+        response, content, validation_err, parsed, booked = await self._one_attempt(
             request_params, response_model, response_schema, label, ceiling
         )
         if validation_err is None:
-            return _llm_response(_ParsedReply(response, content, parsed), self._provider_name)
+            return _llm_response(
+                _ParsedReply(response, content, parsed, booked), self._provider_name
+            )
         landed = await self._climb_retry_ladder(
             request_params,
             response_model,
@@ -506,6 +512,7 @@ class OpenAICompatibleClient:
             response,
             content,
             validation_err,
+            booked,
         )
         return _llm_response(landed, self._provider_name)
 
@@ -563,13 +570,14 @@ class OpenAICompatibleClient:
         response: ChatReply,
         content: str,
         rejected: ValidationError,
+        booked: float | None,
     ) -> _ParsedReply:
         validation_err: ValidationError | None
         validation_err = rejected
         repair_errors: list[str] = []
         # Captured before `response` is rebound to a retry's: the FAILING attempt's own account.
         first = response.tokens
-        earlier, earlier_cost = first, response.cost
+        earlier = first
         first_finish_reason = response.finish_reason
         schema_name = response_model.__name__ if response_model else "<schema>"
         content_len = len(content.strip())
@@ -631,9 +639,10 @@ class OpenAICompatibleClient:
                 len(ladder),
                 truncate(repair_errors[-1], 900),
             )
-            response, content, validation_err, parsed = await self._one_attempt(
+            response, content, validation_err, parsed, rung = await self._one_attempt(
                 retry_params, response_model, response_schema, label, ceiling
             )
+            booked = booked_sum(booked, rung)
             if validation_err is None:
                 break
             if attempt_no == len(ladder):
@@ -659,8 +668,7 @@ class OpenAICompatibleClient:
                 )
                 raise err from validation_err
             earlier = _plus(earlier, response.tokens)
-            earlier_cost = billed_cost(earlier_cost, response.cost)
-        return _ParsedReply(response, content, parsed, earlier, earlier_cost, repair_errors)
+        return _ParsedReply(response, content, parsed, booked, earlier, repair_errors)
 
     async def _one_attempt(
         self,
@@ -669,7 +677,7 @@ class OpenAICompatibleClient:
         response_schema: dict[str, Any] | None,
         label: CallLabel,
         ceiling: RateCeiling | None,
-    ) -> tuple[ChatReply, str, ValidationError | None, Any]:
+    ) -> tuple[ChatReply, str, ValidationError | None, Any, float | None]:
         async def send() -> tuple[object | None, ChatReply]:
             try:
                 reply = await self._post(request_params)
@@ -682,7 +690,7 @@ class OpenAICompatibleClient:
                 raise FaultedReplyError(reply, said["error"])
             return reply.headers, said
 
-        response = await self._admitted_send(
+        response, booked = await self._admitted_send(
             label,
             model=request_params["model"],
             messages=request_params["messages"],
@@ -701,15 +709,15 @@ class OpenAICompatibleClient:
         content = response.choices[0].content or ""
         if response.choices[0].tool_calls:
             # The calls are the answer: no schema governs a turn that asks for tools.
-            return response, content, None, None
+            return response, content, None, None, booked
 
         try:
             parsed = parse_response_content(
                 content, response_model, response_schema, self._provider_name
             )
         except ValidationError as err:
-            return response, content, err, None
-        return response, content, None, parsed
+            return response, content, err, None, booked
+        return response, content, None, parsed, booked
 
     def _refused_generation(
         self, exc: httpx.HTTPStatusError, request_params: dict[str, Any]

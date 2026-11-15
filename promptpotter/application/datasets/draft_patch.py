@@ -28,11 +28,12 @@ from promptpotter.application.pipeline_resolve import (
 from promptpotter.application.preflight import refuse_unpriced, unpriced_routes
 from promptpotter.application.scoring.formula.compiler import (
     DIALS_KEY,
+    MATCHER_KEY,
+    SCORING_BLOCK_KEYS,
     campaign_terms,
     parse_dials,
     spell_dials,
 )
-from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.domain.campaign_config import CAMPAIGN_RULE
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
@@ -209,9 +210,6 @@ def _stamp_optimizer(config: dict[str, Any], running: str) -> dict[str, Any]:
     return {**config, "optimization": {**optimization, "optimizer": running}}
 
 
-_SCORING_EDIT_KEYS = frozenset({"matcher", DIALS_KEY, "per_sample", "per_cell"})
-
-
 def _folded_scoring(
     running: str | dict[str, str] | None, edit: object, terms: Mapping[str, CellTerm]
 ) -> object:
@@ -221,19 +219,16 @@ def _folded_scoring(
     *terms* are the patched draft's backend's: what its dials may weigh."""
     if not isinstance(edit, dict):
         return edit
-    if unknown := sorted(set(edit) - _SCORING_EDIT_KEYS):
+    if unknown := sorted(set(edit) - SCORING_BLOCK_KEYS):
         raise PayloadInvalidError(
-            f"patch.config.scoring names {unknown}; a scoring edit takes {sorted(_SCORING_EDIT_KEYS)}."
+            f"patch.config.scoring names {unknown}; a scoring edit takes {sorted(SCORING_BLOCK_KEYS)}."
         )
     block = dict(running) if isinstance(running, dict) else {"per_sample": running}
-    if "matcher" in edit:
-        if edit["matcher"] not in MATCHERS:
-            raise PayloadInvalidError(
-                f"patch.config.scoring.matcher {edit['matcher']!r} is none of {sorted(MATCHERS)}."
-            )
-        block["per_sample"] = f"{edit['matcher']}(predicted, ground_truth)"
-    if "per_sample" in edit:
-        block["per_sample"] = edit["per_sample"]
+    # The compiler's block, as stored: a pick replaces the formula, and a formula the pick.
+    for key, other in ((MATCHER_KEY, "per_sample"), ("per_sample", MATCHER_KEY)):
+        if key in edit:
+            block.pop(other, None)
+            block[key] = edit[key]
     if "per_cell" in edit:
         block.pop(DIALS_KEY, None)
         block["per_cell"] = edit["per_cell"]

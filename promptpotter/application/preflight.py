@@ -4,9 +4,9 @@ import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from promptpotter.application import optimizers
 from promptpotter.application.config_map import check_couplings
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
+from promptpotter.application.optimizers.nodes import unfit_pipeline
 from promptpotter.domain.campaign import Arm
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_manifest import CHECKIN_NODE
@@ -323,7 +323,7 @@ def refuse_unfit_pipeline(
     selected: SelectedOptimizer, schema: PipelineSchema, connector: str
 ) -> None:
     """A member that cannot write the chain's prompt nodes would raise inside round 1, after the origin is paid."""
-    if (unfit := optimizers.unfit_pipeline(selected, schema, connector)) is not None:
+    if (unfit := unfit_pipeline(selected, schema, connector)) is not None:
         raise PayloadInvalidError(unfit, code="optimizer_unfit_pipeline")
 
 

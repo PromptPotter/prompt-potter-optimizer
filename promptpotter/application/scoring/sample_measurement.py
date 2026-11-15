@@ -20,7 +20,7 @@ from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.classification import terminal_ranking
 from promptpotter.application.scoring.evaluators import materialize_sample_values
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
-from promptpotter.connectors.protocol import Connector
+from promptpotter.connectors.protocol import Connector, PricedPair
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import (
     LLMSpendBound,
@@ -133,10 +133,6 @@ assert _INFRA_KEYS <= PIPELINE_KEYS, (
 )
 
 _SPEND_KEYS = ("step_tokens", "step_timings")
-
-
-PricedPair = tuple[str | None, str | None]
-"""The ``(model, provider)`` one node's sends are priced as (``BackendClient.priced_as``)."""
 
 _UNROUTED: PricedPair = (None, None)
 
@@ -624,6 +620,7 @@ async def _send_cell(
                     sample,
                     pipeline_params=wire_params,
                     bound=bound,
+                    pairs=pairs,
                     billed=cell_billing(
                         session.pipeline_schema,
                         pairs,

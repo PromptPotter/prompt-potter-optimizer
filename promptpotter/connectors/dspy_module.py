@@ -5,11 +5,16 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
-from collections.abc import Awaitable, Callable, Coroutine
+from collections.abc import Awaitable, Callable, Coroutine, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.connectors.protocol import Connector, InProcessWorkload, cell_envelope_of
+from promptpotter.connectors.protocol import (
+    Connector,
+    InProcessWorkload,
+    PricedPair,
+    cell_envelope_of,
+)
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE, LLMSpendBound
 from promptpotter.domain.sample import Sample
@@ -18,7 +23,6 @@ from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.capabilities import sent_llm_bound
 from promptpotter.infrastructure.llm.openai_compat import ReportedUsage
-from promptpotter.infrastructure.llm.pricing import priced_pair
 from promptpotter.infrastructure.llm.send_failure import failed_send
 from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
 from promptpotter.infrastructure.llm.spend_book import (
@@ -109,9 +113,7 @@ _CELL_ENVELOPE_S = 600.0
 class _ProgramCalls:
     """A forward-only student calls from a worker thread; the spend book is the event loop's."""
 
-    def __init__(
-        self, sample_id: int, max_calls: int | None, priced_as: tuple[str | None, str | None]
-    ) -> None:
+    def __init__(self, sample_id: int, max_calls: int | None, priced_as: PricedPair) -> None:
         self.what = f"dspy example {sample_id}"
         self.calls_left = max_calls
         self.model, self.provider = priced_as
@@ -318,14 +320,14 @@ def _metered(lm: Any, sends: _ProgramCalls, changed: dict[str, Any]) -> Any:
 
 
 def _sent_spend_bound(
-    node: str, cfg: NodeCall, workload: InProcessWorkload
+    node: str, cfg: NodeCall, pair: PricedPair, workload: InProcessWorkload
 ) -> LLMSpendBound | None:
     # `max_calls` is the program's opt-in ceiling: without it each call is admitted on its own.
     if node != PROGRAM_NODE or (calls := (cfg.model_extra or {}).get("max_calls")) is None:
         return None
     return sent_llm_bound(
         f"dspy connector: `nodes.{PROGRAM_NODE}.config`",
-        priced_pair(cfg.model, cfg.provider, names_provider=CONNECTOR.model_names_provider),
+        pair,
         cfg.max_tokens,
         workspace=workload.workspace,
         attempts=int(calls),
@@ -343,7 +345,10 @@ async def _acall(student: Any, example: Any) -> Any:
 
 
 async def _in_process_run(
-    workload: InProcessWorkload, sample: Sample, payload: dict[str, Any]
+    workload: InProcessWorkload,
+    sample: Sample,
+    payload: dict[str, Any],
+    pairs: Mapping[str, PricedPair],
 ) -> dict[str, Any]:
     program = workload.program
     if not isinstance(program, DspyProgram) or sample.id >= len(program.examples):
@@ -363,7 +368,7 @@ async def _in_process_run(
     sends = _ProgramCalls(
         sample.id,
         None if calls is None else int(calls),
-        priced_pair(cfg.model, cfg.provider, names_provider=CONNECTOR.model_names_provider),
+        pairs[PROGRAM_NODE],
     )
     student = _configured(program.student, payload.get("prompt"), lm_kwargs, sends)
     # Metered too, so a call naming no LM runs the model the cell is priced as.

@@ -6,9 +6,9 @@ import logging
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 import httpx
+from pydantic import BaseModel
 
 from promptpotter import connectors
 from promptpotter.application.datasets.loaders import (
@@ -128,10 +128,11 @@ def _verify_observation_names(
 
 def _verify_package_cache_scope(
     connector: Connector,
-    experiment: dict[str, Any] | None,
+    experiment: BaseModel | None,
     dataset_name: str,
 ) -> None:
-    scope = (experiment or {}).get(PACKAGE_CACHE_KEY)
+    # An extra or a declared field alike: the key is the panel's, whatever its model.
+    scope = getattr(experiment, PACKAGE_CACHE_KEY, None)
     if scope is None or scope in connector.package_cache_scopes:
         return
     honoured = sorted(connector.package_cache_scopes)
@@ -154,7 +155,7 @@ def session_bank(
     dataset: ResolvedDataset,
     *,
     connector: Connector,
-    experiment: dict[str, Any] | None,
+    experiment: BaseModel | None,
 ) -> tuple[Bank, tuple[str, ...]]:
     """The bank and its answer terms, empty where the connector owns the panel."""
     # First, never a fallback: rows cached under the same dataset name describe another instrument.

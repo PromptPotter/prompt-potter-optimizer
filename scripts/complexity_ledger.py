@@ -58,7 +58,8 @@ BASELINE = {
     # mkey (+516): a door, an account's API tokens: the token store and its SURVIVOR row, three
     # command kinds, the bearer's resolution through the one identity builder, the stream's per-tick
     # re-check; its fix pass the token cap, `account.self` and a cancel's rung.
-    "package_lines": 110569,
+    # rk-rest (+57): each connector's typed experiment model (decision 6) and a call's booked cost.
+    "package_lines": 110597,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 158,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -73,7 +74,8 @@ BASELINE = {
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 48,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
-    "models_lax": 9,
+    # rk-rest (+2): `HarborPanel` and `DbllmbenchPanel`, a backend's panel keys the bench never reads.
+    "models_lax": 11,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
     "injections": 32,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a
@@ -622,10 +624,9 @@ def _is_reexport_shim(init_file: Path) -> bool:
 
 
 def compute_ledger() -> dict[str, int]:
-    from promptpotter.application import optimizers
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.config_map import KNOBS, member_knob_count
-    from promptpotter.application.optimizers.nodes import CycleRead
+    from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
     from promptpotter.config.settings import Settings
     from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
     from promptpotter.domain.record_kinds import RECORDS
@@ -648,7 +649,7 @@ def compute_ledger() -> dict[str, int]:
         ],
     )
     priced: collections.Counter[str] = collections.Counter()
-    for member in optimizers.NODE_MEMBERS.table.values():
+    for member in NODE_MEMBERS.table.values():
         priced.update(member.priced_surface)
     read = _read_names(sites)
     test_files, test_functions_over_150 = _count_tests()

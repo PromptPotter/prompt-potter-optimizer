@@ -7,7 +7,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, NamedTuple, assert_never, get_args
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from promptpotter import connectors
 from promptpotter.application.config_map import ConfigMapResponse, bench_defaults_pin, config_map
@@ -343,7 +343,7 @@ async def served_pipeline(
     connector: Connector,
     *,
     endpoint: str | None,
-    experiment: Mapping[str, Any] | None,
+    experiment: BaseModel | None,
 ) -> ServedPipeline:
     """Read live at every moment that needs it; raises ``BackendUnreachableError``, never a stand-in."""
     served: Mapping[str, Any] | None = None
@@ -406,7 +406,7 @@ async def draft_served(stores: Stores, draft: DraftFile) -> ServedPipeline:
 
 
 async def dataset_pipeline(
-    stores: Stores, dataset: ResolvedDataset, *, experiment: Mapping[str, Any] | None
+    stores: Stores, dataset: ResolvedDataset, *, experiment: BaseModel | None
 ) -> dict[str, Any]:
     """A dataset's pipeline outside a run, over the experiment its panel holds today."""
     definition = runnable_definition(dataset)
@@ -417,9 +417,7 @@ async def dataset_pipeline(
     return served.over(definition.pipeline)
 
 
-def experiment_outside_run(
-    stores: Stores, dataset: ResolvedDataset | None
-) -> Mapping[str, Any] | None:
+def experiment_outside_run(stores: Stores, dataset: ResolvedDataset | None) -> BaseModel | None:
     if dataset is None:
         return None
     connector = dataset_connector(dataset)
@@ -430,7 +428,7 @@ def experiment_outside_run(
 def identity_layer(
     stores: Stores | None,
     connector: Connector | None,
-    experiment: Mapping[str, Any] | None,
+    experiment: BaseModel | None,
     judges: Mapping[str, JudgeSpec] | None,
     chain: Sequence[str],
     *,
@@ -986,7 +984,7 @@ def resolve_pipeline_for_campaign(
         identity=identity_layer(
             stores,
             connector := connectors.CONNECTORS.get(campaign.connector),
-            m.experiment,
+            None if m.experiment is None else connector.pinned(m.experiment),
             m.cfg.judges,
             m.filtered.active_steps,
             base_url=connector.base_url(m.endpoint),

@@ -661,6 +661,12 @@ class Billed(NamedTuple):
     rate_priced_usd: float | None = None
 
 
+def booked_sum(*usd: float | None) -> float | None:
+    """The parts that named a price, summed; absent only when none did."""
+    known = [one for one in usd if one is not None]
+    return sum(known, 0.0) if known else None
+
+
 class _Part(NamedTuple):
     part: Billed
     price: CallPrice
@@ -691,6 +697,8 @@ class Admission:
         # Its usage lands where the ledger was bound at admission, whatever a probe mutes after.
         self._ledger = billing_ledger(label.node)
         self.closed = False
+        # What the close booked: each reported bill, and a send that may have billed at its bound.
+        self.booked_usd: float | None = None
         what = f"{label.node} on {model}" if model else label.node
         self._hold_id = book.hold(
             book.expected(bound, label.node),
@@ -744,6 +752,9 @@ class Admission:
             for one in priced
         ]
         closing: list[Lapse | Release] = []
+        self.booked_usd = booked_sum(
+            *(one.price.cost_usd for one in priced), *(() if unknown is None else (unknown.usd,))
+        )
         if unknown is not None:
             closing.append(Lapse(hold_id=self._hold_id, bound=unknown.budget))
         elif not parts:
@@ -757,6 +768,7 @@ class Admission:
 
     def unreported(self) -> None:
         self._finish()
+        self.booked_usd = self._bound.usd
         self._charges.append(Lapse(hold_id=self._hold_id, bound=self._bound.budget))
 
     def _finish(self) -> None:

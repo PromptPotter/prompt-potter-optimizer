@@ -67,7 +67,7 @@ from offline_world import Router
 from pydantic import SecretStr, TypeAdapter, ValidationError
 from starlette.types import Message, Receive, Scope, Send
 
-from promptpotter.application import account, app_visits, cycle_reads, health, notices, optimizers
+from promptpotter.application import account, app_visits, cycle_reads, health, notices
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import RoundContext
 from promptpotter.application.bench.node_context import NodeContext
@@ -121,6 +121,7 @@ from promptpotter.application.optimizer_manifest import (
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -652,7 +653,7 @@ class _Poisoned(NamedTuple):
 
     def view(self) -> PotterView:
         """What L1's prompt renders from, read off its node context over the poisoned cycle."""
-        generate = optimizers.NODE_MEMBERS.get("l1_generate")
+        generate = NODE_MEMBERS.get("l1_generate")
         return PotterView(NodeContext(self.seated, generate), Ladder())
 
 
