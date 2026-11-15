@@ -724,10 +724,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (`scoring/closed_rounds.py` → `pipeline_resolve.py` → `jobs/quota.py` → `jobs/registry.py`). Action:
   the stop vocabulary moves to `domain/phases`. **Held:** no chain reaches `domain/phases` yet.
   **Re-test:** `git ls-files promptpotter/application/runner/termination.py` is non-empty.
-- **A line's ledger spans are spelled at every reader**: `LedgerSpan(stores.campaigns.ledger(h)) for h
-  in stores.campaigns.line(...)` sits in `runner/bench.py` (×4), `evidence/head_to_head.py` and
-  `head_to_head_price.py`. Action: the campaign store serves a line's spans. **Held:** no chain owns
-  `campaign_store/` reads yet. **Re-test:** `git grep -c "stores.campaigns.line(" -- promptpotter/application` sums above 1.
 - **The optimizer registry is outside `optimizers/nodes.py`.** No digest walk holds it since the
   behaviour keys: the fold moves `llm_nodes`, `unfit_pipeline` and `_members` with no treatment re-key.
   **Rides with:** rk-rest.

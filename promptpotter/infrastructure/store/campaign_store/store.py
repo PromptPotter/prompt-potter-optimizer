@@ -558,6 +558,11 @@ class CampaignStore:
             out.append(hop)
         return out
 
+    def line_spans(self, hop: CycleHop) -> list[LedgerSpan]:
+        """Each ledger of the line from *hop*, read whole: what a superseded cycle did past its
+        cut is the line's too."""
+        return [LedgerSpan(self.ledger(h)) for h in self.line(hop)]
+
     def line_to(self, hop: CycleHop) -> list[CycleHop]:
         """The supersede chain ending at *hop*, oldest first: `line` walked back."""
         out = [hop]

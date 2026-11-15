@@ -34,7 +34,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     dataset_experiment,
     runnable_definition,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NextAct, PayloadInvalidError
 
@@ -118,10 +117,7 @@ def optimizer_round_price(stores: Stores, optimizer: str) -> OptimizerRoundPrice
     usd = seconds = 0.0
     rounds = campaigns = 0
     for campaign in ran[:_PRICED_CAMPAIGNS]:
-        by_round = scan_ledger_spend_by_round(
-            LedgerSpan(stores.campaigns.ledger(hop))
-            for hop in stores.campaigns.line(campaign.root_hop)
-        )
+        by_round = scan_ledger_spend_by_round(stores.campaigns.line_spans(campaign.root_hop))
         # The origin opens no round: what its init sent is no round's price.
         paid = [
             spent

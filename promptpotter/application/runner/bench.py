@@ -90,7 +90,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend,
     scan_ledger_wall_clock,
 )
-from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
@@ -645,9 +644,7 @@ def launch_clock_record(
 
 def line_launches(stores: Stores, campaign: Campaign) -> list[LaunchClockRecord]:
     """Each cycle's OWN appends: a launch banks on the cycle holding the line as it ends."""
-    return scan_launch_clocks(
-        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
-    )
+    return scan_launch_clocks(stores.campaigns.line_spans(campaign.root_hop))
 
 
 def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
@@ -660,7 +657,7 @@ def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
     closing = launch_clock_record(stores, line, clock, utcnow_iso(), phases)
     return LineOutlay(
         search_usd=scan_ledger_spend(
-            LedgerSpan(stores.campaigns.ledger(h)) for h in line
+            stores.campaigns.line_spans(campaign.root_hop)
         ).spend.search_incurred_usd,
         worked_s=worked_seconds([*line_launches(stores, campaign), closing]),
     )
@@ -742,9 +739,7 @@ def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
     campaign = stores.campaigns.load_campaign(campaign_id)
     if campaign is None:
         return None
-    return scan_bench_passes(
-        LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
-    )
+    return scan_bench_passes(stores.campaigns.line_spans(campaign.root_hop))
 
 
 def read_cycle_bench(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScore:
@@ -788,10 +783,7 @@ def bench_line(
             drawn, stores.campaigns.standing_rounds(hop, moment=None).rounds
         ),
         run=run,
-        # Every cycle read WHOLE: what a superseded cycle paid past its cut is the line's cost too.
-        spend=scan_ledger_spend(
-            LedgerSpan(stores.campaigns.ledger(h)) for h in stores.campaigns.line(campaign.root_hop)
-        ).spend,
+        spend=scan_ledger_spend(stores.campaigns.line_spans(campaign.root_hop)).spend,
     )
 
 
