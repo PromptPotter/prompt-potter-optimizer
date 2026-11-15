@@ -81,6 +81,7 @@ from promptpotter.shared.errors import (
     ContextOverflowError,
     ErrorCategory,
     NextAct,
+    PayloadInvalidError,
     SendRefusedError,
     cell_failure,
     is_provider_credit_refusal,
@@ -243,7 +244,7 @@ SkillDelivery = Literal["agent_skill", "system_prompt"]
 def _skill_delivery(cfg: Mapping[str, Any]) -> SkillDelivery:
     value = cfg.get(SKILL_DELIVERY_KEY)
     if value not in get_args(SkillDelivery):
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: `nodes.{AGENT_NODE}.config.{SKILL_DELIVERY_KEY}` is {value!r}, no "
             f"channel; the dataset names one of {list(get_args(SkillDelivery))}."
         )
@@ -264,7 +265,7 @@ def _system_skill_template(template: str, prompt: str) -> str:
 def _roster_path(dataset: str, version: str) -> Path:
     for part in (dataset, version):
         if not _REGISTRY_NAME.fullmatch(part):
-            raise ValueError(f"harbor connector: {part!r} is not a registry name.")
+            raise PayloadInvalidError(f"harbor connector: {part!r} is not a registry name.")
     return _ROSTER_DIR / f"harbor-roster.{dataset}@{version}.json"
 
 
@@ -301,13 +302,13 @@ def _registry_roster(dataset: str, version: str) -> list[dict[str, Any]]:
         if spec.name == dataset
     }
     if not specs:
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: no dataset {dataset!r} in Harbor's registry. "
             f"`harbor dataset list` names what is published."
         )
     spec = specs.get(version)
     if spec is None:
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: dataset {dataset!r} has no version {version!r} "
             f"(published: {sorted(specs)})."
         )
@@ -328,7 +329,7 @@ def pin_roster(dataset: str, version: str) -> Path:
     tasks = _registry_roster(dataset, version)
     # The registry is a file on upstream's main branch: a version is no promise its roster holds.
     if path.is_file() and json.loads(path.read_text(encoding="utf-8"))["tasks"] != tasks:
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: the registry now publishes a different {dataset}@{version} "
             f"roster than {path.name} pins. The pin stands — a panel is never re-cut under the "
             f"name it had (`datasets/CLAUDE.md`); delete the file only to re-cut on purpose."
@@ -348,13 +349,13 @@ def _resolve_experiment(_stores: Stores, panel: Mapping[str, Any]) -> HarborPane
     agent = panel.get("agent") or {}
     kwargs = set(agent.get("kwargs") or {})
     if owned := sorted(kwargs & AGENT_KWARG_KEYS):
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: the panel sets {owned} under `agent.kwargs`, which "
             f"`pipeline.nodes.{AGENT_NODE}.config` owns and lays over it. Delete them here."
         )
     seamed = _AGENTS.get(_agent_name(agent), _UNDECLARED).model_seam
     if seamed and (discarded := sorted(kwargs & _DISCARDED_SENDER_KEYS)):
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: the panel sets {discarded} under `agent.kwargs`, which configure "
             "the agent's own sender; `_AgentModel` sends in its place, so they would reach no "
             "wire. Delete them here."
@@ -370,13 +371,13 @@ def _resolve_tasks(panel: Mapping[str, Any]) -> dict[str, Any]:
         return {**panel, "tasks": list(inline)}
     dataset = panel.get("harbor_dataset")
     if not dataset:
-        raise ValueError(
+        raise PayloadInvalidError(
             "harbor connector: the panel names neither `harbor_dataset` (a published "
             "dataset to resolve) nor an inline `tasks` list."
         )
     version = panel.get("harbor_dataset_version")
     if not version:
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: the panel declares `harbor_dataset: {dataset}` with no "
             f"`harbor_dataset_version`. Resolving 'latest' would put a moving roster behind a "
             f"fixed dataset name, so the version is required."
@@ -389,7 +390,7 @@ def _resolve_tasks(panel: Mapping[str, Any]) -> dict[str, Any]:
     wanted = list(dict.fromkeys(str(i) for i in include))
     by_id = {t["id"]: t for t in tasks}
     if missing := [i for i in wanted if i not in by_id]:
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: the panel includes {missing}, which {dataset}@{version} "
             f"does not publish (it has {sorted(by_id)})."
         )
@@ -398,12 +399,14 @@ def _resolve_tasks(panel: Mapping[str, Any]) -> dict[str, Any]:
 
 def _extract_experiment(panel: HarborPanel) -> list[dict[str, Any]]:
     if not (panel.agent or {}).get("environment"):
-        raise ValueError("harbor connector: the panel's `agent` declares no `environment`.")
+        raise PayloadInvalidError(
+            "harbor connector: the panel's `agent` declares no `environment`."
+        )
     tasks = [t for t in panel.tasks if t.get("id")]
     labelled = [t for t in tasks if str(t.get("answer") or "").strip()]
     if labelled and len(labelled) != len(tasks):
         unlabelled = [t["id"] for t in tasks if not str(t.get("answer") or "").strip()]
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: the panel declares an `answer` for {len(labelled)} of "
             f"{len(tasks)} tasks. A bank's answer shape is whole-bank — declare one for every "
             f"task or for none. Missing: {unlabelled[:5]}"
@@ -427,7 +430,7 @@ _AGENT_SENDER = "registry-client.ChatRequest"
 
 def _refuse_discarded(cfg: Mapping[str, Any]) -> None:
     if discarded := sorted(cfg.keys() & _DISCARDED_SENDER_KEYS):
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor connector: `nodes.{AGENT_NODE}.config` sets {discarded}, which configure "
             "terminus-2's own sender; `_AgentModel` sends in its place, so they would reach no "
             "wire. Delete them."
@@ -446,21 +449,23 @@ def _refuse_send_faults(agent_name: str, cfg: NodeCall) -> None:
     where = f"harbor connector: `nodes.{AGENT_NODE}.config`"
     if not model and not provider:
         if _AGENTS.get(agent_name, _UNDECLARED).model_seam:
-            raise ValueError(
+            raise PayloadInvalidError(
                 f"{where} names no model and no provider, so its {agent_name} agent has "
                 "nothing to send on."
             )
         return
     if not model or not provider:
-        raise ValueError(
+        raise PayloadInvalidError(
             f"{where} names a {'provider' if provider else 'model'} and no "
             f"{'model' if provider else 'provider'}, so its agent has nothing to send on."
         )
     if provider not in providers():
-        raise ValueError(f"{where}: no LLM provider {provider!r}; have {sorted(providers())}.")
+        raise PayloadInvalidError(
+            f"{where}: no LLM provider {provider!r}; have {sorted(providers())}."
+        )
     spec = openai_compat_spec(provider)
     if cfg.route_order and (spec is None or not spec.gateway):
-        raise ValueError(
+        raise PayloadInvalidError(
             f"{where} sets `route_order` on {provider!r}, which is no gateway: it has no host "
             "behind it to route to."
         )
@@ -478,7 +483,7 @@ def _sent_spend_bound(
         return None
     where = f"harbor connector: `nodes.{AGENT_NODE}.config`"
     if (turns := backend.get("max_turns")) is None:
-        raise ValueError(f"{where} declares no `max_turns`, so its sends have no bound")
+        raise PayloadInvalidError(f"{where} declares no `max_turns`, so its sends have no bound")
     summarized = _TERMINUS_SUMMARY_CALLS if backend.get("enable_summarize", True) else 0
     # Our client holds each send at the dearest host: its gateway route falls back, capped.
     return sent_llm_bound(
@@ -496,7 +501,7 @@ def _task_pin(task: Mapping[str, Any]) -> dict[str, Any]:
         and not task.get("git_url")
         and (PurePosixPath(path).is_absolute() or PureWindowsPath(path).is_absolute())
     ):
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor task {task.get('id')!r}: local path {path!r} is absolute; pin it relative "
             "to the panel that names it."
         )
@@ -517,7 +522,7 @@ def _identity_config(
     _stores: Stores, experiment: HarborPanel | None, _base_url: str
 ) -> dict[str, dict[str, Any]]:
     if experiment is None:
-        raise ValueError("harbor connector: no panel on this machine to fingerprint.")
+        raise PayloadInvalidError("harbor connector: no panel on this machine to fingerprint.")
     # Narrow on purpose: a task rides its own sample (`_task_pin`), so a wider panel re-keys none.
     fingerprint = stable_hash(
         [
@@ -1017,7 +1022,7 @@ def _task_config(task: dict[str, Any], task_root: Path, harbor_config: ModuleTyp
         return harbor_config.TaskConfig(name=name, ref=task.get("ref"))
     path = task.get("path")
     if not path:
-        raise ValueError(
+        raise PayloadInvalidError(
             f"harbor task {task.get('id')!r} declares neither 'name' (a registry package) "
             "nor 'path' (a task directory) in the panel."
         )
@@ -1154,7 +1159,7 @@ def _install_model(trial: Trial, agent_name: str, model: _AgentModel) -> None:
 def _chat_message(turn: Mapping[str, Any]) -> ChatMessage:
     role = turn.get("role")
     if role not in ("system", "user", "assistant"):
-        raise ValueError(f"harbor connector: the agent's history holds a {role!r} turn.")
+        raise PayloadInvalidError(f"harbor connector: the agent's history holds a {role!r} turn.")
     return {"role": role, "content": str(turn.get("content") or "")}
 
 
@@ -1332,7 +1337,7 @@ async def _attempt(episode: _Episode) -> _Ran:
         if model is not None:
             _install_model(trial, episode.agent_name, model)
         elif episode.declared is None and not installed:
-            raise ValueError(
+            raise PayloadInvalidError(
                 f"harbor connector: agent {episode.agent_name!r} runs in this process and is "
                 "undeclared (`_AGENTS`), so its sends would reach its provider unadmitted."
             )

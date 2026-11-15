@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -98,9 +97,7 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
     TaskUncancellableError,
 )
-from promptpotter.shared.identity import CAMPAIGN_BABYSIT_CAP, acting_principal
-
-logger = logging.getLogger(__name__)
+from promptpotter.shared.identity import acting_principal
 
 
 def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, NodeCall]:
@@ -150,11 +147,6 @@ def parse_cycle_start(sent: ForkStart, stores: Stores, of: Campaign, hop: CycleH
             raise PayloadInvalidError(f"payload.start.node_narrowing invalid: {exc}") from exc
     verdict = steer_verdict(stores, permitted_narrowing(stores, of), sent.laid)
     if verdict == "refused":
-        logger.warning(
-            "fork-cycle disallowed-model steer denied for principal %s (missing %s)",
-            acting_principal(stores.identity).id,
-            CAMPAIGN_BABYSIT_CAP,
-        )
         raise NotFoundError("Not found", code="not_found")
     overlay = _typed_steer(sent.laid, recorded_schema(stores, hop)) if sent.laid else {}
     for node, call in overlay.items():

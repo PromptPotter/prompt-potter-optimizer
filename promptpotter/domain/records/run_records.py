@@ -77,6 +77,7 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import fault_said
 from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
@@ -838,6 +839,10 @@ RoundWarningKind = Literal[
     "injection_budget_overrun",
     # A projection that could not write its derived file: the line landed, the file is stale until its next write.
     "derived_file_stale",
+    # A round's adapter that raised: the next walk re-runs it first (`settle_owed_outputs`).
+    "adapter_landed_nothing",
+    # A stopped walk whose returned cells could not be banked: a resume re-measures them.
+    "cells_unbanked",
 ]
 # `error` = the step produced nothing usable; `warning` = degraded but progressed.
 RoundWarningSeverity = Literal["warning", "error"]
@@ -854,12 +859,26 @@ class RoundWarningRecord(CycleRecord):
     detail: dict[str, Any] = Field(default_factory=dict)
     timestamp: str = Field(default_factory=utcnow_iso)
 
+    @classmethod
+    def handled(
+        cls, kind: RoundWarningKind, fault: BaseException, *, said: str, round: int | None
+    ) -> RoundWarningRecord:
+        """A fault its step handled, said once as its sentence; never its traceback."""
+        sentence, _ = fault_said(fault)
+        return cls(
+            kind=kind,
+            severity="error",
+            message=f"{said}: {sentence}",
+            round=round,
+            detail={"fault": type(fault).__name__},
+        )
 
-def stale_file_warning(projection: str, offset: int, reason: str) -> RoundWarningRecord:
+
+def stale_file_warning(file: str, offset: int, reason: str) -> RoundWarningRecord:
     return RoundWarningRecord(
         kind="derived_file_stale",
-        message=f"{projection} could not project line {offset}; its file is stale until its next write",
-        detail={"projection": projection, "offset": offset, "reason": reason},
+        message=f"{file} could not take line {offset}; it is stale until its next write",
+        detail={"file": file, "offset": offset, "reason": reason},
     )
 
 

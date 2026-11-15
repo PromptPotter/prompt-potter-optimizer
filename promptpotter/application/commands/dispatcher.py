@@ -61,10 +61,10 @@ from promptpotter.shared.identity import acting_principal, require_capability
 from promptpotter.shared.named_rows import imported, returned
 
 
-class RejectedError(Exception):
-    def __init__(self, reason: str) -> None:
-        super().__init__(reason)
-        self.reason = reason
+class RejectedError(ConflictError):
+    """A command its subject's state refuses, said in its own words."""
+
+    code = "command_rejected"
 
 
 _HANDLER_PACKAGE = "promptpotter.application.commands"
@@ -188,13 +188,6 @@ class Applier[R]:
                 raise RejectedError(refusal)
 
         return Applier(_guard, effect_fn=lambda _: standing, ack="accepted")
-
-    @staticmethod
-    def refusing(reason: str) -> Applier[object]:
-        async def _refuse() -> None:
-            raise RejectedError(reason)
-
-        return Applier(_refuse)
 
 
 @dataclass(frozen=True, slots=True)
@@ -591,14 +584,6 @@ class CommandDispatcher:
         try:
             try:
                 applied.append(await applier.run())
-            except RejectedError as exc:
-                ended = True
-                refused = ConflictError(
-                    f"command {kind} rejected: {exc.reason}",
-                    details={"command_id": command_id, "reason": exc.reason},
-                )
-                await asyncio.to_thread(log.append, _rejected(command_id, exc.reason, refused))
-                raise refused from None
             except Exception as exc:
                 ended = True
                 await asyncio.to_thread(log.append, _rejected(command_id, str(exc), exc))

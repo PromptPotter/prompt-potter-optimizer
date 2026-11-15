@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
@@ -67,7 +66,6 @@ from promptpotter.domain.spend import (
 from promptpotter.infrastructure.llm.spend_book import LiveCycle, SpendBook, draws_on
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.run_scope import run_scope, scoped
-from promptpotter.infrastructure.store.account_spend import unreported_under
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_READ_ERRORS,
     definition_version,
@@ -88,8 +86,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
-
-logger = logging.getLogger(__name__)
 
 
 # A share's run: started under its hold, it answers what it ran and the result its job's release
@@ -144,7 +140,7 @@ class RunStart:
         stop_reason = StopReason.NOT_ADMITTED if job is None or job.ending is None else job.ending
         stores = self.stores
         # Best-effort — it must never mask *exc*.
-        try:
+        try:  # noqa: SIM105
             stores.declare_stop(
                 stamps,
                 RunPhaseRecord.stop(
@@ -162,8 +158,8 @@ class RunStart:
                     else ErrorRecord.raised(exc, kind="launch_failed", stop_reason=stop_reason)
                 ),
             )
-        except Exception:
-            logger.exception("failed to record launch stop for job %s", self.job_id)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 async def probe_backend(
@@ -571,17 +567,6 @@ def open_spend_book(
         opened=opened,
         cycle=LiveCycle(stores.campaigns, hop) if live and hop is not None else None,
     )
-    if ledger is None:
-        return book
-    left = unreported_under(stores.charges, ledger).total
-    if left.unreported_usd or left.unreported_tokens:
-        logger.warning(
-            "paid sends on %s reported no bill; the ceiling holds up to $%.4f and %d tokens for "
-            "them as unreported.",
-            hop,
-            left.unreported_usd,
-            left.unreported_tokens,
-        )
     return book
 
 

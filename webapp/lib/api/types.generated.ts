@@ -272,6 +272,10 @@ export interface MachineStatusResponse {
   /** Each job file no count above includes, with why it does not load: a run it
    * names may hold a slot the machine cannot see. Served where every slot is. */
   unloadable: string[];
+  /** Each periodic step (the sweep, the route answers) whose last pass raised, with
+   * its fault: what it reclaims stands until a pass runs clean. Served where
+   * every slot is. */
+  unswept: string[];
   /** A landing in progress, `busy` and the caller's place in `queue` — a fact about
    * the NEXT launch, never about a run in view; null where a slot is free and
    * nothing of theirs waits. */
@@ -2451,7 +2455,7 @@ export interface RoundAudit {
 /** One optimizer-loop degradation the self-healing rails recovered from. */
 export interface LoopWarning {
   ts: string;
-  kind: 'layer_parse_failure' | 'injection_budget_overrun' | 'derived_file_stale';
+  kind: 'layer_parse_failure' | 'injection_budget_overrun' | 'derived_file_stale' | 'adapter_landed_nothing' | 'cells_unbanked';
   severity: 'warning' | 'error';
   message: string;
   round: number | null;
@@ -5493,7 +5497,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "f206c61f3180fa9c";
+export const SERVED_CONTRACT = "b25b2040348a0ba8";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

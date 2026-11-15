@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import random
 from collections.abc import Callable, Sequence
 from typing import Annotated, ClassVar, Literal, NamedTuple
@@ -29,8 +28,6 @@ from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, Variatio
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.strict_model import StrictModel
-
-logger = logging.getLogger(__name__)
 
 MatingPool = Literal["population", "measured"]
 
@@ -109,13 +106,6 @@ class Mating(nodes.Proposer):
             if rivals := [donor for donor in donors if donor.id != main.id]:
                 drawn = rng.sample(rivals, min(knobs.tournament, len(rivals)))
                 pairs.append(Cross(main, _fittest(drawn, by)))
-        if dropped := knobs.offspring - len(pairs):
-            logger.info(
-                "%d offspring dropped: %d main(s), a child needing a %s donor apart from it",
-                dropped,
-                len(mains),
-                knobs.donor_from,
-            )
         children = ctx.read(Children)
         return nodes.Proposals(
             [
@@ -186,10 +176,6 @@ class LocusCrossover(nodes.Proposer):
                 clones.append(proposal.individual.lineage.changes_description)
                 continue
             out.append(children.edit(proposal, take=take))
-        if clones:
-            logger.info(
-                "%d offspring dropped, each pair under two crossable loci: %s", len(clones), clones
-            )
         return nodes.Proposals(out)
 
 

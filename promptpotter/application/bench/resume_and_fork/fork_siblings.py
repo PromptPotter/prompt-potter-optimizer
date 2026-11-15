@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -38,7 +37,6 @@ from promptpotter.infrastructure.store.stores import Stores, owned_campaign
 from promptpotter.shared.errors import (
     MINT_FRESH,
     ConflictError,
-    CycleBusyError,
     PayloadInvalidError,
 )
 from promptpotter.shared.hashing import stable_hash
@@ -47,8 +45,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.registry import JobRegistry
-
-logger = logging.getLogger(__name__)
 
 
 def _fork_sibling_setup(
@@ -161,20 +157,13 @@ class ForkCut:
         return self.child.cycle_id
 
     def withdraw(self, stores: Stores, job_registry: JobRegistry) -> None:
-        # Best-effort: it must never mask the refusal its caller re-raises.
+        # A cleanup fault never masks the refusal its caller re-raises; a cut it keeps lists.
         child = self.child
         try:
             with destroying(stores, job_registry, child.campaign_id, cycle_id=child.cycle_id):
-                deleted, reason = cleanup_stub_fork_if_empty(
-                    campaign_store=stores.campaigns, hop=child
-                )
-        except CycleBusyError as held:
-            deleted, reason = False, str(held)
-        except Exception:
-            logger.exception("fork %s: refused, and its cut could not be deleted", self.child)
-            return
-        if not deleted:
-            logger.warning("fork %s: refused, and its cut was kept (%s)", self.child, reason)
+                cleanup_stub_fork_if_empty(campaign_store=stores.campaigns, hop=child)
+        except Exception:  # noqa: BLE001
+            pass
 
 
 def cut_fork(

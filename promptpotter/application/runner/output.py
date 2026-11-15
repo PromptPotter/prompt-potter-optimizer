@@ -639,6 +639,8 @@ def _fork_summary_from_index(fork_index: CycleIndex) -> ForkSummaryView:
 class RunArtifacts(Projection):
     """The ONE writer of a cycle's ``log.md``, ``review.md`` and ``export.json`` and its campaign's ``log.md``."""
 
+    derives = "log.md, review.md, export.json"
+
     def __init__(self, session: Session, config: CampaignConfig) -> None:
         self._session, self._config = session, config
 

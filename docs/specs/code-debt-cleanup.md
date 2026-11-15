@@ -654,56 +654,19 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/28 · faults
 
-- **Q3: one fault channel — a fault is a value.** A failed or skipped step is a log line at many sites
-  (engine decisions narrated into `logger.warning`, `origin_listing.py::list_origins` skipping an origin
-  silently, `campaign_store/store.py::CampaignStore.list_campaigns` and
-  `tenant_dataset_store.py::banks_sharing` logging an unreadable entry out of every list,
-  `intelligence/earned_blocks.py::CampaignSurvey.faulted` written and never read, `llm/heartbeat.py`
-  a failed beat); until this lands, `application/`'s `logger.(warning|error|exception)(`
-  count may not rise. Owner: inside a run, a typed fault record through the one producer door, read by a
-  projection; inside a read, a field of the row it failed, served as its `Said`; `logging` leaves
-  `application/` and `domain/`, banned at the gate as `gate.py::_IMPORTS_OPTIMIZER` bans an optimizer
-  import. Invariant: the gate lists every `except` there that neither raises nor hands its fault on, and
-  the list is empty.
-  **Rides with:** faults 2 (faults 1 cut the logs no reader needed: 41 modules import `logging`).
-  **Re-test:** `git grep -l "^import logging" -- promptpotter/application`.
-- **A `derived_file_stale` warning names the projection's class, never the file it could not write**:
-  `read_model.py::LedgerIndex.shielded` has only the `Projected` protocol, which carries no path. Action:
-  a `derives` ClassVar on each `Projected`, which the warning names. **Rides with:** faults 1, a fault
-  the readout serves; after narr, money and rec, whose derivers it reads, so its Owns gain one line each in
-  `views/readout.py::ReadoutProjection`, `projections/cycle_index.py::CycleIndexProjection`,
-  `scoring/closed_rounds.py::RoundFileProjection` and `llm/spend_book.py::SpendBook`, with
-  `domain/records/run_records.py::stale_file_warning` and `read_model.py`'s `Projected`. **Re-test:** a
-  `dashboard.json` write fault's warning detail names `dashboard.json`.
-- **A preflight warning reaches the terminal alone** (narr-2's landing): `InitOpened.warnings` is read
-  by `render/ansi.py::_render_init_enter` only; `domain/narration.py` has no row for it, so the chat
-  thread and the dashboard never say an inner connector's or a knob's warning. Root: the warnings are
-  a narration row every door reads, and `PreflightNote.title` / `detail` are facts, not text worded
-  from the config at write (narr-3's fix pass). **Rides with:** faults 2. **Re-test:** a launch with a
-  preflight warning shows it in the run's thread.
-- **A handled parse failure prints two tracebacks** (C0 at narr-3's landing): an `l1_critique` reply
-  failing both repair rungs is answered (`round 0 l1_critique landed nothing`), yet the readout
-  prints the `ValidationError` and the `OptimizerPromptParseError` chain under `shared/errors.py::graceful`.
-  Root: a handled fault is said once as its sentence; a traceback is for a fault nobody handled.
-  **Rides with:** faults 2. **Re-test:** a readout with a twice-failed critique holds no `Traceback`.
-- **An origin gate's last error reaches a log alone** (faults-1's report): `DegradationHealth.last_error`
-  is read only by `runner/loop.py`'s `logger.error` at the origin-gate halt, so the readout and the
-  browser never say why round 0 was graded unhealthy. Root: the stop's served detail (`Ended.detail`, as
-  `OPTIMIZER_ABORT` carries it) holds it. **Rides with:** faults 2. **Re-test:** an `ORIGIN_GATE`
-  readout names the origin's last error, and the log goes.
-- **A loop refusal carries no code** (faults-2a's report): `dispatcher.py::RejectedError` is no
-  `PotterError`, so a refused loop command serves no code or acts. Root: a `PotterError` subclass.
-  **Rides with:** faults 2. **Re-test:** a refused loop command's reading names its code.
-- **A refusal reads every bank to word itself** (faults-2a's report): `cycle_addressing.py` and
-  `origin_listing.py::no_dataset_hint` call `list_datasets`, which reads every bank. Root: a listing
-  that holds no rows. **Rides with:** faults 2. **Re-test:** a refusal's path opens no bank file.
-- **Harbor's other refusals are `ValueError`s** (faults-2a's report): only the pin roster's is a refusal
-  with acts. **Rides with:** faults 2. **Re-test:** `git grep -c "raise ValueError" -- promptpotter/connectors/harbor.py` is 0.
-- **`new` spells its dataset twice** (faults-2a's report): `--dataset-name` beside the positional.
-  **Rides with:** faults 2. **Re-test:** `python -m promptpotter new --help` names the dataset once.
 - **A line file's kind is passed by its caller** (faults-2a's report): `read_model.py::LineIndex.of(...,
-  kind)` defaults to `LEDGER`. Root: the kind is read off the path's `data_root.py::KINDS` row.
-  **Rides with:** faults 2. **Re-test:** `LineIndex.of` takes no kind.
+  kind)` defaults to `LEDGER`. Root: the kind is read off the path's `data_root.py::KINDS` row; but
+  `data_root` imports `read_model` (a cycle) and `KINDS` holds no `FileKind` (faults-2b's report).
+  Action: the kind table moves below both modules, each row naming its `FileKind`. **Rides with:**
+  faults 3. **Re-test:** `LineIndex.of` takes no kind.
+- **`SampleFoldRow.unscoreable` is read by nothing** (`store/archive_queries.py:153`, set by
+  `intelligence/indexes/sample.py:178`): its one reader was the skip log faults-2b deleted. Action:
+  serve it where a fold's row is read, or delete it with a sample-fold wipe. **Rides with:** faults 3.
+  **Re-test:** `p_unread_fields` falls by one.
+- **An inline launch queued on a full machine prints nothing, and machine-status `unloadable` has no
+  CLI line** (faults-2b's report): two states a door enters and cannot report. Action: each is a
+  served fact the terminal words, as `unswept` is. **Rides with:** faults 3. **Re-test:** launch
+  inline on a full machine; read `machine-status` with an unloadable job file.
 
 ### lite-2 (what lite left at its landing)
 
@@ -825,7 +788,7 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
 
 ### batch/30 · forks
 
-- **Money text has no sub-cent rule**: a cell's price at six places (`preflight.py::_RoundShort.costing`,
+- **Money text has no sub-cent rule**: a cell's price at six places (`phase_acts.py::CapUnderRound.costing`,
   `cli/commands/reads.py::_human`, and `potter/dispatch/injections/panels.py:1179-1180`) beside `domain/spend.py::usd_text`, which prints `$0.0000`
   for a cheap model; `usd_text` and webapp `fmtUsd` are one rule; `run_standing.py` spells a third.
   Open (operator): the rule (significant digits under a dollar is one candidate). **Rides with:** forks 1.

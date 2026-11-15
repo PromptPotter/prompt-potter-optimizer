@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from collections.abc import AsyncIterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
@@ -86,9 +85,6 @@ from promptpotter.shared.measurement_context import (
     measured_pass,
     measured_pass_context,
 )
-
-logger = logging.getLogger(__name__)
-
 
 # An inner cycle's budget is ROUNDS, never a spend or token cap: those trip on token counts, which jitter.
 
@@ -214,13 +210,6 @@ def _continue_inner_campaign(
     except ConfigDriftError as refused:
         raise CellUnscoreableError(str(refused), spent={}) from refused
 
-    logger.info(
-        "inner campaign %s/%s CONTINUES from %d banked round record(s) (was %s)",
-        campaign.campaign_id,
-        hop.cycle_id,
-        _banked_inner_rounds(store, campaign.root_hop),
-        run.run_phase,
-    )
     return plan.session, plan.cycle, plan.optimizer
 
 
@@ -377,13 +366,6 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     try:
         result = await inner_task
     except asyncio.CancelledError:
-        logger.warning(
-            "inner cell %s abandoned; its partial campaign is at %s",
-            query,
-            sandbox_stores(cell.ctx).campaigns.cycle_dir(minted[0])
-            if minted
-            else "<not yet minted>",
-        )
         if not inner_task.done():
             inner_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):

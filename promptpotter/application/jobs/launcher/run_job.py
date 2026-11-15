@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 import os
 import subprocess
 import sys
@@ -25,6 +24,7 @@ from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
+from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.campaign_config import CycleConfig
@@ -44,8 +44,6 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.jobs.mint import OpenedCycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-
-logger = logging.getLogger(__name__)
 
 # Out of the server's process group, so its Ctrl+C or a service stop signal is the server's alone.
 _DETACHED: dict[str, Any]
@@ -306,7 +304,6 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     # The job, its claim with it, now lives and dies with THIS process: a run killed before it
     # declares itself leaves the cycle free.
     if (adopted := job_registry.adopt(spec.job_id)) is None:
-        logger.warning("job %s was cleared before its process started — not running", spec.job_id)
         return None
     start = RunStart(stores, job_registry, adopted)
     _tell_spawner()
@@ -315,7 +312,6 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
         refuse_campaign(stores, campaign := campaign_at(stores, spec.hop))
     except CampaignRefusedError as refused:
         # The job's refusal, never the cycle's stop: the cycle keeps the one it had.
-        logger.warning("job %s refused past its handoff: %s", spec.job_id, refused)
         start.release(refused)
         return StopOutcome.FAILED
     async with AsyncExitStack() as closing:
@@ -323,8 +319,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
             opened = await closing.enter_async_context(
                 ExistingCycle(spec.hop, campaign, Budget()).open(stores)
             )
-        except BaseException as exc:
-            logger.exception("job %s could not bind its session", spec.job_id)
+        except BaseException as exc:  # noqa: BLE001
             start.release(exc, stamps=spec.hop)
             return StopOutcome.FAILED
         try:
@@ -338,16 +333,13 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
             )
         except (KeyboardInterrupt, asyncio.CancelledError):
             return StopOutcome.PAUSED
-        except Exception:
-            logger.exception("job %s failed", spec.job_id)
+        except Exception:  # noqa: BLE001 -- `run_held_job` released the job with it
             return StopOutcome.FAILED
     return stop_reason_outcome(result.stop_reason)
 
 
 def main() -> None:
-    logging.basicConfig(
-        level=logging.INFO, format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
-    )
+    setup_logging()
     spec = JobSpec.model_validate_json(sys.stdin.buffer.read())
     land_at_entry(every_treatment=False)
     if (outcome := asyncio.run(run_job(spec))) is not None and (code := outcome.exit_code):

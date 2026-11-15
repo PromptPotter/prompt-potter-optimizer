@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from typing import Any, assert_never
@@ -25,8 +24,6 @@ from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import FileUnreadableError
 
-logger = logging.getLogger(__name__)
-
 
 class CampaignSurvey:
     """THE cross-campaign survey; a campaign whose ledger this build cannot read is a faulted row, never a crash."""
@@ -42,7 +39,7 @@ class CampaignSurvey:
         try:
             return self._store.standing_rounds(hop, moment=None)
         except FileUnreadableError as exc:
-            logger.warning("the survey skips %s: %s", hop.campaign_id, exc)
+            # A run says it at its start (`preflight.py::SurveyUnread`).
             self.faulted[hop.campaign_id] = exc
             return None
 

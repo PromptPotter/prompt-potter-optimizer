@@ -3,7 +3,7 @@ from __future__ import annotations
 import threading
 import time
 from pathlib import Path
-from typing import Any, NamedTuple, assert_never
+from typing import Any, ClassVar, NamedTuple, assert_never
 
 from pydantic import ConfigDict, Field
 
@@ -879,6 +879,8 @@ class LiveDashboardProjection(Projection):
 class DashboardCheckout:
     """`dashboard.json`: its ledger index's `LiveDashboardProjection`, written out at a boundary or
     settled; a write that cannot land is its ledger's warning (`LedgerIndex.shielded`)."""
+
+    derives: ClassVar[str] = "dashboard.json"
 
     def __init__(self, cycle_dir: CycleDir) -> None:
         *self._prefix, own = ledger_chain(cycle_dir, moment=None)

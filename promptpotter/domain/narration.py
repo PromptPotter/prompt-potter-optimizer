@@ -8,7 +8,7 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cycle_index import STATUS_MARK_INFO
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit, level_text
-from promptpotter.domain.phase_acts import PassOpened
+from promptpotter.domain.phase_acts import InitOpened, PassOpened
 from promptpotter.domain.phases import STOP_REASON_INFO, CampaignPhase, StopOutcome, stop_said
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.error import ErrorRecord
@@ -394,6 +394,11 @@ class Narration:
     def _phase(self, record: PhaseRecord) -> _Line | None:
         if record.step == "enter" and record.round is not None and self.round is None:
             self.round = record.round
+        if isinstance(record.act, InitOpened) and (notes := record.act.warnings):
+            if len(notes) == 1:
+                return _Line("warn", notes[0].title, notes[0].detail, "run")
+            said = "; ".join(note.title for note in notes)
+            return _Line("warn", f"{len(notes)} preflight warnings", said, "run")
         if record.phase != CampaignPhase.BENCH:
             return None
         # Without this bracket the pass's row ticks read as the last candidate scoring again.

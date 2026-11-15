@@ -9881,7 +9881,9 @@
             "enum": [
               "layer_parse_failure",
               "injection_budget_overrun",
-              "derived_file_stale"
+              "derived_file_stale",
+              "adapter_landed_nothing",
+              "cells_unbanked"
             ],
             "title": "Kind",
             "type": "string"
@@ -10171,6 +10173,14 @@
               "type": "string"
             },
             "title": "Unloadable",
+            "type": "array"
+          },
+          "unswept": {
+            "description": "Each periodic step (the sweep, the route answers) whose last pass raised, with its fault: what it reclaims stands until a pass runs clean. Served where every slot is.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Unswept",
             "type": "array"
           }
         },

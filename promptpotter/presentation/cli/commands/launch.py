@@ -435,12 +435,9 @@ def _named_mint(args: argparse.Namespace, dispatcher: CommandDispatcher) -> Mint
     if args.config:
         path = Path(args.config)
         declared = campaign_file_block(path)
-    dataset_name = args.dataset or args.dataset_name
+    dataset_name = args.dataset
     if not dataset_name:
-        refused = PayloadInvalidError(
-            "`new` requires a dataset name. Pass it as a positional "
-            "(`new justlogic/d234`) or via `--dataset-name <name>`."
-        )
+        refused = PayloadInvalidError("`new` requires a dataset name (`new justlogic/d234`).")
         refused.add_note(no_dataset_hint(dispatcher.stores))
         raise refused
     knobs = _set_knobs(args.sets)

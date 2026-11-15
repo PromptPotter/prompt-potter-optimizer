@@ -5,7 +5,6 @@ no re-mint."""
 from __future__ import annotations
 
 import asyncio
-import logging
 from typing import NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle, RoundContext
@@ -30,7 +29,7 @@ from promptpotter.application.runner.termination import (
 from promptpotter.application.scoring.passes import measure_noise_floor
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import repairable_holes
-from promptpotter.domain.phases import STOP_REASON_INFO, StopReason
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
     OriginGatePass,
@@ -42,9 +41,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.run_scope import scoped
-
-logger = logging.getLogger(__name__)
-
 
 # Counted in ARMS, not rounds: a one-child optimizer gets as many proposals as a five-arm one.
 HARD_CAP_ARMS: int = 500
@@ -185,14 +181,10 @@ async def open_origin_round(
             return None
         if resumed_ending is not StopReason.ORIGIN_GATE:
             health = cycle.origin_round.health
-            logger.error(
-                "Origin gate (%s): round 0 is %s (%s) — halted. %s",
-                mode,
-                health.grade,
-                health.last_error or "no error recorded",
-                STOP_REASON_INFO[StopReason.ORIGIN_GATE].next_step,
+            said = health.last_error or "no error recorded"
+            return LoopEnd(
+                StopReason.ORIGIN_GATE, detail=f"{mode}: round 0 is {health.grade} ({said})"
             )
-            return LoopEnd(StopReason.ORIGIN_GATE)
         # Resuming an origin the gate halted, still unhealthy, is the operator's override.
         pass_origin_gate(by="resume")
         await bench_line_origin(cycle)
@@ -216,12 +208,6 @@ async def walk_round_zero(cycle: Cycle, dataset: list[Sample]) -> None:
         standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
         if not origin_only(cycle.rounds, standing) or not (holes or unsent):
             return
-        logger.warning(
-            "Resume re-measures the origin's %d lost cell(s) and the %d its walk never sent; "
-            "round 0 closes again on them.",
-            holes,
-            unsent,
-        )
     elif not head.expected_samples:
         return
     held = {cell.key for cell in rows}

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-import logging
-from collections.abc import AsyncIterator, Sequence
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -31,8 +30,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import BackendRevision, PipelineRead
-from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.scoring import all_verifier_graded
+from promptpotter.domain.sample import Bank
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.llm.capabilities import ensure_model_capabilities
 from promptpotter.infrastructure.store.dataset_access import (
@@ -45,8 +43,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.shared.errors import PayloadInvalidError
 from promptpotter.shared.identity import IdentityContext
-
-logger = logging.getLogger(__name__)
 
 
 async def _read_backend_revision(
@@ -66,26 +62,6 @@ async def _read_backend_revision(
     except (httpx.HTTPError, ValueError) as exc:
         return BackendRevision(expected=expected, reported=None, unread=type(exc).__name__)
     return BackendRevision(expected=expected, reported=reported, unread=None)
-
-
-def _warn_if_labels_have_no_ranker(
-    schema: PipelineSchema,
-    samples: Sequence[Sample],
-    connector: Connector | None,
-) -> None:
-    """The converse is deliberately not warned: a ranker with no labels is no fault."""
-    if not schema.running_nodes or not samples:
-        return
-    if all_verifier_graded(s.ground_truth for s in samples):
-        return
-    if connector is not None and connector.answer_key:
-        return
-    if schema.emits_ranking:
-        return
-    logger.warning(
-        "The pipeline has no terminal ranker — no node emits a ranked list, so every sample will "
-        "score NO_RESULT against a real label (check node_role on the final node)"
-    )
 
 
 def _verify_required_observation_keys(
@@ -247,8 +223,6 @@ async def _session(
         )
         # By hash, never a label: every answer this session files names a bank the store holds.
         stores.tenant_datasets.put_bank(bank)
-        # After the samples, never before: the invariant is about the schema AND the bank together.
-        _warn_if_labels_have_no_ranker(pipeline_schema, bank.samples, connector)
         yield Session(
             store=stores,
             backend_client=client,

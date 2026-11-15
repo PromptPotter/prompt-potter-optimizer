@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import random
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
@@ -94,8 +93,6 @@ if TYPE_CHECKING:
         Proposer,
         RaceSnapshot,
     )
-
-logger = logging.getLogger(__name__)
 
 
 def stated_line(
@@ -229,14 +226,6 @@ async def measure_as_parent(
         held=round_.held(key),
     )
     # A partial pass is kept: `read_pair` pairs each arm on the cells both scored.
-    if walked.stopped is not None:
-        logger.warning(
-            "Parent %s stopped after %d/%d cells (%s); its floor covers only those.",
-            arm.label,
-            len(walked.sheet),
-            len(cells),
-            walked.stopped,
-        )
     read = ReadArm(key, conclude(arm, walked, round_num=round_.round_num), walked.sheet)
     if announce:
         append_record(ArmRecord(round=round_.round_num, arm=key, state=read.state))

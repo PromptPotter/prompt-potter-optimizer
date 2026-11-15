@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import threading
 import time
 from collections.abc import Iterator
@@ -88,8 +87,6 @@ from promptpotter.shared.identity import (
     has_capability,
 )
 from promptpotter.shared.worded import Worded
-
-logger = logging.getLogger(__name__)
 
 
 class QuotaExceededError(PotterError):
@@ -533,15 +530,6 @@ def admit_launch(
         return admitted, _nothing_on(wallet.coupon.face)
     if wallet.contended:
         raise _contended("what this account has left")
-    spent = wallet.coupon.spent
-    if bill_is_floor(spent.unpriced_tokens) and wallet.headroom.usd is not None:
-        logger.warning(
-            "spend: account %s has %d unpriced tokens, so its USD total is a floor; admitting "
-            "against the $%.2f grace and leaning on the token coupon",
-            user.user_id,
-            spent.unpriced_tokens,
-            settings.UNPRICED_GRACE_USD,
-        )
     return admitted, _reserve(admitted, wallet.coupon_room)
 
 

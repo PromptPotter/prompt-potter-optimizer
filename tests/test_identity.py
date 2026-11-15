@@ -1134,7 +1134,7 @@ def test_a_harbor_panel_reads_its_pinned_roster_and_never_dials_out(
     roster = harbor_connector.pin_roster("bench", "1.0")
     assert harbor_connector.pin_roster("bench", "1.0") == roster, "an unchanged registry re-pinned"
     offline.registry = published("c2")
-    with pytest.raises(ValueError):
+    with pytest.raises(PayloadInvalidError):
         harbor_connector.pin_roster("bench", "1.0")
     assert [t["git_commit_id"] for t in panel_tasks("bench", "1.0", ["a"])] == ["c1"], (
         "a repinned registry moved the panel under the name it had"
@@ -3349,6 +3349,8 @@ def test_a_projection_that_cannot_write_is_one_stale_file_warning(tmp_path: Path
     # Never a raise into the appends whose lines landed, and nothing it raised is held for a later
     # append.
     class _Unwritable(Projection):
+        derives = "unwritable.json"
+
         def _handle_round_warning(self, record: RoundWarningRecord) -> None:  # noqa: ARG002 -- routed by its annotation
             raise OSError("disk full")
 

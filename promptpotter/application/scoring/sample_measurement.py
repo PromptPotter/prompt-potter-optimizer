@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
-import logging
 import re
 import time
 from collections.abc import Mapping
@@ -62,8 +61,6 @@ from promptpotter.infrastructure.llm.telemetry import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, ErrorCategory, SendRefusedError
-
-logger = logging.getLogger(__name__)
 
 
 class StaleDataStep(StrEnum):
@@ -563,12 +560,11 @@ async def measure_sample(
     except SendRefusedError:
         # A refused send is refused for every cell after it: a stop, never a row.
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 -- any fault of the cell is its row
         if (row := _known_failure(sample, exc)) is not None:
             return row
         # Named by TYPE: a bare `TimeoutError()` has no message.
         failure = f"{type(exc).__name__}: {exc}"
-        logger.exception("measure_sample failed for %s: %s", sample.query[:60], failure)
         outcome = failed_send(exc)
         return _error_result(
             sample,
@@ -630,11 +626,6 @@ async def _send_cell(
             except httpx.HTTPStatusError as exc:
                 if (answered := _answered_nothing(exc)) is None:
                     raise
-                logger.warning(
-                    "measure_sample for %s: answered nothing gradeable (%s) — a miss",
-                    query[:60],
-                    _extract_upstream_detail(exc),
-                )
                 data, spent = answered, _reply_spend(answered, pairs)
     finally:
         heartbeat_task.cancel()
@@ -691,9 +682,7 @@ def _candidate_and_sample_facts(
 
 
 def _known_failure(sample: Sample, exc: Exception) -> MeasuredCell | None:
-    query = sample.query
     if isinstance(exc, CellUnscoreableError):
-        logger.warning("measure_sample %s for %s: %s", exc.category.value, query[:60], exc)
         return _error_result(sample, str(exc), category=exc.category)
     # Never a backend 429: `BackendClient.run_query` answers each with the run's backpressure.
     outcome = failed_send(exc)
@@ -704,13 +693,11 @@ def _known_failure(sample: Sample, exc: Exception) -> MeasuredCell | None:
             f"HTTP {exc.response.status_code} — {_HTTP_FAILURE_WORDS[category]}"
             f"{f' :: {upstream}' if upstream else ''}"
         )
-        logger.warning("measure_sample for %s: %s", query[:60], error_msg)
         return _error_result(
             sample, error_msg, category=category, refused_parameter=outcome.refused_parameter
         )
     if category is ErrorCategory.CONNECTION:
         error_msg = f"{type(exc).__name__}: {exc} — Backend may be down or unreachable."
-        logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
         return _error_result(sample, error_msg, category=category)
     return None
 

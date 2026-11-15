@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -24,8 +23,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
-
-logger = logging.getLogger(__name__)
 
 
 def _holed(t: RoundResult, key: ArmKey, arm: ArmState) -> bool:
@@ -120,15 +117,8 @@ async def repair_incomplete_rounds(
                 else [by_key[r.key] for r in rows if r.key in by_key]
             )
             if not attempted:
-                logger.warning(
-                    "Round %d arm %s has unmeasured cells but none in this dataset to "
-                    "re-measure — leaving it holed rather than guessing.",
-                    t.round,
-                    arm.label,
-                )
                 continue
             sp = cycle.points.measured(arm)
-            missing = repairable_holes(rows)
             # ONE walk, whole: the archive never replays an errored cell, so it sends exactly the
             # holes, and the composite is the GATEWAY's over the full panel.
             scored = await score_search_point(
@@ -140,28 +130,9 @@ async def repair_incomplete_rounds(
                 measured=arm.individual.id,
             )
             if scored.stopped is not None:
-                logger.warning(
-                    "Round %d arm %s: re-scoring its cells stopped after %d/%d (%s) — "
-                    "leaving it holed rather than reporting part of its panel as the whole.",
-                    t.round,
-                    arm.label,
-                    len(scored.sheet),
-                    len(attempted),
-                    scored.stopped,
-                )
                 continue
             cells[key] = scored.sheet
             folds[key] = scored.scores
-            logger.warning(
-                "Repaired round %d arm %s: %d cell(s) had no measurement; "
-                "re-measured %d, composite %s → %s",
-                t.round,
-                arm.label,
-                missing,
-                len(scored.sheet),
-                None if (was := t.folds.get(key)) is None else was.composite_fitness,
-                scored.scores.composite_fitness,
-            )
         # The headline is the head arm's own: re-keying its rows moves it, never a second write.
         if cells != t.cells:
             corrected[slot] = mended_round(
@@ -219,41 +190,12 @@ async def apply_correction(
         named=cut.edge,
     )
     branch = fork_cut.child
-    repair_target = branch.cycle_id
-    logger.warning(
-        "Round(s) %s do not re-derive from their own rows; branched → %s from %s, and this cycle "
-        "keeps them exactly as they ran. Everything after that candidate retires with it; its "
-        "earlier siblings are untouched measurements and stay on the line. Whether the "
-        "correction reaches anything is graded once it lands.",
-        ", ".join(str(r) for r in cut.rounds),
-        repair_target,
-        "its line's pick" if cut.edge is None else f"{cut.edge.arm} of round {cut.edge.round}",
-    )
-    logger.warning(
-        "Resume corrected round(s) %s in memory; measuring what the correction reached "
-        "before deciding where it belongs.",
-        ", ".join(str(r) for r in repaired),
-    )
     corrected = _rebank_on_branch(cycle, standing.rounds, branch, corrected, cut.retirements)
-    if cut.retirements:
-        logger.warning(
-            "Re-banked %d retired candidate(s) onto %s — the branch now names them itself, so "
-            "what a reader sees at those positions is the corrected measurement rather than the "
-            "parent's, which is the version the cut retired.",
-            len(cut.retirements),
-            repair_target,
-        )
     campaign_store.append(
         branch,
         ForkGradedRecord(
             direction=ForkDirection.EQUIVALENT if equivalent else ForkDirection.SUPERSEDE
         ),
     )
-    if equivalent:
-        logger.warning(
-            "The correction reached no recorded decision — cut %s marked EQUIVALENT; the line "
-            "continues on it.",
-            repair_target,
-        )
     cycle.replay_priors(corrected[: cut.resume_at])
     return fork_cut

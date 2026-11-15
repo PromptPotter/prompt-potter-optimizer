@@ -5286,6 +5286,8 @@ def test_a_projection_raising_on_a_landed_bill_is_its_ledgers_one_warning(
 
     # The part counts once, and the next bill lands with no second warning.
     class _Unwritable(Projection):
+        derives = "unwritable.json"
+
         def _handle_token_usage(self, record: TokenUsageRecord) -> None:  # noqa: ARG002 -- routed by its annotation
             raise OSError("the readout's disk is full")
 

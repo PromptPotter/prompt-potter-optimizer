@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from typing import NamedTuple, assert_never
@@ -37,9 +36,6 @@ from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.measurement_context import RoleScope
 
-logger = logging.getLogger(__name__)
-
-
 # Not a knob: the ruler PoBB cuts with and the heatmap the operator reads must be the same scale.
 _RULER_GRADE = "A"
 
@@ -54,8 +50,6 @@ def calibrate_delta_ruler(
     fitted, post = graduate_ruler_model(obs, enable=enable_2pl)
     if len(post.delta) < n_min:
         return None
-    if fitted == "2PL":
-        logger.info("δ ruler graduated to 2PL (%d samples fit)", len(post.delta))
     return post.anchored(fitted)
 
 

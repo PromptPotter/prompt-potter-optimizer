@@ -41,7 +41,7 @@ from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.phase_acts import CellFormula, InitClosed, InitOpened, PreflightNote
+from promptpotter.domain.phase_acts import CellFormula, InitClosed, InitOpened
 from promptpotter.domain.phases import CampaignPhase, StopReason
 from promptpotter.domain.records.run_records import PhaseRecord, StandingBudgetRecord
 from promptpotter.domain.run_mode import RunMode
@@ -335,36 +335,29 @@ async def _enter_init(
     origin: CampaignOrigin,
     survey: CampaignSurvey,
 ) -> None:
-    target_node_configs = list(session.pipeline_params.nodes.items())
-    target_models = tuple(v.model for _, v in target_node_configs if v.model)
-
     bound = await cell_bound(session, session.pipeline_params)
     measured = measured_cell_price(
         session.store, session.bank.dataset_hash, session.pipeline_params
     )
     instrument = inner_origin_of(session.pipeline_params)
-    preflight_warnings = run_preflight_checks(
+    warnings = run_preflight_checks(
         config,
         selected,
+        session,
         dataset,
-        target_models,
         framing=origin.framing,
         cell_usd=None if bound is None else bound.usd,
         measured_cell_usd=None if measured is None else measured.usd,
         origin_campaigns=_campaigns_on_origin(session, survey),
         instrument=instrument,
         banked_instruments=[] if instrument is None else _banked_instruments(session, survey),
+        unread=survey.faulted,
     )
     append_record(
         PhaseRecord(
             phase=CampaignPhase.INIT,
             step="enter",
-            act=InitOpened(
-                warnings=tuple(
-                    PreflightNote(title=w.title, detail=w.detail) for w in preflight_warnings
-                ),
-                formula=CellFormula.of(session.state.scoring.scorer),
-            ),
+            act=InitOpened(warnings=warnings, formula=CellFormula.of(session.state.scoring.scorer)),
         )
     )
 

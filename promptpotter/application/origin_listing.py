@@ -1,11 +1,8 @@
 from __future__ import annotations
 
-import logging
-
 from pydantic import Field
 
 from promptpotter.application.datasets.startability import dataset_reading, offered
-from promptpotter.application.views.render.phase import acts_line
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.dataset_start import StartBlock
 from promptpotter.domain.refusal import Refusal
@@ -17,8 +14,6 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import DatasetAccessError
-
-logger = logging.getLogger(__name__)
 
 
 class DatasetIndexEntry(StrictModel):
@@ -78,19 +73,14 @@ def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
 
 
 def no_dataset_hint(stores: Stores) -> str:
-    """The terminal's note past a refusal naming no dataset: `list_datasets`, each row a refusal
-    blocks said with its acts."""
-    lines = [
-        line
-        for entry in list_datasets(stores)
-        for refused in (entry.refusal,)
-        for line in (
-            f"  {entry.name}",
-            *(() if refused is None else (f"    {refused.message}", *acts_line(refused.next_acts))),
-        )
+    """The terminal's note past a refusal naming no dataset: each offered name, its rows unread."""
+    names = [
+        f"  {ref.dataset.name}"
+        for ref in list_readable_datasets(stores)
+        if offered(stores, ref.dataset.name)
     ]
     return "Available datasets, by name:\n\n" + (
-        "\n".join(lines) or "  (no datasets readable here)"
+        "\n".join(names) or "  (no datasets readable here)"
     )
 
 
@@ -135,14 +125,10 @@ def list_origins(stores: Stores) -> list[OriginEntry]:
     out: list[OriginEntry] = []
     for origin_id, group in _campaigns_by_origin(stores).items():
         canonical = _canonical(group)
+        # Runnable only: its campaigns still list, each refusing a launch on the dataset it lost.
         try:
             resolve_dataset(stores, canonical.dataset_name)
         except DatasetAccessError:
-            logger.info(
-                "origins: skipping origin %s — dataset %r no longer resolves",
-                origin_id,
-                canonical.dataset_name,
-            )
             continue
         # The BEST across the origin's campaigns: origin scoring is nondeterministic at the backend.
         scores = [

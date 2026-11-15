@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, ClassVar, Literal
@@ -132,8 +131,6 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import ValidationReason
-
-logger = logging.getLogger(__name__)
 
 
 def _strata(pool: list[Sample], by: CellStrata) -> list[list[Sample]]:
@@ -415,14 +412,6 @@ class L2Context(LayoutNode):
             else:
                 layout_refused = True
 
-        if layout_outcomes:
-            logger.warning(
-                "L2 layout %s — %d outcome(s): %s",
-                "REFUSED" if layout_refused else "accepted with reports",
-                len(layout_outcomes),
-                ", ".join(o.validator_id for o in layout_outcomes),
-            )
-
         named = raw.recombinations if isinstance(raw, L2RecombiningOutput) else []
         return TransitionResult(
             rationale=raw.rationale,
@@ -515,12 +504,6 @@ class L3Plan(LayoutNode):
 
     def parse(self, ctx: NodeContext, raw: L3PlanOutput) -> TransitionResult:
         failures = l3_plan_breaches(raw.plan, prior_plan=ctx.slice(L3Memory).plan)
-        if failures:
-            logger.warning(
-                "L3 output failed %d validator(s): %s",
-                len(failures),
-                ", ".join(o.validator_id for o in failures),
-            )
         return TransitionResult(
             rationale=raw.rationale,
             plan=raw.plan,

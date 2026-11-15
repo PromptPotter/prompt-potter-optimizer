@@ -283,6 +283,7 @@ def machine_status_human(
         f"refused {refusal.released_at}: {refusal.job_id}  {refusal.what}  {refusal.reason}"
         for refusal in status.refused
     ]
+    lines += [f"unswept {step}" for step in status.unswept]
     return CommandResult(
         data=status.model_dump(mode="json"),
         human="\n".join(lines),

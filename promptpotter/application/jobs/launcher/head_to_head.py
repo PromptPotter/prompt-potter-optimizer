@@ -4,7 +4,6 @@ each detached to its own process — or, for an embedded host, held for it to ru
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -41,8 +40,6 @@ from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import ResolvedDataset, runnable_definition
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import Stores
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,7 +167,6 @@ class AdmittedHeadToHead(LaunchOutcome):
         raised before any minted."""
         async with self.source.closing:
             for start in self.starts:
-                logger.warning("admitted arm %s withdrawn unrun: %s", start.job_id, exc)
                 await asyncio.to_thread(start.release, exc)
 
     async def minted(self) -> list[HeldArm]:

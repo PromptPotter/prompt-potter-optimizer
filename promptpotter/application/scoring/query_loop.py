@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
-import logging
 import sys
 import time
 from collections.abc import Awaitable, Callable, Hashable, Mapping, Sequence
@@ -31,6 +30,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.records.run_records import (
     ArmAct,
     RaceCatchUpRecord,
+    RoundWarningRecord,
     SampleScoredRecord,
     SampleStartedRecord,
     StopLoop,
@@ -65,14 +65,11 @@ from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
     SendRefusedError,
-    graceful,
 )
 from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.scoring.catch_up import CatchUpPool, CaughtUp
-
-logger = logging.getLogger(__name__)
 
 
 _BUDGET_STOPS = frozenset(
@@ -409,13 +406,6 @@ class Walk:
             if taken.facts.errored:
                 if reason := self._abort_reason(taken):
                     # The untouched tail is counted, never written as rows, which would keep the denominator full.
-                    logger.warning(
-                        "Aborting scoring: %s after query %d/%d. %d cells not attempted.",
-                        reason,
-                        len(self.results),
-                        n,
-                        n - len(self.results),
-                    )
                     return QueryLoopResult(self.results, ended_on=reason)
             else:
                 self.consecutive_errors = 0
@@ -713,7 +703,6 @@ class _ScoringPhase[K: Hashable]:
             self.gauge.touch()
         armed = _armed_cells(self.session, walk.ctx.kind)
         if walk.skip_at is not None and len(walk.results) >= walk.skip_at:
-            logger.info("Replaying an operator skip after query %d/%d.", walk.skip_at, walk.n)
             return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         now = self.turn_state(walk)
         if now.stopping and (now.cut or not now.keeping):
@@ -765,20 +754,9 @@ class _ScoringPhase[K: Hashable]:
             if session.state.control.spend_skip():
                 # Stamped where a searchpoint is actually cut, never at the press.
                 session.act(ArmAct.SKIP)
-            logger.info(
-                "Operator skip after query %d/%d; accepting partial searchpoint.",
-                len(walk.results),
-                walk.n,
-            )
             return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         if now.pause or now.tripped is None:
             raise KeyboardInterrupt("graceful")
-        logger.warning(
-            "Budget ceiling reached after query %d/%d (%s); halting mid-round.",
-            len(walk.results),
-            walk.n,
-            now.tripped.value,
-        )
         raise StopLoop(now.tripped)
 
     def take_head(self, walk: Walk, head: asyncio.Task[_Acquired]) -> bool:
@@ -845,11 +823,6 @@ class _ScoringPhase[K: Hashable]:
         calls = self.outstanding()
         if not calls:
             if book is not None and cell is not None and self.affordable() == 0:
-                logger.warning(
-                    "The spend book holds no further cell after query %d/%d; halting mid-round.",
-                    len(walk.results),
-                    walk.n,
-                )
                 # Raises the refusal `hold` would, naming the ceiling that binds, and holds nothing.
                 book.refuse_unless_room((cell, cell), self.label.kind, NEXT_CELL, self.payer)
             raise RuntimeError(
@@ -911,7 +884,7 @@ class _ScoringPhase[K: Hashable]:
 
     def bank(self) -> None:
         for walk in self.live():
-            with graceful("Could not bank a stopped walk's returned cells"):
+            try:
                 sure = walk.bank()
                 if self.backfills is not None:
                     self.caught_up(
@@ -920,6 +893,15 @@ class _ScoringPhase[K: Hashable]:
                             [*sure, walk.settling] if walk.settling is not None else sure
                         ),
                     )
+            except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
+                raise
+            except Exception as fault:  # noqa: BLE001 -- the stop that ended the walk stands
+                said = "a stopped walk's returned cells were not banked"
+                append_record(
+                    RoundWarningRecord.handled(
+                        "cells_unbanked", fault, said=said, round=bound_round()
+                    )
+                )
 
     def keep_cut(self) -> None:
         for i, walk in enumerate(self.walks):

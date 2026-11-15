@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
@@ -11,8 +10,6 @@ from promptpotter.domain.scoring import CellSheet, Scorer
 from promptpotter.infrastructure.store import archive_queries
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
 from promptpotter.infrastructure.store.stores import Stores
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -163,7 +160,7 @@ class SampleIndex:
         scorer: Scorer,
         sig: list[list[Any]],
         prior: SampleFoldRow | None,
-    ) -> tuple[SampleFoldRow, str | None]:
+    ) -> SampleFoldRow:
         """The WHOLE population goes on the first ungradable row: a per-row skip folds a part as if scored entire."""
         sheet = scorer.sheet(answer.cell for answer in population)
         row = SampleFoldRow(
@@ -177,11 +174,10 @@ class SampleIndex:
                 if cell.scored and (objective := cell.grade.objective) is not None
             ],
         )
-        unscored = next((why for cell in sheet if (why := cell.grade.unscored)), None)
-        if unscored is not None:
-            return row.model_copy(update={"unscoreable": True}), unscored
+        if any(cell.grade.unscored for cell in sheet):
+            return row.model_copy(update={"unscoreable": True})
         cells, new_samples = self._derive(sheet, prior)
-        return row.model_copy(update={"cells": cells, "new_samples": new_samples}), None
+        return row.model_copy(update={"cells": cells, "new_samples": new_samples})
 
     def _persisted(self, stores: Stores, scorer_id: str) -> dict[str, SampleFoldRow]:
         """A fold with any row graded under another formula is rejected whole."""
@@ -205,7 +201,6 @@ class SampleIndex:
 
         rows: dict[str, SampleFoldRow] = {}
         moved = 0
-        skipped: list[str] = []
         for entry in entries:
             key = entry.config_key
             sig = signatures.get(key) or []
@@ -214,17 +209,8 @@ class SampleIndex:
                 population = archive_queries.load_population(stores, entry, self._bank)
                 if not population:
                     continue
-                held, unscored = self._fold_population(entry, population, scorer, sig, held)
+                held = self._fold_population(entry, population, scorer, sig, held)
                 moved += 1
-                if unscored is not None:
-                    logger.warning(
-                        "sample refresh: configuration %r is unscoreable under the active "
-                        "formula — skipping it (it lacks a term the formula names). %s",
-                        key,
-                        unscored,
-                    )
-            if held.unscoreable:
-                skipped.append(key)
             rows[key] = held
 
         if moved or rows.keys() != self._rows.keys():
@@ -235,14 +221,6 @@ class SampleIndex:
             )
         elif not first:
             return
-        if skipped:
-            logger.warning(
-                "sample refresh: %d configuration(s) skipped as unscoreable under the active "
-                "formula (%s) — the index is built from the %d that scored.",
-                len(skipped),
-                ", ".join(skipped[:5]),
-                len(rows) - len(skipped),
-            )
 
     @classmethod
     def ensure_for(

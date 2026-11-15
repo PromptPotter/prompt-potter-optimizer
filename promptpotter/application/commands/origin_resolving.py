@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import logging
-
 from promptpotter.application.commands.dispatcher import Applier, DispatchedToDraft
 from promptpotter.application.datasets.draft_build import DraftCampaignWire, kept_draft_wire
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -11,8 +9,6 @@ from promptpotter.domain.checkin_draft import OriginResolution
 from promptpotter.domain.command_kinds import ResolveOriginPayload
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.errors import ConflictError, PotterError, ServiceUnavailableError
-
-logger = logging.getLogger(__name__)
 
 # The refusal of a turn no draft owes: a door that sent an empty answer reads it as "no turn".
 RESOLVER_NOT_OWED = "resolver_not_owed"
@@ -49,8 +45,6 @@ async def resolve_origin(
         except PotterError:
             raise
         except Exception as exc:
-            # Logged here: the 503 carries no traceback.
-            logger.exception("resolve-origin turn failed for draft %s", draft_id)
             raise ServiceUnavailableError(
                 f"origin resolver turn failed: {exc}", code="resolver_failed"
             ) from exc

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
@@ -106,16 +105,10 @@ from promptpotter.domain.wounds import (
 )
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 
-logger = logging.getLogger(__name__)
-
 
 def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceGrounding | None:
     """Permissive on purpose: a missing grounding is a behaviour-check failure, never a parse one."""
     if raw is None:
-        logger.warning(
-            "l1_generate: variant emitted without evidence_grounding — "
-            "routed to evidence_grounding_present wound channel"
-        )
         return None
     return EvidenceGrounding(field=raw.field, citation=raw.citation.strip())
 
@@ -137,7 +130,6 @@ async def l1_generate(
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
-    round_num = ctx.round_num
     calls, knobs = ctx.read(Calls), ctx.knobs(L1GenerateKnobs)
     opt_sp = ctx.read(Lineage).parent
 
@@ -182,24 +174,7 @@ async def l1_generate(
     except OptimizerPromptParseError as parse_err:
         # TOOLING is never charged, a truncation always: a prompt that outgrew max_tokens owns its failure.
         # Either way an L4 cell whose every round yields nothing FLOORS (`l4/proxies.py::floor_reason`).
-        is_empty = parse_err.is_empty
-        truncated = parse_err.first_finish_reason == "length"
-        reason = PARSE_FAILURE_TOOLING if is_empty else PARSE_FAILURE_MALFORMED
-        cause = (
-            "response truncated at max_tokens — the optimizer prompt asks for more than the "
-            "budget carries"
-            if truncated
-            else "provider returned empty/truncated content"
-            if is_empty
-            else "optimizer prompt parse failure after retry"
-        )
-        logger.error(
-            "L1 R%d: %s — zero candidates this round (failing attempt=%d chars) [%s]",
-            round_num,
-            cause,
-            parse_err.failing_chars,
-            parse_err.diagnosis(),
-        )
+        reason = PARSE_FAILURE_TOOLING if parse_err.is_empty else PARSE_FAILURE_MALFORMED
         return L1Generation([], reason, citable, budget)
 
     variants_list = generated.variants
@@ -280,8 +255,6 @@ def _recombined(
                 cross, take=take, changes_description=spec.changes_description, hosted_by=host
             )
         )
-    if dropped:
-        logger.info("%d recombination(s) dropped: %s", len(dropped), dropped)
     return out
 
 
@@ -342,15 +315,6 @@ def parse_population(
         failures = [vf for vf in failures if vf not in cp.validation_failures]
         if failures:
             cp = cp.model_copy(update={"validation_failures": [*cp.validation_failures, *failures]})
-            for vf in failures:
-                logger.warning(
-                    "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
-                    opt_sp.id[:8],
-                    vf.axis,
-                    vf.value,
-                    vf.allowed,
-                    vf.reason,
-                )
         parsed.append(cp)
     return parsed
 
@@ -405,7 +369,6 @@ async def propose_l1_population(ctx: NodeContext) -> Proposals:
     if checked and all(
         any(vf.reason == "no_op_variant" for vf in cp.validation_failures) for cp in checked
     ):
-        logger.error("L1 R%d: every variant is a no-op — zero candidates", ctx.round_num)
         checked = []
         generation = replace(generation, parse_failure=PARSE_FAILURE_ALL_NO_OP)
     parsed = parse_population(

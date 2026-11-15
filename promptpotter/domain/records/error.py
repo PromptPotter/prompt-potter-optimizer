@@ -7,6 +7,7 @@ from pydantic import Field
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.records import CycleRecord
 from promptpotter.shared.clock import utcnow_iso
+from promptpotter.shared.errors import fault_said
 
 
 class ErrorRecord(CycleRecord):
@@ -31,11 +32,11 @@ class ErrorRecord(CycleRecord):
         traceback: str | None = None,
         round: int | None = None,
     ) -> ErrorRecord:
-        message, _, detail = (str(exc).strip() or type(exc).__name__).partition("\n")
+        message, detail = fault_said(exc)
         return cls(
             kind=kind,
             message=message,
-            detail=detail or None,
+            detail=detail,
             traceback=traceback,
             stop_reason=stop_reason,
             round=round,

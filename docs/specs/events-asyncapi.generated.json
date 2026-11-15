@@ -1395,6 +1395,57 @@
         "title": "CampaignCeilingRecord",
         "type": "object"
       },
+      "CapUnderRound": {
+        "additionalProperties": false,
+        "description": "A USD cap under what one round can cost, priced on a billed cell where one is archived.",
+        "properties": {
+          "billed": {
+            "title": "Billed",
+            "type": "boolean"
+          },
+          "cap": {
+            "title": "Cap",
+            "type": "number"
+          },
+          "cells": {
+            "title": "Cells",
+            "type": "integer"
+          },
+          "check": {
+            "const": "spend_cap_below_round",
+            "default": "spend_cap_below_round",
+            "title": "Check",
+            "type": "string"
+          },
+          "need": {
+            "title": "Need",
+            "type": "number"
+          },
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          },
+          "price": {
+            "title": "Price",
+            "type": "number"
+          },
+          "search": {
+            "title": "Search",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "optimizer",
+          "cap",
+          "need",
+          "cells",
+          "search",
+          "price",
+          "billed"
+        ],
+        "title": "CapUnderRound",
+        "type": "object"
+      },
       "CellBeatRecord": {
         "additionalProperties": false,
         "description": "A scoring cell still open, by the arm it walks and the bank row it measures: no node runs it.",
@@ -1652,6 +1703,49 @@
           "value"
         ],
         "title": "CountFact",
+        "type": "object"
+      },
+      "CouplingActive": {
+        "additionalProperties": false,
+        "properties": {
+          "check": {
+            "const": "config_coupling",
+            "default": "config_coupling",
+            "title": "Check",
+            "type": "string"
+          },
+          "consequence": {
+            "title": "Consequence",
+            "type": "string"
+          },
+          "knobs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Knobs",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "severity",
+          "knobs",
+          "relation",
+          "consequence"
+        ],
+        "title": "CouplingActive",
         "type": "object"
       },
       "Coverage": {
@@ -3606,7 +3700,49 @@
           "warnings": {
             "default": [],
             "items": {
-              "$ref": "#/components/schemas/PreflightNote"
+              "discriminator": {
+                "mapping": {
+                  "config_coupling": "#/components/schemas/CouplingActive",
+                  "instrument_novel": "#/components/schemas/InstrumentNovel",
+                  "no_terminal_ranker": "#/components/schemas/NoRanker",
+                  "optimizer_below_target": "#/components/schemas/OptimizerBelowTarget",
+                  "origin_already_run": "#/components/schemas/OriginAlreadyRun",
+                  "sp_budget_exceeds_dataset": "#/components/schemas/RoundOverBank",
+                  "spend_cap_below_round": "#/components/schemas/CapUnderRound",
+                  "survey_unread": "#/components/schemas/SurveyUnread",
+                  "unframed": "#/components/schemas/Unframed"
+                },
+                "propertyName": "check"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/RoundOverBank"
+                },
+                {
+                  "$ref": "#/components/schemas/OptimizerBelowTarget"
+                },
+                {
+                  "$ref": "#/components/schemas/CouplingActive"
+                },
+                {
+                  "$ref": "#/components/schemas/Unframed"
+                },
+                {
+                  "$ref": "#/components/schemas/CapUnderRound"
+                },
+                {
+                  "$ref": "#/components/schemas/OriginAlreadyRun"
+                },
+                {
+                  "$ref": "#/components/schemas/InstrumentNovel"
+                },
+                {
+                  "$ref": "#/components/schemas/NoRanker"
+                },
+                {
+                  "$ref": "#/components/schemas/SurveyUnread"
+                }
+              ]
             },
             "title": "Warnings",
             "type": "array"
@@ -3616,6 +3752,36 @@
           "formula"
         ],
         "title": "InitOpened",
+        "type": "object"
+      },
+      "InstrumentNovel": {
+        "additionalProperties": false,
+        "properties": {
+          "campaigns": {
+            "title": "Campaigns",
+            "type": "integer"
+          },
+          "check": {
+            "const": "instrument_novel",
+            "default": "instrument_novel",
+            "title": "Check",
+            "type": "string"
+          },
+          "fingerprints": {
+            "title": "Fingerprints",
+            "type": "integer"
+          },
+          "instrument": {
+            "title": "Instrument",
+            "type": "string"
+          }
+        },
+        "required": [
+          "instrument",
+          "campaigns",
+          "fingerprints"
+        ],
+        "title": "InstrumentNovel",
         "type": "object"
       },
       "Invalid": {
@@ -4768,6 +4934,20 @@
         "title": "NearMiss",
         "type": "object"
       },
+      "NoRanker": {
+        "additionalProperties": false,
+        "description": "The converse is deliberately not warned: a ranker with no labels is no fault.",
+        "properties": {
+          "check": {
+            "const": "no_terminal_ranker",
+            "default": "no_terminal_ranker",
+            "title": "Check",
+            "type": "string"
+          }
+        },
+        "title": "NoRanker",
+        "type": "object"
+      },
       "NodeCall": {
         "additionalProperties": true,
         "type": "object"
@@ -4974,6 +5154,34 @@
         "title": "OptSearchPoint",
         "type": "object"
       },
+      "OptimizerBelowTarget": {
+        "additionalProperties": false,
+        "properties": {
+          "bigger": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bigger",
+            "type": "array"
+          },
+          "check": {
+            "const": "optimizer_below_target",
+            "default": "optimizer_below_target",
+            "title": "Check",
+            "type": "string"
+          },
+          "optimizer": {
+            "title": "Optimizer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "optimizer",
+          "bigger"
+        ],
+        "title": "OptimizerBelowTarget",
+        "type": "object"
+      },
       "OptimizerFact": {
         "additionalProperties": false,
         "description": "One labelled reading an optimizer reports about a round, worded by its own runtime.",
@@ -5106,6 +5314,30 @@
           "outputs"
         ],
         "title": "OptimizerState",
+        "type": "object"
+      },
+      "OriginAlreadyRun": {
+        "additionalProperties": false,
+        "description": "A cycle id is content-addressed: another campaign holding it ran the identical origin.",
+        "properties": {
+          "campaigns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
+          "check": {
+            "const": "origin_already_run",
+            "default": "origin_already_run",
+            "title": "Check",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaigns"
+        ],
+        "title": "OriginAlreadyRun",
         "type": "object"
       },
       "OriginSource": {
@@ -5909,25 +6141,6 @@
           "badge"
         ],
         "title": "PrefixReading",
-        "type": "object"
-      },
-      "PreflightNote": {
-        "additionalProperties": false,
-        "properties": {
-          "detail": {
-            "title": "Detail",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          }
-        },
-        "required": [
-          "title",
-          "detail"
-        ],
-        "title": "PreflightNote",
         "type": "object"
       },
       "PricedKeyRecord": {
@@ -6955,6 +7168,31 @@
         "title": "RoundOutput",
         "type": "object"
       },
+      "RoundOverBank": {
+        "additionalProperties": false,
+        "properties": {
+          "asked": {
+            "title": "Asked",
+            "type": "integer"
+          },
+          "bank": {
+            "title": "Bank",
+            "type": "integer"
+          },
+          "check": {
+            "const": "sp_budget_exceeds_dataset",
+            "default": "sp_budget_exceeds_dataset",
+            "title": "Check",
+            "type": "string"
+          }
+        },
+        "required": [
+          "asked",
+          "bank"
+        ],
+        "title": "RoundOverBank",
+        "type": "object"
+      },
       "RoundProposedRecord": {
         "additionalProperties": false,
         "description": "Banked by the bench once per round; replayed on a resume unless a digest the round ``consumed`` has moved.",
@@ -7172,7 +7410,9 @@
             "enum": [
               "layer_parse_failure",
               "injection_budget_overrun",
-              "derived_file_stale"
+              "derived_file_stale",
+              "adapter_landed_nothing",
+              "cells_unbanked"
             ],
             "title": "Kind",
             "type": "string"
@@ -8519,6 +8759,35 @@
         "title": "StopSpend",
         "type": "object"
       },
+      "SurveyUnread": {
+        "additionalProperties": false,
+        "description": "Campaigns the survey of earlier runs could not read: their rounds inform nothing here.",
+        "properties": {
+          "campaigns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Campaigns",
+            "type": "array"
+          },
+          "check": {
+            "const": "survey_unread",
+            "default": "survey_unread",
+            "title": "Check",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaigns",
+          "reason"
+        ],
+        "title": "SurveyUnread",
+        "type": "object"
+      },
       "TestFamily": {
         "additionalProperties": false,
         "description": "The set of tests one multiple-comparison correction was taken across.",
@@ -8845,6 +9114,27 @@
           "reading"
         ],
         "title": "TriggeredReading",
+        "type": "object"
+      },
+      "Unframed": {
+        "additionalProperties": false,
+        "description": "``chosen``: `task_framing: off`, the framing ablation; else no framing was written.",
+        "properties": {
+          "check": {
+            "const": "unframed",
+            "default": "unframed",
+            "title": "Check",
+            "type": "string"
+          },
+          "chosen": {
+            "title": "Chosen",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "chosen"
+        ],
+        "title": "Unframed",
         "type": "object"
       },
       "ValidationFailure": {

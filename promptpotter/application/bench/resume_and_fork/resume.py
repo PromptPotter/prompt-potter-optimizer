@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.bench.resume_and_fork.ab_replay import line_divergence
@@ -20,8 +19,6 @@ from promptpotter.shared.identity import SYSTEM_PRINCIPAL
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-
-logger = logging.getLogger(__name__)
 
 
 def _stale_generation(
@@ -41,16 +38,6 @@ def _stale_generation(
     current = (round_document_digest(prior[-1]), selected.name, selected.prompt_hashes())
     if recorded == current:
         return None
-    logger.warning(
-        "Round %d's cached candidates were generated from round %d as it read %s by %s, and it "
-        "now reads %s by %s — regenerating on a branch rather than replaying them.",
-        resumed_from_round,
-        prior[-1].round,
-        recorded[0] or "(unrecorded)",
-        recorded[1],
-        current[0],
-        current[1],
-    )
     return ReplayMismatch(
         round_num=resumed_from_round,
         kind="stale_generation",
@@ -121,13 +108,6 @@ def _branch(
         cycle.reopen_origin()
     else:
         cycle.replay_priors([t for t in prior if t.round < div.round_num])
-    logger.warning(
-        "Resume diverged at round %d (%s); branched → %s. That cycle is the "
-        "continuation; this one keeps what the superseded package produced.",
-        div.round_num,
-        div.kind,
-        fork.child.cycle_id,
-    )
     return fork
 
 

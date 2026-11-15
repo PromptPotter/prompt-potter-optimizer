@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import functools
-import logging
 import re
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, cast
@@ -29,8 +28,6 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     layout_json_schema,
 )
 from promptpotter.domain.strict_model import NonNegativeWireFloat, WireInt
-
-logger = logging.getLogger(__name__)
 
 
 def _truncate(max_len: int) -> Callable[[Any], Any]:
@@ -288,13 +285,6 @@ def critique_response_model(marked: frozenset[int], least: int) -> type[L1Critiq
             for c in clusters
             if len(set(ids := [i for i in c.sample_ids if i in marked])) >= least
         ]
-        if dropped := len(clusters) - len(kept):
-            logger.info(
-                "critique: %d of %d clusters span fewer than %d marked rows — dropped",
-                dropped,
-                len(clusters),
-                least,
-            )
         return kept[:CLUSTERS_MAX]
 
     # Named as the base's, so it replaces the cap rather than run after it.

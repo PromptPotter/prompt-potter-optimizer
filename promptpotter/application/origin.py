@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.cycle import ReadArm
@@ -48,9 +47,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import Cycle
-
-
-logger = logging.getLogger(__name__)
 
 
 ORIGIN_POSITION = ArmPosition(round=0, idx=0, total=1)
@@ -130,16 +126,6 @@ def try_inherit_fork_origin(
         return None
 
     inherited_results = parent_round.rows(key)
-    logger.info(
-        "Fork %s: inheriting C0 from branch-point candidate %s (parent %s round %d) "
-        "fitness=%s, %d per-sample rows — skipping origin re-score, straight to L1",
-        session.cycle_id,
-        key,
-        parent,
-        named.round,
-        fold.fitness,
-        len(inherited_results),
-    )
     # The OSP object, not a prompt-field dict, so the inherited C0 keeps the start's lineage.
     inherited = cand.model_copy(
         update={

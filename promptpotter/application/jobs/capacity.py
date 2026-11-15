@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import logging
 from enum import StrEnum
 
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.send_pacing import throttle_stall_seconds
 from promptpotter.shared.worded import Worded
-
-logger = logging.getLogger(__name__)
 
 # "One task waited a whole window". Not a setting: the operator's knob is MACHINE_RUN_CAPACITY.
 _STALL_BUDGET_S = 60.0
@@ -19,15 +16,7 @@ def resolve_run_capacity(running: int) -> int:
     if stalled <= _STALL_BUDGET_S:
         return ceiling
     # Never below one, or a stalled quiet box refuses its own last slot and admits nothing again.
-    held = max(1, min(ceiling, running))
-    if held < ceiling:
-        logger.info(
-            "throttle back-pressure: %.0fs stall in the last window holds capacity at %d (ceiling %d)",
-            stalled,
-            held,
-            ceiling,
-        )
-    return held
+    return max(1, min(ceiling, running))
 
 
 class SlotBound(StrEnum):

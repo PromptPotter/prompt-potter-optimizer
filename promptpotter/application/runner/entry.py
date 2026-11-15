@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from dataclasses import dataclass, replace
 
 from promptpotter.application.bench.cycle import Cycle
@@ -65,8 +64,6 @@ from promptpotter.infrastructure.llm.spend_book import SpendBook, require_spend_
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_wall_clock
 from promptpotter.shared.clock import utcnow_iso
-
-logger = logging.getLogger(__name__)
 
 
 def build_cycle_result(
@@ -379,15 +376,6 @@ def _cut_rebase_fork(
     store.append(
         fork.child,
         branch.restated(branch.optimizer_state.model_copy(update={"slices": learned.slices})),
-    )
-    logger.info(
-        "Auto-rebase: %s → %s at round %d, %s rounds in its cap [trigger=%s, reason=%s]",
-        parent.cycle_id,
-        fork.child.cycle_id,
-        cut,
-        overrides.budget.rounds,
-        rebase_req.trigger.value,
-        rebase_req.reason,
     )
     return prep, fork
 

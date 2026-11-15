@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Collection, Mapping
 from typing import Any
 
@@ -9,9 +8,6 @@ from promptpotter.domain.pipeline_params import PARAM_FORBIDDEN_KEYS, PipelinePa
 from promptpotter.domain.pipeline_schema import SCHEMA_OWNED_FIELDS, PipelineSchema
 from promptpotter.domain.search_point import SHOTS_KEY, missing_template_vars
 from promptpotter.domain.wounds import ValidationFailure, ValidationReason
-
-logger = logging.getLogger(__name__)
-
 
 _JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {
     "string": (str,),
@@ -231,18 +227,8 @@ def admission_failures(
     carried: list[ValidationFailure],
 ) -> list[ValidationFailure]:
     """*config* is every config locus the child was written, *carried* what ``carried_writes`` refused."""
-    found = [
+    return [
         *carried,
         *overlay_failures(config, schema, running=child.pipeline_params),
         *placeholder_failures(child, schema),
     ]
-    for failure in found:
-        logger.warning(
-            "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
-            child.id[:8],
-            failure.axis,
-            failure.value,
-            failure.allowed,
-            failure.reason,
-        )
-    return found

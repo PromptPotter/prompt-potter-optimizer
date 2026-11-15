@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 import math
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
@@ -64,7 +63,6 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_points,
 )
 from promptpotter.application.scoring.selection import cells_read, discordant
-from promptpotter.application.views.render.phase import stop_next_lines
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import (
     ArmState,
@@ -120,6 +118,7 @@ from promptpotter.domain.records.run_records import (
     ElectionRecord,
     PanelCoverage,
     PhaseRecord,
+    RoundWarningRecord,
     Running,
     RunPhaseRecord,
     StopLoop,
@@ -139,7 +138,7 @@ from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint
 from promptpotter.domain.wounds import ValidationFailure, ValidationReason
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat
 from promptpotter.infrastructure.llm.telemetry import append_record
-from promptpotter.shared.errors import SendRefusedError, graceful
+from promptpotter.shared.errors import SendRefusedError, fault_said
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 
 if TYPE_CHECKING:
@@ -154,8 +153,6 @@ if TYPE_CHECKING:
     )
     from promptpotter.application.scoring.query_loop import BlockRace
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
-
-logger = logging.getLogger(__name__)
 
 
 _POLL_S = 1.0
@@ -345,11 +342,6 @@ async def measure_overlap(
     if len(ordered) < 2 and not fired:
         return not_read(ReadingState.SAME_INDIVIDUAL), bought
     if not panel:
-        logger.info(
-            "overlap: round %d — the origin holds no cell this cycle can still buy, so no "
-            "1-to-1 reading is possible",
-            round_result.round,
-        )
         return not_read(ReadingState.NOT_HELD), bought
 
     # A member short of the set breaks the one claim the reading makes; one the election's pass
@@ -556,18 +548,7 @@ async def _measure_gaps(
         kind=MeasurementRole.OVERLAP,
         blocks=top_up,
     )
-    scored = {member: raced[ArmKey(member)] for member in gaps}
-    for member, walk in scored.items():
-        if walk.stopped is not None:
-            step, samples = gaps[member]
-            logger.warning(
-                "overlap: %s stopped after %d/%d cell(s) (%s)",
-                step.arm.label,
-                len(walk.sheet),
-                len(samples),
-                walk.stopped,
-            )
-    return scored
+    return {member: raced[ArmKey(member)] for member in gaps}
 
 
 async def measure_population(
@@ -1003,25 +984,21 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
         if not owed:
             continue
         last: Exception | None = None
-        for attempt in range(1, OWED_WRITE_ATTEMPTS + 1):
+        for _ in range(OWED_WRITE_ATTEMPTS):
             try:
                 await adapter.adapt(NodeContext(at_prior, adapter))
                 break
             # A refused send is decided: swallowed, it halts as a PAUSE that `resume` re-enters forever.
             except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
                 raise
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001 -- the last fault is the halt's detail
                 last = exc
-                logger.exception(
-                    "round %d %s re-run %d/%d failed: %s",
-                    prior.round,
-                    adapter.name,
-                    attempt,
-                    OWED_WRITE_ATTEMPTS,
-                    exc,
-                )
         else:
-            raise StopLoop(StopReason.ADAPTER_OWED) from last
+            assert last is not None, "a re-run that never landed raised"
+            said = f"round {prior.round} {adapter.name}, re-run {OWED_WRITE_ATTEMPTS}x"
+            raise StopLoop(
+                StopReason.ADAPTER_OWED, detail=f"{said}: {fault_said(last)[0]}"
+            ) from last
 
 
 def _crowning_read(cycle: Cycle, measured: MeasuredRound, winner: ArmKey | None) -> BarRead | None:
@@ -1108,36 +1085,8 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
         cut if any(unbought[cid] for cid in holed) else None,
         ctx.cycle.config.optimization.panel_gate,
     )
-    if reason is None:
-        return
-    position_of = ctx.cycle.session.bank.position_of
-    for cid, cell in holed_rows:
-        logger.warning(
-            "round %d panel HOLE: candidate %s, sample %s — %s",
-            round_num,
-            cid,
-            position_of[cell.key],
-            cell.facts.error or cell.facts.error_category,
-        )
-    for cid in holed:
-        if unbought[cid]:
-            logger.warning(
-                "round %d panel HOLE: candidate %s — %d cell(s) the %s stop left unbought",
-                round_num,
-                cid,
-                unbought[cid],
-                reason.value,
-            )
-    logger.warning(
-        "Round %d halted BEFORE electing on an incomplete panel: %d of %d electable "
-        "candidate(s) carry cells that returned no measurement. The round is not persisted "
-        "— a resume re-runs it, replays the cached candidates and re-measures the holes. %s",
-        round_num,
-        len(holed),
-        round_result.candidates_scored,
-        " ".join(stop_next_lines(reason)),
-    )
-    raise StopLoop(reason)
+    if reason is not None:
+        raise StopLoop(reason)
 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
@@ -1200,12 +1149,6 @@ def _one_arm_each(ctx: RoundContext, proposals: list[Proposal]) -> list[Proposal
         if (arm := seen.get(key)) is None:
             seen[key] = proposal
             continue
-        logger.info(
-            "round %d: proposal %d reaches %s, which this round already measures — one arm",
-            ctx.round_num,
-            idx + 1,
-            key[:12],
-        )
         lineage = arm.individual.lineage
         edges = list(dict.fromkeys([*lineage.parent_ids, *proposal.individual.lineage.parent_ids]))
         if edges != lineage.parent_ids:
@@ -1259,8 +1202,17 @@ async def _adapt(ctx: RoundContext, plan: RoundPlan) -> None:
     append_record(PhaseRecord(phase=CampaignPhase.ADAPT, step="enter", round=ctx.round_num))
     for adapter in plan.adapters:
         # Survived here: the next walk re-runs it first (`settle_owed_outputs`).
-        with graceful(f"round {ctx.round_num} {adapter.name} landed nothing"):
+        try:
             await adapter.adapt(NodeContext(ctx, adapter))
+        except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
+            raise
+        except Exception as fault:  # noqa: BLE001 -- any fault of an adapter is its round's warning
+            said = f"round {ctx.round_num} {adapter.name} landed nothing"
+            append_record(
+                RoundWarningRecord.handled(
+                    "adapter_landed_nothing", fault, said=said, round=ctx.round_num
+                )
+            )
     append_record(PhaseRecord(phase=CampaignPhase.ADAPT, step="exit", round=ctx.round_num))
 
 

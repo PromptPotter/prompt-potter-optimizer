@@ -18,6 +18,8 @@ class Projection:
     #: The ``Cut`` folded to, stamped by its feeder. ``-1`` = nothing folded yet.
     at_offset: int = -1
     records: ClassVar[RecordClasses] = ()
+    # The file it writes, which a fault of it leaves stale (`read_model.py::Projected`).
+    derives: ClassVar[str]
     _routes: ClassVar[dict[type[CycleRecord], Callable[[Any, Any], None]]] = {}
 
     def __init_subclass__(cls) -> None:

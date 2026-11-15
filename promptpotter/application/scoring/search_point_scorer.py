@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import logging
 import time
 from collections import Counter
 from collections.abc import Hashable, Mapping, Sequence
@@ -40,8 +39,6 @@ from promptpotter.shared.measurement_context import (
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.application.scoring.query_loop import BlockRace, QueryLoopResult
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -107,11 +104,6 @@ def _resolve_prior_cache(
         cached_sample_results = replayable_on(dataset, feed.advance())
 
     cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
-    if deprecated_samples:
-        logger.info(
-            "Evicted %d deprecated prior result(s) (fatal warnings); will remeasure.",
-            len(deprecated_samples),
-        )
     return cached_sample_results, deprecated_samples
 
 

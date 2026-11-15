@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from collections.abc import Coroutine
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -23,8 +22,6 @@ from promptpotter.domain.job import UNRESOLVED_HOP
 from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
-
-logger = logging.getLogger(__name__)
 
 # Detached queued launches, held so the event loop cannot collect one mid-wait.
 _DETACHED_TASKS: set[asyncio.Task[object]] = set()
@@ -97,7 +94,6 @@ class Admitted(LaunchOutcome):
 
     async def withdraw(self, exc: BaseException) -> None:
         """Its slot given back, where the act that admitted it raised before any run held it."""
-        logger.warning("admitted launch %s withdrawn unrun: %s", self.start.job_id, exc)
         await asyncio.to_thread(self.start.release, exc)
 
     async def held(self) -> HeldRun:
@@ -121,8 +117,7 @@ class Admitted(LaunchOutcome):
             return held.session.hop
 
         if job.queued:
-            what = f"queued launch {job.job_id} ({self.request.dataset_name})"
-            _detach(hold_and_detach(), what=what)
+            _detach(hold_and_detach())
             return Launched(LaunchedJob.of(job), None)
         return Launched(LaunchedJob.of(job, await hold_and_detach()), None)
 
@@ -145,17 +140,8 @@ def admit(
         holder=request.holder,
         hop=request.hop,
     )
-    if inline is not None and job.queued:
-        if inline.no_wait:
-            refuse_as_busy(job_registry, job)
-        oldest = next(iter(job_registry.list_running()), None)
-        order = job_registry.queue_order()
-        logger.warning(
-            "Machine full — queued at position %d (oldest run: %s). It starts by itself; "
-            "Ctrl+C to leave the queue.",
-            next((i for i, q in enumerate(order, 1) if q.job_id == job.job_id), 1),
-            "?" if oldest is None else oldest.what,
-        )
+    if inline is not None and job.queued and inline.no_wait:
+        refuse_as_busy(job_registry, job)
     return Admitted(RunStart(stores, job_registry, job), request, mode, inline)
 
 
@@ -173,17 +159,9 @@ async def launch(
     return await admitted.launched()
 
 
-def _detach(coro: Coroutine[Any, Any, object], *, what: str) -> None:
+def _detach(coro: Coroutine[Any, Any, object]) -> None:
     task = asyncio.ensure_future(coro)
     _DETACHED_TASKS.add(task)
     task.add_done_callback(_DETACHED_TASKS.discard)
-    # Nobody awaits it, so the result is read here: an unread exception warns at shutdown.
-    task.add_done_callback(lambda t: _report_detached(t, what))
-
-
-def _report_detached(task: asyncio.Task[object], what: str) -> None:
-    if task.cancelled():
-        return
-    exc = task.exception()
-    if exc is not None:
-        logger.error("%s failed: %s", what, exc, exc_info=exc)
+    # Its fault is its job's release (`hold`), read here so asyncio never warns it unread.
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())

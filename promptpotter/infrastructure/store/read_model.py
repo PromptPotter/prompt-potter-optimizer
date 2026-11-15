@@ -392,9 +392,11 @@ def folded[F: LedgerFold[Any, Any]](
     return made
 
 
-@runtime_checkable
 class Projected(Protocol):
-    """A fold that writes (`projections/base.py::Projection`), fed after its index's folds."""
+    """A fold that writes (`projections/base.py::Projection`), fed after its index's folds; it
+    `derives` the file its fault leaves stale."""
+
+    derives: ClassVar[str]
 
     def feed(self, record: CycleRecord) -> None: ...
 
@@ -447,9 +449,7 @@ class LedgerIndex(_LedgerTail):
         with cls._registry_lock:
             cls._readers.extend(fold for fold in folds if fold not in cls._readers)
             cls._screened.extend(
-                fold
-                for fold in folds
-                if not issubclass(fold, Projected) and fold not in cls._screened
+                fold for fold in folds if not hasattr(fold, "drain") and fold not in cls._screened
             )
 
     @classmethod
@@ -513,7 +513,7 @@ class LedgerIndex(_LedgerTail):
                     return
                 self._stale.add(type(projection))
                 at = self._lines - 1 if at is None else at
-            warning = stale_file_warning(type(projection).__name__, at, _reason(fault))
+            warning = stale_file_warning(projection.derives, at, _reason(fault))
             ((raw, landed),) = append_jsonl(
                 self._path, warning.model_dump(mode="json", fallback=str)
             ).each()

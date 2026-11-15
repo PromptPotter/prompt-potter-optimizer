@@ -64,6 +64,8 @@ def read_cycle_index(cycle_dir: Path, *, moment: Moment | None) -> CycleIndex | 
 class CycleIndexProjection(Projection):
     """`index.json`'s one writer: the cycle's index, rewritten at each record that moves it."""
 
+    derives = "index.json"
+
     def __init__(self, cycle_dir: CycleDir) -> None:
         self._cycle_dir = Path(cycle_dir)
 

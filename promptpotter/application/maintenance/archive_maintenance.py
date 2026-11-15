@@ -29,7 +29,12 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import ConflictError, NotFoundError, PayloadInvalidError, graceful
+from promptpotter.shared.errors import (
+    ConflictError,
+    NotFoundError,
+    PayloadInvalidError,
+    fault_said,
+)
 from promptpotter.shared.measurement_context import MeasurementRole
 
 
@@ -339,13 +344,16 @@ def _each_file(
         return (rewrite if apply else None), outcome
 
     outcomes: list[_FileOutcome] = []
+    unread: list[str] = []
     for file_key in file_keys:
-        with graceful(f"{verb} {file_key}"):
+        try:
             outcomes.append(stores.archive.rewrite_cell_file(file_key, gated))
-    return _folded(outcomes, applied=apply)
+        except Exception as fault:  # noqa: BLE001 -- a file it cannot rewrite is the report's note
+            unread.append(f"{verb} {file_key}: {fault_said(fault)[0]}")
+    return _folded(outcomes, applied=apply, unread=unread)
 
 
-def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool) -> ArchiveReport:
+def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool, unread: list[str]) -> ArchiveReport:
     touched = rows = before = after = cold = conflicts = purged = unrestorable = 0
     skipped: Counter[str] = Counter()
     for outcome in outcomes:
@@ -378,7 +386,7 @@ def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool) -> ArchiveReport
         purged=purged + unrestorable,
         rows_skipped_by_role=dict(skipped),
         applied=applied,
-        notes=_notes(conflicts=conflicts, unrestorable=unrestorable),
+        notes=(*_notes(conflicts=conflicts, unrestorable=unrestorable), *unread),
     )
 
 

@@ -7,6 +7,7 @@ from pydantic import Field
 
 from promptpotter.application.account import account_or_opening
 from promptpotter.application.jobs.capacity import SlotBound, resolve_run_capacity
+from promptpotter.application.jobs.reaper import UNSWEPT
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
@@ -224,6 +225,12 @@ class MachineStatusResponse(StrictModel):
         description="Each job file no count above includes, with why it does not load: a run it "
         "names may hold a slot the machine cannot see. Served where every slot is.",
     )
+    unswept: list[str] = Field(
+        default_factory=list,
+        description="Each periodic step (the sweep, the route answers) whose last pass raised, "
+        "with its fault: what it reclaims stands until a pass runs clean. Served where every slot "
+        "is.",
+    )
     notice: Said | None = Field(
         description="A landing in progress, `busy` and the caller's place in `queue` — a fact about "
         "the NEXT launch, never about a run in view; null where a slot is free and nothing of "
@@ -274,6 +281,7 @@ def machine_status(
         busy=busy,
         queue=queue,
         unloadable=jobs.unloadable() if sees_all else [],
+        unswept=[f"{step}: {fault}" for step, fault in UNSWEPT.items()] if sees_all else [],
         # Named only where the caller may see the machine's oldest slot.
         notice=machine_notice(
             landing=jobs.landing(),

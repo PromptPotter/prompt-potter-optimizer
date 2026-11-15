@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import enum
-import logging
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, NamedTuple, Protocol, Self
@@ -62,8 +61,6 @@ from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.shared.identity import Principal
-
-logger = logging.getLogger(__name__)
 
 
 class NextAction(enum.StrEnum):
@@ -437,26 +434,19 @@ def _layer_control(fired: LayerCall, result: TransitionResult, view: PotterView)
     """The layer-control channel, read after the ladder banked the fire: terminate outranks rebase."""
     layer, ctx = fired
     capability = ctx.knobs(EscalationKnobs)
-    if result.terminate_proposal is not None:
-        # Present only where the reply schema offered it (`PotterView.terminate_offer`).
-        reason = result.terminate_proposal.reason.strip()
-        if not reason:
-            # Never substitute a stand-in reason: a blank stop is not a decision.
-            logger.warning(
-                "%s emitted a blank terminate_proposal — ignored, cycle continues",
-                layer.layer_id,
-            )
-        else:
-            raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{layer.layer_id}: {reason}")
+    # Present only where the reply schema offered it (`PotterView.terminate_offer`); never a
+    # stand-in reason: a blank stop is not a decision.
+    if result.terminate_proposal is not None and (
+        reason := result.terminate_proposal.reason.strip()
+    ):
+        raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{layer.layer_id}: {reason}")
 
-    if result.fork_proposal is not None:
-        if not capability.rebase_capability:
-            logger.warning(
-                "%s emitted fork_proposal while rebase_capability is off — ignored",
-                layer.layer_id,
-            )
-        elif fork := _rebase_request(ctx, layer.layer_id, result.fork_proposal, view.reelect_offer):
-            raise StopLoop(StopReason.REBASED, fork=fork)
+    if (
+        result.fork_proposal is not None
+        and capability.rebase_capability
+        and (fork := _rebase_request(ctx, layer.layer_id, result.fork_proposal, view.reelect_offer))
+    ):
+        raise StopLoop(StopReason.REBASED, fork=fork)
 
 
 def _rebase_request(
@@ -482,25 +472,6 @@ def _rebase_request(
     else:
         branch = lineage.branch_round(changing=unlock)
     if branch is None:
-        series = ctx.read(Ruler).level_series
-        withheld = sorted(
-            {
-                read.caveat
-                for rnd in series.rounds
-                if rnd <= round_num
-                and (read := series.reading(rnd)) is not None
-                and read.caveat is not None
-            }
-        )
-        logger.warning(
-            "%s emitted fork_proposal changing %s, and no round it may stand on holds a level%s "
-            "— dropped",
-            layer_id,
-            "schema_field_rename"
-            if unlock
-            else "nothing (only a promoted individual the line left may take it)",
-            f" (θ withheld under {', '.join(c.value for c in withheld)})" if withheld else "",
-        )
         return None
 
     request = RebaseRequest(
@@ -617,9 +588,6 @@ async def escalate_l2(
         )
         if heal.next_action is NextAction.FIRE_L3:
             assert result is not None
-            logger.warning(
-                "L3 force-triggered — L2's l1_layout edit was refused at round %d", ctx.round_num
-            )
             # A heal reads no gate, so its record banks the counters the ladder holds.
             held_l3 = ctx.slice(Ladder).l3
             held = LayerReading(

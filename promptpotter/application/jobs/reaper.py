@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import logging
 from collections.abc import Callable
 from pathlib import Path
 
@@ -19,12 +18,13 @@ from promptpotter.infrastructure.store.layout import (
     tenant_workspace,
 )
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, tenant_stores
-from promptpotter.shared.errors import FileUnreadableError
-
-logger = logging.getLogger(__name__)
+from promptpotter.shared.errors import FileUnreadableError, fault_said
 
 # Scheduling only: what counts as dead has no clock in it.
 SWEEP_EVERY_S = 900.0
+
+# The server's own: each periodic step whose last pass raised, with its fault (`machine_status`).
+UNSWEPT: dict[str, str] = {}
 
 
 def reclaim_orphan_sandboxes(projects_root: Path) -> int:
@@ -48,8 +48,7 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
             continue
         try:
             owner_store.delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)
-        except OSError as exc:
-            logger.warning("could not reclaim orphan inner sandbox %s: %s", sandbox, exc)
+        except OSError:
             continue
         reclaimed += 1
     return reclaimed
@@ -64,9 +63,8 @@ def _reap(stores: Stores) -> int:
             try:
                 if stores.mark_producer_vanished(hop):
                     reaped += 1
-            except FileUnreadableError as refused:
-                # A refused cycle is no answer for the cycles after it: each is reaped on its own.
-                logger.warning("sweep left a refused cycle: %s", refused)
+            except FileUnreadableError:
+                pass
             if (inner := inner_sandbox_store(stores, campaign_id, cycle_dir.name)) is not None:
                 reaped += _reap(inner)
     return reaped
@@ -94,14 +92,17 @@ async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY
     refresher (`pricing.refresh_route_answers`). At boot the answers alone, so a restart serves no
     day-old one; the reclaim waits a tick: every read derives what a dead producer left, so no first
     page waits on it."""
-    steps: tuple[Callable[[], None], ...] = (refresh_route_answers,)
+    refresh = ("route answers", refresh_route_answers)
+    steps: tuple[tuple[str, Callable[[], None]], ...] = (refresh,)
     while True:
-        for step in steps:
+        for name, step in steps:
+            # A raising step must not END the loop, nor skip the other: each would stop for the
+            # rest of the server's uptime.
             try:
                 await asyncio.to_thread(step)
-            except Exception:
-                # A raising step must not END the loop, nor skip the other: each would stop for the
-                # rest of the server's uptime.
-                logger.exception("periodic sweep step %s failed; the loop continues", step)
+            except Exception as fault:  # noqa: BLE001
+                UNSWEPT[name] = fault_said(fault)[0]
+            else:
+                UNSWEPT.pop(name, None)
         await asyncio.sleep(interval_s)
-        steps = (functools.partial(sweep, projects_root), refresh_route_answers)
+        steps = (("sweep", functools.partial(sweep, projects_root)), refresh)

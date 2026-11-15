@@ -2,15 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from collections.abc import Callable
 from types import TracebackType
 
 from promptpotter.infrastructure.llm.send_pacing import SendBudget
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.shared.errors import CellHaltedError
-
-logger = logging.getLogger(__name__)
 
 
 class CellEnvelope:
@@ -20,7 +17,6 @@ class CellEnvelope:
         self.budget_s = budget_s
         self.label = label
         self._budget = SendBudget(budget_s, attempts=attempts)
-        self._announced = False
         self._deadline = self._budget.clock
         self._bound = contextlib.ExitStack()
 
@@ -30,31 +26,16 @@ class CellEnvelope:
 
     @property
     def on_suspend(self) -> Callable[[float], None]:
-        """Read BEFORE ``__aenter__`` so the heartbeat task outlives the timeout scope."""
-        return self._give_back
-
-    def _give_back(self, seconds: float) -> None:
-        before = self.unworked
-        self._budget.give_back(seconds)
-        if self.unworked == before:
-            return
-        budget = self.budget_s
-        if not self._announced and self.unworked > budget:
-            self._announced = True
-            logger.warning(
-                "cell %s has now spent longer waiting (%.0fs) than its entire %.0fs wall-clock "
-                "envelope — the box is oversubscribed, not the cell slow",
-                self.label,
-                self.unworked,
-                budget,
-            )
+        """Read BEFORE ``__aenter__`` so the heartbeat task outlives the timeout scope; what it
+        gives back is the cell's `unworked_s`."""
+        return self._budget.give_back
 
     async def __aenter__(self) -> CellEnvelope:
         # Bound in the cell's own task, so its resends and stall never touch a sibling's.
         self._bound.enter_context(
             scoped(
                 send_budget=self._budget,
-                stall_sink=self._give_back,
+                stall_sink=self._budget.give_back,
             )
         )
         await self._deadline.__aenter__()

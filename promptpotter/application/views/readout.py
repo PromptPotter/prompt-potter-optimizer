@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import re
 import time
 from collections.abc import Callable
@@ -110,8 +109,6 @@ from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.composite import render_composite_fitness_block
 from promptpotter.shared.measurement_context import MeasurementRole
 
-logger = logging.getLogger(__name__)
-
 # A host's readout-line sink. ``None`` is silent; the readout is on disk either way.
 StatusFn = Callable[[str], None]
 
@@ -123,6 +120,8 @@ class ReadoutMissedInitError(RuntimeError):
 
 
 class ReadoutProjection(Projection):
+    derives = "readout.log"
+
     def __init__(self, session: Session, *, sink: StatusFn | None) -> None:
         self._round_num = 0
         self._sink = sink
@@ -173,10 +172,11 @@ class ReadoutProjection(Projection):
             return
         try:
             append_line(self._readout, _ANSI_RE.sub("", line).encode("utf-8"))
-        except OSError as exc:
-            # Said once: a readout that just ends reads as a run that stopped.
-            logger.warning("readout.log stopped at %s: %s", self._readout, exc)
+        except OSError:
+            # Said once, as the ledger's `derived_file_stale`: a readout that just ends reads as a
+            # run that stopped.
             self._readout = None
+            raise
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         self._narration.read(self.at_offset, record)

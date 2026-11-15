@@ -278,14 +278,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 default=None,
                 help="Dataset name under ./datasets/ OR a path to a raw file (CSV). "
                 "A name reads datasets/<name>/{pipeline,campaign}.yaml; a file is "
-                "ingested → origin-resolved → committed as a tenant dataset → run. "
-                "Omit (name form) only if you pass --dataset-name explicitly.",
-            ),
-            Arg(
-                "--dataset-name",
-                default=None,
-                help="Explicit dataset name (alternative to positional). Required if "
-                "no positional dataset is given.",
+                "ingested → origin-resolved → committed as a tenant dataset → run.",
             ),
             Arg(
                 "--config",

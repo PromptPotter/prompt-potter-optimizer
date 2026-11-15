@@ -8,7 +8,6 @@ consent line alone (`user_store.py::UserStore.accepted_terms`).
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Literal, NamedTuple
@@ -69,6 +68,7 @@ from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
     PotterError,
+    fault_said,
 )
 from promptpotter.shared.identity import (
     DELEGABLE_CAPABILITIES,
@@ -81,8 +81,6 @@ from promptpotter.shared.identity import (
     display_name,
 )
 from promptpotter.shared.worded import Worded
-
-logger = logging.getLogger(__name__)
 
 
 def _consent(
@@ -260,7 +258,6 @@ def sign_in_oidc(
         # arrival order.
         refused = accounts.claim_default(projects_root=root, user_id=user_id, email=verified.email)
         if refused is not None:
-            logger.warning("The host's sign-in did not claim this box: %s", refused)
             rings.append(f"Your sign-in did not claim this box: {refused}")
     elif not blocked and accounts.host_user_id(root) is None:
         why = (
@@ -268,11 +265,9 @@ def sign_in_oidc(
             if settings.HOST_ADMIN_EMAIL.strip()
             else "HOST_ADMIN_EMAIL is unset, so no browser identity is the host"
         )
-        logger.warning(
-            "Sign-in by %s did not claim this box: %s. Terminal and browser will resolve DIFFERENT "
-            "tenants until it is claimed.",
-            verified.email,
-            why,
+        rings.append(
+            f"Sign-in by {verified.email} did not claim this box: {why}. Terminal and browser "
+            "resolve different tenants until it is claimed."
         )
     session_id, session = bundle.session_store.create(
         user_id=user_id,
@@ -293,10 +288,10 @@ def sign_in_oidc(
     except AccountCeilingError as full:
         rings.append(f"Sign-up refused for {verified.email or 'no email'}: {full.message}")
         refusal = "accounts_full"
-    except Exception:
+    except Exception as fault:  # noqa: BLE001 -- any fault refuses: no sign-in goes unrecorded
         # Refused rather than let through unrecorded: the trail's promise is that no sign-in is
         # missing.
-        logger.exception("A %s sign-in could not be recorded", verified.provider)
+        rings.append(f"A {verified.provider} sign-in could not be recorded: {fault_said(fault)[0]}")
         refusal = "signin_unavailable"
     bundle.session_store.delete(session_id)
     return SignInRefused(refusal, tuple(rings))

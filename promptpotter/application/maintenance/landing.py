@@ -5,7 +5,6 @@ roll the code back once it has written: the old code would run on what it wrote.
 from __future__ import annotations
 
 import functools
-import logging
 from collections import Counter
 from contextlib import AbstractContextManager
 from pathlib import Path, PurePosixPath
@@ -79,8 +78,6 @@ from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PotterError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.named_rows import walked
-
-logger = logging.getLogger(__name__)
 
 
 def complete_registries() -> None:
@@ -498,8 +495,7 @@ def land_at_entry(*, every_treatment: bool) -> None:
     """Every process's first step, before it reads the data root (its registries completed as this
     module imported; *every_treatment* reads each one, for a process serving any campaign): the
     root lands under this code's record schema, once per schema. What it wrote and dropped is
-    said here, a line each on the process's log and one tally to the operator, for every entry
-    alike; the stamp keeps the lines. A landing that refuses raises, having written nothing."""
+    said here as one tally to the operator, for every entry alike; the stamp keeps its lines. A landing that refuses raises, having written nothing."""
     if every_treatment:
         check_every_treatment()
     projects_root = default_projects_root()
@@ -509,8 +505,6 @@ def land_at_entry(*, every_treatment: bool) -> None:
         if _landed(projects_root):
             return
         landing = apply_landing(projects_root, plan_landing(projects_root, reset=False))
-    for one in landing.said:
-        logger.warning("landed: %s", one)
     tell_landed(landing.tally)
 
 

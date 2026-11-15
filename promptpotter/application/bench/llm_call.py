@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
-import logging
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -38,8 +37,6 @@ from promptpotter.infrastructure.llm.wallet import keyed_client
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.shared.errors import OptimizerTimeoutError
-
-logger = logging.getLogger(__name__)
 
 
 def _drop_class_description(schema: dict[str, Any], _model: type[BaseModel]) -> None:
@@ -242,34 +239,6 @@ def _announce(call: _Call) -> None:
         injection_dropped=dict(injections.dropped),
     )
     append_record(start_record)
-    # The alarm is a REFUSED panel, never the prompt's size: the mandatory floor is admitted at any cost.
-    no_room = start_record.refused_panels
-    log = logger.warning if no_room else logger.info
-    heaviest = (
-        " · heaviest: "
-        + ", ".join(
-            f"{name} {chars:,}c"
-            for name, chars in sorted(injections.chars.items(), key=lambda kv: -kv[1])[:3]
-        )
-        if no_room and injections.chars
-        else ""
-    )
-    by_size = sorted(injections.dropped.items(), key=lambda kv: -kv[1])
-    thinned = [f"{n} -{c}" for n, c in by_size if n not in no_room][:3]
-    # `refused_panels` sorts by NAME, so truncating it unranked reports the alphabet, not the loss.
-    worst = sorted(no_room, key=lambda n: -injections.dropped.get(n, 0))
-    more = f" (+{len(worst) - 4} more)" if len(worst) > 4 else ""
-    dropped = (" · NO ROOM: " + ", ".join(worst[:4]) + more if worst else "") + (
-        " · thinned: " + ", ".join(thinned) if thinned else ""
-    )
-    log(
-        "→ optimizer call: %s · %s · %d-char prompt%s%s",
-        label,
-        call.merged.model,
-        prompt_chars,
-        heaviest,
-        dropped,
-    )
 
 
 async def _provider_reply(call: _Call) -> LLMResponse:
@@ -285,13 +254,6 @@ async def _provider_reply(call: _Call) -> LLMResponse:
     )
     try:
         return await _chat_under_deadline(call.client, call.request, node_label=label)
-    except OptimizerPromptParseError as parse_err:
-        logger.error(
-            "%s: optimizer call failed to parse — %s",
-            label,
-            parse_err.diagnosis(),
-        )
-        raise
     finally:
         heartbeat_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

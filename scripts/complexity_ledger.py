@@ -68,7 +68,8 @@ BASELINE = {
     # passb-2 1 (+55): a verify's served admission (`PassAdmission`, its ladder on the shared
     # `PassRefusal`, the cycle's `verify` fact, the command refused by it); a slot's served stage.
     # passb-2 2 (-8): the held-out verb has one name; the export has one writer.
-    "package_lines": 111056,
+    # faults-2b (-451): a fault is a value; `logging` leaves application/ and domain/.
+    "package_lines": 110605,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -105,7 +106,8 @@ BASELINE = {
     # model-lines (+2): `call_target` on a served campaign config, which no surface edits yet.
     "p_served": 195,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
-    "p_unread_fields": 27,
+    # faults-2b (+1): `SampleFoldRow.unscoreable`, whose one reader was the skip log it outlived.
+    "p_unread_fields": 26,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.

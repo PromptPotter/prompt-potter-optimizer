@@ -214,6 +214,133 @@ def _layering(_: Selection) -> Outcome:
     return (1, "\n".join(hits)) if hits else (0, "")
 
 
+# A fault in `application/` and `domain/` is a value: raised, a run's typed record, or a field of the
+# row it failed; never a log line. An except that answers nothing (`pass`, `continue`, `break`, a bare
+# `return`) and neither raises nor reads its fault is a swallow, declared here with its reason.
+_FAULT_LAYERS = ("application", "domain")
+_DECLARED_SWALLOWS: dict[str, str] = {
+    "application/account.py::_dataset_of::FileUnreadableError": (
+        "a trail line names its campaign's dataset; an unreadable manifest refuses its own reads"
+    ),
+    "application/bench/resume_and_fork/fork_siblings.py::ForkCut.withdraw::Exception": (
+        "a cleanup fault never masks the refusal its caller re-raises; a cut it keeps lists"
+    ),
+    "application/datasets/origin_resolve.py::raised_commands::ValidationError": (
+        "a check-in finding the draft's patch model refuses is no finding"
+    ),
+    "application/datasets/startability.py::_connector_extra::DEFINITION_READ_ERRORS": (
+        "asked before any row is read; the listing's reading serves the definition's refusal"
+    ),
+    "application/evidence/read.py::_at::(BadRequestError, NotFoundError, ValueError)": (
+        "an address that names nothing answers None, by contract"
+    ),
+    "application/jobs/launcher/admission.py::RunStart._fail::Exception": (
+        "the stop's stamp never masks the fault being released"
+    ),
+    "application/jobs/launcher/admission.py::deletable_stubs::CycleBusyError": (
+        "a held stub is no deletable one"
+    ),
+    "application/jobs/reaper.py::reclaim_orphan_sandboxes::OSError": (
+        "a sandbox it cannot delete is the next sweep's"
+    ),
+    "application/jobs/reaper.py::_reap::FileUnreadableError": (
+        "each cycle is reaped on its own; every read of a refused one refuses it"
+    ),
+    "application/maintenance/landing.py::last_landing::ValidationError": (
+        "a stamp this build cannot read lands the root again"
+    ),
+    "application/maintenance/migrations/live_jobs_index.py::staged::FileUnreadableError": (
+        "a job file that does not load refuses the landing on its own"
+    ),
+    "application/optimizers/capo/members.py::_instructions::ValueError": (
+        "a reply out of form answers None, by contract; the call's record keeps it"
+    ),
+    "application/origin_listing.py::list_origins::DatasetAccessError": (
+        "runnable only: its campaigns still list, each refusing a launch on the dataset it lost"
+    ),
+    "application/scoring/formula/matchers.py::_label_match::ValueError": (
+        "a non-numeric label falls through to the exact match"
+    ),
+    "application/scoring/formula/matchers.py::_meetings_met::(KeyError, IndexError, ValueError)": (
+        "a schedule's first unreadable step ends the walk it grades"
+    ),
+    "application/scoring/paired.py::_Reader.__call__::ScoringFormulaError": (
+        "a cell its measurand cannot read pairs with nothing"
+    ),
+    "application/scoring/sample_measurement.py::_answered_nothing::ValueError": (
+        "a body that is not JSON answered no gradeable miss: the status error stands"
+    ),
+    "domain/cycle_paths.py::Subject.parse_address::ValueError": (
+        "a step that is no round number parses as the next form"
+    ),
+    "domain/pipeline_parsing.py::_node_kind::ValueError": (
+        "a string no NodeKind names is refused below it, as a non-string is"
+    ),
+    "domain/scoring.py::anchored_criterion_dials::SyntaxError": (
+        "a formula that does not parse is no anchored criterion, by contract"
+    ),
+}
+
+
+def _quiet(stmt: ast.stmt) -> bool:
+    if isinstance(stmt, ast.Return):
+        return stmt.value is None or (
+            isinstance(stmt.value, ast.Constant) and stmt.value.value is None
+        )
+    return isinstance(stmt, ast.Pass | ast.Continue | ast.Break)
+
+
+def _swallows(handler: ast.ExceptHandler) -> bool:
+    walked = [node for stmt in handler.body for node in ast.walk(stmt)]
+    if any(isinstance(node, ast.Raise) for node in walked):
+        return False
+    if handler.name and any(isinstance(n, ast.Name) and n.id == handler.name for n in walked):
+        return False
+    return all(_quiet(stmt) for stmt in handler.body)
+
+
+def _handlers(
+    node: ast.AST, scope: tuple[str, ...] = ()
+) -> Iterator[tuple[str, ast.ExceptHandler]]:
+    for child in ast.iter_child_nodes(node):
+        if isinstance(child, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            yield from _handlers(child, (*scope, child.name))
+            continue
+        if isinstance(child, ast.ExceptHandler):
+            yield ".".join(scope) or "<module>", child
+        yield from _handlers(child, scope)
+
+
+def _faults(_: Selection) -> Outcome:
+    hits: list[str] = []
+    swallowed: set[str] = set()
+    package = REPO / "promptpotter"
+    for layer in _FAULT_LAYERS:
+        for path in _sources(package / layer, "*.py"):
+            rel = path.relative_to(package).as_posix()
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            hits += [
+                f"{rel}:{node.lineno} imports logging: a fault is raised, recorded or served"
+                for node in ast.walk(tree)
+                if (isinstance(node, ast.Import) and any(a.name == "logging" for a in node.names))
+                or (isinstance(node, ast.ImportFrom) and node.module == "logging")
+            ]
+            for scope, handler in _handlers(tree):
+                if not _swallows(handler):
+                    continue
+                caught = ast.unparse(handler.type) if handler.type else "bare"
+                key = f"{rel}::{scope}::{caught}"
+                swallowed.add(key)
+                if key not in _DECLARED_SWALLOWS:
+                    hits.append(f"{rel}:{handler.lineno} swallows {caught}: undeclared ({key})")
+    hits += [
+        f"{key} is declared but swallows nothing"
+        for key in _DECLARED_SWALLOWS
+        if key not in swallowed
+    ]
+    return (1, "\n".join(hits)) if hits else (0, "")
+
+
 # Verbs name their handlers as strings (`main.py::COMMANDS`) so the parser loads no use case.
 _LOADED = "loaded: "
 _HELP_PROBE = f"""
@@ -1421,6 +1548,7 @@ CHECKS: tuple[Check, ...] = (
         ),
     ),
     Check("layering", "py", _layering, mb=0, tier="commit", reads=("promptpotter/", *_GATE)),
+    Check("faults", "py", _faults, mb=0, tier="commit", reads=("promptpotter/", *_GATE)),
     Check(
         "help-imports",
         "py",

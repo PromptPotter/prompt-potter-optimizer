@@ -140,6 +140,8 @@ class RoundFileProjection(Projection):
     """The ONE writer of ``rounds/round_NNNN.json``: it writes what the round read answers, so a round
     the read refuses has no file, and a disk fault is its ledger's warning as any projection's is."""
 
+    derives = "rounds/round_NNNN.json"
+
     def __init__(self, stores: Stores, hop: CycleHop, state: LaunchState) -> None:
         self._stores, self._hop, self._state = stores, hop, state
         self._layout = stores.campaigns.layout(hop)

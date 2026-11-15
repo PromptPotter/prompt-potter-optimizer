@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import time
 import uuid
 from collections.abc import Callable, Mapping
@@ -24,8 +23,6 @@ from promptpotter.shared.errors import (
     SendRefusedError,
     UngeneratedRequestError,
 )
-
-logger = logging.getLogger(__name__)
 
 
 async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
@@ -65,7 +62,6 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
             ).response
     except _ProviderFailedError as failed:
         exc = failed.cause
-        logger.warning("judge %s stage %s failed: %s", judge, stage.role, exc)
         return "", f"{type(exc).__name__}: {exc}"
 
     return response.content or "", ""

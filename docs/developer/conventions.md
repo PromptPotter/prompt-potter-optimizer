@@ -4,7 +4,7 @@ Rules not derivable from the code. Root [`CLAUDE.md`](../../CLAUDE.md) holds the
 
 ## Code style
 
-- **`logging` in library code; `print()` only where a human reads it** (the CLI, terminal views, the server banner, first-run setup). In a live run every readout line goes through `ReadoutProjection._write`.
+- **A fault in `application/` and `domain/` is a value, never a log line**: raised, a run's typed record (`RoundWarningRecord.handled`), or a field of the row it failed; an `except` that answers nothing is a declared row (`scripts/gate.py::_DECLARED_SWALLOWS`). `logging` in the other layers; `print()` only where a human reads it (the CLI, terminal views, the server banner, first-run setup). In a live run every readout line goes through `ReadoutProjection._write`.
 - **Direct field access** — `dict[key]` for a guaranteed field, never `.get(key, fallback)`.
 
 ## Prose in the source
@@ -21,7 +21,7 @@ Rules not derivable from the code. Root [`CLAUDE.md`](../../CLAUDE.md) holds the
 ## Code shape
 
 - **No fallbacks in service code.** Three sanctioned: the synthetic-0 on `validation_failures`; the load-boundary deprecated-sample gate (`classify_result()` fatal codes); an owed adapter output re-run before the next walk (`runner/round.py::settle_owed_outputs`). A new one is listed here.
-- **Where a return-value contract must let an exception escape, use `graceful()`** (`shared/errors.py`).
+- **Where a return-value contract must let an exception escape outside `application/` and `domain/`, use `graceful()`** (`shared/errors.py`).
 - **Absent is not zero.** A failed or missing measurement is ABSENT (`None`, an absent channel), never `0.0`; a real 0.0 is a measurement. Counts, rates and money are honest zeros. Render the state, never the number's truthiness.
 - **Ask the typed predicate, never a hand-authored set of names.** A literal set of dataset / node / stop-reason names silently skips what it failed to list: ask `stop_reason_outcome` (`domain/phases.py`), the resolved definition's `connector`, or the registry; a curated subset is pinned by an `assert subset <= derived`.
 - **Schema field order IS generation order.** Reasoning fields go above the fields they justify; a `description=` is prompt, measured like any prompt edit ([`../research/structured-output.md`](../research/structured-output.md)).

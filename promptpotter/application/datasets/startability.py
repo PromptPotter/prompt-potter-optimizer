@@ -11,7 +11,6 @@ before the extra its connector runs through is installed.
 
 from __future__ import annotations
 
-import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, assert_never
@@ -47,14 +46,14 @@ from promptpotter.infrastructure.store.dataset_access import (
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     ConflictError,
+    FileKind,
     FileUnreadableError,
     NotFoundError,
     PayloadInvalidError,
     PotterError,
+    fault_said,
 )
 from promptpotter.shared.extras import Extra, install_hint, installed
-
-logger = logging.getLogger(__name__)
 
 
 def offered(stores: Stores, name: str) -> bool:
@@ -143,9 +142,9 @@ def dataset_reading(stores: Stores, name: str) -> DatasetReading:
         return DatasetReading(None, StartBlock.BACKEND_UNREACHABLE)
     except (FileUnreadableError, PayloadInvalidError, ConflictError) as refused:
         return DatasetReading(None, StartBlock.UNREADABLE, refused)
-    except (ValueError, OSError):
-        logger.exception("datasets: %s could not be read for the listing", name)
-        return DatasetReading(None, StartBlock.UNREADABLE)
+    except (ValueError, OSError) as fault:
+        unread = FileUnreadableError(FileKind.BANK, path=name, reason=fault_said(fault)[0])
+        return DatasetReading(None, StartBlock.UNREADABLE, unread)
     return DatasetReading(None if held is None else len(held.samples), block)
 
 

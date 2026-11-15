@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 import secrets
 import threading
 import time
@@ -48,8 +47,6 @@ from promptpotter.shared.errors import (
     PotterError,
     ServiceUnavailableError,
 )
-
-logger = logging.getLogger(__name__)
 
 # Each ask takes the machine-wide admission lock.
 _QUEUE_POLL_S = 2.0
@@ -439,11 +436,6 @@ class JobRegistry:
                         self._persist(job, at=self._ended_path(job.job_id))
                         unlink_robust(self._path(job.job_id))
                 elif not self.in_flight(job):
-                    logger.warning(
-                        "job %s claims %s but its producer is gone — releasing",
-                        job.job_id,
-                        job.stage.value,
-                    )
                     self.move(job.job_id, LaunchMove.END, ended=JobEnding(lapse="orphaned"))
                     # An unstamped or unspellable id names no file.
                     with contextlib.suppress(ValueError):

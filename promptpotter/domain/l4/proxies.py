@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Literal, Self
 
@@ -17,8 +16,6 @@ from promptpotter.domain.scoring import GradedCell, PipelineData
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.statistics import sample_sd
-
-logger = logging.getLogger(__name__)
 
 
 class OuterSampleProxies(FrozenModel):
@@ -288,11 +285,9 @@ def floor_reason(result: CycleResult) -> str | None:
 
 def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     """A floor is scored by the formula reading `floored`, never by a lift nobody measured."""
-    if (floor := floor_reason(result)) is not None:
-        logger.warning("inner cycle scored at the floor: %s", floor)
+    if floor_reason(result) is not None:
         return OuterSampleProxies(floored=1, held_out_lift=None)
     if (reason := no_evidence_reason(result)) is not None:
-        logger.warning("inner cycle EXCLUDED (no evidence about the optimizer prompt): %s", reason)
         # The inner cycle forwarded its own spend onto the outer ledger as it ran.
         raise CellUnscoreableError(reason, spent={})
 

@@ -597,14 +597,21 @@ def is_error_result(result: Mapping[str, Any]) -> bool:
     return result.get("error_category") is not None
 
 
+def fault_said(exc: BaseException) -> tuple[str, str | None]:
+    """A fault as its sentence: its first non-blank line, else its class name, and the lines after it."""
+    message, _, detail = (str(exc).strip() or type(exc).__name__).partition("\n")
+    return message, detail or None
+
+
 @contextmanager
 def graceful(msg: str) -> Iterator[None]:
+    """A handled fault is said once, as its sentence: a traceback is for a fault nobody handled."""
     try:
         yield
     except (KeyboardInterrupt, asyncio.CancelledError, SendRefusedError):
         raise
-    except Exception:
-        logger.exception(msg)
+    except Exception as exc:  # noqa: BLE001 -- the caller handles any fault by saying it
+        logger.warning("%s: %s", msg, fault_said(exc)[0])
 
 
 def error_category(result: Mapping[str, Any]) -> ErrorCategory | None:
