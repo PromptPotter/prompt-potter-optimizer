@@ -105,7 +105,7 @@ def _accumulate(
     counted: set[MemberAddress],
 ) -> None:
     earned: list[tuple[OptSearchPoint, str, float]] = []
-    for key, arm in closed.panel.items():
+    for key, arm in closed.proposed.items():
         reading = None if (fit := closed.fit(key)) is None else fit.vs_reference
         if (lift := _credible_lift(reading)) is None:
             continue

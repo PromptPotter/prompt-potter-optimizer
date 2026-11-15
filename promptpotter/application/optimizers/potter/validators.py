@@ -390,7 +390,7 @@ def lost_ideas(prior_rounds: Sequence[RoundResult]) -> list[tuple[int, frozenset
         if (head := parent_round.head) is None:
             continue
         parent, parent_pp = head.individual.prompts, head.individual.pipeline_params
-        for key, arm in rr.panel.items():
+        for key, arm in rr.proposed.items():
             fold, fit = rr.folds.get(key), rr.fit(key)
             reading = None if fit is None else fit.vs_reference
             lift = None if reading is None else reading.headline

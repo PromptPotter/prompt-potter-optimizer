@@ -190,8 +190,13 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   `optimization.call_target` in `defaults.yaml`, laid under every optimizer llm node by the one node
   fold; the 22 yaml lines went. No decision or request moved; the five treatment digests moved by
   the yamls' bytes. Run data wiped (drafts and campaign configs without the key). Beside it on main:
-  the served contract (a bundle built against another API says so), the fold's `start=`.
-- **then:** mkey, then faults-2a beside small-3, then rk-rest (the rows rk-run 4–8's landing left).
+  the served contract (a bundle built against another API says so), the fold's `start=`; a gate is
+  its run phase, and an origin halt grades nothing.
+- **landed 83, small-3:** a proposer reads its round's draw as a declared read (the parameter left
+  thirteen implementations), "panel" is a set of cells only, and an optimizer node's call-target keys
+  serve the layer that set them. No decision or request moved; the estimator digest moved by a rename
+  (the C0 re-measure waits on l4-final, which re-keys it again).
+- **then:** mkey, then faults-2a beside rk-rest.
 
 The re-keys end at the behaviour-key switch.
 

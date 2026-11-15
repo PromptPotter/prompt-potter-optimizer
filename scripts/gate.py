@@ -1257,7 +1257,7 @@ campaigns = build_stores(default_identity(), projects_root=default_projects_root
 for campaign_id in campaigns.list_campaign_ids():
     hop = campaigns.load_campaign(campaign_id).root_hop
     for stood in campaigns.standing_rounds(hop, moment=None).rounds.values():
-        for arm in stood.close.panel.values():
+        for arm in stood.close.proposed.values():
             print(arm.individual.lineage.source)
 """
 

@@ -139,7 +139,7 @@ def _arm_rows(
     closed: RoundResult, samples: frozenset[str] | None
 ) -> list[tuple[ArmKey, ArmState, CellSheet]]:
     out: list[tuple[ArmKey, ArmState, CellSheet]] = []
-    for key, arm in closed.panel.items():
+    for key, arm in closed.proposed.items():
         sheet = closed.rows(key)
         out.append((key, arm, sheet if samples is None else _masked(sheet, samples)))
     return out
@@ -153,7 +153,7 @@ def _parent(
     """Under a sample-set mask a carried full-set bar flips rounds on the mask's asymmetry alone."""
     if samples is None or carried is None:
         return carried
-    references = [closed.rows(key) for key in closed.arms if key not in closed.panel]
+    references = [closed.rows(key) for key in closed.arms if key not in closed.proposed]
     if len(references) != 1:
         return None
     return _masked(references[0], samples) or None

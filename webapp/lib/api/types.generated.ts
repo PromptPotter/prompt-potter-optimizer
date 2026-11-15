@@ -1467,7 +1467,7 @@ export interface ArmReading {
    * the cells that answered it: an L4 outer arm's `held_out_lift` and
    * `floored` share. */
   fitness_terms: Record<string, number>;
-  panel: ArmSamples;
+  samples: ArmSamples;
   /** What measuring it consumed, the BACKEND bucket alone, replayed rows excluded;
    * null until its score report folds an account. */
   tokens: TokenAccount | null;
@@ -1507,8 +1507,8 @@ export interface ArmSamples {
   /** `cached` over `scored`. Null where either is, and on a walk holding no cell. */
   cached_share: number | null;
   /** Stopped short of its round's panel (`panel_cuts`): under its own `expected`,
-   * or, for a panel arm, under the fullest panel a panel arm of its round
-   * reached. */
+   * or, for a proposed arm, under the fullest walk a proposed arm of its
+   * round reached. */
   cut: boolean;
 }
 
@@ -5420,7 +5420,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "fbaa6304539caa07";
+export const SERVED_CONTRACT = "acdf392c92642b4b";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

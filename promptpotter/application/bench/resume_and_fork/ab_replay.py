@@ -150,7 +150,7 @@ def replay_verdict(
             (
                 m.current_outcome
                 for m in found
-                if isinstance(m.current_outcome, str) and m.current_outcome in rd.panel
+                if isinstance(m.current_outcome, str) and m.current_outcome in rd.proposed
             ),
             None,
         )

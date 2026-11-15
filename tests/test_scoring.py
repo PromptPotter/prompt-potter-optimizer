@@ -1606,7 +1606,7 @@ def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
         )
         offline.llm.says = _potter_says("Guess.")
         second = asyncio.run(execute_round(cycle, 2)).result
-        assert next(iter(second.panel)) == leader and second.rows(leader), (
+        assert next(iter(second.proposed)) == leader and second.rows(leader), (
             "the round after a leader missed the bar did not re-score it, first"
         )
         assert cycle.output(L1Readout, 2).l1_proposed == 1, "a re-read counted as L1's yield"
@@ -1771,11 +1771,11 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
                 return
             closed, cut, _ = asyncio.run(cut_walk)
             assert cut is StopReason.SPEND_BUDGET, f"{case}: the round names its cut"
-            rows = {key: closed.rows(key) for key in closed.panel}
+            rows = {key: closed.rows(key) for key in closed.proposed}
             assert sum(len(closed.rows(key)) for key in closed.arms) == (
                 replayed + len(paid) + parent_cells
             ), f"{case}: a cell nobody elects on, or a parent read where the archive lacks it"
-            assert (parent in closed.panel) is (cut_round == 2), (
+            assert (parent in closed.proposed) is (cut_round == 2), (
                 f"{case}: a retained parent is ONE arm, its re-read folded into its own cells"
             )
             parent_arm = closed.arms[parent]
@@ -1837,7 +1837,7 @@ def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at
 
     def fates(closed: RoundResult) -> dict[str, list[int]]:
         out: dict[str, list[int]] = {}
-        for key in closed.panel:
+        for key in closed.proposed:
             arm = closed.arms[key]
             state = (
                 arm.kind
@@ -1991,7 +1991,7 @@ def test_one_round_composes_a_peers_crossover_and_selector_with_potters_race(
     assert cycle.slices.get(CapoObjective).length_norm, (
         "CAPO's initial population banked no length norm for the objective its selector ranks on"
     )
-    for panel_arm in closed.panel.values():
+    for panel_arm in closed.proposed.values():
         lineage = panel_arm.individual.lineage
         assert [(made.node, made.mode) for made in lineage.variations] == [
             (f"{name}:mating", "deterministic"),
@@ -2289,7 +2289,7 @@ def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
     so a band's rescore can only read the rest."""
     cycle, ledger, session = bench.cycle, bench.ledger, bench.session
     origin = cycle.origin_round.origin.individual
-    c0_arm = cycle.origin_round.panel[ArmKey(origin.id)]
+    c0_arm = cycle.origin_round.proposed[ArmKey(origin.id)]
     ledger.append(RoundEnteredRecord(round=0))
     ledger.append(
         ArmRecord(
@@ -2336,7 +2336,7 @@ def test_an_arm_is_read_on_the_theta_its_election_takes_on_the_scale_its_race_re
         assert picked.election is not None
         crowned = picked.election.selected
         assert crowned is not None
-        [bar] = [picked.rows(key) for key in picked.arms if key not in picked.panel]
+        [bar] = [picked.rows(key) for key in picked.arms if key not in picked.proposed]
         # The scale the round OPENED on: its own cells fold after the election.
         opened = cycle.difficulty.ruler_of(picked.election.ruler)
         read = candidate_abilities({crowned: picked.rows(crowned)}, bar, opened)
@@ -3013,7 +3013,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
             )
     finally:
         release_cycle(cycle_dir)
-    [arm] = closed.panel.values()
+    [arm] = closed.proposed.values()
     assert arm.individual.prompts["solve"].fields["instruction"] == "Operator wrote this.", (
         "the operator's arm ran"
     )
@@ -3922,10 +3922,9 @@ def test_a_round_of_no_op_variants_measures_no_candidate_and_books_zero_candidat
             RoundContext(cycle=cycle, round_num=1),
             optimizers.NODE_MEMBERS.get("l1_generate"),
         )
-        no_cells = RoundSamples(cells=[], order=[], block_size=0)
         member = optimizers.NODE_MEMBERS.get("l1_generate")
         assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
-        proposed = asyncio.run(member.propose(generating, no_cells, node_contract.Proposals([])))
+        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
         readout = cycle.output(L1Readout, 1)
     assert proposed.proposals == [], "a round of no-op variants measured a candidate"
     assert len(offline.llm.sent) == 1, "a batch the invariants read as no-ops bought a repair"
@@ -3942,7 +3941,6 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
 ) -> None:
     # The scorer parses answer_format.
     member = cast("L1Generate", optimizers.NODE_MEMBERS.get("l1_generate"))
-    no_cells = RoundSamples(cells=[], order=[], block_size=0)
     with _peer_cycle(
         workspace(tmp_path / "held_format"),
         _PEER_HOP,
@@ -3964,7 +3962,7 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
             RoundContext(cycle=cycle, round_num=1),
             optimizers.NODE_MEMBERS.get("l1_generate"),
         )
-        proposed = asyncio.run(member.propose(generating, no_cells, node_contract.Proposals([])))
+        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
     fatal = [
         [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
         for cp in proposed.proposals
@@ -3988,8 +3986,7 @@ def test_capo_inits_reply_of_only_blank_instructions_is_one_refused_child(
     ) as (cycle, _):
         offline.llm.says = lambda _body: json.dumps(["  ", ""])
         drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-        no_cells = RoundSamples(cells=[], order=[], block_size=0)
-        proposed = asyncio.run(member.propose(drawing, no_cells, node_contract.Proposals([])))
+        proposed = asyncio.run(member.propose(drawing, node_contract.Proposals([])))
     assert [p.refused for p in proposed.proposals] == [True], (
         "a reply of blank instructions drew no child and refused none"
     )

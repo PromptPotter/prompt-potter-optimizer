@@ -165,9 +165,7 @@ class FewShot(nodes.Proposer):
         DemoPool: nodes.CountKnob(nodes.ShotKnobs, "k_max")
     }
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
         k_max = ctx.knobs(nodes.ShotKnobs).k_max
         pool = [s.key for s in ctx.drawn(DemoPool)]
         node = ctx.read(Target).prompt_node.name
@@ -222,7 +220,7 @@ class Blocks(nodes.Sampler):
             return []
         block_size = selected.knobs_of(self.name, BlocksKnobs).block_size
         deepest = max(
-            (-(-len(round_result.rows(key)) // block_size) for key in round_result.panel),
+            (-(-len(round_result.rows(key)) // block_size) for key in round_result.proposed),
             default=0,
         )
         return [
@@ -451,7 +449,7 @@ class PairedT(nodes.Eliminator):
     ) -> list[OptimizerFact]:
         if round_result.round == 0:
             return []
-        arms = round_result.panel
+        arms = round_result.proposed
         cut = sum(1 for arm in arms.values() if isinstance(arm, Cut) and arm.kind == "eliminated")
         return [
             OptimizerFact(
@@ -522,9 +520,7 @@ class CapoInit(nodes.Proposer):
                 "renders no prompt node CAPO could edit"
             )
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
         knobs = ctx.knobs(CapoInitKnobs)
         raw = await ctx.read(Calls).ask(init_prompt(ctx))
         listed = _instructions(raw)
@@ -584,9 +580,7 @@ class CapoCrossover(nodes.Proposer):
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
         pairs = _mated(ctx, proposals)
         if lone := [len(pair) for pair in pairs if len(pair) != 2]:
             raise ValueError(f"a crossover merges two parents; an offspring names {lone[0]}")
@@ -606,9 +600,7 @@ class ShotCrossover(nodes.Proposer):
     variation_mode: ClassVar[VariationMode] = "deterministic"
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Children, Lineage, Replay, Target})
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
         rng = ctx.read(Replay).rng()
         node = ctx.read(Target).prompt_node.name
         children = ctx.read(Children)
@@ -638,9 +630,7 @@ class CapoMutate(nodes.Proposer):
     knobs: ClassVar[type[StrictModel]] = RewriteKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
         live = [i for i, p in enumerate(proposals.proposals) if not p.refused]
         answers = await ctx.read(Calls).ask_each(
             {i: mutation_prompt(ctx, proposals.individuals[i]) for i in live}
@@ -665,9 +655,7 @@ class PopulationRejoin(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.reached_knobs(self, SurvivalKnobs).size
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
         return nodes.Proposals(
             [
                 *(Proposal(individual=m) for m in ctx.read(Lineage).population),

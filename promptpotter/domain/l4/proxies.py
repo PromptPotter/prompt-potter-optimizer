@@ -249,7 +249,7 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
 
 def _spoiled(rnd: RoundResult) -> bool:
     """No proposal reached a cell, whatever the reply's failure: an empty panel is spoiled too."""
-    return all(isinstance(arm, Cut) and arm.kind == "invalid" for arm in rnd.panel.values())
+    return all(isinstance(arm, Cut) and arm.kind == "invalid" for arm in rnd.proposed.values())
 
 
 def no_evidence_reason(result: CycleResult) -> str | None:

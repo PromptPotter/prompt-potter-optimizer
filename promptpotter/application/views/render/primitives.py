@@ -261,8 +261,8 @@ def _scoreboard(ranked: Sequence[ArmReading]) -> str:
         theta = None if s.ability is None else s.ability.theta
         theta_str = "---" if theta is None else theta.point
         cells = (
-            f"{s.panel.scored}/{s.panel.expected}"
-            if s.panel.expected and s.panel.scored is not None
+            f"{s.samples.scored}/{s.samples.expected}"
+            if s.samples.expected and s.samples.scored is not None
             else str(0 if s.own is None else s.own.n)
         )
         fitness_str = "—" if fitness is None else fitness.point

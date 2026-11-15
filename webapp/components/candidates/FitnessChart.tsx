@@ -401,14 +401,14 @@ export const FitnessChart = memo(function FitnessChart({
   }, [views, standingIdx]);
 
   const cutCounts = useMemo(
-    () => views.map((v) => (v.reading?.panel.cut ? v.reading.panel.scored : null)),
+    () => views.map((v) => (v.reading?.samples.cut ? v.reading.samples.scored : null)),
     [views],
   );
 
   const shortPanels = useMemo(
     () =>
       views.map((v) => {
-        const p = v.reading?.panel;
+        const p = v.reading?.samples;
         return p?.scored != null && p.expected != null && p.scored < p.expected;
       }),
     [views],

@@ -15,6 +15,7 @@ from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
+from promptpotter.application.optimizers.nodes import RoundSamples
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.selection import banked_lift_prior
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
@@ -72,7 +73,7 @@ def _sibling_runtime_failures(session: Session) -> list[RuntimeFailure]:
 def _cut_failures(rr: RoundOutcome) -> list[RuntimeFailure]:
     return [
         arm.reason.failure
-        for arm in rr.panel.values()
+        for arm in rr.proposed.values()
         if isinstance(arm, Cut) and isinstance(arm.reason, Broken)
     ]
 
@@ -511,8 +512,16 @@ class RoundContext:
 
     cycle: Cycle
     round_num: int
+    # The round's draw where its sampler drew; a context before the draw or off a round holds none.
+    drew: RoundSamples | None = None
     # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
     walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)
+
+    @property
+    def panel(self) -> RoundSamples:
+        if self.drew is None:
+            raise LookupError(f"round {self.round_num}'s context holds no draw")
+        return self.drew
 
     def asked(self, key: ArmKey, cells: Iterable[Sample]) -> frozenset[str]:
         """What a walk of *key* on *cells* is asked: those, and every cell its walk was asked before."""
@@ -549,7 +558,7 @@ class ReadArm:
 @dataclass(frozen=True)
 class ArmWalk:
     """One arm's walk of its round, which every later read of it continues: ``arm`` holds its rows,
-    each read adding the cells they lack, and a panel arm's state; ``asked`` every cell asked of it."""
+    each read adding the cells they lack, and a proposed arm's state; ``asked`` every cell asked of it."""
 
     arm: ReadArm
     asked: frozenset[str]

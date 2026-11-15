@@ -99,10 +99,10 @@ def inner_narrative(
         steer = critiques.get(rnd.round - 1)
         if steer and steer.get("priority_fix"):
             parts.append(f"steer: {_clip(steer['priority_fix'], 130)}")
-        fits = {key: rnd.fit(key) or ArmFit() for key in rnd.panel}
+        fits = {key: rnd.fit(key) or ArmFit() for key in rnd.proposed}
         scored = [
             (key, c, fold)
-            for key, c in rnd.panel.items()
+            for key, c in rnd.proposed.items()
             if isinstance(c, Cut | Measured) and (fold := rnd.folds.get(key)) is not None
         ]
         if scored:
@@ -140,7 +140,7 @@ def inner_narrative(
             )
         else:
             parts.append("no scored candidates")
-        collapses = collapse_counts(c.validation_failures for c in rnd.panel.values())
+        collapses = collapse_counts(c.validation_failures for c in rnd.proposed.values())
         anomalies = [
             f"{word} x{n}"
             for reason, word in COLLAPSE_WORDS.items()

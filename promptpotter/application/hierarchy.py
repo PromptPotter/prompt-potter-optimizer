@@ -236,15 +236,15 @@ def candidate_lines(reading: ArmReading, standing: CandidateStanding) -> list[Sa
 
 
 def candidate_figures(reading: ArmReading) -> list[Figure]:
-    panel, ability, own = reading.panel, reading.ability, reading.own
+    samples, ability, own = reading.samples, reading.ability, reading.own
     rows = [
         _figure(
             "fitness",
             "Fitness",
             "—" if own is None or own.fitness is None else own.fitness.point,
             None
-            if panel.scored is None
-            else f"{panel.scored}{'' if panel.expected is None else f' of {panel.expected}'} scored",
+            if samples.scored is None
+            else f"{samples.scored}{'' if samples.expected is None else f' of {samples.expected}'} scored",
         )
     ]
     if terms := fitness_terms_text(reading.fitness_terms):

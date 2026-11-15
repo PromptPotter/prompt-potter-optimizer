@@ -6,7 +6,7 @@ import { HoverCard } from "@/components/ui";
 export function SubjectHeadline({ reading }: { reading: ArmReading | null }) {
   const fitness = reading?.own?.fitness?.value;
   if (reading == null || fitness == null) return null;
-  const { scored, expected, cut } = reading.panel;
+  const { scored, expected, cut } = reading.samples;
   return (
     <div className="subject-headline">
       <HoverCard

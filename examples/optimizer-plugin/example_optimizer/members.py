@@ -80,9 +80,7 @@ class Propose(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, ProposeKnobs).variants
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
         parent, node = ctx.read(Lineage).parent, ctx.read(Target).prompt_node
         prompt = prompts.rephrase_prompt(ctx, instruction=shown(ctx, parent, node))
         variants = ctx.knobs(ProposeKnobs).variants

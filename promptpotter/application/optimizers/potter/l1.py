@@ -593,7 +593,7 @@ def _top_lifts(rounds: list[RoundResult]) -> list[float]:
     for r in rounds:
         lifts = [
             fit.vs_reference.headline.estimate.value
-            for key in r.panel
+            for key in r.proposed
             if (fit := r.fit(key)) is not None
             and fit.vs_reference is not None
             and fit.vs_reference.headline is not None

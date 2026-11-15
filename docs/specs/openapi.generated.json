@@ -1023,9 +1023,6 @@
             ],
             "description": "The arm's own level on its round's cells: fitness with the band the gateway folds per cell, the composite beside it, over `n` rows carrying a verdict. Null before the first row is graded, and on an `invalid` arm, which holds no cell."
           },
-          "panel": {
-            "$ref": "#/components/schemas/ArmSamples"
-          },
           "prefix": {
             "anyOf": [
               {
@@ -1058,6 +1055,9 @@
             ],
             "title": "Role",
             "type": "string"
+          },
+          "samples": {
+            "$ref": "#/components/schemas/ArmSamples"
           },
           "sp_hash": {
             "description": "The archive address of this arm's measurements (`prompt_fields_id`). Not a key: a re-proposed configuration shares it across rounds. Empty before it is measured.",
@@ -1138,7 +1138,7 @@
           "refused_parameter",
           "own",
           "fitness_terms",
-          "panel",
+          "samples",
           "tokens",
           "prefix",
           "ability",
@@ -1243,7 +1243,7 @@
             "title": "Cached Share"
           },
           "cut": {
-            "description": "Stopped short of its round's panel (`panel_cuts`): under its own `expected`, or, for a panel arm, under the fullest panel a panel arm of its round reached.",
+            "description": "Stopped short of its round's panel (`panel_cuts`): under its own `expected`, or, for a proposed arm, under the fullest walk a proposed arm of its round reached.",
             "title": "Cut",
             "type": "boolean"
           },

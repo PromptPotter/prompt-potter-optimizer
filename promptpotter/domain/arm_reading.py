@@ -185,7 +185,7 @@ class ArmSamples(FrozenModel):
     )
     cut: bool = Field(
         description="Stopped short of its round's panel (`panel_cuts`): under its own `expected`, "
-        "or, for a panel arm, under the fullest panel a panel arm of its round reached."
+        "or, for a proposed arm, under the fullest walk a proposed arm of its round reached."
     )
 
     @classmethod
@@ -378,7 +378,7 @@ class ArmReading(FrozenModel):
         description="The round mean of each term the scoring formula reads, `fitness` aside, over "
         "the cells that answered it: an L4 outer arm's `held_out_lift` and `floored` share."
     )
-    panel: ArmSamples
+    samples: ArmSamples
     tokens: TokenAccount | None = Field(
         description="What measuring it consumed, the BACKEND bucket alone, replayed rows "
         "excluded; null until its score report folds an account."
@@ -429,7 +429,7 @@ class ArmReading(FrozenModel):
         """*fold* is its round's, or `narration.py::Narration.fold` in flight; *fit* the election's, ``None`` until held."""
         walked = None if isinstance(arm, Proposed) else arm
         tokens = None if fold is None else fold.tokens
-        panel = ArmSamples.of(
+        samples = ArmSamples.of(
             None if fold is None else fold.walked,
             None if walked is None else walked.expected_samples,
             None if fold is None else fold.cached,
@@ -448,7 +448,7 @@ class ArmReading(FrozenModel):
             else None,
             own=None if fold is None else _own_level(fold),
             fitness_terms={} if fold is None else fold.term_means,
-            panel=panel,
+            samples=samples,
             tokens=tokens,
             prefix=None if tokens is None else tokens.prefix(replayed=False),
             ability=None

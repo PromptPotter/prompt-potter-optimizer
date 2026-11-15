@@ -285,13 +285,13 @@ export function health(
 }
 
 export function armReading(
-  over: Partial<Omit<ArmReading, "arm" | "panel" | "election">> & {
+  over: Partial<Omit<ArmReading, "arm" | "samples" | "election">> & {
     arm?: Partial<ArmName>;
-    panel?: Partial<ArmSamples>;
+    samples?: Partial<ArmSamples>;
     election?: Partial<ArmElection>;
   } = {},
 ): ArmReading {
-  const { arm, panel, election, ...rest } = over;
+  const { arm, samples, election, ...rest } = over;
   return {
     role: "panel",
     sp_hash: "",
@@ -312,7 +312,7 @@ export function armReading(
     fitness_terms: {},
     ...rest,
     arm: { round: 1, label: "C1.1", key: "", ...arm },
-    panel: { scored: null, expected: null, cached: null, cached_share: null, cut: false, ...panel },
+    samples: { scored: null, expected: null, cached: null, cached_share: null, cut: false, ...samples },
     election: { held: false, selected: false, leading: false, crown: null, ...election },
   };
 }
@@ -603,7 +603,7 @@ export function summaryCandidate(over: Partial<DashboardCandidate> = {}): Dashbo
       arm: { key: "c" },
       state: "measured",
       own: ownLevel(0),
-      panel: { scored: 0, expected: 0, cached: 0 },
+      samples: { scored: 0, expected: 0, cached: 0 },
       election: { held: true },
     }),
     ...over,

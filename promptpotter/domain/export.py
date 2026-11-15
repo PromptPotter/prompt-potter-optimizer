@@ -224,7 +224,7 @@ def export_lineage(rounds: Sequence[RoundOutcome]) -> list[LineageEntity]:
     seen: dict[str, OptSearchPoint] = {}
     out: list[LineageEntity] = []
     for rr in rounds:
-        for key, arm in rr.panel.items():
+        for key, arm in rr.proposed.items():
             if key in seen:
                 continue
             individual = seen[key] = arm.individual

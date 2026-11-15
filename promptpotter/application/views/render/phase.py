@@ -178,7 +178,7 @@ def render_round_stats(
             (
                 own
                 for row in round_result.ranked()
-                if row.reading.arm.key in round_result.panel and (own := row.reading.own)
+                if row.reading.arm.key in round_result.proposed and (own := row.reading.own)
             ),
             None,
         )

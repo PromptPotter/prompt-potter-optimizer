@@ -459,7 +459,7 @@ def _render_check_checklist(checks: list[CheckResult]) -> list[str]:
 
 
 def _render_variants_table(round_data: RoundResult) -> list[str]:
-    panel = round_data.panel
+    panel = round_data.proposed
     if not panel:
         return []
     # The column's sheet, as its readings name it: every arm's is the round's one.
@@ -592,7 +592,7 @@ def from_disk_log(
                 verdict_reason=None if election is None else election.verdict_reason,
                 overlap=t.overlap,
                 p_best_trajectory=traj,
-                candidate_labels={key: arm.label for key, arm in t.panel.items()},
+                candidate_labels={key: arm.label for key, arm in t.proposed.items()},
                 winner_id=selected or "",
                 spend=spend_by_round.get(t.round),
             )

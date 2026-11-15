@@ -149,7 +149,7 @@ export const CANDIDATE_SERIES: readonly SeriesSpec[] = [
     kind: "line",
     axis: "y",
     gap: "sparse",
-    valueOf: (v) => v.reading?.panel.cached_share ?? null,
+    valueOf: (v) => v.reading?.samples.cached_share ?? null,
     applies: (c) => c.showCache,
   },
 ];

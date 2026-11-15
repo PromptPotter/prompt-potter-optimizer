@@ -105,7 +105,7 @@ export function MeasurementRun({
           const early = reading.walked_short ? end : null;
           const fitness = reading.own?.fitness?.value ?? null;
           const isCandSelected = pick?.round === arm.round && pick.arm === arm.key;
-          const { cached, cached_share: cachedShare } = reading.panel;
+          const { cached, cached_share: cachedShare } = reading.samples;
           const verdict = verdicts.get(arm.key);
           return (
             <section
@@ -129,7 +129,7 @@ export function MeasurementRun({
                   ) : (
                     <span className="rsv-tally-score">
                       {[
-                        reading.panel.scored != null ? `${reading.panel.scored} scored` : null,
+                        reading.samples.scored != null ? `${reading.samples.scored} scored` : null,
                         fitness != null ? fmtUnit("score", fitness) : null,
                       ]
                         .filter((part) => part !== null)

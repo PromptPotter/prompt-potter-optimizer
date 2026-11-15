@@ -486,7 +486,7 @@ class _Build:
         cut: dict[str, bool] = {}
         for cohort in cohorts.values():
             flags = panel_cuts(
-                [(c.arm.reading.panel.scored, c.arm.reading.panel.expected) for c in cohort]
+                [(c.arm.reading.samples.scored, c.arm.reading.samples.expected) for c in cohort]
             )
             cut |= {c.address: flag for c, flag in zip(cohort, flags, strict=True)}
         rounds: list[HierarchyRound] = []
@@ -547,7 +547,10 @@ class _Build:
         if retired:
             election = election.model_copy(update={"selected": False, "crown": None})
         reading = reading.model_copy(
-            update={"election": election, "panel": reading.panel.model_copy(update={"cut": cut})}
+            update={
+                "election": election,
+                "samples": reading.samples.model_copy(update={"cut": cut}),
+            }
         )
         verdict = arm_verdict(reading, retired=retired)
         tags = [HierarchyTag(kind="verdict", value=verdict, label=ARM_VERDICT_LABELS[verdict])]

@@ -66,7 +66,7 @@ describe("a missing value renders as a gap or a floor, never as a measurement", 
       {
         own: ownLevel(0.7),
         ability: { theta: estimate(-1.5, [-1.9, -1.1], { unit: "theta", se: 0.2 }), caveat: null },
-        panel: { cached: 3, scored: 6, cached_share: 0.25 },
+        samples: { cached: 3, scored: 6, cached_share: 0.25 },
       },
       { overlap: { rate: 0.5, n: 4 } },
     );

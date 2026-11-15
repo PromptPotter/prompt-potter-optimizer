@@ -171,7 +171,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
   );
 
   const cacheHitCount = useMemo(
-    () => views.filter((v) => (v.reading?.panel.cached ?? 0) > 0).length,
+    () => views.filter((v) => (v.reading?.samples.cached ?? 0) > 0).length,
     [views],
   );
 

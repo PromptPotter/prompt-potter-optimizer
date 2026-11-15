@@ -505,9 +505,7 @@ class Proposer(NodeMember, Protocol):
         """Asked of the walk's ``lead``: the bench's own, *bench*, unless it keeps a reading of its own."""
         return bench
 
-    async def propose(
-        self, ctx: NodeContext, panel: RoundSamples, proposals: Proposals
-    ) -> Proposals: ...
+    async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals: ...
 
 
 @dataclass(frozen=True)

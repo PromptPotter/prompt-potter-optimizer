@@ -110,7 +110,7 @@ UNELECTED_SHOWN = 2
 
 class ElectionRow(NamedTuple):
     """One round's election as a layer that may re-elect reads it: the pick, and the best of the
-    panel arms left unelected, in the round's own rank."""
+    proposed arms left unelected, in the round's own rank."""
 
     round: RoundOutcome
     picked: ArmKey | None
@@ -127,7 +127,7 @@ def election_table_rows(rounds: Sequence[RoundOutcome]) -> list[ElectionRow]:
         unelected = tuple(
             key
             for key in ranked
-            if key != picked and key in rr.panel and is_leader_eligible(rr.panel[key])
+            if key != picked and key in rr.proposed and is_leader_eligible(rr.proposed[key])
         )
         rows.append(ElectionRow(rr, picked, unelected[:UNELECTED_SHOWN]))
     return rows[-ELECTION_ROUNDS_SHOWN:]

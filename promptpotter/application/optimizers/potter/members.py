@@ -295,9 +295,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
     def complete(self) -> None:
         injection_table()
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
         return await propose_l1_population(ctx)
 
 
@@ -599,7 +597,7 @@ class Escalation(nodes.Controller):
         # Structural, not a stall: heals L2 now instead of burning l1_patience rounds.
         l1_mandatory_breach = any(
             vf.reason == ValidationReason.DROPPED_MANDATORY_PLACEHOLDER
-            for arm in round_result.panel.values()
+            for arm in round_result.proposed.values()
             for vf in arm.validation_failures
         )
         # The same structural fault with an empty panel, so it rides `l1_parse_failure`.

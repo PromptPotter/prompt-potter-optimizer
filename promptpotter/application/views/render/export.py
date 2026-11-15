@@ -183,10 +183,10 @@ def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUn
     out = ["  ".join(head)]
 
     walk = " · ".join(w for w in (r.state, r.end) if w is not None)
-    scored, expected = r.panel.scored, r.panel.expected
+    scored, expected = r.samples.scored, r.samples.expected
     cells = ""
     if scored is not None:
-        held = f"{scored} of {unit_count(expected, unit)}" if r.panel.cut and expected else None
+        held = f"{scored} of {unit_count(expected, unit)}" if r.samples.cut and expected else None
         cells = f" {held or unit_count(scored, unit)}"
     own = r.own
     fitness = (

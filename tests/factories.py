@@ -955,7 +955,7 @@ def close_round(
     rr = line[-1]
     n = rr.round
     ledger.append(RoundEnteredRecord(round=n))
-    for key, arm in rr.panel.items():
+    for key, arm in rr.proposed.items():
         ledger.append(
             ArmRecord(
                 round=n,
@@ -964,7 +964,7 @@ def close_round(
             )
         )
     with scoped(round=n):
-        for key, arm in rr.panel.items():
+        for key, arm in rr.proposed.items():
             ledger.append(ArmRecord(round=n, arm=key, state=arm))
     assert rr.election is not None, "a closed round elects"
     ledger.append(ElectionRecord(round=n, **dict(rr.election)))

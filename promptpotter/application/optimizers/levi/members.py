@@ -494,9 +494,7 @@ class LeviSeed(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.knobs_of(self.name, LeviSeedKnobs).n_diverse_seeds
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
         origin = ctx.read(Lineage).origin
         node, calls = ctx.read(Target).prompt_node, ctx.read(Calls)
         shown: list[tuple[OptSearchPoint, float | None]] = [(origin, None)]
@@ -544,9 +542,7 @@ class LeviParadigmShift(nodes.Proposer):
             )
         ]
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
         n_clusters = ctx.knobs(LeviParadigmShiftKnobs).n_clusters
         shift = await self._shift(ctx, n_clusters, len(proposals.proposals))
         return nodes.Proposals([*proposals.proposals, shift])
@@ -625,9 +621,7 @@ class LeviRefine(nodes.Proposer):
     def arms(self, selected: SelectedOptimizer) -> int:
         return selected.reached_knobs(self, LeviParadigmShiftKnobs).interval - 1
 
-    async def propose(
-        self, ctx: NodeContext, _panel: RoundSamples, _proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
         calibration = ctx.slice(DescriptorCalibration).calibration
         elites = ctx.slice(EliteArchive).elites
         shift = ctx.knobs(LeviParadigmShiftKnobs)

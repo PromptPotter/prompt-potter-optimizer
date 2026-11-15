@@ -78,7 +78,7 @@ export function SearchpointDrillIn({
             {own != null && fitness != null && (
               <Fact
                 k="fitness"
-                v={`${fitness.text}${onPanel(reading.panel)}`}
+                v={`${fitness.text}${onPanel(reading.samples)}`}
               />
             )}
             {(benchPass != null || bench != null) && (
@@ -145,7 +145,7 @@ export function SearchpointDrillIn({
               <Fact
                 k="measured on"
                 v={`${fmtUnit("tokens", reading.tokens.input)} in · ${fmtUnit("tokens", reading.tokens.output)} out${
-                  reading.panel.cached ? ` · ${reading.panel.cached} replayed` : ""
+                  reading.samples.cached ? ` · ${reading.samples.cached} replayed` : ""
                 }`}
                 hint={PREFIX_STATE_TITLES.replayed}
               />
@@ -173,7 +173,7 @@ function FailedPass({ state }: { state: ReadingState }) {
 }
 
 // "on 12 of 20" where the walk stopped short of its length.
-function onPanel({ scored, expected }: ArmReading["panel"]): string {
+function onPanel({ scored, expected }: ArmReading["samples"]): string {
   if (scored == null) return "";
   return expected != null && expected !== scored ? ` on ${scored} of ${expected}` : ` on ${scored}`;
 }

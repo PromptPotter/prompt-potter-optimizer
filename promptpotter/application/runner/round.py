@@ -149,7 +149,6 @@ if TYPE_CHECKING:
         Eliminator,
         Proposer,
         Race,
-        RoundSamples,
         Selection,
         Selector,
     )
@@ -574,14 +573,14 @@ async def _measure_gaps(
 async def measure_population(
     ctx: RoundContext,
     population: Proposals,
-    panel: RoundSamples,
     pool: list[Sample],
     eliminator: Eliminator | None,
     selector: Selector,
 ) -> MeasuredRound:
     cycle = ctx.cycle
+    panel = ctx.panel
     arms, rows, cut, race = await _walk_population(
-        ctx, population, panel, eliminator, keep_cut=selector.elects_partial
+        ctx, population, eliminator, keep_cut=selector.elects_partial
     )
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
@@ -647,7 +646,7 @@ async def measure_population(
         if cycle.config.optimization.lift_reference == "best_so_far"
         else [sample.key for sample in panel.cells],
     )
-    readings = await _reference_readings(ctx, panel, arms, rows, scored, parent, pair)
+    readings = await _reference_readings(ctx, arms, rows, scored, parent, pair)
     rejects = eliminator is not None and eliminator.stop_disqualifies
     electable: list[ArmKey] = []
     for key in scored:
@@ -702,7 +701,6 @@ async def measure_population(
 
 async def _reference_readings(
     ctx: RoundContext,
-    panel: RoundSamples,
     arms: Mapping[ArmKey, Concluded],
     rows: Mapping[ArmKey, CellSheet],
     scored: Sequence[ArmKey],
@@ -730,7 +728,7 @@ async def _reference_readings(
             ctx,
             individual,
             cycle.points.job(individual),
-            [s for s in panel.cells if s.key in keys],
+            [s for s in ctx.panel.cells if s.key in keys],
             role=MeasurementRole.PARENT,
         )
     walks = ctx.walks
@@ -842,13 +840,13 @@ class ReferencePairs:
 async def _walk_population(
     ctx: RoundContext,
     population: Proposals,
-    panel: RoundSamples,
     eliminator: Eliminator | None,
     *,
     keep_cut: bool,
 ) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopReason | None, Race | None]:
     cycle = ctx.cycle
     round_num = ctx.round_num
+    panel = ctx.panel
     schema = cycle.session.pipeline_schema
     proposed = population.arms(round_num)
     rows: dict[ArmKey, CellSheet] = {}
@@ -1093,13 +1091,13 @@ def _unbought_cells(arm: ArmState, rows: CellSheet, cut: StopReason | None) -> i
 
 def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | None) -> None:
     round_num = ctx.round_num
-    panel = round_result.panel
+    proposed = round_result.proposed
     unbought = {
-        key: _unbought_cells(arm, round_result.rows(key), cut) for key, arm in panel.items()
+        key: _unbought_cells(arm, round_result.rows(key), cut) for key, arm in proposed.items()
     }
-    holes = {key: unscoreable_cells(round_result.rows(key)) + unbought[key] for key in panel}
+    holes = {key: unscoreable_cells(round_result.rows(key)) + unbought[key] for key in proposed}
     # A broken arm also carries error rows, but its own outcome already charges it.
-    holed = sorted(key for key, arm in panel.items() if is_leader_eligible(arm) and holes[key])
+    holed = sorted(key for key, arm in proposed.items() if is_leader_eligible(arm) and holes[key])
     # Sink is the LEDGER: the halt below unwinds before `close_round`.
     append_record(decision(PanelCoverage(holes_by_arm=holes), holed, node=None, round=round_num))
     holed_rows = [
@@ -1188,10 +1186,10 @@ def announce_population(ctx: RoundContext, opening: RoundOpening, population: Pr
     )
 
 
-async def _walk(ctx: RoundContext, proposers: Sequence[Proposer], panel: RoundSamples) -> Proposals:
+async def _walk(ctx: RoundContext, proposers: Sequence[Proposer]) -> Proposals:
     proposals = Proposals([])
     for proposer in proposers:
-        proposals = await proposer.propose(NodeContext(ctx, proposer), panel, proposals)
+        proposals = await proposer.propose(NodeContext(ctx, proposer), proposals)
     return proposals
 
 
@@ -1227,7 +1225,7 @@ def bank_walk(ctx: RoundContext, proposals: list[Proposal]) -> None:
     bank_proposals(ctx, proposals, submitted=False)
 
 
-async def _walked(ctx: RoundContext, walk: RoundWalk, panel: RoundSamples) -> Proposals:
+async def _walked(ctx: RoundContext, walk: RoundWalk) -> Proposals:
     cycle = ctx.cycle
     if (banked := cycle.banked_walk(ctx.round_num)) is not None:
         cycle.seat_walk(ctx.round_num, banked.walked)
@@ -1236,18 +1234,18 @@ async def _walked(ctx: RoundContext, walk: RoundWalk, panel: RoundSamples) -> Pr
     seeds, proposers, _ = walk.walked
     refused: list[Proposal] = []
     if seeds:
-        seeded = await _walk(ctx, seeds, panel)
+        seeded = await _walk(ctx, seeds)
         cycle.population = [p.individual for p in seeded.proposals if not p.refused]
         # A refused seed is an arm of its round, as every refused child is: its fault is served.
         refused = [p for p in seeded.proposals if p.refused]
-    population = await _walk(ctx, proposers, panel)
+    population = await _walk(ctx, proposers)
     population = replace(population, proposals=[*population.proposals, *refused])
     bank_walk(ctx, population.proposals)
     return population
 
 
-async def propose_population(ctx: RoundContext, walk: RoundWalk, panel: RoundSamples) -> Proposals:
-    population = await _walked(ctx, walk, panel)
+async def propose_population(ctx: RoundContext, walk: RoundWalk) -> Proposals:
+    population = await _walked(ctx, walk)
     arms = _one_arm_each(ctx, population.proposals)
     seated = walk.walked[2]
     if seated:
@@ -1279,29 +1277,25 @@ class RoundWalked(NamedTuple):
     act: ControllerAct | None
 
 
-async def _proposed(ctx: RoundContext, panel: RoundSamples) -> Proposals:
+async def _proposed(ctx: RoundContext) -> Proposals:
     walk = ctx.cycle.optimizer.plan.walk(stands=bool(ctx.cycle.population))
     opening = announce_opening(ctx, walk)
-    population = await propose_population(ctx, walk, panel)
+    population = await propose_population(ctx, walk)
     announce_population(ctx, opening, population)
     return population
 
 
-async def _measured(
-    ctx: RoundContext, population: Proposals, panel: RoundSamples, pool: list[Sample]
-) -> MeasuredRound:
+async def _measured(ctx: RoundContext, population: Proposals, pool: list[Sample]) -> MeasuredRound:
     plan = ctx.cycle.optimizer.plan
     append_record(
         PhaseRecord(
             phase=CampaignPhase.MEASURE,
             step="enter",
             round=ctx.round_num,
-            act=MeasureOpened(candidates=len(population.proposals), cells=len(panel.cells)),
+            act=MeasureOpened(candidates=len(population.proposals), cells=len(ctx.panel.cells)),
         )
     )
-    measured = await measure_population(
-        ctx, population, panel, pool, plan.eliminator, plan.selector
-    )
+    measured = await measure_population(ctx, population, pool, plan.eliminator, plan.selector)
     append_record(PhaseRecord(phase=CampaignPhase.MEASURE, step="exit", round=ctx.round_num))
     return measured
 
@@ -1362,9 +1356,7 @@ async def _adapt_beside_overlap(
     return cycle.rounds[-1]
 
 
-async def walk_round(
-    cycle: Cycle, round_num: int
-) -> tuple[RoundContext, list[Sample], RoundSamples, Proposals]:
+async def walk_round(cycle: Cycle, round_num: int) -> tuple[RoundContext, list[Sample], Proposals]:
     """A round's open through its banked walk: a measured round's prefix."""
     # The search split alone: a bench or demo row a round could draw would elect on held-out rows.
     pool = list(cycle.session.state.scoring.partition.search)
@@ -1376,8 +1368,8 @@ async def walk_round(
     cycle.difficulty.open_round(cycle.rounds, reach)
     pin_inner_ruler(cycle.difficulty.stamp.reach)
     sampler = cycle.optimizer.plan.sampler
-    panel = sampler.draw(NodeContext(ctx, sampler), pool)
-    return ctx, pool, panel, await _proposed(ctx, panel)
+    drawn = RoundContext(cycle, round_num, sampler.draw(NodeContext(ctx, sampler), pool))
+    return drawn, pool, await _proposed(drawn)
 
 
 async def execute_round(
@@ -1387,9 +1379,9 @@ async def execute_round(
     is_final_round: bool = False,
 ) -> RoundWalked:
     """One round, each role handed what the ones before it left."""
-    ctx, pool, panel, population = await walk_round(cycle, round_num)
+    ctx, pool, population = await walk_round(cycle, round_num)
     plan = cycle.optimizer.plan
-    measured = await _measured(ctx, population, panel, pool)
+    measured = await _measured(ctx, population, pool)
     append_record(PhaseRecord(phase=CampaignPhase.SELECT, step="enter", round=round_num))
     selection = plan.selector.select(NodeContext(ctx, plan.selector), measured)
     cycle.population = _survivors(ctx, selection)

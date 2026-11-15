@@ -222,7 +222,7 @@ Surface whose work is invisible to a sweep that counts readers. A PR touching on
 - **No campaign fact on a side file** — a campaign's result is a fold of its line's ledgers. <!-- probe: git grep -cE "result\.json" -- promptpotter/infrastructure/store/layout.py == 0 -->
 - **The hard-sample sorter** and the round order it feeds
   ([`methods/verdict-resolution.md`](methods/verdict-resolution.md) § The round order).
-- **`RoundResult.panel` means "proposed in THIS round"** — a retained individual read off every
+- **`RoundResult.proposed` means "proposed in THIS round"** — a retained individual read off every
   cell would be counted k+1 times.
 - **One tenant δ ruler, one clock** — every θ is read on it, less the parent line's rows.
 - **The discoverability injections**, **the `new` verb + `/potter-run` onboarding**, and

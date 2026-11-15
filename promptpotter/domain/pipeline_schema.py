@@ -594,7 +594,7 @@ ParamSource = Literal[ParamLayer, "unset"]
 # The layers an optimizer node's knob is set by; the others lay only a target's params.
 KnobLayer = Literal["dataset", "campaign", "free_tier", "start"]
 assert set(get_args(KnobLayer)) <= set(get_args(ParamLayer)), "a knob's layer is a ParamLayer"
-# Per optimizer node, the layer that last set each key of its `optimization.nodes` config.
+# Per optimizer node, the layer that last set each key `optimization.nodes` or `call_target` lays.
 type KnobLayers = Mapping[str, Mapping[str, KnobLayer]]
 
 # The call fact a surface keys a control on; a model row is `kind`'s.

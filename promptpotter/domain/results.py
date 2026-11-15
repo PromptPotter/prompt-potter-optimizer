@@ -133,7 +133,7 @@ class RoundOutcome(FrozenModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     round: int
-    # Its panel arms in slot order, then each reference the round re-read: one key, one state.
+    # Its proposed arms in slot order, then each reference the round re-read: one key, one state.
     arms: dict[ArmKey, ArmState] = Field(default_factory=dict)
     # The candidate its line stood on entering it, which the election reads every arm against.
     reference: RoundArm | None
@@ -188,13 +188,13 @@ class RoundOutcome(FrozenModel):
         return None if self.election is None else self.election.ruler
 
     @property
-    def panel(self) -> dict[ArmKey, ArmState]:
+    def proposed(self) -> dict[ArmKey, ArmState]:
         """The arms the round PROPOSED, in slot order: no reference it re-read."""
         return {key: arm for key, arm in self.arms.items() if arm.role != MeasurementRole.PARENT}
 
     @property
     def candidates_scored(self) -> int:
-        return sum(1 for arm in self.panel.values() if is_leader_eligible(arm))
+        return sum(1 for arm in self.proposed.values() if is_leader_eligible(arm))
 
     @property
     def origin(self) -> Concluded:
@@ -217,9 +217,9 @@ class RoundOutcome(FrozenModel):
 
     def arm_readings(self) -> list[ArmReading]:
         counts = {key: panel_counts(arm, self.folds.get(key)) for key, arm in self.arms.items()}
-        panel = list(self.panel)
-        cuts = dict(zip(panel, panel_cuts([counts[key] for key in panel]), strict=True))
-        # A reference reads the cells its readers asked, so no panel arm's fuller walk cuts it.
+        proposed = list(self.proposed)
+        cuts = dict(zip(proposed, panel_cuts([counts[key] for key in proposed]), strict=True))
+        # A reference reads the cells its readers asked, so no proposed arm's fuller walk cuts it.
         cuts |= {key: panel_cuts([counts[key]])[0] for key in self.arms if key not in cuts}
         line = line_by_individual(self.overlap)
         return [

@@ -941,7 +941,7 @@ def _edits(b: PotterView) -> list[_Edit]:
                     parent.pipeline_params,
                 ),
             )
-            for key, cand in rr.panel.items()
+            for key, cand in rr.proposed.items()
             if isinstance(cand, Cut | Measured)
             and (
                 changed := _candidate_mutation(

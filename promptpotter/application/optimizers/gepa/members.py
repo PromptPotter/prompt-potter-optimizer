@@ -16,6 +16,7 @@ from promptpotter.application.bench.node_context import (
     Lineage,
     NodeContext,
     Replay,
+    RoundPanel,
     Target,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
@@ -195,7 +196,7 @@ class GepaReflect(nodes.Proposer):
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores, ReflectionModules})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ReflectionModules, MinibatchBars})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
-        {Calls, Children, Frontier, Lineage, Target}
+        {Calls, Children, Frontier, Lineage, RoundPanel, Target}
     )
 
     def arms(self, _selected: SelectedOptimizer) -> int:
@@ -204,9 +205,7 @@ class GepaReflect(nodes.Proposer):
     def parent_read(self, panel: nodes.DrawSize) -> int:
         return panel.block_size
 
-    async def propose(
-        self, ctx: NodeContext, panel: RoundSamples, _proposals: Proposals
-    ) -> Proposals:
+    async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
         candidates = ctx.slice(ParetoScores)
         parent_id = candidates.parent_id
         # A lineage no longer scored keeps no pointer.
@@ -224,7 +223,7 @@ class GepaReflect(nodes.Proposer):
         modules = ctx.read(Target).schema.prompt_nodes()
         at = held.get(parent.id, 0) % len(modules)
         node = modules[at]
-        rows = await ctx.read(Frontier).measure_parent(parent.id, panel.order[: panel.block_size])
+        rows = await ctx.read(Frontier).measure_parent(parent.id, ctx.read(RoundPanel).block())
         prompt = reflection_prompt(ctx, instruction=shown(ctx, parent, node), rows=rows)
         proposal = child(
             ctx,
@@ -425,7 +424,7 @@ class Pareto(nodes.Selector):
         banked = round_result.closed_state
         if not (scores := banked.slice(ParetoScores).scores):
             return []
-        arms = round_result.panel.values()
+        arms = round_result.proposed.values()
         accepted = sum(1 for arm in arms if isinstance(arm, Measured))
         rejected = sum(1 for arm in arms if isinstance(arm, Cut) and arm.kind == "eliminated")
         leading = len(pareto_frequencies(scores, banked.slice(ParetoSet).keys))

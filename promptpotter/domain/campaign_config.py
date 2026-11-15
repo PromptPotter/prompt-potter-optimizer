@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import functools
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any, Literal
@@ -493,6 +493,13 @@ class LaidSpan(FrozenModel):
         return layers
 
 
+def node_config_stamps[N: str](folded: Folded[N]) -> Iterator[tuple[str, str, N]]:
+    """Each ``optimization.nodes`` config key a layer laid: its node, its key and that layer."""
+    for path, layer in folded.stamps.items():
+        if len(path) == 5 and path[:2] == ("optimization", "nodes"):
+            yield path[2], path[4], layer
+
+
 class CycleConfig(FrozenModel):
     """What one cycle runs: its chain's spans laid in order over the declaration, each child's over
     its parent's, so no reader lays a part of one again. Built by ``laid`` alone."""
@@ -514,11 +521,7 @@ class CycleConfig(FrozenModel):
             config=CampaignConfig.model_validate(folded.document),
             spans=tuple(spans),
             start_overlay=lay_nodes(*(s.start.runs() for s in spans if s.start is not None)),
-            start_knobs=frozenset(
-                (path[2], path[4])
-                for path in folded.stamps
-                if len(path) == 5 and path[:2] == ("optimization", "nodes")
-            ),
+            start_knobs=frozenset((node, key) for node, key, _ in node_config_stamps(folded)),
         )
 
     def steers_outside(self, permitted: Mapping[str, NodeSearchNarrowing]) -> bool:
@@ -530,15 +533,12 @@ class CycleConfig(FrozenModel):
         )
 
     def knob_layers(self, recorded: KnobLayers) -> dict[str, dict[str, KnobLayer]]:
-        """The layer that last set each ``optimization.nodes`` key ``config`` holds: a start of the
-        line, else the one *recorded* at the mint."""
-        return {
-            node: {
-                key: "start" if (node, key) in self.start_knobs else recorded[node][key]
-                for key in overlay.config
-            }
-            for node, overlay in self.config.optimization.nodes.items()
-        }
+        """The layer that last set each optimizer-node key: a start of the line, else the one
+        *recorded* at the mint (`pipeline_resolve.py::laid_config`)."""
+        laid = {node: dict(held) for node, held in recorded.items()}
+        for node, key in self.start_knobs:
+            laid.setdefault(node, {})[key] = "start"
+        return laid
 
     @property
     def own_start(self) -> CycleStart | None:

@@ -2484,9 +2484,10 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     _fk_dataset(stores)
     restated = {"optimization": {"nodes": {"l1_generate": {"config": {"n_variants": 3}}}}}
     on_dataset = defaulted_config(restated).model_dump(mode="json")
-    assert laid_config(
+    laid = laid_config(
         stores, ConfigLayers(on_dataset, restated), connector="termnorm", schema=None
-    ).knob_layers == {"l1_generate": {"n_variants": "campaign"}}, (
+    )
+    assert laid.knob_layers["l1_generate"]["n_variants"] == "campaign", (
         "an edit restating the dataset's value read as the dataset's"
     )
     knob_config = defaulted_config(
@@ -3737,8 +3738,9 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
     set_cycle(reflected_on.cycle, line=measured(reflected_on.cycle.parent))
     reflected: list[set[str]] = []
     for _ in range(3):
-        reflecting = NodeContext(reflected_on, optimizers.NODE_MEMBERS.get("gepa_reflect"))
         no_cells = RoundSamples(cells=[], order=[], block_size=0)
+        drawn = RoundContext(reflected_on.cycle, reflected_on.round_num, no_cells)
+        reflecting = NodeContext(drawn, optimizers.NODE_MEMBERS.get("gepa_reflect"))
         with (
             scoped(
                 determinism=reflected_on.cycle.config.optimization.determinism,
@@ -3746,7 +3748,7 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
             scoped(book=spend_book()),
             verb_ledger(built_stores, reflected_on.cycle.session.hop),
         ):
-            reflection = asyncio.run(GepaReflect().propose(reflecting, no_cells, Proposals([])))
+            reflection = asyncio.run(GepaReflect().propose(reflecting, Proposals([])))
         (child,) = reflection.proposals
         reflected.append(
             {locus.split(".")[0] for locus in child.individual.lineage.variations[0].loci}

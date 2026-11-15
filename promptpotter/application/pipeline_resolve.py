@@ -66,6 +66,7 @@ from promptpotter.domain.campaign_config import (
     CampaignConfig,
     CycleConfig,
     LaidSpan,
+    node_config_stamps,
 )
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.cycle_paths import CycleHop, Subject
@@ -586,7 +587,7 @@ def resolved_output_schemas(
 
 class LaidConfig(NamedTuple):
     config: CampaignConfig
-    # Per optimizer-node knob `config` holds, the last layer that SET it.
+    # Per optimizer-node key `optimization.nodes` or `call_target` lays, the last layer that SET it.
     knob_layers: dict[str, dict[str, KnobLayer]]
 
 
@@ -601,10 +602,13 @@ def laid_config(
     if fence is not None and (tier := free_tier_layers(schema, fence)):
         folded = fold_layers(CAMPAIGN_RULE, tier, under=folded)
         config = CampaignConfig.model_validate(folded.document)
+    # A key the call target lays is set by the layer that set `call_target`; a node's own wins.
     knob_layers = {
-        node: {key: folded.stamps[("optimization", "nodes", node, "config", key)] for key in held}
-        for node, held in ((n, o.config) for n, o in config.optimization.nodes.items())
+        node: {key: folded.stamps[("optimization", "call_target", key)] for key in keys}
+        for node, keys in select_optimizer(config.optimization).called.items()
     }
+    for node, key, layer in node_config_stamps(folded):
+        knob_layers.setdefault(node, {})[key] = layer
     return LaidConfig(config, knob_layers)
 
 

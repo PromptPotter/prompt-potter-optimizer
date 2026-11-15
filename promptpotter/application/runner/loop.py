@@ -94,7 +94,7 @@ async def run_round_loop(
             if cap is not None and clean_rounds >= cap:
                 return LoopEnd(StopReason.ROUNDS_BUDGET)
             # Off the rounds on record, so a resume counts the arms its priors raced.
-            if sum(len(rr.panel) for rr in cycle.rounds) >= HARD_CAP_ARMS:
+            if sum(len(rr.proposed) for rr in cycle.rounds) >= HARD_CAP_ARMS:
                 return LoopEnd(StopReason.HARD_CAP)
             if session.state.control.pause_requested():
                 return LoopEnd(StopReason.PAUSED)

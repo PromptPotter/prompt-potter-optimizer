@@ -1012,29 +1012,22 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   `not_a_slot` / `stable_slot` names keep the word ren retired in code (arm position, prompt field,
   region). Root: the optimizer prompts say what the code says; a prompt edit is a measured change,
   so it lands with its paid comparison. **Rides with:** tune 1. **Re-test:**
-  `git grep -c "slot" -- 'promptpotter/assets/optimizers/*/pipeline.yaml'` is 0.
+  `git grep -c "slot" -- 'promptpotter/assets/optimizers/*/pipeline.yaml'` is 0. "panel" likewise
+  (small-3): the prompts' "panel" means only a set of cells, never a round's arms (`RoundOutcome.proposed`).
 
 ### batch/31 · small
 
-- **`propose` hands every optimizer the round's samples only gepa reads** (ren's report): twelve of
-  thirteen `propose` signatures take `RoundSamples` and ignore it. Root: gepa reads them through
-  `NodeContext` as a declared read, and the parameter goes. **Rides with:** small 3. **Re-test:** no
-  `propose` signature in `promptpotter/application/optimizers/` takes `RoundSamples`.
-- **An optimizer node's model serves `source: "unset"`** (model-lines' landing): `optimization.call_target`
-  sets every optimizer llm node's `provider` and `model`, but `pipeline_resolve.py::laid_config` stamps
-  only `optimization.nodes` keys into `knob_layers`, so the row (I9) names no layer, as when the yaml
-  set it. Root: the call target's stamp is each llm node's source for the keys its config leaves to it.
-  **Rides with:** small 3. **Re-test:** `/pipeline?at=` serves each optimizer llm node's `model` with
-  the layer that set `call_target`.
-- **"panel" names two things** (ren's report): `RoundResult.panel` (a round's arms) beside the origin
-  panel (its cells). Root: each named for what it holds. **Rides with:** small 3. **Re-test:** one
-  meaning per `git grep -n "\.panel\b" -- promptpotter`.
 - **Archive hygiene before the next bulk delete**: (1) reclaim, a dataset-scoped destructive `delete`,
   dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
   runs its inner campaign produced; (3) the entry-to-run lookup (which runs an archive entry serves,
   so a delete names what it breaks; not `pipeline_schema.py::reach_map`, a node's reach).
-  **Rides with:** small 3. **Re-test:**
+  **Rides with:** small-4 (small-3 left it, as its brief said). **Re-test:**
   `compact-archive inventory`.
+- **A round opens several `RoundContext`s** (small-3's report): `runner/round.py::walk_round` builds one
+  for the draw and one after it, `execute_round` and `post_round` each build a `seat` for the
+  controller, and `settle_owed_outputs` builds `at_prior`. Each has its own `walks`, so a read through
+  one is unseen by the others. Root: one context per round, opened with its draw. **Rides with:**
+  small-4. **Re-test:** `git grep -c "RoundContext(" -- promptpotter/application/runner` (`round.py` 7, `loop.py` 1 at landing 83).
 - **The paper harness tracks no named tree** (small-1's landing): `paper/bbeh-comparison/bbeh_potter_runner.py:1`
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
   harness names the release it runs against, and a fix to it targets that release. **Rides with:** the

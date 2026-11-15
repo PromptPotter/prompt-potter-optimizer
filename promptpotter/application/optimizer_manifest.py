@@ -278,6 +278,8 @@ class SelectedOptimizer:
     node_knobs: Mapping[str, StrictModel]
     # Each llm node's outer levers as laid (an L4 cell's, `spawn.py::arm_layer`), refused at selection where unusable.
     node_levers: Mapping[str, Mapping[str, Any]]
+    # Each llm node's keys its manifest config leaves to `optimization.call_target`.
+    called: Mapping[str, tuple[str, ...]]
 
     @property
     def version(self) -> str:
@@ -792,8 +794,14 @@ def _select(
     overlay_json: str,
     gate: ArmGateMode,
 ) -> SelectedOptimizer:
-    manifest, schemas = _resolved(name)
-    manifest = manifest.calling(target.model_dump())
+    declared, schemas = _resolved(name)
+    manifest = declared.calling(target.model_dump())
+    called = {
+        n: keys
+        for n, node in declared.nodes.items()
+        if node.type is NodeKind.LLM
+        and (keys := tuple(key for key in CallTarget.model_fields if key not in node.config))
+    }
     overlay: dict[str, dict[str, Any]] = json.loads(overlay_json)
     if unknown := sorted(set(overlay) - set(manifest.nodes)):
         raise ValueError(
@@ -850,6 +858,7 @@ def _select(
         node_configs=node_configs,
         node_knobs=node_knobs,
         node_levers=node_levers,
+        called=called,
     )
     # At load, never mid-round: an edge no roster member closes would raise inside round 1.
     if open_ := _open_edges(selected):

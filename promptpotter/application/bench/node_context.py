@@ -209,7 +209,7 @@ async def measure_as_parent(
     key = ArmKey(individual.id)
     asked = round_.asked(key, cells)
     walking = round_.walks.get(key)
-    # A panel arm keeps its panel state: a read of it adds only its cells' records.
+    # A proposed arm keeps its own state: a read of it adds only its cells' records.
     announce = walking is None or walking.arm.state.role == MeasurementRole.PARENT
     arm = measuring(
         Proposed(role=role, position=walked_position(cycle.rounds, key), individual=individual),
@@ -733,6 +733,13 @@ class Progress(CycleRead):
                 paired_breakdown=dict(snapshot.paired_breakdown),
             )
         )
+
+
+class RoundPanel(CycleRead):
+    def block(self) -> list[Sample]:
+        """The first block of the cells the round's sampler drew, in its order."""
+        panel = self._round.panel
+        return panel.order[: panel.block_size]
 
 
 class NodeContext:

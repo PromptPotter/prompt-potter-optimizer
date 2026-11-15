@@ -144,7 +144,7 @@ def banked_lift_prior(survey: CampaignSurvey, dataset: str) -> LiftPrior | None:
         for standing in survey.cycles(campaign)
         for held in standing.rounds.values()
         if held.close.round > 0 and (election := held.close.election) is not None
-        for key in held.close.panel
+        for key in held.close.proposed
         if (fit := election.fit.get(key)) is not None and fit.lift is not None
     )
 

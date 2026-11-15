@@ -493,7 +493,7 @@ def build_observations(rounds: Sequence[RoundResult]) -> list[Observation]:
     return [
         o
         for rr in rounds
-        for o in observations_from_results({key: rr.rows(key) for key in rr.panel})
+        for o in observations_from_results({key: rr.rows(key) for key in rr.proposed})
     ]
 
 

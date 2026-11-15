@@ -284,7 +284,7 @@ def compute_degradation_health(
         is_origin=is_origin,
     )
     # A PRECONDITION for the ORIGIN alone: a later short round is re-measured, the origin never is.
-    if attempted <= 0 or (is_origin and attempted < counts.panel * MEASURED_COVERAGE_FLOOR):
+    if attempted <= 0 or (is_origin and attempted < counts.asked * MEASURED_COVERAGE_FLOOR):
         return DegradationHealth(
             grade="critical" if is_origin else "unmeasured",
             cause="origin_unmeasured" if is_origin else None,
@@ -341,7 +341,7 @@ class _RoundCounts:
     is_origin: bool
 
     @property
-    def panel(self) -> int:
+    def asked(self) -> int:
         return self.attempted + self.not_attempted
 
     @property
@@ -391,11 +391,11 @@ def _grade(counts: _RoundCounts) -> tuple[HealthGrade, HealthCause | None]:
 
 
 def _origin_unmeasured_finding(health: DegradationHealth) -> str:
-    panel = health.samples + health.not_attempted
-    # ``panel`` is 0 when the connector returned an empty list and the walk finished.
+    asked = health.samples + health.not_attempted
+    # ``asked`` is 0 when the connector returned an empty list and the walk finished.
     measured = (
-        f"only {health.samples} of {panel} origin cells were measured"
-        if panel
+        f"only {health.samples} of {asked} origin cells were measured"
+        if asked
         else "the origin measured nothing"
     )
     unsent = (
@@ -464,7 +464,7 @@ def health_finding(health: DegradationHealth, cause: HealthCause) -> str:
                 f"fault, not noise.{reported}"
             )
         case "origin_incomplete":
-            panel = sent + health.not_attempted
+            asked = sent + health.not_attempted
             short = ", ".join(
                 f"{count} {what}"
                 for count, what in (
@@ -476,7 +476,7 @@ def health_finding(health: DegradationHealth, cause: HealthCause) -> str:
                 if count
             )
             return (
-                f"the origin scored {health.scored_cells} of {panel} cells — {short}. "
+                f"the origin scored {health.scored_cells} of {asked} cells — {short}. "
                 "This baseline is what "
                 "every later round's lift is read against, so the shortfall is permanent and "
                 "silent: overlap lines will quote the surviving cells as though nothing were "

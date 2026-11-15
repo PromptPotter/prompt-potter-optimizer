@@ -33,7 +33,7 @@ def _holed(t: RoundResult, key: ArmKey, arm: ArmState) -> bool:
 
 
 def _first_divergent_arm(t: RoundResult) -> ArmKey | None:
-    return next((key for key, arm in t.panel.items() if _holed(t, key, arm)), None)
+    return next((key for key, arm in t.proposed.items() if _holed(t, key, arm)), None)
 
 
 class RepairCut(NamedTuple):
@@ -57,7 +57,7 @@ def repair_cut(prior: list[RoundResult]) -> RepairCut:
             rounds.append(t.round)
             if not cutting:
                 resume_at, carrying = t.round + 1, True
-        for key in t.panel:
+        for key in t.proposed:
             cutting = cutting or key == diverged
             if not cutting:
                 edge = RoundArm(round=t.round, arm=key)
@@ -109,7 +109,7 @@ async def repair_incomplete_rounds(
     for slot, t in enumerate(prior):
         cells = dict(t.cells)
         folds = dict(t.folds)
-        for key, arm in t.panel.items():
+        for key, arm in t.proposed.items():
             rows = t.rows(key)
             if not isinstance(arm, Concluded) or not _holed(t, key, arm):
                 continue
