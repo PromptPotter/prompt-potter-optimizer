@@ -11,11 +11,7 @@ from typing import Literal, NamedTuple
 from promptpotter.domain.paired_reading import Estimate, MeasuredLift
 from promptpotter.domain.ruler import p_better, theta_lift
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.statistics import (
-    discordance_e_value,
-    holm_adjusted,
-    sign_test_p,
-)
+from promptpotter.shared.statistics import discordance_e_value, holm_adjusted, sign_test_p
 
 #: ``posterior`` is today's bar and the default until separability is read on banked runs.
 CrowningStatistic = Literal["posterior", "sign_test", "e_process", "empirical_bayes"]
@@ -25,19 +21,21 @@ BAR_ADMISSION = 0.975
 
 
 class LiftPrior(FrozenModel):
-    """The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean, τ² their
-    observed variance less their mean noise variance, floored at 0."""
+    """The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean (its own
+    error *mu0_se*), τ² their observed variance less their mean noise variance, floored at 0."""
 
     mu0: float
     tau: float
     pairs: int
+    mu0_se: float
 
     def shrunk(self, lift: Estimate) -> Estimate:
-        """The arm's posterior: mean μ0 + τ²/(τ²+se²)·(x−μ0), spread τ·se/√(τ²+se²)."""
+        """The arm's posterior, B = se²/(τ²+se²): mean μ0 + (1−B)(x−μ0), variance se²(1−B) +
+        B²·mu0_se², so a τ floored at 0 leaves μ0's spread, never a point mass at sign(μ0)."""
         tau2, se2 = self.tau**2, (lift.se or 0.0) ** 2
-        weight = tau2 / (tau2 + se2) if tau2 + se2 > 0.0 else 0.0
-        spread = math.sqrt(tau2 * se2 / (tau2 + se2)) if tau2 + se2 > 0.0 else 0.0
-        return theta_lift(self.mu0 + weight * (lift.value - self.mu0), spread, 0.0, 0.0)
+        pool = se2 / (tau2 + se2) if tau2 + se2 > 0.0 else 1.0
+        spread = math.sqrt(se2 * (1.0 - pool) + (pool * self.mu0_se) ** 2)
+        return theta_lift(self.mu0 + (1.0 - pool) * (lift.value - self.mu0), spread, 0.0, 0.0)
 
 
 def lift_prior(lifts: Iterable[Estimate]) -> LiftPrior | None:
@@ -48,7 +46,9 @@ def lift_prior(lifts: Iterable[Estimate]) -> LiftPrior | None:
     mu0 = fmean(lift.value for lift in held)
     observed = sum((lift.value - mu0) ** 2 for lift in held) / (len(held) - 1)
     noise = fmean((lift.se or 0.0) ** 2 for lift in held)
-    return LiftPrior(mu0=mu0, tau=math.sqrt(max(0.0, observed - noise)), pairs=len(held))
+    tau2 = max(0.0, observed - noise)
+    mu0_se = math.sqrt((tau2 + noise) / len(held))
+    return LiftPrior(mu0=mu0, tau=math.sqrt(tau2), pairs=len(held), mu0_se=mu0_se)
 
 
 class BarSubject(NamedTuple):
@@ -102,10 +102,9 @@ class CrowningBar(FrozenModel):
                 return {k: self._shrunk(s) for k, s in subjects.items()}
 
     def separates(self, lift: MeasuredLift) -> bool:
-        """The advance: the pick over C0 on the origin panel, its one subject. ``posterior`` is the
-        lift's own side; the discordance readings count its flips, so a continuous measurand has
-        none to clear on; ``empirical_bayes``'s prior is over θ lifts on a parent, so it reads the
-        side."""
+        """The advance: the pick over C0 on the origin panel, its one subject. ``posterior`` and
+        ``empirical_bayes`` (a prior over θ lifts on a parent) read the lift's side; the discordance
+        readings count its flips, which a continuous measurand has none of to clear on."""
         above = lift.side == "above"
         if self.statistic in ("posterior", "empirical_bayes"):
             return above
@@ -115,8 +114,7 @@ class CrowningBar(FrozenModel):
         return self.read({0: subject})[0].clears
 
     def _read(self, subject: BarSubject, clears: bool) -> BarRead:
-        agrees = subject.wins > subject.losses
-        return BarRead(statistic=self.statistic, clears=agrees and clears)
+        return BarRead(statistic=self.statistic, clears=subject.wins > subject.losses and clears)
 
     def _shrunk(self, subject: BarSubject) -> BarRead:
         if self.prior is None or subject.lift is None:

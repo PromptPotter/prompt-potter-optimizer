@@ -1901,13 +1901,14 @@ export interface OptimizerFact {
   kind: 'stat' | 'note';
 }
 
-/** The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their
- * mean, τ² their observed variance less their mean noise variance, floored at
- * 0. */
+/** The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean
+ * (its own error *mu0_se*), τ² their observed variance less their mean noise
+ * variance, floored at 0. */
 export interface LiftPrior {
   mu0: number;
   tau: number;
   pairs: number;
+  mu0_se: number;
 }
 
 /** A round's level as its series read it, under the one caveat that withholds it. */
@@ -5540,7 +5541,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "6b8f1a4f34a6d37d";
+export const SERVED_CONTRACT = "7495e370a037c272";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

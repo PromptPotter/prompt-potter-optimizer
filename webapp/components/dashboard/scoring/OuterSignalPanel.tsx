@@ -132,8 +132,9 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
       )}
       {walked?.lift_prior ? (
         <p className="note-lede">
-          Round {walked.round}&rsquo;s arms lift μ0 {fmtLogits(walked.lift_prior.mu0)} over their
-          parent, τ {fmtLogits(walked.lift_prior.tau)} across {walked.lift_prior.pairs} pairs.
+          Round {walked.round}&rsquo;s arms lift μ0 {fmtLogits(walked.lift_prior.mu0)} ±{" "}
+          {fmtLogits(walked.lift_prior.mu0_se)} over their parent, τ{" "}
+          {fmtLogits(walked.lift_prior.tau)} across {walked.lift_prior.pairs} pairs.
           {held?.hold_up
             ? ` Round ${held.round}'s promotion holds ${held.hold_up.text} over the parent it beat.`
             : ""}

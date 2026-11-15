@@ -55,8 +55,9 @@ result quotes (`Election.bar`): `posterior` (the default) is the bar above; `sig
 paired sign test on the discordant verdicts, Holm-corrected across the round's arms; `e_process`, a
 uniform-mixture e-value on the same discordance at `arms / α`, valid wherever the race stops;
 `empirical_bayes`, the θ lift shrunk toward the tenant's banked arm-vs-parent lifts on the dataset
-(`selection.py::banked_lift_prior`: τ² = observed variance less mean noise variance, floored at 0).
-No reading crowns an arm its paired verdicts contradict.
+(`selection.py::banked_lift_prior`: τ² = observed variance less mean noise variance, floored at 0),
+its posterior carrying μ0's own error, so a τ at 0 never reads as certainty on μ0's sign
+(`crowning_bar.py::LiftPrior.shrunk`). No reading crowns an arm its paired verdicts contradict.
 
 ## Two regimes
 

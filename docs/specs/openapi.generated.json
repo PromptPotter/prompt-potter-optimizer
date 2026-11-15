@@ -9685,10 +9685,14 @@
       },
       "LiftPrior": {
         "additionalProperties": false,
-        "description": "The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean, τ² their\nobserved variance less their mean noise variance, floored at 0.",
+        "description": "The generator's lift prior N(μ0, τ²) over arm-vs-parent θ lifts: μ0 their mean (its own\nerror *mu0_se*), τ² their observed variance less their mean noise variance, floored at 0.",
         "properties": {
           "mu0": {
             "title": "Mu0",
+            "type": "number"
+          },
+          "mu0_se": {
+            "title": "Mu0 Se",
             "type": "number"
           },
           "pairs": {
@@ -9703,7 +9707,8 @@
         "required": [
           "mu0",
           "tau",
-          "pairs"
+          "pairs",
+          "mu0_se"
         ],
         "title": "LiftPrior",
         "type": "object"
