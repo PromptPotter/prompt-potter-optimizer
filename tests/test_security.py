@@ -134,7 +134,11 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     unplaceable_edit,
 )
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
-from promptpotter.application.read_params import CampaignPipelineParams, HierarchySubtreeParams
+from promptpotter.application.read_params import (
+    CampaignPipelineParams,
+    CycleDashboardParams,
+    HierarchySubtreeParams,
+)
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
@@ -188,7 +192,13 @@ from promptpotter.domain.command_kinds import (
     StartRunPayload,
     VerifyCandidatePayload,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject, WorkspaceDir
+from promptpotter.domain.cycle_paths import (
+    CycleDir,
+    CycleHop,
+    Subject,
+    WorkspaceDir,
+    encode_cycle_path,
+)
 from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
@@ -279,6 +289,7 @@ from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.run_state import derive_run_state
 from promptpotter.infrastructure.store import io as store_io
 from promptpotter.infrastructure.store.account_spend import campaign_spend, sandbox_cycle_dirs
+from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
 from promptpotter.infrastructure.store.data_root import Fate, classify
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
@@ -1415,6 +1426,31 @@ async def test_a_follower_reads_the_hosts_exhibit_and_acts_on_none_of_it(exhibit
         with pytest.raises(NotFoundError):
             await CommandDispatcher(follower).dispatch(CommandCall(act, door=Door.HOST))
     assert not follower.campaigns.list_campaign_ids(), "an act on the exhibit landed somewhere"
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_follower_descends_only_into_the_exhibits_own_inner_runs(
+    exhibit: _Exhibit, tmp_path: Path
+) -> None:
+    # The sandbox key is flat: a chain naming a private host cycle under the exhibit spliced its run in.
+    hop, follower = exhibit
+    host = workspace(tmp_path, default_identity(tenant_id="host-1"))
+    private = CycleHop(campaign_id="camp-private", cycle_id="cycle_private")
+    stored_campaign(host, minted_campaign(private))
+    host.campaigns.mint_cycle(private)
+    inner = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+    for outer in (hop, private):
+        sandbox = inner_sandbox(host, outer.campaign_id, outer.cycle_id)
+        CampaignStore(WorkspaceDir(sandbox / "host-1"), host.jobs_dir).mint_cycle(inner)
+
+    def viewed(*descend: CycleHop) -> object:
+        return CycleDashboardParams(
+            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, descend=encode_cycle_path(descend)
+        ).viewed(Caller(follower))
+
+    assert viewed(inner), "a follower could not open the exhibit's own inner run"
+    with pytest.raises(NotFoundError):
+        viewed(private, inner)
 
 
 @pytest.mark.usefixtures("offline")

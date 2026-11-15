@@ -18,7 +18,8 @@ from promptpotter.shared.identity import default_identity
 
 def exhibit_stores(stores: Stores) -> Stores | None:
     """The host's stores, read-only, where this caller follows the exhibit; ``None`` where none is
-    named, the host has no account yet, the caller is the host or blocked, or its switch is off."""
+    named or active, the host has no account yet, the caller is the host or blocked, or its switch
+    is off."""
     host = host_user_id(stores.projects_root) if settings.EXHIBIT_CAMPAIGN else None
     if (
         host is None
@@ -29,18 +30,21 @@ def exhibit_stores(stores: Stores) -> Stores | None:
     ):
         return None
     reader = replace(default_identity(tenant_id=host), capabilities=frozenset(), host=False)
-    return build_stores(
+    host_stores = build_stores(
         reader,
         projects_root=stores.projects_root,
         install_datasets_root=stores.install_datasets_root,
         research_datasets_root=stores.research_datasets_root,
         shared_root=stores.shared_root,
     )
+    exhibit = host_stores.campaigns.load_campaign(settings.EXHIBIT_CAMPAIGN)
+    return host_stores if exhibit is not None and exhibit.active else None
 
 
-def read_stores(stores: Stores, campaign_id: str | None) -> Stores:
-    """The stores a read of *campaign_id*'s subjects answers from: the exhibit's where it names the
+def read_stores(stores: Stores, root_campaign_id: str | None) -> Stores:
+    """The stores a read answers from, decided by its address's root campaign
+    (`Subject.root_campaign_id`), never a leaf or a filter: the exhibit's where the root is the
     exhibit and the caller follows it (`exhibit_stores`), else the caller's own."""
-    if campaign_id is None or campaign_id != settings.EXHIBIT_CAMPAIGN:
+    if root_campaign_id is None or root_campaign_id != settings.EXHIBIT_CAMPAIGN:
         return stores
     return exhibit_stores(stores) or stores

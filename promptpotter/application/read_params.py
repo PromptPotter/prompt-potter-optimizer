@@ -80,6 +80,7 @@ from promptpotter.application.origin_listing import (
 from promptpotter.application.pipeline_resolve import (
     campaign_config_map,
     fork_preview,
+    pipeline_subject,
     resolve_pipeline_at,
     resolve_pipeline_for_dataset,
 )
@@ -201,8 +202,7 @@ class _CycleAddressed(ReadParams):
 
 def _addressed(caller: Caller, address: str) -> Stores:
     """The stores a hierarchy address's subjects are read from, by its root campaign."""
-    subject = Subject.parse_address(address)
-    return read_stores(caller.stores, (subject.inside or (subject,))[0].campaign_id)
+    return read_stores(caller.stores, Subject.parse_address(address).root_campaign_id)
 
 
 class MeParams(ReadParams, read=ReadKind.ME, route="/auth/me"):
@@ -340,7 +340,9 @@ class HierarchyParams(ReadParams, read=ReadKind.HIERARCHY, route="/hierarchy"):
         return decode_cycle_path(self.descend)
 
     def stores(self, caller: Caller) -> Stores:
-        return read_stores(caller.stores, self.campaign)
+        # The chain's root, never the leaf filter: `descend` is the chain above `campaign`.
+        inside = self.inside
+        return read_stores(caller.stores, inside[0].campaign_id if inside else self.campaign)
 
     def answer(self, caller: Caller) -> HierarchyResponse:
         stores, inside = self.stores(caller), self.inside
@@ -701,8 +703,8 @@ class CampaignPipelineParams(
     )
 
     def answer(self, caller: Caller) -> CampaignPipelineResponse:
-        stores = read_stores(caller.stores, self.campaign_id)
-        return resolve_pipeline_at(stores, self.campaign_id, self.at)
+        root = pipeline_subject(self.at, self.campaign_id).root_campaign_id
+        return resolve_pipeline_at(read_stores(caller.stores, root), self.campaign_id, self.at)
 
 
 class ForkPreviewParams(

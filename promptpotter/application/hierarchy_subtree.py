@@ -76,11 +76,6 @@ from promptpotter.infrastructure.store.stores import (
 from promptpotter.shared.errors import NotFoundError
 
 
-def _top_campaign(subject: Subject) -> str:
-    """The top-level campaign an address sits under: what a subtree is built and versioned from."""
-    return subject.inside[0].campaign_id if subject.inside else subject.campaign_id
-
-
 @dataclass(frozen=True)
 class _Retired:
     by: str
@@ -685,7 +680,7 @@ def hierarchy_subtree(
     moment: Moment | None,
 ) -> HierarchyEntry:
     """The entry at *address* with everything under it; *moment* replays the ledgers only."""
-    campaign = owned_campaign(stores, _top_campaign(Subject.parse_address(address)))
+    campaign = owned_campaign(stores, Subject.parse_address(address).root_campaign_id)
     held = campaign_cycle_reads(stores, campaign, moment=moment)
     root = _answering(
         _Build(moment).campaign(stores, (), campaign, held, depth=MAX_CYCLE_DEPTH, host=None)
@@ -708,9 +703,12 @@ def _root_path(stores: Stores, address: str) -> CyclePath:
 def subtree_moment(
     stores: Stores, address: str, at: int | None, at_cycle: CyclePath
 ) -> Moment | None:
-    """``at`` is a line of *at_cycle*'s own ledger; no cycle named, the campaign root's."""
+    """``at`` is a line of *at_cycle*'s own ledger; no cycle named, the campaign root's. A cycle off
+    the address's own tree is not found: its ledger is no moment of this subtree."""
     if at is None:
         return None
+    if at_cycle and at_cycle[0].campaign_id != Subject.parse_address(address).root_campaign_id:
+        raise NotFoundError(f"Cycle '{at_cycle[-1].campaign_id}/{at_cycle[-1].cycle_id}' not found")
     path = at_cycle or _root_path(stores, address)
     leaf_store, leaf = resolve_cycle_path(stores, path)
     layout = leaf_store.campaigns.layout(leaf)
@@ -721,7 +719,7 @@ def subtree_moment(
 
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
     """Every store the TOP campaign's family spans: the body is built from all of them."""
-    top = (owned_campaign(stores, _top_campaign(Subject.parse_address(address))).root_hop,)
+    top = (owned_campaign(stores, Subject.parse_address(address).root_campaign_id).root_hop,)
     held = [c.store for c in iter_family_cycles(stores, top)]
     workspaces = {str(s.campaigns.workspace) for s in held}
     passes = sorted(

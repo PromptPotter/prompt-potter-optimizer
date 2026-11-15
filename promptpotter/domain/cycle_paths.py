@@ -195,6 +195,11 @@ class Subject(NamedTuple):
         return (*self.inside, CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id))
 
     @property
+    def root_campaign_id(self) -> str:
+        """The top-level campaign the address sits under: whose tenant tree reads it."""
+        return self.inside[0].campaign_id if self.inside else self.campaign_id
+
+    @property
     def descend(self) -> str | None:
         """The ``descend`` tail: every hop below the root's, unset where there is none."""
         return encode_cycle_path(self.path[1:]) or None

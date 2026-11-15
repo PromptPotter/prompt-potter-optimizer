@@ -273,12 +273,12 @@ def tenant_stores(projects_root: Path, workspace: WorkspaceDir) -> Stores:
 def inner_sandbox_store(
     stores: Stores, outer_campaign_id: str, outer_cycle_id: str
 ) -> Stores | None:
-    """Anchored on ``shared_root``, invariant across depth, exactly as the sandbox's writer is."""
-    sandbox_root = inner_sandbox_dir(
-        stores.shared_root,
-        str(stores.tenant_id),
-        CycleHop(campaign_id=outer_campaign_id, cycle_id=outer_cycle_id),
-    )
+    """Anchored on ``shared_root``, invariant across depth, exactly as the sandbox's writer is. The
+    key is flat, so the outer hop must be a cycle of *stores*: else a chain splices in any sandbox."""
+    outer = CycleHop(campaign_id=outer_campaign_id, cycle_id=outer_cycle_id)
+    if not stores.campaigns.cycle_dir(outer).is_dir():
+        return None
+    sandbox_root = inner_sandbox_dir(stores.shared_root, str(stores.tenant_id), outer)
     if not (sandbox_root / stores.tenant_id).is_dir():
         return None
     built = build_stores(

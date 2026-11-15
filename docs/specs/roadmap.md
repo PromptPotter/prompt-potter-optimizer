@@ -224,7 +224,10 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   served field), and `logging` leaves application/ and domain/ under a gate ban, every swallowing
   `except` a declared row; the host's exhibit is the one cross-tenant read, followed read-only by a
   signed-in account with nothing of its own running, else a served `Said`; a 2026 wire's held task
-  asks on `tasks/get`, and the HTTP door sweeps its ended sessions. Run data wiped.
+  asks on `tasks/get`, and the HTTP door sweeps its ended sessions. Its access review's fix pass:
+  a descent follows only a cycle of the store it descends from, a read picks its stores by the
+  address's root, a moment stays on its own tree, a deleted exhibit is followed by no one. Only the
+  L4 leg's instrument ids moved (the estimator digest); the desk lands every file.
 - **then:** the command log typed per kind; `CampaignStore.campaign(id)`; then money's remainder,
   tests-w, small-4 and the edge tail. A cold verify is timed live.
 

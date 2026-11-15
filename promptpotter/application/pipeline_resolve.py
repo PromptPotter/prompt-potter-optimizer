@@ -1004,7 +1004,7 @@ def resolve_pipeline_for_campaign(
     )
 
 
-def _pipeline_subject(at: str, campaign_id: str) -> Subject:
+def pipeline_subject(at: str, campaign_id: str) -> Subject:
     if not at:
         return Subject(campaign_id)
     spec = Subject.parse(at)
@@ -1022,7 +1022,7 @@ def _pipeline_subject(at: str, campaign_id: str) -> Subject:
 
 
 def resolve_pipeline_at(stores: Stores, campaign_id: str, at: str) -> CampaignPipelineResponse:
-    spec = _pipeline_subject(at, campaign_id)
+    spec = pipeline_subject(at, campaign_id)
     # An inner searchpoint lives in the sandbox `;in=` names; the tenant tree answers for the OUTER.
     leaf = descend_store(stores, spec.inside)
     return resolve_pipeline_for_campaign(leaf, owned_campaign(leaf, campaign_id), at=spec)

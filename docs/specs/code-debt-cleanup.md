@@ -756,6 +756,18 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **`ActiveSessionResponse` carries `hop` and `said` together only for an exhibit**: two shapes in one
   response. Action: one shape, the follow read as its own row. **Re-test:** every
   `/sessions/active` answer has one shape.
+- **A follower reads with the host's whole `Stores`** (tv-2's access review): `exhibit.py::exhibit_stores`
+  serves every host store, so the exhibit's ETag folds the host's command log, drafts and every
+  campaign (`application/hierarchy.py::entries_version`), an activity side channel; the raw cycle and campaign
+  files a follower reads carry the host's `issued_by` principal (`ForkSpec`, `RebaseRequest`). The
+  descent, the moment and the root are refused off the exhibit (landing 89's fix pass), each a
+  check. Action: a `Stores` narrowed to the exhibit's campaign, so no read can name another, and the
+  served files carry no principal a follower may not see. **Rides with:** the next access chain.
+  **Re-test:** the exhibit's hierarchy ETag holds while the host edits a draft.
+- **A follower's live tail outlives its switch**: `cycle_reads.py`'s SSE stream re-checks the carrier
+  alone, so turning "Try & learn" off keeps the exhibit's tail open until a reconnect (a block ends it).
+  Action: the stream re-reads `exhibit_stores` per frame batch. **Re-test:** switch off mid-stream;
+  the stream ends.
 
 ### batch/30 · ws
 

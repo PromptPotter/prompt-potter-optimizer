@@ -73,7 +73,9 @@ BASELINE = {
     # and the follow pick's fall-through to it, else a served `Said`. tv-2 (+74): a held task's
     # input on a 2026-07-28 wire (`tasks/get`'s input requests, `tasks/update`), and the HTTP
     # door's managers swept once their sessions end. tv-2 (+1): the exhibit's pipeline read.
-    "package_lines": 110780,
+    # tv-2's access fix (+9): a sandbox opens only off its store's own cycle, a moment stays on
+    # its address's tree, and a deleted exhibit is followed by no one.
+    "package_lines": 110789,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.

@@ -135,7 +135,7 @@ def _command_line(spelled: str, at: str, kind: str, actor: str) -> TrailLine:
         return TrailLine(at, kind, "", actor, "")
     inside = subject.inside[-1].campaign_id if subject.inside else ""
     where = _where(subject.campaign_id, subject.cycle_id, inside)
-    owner = subject.inside[0].campaign_id if subject.inside else subject.campaign_id
+    owner = subject.root_campaign_id
     return TrailLine(at, kind, where, actor, owner)
 
 
