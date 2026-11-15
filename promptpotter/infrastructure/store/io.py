@@ -129,14 +129,24 @@ def unlink_robust(path: Path) -> None:
             time.sleep(0.05 * attempt)
 
 
-def open_text_robust(path: Path) -> IO[str]:
-    """Retried: Windows refuses for the instant another process swaps the file (`_atomic_replace`)."""
+def _open_read[T](path: Path, opener: Callable[[str], T]) -> T:
+    """Every read of a file here: Windows refuses an open for the instant a writer, in this process
+    or another, swaps the file (`_atomic_replace`), so the open is retried past it."""
+    name = _long_path(path)
     for attempt in range(3):
         try:
-            return open(_long_path(path), encoding="utf-8")
+            return opener(name)
         except PermissionError:
             time.sleep(0.05 * (attempt + 1))
-    return open(_long_path(path), encoding="utf-8")
+    return opener(name)
+
+
+def open_text_robust(path: Path) -> IO[str]:
+    return _open_read(path, lambda name: open(name, encoding="utf-8"))
+
+
+def open_bytes_robust(path: Path) -> IO[bytes]:
+    return _open_read(path, lambda name: open(name, "rb"))
 
 
 def rmtree_robust(path: Path) -> None:
@@ -288,14 +298,14 @@ def file_stat(path: Path) -> os.stat_result:
 
 def read_bytes_optional(path: Path) -> bytes | None:
     try:
-        with open(_long_path(path), "rb") as f:
+        with open_bytes_robust(path) as f:
             return f.read()
     except FileNotFoundError:
         return None
 
 
 def read_json(path: Path) -> Any:
-    with open(_long_path(path), encoding="utf-8") as f:
+    with open_text_robust(path) as f:
         return json.load(f)
 
 
@@ -315,7 +325,7 @@ def read_json_tolerant(path: Path, default: Any = None) -> Any:
 
 def read_text_optional(path: Path, default: str = "") -> str:
     try:
-        with open(_long_path(path), encoding="utf-8") as f:
+        with open_text_robust(path) as f:
             return f.read()
     except FileNotFoundError:
         return default
@@ -426,7 +436,7 @@ def parse_yaml(text: str | bytes) -> Any:
 
 
 def read_yaml(path: Path) -> Any:
-    with open(_long_path(path), encoding="utf-8") as f:
+    with open_text_robust(path) as f:
         text = f.read()
     try:
         return parse_yaml(text)
@@ -686,7 +696,7 @@ class Tail(NamedTuple):
 def read_tail(path: Path, mark: FileMark) -> Tail:
     """Every line past *mark* while the file is the one *mark* read; every line otherwise."""
     try:
-        with open(_long_path(path), "rb") as f:
+        with open_bytes_robust(path) as f:
             whole = mark.inode is None or not holds_mark(f, mark)
             at = FileMark(0, os.fstat(f.fileno()).st_ino) if whole else mark
             f.seek(at.end)
@@ -727,7 +737,7 @@ def _end_mark(path: Path) -> FileMark:
     # mark, so `replace_lines` drops it: only what lands past the mark is carried.
     with write_lock(path):
         try:
-            with open(_long_path(path), "rb") as f:
+            with open_bytes_robust(path) as f:
                 st = os.fstat(f.fileno())
                 return FileMark(st.st_size, st.st_ino, _last_line(f, st.st_size))
         except FileNotFoundError:
@@ -763,7 +773,7 @@ def _swap(path: Path, mark: FileMark, lines: Iterable[str], companion: _Companio
     # Only the swap is locked: a big rewrite outlasts `LOCK_TIMEOUT`, where an appender gives up.
     with write_lock(path):
         try:
-            with open(_long_path(path), "rb") as f:
+            with open_bytes_robust(path) as f:
                 if not holds_mark(f, mark):
                     return False
                 f.seek(mark.end)

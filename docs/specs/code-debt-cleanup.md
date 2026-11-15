@@ -282,10 +282,9 @@ plan/apply pair and a temporary locked through its replace. Left:
   and `openai_compat.py::ReportedUsage.tokens` writes `cache_read=… or 0` where `TokenAccount` reads
   `None` as no breakdown reported. Root: `StepUsage` is built from `ReportedUsage` alone.
   **Rides with:** passes-6.
-- **Two tests fail under load, not under their claim**: `test_concurrent_account_edits_and_an_acceptance_all_survive`
-  raises `PermissionError` on `user.json` on Windows beside a second gate, and
-  `tests/test_security.py` is not collectable in a venv lacking the `mcp` extra; `tests/test_scoring.py::_peer_cycle`
-  files no round-0 cells, so a noise floor through it reads nothing. **Rides with:** passes-6.
+- **Two tests fail beside their claim**: `tests/test_security.py` is not collectable in a venv lacking
+  the `mcp` extra; `tests/test_scoring.py::_peer_cycle` files no round-0 cells, so a noise floor
+  through it reads nothing. **Rides with:** passes-6.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 

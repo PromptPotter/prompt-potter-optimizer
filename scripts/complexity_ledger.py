@@ -90,8 +90,9 @@ BASELINE = {
     # an L4 cell's inner campaign, the lookup `inventory` names per entry, and the `reclaim` mode
     # with its plan (and the browser's dataset scope it needs), net of one door for every rewriting
     # pass and one mode table; one RoundContext per round (0). addr-2 (-29): a family root and a
-    # retired arm read from the index, lineage keyed by address, a served short label.
-    "package_lines": 110978,
+    # retired arm read from the index, lineage keyed by address, a served short label. io (+14):
+    # one read open retried past a replace's swap, for every reader (only one text read retried).
+    "package_lines": 110992,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

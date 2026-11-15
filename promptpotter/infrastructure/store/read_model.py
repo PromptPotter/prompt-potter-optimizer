@@ -61,6 +61,7 @@ from promptpotter.infrastructure.store.io import (
     FileMark,
     append_jsonl,
     complete_lines,
+    open_bytes_robust,
     read_bytes_optional,
     read_tail,
     write_bytes,
@@ -377,7 +378,7 @@ def _fresh[F](make: Callable[[], F], start: F | None) -> F:
 
 def _fold_lines(ledger: Path, feeder: _Feeder, until: int | None) -> None:
     try:
-        with open(ledger, "rb") as fh:
+        with open_bytes_robust(ledger) as fh:
             for offset, raw in enumerate(islice(complete_lines(fh), until)):
                 feeder.line(offset, raw)
     except FileNotFoundError:

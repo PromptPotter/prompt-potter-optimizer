@@ -6,7 +6,11 @@ from typing import Any, cast
 
 from promptpotter.domain.activity import ActivityFeed
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
-from promptpotter.infrastructure.store.io import complete_lines
+from promptpotter.infrastructure.store.io import (
+    complete_lines,
+    open_bytes_robust,
+    read_bytes_optional,
+)
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, ledger_record, line_dict
 
@@ -55,7 +59,7 @@ class CycleLedgerTail:
         head = feed.at_offset + 1
         if head <= self._line_index:
             return []
-        with self._ledger_path.open("rb") as fh:
+        with open_bytes_robust(self._ledger_path) as fh:
             fh.seek(self._byte_pos)
             lines = list(islice(complete_lines(fh), head - self._line_index))
         read: list[tuple[int, dict[str, Any]]] = []
@@ -83,8 +87,7 @@ class CycleLedgerTail:
         """Walks the bytes, not the number: a rewind or a fork leaves a ledger shorter than ``line``."""
         self._byte_pos = 0
         self._line_index = 0
-        if self._ledger_path.exists():
-            data = self._ledger_path.read_bytes()
+        if (data := read_bytes_optional(self._ledger_path)) is not None:
             while line is None or self._line_index < line:
                 nl = data.find(b"\n", self._byte_pos)
                 if nl == -1:
