@@ -3184,15 +3184,15 @@
       },
       "EvidenceGrounding": {
         "additionalProperties": false,
-        "description": "The panel field and citation L1 declares to justify a mutation.",
+        "description": "The citation L1 declares to justify a mutation, and the panel found holding it.",
         "properties": {
           "citation": {
-            "description": "Short string naming the panel entry cited.",
+            "description": "The verbatim span L1 quoted.",
             "title": "Citation",
             "type": "string"
           },
           "field": {
-            "description": "A citable panel named in the prompt, or stall_exploration.",
+            "description": "The first citable panel holding the citation; stall_exploration for an empty one.",
             "title": "Field",
             "type": "string"
           }

@@ -40,8 +40,8 @@ Each self-firing wake reads the newest outer round's audit plus the ledger's ren
 not supervision):
 
 1. **`l1_generate`**: panels populated (a dropped `L1_MANDATORY` panel is stop-and-diagnose)? Outer:
-   `inner_narratives` per seed? Variants: `evidence_grounding.field` in the enum; citations quote text
-   that EXISTS in the panel they NAME; hypotheses distinct; no hallucinated node/param.
+   `inner_narratives` per seed? Variants: each citation quotes ONE panel line verbatim (the validator
+   finds the panel); hypotheses distinct; no hallucinated node/param.
 2. **`l1_critique`**: `priority_fix` / `failure_highlights` quote CONCRETE evidence and name a steer the
    generator may make, never the benchmark's vocabulary or labels.
 3. **Scoring**: per-arm `folds`, `election.fit` (θ, θ_se), the matched-parent comparison (never the

@@ -18,7 +18,7 @@
 - **Mutate only with cause** (stall, critique / axis-memory evidence, the frozen `task_context`); a panel speaking against a mutation vetoes it.
 - **L1 never writes `answer_format`**: every node reads the target through `dispatch/bundle.py::l1_target_schema`, rejected at parse (`forbidden_axis`). <!-- probe: git grep -cE "[^(]target\.schema|Target\)\.schema" -- promptpotter/application/optimizers/potter/*.py == 0 -->
 - **Never reorder `L1Variant` alone**: `evidence_grounding`, `mechanism`, `targets_rows`, then `edits` and the overrides; `mechanism` becomes the child's `changes_description`.
-- **L1 edits, never restates**: an `edits` entry names one field's verbatim `anchor`, applied to the parent in `l1.py::applied_edits` alone; an anchor absent or held twice is the arm's `edit_anchor_not_one_span`.
+- **L1 edits, never restates**: an `edits` entry names one field's verbatim `anchor`, applied to the parent in `l1.py::applied_edits` alone; an empty anchor is the whole field; one absent or held twice is the arm's `edit_anchor_not_one_span`.
 - **A cluster spans the detectable move, two rows at least**; a variant's edit holds for every row it `targets_rows`, no per-row patch.
 - **`repeat_variant` rejects an idea this cycle measured and lost** inside `validators.py::detect_invariants`, never at parse; a round is never emptied.
 

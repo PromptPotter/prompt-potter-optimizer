@@ -125,8 +125,6 @@ class L1Readout(RoundOutput, kind="l1_readout"):
     l1_yield: float | None = None
     l1_proposed: int = 0
     l1_rejected: dict[ValidationReason, int] = Field(default_factory=dict)
-    # ``None`` where no call was composed: round 0.
-    l1_citable: list[str] | None = None
     l1_exploration_budget: str | None = None
     # The round owns it: a parse failure yields no candidate to charge.
     l1_parse_failure: ValidationReason | None = None
@@ -138,7 +136,7 @@ class ExplorationBudget(enum.StrEnum):
     """ONE source for the ``escalation_panel`` signal and the review writer's ``ValidatorContext``: prompt and validator agree."""
 
     TIGHT = "tight"  # improving — exploit the parent; speculative gambles rejected
-    NORMAL = "normal"  # stalling — stall_exploration citations permitted
+    NORMAL = "normal"  # stalling — an empty citation permitted
     WIDE = "wide"  # patience exhausted — explore freely; a PEAKED axis is mutable with a wide rebut
 
 

@@ -50,7 +50,6 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import node_lay
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
     CLUSTER_ROWS_MIN,
     L1Edit,
-    VariantEvidenceGrounding,
     build_l1_response_model,
     critique_response_model,
 )
@@ -63,8 +62,8 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.potter.validators import (
     detect_invariants,
-    l1_citation_in_panel,
     l1_config_not_in_runtime_failures,
+    l1_evidence_grounding,
     l1_inner_layout_applies,
     l1_inner_placeholders_intact,
     l1_inner_steer_is_legal,
@@ -81,7 +80,7 @@ from promptpotter.application.optimizers.variation.members import (
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import candidate_delta
 from promptpotter.domain.l4.cells import InnerCells
-from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint
+from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
@@ -105,18 +104,10 @@ from promptpotter.domain.wounds import (
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
 
 
-def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceGrounding | None:
-    """Permissive on purpose: a missing grounding is a behaviour-check failure, never a parse one."""
-    if raw is None:
-        return None
-    return EvidenceGrounding(field=raw.field, citation=raw.citation.strip())
-
-
 @dataclass(frozen=True)
 class L1Generation:
     proposals: list[Proposal]
     parse_failure: ValidationReason | None
-    citable: tuple[str, ...]
     exploration_budget: str
 
 
@@ -151,7 +142,6 @@ async def l1_generate(
     )
     output_schema = build_l1_response_schema(
         pipeline_schema,
-        citable_fields=citable,
         inner_cells=view.inner_cells,
         silent_panels=view.silent_l1_panels,
         schema_field_rename=schema_field_rename,
@@ -174,7 +164,7 @@ async def l1_generate(
         # TOOLING is never charged, a truncation always: a prompt that outgrew max_tokens owns its failure.
         # Either way an L4 cell whose every round yields nothing FLOORS (`l4/proxies.py::floor_reason`).
         reason = PARSE_FAILURE_TOOLING if parse_err.is_empty else PARSE_FAILURE_MALFORMED
-        return L1Generation([], reason, citable, budget)
+        return L1Generation([], reason, budget)
 
     variants_list = generated.variants
 
@@ -191,8 +181,12 @@ async def l1_generate(
             }
         )
         failures += l1_shots_in_demo_pool(v.shots, demo_ids=key_of.keys(), k_max=knobs.k_max)
-        grounding = _parse_evidence_grounding(v.evidence_grounding)
-        failures += l1_citation_in_panel(grounding, rendered=filled.rendered)
+        grounding, cited = l1_evidence_grounding(
+            None if v.evidence_grounding is None else v.evidence_grounding.citation,
+            citable=citable,
+            rendered=filled.rendered,
+        )
+        failures += cited
         population.append(
             children.child(
                 [opt_sp],
@@ -213,7 +207,7 @@ async def l1_generate(
     # What L2's last fire named for this round, L1 the node that adds it.
     population.extend(_recombined(children, hosted, lineage, pipeline_schema, host="l2_context"))
 
-    return L1Generation(population, None, citable, budget)
+    return L1Generation(population, None, budget)
 
 
 def applied_edits(
@@ -223,7 +217,7 @@ def applied_edits(
     pooled: Mapping[str, Mapping[str, str]] | None,
 ) -> tuple[dict[Locus, str], list[ValidationFailure]]:
     """Each edit on its field's text so far, in order; an anchor naming no one span of it, or under
-    `closed` an id the pool lacks, is the arm's failure and changes nothing. An anchor equal to the field is it whole."""
+    `closed` an id the pool lacks, is the arm's failure and changes nothing."""
     texts: dict[Locus, str] = {}
     failures: list[ValidationFailure] = []
     for edit in edits:
@@ -243,8 +237,9 @@ def applied_edits(
                 )
             )
             continue
-        # The empty span sits in every text, so it anchors only an empty field; one held twice, neither.
-        if edit.anchor != current and not (edit.anchor and current.count(edit.anchor) == 1):
+        # An empty anchor is the whole field; a span held twice names no place.
+        anchor = edit.anchor or current
+        if current.count(anchor) != 1:
             failures.append(
                 ValidationFailure(
                     axis=locus.name,
@@ -254,8 +249,8 @@ def applied_edits(
                 )
             )
             continue
-        start = current.index(edit.anchor)
-        cut = start + len(edit.anchor)
+        start = current.index(anchor)
+        cut = start + len(anchor)
         kept = current[:cut] if edit.op == "insert_after" else current[:start]
         texts[locus] = kept + ("" if edit.op == "delete" else edit.text) + current[cut:]
     return texts, failures
@@ -387,7 +382,6 @@ def l1_readout(ctx: NodeContext, generation: L1Generation) -> L1Readout:
         l1_proposed=proposed,
         l1_rejected=dict(rejected),
         l1_parse_failure=generation.parse_failure,
-        l1_citable=list(generation.citable),
         l1_exploration_budget=generation.exploration_budget,
         axis_memory_peaked=sorted(axes.peaked_axes()) if axes else [],
     )
@@ -540,7 +534,6 @@ def _behavior_per_round(
         ctx = ValidatorContext(
             clusters=clusters,
             prior_rounds=list(prior_audits),
-            citable=None if payload.l1_citable is None else tuple(payload.l1_citable),
             context_object=context_object,
             exploration_budget=payload.l1_exploration_budget,
             peaked_axes=frozenset(payload.axis_memory_peaked),

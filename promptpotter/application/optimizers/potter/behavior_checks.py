@@ -11,10 +11,6 @@ from promptpotter.application.optimizers.nodes import CheckResult
 from promptpotter.application.optimizers.potter.dispatch.injections.layer_state import (
     HELD_PROMPT_FIELD_MARK,
 )
-from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
-    STALL_EXPLORATION,
-    injection_table,
-)
 from promptpotter.application.optimizers.potter.dispatch.schemas import CLUSTER_ROWS_MIN
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -24,10 +20,9 @@ from promptpotter.domain.round_audit import NodeBlock, RoundAudit
 
 @dataclass(frozen=True)
 class ValidatorContext:
-    """``citable`` and ``exploration_budget`` are ``None`` on a round that banked no call."""
+    """``exploration_budget`` is ``None`` on a round that banked no call."""
 
     prior_rounds: list[RoundAudit] = field(default_factory=list)
-    citable: tuple[str, ...] | None = None
     context_object: list[str] = field(default_factory=list)
     exploration_budget: str | None = None
     peaked_axes: frozenset[str] = field(default_factory=frozenset)
@@ -143,8 +138,7 @@ def _check_param_scope_discipline(
 def _check_evidence_grounding_present(
     variants: Variants, _audit: RoundAudit, ctx: ValidatorContext
 ) -> tuple[bool, str]:
-    """Whether the quote is in its panel is `validators.py::l1_citation_in_panel`'s, which rejects."""
-    citable = ctx.citable
+    """Whether a panel holds the quote is `validators.py::l1_evidence_grounding`'s, which rejects."""
     offenders: list[tuple[str, str]] = []
     for i, v in enumerate(variants):
         label = f"C{i + 1}"
@@ -152,23 +146,15 @@ def _check_evidence_grounding_present(
         if not isinstance(eg, dict):
             offenders.append((label, "missing"))
             continue
-        field_name = str(eg.get("field") or "").strip()
         citation = str(eg.get("citation") or "").strip()
-        if citable is not None and field_name not in citable:
-            offenders.append((label, _uncitable_reason(field_name)))
-            continue
-        if not citation:
-            offenders.append((label, "empty_citation"))
-            continue
-        peaked_hit = _cited_peaked_axis(v, citation, field_name, ctx)
+        peaked_hit = _cited_peaked_axis(v, citation, ctx)
         if peaked_hit and not _has_peaked_rebut(v, citation, ctx):
             offenders.append((label, f"axis_memory_peaked={peaked_hit}"))
-            continue
 
     if offenders:
         sample = ", ".join(f"{label}({reason})" for label, reason in offenders[:3])
         return False, f"{len(offenders)}/{len(variants)} variants lack valid evidence: {sample}"
-    return True, f"{len(variants)}/{len(variants)} variants cite a panel field"
+    return True, f"{len(variants)}/{len(variants)} variants cite a panel"
 
 
 def _check_not_only_param_variants(
@@ -235,20 +221,6 @@ def run_all_checks(audit: RoundAudit, ctx: ValidatorContext) -> list[CheckResult
     return judged(CHECK_REGISTRY, variants, audit, ctx) if variants else []
 
 
-def _uncitable_reason(field_name: str) -> str:
-    if not field_name:
-        return "no_field"
-    if field_name == STALL_EXPLORATION:
-        return "stall_exploration_when_tight"
-    injection = injection_table().get(field_name)
-    if injection is None:
-        return f"bad_field={field_name!r}"
-    if not injection.citable:
-        return f"not_evidence={field_name!r}"
-    # A real evidence panel, just not one L1 was shown this round.
-    return f"panel_not_in_prompt={field_name!r}"
-
-
 _REBUT_SIGNALS: tuple[str, ...] = (
     "priority_fix",
     "suggested_axes",
@@ -259,10 +231,9 @@ _REBUT_SIGNALS: tuple[str, ...] = (
 )
 
 
-def _cited_peaked_axis(
-    variant: dict[str, Any], citation: str, field_name: str, ctx: ValidatorContext
-) -> str | None:
-    if not ctx.peaked_axes or field_name != "axis_memory":
+def _cited_peaked_axis(variant: dict[str, Any], citation: str, ctx: ValidatorContext) -> str | None:
+    """Whatever panel holds the citation: the audit banks no panel's own text to find it in."""
+    if not ctx.peaked_axes:
         return None
     pp = variant.get("pipeline_overlay") or {}
     flat_pp_axes: set[str] = set()

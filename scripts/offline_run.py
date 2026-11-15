@@ -276,11 +276,11 @@ def _marks(text: str) -> list[int]:
 
 _AXIS_MENU = re.compile(r"(?:EXACTLY one of|VERBATIM from): (.+)")
 # A cited panel, by the heading it opens on: the framing where the leg's config renders one.
-FRAMING = ("task_context", "TASK CONTEXT:\n")
-TALLY = ("answer_distribution", "ANSWER DISTRIBUTION (")
+FRAMING = "TASK CONTEXT:\n"
+TALLY = "ANSWER DISTRIBUTION ("
 
 
-def cited_panel(config: CampaignConfig) -> tuple[str, str]:
+def cited_panel(config: CampaignConfig) -> str:
     return FRAMING if config.task_framing == "committed" else TALLY
 
 
@@ -403,7 +403,7 @@ class ByCallIdentity:
         capture: Path,
         templates: dict[str, str],
         *,
-        cites: tuple[str, str],
+        cites: str,
         rebasing: bool = False,
         crossing: bool = False,
     ) -> None:
@@ -567,13 +567,10 @@ class ByCallIdentity:
     ) -> dict[str, Any]:
         """*generation* is the call's turn whatever its seed: the `SKILL` trajectory is keyed on it."""
         v: dict[str, Any] = filler.fill(item, ("variants", str(i)))
-        grounding = filler.resolve(item["properties"]["evidence_grounding"])
-        cited = filler.resolve(grounding["properties"]["field"])["enum"]
-        # A citation quotes the panel it names, at an offset that is the call's, not the text's.
-        field, heading = self.cites
-        assert field in cited and heading in prompt, f"offline run: no {field} panel to cite"
-        start = prompt.index(heading) + len(heading) + draw("cite", generation, i) % 20
-        v["evidence_grounding"] = {"field": field, "citation": prompt[start : start + 40]}
+        # A citation quotes one panel, at an offset that is the call's, not the text's.
+        assert self.cites in prompt, f"offline run: no {self.cites!r} panel to cite"
+        start = prompt.index(self.cites) + len(self.cites) + draw("cite", generation, i) % 20
+        v["evidence_grounding"] = {"citation": prompt[start : start + 40]}
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
         # An L4 outer edits the inner optimizer's fields as its pipeline params; there a short
         # instruction guts its contracts (`validators.py::l1_prompt_field_not_gutted`).

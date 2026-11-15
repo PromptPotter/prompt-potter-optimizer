@@ -855,6 +855,26 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   migration's body change never lands again. **Rides with:** rel. **Re-test:** edit a migration's body;
   `landing_key()` moves.
 
+### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
+
+- **No test runs a detached job**: `test_spend.py` monkeypatches `run_job.py::spawn_job`, so a sync lock
+  on `run_job`'s loop killed every server launch and head-to-head arm for two days with the gate green
+  (fixed `d17fb2f83`). Action: one test drives `run_job` on a loop against a real registry (adopt,
+  refuse, release). **Re-test:** reintroduce a sync `job_registry.adopt` in `run_job`; a test fails.
+- **A moved search point escapes the end pass unreported**: `domain/arms.py::BankedSearchPointError` is
+  not in `runner/termination.py::RUN_STOPS`, so `runner/entry.py::_run_single_cycle`'s end-pass `except`
+  lets it past `close_cycle`; under `every_adoption` every graded roster member can raise it. Action:
+  the end pass's refusal is a stop the cycle closes on. **Re-test:** a roster member whose point no
+  longer rebuilds ends the cycle with a stop reason, not a traceback.
+- **A citation's panel is matched by substring, not by word**: `potter/validators.py::l1_evidence_grounding`
+  tests `words in _words(panel)`, so a one-word quote is held by whichever panel sorts first.
+  **Re-test:** a one-word citation that only one panel holds as a word names that panel.
+- **The derived citation panel is not served**: `L1Variants.tsx` reads the raw reply, which no longer
+  names a panel. Action: serve the child's `EvidenceGrounding.field` on its variant row.
+- **The offline run refuses outside a git clone**: `processes.py::clone_root`, so a base copy for
+  `gate.py --only equals-main --against` needs a detached worktree. **Re-test:** run
+  `scripts/offline_run.py` in a `git archive` copy.
+
 ## Held — no wave-4 chain yet
 
 - **The estimator has no golden corpus**: its key (`nodes.py::BehaviourKeys.cell_estimator`) reads the

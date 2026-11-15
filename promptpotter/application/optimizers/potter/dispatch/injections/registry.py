@@ -23,7 +23,7 @@ from promptpotter.application.optimizers.potter.records import ExplorationBudget
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.shared.named_rows import walked
 
-# The one citable name that is NOT a panel: the escape hatch a measured stall licenses.
+# The one citable name that is NOT a panel: an empty citation's, which a measured stall licenses.
 STALL_EXPLORATION: str = "stall_exploration"
 
 
@@ -90,7 +90,7 @@ def citable_fields(
     exploration_budget: str | None,
     rendered: Mapping[str, str],
 ) -> tuple[str, ...]:
-    """Narrowed to what RENDERED; never empty, since an empty ``evidence_grounding.field`` enum is unsatisfiable."""
+    """The panels a citation is found in, in order, narrowed to what RENDERED."""
     table = injection_table()
     names = [n for n in layout.all_placeholders() if table[n].citable and rendered.get(n)]
     if not names or exploration_budget != ExplorationBudget.TIGHT:

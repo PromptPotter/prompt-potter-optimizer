@@ -35,10 +35,12 @@ def render_prompt(fields: Mapping[str, str], order: Sequence[str]) -> str:
 
 
 class EvidenceGrounding(FrozenModel):
-    """The panel field and citation L1 declares to justify a mutation."""
+    """The citation L1 declares to justify a mutation, and the panel found holding it."""
 
-    field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
-    citation: str = Field(description="Short string naming the panel entry cited.")
+    field: str = Field(
+        description="The first citable panel holding the citation; stall_exploration for an empty one."
+    )
+    citation: str = Field(description="The verbatim span L1 quoted.")
 
 
 ORIGIN_SOURCE = "origin"

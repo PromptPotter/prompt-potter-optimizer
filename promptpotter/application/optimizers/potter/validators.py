@@ -70,21 +70,27 @@ def _words(text: str) -> str:
     return _NOT_A_WORD_RE.sub(" ", text.lower()).strip()
 
 
-def l1_citation_in_panel(
-    grounding: EvidenceGrounding | None, *, rendered: Mapping[str, str]
-) -> list[ValidationFailure]:
-    """Matched by its words in the panel it NAMES, each ellipsis-free part: a citation re-types a line and may elide."""
-    if grounding is None or grounding.field == STALL_EXPLORATION:
-        return []
-    panel = _words(rendered.get(grounding.field, ""))
-    parts = [words for part in re.split(r"[.]{3}|…", grounding.citation) if (words := _words(part))]
-    if parts and all(words in panel for words in parts):
-        return []
-    return [
+def l1_evidence_grounding(
+    citation: str | None, *, citable: Sequence[str], rendered: Mapping[str, str]
+) -> tuple[EvidenceGrounding | None, list[ValidationFailure]]:
+    """Its panel the first of *citable* holding it by its words, each ellipsis-free part: a citation
+    re-types a line and may elide. An empty one is ``STALL_EXPLORATION`` where *citable* offers it."""
+    if citation is None:
+        return None, []
+    citation = citation.strip()
+    parts = [words for part in re.split(r"[.]{3}|…", citation) if (words := _words(part))]
+    panels = [name for name in citable if name != STALL_EXPLORATION]
+    if parts:
+        held = next((n for n in panels if all(w in _words(rendered[n]) for w in parts)), None)
+    else:
+        held = STALL_EXPLORATION if STALL_EXPLORATION in citable else None
+    if held is not None:
+        return EvidenceGrounding(field=held, citation=citation), []
+    return None, [
         ValidationFailure(
             axis="evidence_grounding",
-            value=grounding.citation[:300],
-            allowed=[grounding.field],
+            value=citation[:300],
+            allowed=panels,
             reason=ValidationReason.CITATION_NOT_IN_PANEL,
         )
     ]

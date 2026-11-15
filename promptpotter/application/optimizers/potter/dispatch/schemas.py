@@ -85,10 +85,7 @@ CLUSTERS_MAX = 3
 
 
 class VariantEvidenceGrounding(OptimizerResponseModel):
-    """PERMISSIVE on ``field`` at the parse boundary: not every provider honours the grafted enum, so the validator enforces it."""
-
-    field: str = Field(description="A citable panel named in the prompt, or stall_exploration.")
-    # Never truncated: `validators.py::l1_citation_in_panel` matches it against the panel `field` names.
+    # Never truncated: `validators.py::l1_evidence_grounding` finds the panel holding it.
     citation: str
 
 
@@ -102,7 +99,9 @@ class L1Edit(OptimizerResponseModel):
     # Loose at the parse boundary: `l1_wire_schema.py` closes it on the open prompt fields.
     at: str
     op: EditOp
-    anchor: str = Field(description="A verbatim span the field's CURRENT text holds once.")
+    anchor: str = Field(
+        description="A verbatim span the field's CURRENT text holds once; empty for the whole field."
+    )
     text: Annotated[str, AfterValidator(_one_script)] = Field(
         description="The new text; empty for delete."
     )

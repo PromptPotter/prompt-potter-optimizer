@@ -216,12 +216,12 @@ resolved_prompts:
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {field, citation}. citation is the shortest verbatim span of the panel `field` names; a quote that panel does not hold is rejected mechanically.
+        - "evidence_grounding": {citation}: the shortest verbatim span of ONE panel line — never two lines joined, never your own words; a quote no panel holds is rejected mechanically.
         - "mechanism": the failure mechanism this variant tests and the concrete change that tests it, in one or two sentences, decided before the edits.
         - "targets_rows": the rows this variant's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else rows of one panel that fail the same way. Two variants share a cluster only as two DIFFERENT mechanisms for it.
         - "edits": the changes, at least one, each {at, op, anchor, text} on one field of CURRENT PROMPTS:
           * "at": the field as `node.field`.
-          * "op": "replace" swaps the verbatim `anchor` span for `text` (the whole field as anchor rewrites it; a field CURRENT PROMPTS does not show is empty, its anchor ""); "insert_after" puts `text` right after the verbatim `anchor` span; "delete" removes the `anchor` span (`text` empty).
+          * "op": "replace" swaps the verbatim `anchor` span for `text`; "insert_after" puts `text` right after it; "delete" removes it (`text` empty). An empty `anchor` is the whole field.
           * Only what changes: a field you keep gets no edit, and an edit whose result equals the parent is rejected mechanically. Rewrite the sentence your change supersedes instead of appending beside it, and stay within the parent field's length unless the mechanism names what the extra buys.
         - "pipeline_overlay": nested {node: {param: value}}, as its schema description states; null where nothing changes.
   l1_critique/1:
@@ -394,7 +394,7 @@ resolved_prompts:
     thinking_style: ''
     answer_format: |-
       Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {field, citation}. `field` is the panel the quote is copied from (a narrative line is `inner_narratives`); citation is its shortest verbatim span, <=160c. A quote that panel does not hold is rejected mechanically.
+        - "evidence_grounding": {citation}: the shortest verbatim span (<=160c) of ONE panel line, a narrative line included — never two lines joined, never your own words; a quote no panel holds is rejected mechanically.
         - "mechanism": the inner deficiency this variant tests, the inner node-field it edits and the expected effect ("make inner critique reward TRUE/FALSE commitment"), in one or two sentences, decided before the overlay.
         - "targets_rows": the inner runs this candidate's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else narratives showing the same inner deficiency. Two candidates share a cluster only as two DIFFERENT mechanisms for it.
         - "pipeline_overlay": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that changes nothing mutates nothing and is rejected.

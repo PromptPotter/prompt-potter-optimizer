@@ -13,7 +13,7 @@ interface Edit {
 
 // The LLM's output as the audit twin banked it, not a served model: read defensively.
 interface Variant {
-  evidence_grounding?: { field?: string; citation?: string } | null;
+  evidence_grounding?: { citation?: string } | null;
   mechanism?: string | null;
   targets_rows?: number[] | null;
   edits?: Edit[] | null;
@@ -93,7 +93,7 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
   const shown = variants[idx];
   if (!shown) return null;
 
-  const grounding = shown.evidence_grounding ?? null;
+  const citation = shown.evidence_grounding?.citation;
 
   return (
     <section className="l1-variants" aria-label="Generated candidates">
@@ -116,12 +116,10 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
 
       {shown.mechanism && <p className="l1v-lede">{shown.mechanism}</p>}
 
-      {grounding && (grounding.field || grounding.citation) && (
+      {citation && (
         <div className="l1v-block">
-          <span className="l1v-block-head">
-            Grounded in{grounding.field ? ` · ${grounding.field}` : ""}
-          </span>
-          {grounding.citation && <blockquote className="l1v-cite">{grounding.citation}</blockquote>}
+          <span className="l1v-block-head">Grounded in</span>
+          <blockquote className="l1v-cite">{citation}</blockquote>
         </div>
       )}
 

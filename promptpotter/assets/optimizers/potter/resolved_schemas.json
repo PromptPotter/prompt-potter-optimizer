@@ -26,7 +26,7 @@
                 "type": "string"
               },
               "anchor": {
-                "description": "A verbatim span the field's CURRENT text holds once.",
+                "description": "A verbatim span the field's CURRENT text holds once; empty for the whole field.",
                 "title": "Anchor",
                 "type": "string"
               },
@@ -173,18 +173,12 @@
           "VariantEvidenceGrounding": {
             "additionalProperties": false,
             "properties": {
-              "field": {
-                "description": "A citable panel named in the prompt, or stall_exploration.",
-                "title": "Field",
-                "type": "string"
-              },
               "citation": {
                 "title": "Citation",
                 "type": "string"
               }
             },
             "required": [
-              "field",
               "citation"
             ],
             "title": "VariantEvidenceGrounding",

@@ -58,20 +58,21 @@ schema, a node graded on several slots (pinned to `json`), a model that does not
 (`PipelineSchema._refused`). Why a connector must not declare it too —
 [`../developer/node-standard.md`](../developer/node-standard.md) § The shape, and what PromptPotter reads of it.
 
-*An enum whose value space is per-call belongs on the wire schema, not on the model.* `evidence_grounding.field`
-is grafted per round in `build_l1_response_schema` from `citable_fields(layout, …)`, so a citable name the
-prompt never rendered is unrepresentable; a frozen copy in a model would silently diverge. A schema-mutating
-optimizer is scoped to the free levers explicitly.
+*An enum whose value space is per-call belongs on the wire schema, not on the model.* `edits[].at` is grafted
+per call in `build_l1_response_schema` from the open prompt fields, so a field the roster never offered is
+unrepresentable; a frozen copy in a model would silently diverge. A schema-mutating optimizer is scoped to the
+free levers explicitly.
 
 ## Enforcement is provider-dependent
 
 Some providers implement structured output as constrained decoding; others validate afterward, or not at
-all. The schema **teaches** more reliably than it **compels**, so `VariantEvidenceGrounding`'s validator
-enforces the grafted enum. Two rules for every optimizer wire: **no prose field carries a `maxLength`** —
+all. The schema **teaches** more reliably than it **compels**, so the bench re-checks the grafted enum
+(`bench/children.py::carried_writes`). Two rules for every optimizer wire: **no prose field carries a `maxLength`** —
 where the grammar binds, every answer ends mid-sentence at the cap, unmarked; the prompt asks for the short
 form and the parse boundary cuts with a visible mark (`schemas.py::_truncate_marked`) or rejects
 (`validators.py::l1_prose_within_ceiling`). **A value the loop must be able to refuse is one a check can read
-off the prompt** — a panel name, a row id (`L1Variant.targets_rows`) — never free text closed by a grafted enum.
+off the prompt** — a quote (`validators.py::l1_evidence_grounding` finds its panel), a row id
+(`L1Variant.targets_rows`) — never free text closed by a grafted enum.
 
 ## Extraction is a double seam — slot first, label second
 

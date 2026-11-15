@@ -92,10 +92,10 @@ def _r_escalation_panel(b: PotterView) -> list[Item]:
     budget = b.exploration_budget
     guidance = {
         ExplorationBudget.TIGHT: "build on the parent, its method open to rewrite — "
-        "stall_exploration citations are rejected",
-        ExplorationBudget.NORMAL: "stalling — stall_exploration citations are permitted",
-        ExplorationBudget.WIDE: "explore freely — a PEAKED axis may be mutated with an "
-        "exploration_budget=wide rebut",
+        "an empty citation is rejected",
+        ExplorationBudget.NORMAL: "stalling — an empty citation is permitted",
+        ExplorationBudget.WIDE: "explore freely, an empty citation permitted — a PEAKED axis "
+        "may be mutated with an exploration_budget=wide rebut",
     }[ExplorationBudget(budget)]
     return [
         Item(

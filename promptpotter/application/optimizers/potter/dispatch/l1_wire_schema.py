@@ -116,7 +116,6 @@ _SLOT_PANEL: dict[str, str] = {
 def build_l1_response_schema(
     pipeline_schema: PipelineSchema,
     *,
-    citable_fields: Sequence[str],
     inner_cells: InnerCells | None,
     silent_panels: Collection[str] = (),
     schema_field_rename: bool = False,
@@ -232,8 +231,7 @@ def build_l1_response_schema(
         if panel in silent_panels:
             variant_props.pop(slot, None)
 
-    grounding = variant_props["evidence_grounding"] = _said(variant_props["evidence_grounding"])
-    grounding["properties"]["field"]["enum"] = list(citable_fields)
+    variant_props["evidence_grounding"] = _said(variant_props["evidence_grounding"])
     variant_props["targets_rows"] = _said(variant_props["targets_rows"])
 
     # Rename LAST: every key above is addressed by its real field name.

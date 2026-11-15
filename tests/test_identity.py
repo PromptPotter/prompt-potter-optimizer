@@ -3662,9 +3662,7 @@ def _gepa_seat(stores: Stores, population: list[OptSearchPoint]) -> RoundContext
 def test_l1s_wire_offers_the_roster_the_second_prompt_node_declares() -> None:
     # A SECOND prompt node, on a roster of its own, is written as the first is.
     two = _two_prompt_nodes()
-    wire = build_l1_response_schema(
-        two, citable_fields=["critique"], inner_cells=None, field_names={}
-    )
+    wire = build_l1_response_schema(two, inner_cells=None, field_names={})
     edits = wire["properties"]["variants"]["items"]["properties"]["edits"]
     offered = {at for at in edits["items"]["properties"]["at"]["enum"] if at.startswith("review.")}
     assert offered == {"review.instruction", "review.rubric"}, (
