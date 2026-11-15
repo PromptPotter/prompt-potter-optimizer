@@ -52,9 +52,10 @@ export function useIngest(): IngestFlow {
   return v;
 }
 
-// The viewed check-in's draft once it is ready to author; null off one.
+// The viewed check-in's draft once it is ready to author; null off one, and on a page mounting no
+// check-in (`/stage/`), whose run reads still fold the connector.
 export function useCheckinDraft(): DraftCampaignWire | null {
-  const flow = useIngest();
+  const flow = useContext(IngestFlowContext);
   const subject = useCheckinSubject();
-  return subject !== null && flow.phase.stage === "ready" ? flow.phase.draft : null;
+  return flow !== null && subject !== null && flow.phase.stage === "ready" ? flow.phase.draft : null;
 }

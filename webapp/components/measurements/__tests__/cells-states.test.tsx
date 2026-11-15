@@ -56,7 +56,7 @@ describe("a cells read's answer, as its panes say it", () => {
       const path = new URL(url, "http://x").pathname;
       if (path.endsWith("/auth/me")) return Response.json({ tenant_id: "t", user_id: "u" });
       if (path.endsWith("/sessions/active")) {
-        return Response.json({ tenant_id: "t", hop: { campaign_id: "c", cycle_id: "y" } });
+        return Response.json({ hop: { campaign_id: "c", cycle_id: "y" }, said: null });
       }
       if (path.endsWith("/hierarchy")) {
         const cycle = subtreeCycle({ address: "c::y", tags: cycleTags("root", "ds") });

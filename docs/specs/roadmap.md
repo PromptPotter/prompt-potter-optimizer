@@ -220,7 +220,13 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   answer; a slot serves its stage; the held-out pass has one verb at every door (`held-out`), and
   the run's one writer re-renders its export. Every leg UNMOVED, digests unmoved; the landing key
   moved on the renamed kinds.
-- **then:** faults-2b; the command log typed per kind; then tv-2. A cold verify is timed live.
+- **landed 89, faults-2b + tv-2:** a fault is a value (a typed record a projection folds, or a
+  served field), and `logging` leaves application/ and domain/ under a gate ban, every swallowing
+  `except` a declared row; the host's exhibit is the one cross-tenant read, followed read-only by a
+  signed-in account with nothing of its own running, else a served `Said`; a 2026 wire's held task
+  asks on `tasks/get`, and the HTTP door sweeps its ended sessions. Run data wiped.
+- **then:** the command log typed per kind; `CampaignStore.campaign(id)`; then money's remainder,
+  tests-w, small-4 and the edge tail. A cold verify is timed live.
 
 The re-keys end at the behaviour-key switch.
 

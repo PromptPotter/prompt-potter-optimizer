@@ -186,7 +186,7 @@
       },
       "ActiveSessionResponse": {
         "additionalProperties": false,
-        "description": "The run to follow (`followed_cycle`): a running one first, else the latest launch.",
+        "description": "The run to follow (`followed_cycle`), and the line saying whose it is where it is not the\ncaller's own (`key` ``exhibit``), or why there is none.",
         "properties": {
           "hop": {
             "anyOf": [
@@ -197,17 +197,23 @@
                 "type": "null"
               }
             ],
-            "description": "The cycle of the run to follow; null when no session is active."
+            "description": "The cycle of the run to follow; null where none is."
           },
-          "tenant_id": {
-            "description": "Tenant the pointer belongs to — the caller's own, always known",
-            "title": "Tenant Id",
-            "type": "string"
+          "said": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null on the caller's own run."
           }
         },
         "required": [
-          "tenant_id",
-          "hop"
+          "hop",
+          "said"
         ],
         "title": "ActiveSessionResponse",
         "type": "object"
@@ -19918,7 +19924,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/pipeline": {
       "get": {
-        "description": "What this campaign runs, the one server-owned answer; ownership-gated, not found on a\ncross-tenant read.",
+        "description": "What this campaign runs, the one server-owned answer; ownership-gated, not found on a\ncross-tenant read but the exhibit's (`exhibit.py::read_stores`).",
         "operationId": "campaign_pipeline_api_v1_campaigns__campaign_id__pipeline_get",
         "parameters": [
           {
@@ -23776,7 +23782,7 @@
     },
     "/api/v1/sessions/active": {
       "get": {
-        "description": "The caller-tenant's run to follow: one running first, else its latest launch (a resume is\none) from any entry point.\n\nNo active session is a steady state: it answers a null `hop`, never a not-found.",
+        "description": "The run to follow, by one rule for every follower; nothing to follow is a null `hop` and\nthe line saying why, never a not-found.",
         "operationId": "active_session_api_v1_sessions_active_get",
         "responses": {
           "200": {

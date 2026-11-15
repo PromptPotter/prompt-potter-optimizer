@@ -106,7 +106,7 @@ function storeOf(path: CyclePath): string {
   return `${STORES}${encodeCyclePath(path.slice(0, -1))}`;
 }
 
-// The run to follow: a running one, else the tenant's latest launch; never the live set.
+// The run to follow, by the server's one rule (`cycle_addressing.py::followed_cycle`).
 export function activeRead(): ReadDescriptor<ActiveSessionResponse> {
   return { ...once("active", readUrl("active-session", {})), auth: true, subject: STORES };
 }

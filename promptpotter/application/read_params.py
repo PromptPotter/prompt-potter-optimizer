@@ -25,7 +25,7 @@ from promptpotter.application.command_reading import CommandReading, read_comman
 from promptpotter.application.config_map import ConfigMapResponse
 from promptpotter.application.cycle_addressing import (
     ActiveSessionResponse,
-    active_session,
+    followed_cycle,
     resolve_subject,
 )
 from promptpotter.application.cycle_files import FileContentResponse, FileScope, FilesResponse
@@ -44,6 +44,7 @@ from promptpotter.application.cycle_reads import (
 from promptpotter.application.datasets.draft_build import DraftReopenResponse, reopen_draft
 from promptpotter.application.evidence.metric_catalogue import MEASURAND
 from promptpotter.application.evidence.read import Evidence, select_evidence
+from promptpotter.application.exhibit import read_stores
 from promptpotter.application.head_to_head_price import HeadToHeadPrice, price_head_to_head
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import hierarchy_subtree, subtree_moment
@@ -191,8 +192,17 @@ class _CycleAddressed(ReadParams):
     def path(self) -> CyclePath:
         return Subject.below(self.campaign_id, self.cycle_id, self.descend).path
 
-    def viewed(self, stores: Stores) -> ViewedCycle:
-        return view_cycle(stores, self.path)
+    def stores(self, caller: Caller) -> Stores:
+        return read_stores(caller.stores, self.campaign_id)
+
+    def viewed(self, caller: Caller) -> ViewedCycle:
+        return view_cycle(self.stores(caller), self.path)
+
+
+def _addressed(caller: Caller, address: str) -> Stores:
+    """The stores a hierarchy address's subjects are read from, by its root campaign."""
+    subject = Subject.parse_address(address)
+    return read_stores(caller.stores, (subject.inside or (subject,))[0].campaign_id)
 
 
 class MeParams(ReadParams, read=ReadKind.ME, route="/auth/me"):
@@ -243,14 +253,11 @@ class ActivityParams(ReadParams, read=ReadKind.ACTIVITY, route="/auth/activity")
 
 
 class ActiveSessionParams(ReadParams, read=ReadKind.ACTIVE_SESSION, route="/sessions/active"):
-    """The caller-tenant's run to follow: one running first, else its latest launch (a resume is
-    one) from any entry point.
-
-    No active session is a steady state: it answers a null `hop`, never a not-found.
-    """
+    """The run to follow, by one rule for every follower; nothing to follow is a null `hop` and
+    the line saying why, never a not-found."""
 
     def answer(self, caller: Caller) -> ActiveSessionResponse:
-        return active_session(caller.stores)
+        return followed_cycle(caller.stores)
 
 
 class MachineStatusParams(ReadParams, read=ReadKind.MACHINE_STATUS, route="/machine-status"):
@@ -332,8 +339,11 @@ class HierarchyParams(ReadParams, read=ReadKind.HIERARCHY, route="/hierarchy"):
     def inside(self) -> CyclePath:
         return decode_cycle_path(self.descend)
 
+    def stores(self, caller: Caller) -> Stores:
+        return read_stores(caller.stores, self.campaign)
+
     def answer(self, caller: Caller) -> HierarchyResponse:
-        stores, inside = caller.stores, self.inside
+        stores, inside = self.stores(caller), self.inside
         named = None if self.campaign is None else Subject(self.campaign, inside=inside)
         return list_hierarchy(
             stores,
@@ -361,13 +371,16 @@ class HierarchyStepsParams(
     limit: int = Field(default=DEFAULT_STEP_LIMIT, ge=1, le=MAX_STEP_LIMIT)
     before: str | None = Field(default=None, description="A prior window's `cursor_prev`")
 
-    def opened(self, stores: Stores) -> FamilyRay:
+    def opened(self, caller: Caller) -> FamilyRay:
         return open_family_ray(
-            stores, Subject.parse_address(self.address).path, limit=self.limit, before=self.before
+            _addressed(caller, self.address),
+            Subject.parse_address(self.address).path,
+            limit=self.limit,
+            before=self.before,
         )
 
     def answer(self, caller: Caller) -> HierarchySteps:
-        return self.opened(caller.stores).window()
+        return self.opened(caller).window()
 
 
 class HierarchySubtreeParams(
@@ -395,8 +408,11 @@ class HierarchySubtreeParams(
         default=None, description="A whole cycle path, root hop included; absent, the root's"
     )
 
+    def stores(self, caller: Caller) -> Stores:
+        return _addressed(caller, self.address)
+
     def answer(self, caller: Caller) -> HierarchyEntry:
-        stores = caller.stores
+        stores = self.stores(caller)
         return hierarchy_subtree(
             stores,
             self.address,
@@ -427,7 +443,7 @@ class CycleDashboardParams(
         return served_dashboard(cycle.stores, cycle.hop, at=self.at)
 
     def answer(self, caller: Caller) -> ServedDashboard | WarmingDashboard:
-        return self.served(self.viewed(caller.stores))
+        return self.served(self.viewed(caller))
 
 
 class CycleRoundParams(
@@ -446,7 +462,7 @@ class CycleRoundParams(
     at: int | None = Field(default=None, ge=0, description="A line of the leaf cycle's own ledger")
 
     def answer(self, caller: Caller) -> RoundView:
-        cycle = self.viewed(caller.stores)
+        cycle = self.viewed(caller)
         closed = served_round(cycle.stores, cycle.hop, self.round_num, moment=cycle.moment(self.at))
         if closed is None:
             raise NotFoundError(
@@ -469,7 +485,7 @@ class CycleRoundAuditParams(
     round_num: int = Field(ge=0)
 
     def answer(self, caller: Caller) -> RoundAudit | None:
-        return round_audit(self.viewed(caller.stores), self.round_num)
+        return round_audit(self.viewed(caller), self.round_num)
 
 
 class CycleExportParams(
@@ -487,7 +503,7 @@ class CycleExportParams(
     tier: ExportTier
 
     def answer(self, caller: Caller) -> ExportFiles:
-        return export_cycle(caller.stores, self.path, self.tier)
+        return export_cycle(self.stores(caller), self.path, self.tier)
 
 
 class CycleEventsParams(
@@ -505,7 +521,7 @@ class CycleEventsParams(
     """
 
     def answer(self, caller: Caller) -> AsyncIterator[str]:
-        return cycle_event_frames(caller, self.viewed(caller.stores))
+        return cycle_event_frames(caller, self.viewed(caller))
 
 
 class FeedParams(ReadParams, read=ReadKind.FEED, route="/feed"):
@@ -524,7 +540,7 @@ class CycleFilesParams(
     depth through ``descend``."""
 
     def answer(self, caller: Caller) -> FilesResponse:
-        return cycle_files.list_cycle_files(caller.stores, self.path)
+        return cycle_files.list_cycle_files(self.stores(caller), self.path)
 
 
 class CycleFileParams(
@@ -543,7 +559,7 @@ class CycleFileParams(
 
     def answer(self, caller: Caller) -> FileContentResponse:
         return cycle_files.read_cycle_file(
-            caller.stores, self.path, scope=self.scope, file=self.file
+            self.stores(caller), self.path, scope=self.scope, file=self.file
         )
 
 
@@ -676,7 +692,7 @@ class CampaignPipelineParams(
     ReadParams, read=ReadKind.CAMPAIGN_PIPELINE, route="/campaigns/{campaign_id}/pipeline"
 ):
     """What this campaign runs, the one server-owned answer; ownership-gated, not found on a
-    cross-tenant read."""
+    cross-tenant read but the exhibit's (`exhibit.py::read_stores`)."""
 
     campaign_id: str = Field(min_length=1, max_length=128)
     at: str = Field(
@@ -685,7 +701,8 @@ class CampaignPipelineParams(
     )
 
     def answer(self, caller: Caller) -> CampaignPipelineResponse:
-        return resolve_pipeline_at(caller.stores, self.campaign_id, self.at)
+        stores = read_stores(caller.stores, self.campaign_id)
+        return resolve_pipeline_at(stores, self.campaign_id, self.at)
 
 
 class ForkPreviewParams(

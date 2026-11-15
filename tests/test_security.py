@@ -30,7 +30,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from datetime import date
 from pathlib import Path, PurePosixPath
-from typing import Any, NamedTuple, cast, override
+from typing import Any, Literal, NamedTuple, cast, override
 
 import gate
 import httpx
@@ -92,6 +92,7 @@ from promptpotter.application.host_surface import (
     CallTool,
     HostHold,
     HostSession,
+    HostTask,
     TaskResultOf,
     TaskStatusOf,
 )
@@ -133,6 +134,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     unplaceable_edit,
 )
 from promptpotter.application.optimizers.potter.records import L2Memory, L3Memory, Ladder
+from promptpotter.application.read_params import CampaignPipelineParams, HierarchySubtreeParams
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
@@ -159,6 +161,7 @@ from promptpotter.domain.command_events import (
 )
 from promptpotter.domain.command_kinds import (
     AcceptTermsPayload,
+    ArchiveCampaignPayload,
     ArmRequest,
     BankSnippetPayload,
     CancelPayload,
@@ -178,6 +181,7 @@ from promptpotter.domain.command_kinds import (
     PauseCyclePayload,
     ReadKind,
     SetApiKeyPayload,
+    SetCampaignLabelPayload,
     SetUserSettingsPayload,
     SkipSearchpointPayload,
     StartCheckinPayload,
@@ -1371,6 +1375,71 @@ def test_a_cross_origin_caller_is_offered_only_the_methods_served_and_headers_se
     assert "access-control-allow-origin" not in preflight("https://evil.example", "GET").headers
 
 
+class _Exhibit(NamedTuple):
+    hop: CycleHop
+    follower: Stores
+
+
+@pytest.fixture
+def exhibit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Exhibit:
+    """A campaign in the declared host's account, named the exhibit, and a stranger's empty account."""
+    monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "host@x.com")
+    monkeypatch.setattr(settings_mod.settings, "EXHIBIT_CAMPAIGN", "camp-exhibit")
+    host = workspace(tmp_path, default_identity(tenant_id="host-1"))
+    UserStore(host.base_dir).save(
+        User(user_id="host-1", tenant_id="host-1", email="host@x.com", created_at="2026-01-01")
+    )
+    hop = CycleHop(campaign_id="camp-exhibit", cycle_id="cycle_exhibit")
+    stored_campaign(host, minted_campaign(hop))
+    host.campaigns.mint_cycle(hop)
+    stranger = dataclasses.replace(_who("guest-1"), capabilities=OWNER_COMMAND_CAPABILITIES)
+    return _Exhibit(hop, workspace(tmp_path, stranger))
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_follower_reads_the_hosts_exhibit_and_acts_on_none_of_it(exhibit: _Exhibit) -> None:
+    # It draws what its follow pick named: an account with nothing launched follows the exhibit.
+    hop, follower = exhibit
+    followed = followed_cycle(follower)
+    assert followed.hop == hop and followed.said is not None, "a new account followed no exhibit"
+    drawn = HierarchySubtreeParams(address=hop.campaign_id).answer(Caller(follower))
+    assert hop.cycle_id in drawn.model_dump_json(), "a follower could not draw the host's exhibit"
+    assert CampaignPipelineParams(campaign_id=hop.campaign_id).answer(Caller(follower)).connector
+    for act in (
+        SetCampaignLabelPayload(campaign_id=hop.campaign_id, label="mine"),
+        ArchiveCampaignPayload(campaign_id=hop.campaign_id),
+        DeleteCampaignPayload(campaign_id=hop.campaign_id),
+        DeleteCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id),
+        PauseCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id),
+    ):
+        with pytest.raises(NotFoundError):
+            await CommandDispatcher(follower).dispatch(CommandCall(act, door=Door.HOST))
+    assert not follower.campaigns.list_campaign_ids(), "an act on the exhibit landed somewhere"
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_blocked_account_or_one_with_its_switch_off_reads_no_exhibit(exhibit: _Exhibit) -> None:
+    hop, follower = exhibit
+    blocked = dataclasses.replace(
+        follower, identity=dataclasses.replace(follower.identity, access_state="blocked")
+    )
+    account.set_user_settings(follower, account.UserSettings(demo_mode_enabled=False))
+    for reader in (blocked, follower):
+        with pytest.raises(NotFoundError):
+            HierarchySubtreeParams(address=hop.campaign_id).answer(Caller(reader))
+        followed = followed_cycle(reader)
+        assert followed.hop is None and followed.said is not None, "it followed no exhibit, unsaid"
+
+
+@pytest.mark.usefixtures("offline")
+def test_with_no_exhibit_named_nothing_launched_is_said(
+    exhibit: _Exhibit, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings_mod.settings, "EXHIBIT_CAMPAIGN", "")
+    followed = followed_cycle(exhibit.follower)
+    assert followed.hop is None and followed.said is not None, "an empty follow went unsaid"
+
+
 # 2. Delegation
 
 
@@ -2401,7 +2470,9 @@ def test_a_follower_shows_the_running_run_and_a_verb_naming_no_cycle_acts_on_the
         launched_last, RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT)
     )
     save_active_pointer(built_stores.base_dir, launched_last)
-    assert followed_cycle(built_stores) == hop, "a door followed a later launch past a running run"
+    assert followed_cycle(built_stores).hop == hop, (
+        "a door followed a later launch past a running run"
+    )
     assert cycle_target(built_stores, "", "") == launched_last, (
         "a resume naming no cycle targeted the running run, not the paused latest launch"
     )
@@ -4244,20 +4315,21 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         detached.cancel()
 
 
-# One journey: the hold's elicitation is answered, that answer filed, and the task's result
-# then reads the run that went on past it.
-@pytest.mark.usefixtures("offline")
-async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
-) -> None:
-    import mcp.types as mcp_types
-    from mcp import Client
-    from mcp.client.session import ClientRequestContext
+class _HeldTask(NamedTuple):
+    session: HostSession
+    task: HostTask
+    ledger: CycleEventLog
+    cycle_dir: Path
+    job: Job
+    queuing: JobRegistry
 
+
+async def _held_at_arms_gate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stores: Stores
+) -> _HeldTask:
+    """A host's start-run task whose run holds at its arms gate, asking for its input."""
     from promptpotter.application import host_surface
-    from promptpotter.presentation.mcp.server import host_server
 
-    stores = host_tenant.caller.stores
     hop = CycleHop(campaign_id="camp-held", cycle_id="cycle_held0000000")
     campaign = minted_campaign(hop)
     stored_campaign(stores, campaign)
@@ -4268,7 +4340,6 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
     monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
     monkeypatch.setattr(host_surface, "_SETTLE_POLL_S", 0.0)
     step = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, "step_rounds": 1}
-    idle = set(launcher_launch._DETACHED_TASKS)
     task = (await session.answer(CallTool("start-run", {**step, IDEMPOTENCY_KEY: "go"}))).task
     assert task is not None
     (job,) = queuing.list_queued()
@@ -4276,7 +4347,35 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
     ledger = CycleEventLog.open(CycleDir(cycle_dir))
     await asyncio.to_thread(ledger.append, RunPhaseRecord(state=ArmsGate()))
     await asyncio.to_thread(hold_cycle, cycle_dir)
-    arm = {"prompt_fields": {"solve": {"instruction": "Held."}}, "changes_description": "mine"}
+    return _HeldTask(session, task, ledger, cycle_dir, job, queuing)
+
+
+def _arms_filed(stores: Stores) -> list[str]:
+    book = stores.commands.book()
+    return [r.command_id for _, r in book.lines() if r.kind == CommandKind.SUBMIT_ARMS]
+
+
+_ARM = {"prompt_fields": {"solve": {"instruction": "Held."}}, "changes_description": "mine"}
+
+
+# One journey: the hold's elicitation is answered, that answer filed, and the task's result
+# then reads the run that went on past it.
+@pytest.mark.usefixtures("offline")
+async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
+) -> None:
+    import mcp.types as mcp_types
+    from mcp import Client
+    from mcp.client.session import ClientRequestContext
+
+    from promptpotter.presentation.mcp.server import host_server
+
+    stores = host_tenant.caller.stores
+    idle = set(launcher_launch._DETACHED_TASKS)
+    session, task, ledger, cycle_dir, job, queuing = await _held_at_arms_gate(
+        tmp_path, monkeypatch, stores
+    )
+    arm = _ARM
     asked: list[mcp_types.ElicitRequestParams] = []
     answered = asyncio.Event()
     answer_hold = AnswerHold.answered_by
@@ -4288,10 +4387,6 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
             answered.set()
 
     monkeypatch.setattr(AnswerHold, "answered_by", spied)
-
-    def filed() -> list[str]:
-        book = stores.commands.book()
-        return [r.command_id for _, r in book.lines() if r.kind == CommandKind.SUBMIT_ARMS]
 
     async def answer(
         context: ClientRequestContext, params: mcp_types.ElicitRequestParams
@@ -4322,7 +4417,44 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
     tied = dict(asked[0].meta).get("io.modelcontextprotocol/related-task")
     assert tied == {"taskId": task.task_id}, "the input request named no task"
     assert not result.is_error, result.content
-    assert len(filed()) == 1, "an answer retried filed a second submit-arms"
+    assert len(_arms_filed(stores)) == 1, "an answer retried filed a second submit-arms"
+    for waiter in set(launcher_launch._DETACHED_TASKS) - idle:
+        waiter.cancel()
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answer_by_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
+) -> None:
+    import mcp.types as mcp_types
+    from mcp import Client
+
+    from promptpotter.presentation.mcp.server import UpdateTaskParams, host_server
+
+    class Update(mcp_types.Request[UpdateTaskParams, Literal["tasks/update"]]):
+        method: Literal["tasks/update"] = "tasks/update"
+        params: UpdateTaskParams
+
+    class Status(mcp_types.GetTaskResult):
+        input_requests: dict[str, dict[str, Any]]
+
+    stores = host_tenant.caller.stores
+    idle = set(launcher_launch._DETACHED_TASKS)
+    held = await _held_at_arms_gate(tmp_path, monkeypatch, stores)
+    task_id = held.task.task_id
+    status_of = mcp_types.GetTaskRequest(params=mcp_types.GetTaskRequestParams(task_id=task_id))
+    async with Client(host_server(held.session)) as host:
+        assert host.session.protocol_version in mcp_types.version.MODERN_PROTOCOL_VERSIONS
+        status = await host.session.send_request(status_of, Status)
+        (key,) = status.input_requests
+        assert status.input_requests[key]["method"] == "elicitation/create", (
+            "a held task on a 2026 wire asked for no input"
+        )
+        accepted = mcp_types.ElicitResult(action="accept", content={"arms": json.dumps([_ARM])})
+        update = Update(params=UpdateTaskParams(task_id=task_id, input_responses={key: accepted}))
+        for _ in range(2):  # a host retrying its answer sends it again
+            await host.session.send_request(update, mcp_types.EmptyResult)
+    assert len(_arms_filed(stores)) == 1, "a task's update filed no answer, or filed it twice"
     for waiter in set(launcher_launch._DETACHED_TASKS) - idle:
         waiter.cancel()
 
@@ -4789,6 +4921,48 @@ async def test_the_mcp_door_over_http_serves_a_session_to_the_bearer_that_opened
         for who, headers in (("another account's bearer", bearer(theirs)), ("no carrier", accept)):
             refused = await http.post("/mcp/", json=listing, headers={**headers, **session})
             assert refused.status_code in (401, 404), f"{who} was served a session it never opened"
+
+
+@pytest.mark.usefixtures("offline")
+async def test_the_mcp_doors_managers_leave_once_their_sessions_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from promptpotter.presentation.mcp.server import HttpDoor
+
+    monkeypatch.setattr(settings_mod.settings, "ALLOWED_ORIGINS", "http://testserver")
+    door = HttpDoor()
+    callers = [
+        Caller(workspace(tmp_path, dataclasses.replace(_who("ada"), token_id=f"tok-{i}")))
+        for i in range(50)
+    ]
+
+    async def mounted(scope: Scope, receive: Receive, send: Send) -> None:
+        who = int(dict(scope["headers"])[b"x-who"])
+        scope["state"] = {"caller": callers[who]}
+        await door(scope, receive, send)
+
+    hello = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test-host", "version": "0"},
+        },
+    }
+    asgi = httpx.ASGITransport(app=mounted)
+    async with (
+        door.running(),
+        httpx.AsyncClient(transport=asgi, base_url="http://testserver") as http,
+    ):
+        for who in range(len(callers)):
+            headers = {"Accept": "application/json, text/event-stream", "x-who": str(who)}
+            opened = await http.post("/", json=hello, headers=headers)
+            assert opened.status_code == 200, opened.text
+            session = {**headers, "mcp-session-id": opened.headers["mcp-session-id"]}
+            assert (await http.delete("/", headers=session)).status_code == 200
+        assert not door._managers, "the door kept a manager for each token whose session ended"
 
 
 @pytest.mark.usefixtures("offline")

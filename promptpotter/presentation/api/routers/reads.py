@@ -118,22 +118,22 @@ def _me(asked: _Asked, read: MeParams) -> Response:
 
 
 def _hierarchy(asked: _Asked, read: HierarchyParams) -> Response:
-    version = hierarchy_version(asked.caller.stores, inside=read.inside)
+    version = hierarchy_version(read.stores(asked.caller), inside=read.inside)
     return _conditional(asked.request, (version, read), lambda: read.answer(asked.caller))
 
 
 def _steps(asked: _Asked, read: HierarchyStepsParams) -> Response:
-    steps = read.opened(asked.caller.stores)
+    steps = read.opened(asked.caller)
     return _conditional(asked.request, steps.validator, steps.window)
 
 
 def _subtree(asked: _Asked, read: HierarchySubtreeParams) -> Response:
-    version = subtree_version(asked.caller.stores, read.address)
+    version = subtree_version(read.stores(asked.caller), read.address)
     return _conditional(asked.request, (version, read), lambda: read.answer(asked.caller))
 
 
 def _dashboard(asked: _Asked, read: CycleDashboardParams) -> Response:
-    cycle = read.viewed(asked.caller.stores)
+    cycle = read.viewed(asked.caller)
     # The leaf store's version, which its feed frame names: it covers the derived phase's edges.
     version = entries_version([cycle.stores])
     return _conditional(asked.request, (version, read), lambda: read.served(cycle))

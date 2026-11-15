@@ -10,4 +10,5 @@
 /* Notes quieter than data: the stage keeps each figure's sub, and the climb's caveat, small and secondary. */
 .stage .figure-sub{font-size:var(--stage-label)}
 .stage-climb .said{margin-top:var(--space-8);font-size:var(--stage-label)}
+.stage-said{margin-block-end:var(--space-16);font-size:var(--stage-label)}
 @media not all and (max-width:880px){.stage-screen{padding:var(--space-24) 6vw}.stage{gap:var(--space-24)}}

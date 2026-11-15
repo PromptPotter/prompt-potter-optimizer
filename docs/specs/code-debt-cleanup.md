@@ -739,41 +739,23 @@ and derived the knob couplings from each member's draws and the escalation ladde
   operator's step after the box update, a connector with the token as its `Authorization` request
   header. **Rides with:** the next box update. **Re-test:** in claude.ai, a custom connector at the
   box's MCP URL answers `tools/list`.
-- **A held task on a 2026-07-28 wire is never asked for its input** (mcp's report):
-  `presentation/mcp/server.py::host_server`'s `tasks/result` elicits only on a handshake-era wire; on
-  a modern one, server-to-client requests give way to `InputRequiredResult` and the tasks
-  extension's `tasks/update`, which nothing here answers. Action: the hold's `HostHold` rides the
-  modern task's input requests. **Rides with:** tv-2. **Re-test:** a 2026-07-28 client holding a task
-  at its arms gate receives the hold's input request and answers it with `tasks/update`.
-- **The HTTP door keeps a session manager per token until shutdown** (mcp's report):
-  `server.py::HttpDoor._managers` is keyed by authority (account, token, carrier, rungs) and never
-  swept, so memory grows with the distinct tokens that ever called. Action: a manager whose sessions
-  all ended leaves the map. **Rides with:** tv-2. **Re-test:** open and close sessions on 50 tokens;
-  `len(_managers)` returns to 0.
+- **The HTTP door's sweep reads the SDK's private `_server_instances`** (tv-2's report): a session
+  that expires idle leaves only at the door's next request. Action: the sweep rides the SDK's own
+  session-end hook, or the door owns its session table. **Rides with:** the next mcp chain.
+  **Re-test:** `git grep -n "_server_instances" -- promptpotter` is empty.
 
-### batch/29 · tv-2
+### batch/29 · tv-2 (what tv-2 left at its landing)
 
-The operator, 2026-11-11: the exhibit root lives in the host account and is served read-only to any
-signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the route says so in a
-`Said`. One access review with mkey and mcp.
-
-- **The exhibit's served fact has no home**: what a follower follows (the running campaign, else the
-  latest launch, else the host's exhibit root, else a `Said`) belongs on
-  `cycle_addressing.py::ActiveSessionResponse`, whose pick is `followed_cycle`. Action: the read falls
-  through to the exhibit, then to a `Said`. **Rides with:** tv-2. **Re-test:** `/stage/` with no launch
-  draws the exhibit.
-- **The install names no exhibit campaign**: one setting names the exhibit campaign root in the host
-  account. **Rides with:** tv-2. **Re-test:** `git grep -n -i "exhibit" -- promptpotter/config` names the
-  setting.
-- **No read reaches the host's exhibit**: every hierarchy, lineage and dashboard read is scoped to the
-  caller's tenant (`stores.py::Stores`). Action: the exhibit root is served read-only to a signed-in
-  follower, the one cross-tenant read, reviewed in
-  [`../operations/access-model.md`](../operations/access-model.md). **Rides with:** tv-2. **Re-test:** an
-  account draws the exhibit root's hierarchy and can act on none of it.
-- **`demo_mode_enabled` has no reader**: `store/user_store.py` → `account.py::user_settings`, the
-  `set-user-settings` kind and the "Try & learn" switch, whose lede promises a support-ticket dataset no
-  code places (`AccountPreferencesTab.tsx`). Action: it becomes the exhibit's reader. **Rides with:**
-  tv-2. **Re-test:** `git grep -n "demo_mode_enabled" -- promptpotter webapp` names a reader.
+- **The main workspace follows the exhibit too, and its run controls 404 there** (tv-2's report): a
+  follower's pause and stop reach a run they may not act on (I3). Action: the controls read the
+  follow's `said.key` and offer no act on an exhibit. **Re-test:** follow the exhibit as a
+  non-host; the workspace offers no run control.
+- **The account feed never re-asks an exhibit's reads when the host's store moves**: a follower's
+  view stands still. Action: the feed's subject includes the exhibit's. **Re-test:** the host's
+  round closes; the follower's dashboard moves without a reload.
+- **`ActiveSessionResponse` carries `hop` and `said` together only for an exhibit**: two shapes in one
+  response. Action: one shape, the follow read as its own row. **Re-test:** every
+  `/sessions/active` answer has one shape.
 
 ### batch/30 · ws
 

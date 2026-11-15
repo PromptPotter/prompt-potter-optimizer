@@ -213,13 +213,13 @@ export interface ActivityBucket {
   series_requests: Record<string, number>;
 }
 
-/** The run to follow (`followed_cycle`): a running one first, else the latest
- * launch. */
+/** The run to follow (`followed_cycle`), and the line saying whose it is where it
+ * is not the caller's own (`key` ``exhibit``), or why there is none. */
 export interface ActiveSessionResponse {
-  /** Tenant the pointer belongs to — the caller's own, always known */
-  tenant_id: string;
-  /** The cycle of the run to follow; null when no session is active. */
+  /** The cycle of the run to follow; null where none is. */
   hop: CycleHop | null;
+  /** Null on the caller's own run. */
+  said: Said | null;
 }
 
 /** One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle
@@ -5497,7 +5497,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "b25b2040348a0ba8";
+export const SERVED_CONTRACT = "ef4ff6ea56a33c6b";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

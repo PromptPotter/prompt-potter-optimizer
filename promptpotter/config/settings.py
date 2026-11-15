@@ -172,6 +172,10 @@ class Settings(BaseSettings):
     # claim the box, and it has no admin identity.
     HOST_ADMIN_EMAIL: str = ""
 
+    # A campaign id in the host's account: the exhibit every account with "Try & learn" on reads,
+    # and follows while it has nothing running (`application/exhibit.py`). Unset: no exhibit.
+    EXHIBIT_CAMPAIGN: str = ""
+
     # Accounts on disk, the host's included, past which no new sign-in opens one; 0 closes sign-up.
     # The host's worst-case exposure to strangers is this times the coupon's face.
     MAX_ACCOUNTS: int = 100

@@ -77,8 +77,8 @@ export function useCampaign(address: string | null): HierarchyCampaign | null {
 
 interface ActivePointer {
   read: ReadResult<ActiveSessionResponse>;
-  // Null while none is: "no active session" is a null `hop` on a 200
-  // (`cycle_addressing.py::active_session`), never a failure.
+  // Null while none is: nothing to follow is a null `hop` and its `said` on a 200
+  // (`cycle_addressing.py::followed_cycle`), never a failure.
   active: CycleHop | null;
 }
 

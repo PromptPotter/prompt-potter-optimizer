@@ -69,7 +69,11 @@ BASELINE = {
     # `PassRefusal`, the cycle's `verify` fact, the command refused by it); a slot's served stage.
     # passb-2 2 (-8): the held-out verb has one name; the export has one writer.
     # faults-2b (-451): a fault is a value; `logging` leaves application/ and domain/.
-    "package_lines": 110605,
+    # tv-2 (+100): the host's exhibit, the one cross-tenant read, resolved once (`exhibit.py`),
+    # and the follow pick's fall-through to it, else a served `Said`. tv-2 (+74): a held task's
+    # input on a 2026-07-28 wire (`tasks/get`'s input requests, `tasks/update`), and the HTTP
+    # door's managers swept once their sessions end. tv-2 (+1): the exhibit's pipeline read.
+    "package_lines": 110780,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -78,7 +82,8 @@ BASELINE = {
     # model-lines (+1): `optimization.call_target`, which replaced eleven node `model` lines.
     "config_leaf_fields": 89,
     # `Settings` fields — what the environment can set.
-    "settings_env": 38,
+    # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
+    "settings_env": 39,
     # Parameters annotated `Any`.
     "any_params": 35,
     # `dict[str, Any]` maps declared in `domain/`.

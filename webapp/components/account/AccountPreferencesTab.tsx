@@ -11,7 +11,9 @@ export function AccountPreferencesTab() {
   const cmd = useCommand<"user-settings">("preferences");
 
   const toggle = (next: boolean) =>
-    void cmd.run("user-settings", () => patchUserSettings({ demo_mode_enabled: next }));
+    void cmd.run("user-settings", () =>
+      patchUserSettings({ demo_mode_enabled: next }),
+    );
 
   const busy = cmd.pending !== null;
 
@@ -19,12 +21,12 @@ export function AccountPreferencesTab() {
     <>
       <AccountSection
         title="Try & learn"
-        lede="A small support-ticket dataset, ready to optimize, in your collection. Turn it off once you are set up."
+        lede="While you have nothing running, follow the host's exhibit: a run to read, never to act on. Turn it off once you are set up."
         aside={
           <ReadState read={read} subject="this setting">
             {(settings) => (
               <Switch
-                label="Show the try-and-learn demo dataset"
+                label="Follow the host's exhibit"
                 checked={settings.demo_mode_enabled}
                 locked={busy}
                 lockedNote="saving"
@@ -48,9 +50,14 @@ function StageViewSection() {
   return (
     <AccountSection
       title="Stage view"
-      lede="For showing a run across a room, on a phone or a TV: a full screen that follows your running campaign, else your latest launch, and leads with the lift over the origin, then what that lift cost per search dollar, per candidate tested and in worked time per unit of lift, then the live round."
+      lede="For showing a run across a room, on a phone or a TV: a full screen that follows the run your account follows, and leads with the lift over the origin, then what that lift cost per search dollar, per candidate tested and in worked time per unit of lift, then the live round."
       aside={
-        <a className="note-empty-link" href="/stage/" target="_blank" rel="noopener">
+        <a
+          className="note-empty-link"
+          href="/stage/"
+          target="_blank"
+          rel="noopener"
+        >
           Open the stage view
         </a>
       }

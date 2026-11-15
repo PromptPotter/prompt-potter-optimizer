@@ -58,7 +58,7 @@ describe("CriticalAlertBanner — a 404 names a gone campaign on the viewed cycl
   it("says a 404 on the followed active run's dashboard is a gone campaign it does not leave", async () => {
     serve({
       "/backends": [],
-      "/sessions/active": { tenant_id: "t", hop: { campaign_id: "c", cycle_id: "y" } },
+      "/sessions/active": { hop: { campaign_id: "c", cycle_id: "y" }, said: null },
       "/hierarchy": { entries: [] },
     });
     view();

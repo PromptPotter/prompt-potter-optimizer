@@ -5,9 +5,10 @@ Every answer is `application/host_surface.py`'s `HostSession`; this module only 
 types. A task kind's call answers the Tasks extension's handle: claimed (`resultType: "task"`) where
 the request itself declares the extension on a 2026-era wire, and as the call's structured content
 everywhere else, since a client MUST reject a claimed result its request did not declare and a
-handshake-era wire carries none. `tasks/get`, `tasks/result` and `tasks/cancel` serve both;
-`tasks/result` on a task held at its arms gate asks for its input in one form elicitation, tied
-to the task, where the client declares elicitation. A refusal is its `domain/refusal.py::Refusal` on every answer: a call's error result, every other
+handshake-era wire carries none. `tasks/get`, `tasks/result` and `tasks/cancel` serve both. A
+task held at its arms gate asks for its input as one form elicitation per hold: on a 2026-era wire
+as `tasks/get`'s input requests, answered by `tasks/update`; on a handshake-era one sent on
+`tasks/result`'s stream, tied to the task, where the client declares elicitation. A refusal is its `domain/refusal.py::Refusal` on every answer: a call's error result, every other
 request's JSON-RPC error data.
 """
 
@@ -18,6 +19,8 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
+from functools import partial
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -55,12 +58,14 @@ _RELATED_TASK = "io.modelcontextprotocol/related-task"
 type Ctx = ServerRequestContext[Any, Any]
 
 
+def _modern(ctx: Ctx) -> bool:
+    return ctx.protocol_version in types.version.MODERN_PROTOCOL_VERSIONS
+
+
 def _claims_task(ctx: Ctx) -> bool:
     """Per request: a 2026-era envelope declares its own capabilities, so a client advertising the
     extension at discovery may still send a call that accepts no task."""
-    return ctx.protocol_version in types.version.MODERN_PROTOCOL_VERSIONS and (
-        ctx.session.check_client_capability(_ACCEPTS_TASKS)
-    )
+    return _modern(ctx) and ctx.session.check_client_capability(_ACCEPTS_TASKS)
 
 
 def _task(task: HostTask) -> types.Task:
@@ -106,22 +111,61 @@ def refusal_result(exc: PotterError) -> types.CallToolResult:
     )
 
 
-async def _asked(ctx: Ctx, held: HostHold) -> host_surface.AnswerHold | None:
-    """The hold's one form elicitation, on the `tasks/result` request's own stream; a decline or
-    a cancel answers nothing, and the task stays held."""
+def _elicitation(held: HostHold) -> types.ElicitRequest:
+    """The hold's one form elicitation, tied to its task."""
     asking = types.ElicitRequestFormParams(
         message=held.message,
         requested_schema=held.requested_schema(),
         meta=cast(types.RequestParamsMeta, {_RELATED_TASK: {"taskId": held.task_id}}),
     )
+    return types.ElicitRequest(params=asking)
+
+
+def _accepted(held: HostHold, reply: object) -> host_surface.AnswerHold | None:
+    """A decline, a cancel or no reply answers nothing, and the task stays held."""
+    if not isinstance(reply, types.ElicitResult) or reply.action != "accept" or not reply.content:
+        return None
+    return host_surface.AnswerHold(held, reply.content)
+
+
+async def _asked(ctx: Ctx, held: HostHold) -> host_surface.AnswerHold | None:
+    """A handshake-era wire's ask, on the `tasks/result` request's own stream."""
     reply = await ctx.session.send_request(
-        types.ElicitRequest(params=asking),
+        _elicitation(held),
         types.ElicitResult,
         metadata=ServerMessageMetadata(related_request_id=ctx.request_id),
     )
-    if reply.action != "accept" or reply.content is None:
-        return None
-    return host_surface.AnswerHold(held, reply.content)
+    return _accepted(held, reply)
+
+
+def _task_read(ctx: Ctx, task: HostTask) -> Any:
+    """`tasks/get`'s answer; on a 2026-era wire a held task's carries its holds' input requests."""
+    if not (_modern(ctx) and task.holds):
+        return types.GetTaskResult(**_task(task).model_dump())
+    asking = {
+        held.key: _elicitation(held).model_dump(mode="json", by_alias=True, exclude_none=True)
+        for held in task.holds
+    }
+    return {**_task(task).model_dump(mode="json", by_alias=True), "inputRequests": asking}
+
+
+class UpdateTaskParams(types.RequestParams):
+    """The tasks extension's `tasks/update`: a client's answers to a task's input requests, keyed
+    as `tasks/get` asked them."""
+
+    task_id: str
+    input_responses: types.InputResponses
+
+
+async def _update(session: HostSession, _ctx: Ctx, params: UpdateTaskParams) -> types.EmptyResult:
+    try:
+        task = await session.answer(host_surface.TaskStatusOf(params.task_id))
+        for held in task.holds:
+            if answer := _accepted(held, params.input_responses.get(held.key)):
+                await session.answer(answer)
+    except PotterError as exc:
+        raise _refused(exc) from exc
+    return types.EmptyResult()
 
 
 def _answered(name: str, answer: HostAnswer) -> types.CallToolResult:
@@ -171,20 +215,19 @@ def host_server(session: HostSession) -> Server[Any]:
             content=_text({"task": task}), structured_content={"task": task}
         )
 
-    async def get_task(_ctx: Ctx, params: types.GetTaskRequestParams) -> types.GetTaskResult:
+    async def get_task(ctx: Ctx, params: types.GetTaskRequestParams) -> Any:
         try:
             task = await session.answer(host_surface.TaskStatusOf(params.task_id))
         except PotterError as exc:
             raise _refused(exc) from exc
-        return types.GetTaskResult(**_task(task).model_dump())
+        return _task_read(ctx, task)
 
     async def task_result(
         ctx: Ctx, params: types.GetTaskPayloadRequestParams
     ) -> types.CallToolResult:
         # A client declaring no elicitation is never asked, nor a 2026-era wire, whose input
-        # requests ride the result instead: its result waits past every hold.
-        asks = ctx.protocol_version not in types.version.MODERN_PROTOCOL_VERSIONS
-        asks = asks and ctx.session.check_client_capability(_ELICITS)
+        # requests ride `tasks/get`: its result waits past every hold.
+        asks = not _modern(ctx) and ctx.session.check_client_capability(_ELICITS)
         asked: set[str] = set()
         try:
             while isinstance(
@@ -289,6 +332,7 @@ def host_server(session: HostSession) -> Server[Any]:
     server.add_request_handler("tasks/get", types.GetTaskRequestParams, get_task)
     server.add_request_handler("tasks/result", types.GetTaskPayloadRequestParams, task_result)
     server.add_request_handler("tasks/cancel", types.CancelTaskRequestParams, cancel_task)
+    server.add_request_handler("tasks/update", UpdateTaskParams, partial(_update, session))
     server.extensions[TASKS_EXTENSION] = {}
     return server
 
@@ -300,15 +344,26 @@ async def serve_stdio(caller: Caller) -> None:
         await server.run(read, write, server.create_initialization_options())
 
 
+@dataclass
+class _Manager:
+    """One authority's session manager, the task serving it, and its requests in flight."""
+
+    manager: StreamableHTTPSessionManager
+    serving: asyncio.Task[None]
+    in_flight: int = 0
+
+
 class HttpDoor:
     """`host_server` over Streamable HTTP, its caller the one its mount's gate resolved
     (`deps.py::mounted_caller`) onto the request's state. One session manager per authority (its
     account, its token and the rungs they hold), so every session a manager holds runs as that one
-    caller: a request on a session another opened finds no session there (404). Its managers run in the API's lifespan
-    (`running`), never at import; DNS-rebinding protection reads the install's allowed origins."""
+    caller: a request on a session another opened finds no session there (404). A manager whose
+    sessions all ended leaves at the door's next request, so the map holds the authorities with a
+    session open. Its managers run in the API's lifespan (`running`), never at import;
+    DNS-rebinding protection reads the install's allowed origins."""
 
     def __init__(self) -> None:
-        self._managers: dict[tuple[object, ...], StreamableHTTPSessionManager] = {}
+        self._managers: dict[tuple[object, ...], _Manager] = {}
         self._opening = asyncio.Lock()
         self._serving: set[asyncio.Task[None]] | None = None
 
@@ -327,13 +382,26 @@ class HttpDoor:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         caller: Caller = scope["state"]["caller"]
-        await (await self._manager(caller)).handle_request(scope, receive, send)
+        opened = await self._manager(caller)
+        try:
+            await opened.manager.handle_request(scope, receive, send)
+        finally:
+            async with self._opening:
+                opened.in_flight -= 1
+                self._sweep()
 
-    async def _manager(self, caller: Caller) -> StreamableHTTPSessionManager:
+    def _sweep(self) -> None:
+        """The SDK forgets a session however it ends (a DELETE, its idle timeout, a crash)."""
+        for authority, held in list(self._managers.items()):
+            if not held.in_flight and not held.manager._server_instances:
+                del self._managers[authority]
+                held.serving.cancel()
+
+    async def _manager(self, caller: Caller) -> _Manager:
         who = caller.stores.identity
         authority = (who.user_id, who.token_id, who.carried_by, who.capabilities)
         async with self._opening:
-            if (manager := self._managers.get(authority)) is None:
+            if (opened := self._managers.get(authority)) is None:
                 assert self._serving is not None, "the door runs in the API's lifespan"
                 origins = settings.allowed_origins_list
                 guard = TransportSecuritySettings(
@@ -346,11 +414,13 @@ class HttpDoor:
                 started = asyncio.Event()
                 serving = asyncio.create_task(_served(manager, started))
                 self._serving.add(serving)
+                serving.add_done_callback(self._serving.discard)
                 await started.wait()
                 if serving.done():
                     serving.result()
-                self._managers[authority] = manager
-        return manager
+                opened = self._managers[authority] = _Manager(manager, serving)
+            opened.in_flight += 1
+        return opened
 
 
 async def _served(manager: StreamableHTTPSessionManager, started: asyncio.Event) -> None:

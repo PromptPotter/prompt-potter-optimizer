@@ -5,10 +5,13 @@ from dataclasses import dataclass
 from pydantic import Field
 
 from promptpotter.application.account import registered_or_default_identity
+from promptpotter.application.exhibit import exhibit_stores
 from promptpotter.application.origin_listing import no_dataset_hint
 from promptpotter.config.paths import default_projects_root
+from promptpotter.config.settings import settings
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
+from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.session_pointer import (
@@ -43,10 +46,7 @@ def launched(stores: Stores) -> CycleHop:
     return hop
 
 
-def followed_cycle(stores: Stores) -> CycleHop | None:
-    """What a follower shows (the stage, an unpinned webapp): a cycle a run holds, the latest
-    launch's first, else the latest launch. A verb naming no cycle acts on `latest_launch`, never
-    on this."""
+def _own_followed(stores: Stores) -> CycleHop | None:
     launched = latest_launch(stores)
     running = stores.campaigns.run_held_cycles()
     if not running or launched in running:
@@ -60,19 +60,53 @@ def _created_at(stores: Stores, hop: CycleHop) -> str:
     return "" if campaign is None else campaign.created_at
 
 
+def _exhibit_head(stores: Stores) -> CycleHop | None:
+    """The head of the exhibit's line, where the caller follows it (`exhibit.py::exhibit_stores`)."""
+    exhibit = exhibit_stores(stores)
+    if (
+        exhibit is None
+        or (campaign := exhibit.campaigns.load_campaign(settings.EXHIBIT_CAMPAIGN)) is None
+    ):
+        return None
+    return exhibit.campaigns.line(campaign.root_hop)[-1]
+
+
 class ActiveSessionResponse(StrictModel):
-    """The run to follow (`followed_cycle`): a running one first, else the latest launch."""
+    """The run to follow (`followed_cycle`), and the line saying whose it is where it is not the
+    caller's own (`key` ``exhibit``), or why there is none."""
 
-    tenant_id: str = Field(
-        description="Tenant the pointer belongs to — the caller's own, always known"
+    hop: CycleHop | None = Field(description="The cycle of the run to follow; null where none is.")
+    said: Said | None = Field(description="Null on the caller's own run.")
+
+
+_EXHIBIT = Said(
+    key="exhibit",
+    tone="quiet",
+    label="The host's exhibit, read-only, while you have nothing running",
+    detail='"Try & learn" in your preferences turns it off.',
+)
+
+
+def followed_cycle(stores: Stores) -> ActiveSessionResponse:
+    """What a follower shows (the stage, an unpinned webapp): a cycle a run holds, the latest
+    launch's first, else the latest launch, else the head of the host's exhibit, else nothing and
+    why. A verb naming no cycle acts on `latest_launch`, never on this."""
+    if (own := _own_followed(stores)) is not None:
+        return ActiveSessionResponse(hop=own, said=None)
+    if (shown := _exhibit_head(stores)) is not None:
+        return ActiveSessionResponse(hop=shown, said=_EXHIBIT)
+    exhibit = (
+        ', else the host\'s exhibit while "Try & learn" is on' if settings.EXHIBIT_CAMPAIGN else ""
     )
-    hop: CycleHop | None = Field(
-        description="The cycle of the run to follow; null when no session is active."
+    return ActiveSessionResponse(
+        hop=None,
+        said=Said(
+            key="nothing_followed",
+            tone="quiet",
+            label="No run to follow yet",
+            detail=f"This screen follows your running campaign, else your latest launch{exhibit}.",
+        ),
     )
-
-
-def active_session(stores: Stores) -> ActiveSessionResponse:
-    return ActiveSessionResponse(tenant_id=stores.tenant_id, hop=followed_cycle(stores))
 
 
 def holds_active_pointer(*, tenant: str | None) -> bool:

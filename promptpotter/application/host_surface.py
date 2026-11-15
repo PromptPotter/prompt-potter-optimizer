@@ -212,27 +212,6 @@ def _jsonable(value: object) -> JsonValue:
     return to_jsonable_python(value, by_alias=True)  # type: ignore[no-any-return]
 
 
-class HostTask(FrozenModel):
-    """A task-answered call as the MCP Tasks extension tracks it: its command, read afresh off the
-    account's log each time it is asked."""
-
-    task_id: str
-    status: TaskStatus
-    status_message: str
-    created_at: str
-    last_updated_at: str
-
-    @classmethod
-    def of(cls, read: CommandReading) -> HostTask:
-        return cls(
-            task_id=read.command_id,
-            status=read.status,
-            status_message=read.said,
-            created_at=read.created_at,
-            last_updated_at=read.last_updated_at,
-        )
-
-
 # The answer a hold asks for, as a form's flat fields: the payload's own, less its cycle's address.
 _ARMS = SubmitArmsPayload.model_fields
 
@@ -275,6 +254,32 @@ class HostHold(FrozenModel):
             "keep": [int(i) for i in content.get("keep") or []],
         }
         return PayloadInvalidError.validating(SubmitArmsPayload, sent)
+
+
+class HostTask(FrozenModel):
+    """A task-answered call as the MCP Tasks extension tracks it: its command, read afresh off the
+    account's log each time it is asked, with the holds asking for its input."""
+
+    task_id: str
+    status: TaskStatus
+    status_message: str
+    created_at: str
+    last_updated_at: str
+    holds: tuple[HostHold, ...]
+
+    @classmethod
+    def of(cls, read: CommandReading) -> HostTask:
+        asking = _asking(read)
+        return cls(
+            task_id=read.command_id,
+            status=read.status,
+            status_message=read.said,
+            created_at=read.created_at,
+            last_updated_at=read.last_updated_at,
+            holds=tuple(
+                HostHold(task_id=read.command_id, message=asking, hold=h) for h in read.holds
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -468,8 +473,7 @@ class HostSession:
         or its jobs run in another process, which no signal here carries, and a run held at one
         round's gate holds afresh at the next."""
         while (read := await self._read(task_id)).status not in TERMINAL:
-            for hold in read.holds:
-                held = HostHold(task_id=task_id, message=_asking(read), hold=hold)
+            for held in HostTask.of(read).holds:
                 if held.key not in asked:
                     return held
             if (acting := self._acting.get(task_id)) is not None:
