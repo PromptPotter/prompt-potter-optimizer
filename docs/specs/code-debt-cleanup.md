@@ -735,21 +735,18 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/31 · small
 
-- **Archive hygiene before the next bulk delete**: (1) reclaim, a dataset-scoped destructive `delete`,
-  dry-run by default, refusing while a producer can append; (2) attribution, an L4 outer cell stamps the
-  runs its inner campaign produced; (3) the entry-to-run lookup (which runs an archive entry serves,
-  so a delete names what it breaks; not `pipeline_schema.py::reach_map`, a node's reach).
-  **Rides with:** small-4 (small-3 left it, as its brief said). **Re-test:**
-  `compact-archive inventory`.
-- **A round opens several `RoundContext`s** (small-3's report): `runner/round.py::walk_round` builds one
-  for the draw and one after it, `execute_round` and `post_round` each build a `seat` for the
-  controller, and `settle_owed_outputs` builds `at_prior`. Each has its own `walks`, so a read through
-  one is unseen by the others. Root: one context per round, opened with its draw. **Rides with:**
-  small-4. **Re-test:** `git grep -c "RoundContext(" -- promptpotter/application/runner` (`round.py` 7, `loop.py` 1 at landing 83).
 - **The paper harness tracks no named tree** (small-1's landing): `paper/bbeh-comparison/bbeh_potter_runner.py:1`
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
   harness names the release it runs against, and a fix to it targets that release. **Rides with:** the
   next chain touching `paper/bbeh-comparison/`.
+- **A reclaim that empties a cell file leaves it** (small-4's report): `measurement_archive.py::rewrite_cell_file`
+  writes a 0-byte file, which `keys(ArchiveFile.CELLS)` still lists. Root: `rewrite_pair` has no
+  "delete when empty" outcome. **Rides with:** the next archive chain. **Re-test:** after a reclaim
+  of a dataset's every row, `keys(CELLS)` names none of its files.
+- **The reclaim control takes its dataset as free text** (small-4's report):
+  `webapp/components/account/ArchiveCompactionControl.tsx` has no served list of the account's
+  datasets to pick from. Root: no `ReadKind` lists an account's datasets. **Rides with:** the next
+  chain in `application/read_params.py`. **Re-test:** the control offers only datasets the archive holds.
 
 ### batch/31 · box
 

@@ -1,15 +1,26 @@
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Callable
+from typing import Any, get_args
 
 from promptpotter.application.commands.dispatcher import Applier, Dispatched, Replaying, replays
 from promptpotter.application.maintenance.archive_maintenance import (
     ArchiveReport,
     compact_measurement_archive,
     purge_cold_store,
+    reclaim_dataset,
     restore_measurement_archive,
 )
-from promptpotter.domain.command_kinds import CommandKind, CompactArchivePayload
+from promptpotter.domain.command_kinds import ArchiveMode, CommandKind, CompactArchivePayload
+
+#: Each mode's pass, every one called alike: the stores, the dataset it is scoped to, and `apply`.
+_PASS: dict[ArchiveMode, Callable[..., ArchiveReport]] = {
+    "compact": compact_measurement_archive,
+    "restore": restore_measurement_archive,
+    "purge-cold": purge_cold_store,
+    "reclaim": reclaim_dataset,
+}
+assert set(_PASS) == set(get_args(ArchiveMode.__value__)), "an archive mode runs no pass"
 
 
 async def compact_archive(dispatched: Dispatched[CompactArchivePayload]) -> Applier[ArchiveReport]:
@@ -17,18 +28,7 @@ async def compact_archive(dispatched: Dispatched[CompactArchivePayload]) -> Appl
     stores, payload = dispatched.dispatcher.stores, dispatched.payload
 
     async def _apply() -> ArchiveReport:
-        match payload.mode:
-            case "compact":
-                report = compact_measurement_archive(
-                    stores, dataset=payload.dataset, apply=payload.apply
-                )
-            case "restore":
-                report = restore_measurement_archive(
-                    stores, dataset=payload.dataset, apply=payload.apply
-                )
-            case "purge-cold":
-                report = purge_cold_store(stores, dataset=payload.dataset, apply=payload.apply)
-        return report
+        return _PASS[payload.mode](stores, dataset=payload.dataset, apply=payload.apply)
 
     return Applier(_apply)
 

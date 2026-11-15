@@ -4688,6 +4688,9 @@ export interface ArchiveReport {
   conflicts: number;
   purged: number;
   rows_skipped_by_role: unknown;
+  /** The runs a reclaim's delete breaks: each that filed an answer it deletes, or
+   * measured one as an L4 inner campaign. */
+  breaks: string[];
   applied: boolean;
   /** What the counts mean where they are not a plain success — the refusal while a
    * cycle can still append, files refused, answers already purged — worded
@@ -4793,7 +4796,7 @@ export interface CleanupEmptyCyclesPayload {
  * preview is what the operator consents on, so the write has to be asked for
  * rather than defaulted into. */
 export interface CompactArchivePayload {
-  mode: 'compact' | 'restore' | 'purge-cold';
+  mode: 'compact' | 'restore' | 'purge-cold' | 'reclaim';
   dataset: string | null;
   apply: boolean;
 }
@@ -5497,7 +5500,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "ef953ba1b1d4ccc0";
+export const SERVED_CONTRACT = "5bd7536a43f8e866";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5542,7 +5545,7 @@ export type LifecycleStatus = 'active' | 'archived' | 'deleted';
 export type HitSpread = 'unmeasured' | 'never' | 'partly' | 'always';
 
 // promptpotter.domain.command_kinds::ArchiveMode
-export type ArchiveMode = 'compact' | 'restore' | 'purge-cold';
+export type ArchiveMode = 'compact' | 'restore' | 'purge-cold' | 'reclaim';
 
 // promptpotter.domain.cycle_index::StatusMark
 export type StatusMark = 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'success' | 'halted' | 'failed' | 'archived' | 'unknown';
@@ -5982,6 +5985,7 @@ export const ARCHIVE_MODE_INFO: Record<ArchiveMode, ArchiveModeInfo> = {
   "compact": { label: "Compact", sentence: "Moves the fields nothing reads out of candidate runs into a compressed store beside them. Origin and round-parent runs are never touched — they serve almost every cache replay." },
   "restore": { label: "Restore", sentence: "Puts every moved field back and drops the compressed copy." },
   "purge-cold": { label: "Purge", sentence: "Deletes the compressed copy for good. The rows cost real money and hours to measure again, and nothing puts them back." },
+  "reclaim": { label: "Reclaim", sentence: "Deletes every answer one dataset measured, and names the runs that lose them. Nothing puts them back." },
 };
 
 // Mirror of domain/connector.py::BACKEND_REACHABILITY_INFO, in display order.
@@ -6326,7 +6330,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [HARD_SAMPLE_ORDER_LABELS, ["info_gain", "difficulty"]],
   [HEATMAP_SCOPE_LABELS, ["cycle", "campaign", "dataset"]],
   [HIT_SPREAD_LABELS, ["unmeasured", "never", "partly", "always"]],
-  [ARCHIVE_MODE_INFO, ["compact", "restore", "purge-cold"]],
+  [ARCHIVE_MODE_INFO, ["compact", "restore", "purge-cold", "reclaim"]],
   [BACKEND_REACHABILITY_INFO, ["live", "unreachable", "missing_extra"]],
   [STATUS_MARK_INFO, ["running", "scoring", "starting", "queued", "gate", "paused", "detached", "success", "halted", "failed", "archived", "unknown"]],
   [PRECISION_VERDICT_ADVICE, ["noise", "spread"]],

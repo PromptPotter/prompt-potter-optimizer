@@ -196,6 +196,7 @@ class _ArchiveRecorder:
             ((cell.facts, self.provenance(cell.facts)) for cell in cells),
             role=self.kind,
             created_at=utcnow_iso(),
+            filed_by=self.session.hop,
         )
         return [
             cell.filed(replace(cell.facts, answer=answer))

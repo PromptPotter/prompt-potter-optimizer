@@ -382,7 +382,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
         )
     # Raises `CellUnscoreableError` on every other no-evidence shape, which `measure_sample` resolves.
     scored = compute_outer_proxies(result)
-    facts = inner_cell_facts(result)
+    facts = inner_cell_facts(result).model_copy(update={"campaign_id": cell.campaign_id})
     delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"
     held = "floored" if scored.held_out_lift is None else f"B{scored.held_out_lift:+.3f}"
 

@@ -523,7 +523,8 @@
         "enum": [
           "compact",
           "restore",
-          "purge-cold"
+          "purge-cold",
+          "reclaim"
         ],
         "type": "string"
       },
@@ -540,6 +541,15 @@
             "default": 0,
             "title": "Archive Writers",
             "type": "integer"
+          },
+          "breaks": {
+            "default": [],
+            "description": "The runs a reclaim's delete breaks: each that filed an answer it deletes, or measured one as an L4 inner campaign.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Breaks",
+            "type": "array"
           },
           "bytes_after": {
             "default": 0,

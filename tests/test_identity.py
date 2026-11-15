@@ -4295,7 +4295,7 @@ def _view(
     an L4 outer's under *cells*, which run each inner campaign's manifest."""
     monkeypatch.setattr(node_context, "inner_cells", lambda: cells)
     seated = seat(stores, schema=schema, framing=framing, origin=(parent, lambda _s: sheet([])))
-    run_init(seated.cycle)
+    run_init(RoundContext(seated.cycle, 0))
     return PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
 
 
@@ -4322,7 +4322,7 @@ def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
     hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(80)]
     monkeypatch.setattr(node_context, "inner_cells", lambda: None)
     seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
-    run_init(seated.cycle)
+    run_init(RoundContext(seated.cycle, 0))
     parent = ArmKey(prompted(instruction="parent").id)
     latest = round_result(
         1,

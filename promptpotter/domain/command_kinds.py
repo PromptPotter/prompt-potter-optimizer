@@ -881,7 +881,7 @@ class BankSnippetPayload(CommandPayload, kind=CommandKind.BANK_SNIPPET):
     )
 
 
-type ArchiveMode = Literal["compact", "restore", "purge-cold"]
+type ArchiveMode = Literal["compact", "restore", "purge-cold", "reclaim"]
 
 
 class ArchiveModeInfo(NamedTuple):
@@ -905,6 +905,11 @@ ARCHIVE_MODE_INFO: Worded[ArchiveMode, ArchiveModeInfo] = Worded(
             "Purge",
             "Deletes the compressed copy for good. The rows cost real money and hours to measure "
             "again, and nothing puts them back.",
+        ),
+        "reclaim": ArchiveModeInfo(
+            "Reclaim",
+            "Deletes every answer one dataset measured, and names the runs that lose them. "
+            "Nothing puts them back.",
         ),
     }
 )

@@ -958,12 +958,11 @@ OWED_WRITE_ATTEMPTS = 3
 """Each is a whole call: the client's backpressure and 5xx retries sit INSIDE one attempt and do not count against this."""
 
 
-def run_init(cycle: Cycle) -> None:
+def run_init(ctx: RoundContext) -> None:
     """Once per cycle, before round 0's adapters: a cycle whose origin closed already holds what it wrote."""
-    if cycle.origin_round.optimizer_state is not None:
+    if ctx.cycle.origin_round.optimizer_state is not None:
         return
-    ctx = RoundContext(cycle=cycle, round_num=0)
-    for initializer in cycle.optimizer.plan.initializers:
+    for initializer in ctx.cycle.optimizer.plan.initializers:
         initializer.initialize(NodeContext(ctx, initializer))
 
 
@@ -1224,6 +1223,7 @@ class ControllerAct(NamedTuple):
 
 
 class RoundWalked(NamedTuple):
+    ctx: RoundContext
     result: RoundResult
     cut: StopReason | None
     act: ControllerAct | None
@@ -1320,8 +1320,8 @@ async def walk_round(cycle: Cycle, round_num: int) -> tuple[RoundContext, list[S
     cycle.difficulty.open_round(cycle.rounds, reach)
     pin_inner_ruler(cycle.difficulty.stamp.reach)
     sampler = cycle.optimizer.plan.sampler
-    drawn = RoundContext(cycle, round_num, sampler.draw(NodeContext(ctx, sampler), pool))
-    return drawn, pool, await _proposed(drawn)
+    ctx.drew = sampler.draw(NodeContext(ctx, sampler), pool)
+    return ctx, pool, await _proposed(ctx)
 
 
 async def execute_round(
@@ -1345,16 +1345,17 @@ async def execute_round(
         ctx, result, measured, population, pool, is_final_round=is_final_round
     )
     act = None
-    if (controller := plan.controller) is not None:
-        seat = RoundContext(cycle=cycle, round_num=round_num)
-        if (rule := controller.bank_round(NodeContext(seat, controller), result)) is not None:
-            act = ControllerAct(controller, rule)
-    return RoundWalked(result, measured.cut, act)
+    if (controller := plan.controller) is not None and (
+        rule := controller.bank_round(NodeContext(ctx, controller), result)
+    ) is not None:
+        act = ControllerAct(controller, rule)
+    return RoundWalked(ctx, result, measured.cut, act)
 
 
-async def emit_origin_round(cycle: Cycle, session: Session) -> None:
+async def emit_origin_round(ctx: RoundContext, session: Session) -> None:
+    cycle = ctx.cycle
     if cycle.origin_round.results:
-        await _adapt(RoundContext(cycle=cycle, round_num=0), cycle.optimizer.plan)
+        await _adapt(ctx, cycle.optimizer.plan)
     round_result = cycle.origin_round
 
     # The origin's cells fold after the election that adopted it, and before the close.
@@ -1401,11 +1402,11 @@ async def close_round(
 async def post_round(
     cycle: Cycle,
     walked: RoundWalked,
-    round_num: int,
     session: Session,
     *,
     is_final_round: bool = False,
 ) -> None:
+    round_num = walked.ctx.round_num
     round_result = await close_round(cycle, walked.result, round_num, session)
 
     # Before the stop below, so a perfect round that also ends the campaign still gets its check.
@@ -1424,5 +1425,4 @@ async def post_round(
     if (stop := standing_tripped(cycle.standing, cycle.config.optimization)) is not None:
         raise StopLoop(stop)
     if (act := walked.act) is not None and not is_final_round:
-        seat = RoundContext(cycle=cycle, round_num=round_num)
-        await act.controller.act(NodeContext(seat, act.controller), act.rule)
+        await act.controller.act(NodeContext(walked.ctx, act.controller), act.rule)

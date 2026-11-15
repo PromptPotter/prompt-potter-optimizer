@@ -86,9 +86,15 @@ BASELINE = {
     # `LineIndex.of` takes none. faults-3 2 (+35): a periodic step's last pass on disk, read by every
     # door's machine-status (the in-process global reached no CLI), and each cycle the reaper
     # cannot read named in it. faults-3 3 (+1): the CLI words `unloadable`.
-    "package_lines": 110907,
+    # small-4 (+100): the archive's three new facts, each its substance: an answer's filing run and
+    # an L4 cell's inner campaign, the lookup `inventory` names per entry, and the `reclaim` mode
+    # with its plan (and the browser's dataset scope it needs), net of one door for every rewriting
+    # pass and one mode table; one RoundContext per round (0).
+    "package_lines": 111007,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
-    "model_copy_updates": 155,
+    # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
+    # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
+    "model_copy_updates": 156,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.

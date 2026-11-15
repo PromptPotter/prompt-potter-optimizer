@@ -501,13 +501,13 @@ class SliceMap:
         self._held = dict(banked.slices)
 
 
-@dataclass(frozen=True)
+@dataclass
 class RoundContext:
     """A member never sees it: each is handed the ``NodeContext`` the bench builds over it."""
 
     cycle: Cycle
     round_num: int
-    # The round's draw where its sampler drew; a context before the draw or off a round holds none.
+    # The round's one context holds its draw, set where its sampler drew; none before it or off a round.
     drew: RoundSamples | None = None
     # Each arm the round walked, its panel walk and every read of it as a reference, whoever asked.
     walks: dict[ArmKey, ArmWalk] = field(default_factory=dict, init=False)

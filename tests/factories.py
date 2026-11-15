@@ -495,6 +495,10 @@ def archive_row(query: str, *, truth: str = "g", **wire: Any) -> MeasuredCell:
     )
 
 
+#: The run `filed` stamps on what it files, where a fact names no filer of its own.
+FILER = CycleHop(campaign_id="filer", cycle_id="filer")
+
+
 def filed(
     archive: MeasurementArchive,
     cells: Iterable[MeasuredCell],
@@ -503,6 +507,7 @@ def filed(
     grade: str = "A",
     role: MeasurementRole = MeasurementRole.PANEL,
     created_at: str = "",
+    filed_by: CycleHop = FILER,
 ) -> list[WalkedCell]:
     """Each cell filed as a fresh answer under *under*, as a walk files what it bought."""
     held = list(cells)
@@ -511,6 +516,7 @@ def filed(
         [(cell, grade) for cell in held],
         role=role,
         created_at=created_at,
+        filed_by=filed_by,
     )
     return [(cell.sample_key, ref, False) for cell, ref in zip(held, refs, strict=True)]
 
@@ -794,7 +800,7 @@ async def launched_round(
             cycle, _ = await open_cycle(prep, session=running, mode=RunMode())
             close_init(cycle)
             # Round 0's walk, as its door takes it; its close is the round's caller's.
-            await walk_round_zero(cycle, prep.dataset)
+            await walk_round_zero(RoundContext(cycle, 0), prep.dataset)
     finally:
         observers.release()
     ctx = RoundContext(cycle, round_num)

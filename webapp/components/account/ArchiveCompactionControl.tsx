@@ -4,24 +4,36 @@ import { type ArchiveReport, ARCHIVE_MODE_INFO, type ArchiveMode as Mode } from 
 import { wordRows } from "@/lib/api/words";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { fmtBytes } from "@/lib/format";
-import { Button, FailureLine, Said, SegmentedControl, type Segment } from "@/components/ui";
+import {
+  Button,
+  CommitInput,
+  FailureLine,
+  Said,
+  SegmentedControl,
+  type Segment,
+} from "@/components/ui";
 
 const MODES: readonly Segment<Mode>[] = wordRows(ARCHIVE_MODE_INFO).map(([value, info]) => ({
   value,
   label: info.label,
 }));
 
+// The modes whose apply deletes for good.
+const DELETES: ReadonlySet<Mode> = new Set<Mode>(["purge-cold", "reclaim"]);
+
 export function ArchiveCompactionControl() {
   const [mode, setMode] = useState<Mode>("compact");
+  const [dataset, setDataset] = useState("");
   const [preview, setPreview] = useState<ArchiveReport | null>(null);
   const [done, setDone] = useState<ArchiveReport | null>(null);
   const dry = useCommand<Mode>("archive-preview");
   const commit = useCommand<Mode>("archive-apply");
   const busy = dry.pending !== null || commit.pending !== null;
 
-  // A preview must not stand as consent for another mode.
-  function pick(next: Mode) {
+  // A preview must not stand as consent for another mode or another dataset.
+  function pick(next: Mode, scope: string = dataset) {
     setMode(next);
+    setDataset(scope);
     setPreview(null);
     setDone(null);
     dry.clear();
@@ -30,7 +42,8 @@ export function ArchiveCompactionControl() {
 
   async function run(apply: boolean) {
     const slot = apply ? commit : dry;
-    const r = await slot.run(mode, () => commands["compact-archive"]({ mode, apply }));
+    const scope = dataset.trim() === "" ? {} : { dataset: dataset.trim() };
+    const r = await slot.run(mode, () => commands["compact-archive"]({ mode, apply, ...scope }));
     if (!r.ok) {
       // Each run swaps atomically but the batch does not, so a failed apply voids its preview.
       if (apply) setPreview(null);
@@ -56,17 +69,23 @@ export function ArchiveCompactionControl() {
         ariaLabel="Archive maintenance mode"
       />
       <p className="account-muted wsmaint-blurb">{ARCHIVE_MODE_INFO[mode].sentence}</p>
+      <CommitInput
+        value={dataset}
+        onCommit={(scope) => pick(mode, scope)}
+        placeholder="Dataset (blank: every dataset)"
+        aria-label="Dataset to scope the pass to"
+      />
 
       <div className="wsmaint-actions">
         <Button onClick={() => void run(false)} disabled={busy}>
           {busy && !preview ? "Checking…" : "Preview"}
         </Button>
         <Button
-          variant={mode === "purge-cold" ? "danger" : "primary"}
+          variant={DELETES.has(mode) ? "danger" : "primary"}
           onClick={() => void run(true)}
           disabled={busy || preview === null || blocked || preview.files_touched === 0}
         >
-          {mode === "purge-cold" ? "Delete permanently" : "Apply"}
+          {DELETES.has(mode) ? "Delete permanently" : "Apply"}
         </Button>
       </div>
 
@@ -106,6 +125,12 @@ export function ArchiveCompactionControl() {
             <dt>Answers</dt>
             <dd>{report.rows_moved}</dd>
           </div>
+          {report.breaks.length > 0 && (
+            <div>
+              <dt>{done ? "Broke" : "Would break"}</dt>
+              <dd>{report.breaks.join(", ")}</dd>
+            </div>
+          )}
         </dl>
       )}
 

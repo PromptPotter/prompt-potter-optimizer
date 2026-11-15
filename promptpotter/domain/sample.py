@@ -6,6 +6,7 @@ from typing import Any
 
 from pydantic import ConfigDict, JsonValue, PrivateAttr
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.scoring import MeasuredCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -157,7 +158,8 @@ def _stamp(row: Mapping[str, object], key: str) -> str | None:
 
 @dataclass(frozen=True, slots=True)
 class FiledAnswer:
-    """Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it."""
+    """Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it,
+    ``filed_by`` the run that filed it, ``None`` on an answer filed before the stamp."""
 
     cell: MeasuredCell
     config_key: str
@@ -165,11 +167,13 @@ class FiledAnswer:
     role: MeasurementRole
     provenance: str
     created_at: str
+    filed_by: CycleHop | None = None
     compaction: str | None = None
     purged: str | None = None
 
     @classmethod
     def from_wire(cls, row: Mapping[str, object]) -> FiledAnswer:
+        filed_by = row.get("filed_by")
         return cls(
             MeasuredCell.from_wire(row),
             config_key=_stated(row, "config_key"),
@@ -177,6 +181,7 @@ class FiledAnswer:
             role=MeasurementRole(_stated(row, "role")),
             provenance=_stated(row, "provenance"),
             created_at=_stated(row, "created_at"),
+            filed_by=None if filed_by is None else CycleHop.model_validate(filed_by),
             compaction=_stamp(row, "compaction"),
             purged=_stamp(row, "purged"),
         )
@@ -190,6 +195,8 @@ class FiledAnswer:
             "provenance": self.provenance,
             "created_at": self.created_at,
         }
+        if self.filed_by is not None:
+            out["filed_by"] = self.filed_by.model_dump()
         if self.compaction is not None:
             out["compaction"] = self.compaction
         if self.purged is not None:

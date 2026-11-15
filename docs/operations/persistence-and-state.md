@@ -36,7 +36,7 @@ A step's offset is the line index in its cycle's own ledger. A fork is stored as
 
 `python -m promptpotter <verb> --help`. What `--help` does not say:
 
-- **`compact-archive` is the only verb that can destroy a measurement**; its `purge-cold --apply` is irreversible and `origin`/`parent` answers are never eligible.
+- **`compact-archive` is the only verb that can destroy a measurement**; its `purge-cold --apply` and `reclaim --apply` (one dataset's answers, whole, its plan naming the runs it breaks) are irreversible, and `origin`/`parent` answers are never eligible for a compaction.
 - `reset`, `land-data`, `close-admission` are the data-root verbs — [`../decisions.md`](../decisions.md) § 0011.
 - Nothing the loop decides reads the noise floor (`CampaignConfig.origin_replicates`). A held-out pass holds a machine slot and an account reservation, refused `409 cycle_busy` / `409 machine_busy` rather than queued.
 

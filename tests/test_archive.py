@@ -9,6 +9,7 @@ replay served to the wrong content, a paid row dropped, a fork that inherits the
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import contextvars
 import dataclasses
 import json
@@ -17,7 +18,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, NamedTuple
@@ -60,7 +61,7 @@ from factories import (
     workspace,
 )
 
-from promptpotter.application.bench.cycle import Cycle, ReadArm
+from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
@@ -85,6 +86,7 @@ from promptpotter.application.jobs.launcher.launch import Admitted, Inline
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import (
     compact_measurement_archive,
+    reclaim_dataset,
     reindex_measurement_archive,
     restore_measurement_archive,
 )
@@ -437,11 +439,10 @@ sys.stdin.read()
 """
 
 
-def test_a_reindex_beside_a_run_in_another_process_refuses_naming_its_cycle(
-    built_stores: Stores,
-) -> None:
-    """A row the run lands mid-rewrite lands in no index: its writer is asked, never raced."""
-    cycle_dir = built_stores.campaigns.cycle_dir(CycleHop(campaign_id="camp", cycle_id="cyc"))
+@contextlib.contextmanager
+def _a_run_appending(stores: Stores) -> Iterator[None]:
+    """A cycle `camp/cyc` whose producer lock another process holds for the block."""
+    cycle_dir = stores.campaigns.cycle_dir(CycleHop(campaign_id="camp", cycle_id="cyc"))
     layout = CycleLayout(cycle_dir)
     layout.ledger.parent.mkdir(parents=True)
     layout.ledger.touch()
@@ -454,14 +455,44 @@ def test_a_reindex_beside_a_run_in_another_process_refuses_naming_its_cycle(
     assert run.stdin is not None and run.stdout is not None
     try:
         assert run.stdout.readline().strip() == "held"
-        with pytest.raises(ConflictError) as refused:
-            reindex_measurement_archive(built_stores)
-        assert refused.value.code == "archive_writers"
-        assert "cyc, held by its run" in str(refused.value), "the refusal named no writer"
+        yield
     finally:
         run.stdin.close()
         run.wait()
+
+
+def test_a_reindex_beside_a_run_in_another_process_refuses_naming_its_cycle(
+    built_stores: Stores,
+) -> None:
+    """A row the run lands mid-rewrite lands in no index: its writer is asked, never raced."""
+    with _a_run_appending(built_stores), pytest.raises(ConflictError) as refused:
+        reindex_measurement_archive(built_stores)
+    assert refused.value.code == "archive_writers"
+    assert "cyc, held by its run" in str(refused.value), "the refusal named no writer"
     assert reindex_measurement_archive(built_stores, apply=True) == {"indexed": 0, "undescribed": 0}
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_reclaim_deletes_nothing_while_a_run_appends_and_only_what_its_plan_named_after(
+    built_stores: Stores, compacted_rows: _Compacted
+) -> None:
+    """Paid answers deleted under a landing row, or past the plan consented to, are gone for good.
+    One journey: the plan is what the apply is checked against."""
+    archive, whole = built_stores.archive, compacted_rows.whole
+    before = archive.population(whole)
+    with _a_run_appending(built_stores):
+        for apply in (False, True):
+            refused = reclaim_dataset(built_stores, dataset="compacted", apply=apply)
+            assert (refused.archive_writers, refused.files_touched) == (1, 0)
+            assert archive.population(whole) == before, "a reclaim deleted beside a live producer"
+    plan = reclaim_dataset(built_stores, dataset="compacted")
+    assert plan.breaks == ("filer/filer",), "the plan named no run its delete breaks"
+    assert (plan.rows_moved, archive.population(whole)) == (2, before), "a dry run deleted"
+    done = reclaim_dataset(built_stores, dataset="compacted", apply=True)
+    assert (done.files_touched, done.rows_moved) == (plan.files_touched, plan.rows_moved)
+    assert (
+        archive.population(whole) == [] and archive.list_all(dataset_hash=whole.dataset_hash) == []
+    )
 
 
 # Each step reads on from where the feed's last advance left it.
@@ -2409,7 +2440,7 @@ def repair(built_stores: Stores) -> _Repair:
         )
         cycle, ledger = running.cycle, cycle_ledger(running.cycle)
         rescope(spawn=inner_spawn_of(cycle.session), ledger=ledger)
-        run_init(cycle)
+        run_init(RoundContext(cycle, 0))
         # Round 1's arm ran to its end on cell 3 and came back with no measurement.
         hole = measurement(
             3, None, sample_key=repair_bank[3].key, error="boom", error_category="transient"

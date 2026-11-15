@@ -123,12 +123,17 @@ class ArchiveReport(StrictModel):
     archive_writers: int = 0
     conflicts: int = 0
     purged: int = 0
-    """Answers whose moved payload is gone for good.
+    """Answers whose payload is gone for good: a purged cold payload, or a reclaimed answer whole.
 
     Counted apart from the answers a pass left alone: "this was measured and we dropped its
     payload deliberately" and "this was never compacted" are different facts, and collapsing them
     is how a purge starts reading as if it never happened."""
     rows_skipped_by_role: Mapping[str, int] = Field(default_factory=dict)
+    breaks: tuple[str, ...] = Field(
+        default=(),
+        description="The runs a reclaim's delete breaks: each that filed an answer it deletes, or "
+        "measured one as an L4 inner campaign.",
+    )
     applied: bool = False
     notes: tuple[str, ...] = Field(
         default=(),
@@ -189,6 +194,26 @@ def _age_band(created_at: str, *, now: datetime) -> str:
     return next(band for band, upper in _AGE_BANDS if age_days < upper)
 
 
+_UNSTAMPED = "filed before the stamp, naming no run"
+
+
+def _runs_of(answer: FiledAnswer) -> set[str]:
+    """The runs *answer* serves: the one that filed it, and an L4 outer cell's inner campaign."""
+    hop = answer.filed_by
+    runs = {_UNSTAMPED if hop is None else f"{hop.campaign_id}/{hop.cycle_id}"}
+    if (inner := inner_facts_of(answer.cell.pipeline)) is not None and inner.campaign_id:
+        runs.add(f"inner {inner.campaign_id}")
+    return runs
+
+
+class EntryRuns(StrictModel):
+    """One archive entry, a configuration under a dataset, and the runs its answers serve."""
+
+    config_key: str
+    dataset: str
+    runs: list[str]
+
+
 class InventoryRow(StrictModel):
     """One cut of the archive — a dataset, a pass role, or an age band."""
 
@@ -233,6 +258,7 @@ class ArchiveInventory(StrictModel):
     by_role: list[InventoryRow]
     by_age: list[InventoryRow]
     total: InventoryRow
+    serves: list[EntryRuns]
     orphan_index_rows: int = 0
     """Index rows no answer stands behind.
 
@@ -254,6 +280,10 @@ def _in_band_order(tallies: Mapping[str, _Tally]) -> list[InventoryRow]:
     return [tallies[band].row(band) for band in order if band in tallies]
 
 
+def _label(named: Mapping[str, list[str]], dataset_hash: str) -> str:
+    return " · ".join(named.get(dataset_hash, [dataset_hash]))
+
+
 def inventory_measurement_archive(
     stores: Stores,
     *,
@@ -270,7 +300,7 @@ def inventory_measurement_archive(
     by_role: dict[str, _Tally] = {}
     by_age: dict[str, _Tally] = {}
     total = _Tally()
-    held: set[tuple[str, str]] = set()
+    held: dict[tuple[str, str], set[str]] = {}
 
     for file_key in archive.keys(ArchiveFile.CELLS):
         answers = _parsed(archive.detail_lines(file_key))
@@ -280,11 +310,11 @@ def inventory_measurement_archive(
             if not _in_scope(answer, digest):
                 continue
             configuration = answer.config_key
-            held.add((configuration, answer.dataset_hash))
+            held.setdefault((configuration, answer.dataset_hash), set()).update(_runs_of(answer))
             hot = len(line.encode("utf-8"))
             cold = cold_each if _moved(answer) else 0.0
             for table, key in (
-                (by_dataset, " · ".join(named.get(answer.dataset_hash, [answer.dataset_hash]))),
+                (by_dataset, _label(named, answer.dataset_hash)),
                 (by_role, answer.role.value),
                 (by_age, _age_band(answer.created_at, now=now)),
             ):
@@ -301,6 +331,10 @@ def inventory_measurement_archive(
         by_role=_by_bytes(by_role),
         by_age=_in_band_order(by_age),
         total=total.row(dataset or "all"),
+        serves=[
+            EntryRuns(config_key=config, dataset=_label(named, digest), runs=sorted(runs))
+            for (config, digest), runs in sorted(held.items())
+        ],
         orphan_index_rows=orphans,
         archive_writers=len(archive_writers(stores.shared_root)),
     )
@@ -331,21 +365,36 @@ class _FileOutcome:
     change: _Swept | _Purged | _Conflict | None
     skipped: Mapping[str, int] = field(default_factory=dict)
     unrestorable: int = 0
+    breaks: frozenset[str] = frozenset()
 
 
-_Transform = Callable[[list[str], list[MovedFields]], tuple[CellRewrite | None, _FileOutcome]]
+# A cell or cold file's lines and payload, and the dataset hash it is scoped to, keyword.
+_Transform = Callable[..., tuple[CellRewrite | None, _FileOutcome]]
 
 
 def _each_file(
-    stores: Stores, file_keys: Iterable[str], verb: str, transform: _Transform, *, apply: bool
+    stores: Stores,
+    kind: ArchiveFile,
+    verb: str,
+    transform: _Transform,
+    *,
+    dataset: str | None,
+    apply: bool,
 ) -> ArchiveReport:
+    """Every rewriting pass's door: refused on a home not the caller's, and while a cycle can still
+    append; each file of *kind* planned, and written only where *apply*."""
+    _refuse_unowned_home(stores)
+    if writers := archive_writers(stores.shared_root):
+        return _blocked(writers)
+    scoped = partial(transform, dataset_hash=_scope(stores, dataset))
+
     def gated(lines: list[str], cold: list[MovedFields]) -> tuple[CellRewrite | None, _FileOutcome]:
-        rewrite, outcome = transform(lines, cold)
+        rewrite, outcome = scoped(lines, cold)
         return (rewrite if apply else None), outcome
 
     outcomes: list[_FileOutcome] = []
     unread: list[str] = []
-    for file_key in file_keys:
+    for file_key in stores.archive.keys(kind):
         try:
             outcomes.append(stores.archive.rewrite_cell_file(file_key, gated))
         except Exception as fault:  # noqa: BLE001 -- a file it cannot rewrite is the report's note
@@ -356,8 +405,10 @@ def _each_file(
 def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool, unread: list[str]) -> ArchiveReport:
     touched = rows = before = after = cold = conflicts = purged = unrestorable = 0
     skipped: Counter[str] = Counter()
+    breaks: set[str] = set()
     for outcome in outcomes:
         skipped.update(outcome.skipped)
+        breaks |= outcome.breaks
         unrestorable += outcome.unrestorable
         match outcome.change:
             case _Swept() as moved:
@@ -385,6 +436,7 @@ def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool, unread: list[str
         conflicts=conflicts,
         purged=purged + unrestorable,
         rows_skipped_by_role=dict(skipped),
+        breaks=tuple(sorted(breaks)),
         applied=applied,
         notes=(*_notes(conflicts=conflicts, unrestorable=unrestorable), *unread),
     )
@@ -444,13 +496,8 @@ def compact_measurement_archive(
     dataset: str | None = None,
     apply: bool = False,
 ) -> ArchiveReport:
-    _refuse_unowned_home(stores)
-    writers = archive_writers(stores.shared_root)
-    if writers:
-        return _blocked(writers)
-    transform = partial(_compacted, dataset_hash=_scope(stores, dataset), stamped_at=utcnow_iso())
-    cells = stores.archive.keys(ArchiveFile.CELLS)
-    return _each_file(stores, cells, "compact", transform, apply=apply)
+    transform = partial(_compacted, stamped_at=utcnow_iso())
+    return _each_file(stores, ArchiveFile.CELLS, "compact", transform, dataset=dataset, apply=apply)
 
 
 _Split = tuple[dict[str, MovedFields], list[MovedFields]]
@@ -499,13 +546,7 @@ def restore_measurement_archive(
     dataset: str | None = None,
     apply: bool = False,
 ) -> ArchiveReport:
-    _refuse_unowned_home(stores)
-    writers = archive_writers(stores.shared_root)
-    if writers:
-        return _blocked(writers)
-    transform = partial(_restored, dataset_hash=_scope(stores, dataset))
-    cells = stores.archive.keys(ArchiveFile.CELLS)
-    return _each_file(stores, cells, "restore", transform, apply=apply)
+    return _each_file(stores, ArchiveFile.CELLS, "restore", _restored, dataset=dataset, apply=apply)
 
 
 def _purged(
@@ -532,13 +573,40 @@ def purge_cold_store(
     dataset: str | None = None,
     apply: bool = False,
 ) -> ArchiveReport:
-    _refuse_unowned_home(stores)
-    writers = archive_writers(stores.shared_root)
-    if writers:
-        return _blocked(writers)
-    transform = partial(_purged, dataset_hash=_scope(stores, dataset), stamped_at=utcnow_iso())
-    cold = stores.archive.keys(ArchiveFile.COLD)
-    return _each_file(stores, cold, "purge", transform, apply=apply)
+    transform = partial(_purged, stamped_at=utcnow_iso())
+    return _each_file(stores, ArchiveFile.COLD, "purge", transform, dataset=dataset, apply=apply)
+
+
+def _reclaimed(
+    lines: list[str], cold: list[MovedFields], *, dataset_hash: str | None
+) -> tuple[CellRewrite | None, _FileOutcome]:
+    answers = _parsed(lines)
+    gone = [a for _, a in answers if _in_scope(a, dataset_hash)]
+    if not gone:
+        return None, _FileOutcome(None)
+    kept = [line for line, a in answers if not _in_scope(a, dataset_hash)]
+    deleted = {a.answer for a in gone}
+    rest = [moved for moved in cold if moved.answer not in deleted]
+    freed = _size(lines) - _size(kept) + cold_size(cold) - cold_size(rest)
+    breaks = frozenset().union(*map(_runs_of, gone))
+    return CellRewrite(kept, rest), _FileOutcome(_Purged(len(gone), freed), breaks=breaks)
+
+
+def reclaim_dataset(stores: Stores, *, dataset: str | None, apply: bool = False) -> ArchiveReport:
+    """Deletes every answer *dataset* measured, hot and cold, then the index rows left standing on
+    nothing; its plan names the runs the delete breaks."""
+    if dataset is None:
+        raise PayloadInvalidError(
+            "A reclaim deletes ONE dataset's answers, and this one is scoped to none: name the "
+            "dataset it deletes.",
+            code="reclaim_names_no_dataset",
+        )
+    report = _each_file(
+        stores, ArchiveFile.CELLS, "reclaim", _reclaimed, dataset=dataset, apply=apply
+    )
+    if apply and not report.archive_writers:
+        stores.archive.reindex(apply=True)
+    return report
 
 
 def reindex_measurement_archive(stores: Stores, *, apply: bool = False) -> dict[str, int]:

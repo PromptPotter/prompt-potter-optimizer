@@ -1376,7 +1376,7 @@ def _peer_cycle(
             spawn=inner_spawn_of(cycle.session),
             determinism=cycle.config.optimization.determinism,
         ):
-            run_init(cycle)
+            run_init(RoundContext(cycle, 0))
             with scoped(book=spend_book() if book is None else book):
                 yield cycle, ledger
 
@@ -1767,7 +1767,7 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
                     f"{case}: an arm was crowned on a holed panel"
                 )
                 return
-            closed, cut, _ = asyncio.run(cut_walk)
+            _, closed, cut, _ = asyncio.run(cut_walk)
             assert cut is StopReason.SPEND_BUDGET, f"{case}: the round names its cut"
             rows = {key: closed.rows(key) for key in closed.proposed}
             assert sum(len(closed.rows(key)) for key in closed.arms) == (
@@ -1981,7 +1981,7 @@ def test_one_round_composes_a_peers_crossover_and_selector_with_potters_race(
     ):
         offline.llm.says = crossover_says
         assert not cycle.population
-        closed, cut, _ = asyncio.run(execute_round(cycle, 1))
+        _, closed, cut, _ = asyncio.run(execute_round(cycle, 1))
     assert cut is None
     assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
         "a crossover saw one parent"
@@ -2970,7 +2970,7 @@ def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
                     )
                     await submit("arms-at-the-hold")
 
-                (held_round, held_cut, _), _ = await asyncio.gather(
+                (_, held_round, held_cut, _), _ = await asyncio.gather(
                     execute_round(cycle, 1), answer()
                 )
                 assert held_cut is None
@@ -4268,7 +4268,7 @@ def test_l2s_box_banks_its_parents_fitness_in_its_scorers_unit(
     monkeypatch.setattr(node_context, "inner_cells", lambda: None)
     hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(40)]
     seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
-    run_init(seated.cycle)
+    run_init(RoundContext(seated.cycle, 0))
     l2: Any = NODE_MEMBERS.get("l2_context")
     fire = Fire(cause="l1_patience", ask=None, best=_high_water(0.9, [], 0.1))
     said = l2.enter_act(NodeContext(seated, l2), fire).facts["parent fitness"]

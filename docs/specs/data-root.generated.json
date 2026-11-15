@@ -118,6 +118,26 @@
       ],
       "shape": {
         "$defs": {
+          "CycleHop": {
+            "additionalProperties": false,
+            "description": "One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone.",
+            "properties": {
+              "campaign_id": {
+                "title": "Campaign Id",
+                "type": "string"
+              },
+              "cycle_id": {
+                "title": "Cycle Id",
+                "type": "string"
+              }
+            },
+            "required": [
+              "campaign_id",
+              "cycle_id"
+            ],
+            "title": "CycleHop",
+            "type": "object"
+          },
           "Diagnostics": {
             "properties": {
               "step_statuses": {
@@ -781,7 +801,7 @@
             "type": "object"
           }
         },
-        "description": "Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it.",
+        "description": "Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it,\n``filed_by`` the run that filed it, ``None`` on an answer filed before the stamp.",
         "properties": {
           "cell": {
             "$ref": "#/$defs/MeasuredCell"
@@ -809,6 +829,17 @@
           "dataset_hash": {
             "title": "Dataset Hash",
             "type": "string"
+          },
+          "filed_by": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/CycleHop"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
           },
           "provenance": {
             "title": "Provenance",

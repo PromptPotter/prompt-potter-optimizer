@@ -241,9 +241,13 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   before), a periodic step's last pass is a file every door's machine-status reads (the in-process
   global reached no CLI), the reaper names each cycle it cannot read, and the CLI words
   `unloadable`. Every leg UNMOVED, digests unmoved; the landing key moved on the new row, no wipe.
-- **then:** addr-2 and small-4 (cloud, in flight); tests-w on small-4's tip; the feed's per-subject
-  version, the lineage fold and the inline launch's queued answer; the edge tail. A cold verify is
-  timed live.
+- **landed 92, small-4:** a round opens one `RoundContext`, its draw landing on it, so a read
+  through it is every reader's; an archived answer names the run that filed it (an L4 cell its
+  inner campaign), `compact-archive inventory` names each entry's runs, and `reclaim` deletes one
+  dataset's answers, planning unless `--apply` and refusing while a producer appends. Every leg
+  UNMOVED, digests unmoved; answers filed before it load with the stamp unset.
+- **then:** addr-2 (cloud, in flight); tests-w on small-4's tip; the feed's per-subject version, the
+  lineage fold and the inline launch's queued answer; the edge tail. A cold verify is timed live.
 
 The re-keys end at the behaviour-key switch.
 

@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
 
 from promptpotter.config.paths import MEASUREMENTS_DIR
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, FiledAnswer
@@ -381,6 +382,7 @@ class MeasurementArchive:
         *,
         role: MeasurementRole,
         created_at: str,
+        filed_by: CycleHop,
     ) -> list[str]:
         """Each cell beside its provenance grade; the addresses come back in that order."""
         by_file: dict[str, list[FiledAnswer]] = {}
@@ -397,6 +399,7 @@ class MeasurementArchive:
                     role=role,
                     provenance=provenance,
                     created_at=created_at,
+                    filed_by=filed_by,
                 )
             )
         if not refs:

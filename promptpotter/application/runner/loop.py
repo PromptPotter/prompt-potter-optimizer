@@ -110,7 +110,6 @@ async def run_round_loop(
                 await post_round(
                     cycle,
                     walked,
-                    round_num,
                     session,
                     is_final_round=is_final_round or cut is not None,
                 )
@@ -155,13 +154,14 @@ async def open_origin_round(
     replayed origin closed on the ledger already). ``None`` proceeds into round 1."""
     session = cycle.session
     open_round: int | None = None
+    ctx = RoundContext(cycle=cycle, round_num=0)
     try:
-        run_init(cycle)
+        run_init(ctx)
         if session.state.resumed_from_round > 1:
             await bench_line_origin(cycle)
             return None
         open_round = 0
-        await walk_round_zero(cycle, dataset)
+        await walk_round_zero(ctx, dataset)
         mode = cycle.config.optimization.origin_gate
         gated = (
             not origin_gate_passed(session)
@@ -170,7 +170,7 @@ async def open_origin_round(
         if not gated:
             await bench_line_origin(cycle)
         if cycle.origin_round.at_offset is None:
-            await emit_origin_round(cycle, session)
+            await emit_origin_round(ctx, session)
             replicates = cycle.config.origin_replicates
             if not gated and replicates is not None:
                 origin = cycle.origin_round.head
@@ -193,13 +193,13 @@ async def open_origin_round(
     return None
 
 
-async def walk_round_zero(cycle: Cycle, dataset: list[Sample]) -> None:
+async def walk_round_zero(ctx: RoundContext, dataset: list[Sample]) -> None:
     """Round 0's ONE walk, inside its door and past the divergence check, so a resume it refuses
     pays nothing. An unclosed origin is walked: a seated one on its scoring set, one whose rows
     another launch measured (inherited, or a fork cut at round 0) on its own cells, the archive
     replaying all but the errored. A closed origin no round has read re-walks only what it lost.
     The criterion locks at the walk's close (`origin.py::lock_criterion`)."""
-    session = cycle.session
+    cycle, session = ctx.cycle, ctx.cycle.session
     origin, head = cycle.origin_round, cycle.origin_round.head
     assert origin.election is not None and head is not None, "round 0 ends on its origin"
     rows = origin.rows(origin.election.ended_on)
@@ -215,7 +215,7 @@ async def walk_round_zero(cycle: Cycle, dataset: list[Sample]) -> None:
     cells = cycle.origin_cells(dataset) if unsent else [s for s in pool if s.key in held]
     if not cells:
         return
-    read = await walk_origin(RoundContext(cycle=cycle, round_num=0), cells)
+    read = await walk_origin(ctx, cells)
     if origin.at_offset is None:
         read = lock_criterion(cycle, read)
     cycle.seat_origin(read, origin.optimizer_state)

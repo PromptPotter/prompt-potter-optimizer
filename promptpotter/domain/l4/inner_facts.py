@@ -79,3 +79,8 @@ class InnerCellFacts(FrozenModel):
     tokens: int | None = Field(
         description="Tokens used, cumulative across attempts; reporting only, as `sent_usd`"
     )
+    campaign_id: str | None = Field(
+        default=None,
+        description="The inner campaign that measured the cell, in the outer cycle's sandbox; null "
+        "on a row filed before the stamp",
+    )

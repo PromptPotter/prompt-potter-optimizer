@@ -545,8 +545,10 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "mode carries",
         help="Count what the archive holds (`inventory`), move the fields nothing reads out of "
         "candidate measurement rows into a gzip cold store beside them (`compact`), put them back "
-        "(`restore`), or delete the store (`purge-cold`). `inventory` writes nothing and refuses "
-        "nothing: runs, cells, bytes and replay rate by dataset, run-label family and age, plus "
+        "(`restore`), delete the store (`purge-cold`), or delete one dataset's answers "
+        "(`reclaim`, which needs --dataset and names the runs its delete breaks). `inventory` "
+        "writes nothing and refuses nothing: runs, cells, bytes and replay rate by dataset, "
+        "run-label family and age, each entry's runs, plus "
         "the index rows carrying no detail file, which is what makes every other count an upper "
         "bound. It is what a reclaim is sized against, so it is taken BEFORE a bulk delete — the "
         "delete destroys its own evidence. "
@@ -555,11 +557,12 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "`result_ranking`, `final_ranking` and `total_time`, and stamps the run header with what "
         "left. Only `panel` runs (a candidate's own walk) are touched: `origin` and `parent` "
         "serve the overwhelming majority of cache replays. Refuses while any cycle can still append. Dry-run by default; "
-        "`purge-cold --apply` is the ONE irreversible step. Pure disk work, zero spend.",
+        "`purge-cold --apply` and `reclaim --apply` are the irreversible steps. Pure disk work, "
+        "zero spend.",
         args=(
             Arg(
                 "mode",
-                choices=["inventory", "compact", "restore", "purge-cold"],
+                choices=["inventory", "compact", "restore", "purge-cold", "reclaim"],
                 help="Which step to run.",
             ),
             Arg("--dataset", default=None, help="Scope to one dataset (default: every dataset)."),
