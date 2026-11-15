@@ -604,10 +604,14 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/28 · faults
 
-- **An inline launch queued on a full machine prints nothing, and machine-status `unloadable` has no
-  CLI line** (faults-2b's report): two states a door enters and cannot report. Action: each is a
-  served fact the terminal words, as `unswept` is. **Rides with:** faults 3. **Re-test:** launch
-  inline on a full machine; read `machine-status` with an unloadable job file.
+- **An inline launch queued on a full machine prints nothing** (faults-2b's report; its `unloadable`
+  half closed at faults 3): `launcher/launch.py::Admitted.hand_over` awaits the hold, whose
+  `admit_and_hold` waits in `JobRegistry.await_claim`, before the inline door holds any answer.
+  Action: the inline `Launched` answers before its wait, carrying the queued `LaunchedJob` as the
+  detached one does, and the terminal words it with `machine_notice`'s words (nothing on stdout
+  under `--json`), then awaits the hold; no sink on `Inline`. **Rides with:** the next chain in
+  `application/commands/launching.py`. **Re-test:** `new` inline with `MACHINE_RUN_CAPACITY=0`
+  prints its queue place.
 
 ### batch/29 · xconn
 
@@ -843,6 +847,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
   behaviour key happens to read alike. Action: the world answers the rates URL from the bundled
   table, so every leg's `unrouted` is empty. **Rides with:** tests-w. **Re-test:** no trace's
   `harness.unrouted` names the rates URL.
+- **The suite's peak grew 23 MB toward its tripwire** (landing 90's push gate): `gate.py`'s pytest
+  check peaked at 360 MB against its 375 MB cap, set "38 MB above a measured warm 337 MB". Action:
+  attribute the growth (per-module import weight, what the session home holds) and cut its waste; the cap moves only on a measured peak with no waste left.
+  **Rides with:** tests-w. **Re-test:** the push gate's pytest peaks at or under 345 MB.
 - **A failing test can hang the gate's pytest**: in a cloud run (hubs, 2026-11-14) a full-gate pytest
   sat at 2% CPU for 20 minutes on a failing connector test instead of failing. Not yet reproduced.
   Action: reproduce it, name what the test waits on, and make that wait end with the failure.

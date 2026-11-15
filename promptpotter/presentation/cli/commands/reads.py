@@ -284,6 +284,7 @@ def machine_status_human(
         for refusal in status.refused
     ]
     lines += [f"unswept {step}" for step in status.unswept]
+    lines += [f"unloadable {job}" for job in status.unloadable]
     return CommandResult(
         data=status.model_dump(mode="json"),
         human="\n".join(lines),

@@ -237,8 +237,13 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   folded in arrival order, a launch's coupon draw is one fact, and the host's claim holds the
   admission gate. A doc probe's `git grep` runs one thread (doc-claims 304 → 135 MB). Every leg
   UNMOVED, digests unmoved; the landing key moved on the budget records, which wipes run data.
-- **then:** addr-2 and small-4 beside each other in the cloud; tests-w, faults-3, the feed's
-  per-subject version and the lineage fold; the edge tail. A cold verify is timed live.
+- **landed 91, faults-3:** a line fold names the file kind it reads (the ruler refused as a ledger
+  before), a periodic step's last pass is a file every door's machine-status reads (the in-process
+  global reached no CLI), the reaper names each cycle it cannot read, and the CLI words
+  `unloadable`. Every leg UNMOVED, digests unmoved; the landing key moved on the new row, no wipe.
+- **then:** addr-2 and small-4 (cloud, in flight); tests-w on small-4's tip; the feed's per-subject
+  version, the lineage fold and the inline launch's queued answer; the edge tail. A cold verify is
+  timed live.
 
 The re-keys end at the behaviour-key switch.
 

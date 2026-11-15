@@ -85,8 +85,8 @@ BASELINE = {
     # faults-3 1 (+8): each line fold names its file's kind, the ruler its own code;
     # `LineIndex.of` takes none. faults-3 2 (+35): a periodic step's last pass on disk, read by every
     # door's machine-status (the in-process global reached no CLI), and each cycle the reaper
-    # cannot read named in it.
-    "package_lines": 110906,
+    # cannot read named in it. faults-3 3 (+1): the CLI words `unloadable`.
+    "package_lines": 110907,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 155,
     # The `__init__.py` files that re-export names instead of staying empty.
