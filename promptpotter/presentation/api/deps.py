@@ -96,6 +96,13 @@ def _drawn(request: Request, identity: IdentityDep) -> None:
     refuse_request_rate(identity, read=isinstance(_NAMED[getattr(route, "name", "")], ReadKind))
 
 
+def _caller(request: Request, stores: Stores, jobs: JobRegistry) -> Caller:
+    """It reads only: an account opens at sign-in or at its first act (`account_of`), never at a
+    read."""
+    carrier = getattr(request.state, "carrier", None) if stores.identity.carried_by else None
+    return Caller(stores, jobs, require_identity_bundle(request), carrier)
+
+
 def open_caller(
     request: Request,
     _rate: Annotated[None, Depends(_drawn)],
@@ -103,10 +110,15 @@ def open_caller(
     jobs: JobRegistryDep,
 ) -> Caller:
     """A session mount's gate: the request drawn on its rate first (`_drawn`, solved before the
-    stores), then its caller on the request's one `StoresDep`. It reads only: an account opens at
-    sign-in or at its first act (`account_of`), never at a read."""
-    carrier = getattr(request.state, "carrier", None) if stores.identity.carried_by else None
-    return Caller(stores, jobs, require_identity_bundle(request), carrier)
+    stores), then its caller on the request's one `StoresDep`."""
+    return _caller(request, stores, jobs)
+
+
+def mounted_caller(request: Request) -> Caller:
+    """An ASGI mount's gate, applied before its app runs: the caller a session mount's would be,
+    drawn on no rate, since what the app serves draws its own (`HostSession.answer`)."""
+    stores = build_stores_from_identity(resolve_identity(request))
+    return _caller(request, stores, get_job_registry(request))
 
 
 _NAMED: dict[str, CommandKind | ReadKind] = {k.value: k for k in (*CommandKind, *ReadKind)}

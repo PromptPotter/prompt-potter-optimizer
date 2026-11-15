@@ -356,6 +356,7 @@ export interface CommandReading {
   created_at: string;
   last_updated_at: string;
   launches: LaunchedJob[] | null;
+  holds: ArmsHold[];
 }
 
 /** What a launch answers of one job it launched: the job, the cycle it holds or
@@ -365,6 +366,15 @@ export interface LaunchedJob {
   job_id: string;
   hop: CycleHop | null;
   what: string;
+}
+
+/** A launched job's cycle holding at its arms gate, the hold `submit-arms`
+ * answers: named by its declaration's stamp, since each round holds afresh,
+ * with the drafts it offers to keep. */
+export interface ArmsHold {
+  hop: CycleHop;
+  held_at: string;
+  drafts: number;
 }
 
 /** The optimizers this install can run, the default first: one per manifest the
@@ -5469,7 +5479,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "8a78c981d2198b83";
+export const SERVED_CONTRACT = "39653e1fc1cc9551";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

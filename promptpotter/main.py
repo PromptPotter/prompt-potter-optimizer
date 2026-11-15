@@ -20,6 +20,7 @@ from scalar_fastapi import get_scalar_api_reference
 from starlette.datastructures import Headers
 from starlette.exceptions import HTTPException
 from starlette.middleware.gzip import GZipMiddleware
+from starlette.routing import Mount
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from promptpotter.application import health, notices
@@ -49,6 +50,7 @@ from promptpotter.infrastructure.producer_lock import minted_producer, this_prod
 from promptpotter.presentation.api.deps import (
     auth_is_open,
     build_stores_from_identity,
+    mounted_caller,
     open_caller,
     resolve_identity,
 )
@@ -58,6 +60,7 @@ from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddlew
 from promptpotter.presentation.api.routers.auth import auth_flow_router
 from promptpotter.presentation.api.routers.commands import commands_router
 from promptpotter.presentation.api.routers.reads import READ_ROUTES, reads_router
+from promptpotter.presentation.mcp.server import HttpDoor
 from promptpotter.presentation.terminal.server_banner import render_server_banner
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import (
@@ -125,7 +128,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.identity_bundle = bundle
     app.state.job_registry = registry
     sweep_task = asyncio.create_task(periodic_sweep(default_projects_root()))
-    yield
+    async with MCP_DOOR.running():
+        yield
     sweep_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await sweep_task
@@ -316,11 +320,37 @@ async def health_check() -> HealthResponse:
 
 
 class RouterMount(NamedTuple):
-    router: APIRouter
+    """An `APIRouter`, or an ASGI app mounted whole at its prefix."""
+
+    router: APIRouter | ASGIApp
     prefix: str
     # Applied at the mount, so no route under it can forget it; `None` is public by declaration.
+    # An ASGI app's is `mounted_caller`, run before the app, its caller on the request's state.
     gate: Callable[..., object] | None
 
+    @property
+    def routes(self) -> list[APIRoute]:
+        """Its router's routes; an ASGI app declares none."""
+        if not isinstance(self.router, APIRouter):
+            return []
+        return [route for route in self.router.routes if isinstance(route, APIRoute)]
+
+
+class _Gated:
+    """An ASGI mount behind its gate: refused before its app runs, as a router's route is."""
+
+    def __init__(self, app: ASGIApp, gate: Callable[[Request], object]) -> None:
+        self.app, self.gate = app, gate
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        caller = await asyncio.to_thread(self.gate, Request(scope))
+        scope.setdefault("state", {})["caller"] = caller
+        await self.app(scope, receive, send)
+
+
+# The MCP door, `host_server` over Streamable HTTP; its sessions run in `lifespan`.
+MCP_DOOR = HttpDoor()
+WEBAPP_DIR = webapp_static_root()
 
 API_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(_contract, "", None),
@@ -328,10 +358,15 @@ API_ROUTERS: tuple[RouterMount, ...] = (
     RouterMount(reads_router, _API, open_caller),
     RouterMount(commands_router, _API, open_caller),
     RouterMount(auth_flow_router, _API, None),
+    RouterMount(MCP_DOOR, "/mcp", mounted_caller),
+    # A catch-all, so it MUST stay the last row: Starlette resolves in order.
+    *(
+        (RouterMount(StaticFiles(directory=WEBAPP_DIR, html=True), "", None),)
+        if WEBAPP_DIR.exists()
+        else ()
+    ),
 )
-_ROUTES = [
-    route for mount in API_ROUTERS for route in mount.router.routes if isinstance(route, APIRoute)
-]
+_ROUTES = [route for mount in API_ROUTERS for route in mount.routes]
 
 
 def _off_catalogue(route: APIRoute) -> str | None:
@@ -356,21 +391,35 @@ def _off_catalogue(route: APIRoute) -> str | None:
     return None
 
 
-# Refused at import, over the copies the mounts carry: a session route is named by its row.
+# Refused at import, over the copies the mounts carry: a session route is named by its row, and an
+# ASGI app, which no kind names, is gated as one whole.
 if _faults := [
-    fault
-    for mount in API_ROUTERS
-    if mount.gate is open_caller
-    for route in mount.router.routes
-    if isinstance(route, APIRoute) and (fault := _off_catalogue(route)) is not None
+    *(
+        fault
+        for mount in API_ROUTERS
+        if mount.gate is open_caller
+        for route in mount.routes
+        if (fault := _off_catalogue(route)) is not None
+    ),
+    # A router's gate is a dependency, an app's the one gate taking its request alone.
+    *(
+        f"{mount.prefix or '/'} is gated by {mount.gate!r}"
+        for mount in API_ROUTERS
+        if mount.gate is not None
+        and isinstance(mount.router, APIRouter) is (mount.gate is mounted_caller)
+    ),
 ]:
     raise RuntimeError("the surface is out of the catalogue:\n  " + "\n  ".join(_faults))
 for _mount in API_ROUTERS:
-    app.include_router(
-        _mount.router,
-        prefix=_mount.prefix,
-        dependencies=[] if _mount.gate is None else [Depends(_mount.gate)],
-    )
+    if isinstance(_mount.router, APIRouter):
+        app.include_router(
+            _mount.router,
+            prefix=_mount.prefix,
+            dependencies=[] if _mount.gate is None else [Depends(_mount.gate)],
+        )
+    else:
+        gated = _mount.router if _mount.gate is None else _Gated(_mount.router, _mount.gate)
+        app.router.routes.append(Mount(_mount.prefix, app=gated))
 
 
 def _request_bodies() -> Iterator[type[BaseModel]]:
@@ -471,12 +520,6 @@ install_oidc_middleware(app)
 app.add_middleware(OutsideVisitsMiddleware)
 
 
-WEBAPP_DIR = webapp_static_root()
-
 # Inside the header seam; GZip passes ``text/event-stream`` through, so SSE is never buffered.
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.add_middleware(ResponseHeadersMiddleware)
-
-# A catch-all, so it MUST stay the last route registered: Starlette resolves in order.
-if WEBAPP_DIR.exists():
-    app.mount("/", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")

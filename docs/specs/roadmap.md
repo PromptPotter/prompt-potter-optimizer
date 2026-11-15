@@ -210,7 +210,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   scalar, the CLI builds its arguments from each field's declared spelling, and one bounded parse
   door reads YAML and capo's replies. No decision moved; the capo, capo-pobb and potter digests
   moved by code alone; job files only widen.
-- **then:** mcp beside faults-2b; then tv-2.
+- **landed 87, passb-2 3 + mcp:** the origin's bench reserve is read off its own ledger (it was
+  always zero, so the selection's set-aside never held), and the parity file holds decisions alone
+  with each graded pass and its reserve in them; a task held at its arms gate asks its host for its
+  input once, and the host registry serves over Streamable HTTP on the account's bearer, a mount a
+  declared row. Every leg moved only on the origin reserve; behaviour keys rewritten.
+- **then:** faults-2b; passb-2 1, 2, 4 (local); then tv-2.
 
 The re-keys end at the behaviour-key switch.
 

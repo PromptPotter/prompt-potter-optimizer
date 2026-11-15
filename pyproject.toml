@@ -62,6 +62,7 @@ api = [
     "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the API
     "sse-starlette>=2.4.1",    # why kept: EventSourceResponse owns events:subscribe SSE framing + heartbeat + teardown on client-disconnect/server-shutdown (patches uvicorn handle_exit, so one Ctrl+C shuts down clean)
     "cryptography>=50.0.0",    # why kept: RS256 / ES256 JWS verification for OIDC ID tokens (the identity foundation, docs/decisions.md § 0002). Floor past PYSEC-2026-35/36 + CVE-2026-26007, and now past GHSA-g6cj-pr64-35w5 (PKCS#7 Bleichenbacher oracle, fixed in 50.0.0).
+    "mcp>=2.3.0,<2.4",         # why kept: the API serves the host registry over Streamable HTTP at /mcp/ (`presentation/mcp/server.py::HttpDoor`); bounded as the `mcp` extra says.
 ]
 excel = [
     # why kept: .xlsx ingest (`application/datasets/tabular_ingest.py::_xlsx_records`). Lazy behind `shared/extras.py::require_extra`,
@@ -111,11 +112,11 @@ harbor = [
     "harbor>=0.22.0,<0.23",
 ]
 mcp = [
-    # why kept: `presentation/mcp/` serves the host registry (`application/host_surface.py`) to a
-    # local host over MCP stdio — `python -m promptpotter mcp`. Its import is module-level there and
-    # guarded naming this extra; nothing on the core path reaches that package. 2.3 is the floor
-    # whose server speaks the extensions vocabulary the Tasks handle rides on. Deliberately absent
-    # from `all`: only a host spawns it.
+    # why kept: `presentation/mcp/` serves the host registry (`application/host_surface.py`) over
+    # MCP: to a local host over stdio (`python -m promptpotter mcp`), and on the API over Streamable
+    # HTTP, so `api` and `all` carry it too. Its import is module-level there and guarded naming
+    # this extra; nothing on the core path reaches that package. 2.3 is the floor whose server
+    # speaks the extensions vocabulary the Tasks handle rides on.
     # UPPER-BOUNDED, as `harbor` is, because `presentation/mcp/server.py` drives the low-level
     # `Server` beside its public surface — a raw `tasks/*` handler (`add_request_handler`), the
     # `extensions` map and `types.version.MODERN_PROTOCOL_VERSIONS` — none of which a minor
@@ -135,7 +136,7 @@ all = [
     # `benchmarks` is NOT folded in here, and that is the point of it being separate: `all` is
     # what a developer installs by default, so anything listed becomes attack surface nobody
     # opted into. Reach for `.[all,dev,benchmarks]` when you actually fetch a public bank.
-    # `harbor` and `mcp` are out for the same reason.
+    # `harbor` is out for the same reason.
     "fastapi>=0.119.0",
     "starlette>=1.0.1",
     "python-multipart>=0.0.27",
@@ -143,6 +144,7 @@ all = [
     "uvicorn[standard]>=0.27.0",
     "sse-starlette>=2.4.1",
     "cryptography>=50.0.0",
+    "mcp>=2.3.0,<2.4",
     "openpyxl>=3.1.0",
     "xlrd>=2.0.1",
 ]

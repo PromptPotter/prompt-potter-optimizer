@@ -41,9 +41,9 @@ from promptpotter.shared.worded import Worded, registered
 def _served_roots() -> list[typing.Any]:
     roots: list[typing.Any] = [app.router.responses["default"]["model"]]
     for mount in API_ROUTERS:
-        for route in mount.router.routes:
+        for route in mount.routes:
             # FastAPI sets `response_model` on the instance outside `APIRoute`'s declared attributes.
-            if isinstance(route, APIRoute) and (answer := vars(route)["response_model"]):
+            if answer := vars(route)["response_model"]:
                 roots.append(answer)
     return roots
 

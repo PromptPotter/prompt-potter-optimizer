@@ -8,7 +8,8 @@ or a read through its `ReadParams.answer`. A kind its row answers as a task
 (`CommandKind.answering`) answers a `HostTask`, the MCP Tasks handle: its status is what its run
 returned (`Job.ending`, worded by `STOP_REASON_INFO`) or how its job lapsed, as its release
 stamped it, a reaped job's included, its result the answer its one dispatch recorded, and its cancel each job's own
-command. Transports: in-process (call `answer`) and `presentation/mcp/`.
+command. A task held at its arms gate asks for its input (`HostHold`), answered as `submit-arms`.
+Transports: in-process (call `answer`) and `presentation/mcp/`.
 """
 
 from __future__ import annotations
@@ -30,6 +31,7 @@ from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import (
     TERMINAL,
+    ArmsHold,
     CommandReading,
     TaskStatus,
     owned_command,
@@ -60,6 +62,7 @@ from promptpotter.domain.command_kinds import (
     CommandPayload,
     Door,
     ReadKind,
+    SubmitArmsPayload,
 )
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCycle
 from promptpotter.domain.records.run_records import LaunchAnswer
@@ -230,6 +233,50 @@ class HostTask(FrozenModel):
         )
 
 
+# The answer a hold asks for, as a form's flat fields: the payload's own, less its cycle's address.
+_ARMS = SubmitArmsPayload.model_fields
+
+
+class HostHold(FrozenModel):
+    """A task held at its arms gate, asking for its input: worded by the hold's own acts, its form
+    `SubmitArmsPayload`'s answer fields, answered once under `key` (`AnswerHold`)."""
+
+    task_id: str
+    message: str
+    hold: ArmsHold
+
+    @property
+    def key(self) -> str:
+        return f"held:{self.task_id}:{self.hold.hop.cycle_id}:{self.hold.held_at}"
+
+    def requested_schema(self) -> dict[str, JsonValue]:
+        """`keep` picks among the drafts the hold offers; `arms`, a list of objects no form field
+        holds, is sent as its JSON text."""
+        fields: dict[str, JsonValue] = {
+            "arms": {"type": "string", "description": f"{_ARMS['arms'].description} A JSON list."}
+        }
+        if self.hold.drafts:
+            fields["keep"] = {
+                "type": "array",
+                "description": _ARMS["keep"].description,
+                "items": {"type": "string", "enum": [str(i) for i in range(self.hold.drafts)]},
+            }
+        return {"type": "object", "properties": fields}
+
+    def answered(self, content: Mapping[str, Any]) -> SubmitArmsPayload:
+        try:
+            arms = json.loads(str(content.get("arms") or "[]"))
+        except ValueError as exc:
+            raise PayloadInvalidError(f"arms is no JSON list: {exc}") from exc
+        sent = {
+            "campaign_id": self.hold.hop.campaign_id,
+            "cycle_id": self.hold.hop.cycle_id,
+            "arms": arms,
+            "keep": [int(i) for i in content.get("keep") or []],
+        }
+        return PayloadInvalidError.validating(SubmitArmsPayload, sent)
+
+
 @dataclass(frozen=True, slots=True)
 class HostAnswer:
     """What a tool call answers: a JSON value, or the task tracking it."""
@@ -294,16 +341,35 @@ class TaskStatusOf(HostRequest[HostTask]):
 
 
 @dataclass(frozen=True, slots=True)
-class TaskResultOf(HostRequest[tuple[str, HostAnswer]]):
+class TaskResultOf(HostRequest[tuple[str, HostAnswer] | HostHold]):
     """Once the task is terminal, its tool's name and answer, read from what its command's end
     kept and never acted again: a launch answers its record, any other kind the answer that end
-    keeps (`keeps_answer`), a refusal the one its door served. A gate's hold is no end: the result
-    waits past it."""
+    keeps (`keeps_answer`), a refusal the one its door served. A gate's hold is no end: one not
+    yet *asked* (by its `HostHold.key`) is answered as its input request, and the result waits
+    past one asked."""
 
     task_id: str
+    asked: frozenset[str] = frozenset()
 
-    async def answered_by(self, session: HostSession) -> tuple[str, HostAnswer]:
-        return await session._task_result(self.task_id)
+    async def answered_by(self, session: HostSession) -> tuple[str, HostAnswer] | HostHold:
+        return await session._task_result(self.task_id, self.asked)
+
+
+@dataclass(frozen=True, slots=True)
+class AnswerHold(HostRequest[None]):
+    """What a host's person answered a `HostHold`, as the existing `submit-arms` filed at the host
+    door under the hold's key, so an answer retried acts once. A decline sends none."""
+
+    held: HostHold
+    content: Mapping[str, Any]
+
+    @property
+    def reads(self) -> bool:
+        return False
+
+    async def answered_by(self, session: HostSession) -> None:
+        answer = CommandCall(self.held.answered(self.content), self.held.key, door=Door.HOST)
+        await session._dispatcher().dispatch(answer)
 
 
 @dataclass(frozen=True, slots=True)
@@ -395,12 +461,19 @@ class HostSession:
         stores, jobs = self.caller.stores, self.caller.jobs
         return await off_loop(read_command, stores, jobs, command_id)
 
-    async def _task_result(self, task_id: str) -> tuple[str, HostAnswer]:
+    async def _task_result(
+        self, task_id: str, asked: frozenset[str]
+    ) -> tuple[str, HostAnswer] | HostHold:
         """Woken by its act where this process runs it, else read every `_SETTLE_POLL_S`: its act
-        or its jobs run in another process, which no signal here carries."""
+        or its jobs run in another process, which no signal here carries, and a run held at one
+        round's gate holds afresh at the next."""
         while (read := await self._read(task_id)).status not in TERMINAL:
+            for hold in read.holds:
+                held = HostHold(task_id=task_id, message=_asking(read), hold=hold)
+                if held.key not in asked:
+                    return held
             if (acting := self._acting.get(task_id)) is not None:
-                await asyncio.wait({acting})
+                await asyncio.wait({acting}, timeout=_SETTLE_POLL_S)
             else:
                 await asyncio.sleep(_SETTLE_POLL_S)
         tool = host_tool(read.kind)
@@ -461,8 +534,14 @@ class HostSession:
         return template.compile_prompt(consultation_instruction=instruction)
 
 
-# How often a task's result re-reads its command where no act of this process runs it.
+# How often a task's result re-reads its command: no signal here carries another process's act.
 _SETTLE_POLL_S = 2.0
+
+
+def _asking(read: CommandReading) -> str:
+    """A hold's request in its task's words and its own acts' (`NextAct`), the one source."""
+    acts = "; ".join(f"{a.kind} {a.field}: {a.value}" for a in read.next_acts if a.field)
+    return f"{read.said} ({acts})"
 
 
 # Prompts: what a host is told to do, seeded from the bench's own check-in text.

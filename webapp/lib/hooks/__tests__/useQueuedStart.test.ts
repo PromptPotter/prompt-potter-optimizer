@@ -54,6 +54,7 @@ describe("a queued Start follows its whole command reading on the feed", () => {
     created_at: "2026-11-11T00:00:00Z",
     last_updated_at: "2026-11-11T00:00:00Z",
     launches: [{ job_id: "job_1", hop: served.hop, what: "the check-in's run" }],
+    holds: [],
   });
 
   const followed = async () => {
@@ -204,6 +205,7 @@ describe("a reopened queued Start follows the Start's own command, as the tab th
           created_at: "2026-11-11T00:00:00Z",
           last_updated_at: "2026-11-11T00:00:00Z",
           launches: [{ job_id: "job_1", hop: command.hop, what: "the check-in's run" }],
+          holds: [],
         };
         return Response.json(body, { headers: stood() });
       }

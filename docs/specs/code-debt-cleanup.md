@@ -795,20 +795,22 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/29 · mcp
 
-- **An arms gate's hold claims `input_required` and sends no input request**: `command_reading.py::job_status`
-  sets the status (the arms gate is its one holder since the origin gate's hold went); `tasks/result`
-  blocks until the run ends, in `host_surface.py::_task_result` (`:398-405`), not only `job_status`. Action: the hold becomes the task's input request (the arms shape for
-  `submit-arms`), answered as the existing command. **Rides with:** mcp 1. **Re-test:** a host calling
-  `tasks/result` on a held arms gate receives an input request.
-- **The MCP door speaks stdio only, so a browser chat cannot reach it**:
-  `promptpotter/presentation/mcp/server.py::serve_stdio` is the one transport. Action: serve
-  `promptpotter/presentation/mcp/server.py::host_server` over Streamable HTTP, mounted on the API behind
-  its sign-in, a second transport of the one adapter, on mkey's bearer; its auth follows
-  [`access-model.md`](../operations/access-model.md). **Rides with:** mcp 2. **Re-test:** in claude.ai,
-  a custom connector at the box's MCP URL answers `tools/list`.
-- **`promptpotter/main.py::API_ROUTERS` declares `APIRouter`s only**, so an ASGI mount (the webapp's `StaticFiles`,
-  MCP next) sits outside the declared gate and `_off_catalogue`. Action: a mount is a declared row.
-  **Rides with:** mcp 2. **Re-test:** `git grep -n "app.mount(" -- promptpotter/main.py` is empty.
+- **The MCP door's claude.ai connector is unproven on the box**: the door serves Streamable HTTP at
+  `/mcp/` on the account's bearer (`promptpotter/presentation/mcp/server.py::HttpDoor`). Action: the
+  operator's step after the box update, a connector with the token as its `Authorization` request
+  header. **Rides with:** the next box update. **Re-test:** in claude.ai, a custom connector at the
+  box's MCP URL answers `tools/list`.
+- **A held task on a 2026-07-28 wire is never asked for its input** (mcp's report):
+  `presentation/mcp/server.py::host_server`'s `tasks/result` elicits only on a handshake-era wire; on
+  a modern one, server-to-client requests give way to `InputRequiredResult` and the tasks
+  extension's `tasks/update`, which nothing here answers. Action: the hold's `HostHold` rides the
+  modern task's input requests. **Rides with:** tv-2. **Re-test:** a 2026-07-28 client holding a task
+  at its arms gate receives the hold's input request and answers it with `tasks/update`.
+- **The HTTP door keeps a session manager per token until shutdown** (mcp's report):
+  `server.py::HttpDoor._managers` is keyed by authority (account, token, carrier, rungs) and never
+  swept, so memory grows with the distinct tokens that ever called. Action: a manager whose sessions
+  all ended leaves the map. **Rides with:** tv-2. **Re-test:** open and close sessions on 50 tokens;
+  `len(_managers)` returns to 0.
 
 ### batch/29 · tv-2
 

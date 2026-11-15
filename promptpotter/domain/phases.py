@@ -262,7 +262,8 @@ INNER_SKIP_REFUSAL = (
 class RunState(NamedTuple):
     """``inner``: the cycle is an L4 inner run, which answers every run verb for itself.
 
-    ``drafts`` is the standing hold's own, set only while the phase is ``gate``."""
+    ``drafts`` and ``held_at`` (its declaration's stamp, which names it) are the standing hold's
+    own, set only while the phase is ``gate``."""
 
     run_phase: RunPhase
     producer: ProducerReading
@@ -270,6 +271,7 @@ class RunState(NamedTuple):
     stop: StopReading | None = None
     inner: bool = False
     drafts: int = 0
+    held_at: str = ""
 
     @property
     def resumable(self) -> bool:

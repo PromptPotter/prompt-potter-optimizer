@@ -1734,6 +1734,7 @@ dependencies = [
 all = [
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "mcp" },
     { name = "openpyxl" },
     { name = "python-multipart" },
     { name = "scalar-fastapi" },
@@ -1745,6 +1746,7 @@ all = [
 api = [
     { name = "cryptography" },
     { name = "fastapi" },
+    { name = "mcp" },
     { name = "python-multipart" },
     { name = "scalar-fastapi" },
     { name = "sse-starlette" },
@@ -1788,6 +1790,8 @@ requires-dist = [
     { name = "harbor", marker = "extra == 'harbor'", specifier = ">=0.22.0,<0.23" },
     { name = "httpx", specifier = ">=0.26.0" },
     { name = "json-repair", specifier = ">=0.30,<1.0" },
+    { name = "mcp", marker = "extra == 'all'", specifier = ">=2.3.0,<2.4" },
+    { name = "mcp", marker = "extra == 'api'", specifier = ">=2.3.0,<2.4" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.3.0,<2.4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10.0" },
     { name = "numpy", specifier = ">=1.26" },

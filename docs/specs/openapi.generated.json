@@ -1325,6 +1325,30 @@
         "title": "ArmSamples",
         "type": "object"
       },
+      "ArmsHold": {
+        "additionalProperties": false,
+        "description": "A launched job's cycle holding at its arms gate, the hold `submit-arms` answers: named by\nits declaration's stamp, since each round holds afresh, with the drafts it offers to keep.",
+        "properties": {
+          "drafts": {
+            "title": "Drafts",
+            "type": "integer"
+          },
+          "held_at": {
+            "title": "Held At",
+            "type": "string"
+          },
+          "hop": {
+            "$ref": "#/components/schemas/CycleHop"
+          }
+        },
+        "required": [
+          "hop",
+          "held_at",
+          "drafts"
+        ],
+        "title": "ArmsHold",
+        "type": "object"
+      },
       "BackendHealthResponse": {
         "additionalProperties": false,
         "properties": {
@@ -3991,6 +4015,13 @@
             "title": "Created At",
             "type": "string"
           },
+          "holds": {
+            "items": {
+              "$ref": "#/components/schemas/ArmsHold"
+            },
+            "title": "Holds",
+            "type": "array"
+          },
           "kind": {
             "title": "Kind",
             "type": "string"
@@ -4053,7 +4084,8 @@
           "next_acts",
           "created_at",
           "last_updated_at",
-          "launches"
+          "launches",
+          "holds"
         ],
         "title": "CommandReading",
         "type": "object"

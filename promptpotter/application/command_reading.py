@@ -10,8 +10,10 @@ from typing import Literal, NamedTuple
 from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.phases import (
+    RUN_PHASE_INFO,
     STOP_REASON_INFO,
     RunPhase,
     StopCategory,
@@ -47,6 +49,10 @@ _PRECEDENCE: tuple[TaskStatus, ...] = (
     "completed",
 )
 TERMINAL = frozenset[TaskStatus]({"completed", "failed", "cancelled"})
+# What a held task asks, the hold's own acts: one source with the run control's.
+_HOLDING = RUN_PHASE_INFO[RunPhase.GATE].refusal
+assert _HOLDING is not None, "a gate's hold names the act that answers it"
+_HOLDING_ACTS = _HOLDING.next_acts
 
 
 class JobStatus(NamedTuple):
@@ -79,15 +85,29 @@ def job_status(job: Job, *, held: bool) -> JobStatus:
     if job.released:
         return JobStatus("completed", f"{job.what}: returned")
     if held:
-        return JobStatus("input_required", f"{job.what}: holding at a gate for its answer")
+        return JobStatus(
+            "input_required", f"{job.what}: holding at a gate for its answer", _HOLDING_ACTS
+        )
     return JobStatus("working", f"{job.what}: {job.stage}")
 
 
-def _held(stores: Stores, job: Job) -> bool:
-    """Its cycle holds at a gate while the run waits on an answer."""
+class ArmsHold(FrozenModel):
+    """A launched job's cycle holding at its arms gate, the hold `submit-arms` answers: named by
+    its declaration's stamp, since each round holds afresh, with the drafts it offers to keep."""
+
+    hop: CycleHop
+    held_at: str
+    drafts: int
+
+
+def _hold(stores: Stores, job: Job) -> ArmsHold | None:
+    """Its cycle's hold, while the run waits on an answer."""
     if job.released or job.hop == UNRESOLVED_HOP:
-        return False
-    return stores.run_state(job.hop).run_phase is RunPhase.GATE
+        return None
+    state = stores.run_state(job.hop)
+    if state.run_phase is not RunPhase.GATE:
+        return None
+    return ArmsHold(hop=job.hop, held_at=state.held_at, drafts=state.drafts)
 
 
 class CommandReading(FrozenModel):
@@ -107,6 +127,8 @@ class CommandReading(FrozenModel):
     created_at: str
     last_updated_at: str
     launches: list[LaunchedJob] | None
+    # Each launched cycle holding for its answer, in launch order.
+    holds: list[ArmsHold]
 
 
 class OwnedCommand(FrozenModel):
@@ -146,9 +168,12 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
     updated = filed.timestamp if end is None else end.timestamp
     status: TaskStatus
     acts: tuple[NextAct, ...] = ()
+    holds: list[ArmsHold] = []
     launched = launched_jobs(jobs, owned)
     if launched is not None:
-        read = [job_status(job, held=_held(stores, job)) for job in launched]
+        held = {job.job_id: _hold(stores, job) for job in launched}
+        holds = [hold for hold in held.values() if hold is not None]
+        read = [job_status(job, held=held[job.job_id] is not None) for job in launched]
         status = next(s for s in _PRECEDENCE if s in {r.status for r in read})
         said = "; ".join(r.said for r in read)
         acts = tuple(dict.fromkeys(act for r in read for act in r.acts))
@@ -190,4 +215,5 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
         created_at=filed.timestamp,
         last_updated_at=updated,
         launches=None if launched is None else [LaunchedJob.of(job) for job in launched],
+        holds=holds,
     )

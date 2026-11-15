@@ -33,6 +33,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, NamedTuple, cast, override
 
 import gate
+import httpx
 import pytest
 from factories import (
     PROMPT_INFO,
@@ -85,7 +86,11 @@ from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.application.embedded_run import host_dispatcher
 from promptpotter.application.hierarchy_subtree import hierarchy_subtree, subtree_version
 from promptpotter.application.host_surface import (
+    HOST_TOOLS,
+    IDEMPOTENCY_KEY,
+    AnswerHold,
     CallTool,
+    HostHold,
     HostSession,
     TaskResultOf,
     TaskStatusOf,
@@ -207,6 +212,7 @@ from promptpotter.domain.prompt_block import (
     snippet_id,
 )
 from promptpotter.domain.records.run_records import (
+    ArmsGate,
     Bill,
     Ended,
     ForkDirection,
@@ -307,7 +313,7 @@ from promptpotter.infrastructure.store.visit_records import (
     default_visit_record_store,
 )
 from promptpotter.infrastructure.store.wallet_store import ChargeBook
-from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, _off_catalogue, app
+from promptpotter.main import API_ROUTERS, MAX_REQUEST_BYTES, MCP_DOOR, _off_catalogue, app
 from promptpotter.presentation import admin_bot
 from promptpotter.presentation.api.deps import build_stores_from_identity
 from promptpotter.presentation.api.middleware.oidc import (
@@ -948,8 +954,7 @@ def test_a_stranger_reaches_only_the_routes_mounted_public_by_method(
         (method.lower(), f"{mount.prefix}{route.path}")
         for mount in API_ROUTERS
         if mount.gate is None
-        for route in mount.router.routes
-        if isinstance(route, APIRoute)
+        for route in mount.routes
         for method in route.methods or ()
     }
     anonymous = TestClient(app)
@@ -4239,6 +4244,89 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         detached.cancel()
 
 
+# One journey: the hold's elicitation is answered, that answer filed, and the task's result
+# then reads the run that went on past it.
+@pytest.mark.usefixtures("offline")
+async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, host_tenant: _HostTenant
+) -> None:
+    import mcp.types as mcp_types
+    from mcp import Client
+    from mcp.client.session import ClientRequestContext
+
+    from promptpotter.application import host_surface
+    from promptpotter.presentation.mcp.server import host_server
+
+    stores = host_tenant.caller.stores
+    hop = CycleHop(campaign_id="camp-held", cycle_id="cycle_held0000000")
+    campaign = minted_campaign(hop)
+    stored_campaign(stores, campaign)
+    minted_dataset(stores, campaign)
+    stores.campaigns.mint_cycle(hop)
+    queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
+    session = HostSession(Caller(stores, queuing))
+    monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
+    monkeypatch.setattr(host_surface, "_SETTLE_POLL_S", 0.0)
+    step = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, "step_rounds": 1}
+    idle = set(launcher_launch._DETACHED_TASKS)
+    task = (await session.answer(CallTool("start-run", {**step, IDEMPOTENCY_KEY: "go"}))).task
+    assert task is not None
+    (job,) = queuing.list_queued()
+    cycle_dir = stores.campaigns.cycle_dir(hop)
+    ledger = CycleEventLog.open(CycleDir(cycle_dir))
+    await asyncio.to_thread(ledger.append, RunPhaseRecord(state=ArmsGate()))
+    await asyncio.to_thread(hold_cycle, cycle_dir)
+    arm = {"prompt_fields": {"solve": {"instruction": "Held."}}, "changes_description": "mine"}
+    asked: list[mcp_types.ElicitRequestParams] = []
+    answered = asyncio.Event()
+    answer_hold = AnswerHold.answered_by
+
+    async def spied(self: AnswerHold, session: HostSession) -> None:
+        try:
+            await answer_hold(self, session)
+        finally:
+            answered.set()
+
+    monkeypatch.setattr(AnswerHold, "answered_by", spied)
+
+    def filed() -> list[str]:
+        book = stores.commands.book()
+        return [r.command_id for _, r in book.lines() if r.kind == CommandKind.SUBMIT_ARMS]
+
+    async def answer(
+        context: ClientRequestContext, params: mcp_types.ElicitRequestParams
+    ) -> mcp_types.ElicitResult | mcp_types.ErrorData:
+        del context
+        asked.append(params)
+        return mcp_types.ElicitResult(action="accept", content={"arms": json.dumps([arm])})
+
+    async def the_loop_takes_it() -> None:
+        # The run's side of the hold: it takes the answer, goes on and ends.
+        await answered.wait()
+        # The same hold answered again, as a host retrying its answer sends it.
+        again = await session.answer(TaskResultOf(task.task_id))
+        assert isinstance(again, HostHold), "a hold already answered stopped reading as held"
+        await session.answer(AnswerHold(again, {"arms": json.dumps([arm])}))
+        await asyncio.to_thread(ledger.append, RunPhaseRecord(state=Running()))
+        await asyncio.to_thread(release_cycle, cycle_dir)
+        await asyncio.to_thread(queuing.release, job.job_id, StopReason.TARGET_HIT)
+
+    async with Client(host_server(session), mode="legacy", elicitation_callback=answer) as host:
+        result_of = mcp_types.GetTaskPayloadRequest(
+            params=mcp_types.GetTaskPayloadRequestParams(task_id=task.task_id)
+        )
+        result, _ = await asyncio.gather(
+            host.session.send_request(result_of, mcp_types.CallToolResult), the_loop_takes_it()
+        )
+    assert len(asked) == 1 and asked[0].meta is not None, "a held task sent no input request"
+    tied = dict(asked[0].meta).get("io.modelcontextprotocol/related-task")
+    assert tied == {"taskId": task.task_id}, "the input request named no task"
+    assert not result.is_error, result.content
+    assert len(filed()) == 1, "an answer retried filed a second submit-arms"
+    for waiter in set(launcher_launch._DETACHED_TASKS) - idle:
+        waiter.cancel()
+
+
 # An act a refusal serves is pressed as served: its value is the field's own JSON type.
 @pytest.mark.usefixtures("offline")
 def test_a_served_from_round_act_pressed_through_the_api_is_admitted_by_its_payload(
@@ -4634,6 +4722,73 @@ async def test_a_hosts_token_is_refused_auth_on_or_off_and_two_credentials_at_on
         headers={"Authorization": f"Bearer {_minted(token_box.browser, 'step')['secret']}"},
     ).get("/api/v1/auth/me")
     assert (doubled.status_code, doubled.json()["code"]) == (401, "credentials_doubled")
+
+
+def _mcp_said(answer: httpx.Response) -> dict[str, Any]:
+    """The one JSON-RPC message an MCP POST answered, framed as an SSE event or as JSON."""
+    if not answer.headers.get("content-type", "").startswith("text/event-stream"):
+        return cast(dict[str, Any], answer.json())
+    (data,) = [line[5:] for line in answer.text.splitlines() if line.startswith("data:")]
+    return cast(dict[str, Any], json.loads(data))
+
+
+# One door's journey: the session a bearer opens answers it, and no other caller.
+@pytest.mark.usefixtures("offline")
+async def test_the_mcp_door_over_http_serves_a_session_to_the_bearer_that_opened_it_alone(
+    sign_up: _SignUp, token_box: _TokenBox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(settings_mod.settings, "ALLOWED_ORIGINS", "http://testserver")
+    mine = _minted(token_box.browser, "step")["secret"]
+    _, theirs_session = await sign_up.sign_in("ada")
+    _, host_session = await sign_up.sign_in("root")
+    assert theirs_session is not None and host_session is not None
+    theirs_browser = TestClient(app, cookies={SESSION_COOKIE_NAME: theirs_session})
+    theirs = _minted(theirs_browser, "step")["secret"]
+    host_me = TestClient(app, cookies={SESSION_COOKIE_NAME: host_session}).get("/api/v1/auth/me")
+    host_token, _ = mint_token(
+        token_box.paths.tokens,
+        user_id=cast(dict[str, str], host_me.json())["user_id"],
+        name="ci",
+        scopes=frozenset({CAMPAIGN_STEP_CAP}),
+    )
+    accept = {"Accept": "application/json, text/event-stream"}
+    hello = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test-host", "version": "0"},
+        },
+    }
+    listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+
+    def bearer(secret: str) -> dict[str, str]:
+        return {**accept, "Authorization": f"Bearer {secret}"}
+
+    asgi = httpx.ASGITransport(app=app)
+    async with (
+        MCP_DOOR.running(),
+        httpx.AsyncClient(transport=asgi, base_url="http://testserver") as http,
+    ):
+        unsigned = await http.post("/mcp/", json=hello, headers=accept)
+        assert unsigned.status_code == 401, "an MCP session opened on no carrier"
+        hosted = await http.post("/mcp/", json=hello, headers=bearer(host_token))
+        assert (hosted.status_code, hosted.json()["code"]) == (401, "host_bearer_refused"), (
+            "the host's bearer opened an MCP session"
+        )
+        opened = await http.post("/mcp/", json=hello, headers=bearer(mine))
+        assert opened.status_code == 200, opened.text
+        session = {"mcp-session-id": opened.headers["mcp-session-id"]}
+        initialized = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+        await http.post("/mcp/", json=initialized, headers={**bearer(mine), **session})
+        listed = await http.post("/mcp/", json=listing, headers={**bearer(mine), **session})
+        tools = {tool["name"] for tool in _mcp_said(listed)["result"]["tools"]}
+        assert tools == set(HOST_TOOLS), "the HTTP door listed another registry than the host's"
+        for who, headers in (("another account's bearer", bearer(theirs)), ("no carrier", accept)):
+            refused = await http.post("/mcp/", json=listing, headers={**headers, **session})
+            assert refused.status_code in (401, 404), f"{who} was served a session it never opened"
 
 
 @pytest.mark.usefixtures("offline")

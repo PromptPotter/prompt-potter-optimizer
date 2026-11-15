@@ -63,7 +63,9 @@ BASELINE = {
     # as typed `Refusal` rows with acts, checked against their payload; a field's positional or flag
     # declared beside the payload; served acts read at every door; the command log's own file kind;
     # YAML composed once, bounded in Python, through the one parse door capo's reply reads too.
-    "package_lines": 110737,
+    # mcp (+272): a held task's form elicitation and its once-filed answer; the host registry over
+    # Streamable HTTP, one session per caller, a mount a declared row.
+    "package_lines": 111009,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 158,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -98,7 +100,7 @@ BASELINE = {
     # webb-5b (+1): `NodeOutputSchema.json_schema`, the backend's own document, served beside the
     # `contract` rows the browser now draws.
     # model-lines (+2): `call_target` on a served campaign config, which no surface edits yet.
-    "p_served": 192,
+    "p_served": 195,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     "p_unread_fields": 27,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.

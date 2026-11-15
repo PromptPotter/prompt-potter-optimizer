@@ -132,6 +132,8 @@ curl -sH "$H" $BOX/api/v1/commands/$COMMAND_ID       # poll: the command's statu
 curl -sH "$H" $BOX/api/v1/campaigns/$CAMPAIGN/cycles/$CYCLE/export   # fetch, once a round closed
 ```
 
+The same token opens an MCP session at `$BOX/mcp/` (Streamable HTTP), serving the host registry the `mcp` verb serves over stdio ([`../operations/access-model.md`](../operations/access-model.md) § The perimeter).
+
 A malformed, unknown or revoked token is a 401 naming its next act (`code` `token_malformed`, `token_unknown`, `token_revoked`); a revoke also ends the token's open streams within one tick (`cycle_reads.py::cycle_event_frames`, `::feed_frames`). The token draws its account's rate buckets as a session does.
 
 ## 8. What is NOT stable
