@@ -59,7 +59,11 @@ BASELINE = {
     # command kinds, the bearer's resolution through the one identity builder, the stream's per-tick
     # re-check; its fix pass the token cap, `account.self` and a cancel's rung.
     # rk-rest (+57): each connector's typed experiment model (decision 6) and a call's booked cost.
-    "package_lines": 110597,
+    # faults-2a (+143): a run phase's hold and the store's, landing's, harbor's and quota's refusals
+    # as typed `Refusal` rows with acts, checked against their payload; a field's positional or flag
+    # declared beside the payload; served acts read at every door; the command log's own file kind;
+    # YAML composed once, bounded in Python, through the one parse door capo's reply reads too.
+    "package_lines": 110740,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 158,
     # The `__init__.py` files that re-export names instead of staying empty.

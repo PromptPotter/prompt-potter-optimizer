@@ -77,8 +77,10 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     CellInfrastructureError,
     CellUnscoreableError,
+    ConflictError,
     ContextOverflowError,
     ErrorCategory,
+    NextAct,
     SendRefusedError,
     cell_failure,
     is_provider_credit_refusal,
@@ -272,9 +274,11 @@ def _pinned_roster(dataset: str, version: str) -> list[dict[str, Any]]:
     try:
         pin = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        raise ValueError(
-            f"harbor connector: {dataset}@{version} has no pinned roster ({path.name}). Pin it "
-            f"once with `python -m promptpotter pin-roster {dataset} {version}`."
+        raise ConflictError(
+            f"harbor connector: {dataset}@{version} has no pinned roster ({path.name}); it is "
+            "pinned once.",
+            code="roster_unpinned",
+            next_acts=(NextAct(field="pin-roster", value=f"{dataset} {version}"),),
         ) from None
     return list(pin["tasks"])
 

@@ -129,7 +129,7 @@ class L1Readout(RoundOutput, kind="l1_readout"):
     l1_citable: list[str] | None = None
     l1_exploration_budget: str | None = None
     # The round owns it: a parse failure yields no candidate to charge.
-    l1_parse_failure: str | None = None
+    l1_parse_failure: ValidationReason | None = None
     # The AxisIndex's peaked axes as L1 proposed, which no later reading of the index rebuilds.
     axis_memory_peaked: list[str] = Field(default_factory=list)
 

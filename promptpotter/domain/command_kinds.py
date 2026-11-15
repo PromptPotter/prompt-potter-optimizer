@@ -17,6 +17,8 @@ from pydantic import (
     JsonValue,
     SecretStr,
     SerializerFunctionWrapHandler,
+    TypeAdapter,
+    ValidationError,
     model_serializer,
     model_validator,
 )
@@ -429,9 +431,10 @@ class CommandPayload(RequestBody):
     unmatched: ClassVar[bool] = False
     # What the terminal prints after the ack; a `{field}` in it reads that field of the applied answer.
     follow_up: ClassVar[str] = ""
-    # A field's terminal flag by its dotted path, where it is not `--` its dashed leaf; each model up
-    # the line declares its own. The terminal builds its flags from `cli_flag` and spells an act's.
-    cli_flags: ClassVar[Mapping[str, str]] = {
+    # A field's terminal spelling by its dotted path, a flag or (no dash) a positional, where it is
+    # not the default `cli_spelling` gives; each model up the line declares its own. The terminal
+    # builds its arguments from `cli_spelling` and spells an act's.
+    cli_spellings: ClassVar[Mapping[str, str]] = {
         "budget.usd": "--max-usd",
         "budget.tokens": "--max-tokens",
         "budget.rounds": "--max-rounds",
@@ -439,10 +442,20 @@ class CommandPayload(RequestBody):
     }
 
     @classmethod
-    def cli_flag(cls, path: str) -> str:
-        """The terminal's flag for the field at dotted *path*."""
-        flags: ChainMap[str, str] = ChainMap(*(vars(m).get("cli_flags", {}) for m in cls.__mro__))
-        return flags.get(path) or f"--{path.rpartition('.')[2].replace('_', '-')}"
+    def cli_spelling(cls, path: str) -> str:
+        """The terminal's spelling of the field at dotted *path*: as declared, else a required
+        field's own name as a positional, else `--` its dashed leaf."""
+        said: ChainMap[str, str] = ChainMap(
+            *(vars(m).get("cli_spellings", {}) for m in cls.__mro__)
+        )
+        if spelled := said.get(path):
+            return spelled
+        held = cls.model_fields.get(path)
+        return (
+            path
+            if held is not None and held.is_required()
+            else f"--{path.rpartition('.')[2].replace('_', '-')}"
+        )
 
     def __init_subclass__(cls, kind: CommandKind | None = None, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -498,7 +511,10 @@ class CyclePayload(CampaignPayload):
     inner_refusal: ClassVar[str | None]
     # False: a terminal names the cycle, never defaulting to the active one.
     implied_target: ClassVar[bool] = True
-    cli_flags: ClassVar[Mapping[str, str]] = {"campaign_id": "--campaign", "cycle_id": "--cycle"}
+    cli_spellings: ClassVar[Mapping[str, str]] = {
+        "campaign_id": "--campaign",
+        "cycle_id": "--cycle",
+    }
 
 
 class LoopPayload(CyclePayload):
@@ -648,7 +664,7 @@ class StartRunPayload(CyclePayload, kind=CommandKind.START_RUN):
     takes (``mode``)."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-    cli_flags: ClassVar[Mapping[str, str]] = {"mode.from_round": "--from"}
+    cli_spellings: ClassVar[Mapping[str, str]] = {"mode.from_round": "--from"}
 
     budget: Budget = Budget()
     step_rounds: WireInt | None = Field(default=None, ge=1, le=100)
@@ -703,7 +719,7 @@ class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCL
     A parent a producer still holds is paused by the applier once the fork's run is admitted."""
 
     inner_refusal: ClassVar[str | None] = INNER_LAUNCH_REFUSAL
-    cli_flags: ClassVar[Mapping[str, str]] = {"round": "--rewind", "reason": "--rewind-reason"}
+    cli_spellings: ClassVar[Mapping[str, str]] = {"round": "--rewind", "reason": "--rewind-reason"}
 
     budget: Budget = Field(
         default_factory=Budget,
@@ -1019,6 +1035,11 @@ class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.HEAD_TO_HEAD):
 
     dataset_name: str = Field(min_length=1, max_length=64)
     head_to_head: HeadToHeadRequest
+    cli_spellings: ClassVar[Mapping[str, str]] = {
+        "dataset_name": "dataset",
+        "head_to_head.head_to_head_id": "--head-to-head",
+        "head_to_head.arms": "--arm",
+    }
 
     @model_validator(mode="after")
     def _name_is_a_dataset_name(self) -> MintHeadToHeadPayload:
@@ -1029,6 +1050,7 @@ class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.HEAD_TO_HEAD):
 class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
     """Mint a campaign on an authored dataset and launch its root cycle."""
 
+    cli_spellings: ClassVar[Mapping[str, str]] = {"dataset_name": "dataset"}
     dataset_name: str = Field(min_length=1, max_length=64)
     budget: Budget = Budget()
     optimization: OptimizationOverrides | None = Field(
@@ -1113,6 +1135,8 @@ class OpenOriginDraftPayload(CommandPayload, kind=CommandKind.OPEN_ORIGIN_DRAFT)
 class SetUserSettingsPayload(CommandPayload, kind=CommandKind.SET_USER_SETTINGS):
     """Persist the caller's per-user preferences."""
 
+    # A switch: its absence is off.
+    cli_spellings: ClassVar[Mapping[str, str]] = {"demo_mode_enabled": "--demo-mode-enabled"}
     demo_mode_enabled: bool
 
 
@@ -1190,12 +1214,20 @@ def _fills(model: object, dotted: str) -> bool:
 
 
 def takes_act(act: NextAct) -> bool:
-    """A kind every door presses, filling a field its payload has; or, kind-less, a field set or a
-    file read, never both and never neither; a stop's checked below, a refusal's at the gate."""
+    """A kind every door presses, filling a field its payload has with what it sends, as its model
+    validates the wire; or, kind-less, a field set or a file read, never both and never neither; a
+    stop's checked below, a refusal's at the gate."""
     if not act.kind:
         return bool(act.field) != bool(act.reads)
     model = PAYLOAD_MODEL_FOR_KIND.get(act.kind)
-    return model is not None and not act.reads and (not act.field or _fills(model, act.field))
+    if model is None or act.reads or (act.field and not _fills(model, act.field)):
+        return False
+    try:
+        for head, sent in act.payload.items():
+            TypeAdapter(model.model_fields[head].annotation).validate_json(json.dumps(sent))
+    except ValidationError:
+        return False
+    return True
 
 
 if _unacted := sorted(

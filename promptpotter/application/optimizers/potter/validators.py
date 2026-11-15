@@ -35,7 +35,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.search_point import SHOTS_KEY, missing_template_vars
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import (
-    INVARIANT_REASONS,
+    COLLAPSE_WORDS,
     RuntimeFailure,
     ValidationFailure,
     ValidationReason,
@@ -411,8 +411,7 @@ def detect_invariants(
 ) -> list[Proposal]:
     """Each proposal with its invariant failures re-derived: any it carried in are dropped first."""
     failures = [
-        [vf for vf in cp.validation_failures if vf.reason not in INVARIANT_REASONS]
-        for cp in proposals
+        [vf for vf in cp.validation_failures if vf.reason not in COLLAPSE_WORDS] for cp in proposals
     ]
     seen: dict[tuple[Any, ...], int] = {}
     tried = lost_ideas(prior_rounds)

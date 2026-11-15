@@ -377,24 +377,52 @@ if yaml.load(_yaml_text(_hazards), Loader=_YAML_LOADER) != _hazards:
 del _hazards
 
 
-# The deepest shipped YAML nests 9 (`justlogic/family.yaml`); the loader's composer recurses, and a
-# few thousand levels end the interpreter with no exception, while its event stream stays flat.
+# The deepest shipped YAML nests 9 (`justlogic/family.yaml`).
 YAML_MAX_DEPTH = 64
-_OPENS = (yaml.MappingStartEvent, yaml.SequenceStartEvent)
-_CLOSES = (yaml.MappingEndEvent, yaml.SequenceEndEvent)
+_Composer = yaml.composer.Composer
+
+
+class _BoundedLoader(_YAML_LOADER):  # type: ignore[misc]
+    """The C loader composes in C, where a few thousand levels end the interpreter with no
+    exception; this one composes in Python and refuses past `YAML_MAX_DEPTH`, in one pass."""
+
+    get_single_node = _Composer.get_single_node
+    compose_document = _Composer.compose_document
+    compose_node = _Composer.compose_node
+    compose_scalar_node = _Composer.compose_scalar_node
+
+    def __init__(self, stream: str | bytes) -> None:
+        super().__init__(stream)
+        self.anchors: dict[str, yaml.Node] = {}
+        self.depth = 0
+
+    def _nested(self, compose: Callable[..., yaml.Node], anchor: str | None) -> yaml.Node:
+        self.depth += 1
+        if self.depth > YAML_MAX_DEPTH:
+            raise ValueError(f"nested past {YAML_MAX_DEPTH} levels")
+        try:
+            return compose(self, anchor)
+        finally:
+            self.depth -= 1
+
+    def compose_sequence_node(self, anchor: str | None) -> yaml.Node:
+        return self._nested(_Composer.compose_sequence_node, anchor)
+
+    def compose_mapping_node(self, anchor: str | None) -> yaml.Node:
+        return self._nested(_Composer.compose_mapping_node, anchor)
+
+
+def parse_bounded[S, T](parse: Callable[[S], T], text: S) -> T:
+    """The one door for a parser that recurses on what it reads: a text it refuses, or one nested
+    past the stack, is the `ValueError` every guard in this tree catches."""
+    try:
+        return parse(text)
+    except (yaml.YAMLError, SyntaxError, RecursionError) as exc:
+        raise ValueError(f"not a readable text — {exc}") from exc
 
 
 def parse_yaml(text: str | bytes) -> Any:
-    """`yaml.YAMLError` is no `ValueError`, which every guard in this tree catches, so it is wrapped here."""
-    try:
-        depth = 0
-        for event in yaml.parse(text, Loader=_YAML_LOADER):
-            depth += isinstance(event, _OPENS) - isinstance(event, _CLOSES)
-            if depth > YAML_MAX_DEPTH:
-                raise ValueError(f"nested past {YAML_MAX_DEPTH} levels")
-        return yaml.load(text, Loader=_YAML_LOADER)
-    except yaml.YAMLError as exc:
-        raise ValueError(f"not valid YAML — {exc}") from exc
+    return parse_bounded(lambda t: yaml.load(t, Loader=_BoundedLoader), text)
 
 
 def read_yaml(path: Path) -> Any:

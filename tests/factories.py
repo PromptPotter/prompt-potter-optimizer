@@ -1108,7 +1108,7 @@ def degradation_health(
     )
 
 
-def optimizer_state(*, parse_failure: str | None = None) -> OptimizerState:
+def optimizer_state(*, parse_failure: ValidationReason | None = None) -> OptimizerState:
     held = (
         L2Memory(),
         L3Memory(),
@@ -1155,7 +1155,7 @@ def round_result(
     no_result: int = 0,
     samples: int = 24,
     candidates_scored: int = 2,
-    parse_failure: str | None = None,
+    parse_failure: ValidationReason | None = None,
     no_op: int = 0,
     dup: int = 0,
     collapsed: int = 0,

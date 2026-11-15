@@ -207,6 +207,10 @@ def slot_rate(stores: Stores, holder: JobHolder, hop: CycleHop, *, asked: int) -
     _debit_metered(meter, tokens=asked)
 
 
+#: The act past every retryable refusal: the same ask, once its served wait passes.
+_RETRY = NextAct(field="Retry-After", value="seconds to wait, then ask the same again")
+
+
 class RateLimitedError(QuotaExceededError):
     """A refusal a retry after ``retry_after_s`` passes: it repeats as fast as it is asked, so the
     trail banks none of it (`main.py::_bank_refusal`). It alone serves 429, with `Retry-After`."""
@@ -214,7 +218,7 @@ class RateLimitedError(QuotaExceededError):
     http_status = 429
 
     def __init__(self, message: str, *, retry_after_s: float, code: str = "rate_limited") -> None:
-        super().__init__(code=code, message=message)
+        super().__init__(code=code, message=message, next_acts=(_RETRY,))
         self.retry_after_s = retry_after_s
         self.details = {"retry_after_s": round(retry_after_s, 3)}
 

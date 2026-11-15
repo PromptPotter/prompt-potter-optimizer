@@ -96,10 +96,15 @@ def is_provider_credit_refusal(detail: str) -> bool:
     return _PROVIDER_CREDIT_REFUSAL.search(detail) is not None
 
 
+#: The JSON scalar an act's field takes, as its payload model types it.
+type ActValue = str | int | float | bool
+
+
 class NextAct(BaseModel):
     """A remedy past a stop or a refusal: a *kind* a door presses and the one payload field it
     fills (dotted into a model); with no kind, a declared *field* the operator sets; or a file it
-    *reads*. *value* describes what goes in the field. Each door words its own spelling from it:
+    *reads*. *value* is the JSON scalar a `start-run`'s field takes, sent as typed; any other act's
+    describes what goes in the field. Each door words its own spelling from it:
     the terminal its verb and flag (`views/render/phase.py::acts_line`), the API and the webapp the
     kind, MCP the tool of that name; so no sentence beside it names a verb or a flag. Each is one a
     door takes (`command_kinds.py::takes_act`), a stop's at import and a refusal's at the gate."""
@@ -117,15 +122,16 @@ class NextAct(BaseModel):
         "revoke-api-token",
     ] = ""
     field: str = ""
-    value: str = ""
+    value: ActValue = ""
     reads: str = ""
 
     @property
-    def payload(self) -> dict[str, dict[str, str]]:
-        """What a press sends beside the cycle's address: a `start-run`'s *value* is the literal
-        its dotted *field* takes; any other act's *value* describes, so it sends none."""
+    def payload(self) -> dict[str, dict[str, ActValue]]:
+        """What a press sends beside the cycle's address, the roster `command_kinds.py::takes_act`
+        checks: a `start-run`'s dotted *field* filled with *value*; any other act's sends none."""
         head, _, leaf = self.field.partition(".")
-        return {head: {leaf: self.value}} if self.kind == "start-run" and leaf else {}
+        filled = self.kind == "start-run" and leaf and self.value != ""
+        return {head: {leaf: self.value}} if filled else {}
 
 
 #: The act past a cycle or campaign that cannot stand: a fresh campaign, on a dataset named.
@@ -426,20 +432,26 @@ class ServiceUnavailableError(PotterError):
     code = "service_unavailable"
 
 
-# The one remedy for a file this build cannot read that a reader cannot repair: the landing's.
-LANDING_REMEDY = (
-    "`land-data` lands the data root: it drops run data this build cannot read, and names the "
-    "migration a release owes a survivor."
+# The one remedy for a file this build cannot read that a reader cannot repair: the landing's, a
+# terminal verb alone (`gate.py`'s refusal-words scans the remedy's sentence).
+_LANDED = (
+    "Landing the data root drops run data this build cannot read, and names the migration a "
+    "release owes a survivor.",
+    (NextAct(field="land-data"),),
 )
 
 
 class FileKind(enum.Enum):
-    """What a file the store refuses whole IS: its code, status and remedy, said here once."""
+    """What a file the store refuses whole IS: its code, status, remedy and the acts past it, said
+    here once."""
 
-    def __init__(self, code: str, http_status: int, remedy: str) -> None:
+    def __init__(
+        self, code: str, http_status: int, remedy: str, acts: tuple[NextAct, ...] = ()
+    ) -> None:
         self.code = code
         self.http_status = http_status
         self.remedy = remedy
+        self.acts = acts
 
     STORE = ("file_unreadable", 409, "No reader repairs it.")
     BANK = (
@@ -450,10 +462,12 @@ class FileKind(enum.Enum):
     )
     EXPORT = ("export_unreadable", 409, "An export is disposable: re-run the cycle to export it.")
     # Never migrated: the landing drops the run it belongs to whole.
-    MANIFEST = ("manifest_unreadable", 409, LANDING_REMEDY)
-    JOB = ("job_unreadable", 409, LANDING_REMEDY)
+    MANIFEST = ("manifest_unreadable", 409, *_LANDED)
+    JOB = ("job_unreadable", 409, *_LANDED)
     # A line this build cannot read refuses every reader of its kind.
-    LEDGER = ("ledger_unreadable", 409, LANDING_REMEDY)
+    LEDGER = ("ledger_unreadable", 409, *_LANDED)
+    # The account's: a line it cannot take refuses every command filed and every one read.
+    COMMAND_LOG = ("command_log_unreadable", 409, *_LANDED)
     # 500, not 422: the request was fine and the caller cannot fix a file the server persisted.
     STORED_CONFIG = ("stored_config_invalid", 500, "Fix the file.")
     # An optimizer prompt's manifest, the install's or the operator's copy shadowing it.
@@ -479,6 +493,7 @@ class FileUnreadableError(PotterError):
         super().__init__(
             f"{path} is unreadable by this build ({reason}). {kind.remedy}",
             details={"path": path, "reason": reason},
+            next_acts=kind.acts,
         )
 
     @property

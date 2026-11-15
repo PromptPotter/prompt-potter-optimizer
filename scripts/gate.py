@@ -295,9 +295,10 @@ def _unbuilt_schemas(out: str) -> Outcome:
 _REFUSAL_PROBE = """
 import ast, re
 from pathlib import Path
+from typing import get_args
 from promptpotter.domain.command_kinds import CommandKind, takes_act
 from promptpotter.presentation.cli.main import VERBS
-from promptpotter.shared.errors import NextAct
+from promptpotter.shared.errors import FileKind, NextAct
 words = {k.value for k in CommandKind} | {v.name for v in VERBS}
 ticked, flag = re.compile(r"`+([^`]+)`+"), re.compile(r"(?<![\\w-])--[a-z]")
 def names_one(text):
@@ -317,6 +318,7 @@ while grown:
     fresh = {name for name, of in bases.items() if of & refusals} - refusals
     refusals |= fresh
     grown = bool(fresh)
+pressed = set()
 for path in paths:
     if path.as_posix().startswith("promptpotter/presentation/cli/"):
         continue
@@ -336,11 +338,22 @@ for path in paths:
                     print(f"  {path.as_posix()}:{call.lineno}: {text[:90]!r}")
     for call in ast.walk(tree):
         if isinstance(call, ast.Call) and getattr(call.func, "id", "") == "NextAct":
-            named = {k.arg: k.value for k in call.keywords if k.arg != "value"}
-            if all(isinstance(v, ast.Constant) for v in named.values()) and not takes_act(
-                NextAct(**{k: v.value for k, v in named.items()})
-            ):
-                print(f"  {path.as_posix()}:{call.lineno}: an act no door takes")
+            kw = {k.arg: k.value for k in call.keywords}
+            if isinstance(kw.get("kind"), ast.Constant):
+                pressed.add(kw["kind"].value)
+            # A value the call computes is left out; a constant one is checked as it is sent.
+            if all(isinstance(v, ast.Constant) for a, v in kw.items() if a != "value"):
+                fixed = {a: v.value for a, v in kw.items() if isinstance(v, ast.Constant)}
+                if not takes_act(NextAct(**fixed)):
+                    print(f"  {path.as_posix()}:{call.lineno}: an act no door takes")
+# A file kind's remedy is a refusal's sentence too, worded once beside its acts.
+for kind in FileKind:
+    if names_one(kind.remedy):
+        print(f"  shared/errors.py::FileKind.{kind.name}: {kind.remedy[:90]!r}")
+# One roster: the kinds an act may name are the kinds the tree's acts press, each a command kind.
+rostered = set(get_args(NextAct.model_fields["kind"].annotation)) - {""}
+if drift := sorted(rostered ^ pressed) + sorted(rostered - {k.value for k in CommandKind}):
+    print(f"  shared/errors.py::NextAct.kind and the kinds acts press differ: {drift}")
 """
 
 

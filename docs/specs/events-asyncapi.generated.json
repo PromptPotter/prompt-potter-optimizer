@@ -8903,6 +8903,7 @@
           "over_ceiling",
           "optimizer_prompt_parse_failure",
           "l1_provider_empty_response",
+          "l1_all_no_op_variants",
           "steers_inner_stopping",
           "steers_across_seeds",
           "guts_inherited_contract",

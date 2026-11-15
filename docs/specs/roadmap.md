@@ -205,7 +205,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   admissions booked (a resend included), each connector declares its typed experiment model, the
   node registry lives beside its members, and the compiler owns the matcher pick. No decision or
   request moved; the estimator, potter and capo-pobb digests moved by code alone.
-- **then:** faults-2a; then mcp on mkey's tip beside faults-2b; then tv-2.
+- **landed 86, faults-2a:** a refusal is a typed row with its acts at every door (the store's mint,
+  the landing, a phase, an admission, harbor's pin roster), an act's value is its field's typed
+  scalar, the CLI builds its arguments from each field's declared spelling, and one bounded parse
+  door reads YAML and capo's replies. No decision moved; the capo, capo-pobb and potter digests
+  moved by code alone; job files only widen.
+- **then:** mcp beside faults-2b; then tv-2.
 
 The re-keys end at the behaviour-key switch.
 

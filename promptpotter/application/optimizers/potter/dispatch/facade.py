@@ -68,7 +68,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.value_tree import Delivery
-from promptpotter.domain.wounds import RuntimeFailure
+from promptpotter.domain.wounds import RuntimeFailure, ValidationReason
 from promptpotter.infrastructure.llm.telemetry import append_record, current_round
 from promptpotter.infrastructure.run_scope import RunScope, scoped
 from promptpotter.shared.errors import PromptCompositionError
@@ -316,7 +316,7 @@ class PotterView:
         return self._l1_readout.l1_yield
 
     @property
-    def l1_parse_failure(self) -> str | None:
+    def l1_parse_failure(self) -> ValidationReason | None:
         """`None` where the round's generation parsed, or made no call."""
         return self._l1_readout.l1_parse_failure
 

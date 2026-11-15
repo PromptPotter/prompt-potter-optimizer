@@ -46,6 +46,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
+    ConflictError,
     FileUnreadableError,
     NotFoundError,
     PayloadInvalidError,
@@ -140,7 +141,7 @@ def dataset_reading(stores: Stores, name: str) -> DatasetReading:
         block = _held_block(dataset, held)
     except BackendUnreachableError:
         return DatasetReading(None, StartBlock.BACKEND_UNREACHABLE)
-    except (FileUnreadableError, PayloadInvalidError) as refused:
+    except (FileUnreadableError, PayloadInvalidError, ConflictError) as refused:
         return DatasetReading(None, StartBlock.UNREADABLE, refused)
     except (ValueError, OSError):
         logger.exception("datasets: %s could not be read for the listing", name)

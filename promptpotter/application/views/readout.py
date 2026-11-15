@@ -67,7 +67,12 @@ from promptpotter.domain.phase_acts import (
     ProposeClosed,
     ProposeOpened,
 )
-from promptpotter.domain.phases import CampaignPhase, StopOutcome, stop_reason_outcome
+from promptpotter.domain.phases import (
+    RUN_PHASE_INFO,
+    CampaignPhase,
+    StopOutcome,
+    stop_reason_outcome,
+)
 from promptpotter.domain.records.cell_beat import CellBeatRecord
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import (
@@ -235,8 +240,8 @@ class ReadoutProjection(Projection):
         if not isinstance(state, Paused | Ended):
             # The arms gate is its narration row, then the act that answers it.
             self._say(record)
-            if isinstance(state, ArmsGate):
-                for line in acts_line(state.next_acts):
+            if isinstance(state, ArmsGate) and (held := RUN_PHASE_INFO[state.run_phase].refusal):
+                for line in acts_line(held.next_acts):
                     self._write(f"    {line}")
             return
         # Every entry point's readout ends on why, so no completion box repeats it; this block is

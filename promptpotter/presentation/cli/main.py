@@ -124,28 +124,28 @@ def _budget_axis(axis: str, cast: Callable[[str], float]) -> Callable[[str], Bud
 
 BUDGET_AXES = (
     Arg(
-        CommandPayload.cli_flag("budget.usd"),
+        CommandPayload.cli_spelling("budget.usd"),
         type=_budget_axis("usd", float),
         metavar="USD|none",
         help="Campaign USD ceiling (optimizer + backend, every live cycle); 0 halts after the "
         "current round, `none` leaves only your account's allowance. Omit to leave it as it stands.",
     ),
     Arg(
-        CommandPayload.cli_flag("budget.tokens"),
+        CommandPayload.cli_spelling("budget.tokens"),
         type=_budget_axis("tokens", int),
         metavar="N|none",
         help="Campaign token ceiling (in + out) — the unit that survives an unpriced model; "
         "whichever ceiling trips first halts. Omit to leave it as it stands.",
     ),
     Arg(
-        CommandPayload.cli_flag("budget.rounds"),
+        CommandPayload.cli_spelling("budget.rounds"),
         type=_budget_axis("rounds", int),
         metavar="N|none",
         help="L1 round cap, read at the next round boundary; `none` lifts it, so the spend "
         "ceiling governs. Omit to leave it as it stands.",
     ),
     Arg(
-        CommandPayload.cli_flag("budget.wall_clock_s"),
+        CommandPayload.cli_spelling("budget.wall_clock_s"),
         type=_budget_axis("wall_clock_s", float),
         metavar="S|none",
         help="Wall-clock bound in seconds for each launch; a remote cell still open at the edge "
@@ -154,12 +154,16 @@ BUDGET_AXES = (
 )
 
 ACTIVE_CAMPAIGN = Arg(
-    CyclePayload.cli_flag("campaign_id"), default="", help="Campaign id (default: the active one)."
+    CyclePayload.cli_spelling("campaign_id"),
+    default="",
+    help="Campaign id (default: the active one).",
 )
 ACTIVE_CYCLE = Arg(
-    CyclePayload.cli_flag("cycle_id"), default="", help="Cycle id (default: the active one)."
+    CyclePayload.cli_spelling("cycle_id"), default="", help="Cycle id (default: the active one)."
 )
-CAMPAIGN_ID = Arg("campaign_id", help="Target campaign id ({dataset}__{rand6_hex})")
+CAMPAIGN_ID = Arg(
+    CampaignPayload.cli_spelling("campaign_id"), help="Target campaign id ({dataset}__{rand6_hex})"
+)
 
 
 def _declare(parser: argparse.ArgumentParser, args: Iterable[Arg]) -> None:
@@ -317,9 +321,6 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
     Verb(
         "head-to-head",
         "cli.commands.launch:cmd_head_to_head",
-        unspelled={
-            "dataset_name": "the DATASET positional",
-        },
         help="Mint the arms of one controlled head-to-head on a dataset NAME in one act, each a "
         "campaign on the same origin and bench set that searches prompts alone, and run them side "
         "by side, each in its own process, until every arm ends. Every arm is planned, priced on "
@@ -364,18 +365,18 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "left off; flags handle rewind and divergence.",
         args=(
             Arg(
-                StartRunPayload.cli_flag("campaign_id"),
+                StartRunPayload.cli_spelling("campaign_id"),
                 default="",
                 help="Campaign id, 6-hex suffix, or unambiguous prefix (default: the active one). Its "
                 "cycle's own session is resumed; the active pointer is not consulted.",
             ),
             Arg(
-                StartRunPayload.cli_flag("cycle_id"),
+                StartRunPayload.cli_spelling("cycle_id"),
                 default="",
                 help="Cycle id (default: the active one, or the named campaign's only cycle).",
             ),
             Arg(
-                StartRunPayload.cli_flag("mode.from_round"),
+                StartRunPayload.cli_spelling("mode.from_round"),
                 dest="resume_from_round",
                 type=int,
                 default=None,
@@ -391,7 +392,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "run on, or `fork` a sibling cycle at the divergent round and run that.",
             ),
             Arg(
-                ForkCyclePayload.cli_flag("round"),
+                ForkCyclePayload.cli_spelling("round"),
                 dest="rewind_to_round",
                 type=int,
                 default=None,
@@ -401,7 +402,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 "preserved intact. Contrast with `--from N` which rewinds in place.",
             ),
             Arg(
-                ForkCyclePayload.cli_flag("reason"),
+                ForkCyclePayload.cli_spelling("reason"),
                 dest="rewind_reason",
                 type=str,
                 default="",
@@ -878,11 +879,11 @@ def _field_args(model: type[CommandPayload], name: str, field: FieldInfo) -> tup
         annotation = annotation.__value__
     if annotation is Budget:
         return BUDGET_AXES
-    flag = model.cli_flag(name)
+    spelled = model.cli_spelling(name)
     spec: dict[str, Any] = {"help": field.description}
     # Never `is bool`: past a final class, mypy narrows `type[Any]` away and drops every later arm.
     if isinstance(annotation, type) and issubclass(annotation, bool):
-        return (Arg(flag, dest=name, action="store_true", **spec),)
+        return (Arg(spelled, dest=name, action="store_true", **spec),)
     if get_origin(annotation) is Literal:
         spec["choices"] = get_args(annotation)
     elif annotation is int:
@@ -897,12 +898,13 @@ def _field_args(model: type[CommandPayload], name: str, field: FieldInfo) -> tup
             spec |= {"type": _int_list_arg, "metavar": "0,2"}
     elif annotation is not str:
         raise TypeError(f"`{name}` has no terminal spelling: {annotation}")
-    if not field.is_required():
-        return (Arg(flag, dest=name, default=argparse.SUPPRESS, **spec),)
+    if spelled.startswith("-"):
+        held = {"required": True} if field.is_required() else {"default": argparse.SUPPRESS}
+        return (Arg(spelled, dest=name, **held, **spec),)
     if annotation is str and not any(getattr(m, "min_length", 0) for m in field.metadata):
         # `''` is a value here, and PowerShell drops an empty argument before argparse sees it.
-        return (Arg(name, nargs="?", default="", **spec),)
-    return (Arg(name, **spec),)
+        return (Arg(spelled, nargs="?", default="", **spec),)
+    return (Arg(spelled, **spec),)
 
 
 def command_verb(kind: CommandKind) -> Verb:
@@ -941,9 +943,10 @@ def _paths(model: type[BaseModel], prefix: str = "") -> dict[str, FieldInfo]:
 
 
 def _unsaid(verb: Verb) -> list[str]:
-    """What *verb* leaves unsaid: a payload field, nested ones too, with no `Arg` or `unspelled`
-    reason on it or a model holding it, or the reverse. A flag spells a field only as its payload
-    declares it (`CommandPayload.cli_flag`), so an act the terminal spells is a flag it takes."""
+    """What *verb* leaves unsaid: a payload field, nested ones too, with no `Arg` carrying the
+    whole spelling its payload declares (`CommandPayload.cli_spelling`, a positional or a flag) or
+    `unspelled` reason on it or a model holding it, or the reverse; so an act the terminal spells
+    is an argument it takes."""
     if verb.read is not None:
         return []
     models = [PAYLOAD_MODEL_FOR_KIND[kind] for kind in CommandKind if kind.cli_verb == verb.name]
@@ -955,16 +958,17 @@ def _unsaid(verb: Verb) -> list[str]:
         for name, field in _paths(model).items()
         if name.split(".")[0] not in CyclePayload.model_fields
     }
-    flags = {flag for arg in verb.args for flag in arg.flags}
-    spelled = {arg.dest for arg in verb.args if not arg.flags[0].startswith("-")} | {
-        name for name in fields if any(model.cli_flag(name) in flags for model in models)
-    }
+    taken = {flag for arg in verb.args for flag in arg.flags}
+    spelled = {name for name in fields if any(m.cli_spelling(name) in taken for m in models)}
     budgets = {name for name, field in fields.items() if field.annotation is Budget}
-    said, holders = spelled | verb.unspelled.keys(), {name.rpartition(".")[0] for name in fields}
+    holders = {name.rpartition(".")[0] for name in fields}
+    # An argument spells its whole field alone; a reason may name a model, holding its fields.
     unsaid = [
         f"`{verb.name}` spells no `{name}`"
-        for name in sorted(fields.keys() - budgets - holders)
-        if not any(".".join(name.split(".")[:n]) in said for n in range(1, name.count(".") + 2))
+        for name in sorted(fields.keys() - budgets - holders - spelled)
+        if not any(
+            ".".join(name.split(".")[:n]) in verb.unspelled for n in range(1, name.count(".") + 2)
+        )
     ]
     if budgets and not set(BUDGET_AXES) <= set(verb.args):
         unsaid.append(f"`{verb.name}` takes a budget without `BUDGET_AXES`")

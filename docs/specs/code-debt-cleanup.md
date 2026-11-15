@@ -727,56 +727,24 @@ and derived the knob couplings from each member's draws and the escalation ladde
   prints the `ValidationError` and the `OptimizerPromptParseError` chain under `shared/errors.py::graceful`.
   Root: a handled fault is said once as its sentence; a traceback is for a fault nobody handled.
   **Rides with:** faults 2. **Re-test:** a readout with a twice-failed critique holds no `Traceback`.
-- **A run phase spells two refusal words** (narr-2's report): `domain/phases.py::RunPhaseInfo`'s
-  `no_action` and `parked` (`:325-326`) are prose `phases.py:439,444` hands out as a refusal, beside
-  `Refusal`'s own message. Root: the phase's refusal is a `Refusal` with its `next_acts`.
-  **Rides with:** faults 2, after faults 1's `next_acts`. **Re-test:**
-  `git grep -nE "no_action|\.parked\b" -- promptpotter/domain/phases.py` is empty.
 - **An origin gate's last error reaches a log alone** (faults-1's report): `DegradationHealth.last_error`
   is read only by `runner/loop.py`'s `logger.error` at the origin-gate halt, so the readout and the
   browser never say why round 0 was graded unhealthy. Root: the stop's served detail (`Ended.detail`, as
   `OPTIMIZER_ABORT` carries it) holds it. **Rides with:** faults 2. **Re-test:** an `ORIGIN_GATE`
   readout names the origin's last error, and the log goes.
-- **Three refusals sit outside the act rule** (faults-1's report): `campaign_store/store.py`'s
-  `mint_cycle` / `cycle_minted_otherwise` 409 names no next act; `maintenance`'s `LANDING_REMEDY` and
-  harbor's pin-roster `ValueError` name `land-data` and a terminal verb in prose, outside the
-  `refusal-words` scan because no command kind exists for them. Root: each is a `Refusal` with its
-  `next_acts`. **Rides with:** faults 2. **Re-test:** `refusal-words` scans all three. So does
-  `jobs/quota.py::_contended` (coupon's report): its retryable refusal carries no act, because
-  `RateLimitedError` takes none.
-- **An act's value is a string beside a typed field** (faults-1's fix pass): `shared/errors.py::NextAct`
-  holds every payload value as `str`, so a pressed `mode.from_round: "2"` meets the payload's strict
-  `WireInt` and is refused; `NextAct.kind`'s Literal re-spells `CommandKind`, since `shared/` cannot
-  import `domain/`. Root: the act lives beside the kinds, its value typed as the field it fills.
-  **Rides with:** faults 2. **Re-test:** pressing a `mode.from_round` act through the API is admitted.
-- **The command log has no file kind** (faults-1's fix pass): `dispatcher.py::Replaying.misread` and
-  `read_model.py`'s `_refusal` file the account's command log as `FileKind.LEDGER`, whose remedy speaks
-  of a run's ledger. Root: the command log's own `FileKind`. **Rides with:** faults 2. **Re-test:** a
-  torn command log's refusal names the command log.
-- **A stop becomes a refusal by two rules** (faults-1's fix pass): `scoring_scope.py::_refused` and
-  `passes.py::_grade` each map a stop to a refusal. Root: one domain mapping both read. **Rides
-  with:** faults 2. **Re-test:** one definition of the mapping in `promptpotter/`.
-- **Two parsers bound depth by hand** (faults-1's fix pass): `capo/members.py::_instructions` catches
-  `ValueError`/`SyntaxError` only, so `literal_eval`'s `RecursionError` still crashes init;
-  `store/io.py::parse_yaml` parses each text twice. Root: one bounded parse door that answers a
-  refusal. **Rides with:** faults 2. **Re-test:** a 5000-deep list as a capo init reply is one refused
-  child.
-- **Validation reasons as loose strings** (faults-1's fix pass): `INVARIANT_REASONS` and
-  `optimizer_state.py::PARSE_FAILURE_ALL_NO_OP` stay `str` beside `ValidationReason`'s enum. Root:
-  rows of the one enum. **Rides with:** faults 2. **Re-test:** `git grep -n "INVARIANT_REASONS" -- promptpotter` is empty.
-- **A positional argument has no declared spelling** (faults-1's fix pass): `cli_flag` spells flags
-  only, so `CampaignPayload.campaign_id` (positional) is spelled by the CLI alone, and `cli/main.py`'s
-  `_unsaid` prefix rule counts `head_to_head.arms` as spelled by `--head-to-head` (`--arm` spells it).
-  Root: every CLI spelling of a payload field, positional or flag, declared beside the payload.
-  **Rides with:** faults 2. **Re-test:** `_unsaid` matches whole flags only.
-- **Three served acts reach no door** (faults-1's review): `origin_listing.py::DatasetIndexEntry.refusal`
-  has no webapp or CLI reader; `webapp/lib/hooks/useQueuedStart.ts`'s `said` carries a refusal's
-  message without its `next_acts`; `run_records.py::ArmsGate.next_acts` is a `ClassVar`, so no wire
-  field carries it and `run-phase.ts`'s "Submit arms" control is never fed an act; `cli/commands/launch.py`
-  prints a refusal without its acts. Root: an act a refusal or a hold names rides the row it is
-  served on, and every door reads it there.
-  **Rides with:** faults 2. **Re-test:** each of the three is read by the webapp (a `withActs` call)
-  and by the CLI (`acts_line`).
+- **A loop refusal carries no code** (faults-2a's report): `dispatcher.py::RejectedError` is no
+  `PotterError`, so a refused loop command serves no code or acts. Root: a `PotterError` subclass.
+  **Rides with:** faults 2. **Re-test:** a refused loop command's reading names its code.
+- **A refusal reads every bank to word itself** (faults-2a's report): `cycle_addressing.py` and
+  `origin_listing.py::no_dataset_hint` call `list_datasets`, which reads every bank. Root: a listing
+  that holds no rows. **Rides with:** faults 2. **Re-test:** a refusal's path opens no bank file.
+- **Harbor's other refusals are `ValueError`s** (faults-2a's report): only the pin roster's is a refusal
+  with acts. **Rides with:** faults 2. **Re-test:** `git grep -c "raise ValueError" -- promptpotter/connectors/harbor.py` is 0.
+- **`new` spells its dataset twice** (faults-2a's report): `--dataset-name` beside the positional.
+  **Rides with:** faults 2. **Re-test:** `python -m promptpotter new --help` names the dataset once.
+- **A line file's kind is passed by its caller** (faults-2a's report): `read_model.py::LineIndex.of(...,
+  kind)` defaults to `LEDGER`. Root: the kind is read off the path's `data_root.py::KINDS` row.
+  **Rides with:** faults 2. **Re-test:** `LineIndex.of` takes no kind.
 
 ### lite-2 (what lite left at its landing)
 
@@ -981,6 +949,12 @@ signed-in follower; `demo_mode_enabled` is its reader; with no exhibit named the
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
+- **The freed lineage tree overflows its card under load** (rk-rest's push gate, beside an offline
+  run): `e2e/walk/responsive.spec.ts` "the freed lineage tree fits its viewport" read
+  `div.card.cand-card +593px` at desktop-1440 [touch], and passed on the same tree alone. Either the
+  card is wide until a late style or measure lands, or `harness.ts::noSidewaysScroll` reads before
+  the pane settles. Root first: find which; a flash the user sees is the app's fix. **Rides with:**
+  tests-w. **Re-test:** the walk beside a busy offline run passes 5/5.
 
 - **`run_init_round`, `seat`, `_peer_cycle` and `close_round` replay production by hand**:
   `tests/factories.py::run_init_round` re-composes `runner/entry.py::run_optimization`'s preamble and

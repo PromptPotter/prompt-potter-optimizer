@@ -181,30 +181,39 @@ def line_dict(raw: bytes) -> dict[str, Any]:
     return rec
 
 
-def _refusal(ledger: Path, offset: int, reason: str) -> FileUnreadableError:
-    return FileUnreadableError(FileKind.LEDGER, path=str(ledger), reason=f"line {offset}: {reason}")
+def _refusal(
+    ledger: Path, offset: int, reason: str, kind: FileKind = FileKind.LEDGER
+) -> FileUnreadableError:
+    return FileUnreadableError(kind, path=str(ledger), reason=f"line {offset}: {reason}")
 
 
 def ledger_record[R](
-    validate: Callable[[bytes], R], raw: bytes, *, ledger: Path, offset: int
+    validate: Callable[[bytes], R],
+    raw: bytes,
+    *,
+    ledger: Path,
+    offset: int,
+    kind: FileKind = FileKind.LEDGER,
 ) -> R | None:
-    """Every ledger reader's one policy: a line it cannot take refuses the read."""
+    """Every line-file reader's one policy: a line it cannot take refuses the read, as its *kind*."""
     if not raw.strip():
         return None
     try:
         return validate(raw)
     except ValueError as exc:
-        raise _refusal(ledger, offset, _reason(exc)) from exc
+        raise _refusal(ledger, offset, _reason(exc), kind) from exc
 
 
-def feed_fold[T](fold: _Feeds[T], record: T, *, ledger: Path, offset: int) -> None:
+def feed_fold[T](
+    fold: _Feeds[T], record: T, *, ledger: Path, offset: int, kind: FileKind = FileKind.LEDGER
+) -> None:
     """A fold that cannot take a line refuses as a line no model takes does: a writer's checkout and a
     refold then fail at one offset, where folding past it would serve a value missing that line."""
     try:
         fold.feed(record)
     except Exception as exc:
         reason = f"{type(fold).__name__} cannot fold it: {_reason(exc)}"
-        raise _refusal(ledger, offset, reason) from exc
+        raise _refusal(ledger, offset, reason, kind) from exc
 
 
 def _by_record_type(folds: Iterable[LedgerFold[Any, Any]]) -> dict[str, type[StrictModel]]:
@@ -733,14 +742,22 @@ class LineIndex(_LedgerTail):
     ] = OrderedDict()
     _registry_lock: ClassVar[threading.Lock] = threading.Lock()
 
-    def __init__(self, path: Path, roster: Sequence[Callable[[], LineFold[Any]]]) -> None:
-        self._roster = tuple(roster)
+    def __init__(
+        self, path: Path, roster: Sequence[Callable[[], LineFold[Any]]], kind: FileKind
+    ) -> None:
+        self._roster, self._kind = tuple(roster), kind
         super().__init__(path)
 
     @classmethod
-    def of(cls, path: Path, roster: tuple[Callable[[], LineFold[Any]], ...]) -> LineIndex:
+    def of(
+        cls,
+        path: Path,
+        roster: tuple[Callable[[], LineFold[Any]], ...],
+        kind: FileKind = FileKind.LEDGER,
+    ) -> LineIndex:
+        """*kind* is what the file at *path* IS, which a line it cannot take is refused as."""
         with cls._registry_lock:
-            return _registered(cls._registry, (path, roster), lambda: cls(path, roster))
+            return _registered(cls._registry, (path, roster), lambda: cls(path, roster, kind))
 
     def _reset(self) -> None:
         super()._reset()
@@ -761,7 +778,9 @@ class LineIndex(_LedgerTail):
         for placed in self._placed:
             placed.at_offset = self._lines
         try:
-            line = ledger_record(line_dict, raw, ledger=self._path, offset=self._lines)
+            line = ledger_record(
+                line_dict, raw, ledger=self._path, offset=self._lines, kind=self._kind
+            )
         except FileUnreadableError as refusal:
             self._refused = self._refused or refusal
             return
@@ -769,7 +788,7 @@ class LineIndex(_LedgerTail):
             return
         try:
             for fold in self._folds.values():
-                feed_fold(fold, line, ledger=self._path, offset=self._lines)
+                feed_fold(fold, line, ledger=self._path, offset=self._lines, kind=self._kind)
         except FileUnreadableError as refusal:
             self._refused = refusal
 

@@ -122,7 +122,7 @@ class Replaying[P: CommandPayload]:
     def misread(self, said: str) -> FileUnreadableError:
         """Its end acks another kind's effect: the account's command log that holds it."""
         return FileUnreadableError(
-            FileKind.LEDGER, path=str(self.stores.commands.path), reason=said
+            FileKind.COMMAND_LOG, path=str(self.stores.commands.path), reason=said
         )
 
 

@@ -5,7 +5,7 @@ words of an MCP task's status, and for a launch each job it launched (`Job.endin
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, NamedTuple
 
 from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.application.jobs.registry import JobRegistry
@@ -21,7 +21,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.records.run_records import LaunchedEffect, LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NotFoundError
+from promptpotter.shared.errors import NextAct, NotFoundError
 
 type TaskStatus = Literal["working", "input_required", "completed", "failed", "cancelled"]
 
@@ -49,28 +49,38 @@ _PRECEDENCE: tuple[TaskStatus, ...] = (
 TERMINAL = frozenset[TaskStatus]({"completed", "failed", "cancelled"})
 
 
-def _ended(what: str, ending: StopReason, *, stepped: bool) -> tuple[TaskStatus, str]:
+class JobStatus(NamedTuple):
+    status: TaskStatus
+    said: str
+    # The acts past what it says: its stop's, or the refusal it lapsed on.
+    acts: tuple[NextAct, ...] = ()
+
+
+def _ended(what: str, ending: StopReason, *, stepped: bool) -> JobStatus:
     info = STOP_REASON_INFO[ending]
     if stepped:
-        return "completed", f"{what}: stepped its rounds. {info.next_step}"
+        return JobStatus(
+            "completed", f"{what}: stepped its rounds. {info.next_step}", info.next_acts
+        )
     status = _ENDED[info.outcome]
     if info.outcome is StopOutcome.PAUSED and info.category is StopCategory.OPERATOR:
         status = "cancelled"
-    return status, f"{what}: {info.label}. {info.next_step}"
+    return JobStatus(status, f"{what}: {info.label}. {info.next_step}", info.next_acts)
 
 
-def job_status(job: Job, *, held: bool) -> tuple[TaskStatus, str]:
+def job_status(job: Job, *, held: bool) -> JobStatus:
     """One job's task status and its words; *held* is its cycle holding at a gate for an answer."""
     if job.ending is not None:
         return _ended(job.what, job.ending, stepped=job.stepped)
     if job.lapse is not None:
-        refused = "" if job.refusal is None else job.refusal.message
-        return _LAPSED[job.lapse], f"{job.what}: {refused or job.lapse}"
+        if (refused := job.refusal) is None:
+            return JobStatus(_LAPSED[job.lapse], f"{job.what}: {job.lapse}")
+        return JobStatus(_LAPSED[job.lapse], f"{job.what}: {refused.message}", refused.next_acts)
     if job.released:
-        return "completed", f"{job.what}: returned"
+        return JobStatus("completed", f"{job.what}: returned")
     if held:
-        return "input_required", f"{job.what}: holding at a gate for its answer"
-    return "working", f"{job.what}: {job.stage}"
+        return JobStatus("input_required", f"{job.what}: holding at a gate for its answer")
+    return JobStatus("working", f"{job.what}: {job.stage}")
 
 
 def _held(stores: Stores, job: Job) -> bool:
@@ -92,6 +102,8 @@ class CommandReading(FrozenModel):
     token_id: str | None
     status: TaskStatus
     said: str
+    # The acts past what it says, as the stop or refusal it ended on names them.
+    next_acts: tuple[NextAct, ...]
     created_at: str
     last_updated_at: str
     launches: list[LaunchedJob] | None
@@ -133,18 +145,14 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
     filed, end = owned.filed, owned.end
     updated = filed.timestamp if end is None else end.timestamp
     status: TaskStatus
+    acts: tuple[NextAct, ...] = ()
     launched = launched_jobs(jobs, owned)
     if launched is not None:
-        read = [
-            (
-                *job_status(job, held=_held(stores, job)),
-                job.released_at or job.started_at or job.created_at,
-            )
-            for job in launched
-        ]
-        status = next(s for s in _PRECEDENCE if s in {r[0] for r in read})
-        said = "; ".join(r[1] for r in read)
-        updated = max([updated, *(r[2] for r in read)])
+        read = [job_status(job, held=_held(stores, job)) for job in launched]
+        status = next(s for s in _PRECEDENCE if s in {r.status for r in read})
+        said = "; ".join(r.said for r in read)
+        acts = tuple(dict.fromkeys(act for r in read for act in r.acts))
+        updated = max([updated, *(j.released_at or j.started_at or j.created_at for j in launched)])
     elif end is None and owned.status == "cancelled":
         status, said = "cancelled", f"{filed.kind}: its filer died before it ended"
     elif end is None:
@@ -168,6 +176,7 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
                 said = f"{filed.kind}: {refusal.message}"
                 if not stopped:
                     said = f"{filed.kind}: {refusal.code}: {refusal.message}"
+                acts = refusal.next_acts
             case "rejected":
                 status, said = "failed", f"{filed.kind}: {end.detail}"
     return CommandReading(
@@ -177,6 +186,7 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
         token_id=filed.token_id,
         status=status,
         said=said,
+        next_acts=acts,
         created_at=filed.timestamp,
         last_updated_at=updated,
         launches=None if launched is None else [LaunchedJob.of(job) for job in launched],

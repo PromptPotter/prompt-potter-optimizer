@@ -33,6 +33,7 @@ from promptpotter.application.read_params import (
 from promptpotter.application.served_dashboard import ServedDashboard, WarmingDashboard
 from promptpotter.application.views.evidence import evidence_lines
 from promptpotter.application.views.render.export import ExportFiles
+from promptpotter.application.views.render.phase import acts_line
 from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
@@ -75,10 +76,10 @@ def command_human(
     _params: ReadParams, read: CommandReading, _args: argparse.Namespace, _caller: Caller
 ) -> CommandResult:
     where = f" on {read.subject}" if read.subject else ""
+    said = f"{read.command_id} ({read.kind}{where}): {read.status} as of {read.last_updated_at}."
     return CommandResult(
         data=read.model_dump(mode="json"),
-        human=f"{read.command_id} ({read.kind}{where}): {read.status} as of "
-        f"{read.last_updated_at}. {read.said}",
+        human="\n".join((f"{said} {read.said}", *acts_line(read.next_acts))),
     )
 
 
@@ -111,8 +112,8 @@ def _line(cycle: HierarchyCycle, *, active: bool) -> str:
         + ("" if state.stop is None else f"  {state.stop.said}")
         + (
             f"  next: {state.admission.offers}"
-            if state.admission.offers
-            else f"  ({state.admission.refusal})"
+            if state.admission.refusal is None
+            else f"  ({state.admission.refusal.message})"
         )
         + ("  <- latest launch" if active else "")
     )
@@ -249,7 +250,10 @@ def dashboard_human(
             lines.append(said_text(dash.said))
     if dash.stop is not None:
         lines.append(dash.stop.said)
-    lines.append(f"next: {admission.offers}" if admission.offers else f"({admission.refusal})")
+    if admission.refusal is None:
+        lines.append(f"next: {admission.offers}")
+    else:
+        lines += [f"({admission.refusal.message})", *acts_line(admission.refusal.next_acts)]
     return CommandResult(data=dash.model_dump(mode="json"), human="\n".join(lines))
 
 

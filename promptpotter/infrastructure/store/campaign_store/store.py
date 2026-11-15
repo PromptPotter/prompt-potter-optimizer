@@ -500,6 +500,7 @@ class CampaignStore:
             raise ConflictError(
                 f"cycle {hop.cycle_id} is minted already, on another seed or cut",
                 code="cycle_minted_otherwise",
+                next_acts=(NextAct(kind="fork-cycle"),),
             )
 
     def act(self, hop: CycleHop, act: ArmAct) -> None:

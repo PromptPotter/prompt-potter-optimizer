@@ -27,7 +27,7 @@ from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import Campaign, Compare, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.phases import STOP_REASON_INFO
+from promptpotter.domain.phases import stop_refused
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import all_verifier_graded
@@ -162,24 +162,16 @@ def cycle_partition(
     return partition_bank(rows, campaign_config.dataset_split, seed=campaign_config.run_seed)
 
 
-def _refused(stop: StopLoop) -> DiagnosticError:
-    info = STOP_REASON_INFO[stop.reason]
-    unmeasured = "" if stop.unmeasured is None else f", {stop.unmeasured} cell(s) unmeasured"
-    return DiagnosticError(
-        f"{info.label}{unmeasured}. {info.next_step}".strip(), next_acts=info.next_acts
-    )
-
-
 async def diagnostic_pass(scoring: Awaitable[ScoredWalk], session: Session) -> ScoredWalk:
     """Nothing above a diagnostic verb catches the round loop's ``StopLoop``; a pause it asked
     comes back with the cells its pass took."""
     try:
         scored = await scoring
     except StopLoop as stop:
-        raise _refused(stop) from None
+        raise stop_refused(stop.reason, unmeasured=stop.unmeasured) from None
     if (halt := scored.halt) is not None:
         if isinstance(halt, StopLoop):
-            raise _refused(halt) from None
+            raise stop_refused(halt.reason, unmeasured=halt.unmeasured) from None
         if not isinstance(halt, KeyboardInterrupt | CancelledError) or not (
             session.state.control.paused(halt)
         ):

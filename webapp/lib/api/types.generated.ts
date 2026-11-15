@@ -22,16 +22,17 @@ export interface ErrorEnvelope {
 
 /** A remedy past a stop or a refusal: a *kind* a door presses and the one payload
  * field it fills (dotted into a model); with no kind, a declared *field* the
- * operator sets; or a file it *reads*. *value* describes what goes in the
- * field. Each door words its own spelling from it: the terminal its verb and
- * flag (`views/render/phase.py::acts_line`), the API and the webapp the kind,
- * MCP the tool of that name; so no sentence beside it names a verb or a flag.
- * Each is one a door takes (`command_kinds.py::takes_act`), a stop's at
+ * operator sets; or a file it *reads*. *value* is the JSON scalar a `start-
+ * run`'s field takes, sent as typed; any other act's describes what goes in
+ * the field. Each door words its own spelling from it: the terminal its verb
+ * and flag (`views/render/phase.py::acts_line`), the API and the webapp the
+ * kind, MCP the tool of that name; so no sentence beside it names a verb or a
+ * flag. Each is one a door takes (`command_kinds.py::takes_act`), a stop's at
  * import and a refusal's at the gate. */
 export interface NextAct {
   kind: '' | 'start-run' | 'set-limits' | 'verify-candidate' | 'mint-campaign' | 'fork-cycle' | 'submit-arms' | 'revoke-api-token';
   field: string;
-  value: string;
+  value: string | number | boolean;
   reads: string;
 }
 
@@ -351,6 +352,7 @@ export interface CommandReading {
   token_id: string | null;
   status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
   said: string;
+  next_acts: NextAct[];
   created_at: string;
   last_updated_at: string;
   launches: LaunchedJob[] | null;
@@ -592,12 +594,12 @@ export interface StopReading {
 export interface RunAdmission {
   /** The verb the one run control offers; null where it offers none. */
   offers: 'pause' | 'resume' | 'start' | null;
-  /** Why the control offers none; empty where it offers one. */
-  refusal: string;
+  /** Why the control offers none, with the acts past it; null where it offers one. */
+  refusal: Refusal | null;
   /** What the offered start or resume sends beside the cycle's address: the `start-
    * run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent
    * as served. */
-  payload: Record<string, Record<string, string>>;
+  payload: Record<string, Record<string, string | number | boolean>>;
   /** Why the cycle's campaign refuses every launch (archived, its definition
    * moved), so its stop's `start-run` acts are not offered; empty where a
    * launch is admitted. */
@@ -2048,7 +2050,7 @@ export interface ValidationFailure {
   /** The accept-set the validator checked against. Empty list when the failure is
    * mode-based (parse error, forbidden axis) rather than membership-based. */
   allowed: string[];
-  reason: 'forbidden_axis' | 'unknown_param' | 'type_mismatch' | 'not_in_available_models' | 'not_in_param_allowed_values' | 'not_accepted_by_model' | 'reproposes_known_failing_config' | 'hallucinated_node' | 'dropped_mandatory_placeholder' | 'shots_without_demo_pool' | 'shot_not_in_demo_pool' | 'shot_repeated' | 'shots_over_cap' | 'not_in_block_pool' | 'citation_not_in_panel' | 'over_ceiling' | 'optimizer_prompt_parse_failure' | 'l1_provider_empty_response' | 'steers_inner_stopping' | 'steers_across_seeds' | 'guts_inherited_contract' | 'layout_node_not_l4_editable' | 'l1_layout_unparseable' | 'l1_layout_missing_mandatory' | 'l1_layout_unknown_placeholder' | 'l1_layout_voids_prefix' | 'l1_layout_unchanged_from_prior' | 'no_op_variant' | 'duplicate_variant' | 'repeat_variant';
+  reason: 'forbidden_axis' | 'unknown_param' | 'type_mismatch' | 'not_in_available_models' | 'not_in_param_allowed_values' | 'not_accepted_by_model' | 'reproposes_known_failing_config' | 'hallucinated_node' | 'dropped_mandatory_placeholder' | 'shots_without_demo_pool' | 'shot_not_in_demo_pool' | 'shot_repeated' | 'shots_over_cap' | 'not_in_block_pool' | 'citation_not_in_panel' | 'over_ceiling' | 'optimizer_prompt_parse_failure' | 'l1_provider_empty_response' | 'l1_all_no_op_variants' | 'steers_inner_stopping' | 'steers_across_seeds' | 'guts_inherited_contract' | 'layout_node_not_l4_editable' | 'l1_layout_unparseable' | 'l1_layout_missing_mandatory' | 'l1_layout_unknown_placeholder' | 'l1_layout_voids_prefix' | 'l1_layout_unchanged_from_prior' | 'no_op_variant' | 'duplicate_variant' | 'repeat_variant';
 }
 
 /** One scored sample as `dashboard.json` serves it, display-trimmed and one shape
@@ -5467,7 +5469,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "dcb444793d4212fd";
+export const SERVED_CONTRACT = "8a78c981d2198b83";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5652,8 +5654,7 @@ export interface RunPhaseInfo {
   awaits_operator: boolean;
   dock_priority: number;
   action: 'pause' | 'resume' | 'start' | null;
-  no_action: string;
-  parked: string;
+  refusal: Refusal | null;
 }
 
 export interface StopReasonInfo {
@@ -6085,14 +6086,14 @@ export const DASHBOARD_STATE_PAUSE_WORDS: Record<DashboardState, string> = {
 
 // Mirror of domain/phases.py::RUN_PHASE_INFO, in display order.
 export const RUN_PHASE_INFO: Record<RunPhase, RunPhaseInfo> = {
-  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, no_action: "Queued — it starts by itself when a slot frees.", parked: "" },
-  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, no_action: "Starting up…", parked: "" },
-  "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
-  "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", no_action: "", parked: "" },
-  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", no_action: "", parked: "stopping at its next checkpoint" },
-  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, no_action: "Holding for you — the chat says what it waits on.", parked: "" },
-  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "producer gone" },
-  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", no_action: "", parked: "writing its last files" },
+  "queued": { label: "Queued", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: null, refusal: { code: "run_queued", message: "Queued — it starts by itself when a slot frees.", details: {}, next_acts: [] } },
+  "starting": { label: "Starting", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: null, refusal: { code: "run_starting", message: "Starting up…", details: {}, next_acts: [] } },
+  "running": { label: "Running", walks: true, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", refusal: null },
+  "scoring": { label: "Scoring", walks: false, settled: false, awaits_operator: false, dock_priority: 1, action: "pause", refusal: null },
+  "paused": { label: "Paused", walks: false, settled: false, awaits_operator: false, dock_priority: 2, action: "resume", refusal: { code: "run_stopping", message: "Stopping at its next checkpoint.", details: {}, next_acts: [] } },
+  "gate": { label: "Holding", walks: false, settled: false, awaits_operator: true, dock_priority: 0, action: null, refusal: { code: "run_held", message: "Holding for you — the chat says what it waits on.", details: {}, next_acts: [{"kind": "submit-arms", "field": "keep", "value": "the draft indexes to measure", "reads": ""}] } },
+  "detached": { label: "Detached", walks: false, settled: false, awaits_operator: false, dock_priority: 3, action: "start", refusal: { code: "run_detached", message: "Producer gone.", details: {}, next_acts: [] } },
+  "terminal": { label: "Ended", walks: false, settled: true, awaits_operator: false, dock_priority: 3, action: "start", refusal: { code: "run_ending", message: "Writing its last files.", details: {}, next_acts: [] } },
 };
 
 // Mirror of domain/phases.py::STOP_REASON_INFO, in display order.

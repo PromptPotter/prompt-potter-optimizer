@@ -2525,6 +2525,22 @@
       ],
       "shape": {
         "$defs": {
+          "ActValue": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
           "CampaignLaunch": {
             "additionalProperties": false,
             "description": "A campaign run: its hop is UNRESOLVED until a fresh mint names the cycle.",
@@ -2618,7 +2634,7 @@
           },
           "NextAct": {
             "additionalProperties": false,
-            "description": "A remedy past a stop or a refusal: a *kind* a door presses and the one payload field it\nfills (dotted into a model); with no kind, a declared *field* the operator sets; or a file it\n*reads*. *value* describes what goes in the field. Each door words its own spelling from it:\nthe terminal its verb and flag (`views/render/phase.py::acts_line`), the API and the webapp the\nkind, MCP the tool of that name; so no sentence beside it names a verb or a flag. Each is one a\ndoor takes (`command_kinds.py::takes_act`), a stop's at import and a refusal's at the gate.",
+            "description": "A remedy past a stop or a refusal: a *kind* a door presses and the one payload field it\nfills (dotted into a model); with no kind, a declared *field* the operator sets; or a file it\n*reads*. *value* is the JSON scalar a `start-run`'s field takes, sent as typed; any other act's\ndescribes what goes in the field. Each door words its own spelling from it:\nthe terminal its verb and flag (`views/render/phase.py::acts_line`), the API and the webapp the\nkind, MCP the tool of that name; so no sentence beside it names a verb or a flag. Each is one a\ndoor takes (`command_kinds.py::takes_act`), a stop's at import and a refusal's at the gate.",
             "properties": {
               "field": {
                 "default": "",
@@ -2646,9 +2662,8 @@
                 "type": "string"
               },
               "value": {
-                "default": "",
-                "title": "Value",
-                "type": "string"
+                "$ref": "#/$defs/ActValue",
+                "default": ""
               }
             },
             "title": "NextAct",

@@ -53,6 +53,7 @@ from promptpotter.domain.scoring import NO_CELLS, ROW_GRADES, CellSheet, GradedC
 from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import StopSignal
+from promptpotter.infrastructure.store.io import parse_bounded
 from promptpotter.shared.statistics import paired_mean_t
 
 
@@ -487,8 +488,8 @@ def _instructions(raw: str) -> list[str] | None:
     non-blank string included."""
     start, end = raw.find("["), raw.rfind("]")
     try:
-        listed = ast.literal_eval(raw[start : end + 1]) if 0 <= start < end else None
-    except (ValueError, SyntaxError):
+        listed = parse_bounded(ast.literal_eval, raw[start : end + 1]) if 0 <= start < end else None
+    except ValueError:
         return None
     if not isinstance(listed, list) or not all(isinstance(s, str) for s in listed):
         return None

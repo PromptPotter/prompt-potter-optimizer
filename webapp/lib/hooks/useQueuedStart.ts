@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { commandRead } from "@/lib/api/reads";
 import type { CycleHop } from "@/lib/api/types";
+import { withActs } from "@/lib/derivations";
 import { readyData, useRead } from "./useRead";
 
 // A queued Start as its command reads on the feed: the cycle a slot minted, else how it ended
@@ -16,7 +17,9 @@ export function useQueuedStart(commandId: string | null): QueuedStart {
     const hop = reading?.launches?.find((launch) => launch.hop !== null)?.hop;
     if (hop) return { stage: "minted", hop };
     // An unminted job holds no gate, so past `working` it has ended: the served words say how.
-    if (reading && reading.status !== "working") return { stage: "ended", said: reading.said };
+    if (reading && reading.status !== "working") {
+      return { stage: "ended", said: withActs(reading.said, reading.next_acts) };
+    }
     return { stage: "waiting" };
   }, [reading]);
 }

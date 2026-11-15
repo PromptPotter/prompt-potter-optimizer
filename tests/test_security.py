@@ -193,6 +193,7 @@ from promptpotter.domain.phases import (
     RUN_PHASE_INFO,
     PauseCause,
     ProducerState,
+    RunAdmission,
     RunPhase,
     StopReason,
 )
@@ -329,6 +330,7 @@ from promptpotter.shared.errors import (
     CycleBusyError,
     FileUnreadableError,
     IdempotencyKeyReusedError,
+    NextAct,
     NotFoundError,
     PayloadInvalidError,
     PotterError,
@@ -3143,6 +3145,10 @@ def command_log(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _CommandLog:
     )
 
 
+def _refusal_said(admission: RunAdmission) -> str:
+    return "" if admission.refusal is None else admission.refusal.message
+
+
 def _read_as_owed(
     log: _CommandLog,
     owed: dict[_Row, _Reading],
@@ -3580,9 +3586,9 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     into_leaf = Subject.of((acts_hop, leaf)).command_fields
     CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(state=Running()))
     await asyncio.to_thread(hold_cycle, leaf_dir)
-    controls["inner, its own loop running"] = admitted(
-        inner, campaign_at(inner, leaf), inner.run_state(leaf)
-    ).refusal
+    controls["inner, its own loop running"] = _refusal_said(
+        admitted(inner, campaign_at(inner, leaf), inner.run_state(leaf))
+    )
     paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run", door=Door.HOST)
     with pytest.raises(PayloadInvalidError):
         await sender.dispatch(paused)
@@ -3645,12 +3651,13 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Com
         ):
             pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
             await sender.dispatch(CommandCall(pause, door=Door.HOST))
-            controls["outer, paused under a pass"] = admitted(
-                stores, campaign_at(stores, held), stores.run_state(held)
-            ).refusal
+            controls["outer, paused under a pass"] = _refusal_said(
+                admitted(stores, campaign_at(stores, held), stores.run_state(held))
+            )
             raise asyncio.CancelledError("aborted")
-    parked = f"{RUN_PHASE_INFO[RunPhase.PAUSED].parked.capitalize()}."
-    _read_as_owed(command_log, {}, {"outer, paused under a pass": parked})
+    parked = RUN_PHASE_INFO[RunPhase.PAUSED].refusal
+    assert parked is not None, "a paused cycle's start names no wait"
+    _read_as_owed(command_log, {}, {"outer, paused under a pass": parked.message})
 
 
 # Taken and voided are the next states of the one loop's two commands.
@@ -4230,6 +4237,34 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         assert not queuing.list_queued(), "a retried launch launched again"
     for detached in list(launcher_launch._DETACHED_TASKS):
         detached.cancel()
+
+
+# An act a refusal serves is pressed as served: its value is the field's own JSON type.
+@pytest.mark.usefixtures("offline")
+def test_a_served_from_round_act_pressed_through_the_api_is_admitted_by_its_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    act = NextAct(kind="start-run", field="mode.from_round", value=2)
+    served = Refusal(code="c", message="m", details={}, next_acts=(act,)).model_dump(mode="json")
+    pressed = NextAct.model_validate_json(json.dumps(served["next_acts"][0]))
+    monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "off")
+    monkeypatch.setattr(
+        app.state,
+        "job_registry",
+        JobRegistry(tmp_path / "queue", capacity=lambda _live: 0),
+        raising=False,
+    )
+    signed_in = build_identity_bundle(default_identity_paths())
+    monkeypatch.setattr(app.state, "identity_bundle", signed_in, raising=False)
+    posted = TestClient(app).post(
+        f"/api/v1/commands/{CommandKind.START_RUN}",
+        json={"campaign_id": "c1", "cycle_id": "k1", **pressed.payload},
+        headers={"Idempotency-Key": uuid.uuid4().hex},
+    )
+    # Past the payload, the address answers: no such campaign.
+    assert posted.status_code == NotFoundError.http_status, (
+        f"the served act's own value was refused by the payload it fills: {posted.json()}"
+    )
 
 
 # The flags refuse in the sentence the refused start-run's value carries.

@@ -32,15 +32,15 @@ from promptpotter.application.cycle_addressing import SessionCtx, cycle_target, 
 from promptpotter.application.datasets.authored import (
     campaign_file_block,
 )
-from promptpotter.application.datasets.loaders import no_dataset_hint
 from promptpotter.application.datasets.origin_readiness import checklist_field
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.launcher.run_job import HeldRun
 from promptpotter.application.jobs.mint import ConfigDriftError
+from promptpotter.application.origin_listing import no_dataset_hint
 from promptpotter.application.pipeline_resolve import fork_preview
-from promptpotter.application.views.render.phase import render_completion
+from promptpotter.application.views.render.phase import acts_line, render_completion
 from promptpotter.config.first_run import ensure_api_key
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.account_words import refusal_words
@@ -175,7 +175,8 @@ def _ctrl_c(
         try:
             await dispatcher.dispatch(CommandCall(payload, door=Door.TERMINAL))
         except PotterError as exc:
-            print(f"  {refusal_words(exc)}", flush=True)
+            for line in (refusal_words(exc), *acts_line(exc.next_acts)):
+                print(f"  {line}", flush=True)
 
     def _spawn(coro: Coroutine[Any, Any, None]) -> None:
         task = loop.create_task(coro)
@@ -553,7 +554,7 @@ def head_to_head_command(mint: MintHeadToHeadPayload) -> str:
         words += ["--arm", _arm_spec(arm)]
     for axis in sorted(request.budget.named):
         bound = getattr(request.budget, axis)
-        flag = CommandPayload.cli_flag(f"budget.{axis}")
+        flag = CommandPayload.cli_spelling(f"budget.{axis}")
         words += [flag, "none" if bound is None else _spelled(bound)]
     back = _head_to_head_payload(build_parser(VERBS).parse_args(words)).head_to_head
 

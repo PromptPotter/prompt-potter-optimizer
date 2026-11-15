@@ -77,7 +77,6 @@ from promptpotter.domain.spend import (
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.clock import utcnow_iso
-from promptpotter.shared.errors import NextAct
 from promptpotter.shared.identity import Principal
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
@@ -141,10 +140,6 @@ class Ended(FrozenModel):
 
 class ArmsGate(FrozenModel):
     run_phase: Literal[RunPhase.GATE] = RunPhase.GATE
-    # The act that answers the hold, as a stop's acts answer it: each door spells it.
-    next_acts: ClassVar[tuple[NextAct, ...]] = (
-        NextAct(kind="submit-arms", field="keep", value="the draft indexes to measure"),
-    )
     # What the hold offers to keep, in the order its act's `keep` indexes.
     drafts: list[Proposal] = Field(default_factory=list)
 

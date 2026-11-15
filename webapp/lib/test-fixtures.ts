@@ -400,7 +400,7 @@ export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchySta
     status: { run_phase: "terminal", stop_reason: null, mark: "unknown" },
     attached: false,
     stop: null,
-    admission: { offers: null, refusal: "", payload: {}, launch_refusal: "" },
+    admission: { offers: null, refusal: null, payload: {}, launch_refusal: "" },
     intervened: false,
     ...over,
   };
@@ -567,7 +567,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     },
     held_call: null,
     producer: producerReading(),
-    admission: { offers: "pause", refusal: "", payload: {}, launch_refusal: "" },
+    admission: { offers: "pause", refusal: null, payload: {}, launch_refusal: "" },
     skip_refusal: "",
     backpressure: null,
     measured_unit: "sample",

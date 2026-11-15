@@ -45,6 +45,8 @@ class ValidationReason(enum.StrEnum):
     # The generator's own reply.
     OPTIMIZER_PROMPT_PARSE_FAILURE = "optimizer_prompt_parse_failure"
     L1_PROVIDER_EMPTY_RESPONSE = "l1_provider_empty_response"
+    # Every variant leaves its parent unchanged: a round's zero candidates, never an arm's.
+    L1_ALL_NO_OP_VARIANTS = "l1_all_no_op_variants"
     # An L4 override: stopping the inner loop, reasoning over the seed panel one level up, or
     # replacing a long prompt field with a fraction of it.
     STEERS_INNER_STOPPING = "steers_inner_stopping"
@@ -63,18 +65,13 @@ class ValidationReason(enum.StrEnum):
     REPEAT_VARIANT = "repeat_variant"
 
 
-# In `domain/`: `RoundResult` counts collapses off these and may not import their validator.
-INVARIANT_REASONS: frozenset[str] = frozenset(
-    {"no_op_variant", "duplicate_variant", "repeat_variant"}
-)
-
-# The word for each, on every surface: the inner narrative renders it into the outer's prompt.
-COLLAPSE_WORDS: dict[str, str] = {
-    "no_op_variant": "no-op",
-    "duplicate_variant": "duplicate",
-    "repeat_variant": "repeat",
+# The collapses and the word for each, on every surface: the inner narrative renders it into the
+# outer's prompt. In `domain/`: `RoundResult` counts them and may not import their validator.
+COLLAPSE_WORDS: dict[ValidationReason, str] = {
+    ValidationReason.NO_OP_VARIANT: "no-op",
+    ValidationReason.DUPLICATE_VARIANT: "duplicate",
+    ValidationReason.REPEAT_VARIANT: "repeat",
 }
-assert COLLAPSE_WORDS.keys() == INVARIANT_REASONS
 
 
 class ValidationFailure(FrozenModel):
@@ -108,7 +105,7 @@ class ValidationFailure(FrozenModel):
 
 def collapse_reason(failures: Iterable[ValidationFailure]) -> str | None:
     """One per proposal, or the collapse counts would sum past the population."""
-    return next((vf.reason for vf in failures if vf.reason in INVARIANT_REASONS), None)
+    return next((vf.reason for vf in failures if vf.reason in COLLAPSE_WORDS), None)
 
 
 def collapse_counts(populations: Iterable[Iterable[ValidationFailure]]) -> dict[str, int]:
@@ -175,8 +172,8 @@ class RuntimeFailure(FrozenModel):
     )
 
 
-_NON_FATAL_REASONS = frozenset({"hallucinated_node"})
-assert not INVARIANT_REASONS & _NON_FATAL_REASONS
+_NON_FATAL_REASONS = frozenset({ValidationReason.HALLUCINATED_NODE})
+assert not COLLAPSE_WORDS.keys() & _NON_FATAL_REASONS
 
 
 def fatal_validation_failures(failures: Iterable[ValidationFailure]) -> list[ValidationFailure]:

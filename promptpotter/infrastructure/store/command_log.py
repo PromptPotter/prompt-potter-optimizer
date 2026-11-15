@@ -38,7 +38,7 @@ from promptpotter.infrastructure.holders import hold_released, producer_alive
 from promptpotter.infrastructure.store.io import append_line, appending
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR
 from promptpotter.infrastructure.store.read_model import LineIndex
-from promptpotter.shared.errors import ConflictError, IdempotencyKeyReusedError
+from promptpotter.shared.errors import ConflictError, FileKind, IdempotencyKeyReusedError
 from promptpotter.shared.identity import Principal
 
 COMMAND_LOG_FILE = "commands.jsonl"
@@ -419,7 +419,7 @@ class CommandLog:
         self.path, self.jobs_dir = command_log_path(account), jobs_dir
 
     def book(self) -> CommandBook:
-        state, line = LineIndex.of(self.path, (_Book,)).view(_Book)
+        state, line = LineIndex.of(self.path, (_Book,), FileKind.COMMAND_LOG).view(_Book)
         return CommandBook(state, line, self.jobs_dir)
 
     def file(self, record: CommandRecord) -> None:

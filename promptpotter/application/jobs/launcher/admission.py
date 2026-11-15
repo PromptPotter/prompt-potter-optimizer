@@ -56,6 +56,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import Hold, RunPhaseRecord
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.spend import (
     MONEY_AXES,
     NOTHING_METERED,
@@ -237,7 +238,7 @@ def campaign_refusal(stores: Stores, campaign: Campaign) -> CampaignRefusedError
 def admitted(stores: Stores, campaign: Campaign, run: RunState) -> RunAdmission:
     """*run*'s launch half with its campaign's refusal joined: the acts every served read offers."""
     refused = campaign_refusal(stores, campaign)
-    return RunAdmission.of(run, campaign_refusal="" if refused is None else str(refused))
+    return RunAdmission.of(run, campaign_refusal=None if refused is None else Refusal.of(refused))
 
 
 def refuse_campaign(stores: Stores, campaign: Campaign) -> None:

@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pydantic import Field
 
 from promptpotter.application.account import registered_or_default_identity
-from promptpotter.application.datasets.loaders import no_dataset_hint
+from promptpotter.application.origin_listing import no_dataset_hint
 from promptpotter.config.paths import default_projects_root
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject

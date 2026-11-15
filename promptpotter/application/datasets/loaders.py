@@ -25,7 +25,6 @@ from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     dataset_connector,
     dataset_panel_rows,
-    list_readable_datasets,
     read_dataset_definition,
 )
 from promptpotter.infrastructure.store.io import write_bytes
@@ -430,13 +429,6 @@ def source_extra(dataset: ResolvedDataset) -> Extra | None:
 def has_source(dataset: ResolvedDataset) -> bool:
     src = definition_source(dataset)
     return src is not None and (src.recipe in BANK_RECIPES or src.recipe in PANEL_RECIPES)
-
-
-def no_dataset_hint(stores: Stores) -> str:
-    """Every dataset this account reads: its own definitions first, then the installed templates."""
-    lines = [f"  {ref.dataset.name}" for ref in list_readable_datasets(stores)]
-    body = "\n".join(lines) if lines else "  (no datasets readable here)"
-    return "Available datasets, by name:\n\n" + body
 
 
 def build_panel(stores: Stores, dataset: ResolvedDataset) -> bool:

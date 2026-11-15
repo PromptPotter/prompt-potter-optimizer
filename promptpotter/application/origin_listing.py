@@ -5,6 +5,7 @@ import logging
 from pydantic import Field
 
 from promptpotter.application.datasets.startability import dataset_reading, offered
+from promptpotter.application.views.render.phase import acts_line
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.dataset_start import StartBlock
 from promptpotter.domain.refusal import Refusal
@@ -74,6 +75,23 @@ def list_datasets(stores: Stores) -> list[DatasetIndexEntry]:
         if offered(stores, ref.dataset.name)
         for reading in (dataset_reading(stores, ref.dataset.name),)
     ]
+
+
+def no_dataset_hint(stores: Stores) -> str:
+    """The terminal's note past a refusal naming no dataset: `list_datasets`, each row a refusal
+    blocks said with its acts."""
+    lines = [
+        line
+        for entry in list_datasets(stores)
+        for refused in (entry.refusal,)
+        for line in (
+            f"  {entry.name}",
+            *(() if refused is None else (f"    {refused.message}", *acts_line(refused.next_acts))),
+        )
+    ]
+    return "Available datasets, by name:\n\n" + (
+        "\n".join(lines) or "  (no datasets readable here)"
+    )
 
 
 class OriginEntry(StrictModel):

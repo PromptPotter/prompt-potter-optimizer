@@ -3,6 +3,7 @@ import {
   type HierarchyState,
   type LookaheadDepth,
   type NextAct,
+  type Refusal,
   type RunPhase,
   type SampleLookahead,
   type StopReading,
@@ -42,7 +43,7 @@ const ACT_CONTROL: Record<Exclude<NextAct["kind"], "">, string> = {
  * the declared field set, or the file read. */
 function actText(act: NextAct): string {
   if (act.reads) return `read ${act.reads}`;
-  const field = act.field && (act.value ? `${act.field} (${act.value})` : act.field);
+  const field = act.field && (act.value !== "" ? `${act.field} (${act.value})` : act.field);
   return [act.kind && ACT_CONTROL[act.kind], field].filter(Boolean).join(" ");
 }
 
@@ -52,11 +53,18 @@ export function withActs(said: string, acts: readonly NextAct[]): string {
   return spelled.length > 0 ? `${said} Next: ${spelled.join("; ")}.`.trim() : said;
 }
 
+/** A served refusal in the browser's words: its sentence, then its acts; null where none stands. */
+export function refusalText(refusal: Refusal | null): string | null {
+  return refusal === null ? null : withActs(refusal.message, refusal.next_acts);
+}
+
 /** A stop as served, then its step and the acts the cycle's admission offers — a pause asked and
  * not yet reached, where the run stops. A campaign that refuses a launch (served
  * `launch_refusal`) offers no `start-run`. */
 export function stopNote(stop: StopReading, launchRefusal: string): string {
-  if (stop.stop_reason === null) return `${stop.said} — ${RUN_PHASE_INFO.paused.parked}`;
+  if (stop.stop_reason === null) {
+    return `${stop.said} — ${refusalText(RUN_PHASE_INFO.paused.refusal) ?? ""}`;
+  }
   const info = STOP_REASON_INFO[stop.stop_reason];
   const offered = info.next_acts.filter((act) => !(launchRefusal && act.kind === "start-run"));
   const next = withActs(info.next_step, offered);

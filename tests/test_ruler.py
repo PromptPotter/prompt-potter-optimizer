@@ -89,6 +89,7 @@ from promptpotter.domain.ruler import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import LedgerCell, Scorer
+from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
@@ -822,7 +823,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
 
     # Ending on its own terms, a cycle none of whose L1 proposals reached a cell is FLOORED,
     # whatever its replies' failure: potter banks an empty panel, a paper optimizer Invalid arms.
-    def failed(reason: str, rnd: int) -> RoundResult:
+    def failed(reason: ValidationReason, rnd: int) -> RoundResult:
         return round_result(rnd, parse_failure=reason)
 
     for spoiled in (

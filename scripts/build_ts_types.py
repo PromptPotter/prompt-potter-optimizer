@@ -100,7 +100,8 @@ def _emit_type(annotation: typing.Any) -> str:
     if origin in (typing.Union, types.UnionType):
         has_none = type(None) in args
         non_none = [a for a in args if a is not type(None)]
-        rendered = " | ".join(_emit_type(a) for a in non_none)
+        # Each TS type once: Python's `int` and `float` are both `number`.
+        rendered = " | ".join(dict.fromkeys(_emit_type(a) for a in non_none))
         return f"{rendered} | null" if has_none else rendered
 
     if origin is typing.Literal:

@@ -7,6 +7,7 @@ import {
   type UnstartedCampaign,
   START_BLOCK_WORDS,
 } from "@/lib/api/types";
+import { refusalText } from "@/lib/derivations";
 import { fmtAgo, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { useCommand } from "@/lib/hooks/useCommand";
 import type { ReadResult } from "@/lib/read-cache";
@@ -146,7 +147,7 @@ export function DatasetPickList({
                 {d.start_block ? (
                   <p className="ingest-pick-why">
                     {d.summary ? `${d.summary} ` : ""}
-                    {START_BLOCK_WORDS[d.start_block]}
+                    {refusalText(d.refusal) ?? START_BLOCK_WORDS[d.start_block]}
                   </p>
                 ) : null}
               </li>

@@ -52,7 +52,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_acts import PassOpened
-from promptpotter.domain.phases import STOP_REASON_INFO
+from promptpotter.domain.phases import stop_refused
 from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import PhaseRecord, VerifySaturated
@@ -620,10 +620,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                     ending=live_cycle_run(stores, hop).ending,
                 )
             except RUN_STOPS as stop:
-                info = STOP_REASON_INFO[run_stop_reason(stop)]
-                raise BenchTriggerError(
-                    f"{info.label}. {info.next_step}".strip(), next_acts=info.next_acts
-                ) from None
+                raise stop_refused(run_stop_reason(stop)) from None
             finally:
                 # The verb's own clock and cost; each pass it sent banked itself as it was graded.
                 if banked is not None:

@@ -6,9 +6,10 @@ from typing import Literal, NamedTuple
 
 from pydantic import Field, computed_field
 
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.errors import ErrorCategory, NextAct
+from promptpotter.shared.errors import ActValue, DiagnosticError, ErrorCategory, NextAct
 from promptpotter.shared.worded import Worded
 
 
@@ -338,11 +339,17 @@ class RunPhaseInfo(NamedTuple):
     awaits_operator: bool
     dock_priority: int
     action: RunAction | None
-    no_action: str
-    parked: str
+    # What the run control answers where the phase offers no verb, or its producer declines the
+    # one it names; `None` where the phase's verb stands alone.
+    refusal: Refusal | None
 
 
 QUEUE_STARTS_ITSELF = "it starts by itself when a slot frees"
+
+
+def _holding(code: str, said: str, *acts: NextAct) -> Refusal:
+    return Refusal(code=code, message=said, details={}, next_acts=acts)
+
 
 RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
     {
@@ -353,22 +360,14 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             False,
             2,
             None,
-            f"Queued — {QUEUE_STARTS_ITSELF}.",
-            "",
+            _holding("run_queued", f"Queued — {QUEUE_STARTS_ITSELF}."),
         ),
         RunPhase.STARTING: RunPhaseInfo(
-            "Starting",
-            False,
-            False,
-            False,
-            1,
-            None,
-            "Starting up…",
-            "",
+            "Starting", False, False, False, 1, None, _holding("run_starting", "Starting up…")
         ),
-        RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", "", ""),
+        RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", None),
         # No loop walks it, so a skip or a look-ahead has nothing to spend; the one stop reaches it.
-        RunPhase.SCORING: RunPhaseInfo("Scoring", False, False, False, 1, "pause", "", ""),
+        RunPhase.SCORING: RunPhaseInfo("Scoring", False, False, False, 1, "pause", None),
         # Asked to pause, an attached producer runs on to its checkpoint.
         RunPhase.PAUSED: RunPhaseInfo(
             "Paused",
@@ -377,10 +376,9 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             False,
             2,
             "resume",
-            "",
-            "stopping at its next checkpoint",
+            _holding("run_stopping", "Stopping at its next checkpoint."),
         ),
-        # Blocked on the operator, so it leads the dock.
+        # Blocked on the operator, so it leads the dock; its act answers the arms it holds for.
         RunPhase.GATE: RunPhaseInfo(
             "Holding",
             False,
@@ -388,14 +386,23 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             True,
             0,
             None,
-            "Holding for you — the chat says what it waits on.",
-            "",
+            _holding(
+                "run_held",
+                "Holding for you — the chat says what it waits on.",
+                NextAct(kind="submit-arms", field="keep", value="the draft indexes to measure"),
+            ),
         ),
         RunPhase.DETACHED: RunPhaseInfo(
-            "Detached", False, False, False, 3, "start", "", "producer gone"
+            "Detached", False, False, False, 3, "start", _holding("run_detached", "Producer gone.")
         ),
         RunPhase.TERMINAL: RunPhaseInfo(
-            "Ended", False, True, False, 3, "start", "", "writing its last files"
+            "Ended",
+            False,
+            True,
+            False,
+            3,
+            "start",
+            _holding("run_ending", "Writing its last files."),
         ),
     }
 )
@@ -421,8 +428,10 @@ class RunAdmission(FrozenModel):
     offers: RunAction | None = Field(
         description="The verb the one run control offers; null where it offers none."
     )
-    refusal: str = Field(description="Why the control offers none; empty where it offers one.")
-    payload: dict[str, dict[str, str]] = Field(
+    refusal: Refusal | None = Field(
+        description="Why the control offers none, with the acts past it; null where it offers one."
+    )
+    payload: dict[str, dict[str, ActValue]] = Field(
         description="What the offered start or resume sends beside the cycle's address: the "
         "`start-run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent as served."
     )
@@ -432,31 +441,29 @@ class RunAdmission(FrozenModel):
     )
 
     @classmethod
-    def of(cls, run: RunState, *, campaign_refusal: str) -> RunAdmission:
+    def of(cls, run: RunState, *, campaign_refusal: Refusal | None) -> RunAdmission:
         """Read only through `admission.py::admitted`, which joins *campaign_refusal*, the cycle's
         campaign's own: a launch verb it refuses is not offered."""
         info = RUN_PHASE_INFO[run.run_phase]
         pausing = info.action == "pause"
         declined = run.pause_refusal if pausing else run.start_refusal
+        refusal: Refusal | None = None
         if info.action is None:
-            offers, refusal = None, info.no_action
-        elif run.inner:
-            offers, refusal = None, declined
+            refusal = info.refusal
         elif declined:
-            # The phase names a verb its producer does not admit yet; a pause says its own refusal.
-            offers, refusal = None, declined if pausing else f"{info.parked.capitalize()}."
-        else:
-            offers, refusal = info.action, ""
-        refuses_launch = bool(campaign_refusal) and info.action in ("resume", "start")
-        if refuses_launch and offers is not None:
-            offers, refusal = None, campaign_refusal
+            # The phase names a verb its producer does not admit yet; a pause and an inner run say
+            # their own refusal.
+            refusal = _holding("run_declined", declined) if pausing or run.inner else info.refusal
+        refuses_launch = campaign_refusal is not None and info.action in ("resume", "start")
+        if refuses_launch and refusal is None:
+            refusal = campaign_refusal
         stop = None if run.stop is None else run.stop.stop_reason
         acts = () if stop is None or pausing or refuses_launch else STOP_REASON_INFO[stop].next_acts
         return cls(
-            offers=offers,
+            offers=info.action if refusal is None else None,
             refusal=refusal,
             payload={k: v for act in acts for k, v in act.payload.items()},
-            launch_refusal=campaign_refusal,
+            launch_refusal="" if campaign_refusal is None else campaign_refusal.message,
         )
 
 
@@ -839,6 +846,16 @@ assert all(STOP_REASON_INFO[r].outcome is StopOutcome.PAUSED for r in SELF_PAUSE
 
 def stop_reason_outcome(reason: StopReason) -> StopOutcome:
     return STOP_REASON_INFO[reason].outcome
+
+
+def stop_refused(reason: StopReason, *, unmeasured: int | None = None) -> DiagnosticError:
+    """THE refusal a verb scoring outside a run answers a stop with: its label, then its step and
+    its acts, as the stop's row words them."""
+    info = STOP_REASON_INFO[reason]
+    cells = "" if unmeasured is None else f", {unmeasured} cell(s) unmeasured"
+    return DiagnosticError(
+        f"{info.label}{cells}. {info.next_step}".strip(), next_acts=info.next_acts
+    )
 
 
 class ErrorCategoryInfo(NamedTuple):

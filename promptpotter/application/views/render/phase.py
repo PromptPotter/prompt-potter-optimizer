@@ -47,19 +47,24 @@ from promptpotter.shared.errors import NextAct
 
 
 def _spelled(act: NextAct) -> str:
-    """The terminal's spelling of *act*: its kind's verb and the flag its payload declares for its
-    field (`CommandPayload.cli_flag`); kind-less, a cycle's address flag, else the field itself."""
+    """The terminal's spelling of *act*: its kind's verb and the positional or flag its payload
+    declares for its field (`CommandPayload.cli_spelling`); kind-less, a cycle's address flag, else
+    the field itself."""
     if act.reads:
         return f"else read `{act.reads}`"
     # A start-run's value is the literal its field takes; any other's describes one.
     value = f" {act.value}" if act.payload else f" <{act.value}>" if act.value else ""
     if not act.kind:
-        if act.field in CyclePayload.cli_flags:
-            return f"`{CyclePayload.cli_flag(act.field)}{value}`"
+        if act.field in CyclePayload.cli_spellings:
+            return f"`{CyclePayload.cli_spelling(act.field)}{value}`"
         return f"`{act.field}: {act.value}`" if act.value else f"`{act.field}`"
     model = PAYLOAD_MODEL_FOR_KIND[act.kind]
-    flag = f" {model.cli_flag(act.field)}{value}" if act.field else ""
-    return f"`{model.kind.cli_verb}{flag}`"
+    spelled = model.cli_spelling(act.field) if act.field else ""
+    if spelled and not spelled.startswith("-"):
+        spelled = value.strip() or f"<{spelled}>"
+    elif spelled:
+        spelled += value
+    return f"`{model.kind.cli_verb}{f' {spelled}' if spelled else ''}`"
 
 
 def acts_line(acts: Sequence[NextAct]) -> list[str]:

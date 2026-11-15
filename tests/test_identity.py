@@ -351,7 +351,6 @@ from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.presentation.cli.commands import launch as cli_launch
 from promptpotter.shared.errors import (
-    LANDING_REMEDY,
     CellUnscoreableError,
     ConflictError,
     DatasetAccessError,
@@ -1123,7 +1122,7 @@ def test_a_harbor_panel_reads_its_pinned_roster_and_never_dials_out(
             f"{harbor_dataset} resolved another panel than its include list"
         )
     assert not offline.unrouted, f"a panel read fetched Harbor's registry: {offline.unrouted}"
-    with pytest.raises(ValueError):
+    with pytest.raises(ConflictError):
         panel_tasks("unpinned", "9", ["a"])
 
     def published(commit: str) -> list[dict[str, Any]]:
@@ -1493,13 +1492,13 @@ def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
             CampaignLayout(tiered.campaigns.campaign_root_dir("camp-beside")).manifest,
             b"{not a manifest",
             lambda: tiered.campaigns.load_campaign("camp-beside"),
-            ("manifest_unreadable", 409, LANDING_REMEDY),
+            ("manifest_unreadable", 409, FileKind.JOB.remedy),
         ),
         (
             manifest_file,
             json.dumps(manifest).encode(),
             beside_config,
-            ("manifest_unreadable", 409, LANDING_REMEDY),
+            ("manifest_unreadable", 409, FileKind.JOB.remedy),
         ),
         (
             checkin_file,
@@ -1517,7 +1516,13 @@ def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
             tiered.jobs_dir / "torn.json",
             b'{"job_id": 3}',
             lambda: JobRegistry.attach(tiered.jobs_dir).get("torn"),
-            ("job_unreadable", 409, LANDING_REMEDY),
+            ("job_unreadable", 409, FileKind.JOB.remedy),
+        ),
+        (
+            tiered.commands.path,
+            b"{not a filing\n",
+            tiered.commands.book,
+            ("command_log_unreadable", 409, FileKind.COMMAND_LOG.remedy),
         ),
         (
             config_file,

@@ -3970,25 +3970,29 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_capo_inits_reply_of_only_blank_instructions_is_one_refused_child(
+def test_capo_inits_reply_out_of_form_is_one_refused_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # An array of blanks seeds nothing; read as in form, it left the round without one arm or a word.
+    # A reply nested past the parser's stack crashed the init instead of refusing it.
     member = cast("CapoInit", NODE_MEMBERS.get("capo_init"))
-    with _peer_cycle(
-        workspace(tmp_path / "blank_init"),
-        _PEER_HOP,
-        monkeypatch,
-        "capo",
-        {"capo_init": {"config": {"size": 2, "k_max": 0}}},
-        lambda _p, _s: True,
-    ) as (cycle, _):
-        offline.llm.says = lambda _body: json.dumps(["  ", ""])
-        drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-        proposed = asyncio.run(member.propose(drawing, node_contract.Proposals([])))
-    assert [p.refused for p in proposed.proposals] == [True], (
-        "a reply of blank instructions drew no child and refused none"
-    )
+    for n, reply in enumerate(
+        (json.dumps(["  ", ""]), "[" * 5000 + "]" * 5000, "[" + "1+" * 20000 + "1]")
+    ):
+        with _peer_cycle(
+            workspace(tmp_path / f"init_{n}"),
+            _PEER_HOP,
+            monkeypatch,
+            "capo",
+            {"capo_init": {"config": {"size": 2, "k_max": 0}}},
+            lambda _p, _s: True,
+        ) as (cycle, _):
+            offline.llm.says = lambda _body, said=reply: said  # type: ignore[misc]
+            drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
+            proposed = asyncio.run(member.propose(drawing, node_contract.Proposals([])))
+        assert [p.refused for p in proposed.proposals] == [True], (
+            f"reply {n} out of form drew a child or refused none"
+        )
 
 
 # Round 3's fork offer reads the rounds the disk-faulted closes landed.

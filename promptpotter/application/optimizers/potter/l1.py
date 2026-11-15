@@ -101,6 +101,7 @@ from promptpotter.domain.wounds import (
     COLLAPSE_WORDS,
     RuntimeFailure,
     ValidationFailure,
+    ValidationReason,
     fatal_validation_failures,
 )
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
@@ -122,7 +123,7 @@ def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceG
 @dataclass(frozen=True)
 class L1Generation:
     proposals: list[Proposal]
-    parse_failure: str | None
+    parse_failure: ValidationReason | None
     citable: tuple[str, ...]
     exploration_budget: str
 

@@ -117,7 +117,7 @@ def _with_rows(stores: Stores, hop: CycleHop, held: StandingRound, scorer: Score
         if len(taken) != len(walked):
             kept = {cell.key for cell in taken}
             # The origin has no round before it: only a fresh campaign measures it again.
-            before = NextAct(kind="start-run", field="mode.from_round", value=str(close.round - 1))
+            before = NextAct(kind="start-run", field="mode.from_round", value=close.round - 1)
             again = "a run resumed from before it" if close.round else "only a fresh campaign"
             raise NotFoundError(
                 f"round {close.round} of cycle {hop.cycle_id} closed on answers the measurement "
