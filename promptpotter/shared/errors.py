@@ -468,6 +468,8 @@ class FileKind(enum.Enum):
     LEDGER = ("ledger_unreadable", 409, *_LANDED)
     # The account's: a line it cannot take refuses every command filed and every one read.
     COMMAND_LOG = ("command_log_unreadable", 409, *_LANDED)
+    # The tenant's δ ruler: a line it cannot take refuses every ruler read.
+    RULER = ("ruler_unreadable", 409, *_LANDED)
     # 500, not 422: the request was fine and the caller cannot fix a file the server persisted.
     STORED_CONFIG = ("stored_config_invalid", 500, "Fix the file.")
     # An optimizer prompt's manifest, the install's or the operator's copy shadowing it.

@@ -82,7 +82,9 @@ BASELINE = {
     # money-2 (+18): the standing budget's named-only patch and its arrival-order fold, and the
     # browser sign-in moved above admission so the host's claim holds the destroyers' gate; the
     # `owned_campaign` alias gone.
-    "package_lines": 110863,
+    # faults-3 1 (+8): each line fold names its file's kind, the ruler its own code;
+    # `LineIndex.of` takes none.
+    "package_lines": 110871,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 155,
     # The `__init__.py` files that re-export names instead of staying empty.

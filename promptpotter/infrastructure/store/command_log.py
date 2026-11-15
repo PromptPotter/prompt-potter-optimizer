@@ -10,7 +10,7 @@ from __future__ import annotations
 from bisect import bisect_right
 from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
 from promptpotter.domain.command_events import (
     COMMAND_LOG_ADAPTER,
@@ -395,6 +395,7 @@ class _Book:
     """The log's line fold: a rewritten log is read whole into a fresh one, and a book read off the
     old state keeps it."""
 
+    kind: ClassVar[FileKind] = FileKind.COMMAND_LOG
     at_offset = 0
 
     def __init__(self) -> None:
@@ -420,7 +421,7 @@ class CommandLog:
         self.path, self.jobs_dir = command_log_path(account), jobs_dir
 
     def book(self) -> CommandBook:
-        state, line = LineIndex.of(self.path, (_Book,), FileKind.COMMAND_LOG).view(_Book)
+        state, line = LineIndex.of(self.path, (_Book,)).view(_Book)
         return CommandBook(state, line, self.jobs_dir)
 
     def file(self, record: CommandRecord) -> None:

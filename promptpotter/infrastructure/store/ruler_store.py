@@ -4,16 +4,19 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from promptpotter.domain.ruler import RulerFold, RulerOwn, RulerReach, RulerRow, RulerScope
 from promptpotter.infrastructure.store.io import append_jsonl
 from promptpotter.infrastructure.store.read_model import LineIndex
+from promptpotter.shared.errors import FileKind
 
 RULER_FILE = "ruler.jsonl"
 
 
 class _Folds:
+    kind: ClassVar[FileKind] = FileKind.RULER
+
     def __init__(self) -> None:
         self.at_offset = -1
         self._folds: list[RulerFold | None] = []

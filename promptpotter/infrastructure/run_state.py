@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import time
 from pathlib import Path
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
 from promptpotter.domain.phases import (
     LaunchStage,
@@ -30,6 +30,7 @@ from promptpotter.infrastructure.store.io import newest_mtime_ns
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerSpan, LineIndex, scan_last
 from promptpotter.shared.clock import epoch_seconds
+from promptpotter.shared.errors import FileKind
 
 # `RUN_FRESH_S` bounds ANY ledger append (a heartbeat is one); the other two, the last NON-heartbeat one.
 RUN_FRESH_S = 30.0
@@ -43,6 +44,8 @@ class Liveness(NamedTuple):
 
 
 class _Progress:
+    kind: ClassVar[FileKind] = FileKind.LEDGER
+
     def __init__(self) -> None:
         self._held = Liveness()
 

@@ -608,11 +608,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/28 · faults
 
-- **A line file's kind is passed by its caller** (faults-2a's report): `read_model.py::LineIndex.of(...,
-  kind)` defaults to `LEDGER`. Root: the kind is read off the path's `data_root.py::KINDS` row; but
-  `data_root` imports `read_model` (a cycle) and `KINDS` holds no `FileKind` (faults-2b's report).
-  Action: the kind table moves below both modules, each row naming its `FileKind`. **Rides with:**
-  faults 3. **Re-test:** `LineIndex.of` takes no kind.
 - **An inline launch queued on a full machine prints nothing, and machine-status `unloadable` has no
   CLI line** (faults-2b's report): two states a door enters and cannot report. Action: each is a
   served fact the terminal words, as `unswept` is. **Rides with:** faults 3. **Re-test:** launch

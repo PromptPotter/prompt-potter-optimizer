@@ -156,7 +156,10 @@ class LedgerFold[R: StrictModel, V](Protocol):
 
 
 class LineFold[V](Protocol):
-    """`feed` takes EVERY line as written, which is what reads an envelope alone; `value` is a snapshot."""
+    """`feed` takes EVERY line as written, which is what reads an envelope alone; `value` is a
+    snapshot; `kind` is what the file it folds IS, which a line it cannot take is refused as."""
+
+    kind: ClassVar[FileKind]
 
     def feed(self, line: dict[str, Any]) -> None: ...
 
@@ -737,27 +740,21 @@ def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R
 class LineIndex(_LedgerTail):
     """One per (ledger, roster): a line fold is fed every line, so it shares no screened index."""
 
-    _registry: ClassVar[
-        OrderedDict[tuple[Path, tuple[Callable[[], LineFold[Any]], ...]], LineIndex]
-    ] = OrderedDict()
+    _registry: ClassVar[OrderedDict[tuple[Path, tuple[type[LineFold[Any]], ...]], LineIndex]] = (
+        OrderedDict()
+    )
     _registry_lock: ClassVar[threading.Lock] = threading.Lock()
 
-    def __init__(
-        self, path: Path, roster: Sequence[Callable[[], LineFold[Any]]], kind: FileKind
-    ) -> None:
-        self._roster, self._kind = tuple(roster), kind
+    def __init__(self, path: Path, roster: tuple[type[LineFold[Any]], ...]) -> None:
+        # One file is one kind: its folds say which, and a roster naming two is a wiring fault.
+        (self._kind,) = {fold.kind for fold in roster}
+        self._roster = roster
         super().__init__(path)
 
     @classmethod
-    def of(
-        cls,
-        path: Path,
-        roster: tuple[Callable[[], LineFold[Any]], ...],
-        kind: FileKind = FileKind.LEDGER,
-    ) -> LineIndex:
-        """*kind* is what the file at *path* IS, which a line it cannot take is refused as."""
+    def of(cls, path: Path, roster: tuple[type[LineFold[Any]], ...]) -> LineIndex:
         with cls._registry_lock:
-            return _registered(cls._registry, (path, roster), lambda: cls(path, roster, kind))
+            return _registered(cls._registry, (path, roster), lambda: cls(path, roster))
 
     def _reset(self) -> None:
         super()._reset()
@@ -794,6 +791,8 @@ class LineIndex(_LedgerTail):
 
 
 class _Clock:
+    kind: ClassVar[FileKind] = FileKind.LEDGER
+
     def __init__(self) -> None:
         self.at_offset = -1
         self._at: list[float] = []
