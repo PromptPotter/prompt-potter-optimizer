@@ -175,7 +175,7 @@ class SampleIndex:
             ],
         )
         if any(cell.grade.unscored for cell in sheet):
-            return row.model_copy(update={"unscoreable": True})
+            return row
         cells, new_samples = self._derive(sheet, prior)
         return row.model_copy(update={"cells": cells, "new_samples": new_samples})
 

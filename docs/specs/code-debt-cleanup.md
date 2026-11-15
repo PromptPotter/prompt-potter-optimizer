@@ -653,38 +653,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `data_root` imports `read_model` (a cycle) and `KINDS` holds no `FileKind` (faults-2b's report).
   Action: the kind table moves below both modules, each row naming its `FileKind`. **Rides with:**
   faults 3. **Re-test:** `LineIndex.of` takes no kind.
-- **`SampleFoldRow.unscoreable` is read by nothing** (`store/archive_queries.py:153`, set by
-  `intelligence/indexes/sample.py:178`): its one reader was the skip log faults-2b deleted. Action:
-  serve it where a fold's row is read, or delete it with a sample-fold wipe. **Rides with:** faults 3.
-  **Re-test:** `p_unread_fields` falls by one.
 - **An inline launch queued on a full machine prints nothing, and machine-status `unloadable` has no
   CLI line** (faults-2b's report): two states a door enters and cannot report. Action: each is a
   served fact the terminal words, as `unswept` is. **Rides with:** faults 3. **Re-test:** launch
   inline on a full machine; read `machine-status` with an unloadable job file.
-
-### lite-2 (what lite left at its landing)
-
-- **The capability override's fate is RUN, though it is authored** (`store/data_root.py`, row "model
-  capability override"): the landing drops an override no model types, while its reader refuses it as
-  operator config (`FileKind.STORED_CONFIG`, "Fix the file"). Action: an authored workspace file is a
-  SURVIVOR, migrated, or the reader drops it as the landing does; one rule. **Re-test:** the row's
-  `Fate` and the reader's refusal agree.
-- **OpenRouter's endpoints payload has no model**: `llm/pricing.py::_fetch_route_ceiling` and
-  `::_host_tiers` walk it with `.get` and `_as_tokens`, the shape lite removed from the three data-root
-  files. Action: one model for the payload, validated at the fetch. **Re-test:** `git grep -c "_as_tokens"
-  -- promptpotter/infrastructure/llm/pricing.py` is 0.
-
-### la-2 (what la left at its landing)
-
-- **`run_state.py` still reaches `campaign_store/` transitively**: `infrastructure/holders.py:15`
-  imports `campaign_store/ledger_scan.py::scan_cycle_hold`. So the run-state leg imports neither
-  directly, yet still loads it. Root: what holders reads off the ledger belongs in
-  `store/read_model.py`. **Re-test:** importing `run_state` alone loads no `campaign_store` module.
-- **The CLI prompts for an API key under `--json`**: a verb run with no provider key asks on the
-  terminal before it answers, so a `--json` caller gets an interactive prompt rather than a Refusal.
-  Root: the key check runs before the `--json` refusal path; under `--json` a missing key is a typed
-  refusal. **Re-test:** `resume --json` with no key set exits 1 with Refusal JSON on stdout and reads
-  nothing from stdin.
 
 ### batch/29 · xconn
 

@@ -6,18 +6,13 @@ from pathlib import Path
 from promptpotter.domain.cycle_paths import CycleDir, WorkspaceDir
 from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import CycleMintedRecord
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
 from promptpotter.infrastructure.store.io import append_jsonl
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR, CycleLayout
-from promptpotter.infrastructure.store.read_model import (
-    LedgerIndex,
-    LedgerSpan,
-    Moment,
-)
+from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, Moment, scan_last
 
 
 def _fork_link(cycle_dir: Path) -> tuple[CycleMintedRecord, Path] | None:
-    minted = scan_cycle_facts(CycleLayout(cycle_dir).ledger).minted
+    minted = scan_last([LedgerSpan(CycleLayout(cycle_dir).ledger)], CycleMintedRecord)
     parent = None if minted is None else minted.parent_cycle_dir(cycle_dir)
     return None if minted is None or parent is None else (minted, parent)
 

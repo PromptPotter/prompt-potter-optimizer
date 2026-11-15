@@ -1562,11 +1562,6 @@
           "sp": {
             "title": "Sp",
             "type": "string"
-          },
-          "unscoreable": {
-            "default": false,
-            "title": "Unscoreable",
-            "type": "boolean"
           }
         },
         "required": [

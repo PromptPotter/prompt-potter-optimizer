@@ -5,16 +5,17 @@ the cycle lock, the one hold a process outside the registry can take."""
 from __future__ import annotations
 
 from pathlib import Path
-from typing import NamedTuple
+from typing import ClassVar, NamedTuple, assert_never
 
 from pydantic import ValidationError
 
 from promptpotter.domain.job import JOB_ADAPTER, Job, ScoringPass
 from promptpotter.domain.phases import LaunchStage, RunPhase
+from promptpotter.domain.records.run_records import Hold, RunPhaseRecord
 from promptpotter.infrastructure import producer_lock
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_hold
 from promptpotter.infrastructure.store.io import open_text_robust, validate_path_component
 from promptpotter.infrastructure.store.layout import CycleLayout
+from promptpotter.infrastructure.store.read_model import LedgerIndex, RecordClasses
 from promptpotter.shared.errors import (
     FileKind,
     FileUnreadableError,
@@ -104,10 +105,40 @@ class CycleHolder(NamedTuple):
         return job
 
 
+class _CycleHold(NamedTuple):
+    """The last job's hold on the cycle, and whether a run declared itself since."""
+
+    hold: Hold
+    declared: bool
+
+
+class _HoldFold:
+    records: ClassVar[RecordClasses] = (Hold, RunPhaseRecord)
+
+    def __init__(self) -> None:
+        self._found: _CycleHold | None = None
+
+    def feed(self, record: Hold | RunPhaseRecord) -> None:
+        match record:
+            case RunPhaseRecord():
+                if self._found is not None:
+                    self._found = self._found._replace(declared=True)
+            case Hold():
+                self._found = _CycleHold(record, declared=False)
+            case _:
+                assert_never(record)
+
+    def value(self) -> _CycleHold | None:
+        return self._found
+
+
+LedgerIndex.readers(_HoldFold)
+
+
 def holder_of(jobs_dir: Path, cycle_dir: Path) -> CycleHolder | None:
     """Who holds the cycle: the live job whose hold its ledger names last, until that job's run
     declares itself; from then on, while the cycle lock is held."""
-    held = scan_cycle_hold(CycleLayout(cycle_dir).ledger)
+    held = LedgerIndex.of(CycleLayout(cycle_dir).ledger).view(_HoldFold)
     job = None if held is None else read_job(job_path(jobs_dir, held.hold.hold_id))
     job = job if job is not None and in_flight(jobs_dir, job) else None
     if job is not None and held is not None and not held.declared:

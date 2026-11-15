@@ -150,7 +150,6 @@ class SampleFoldRow(FrozenModel):
     sig: list[list[Any]]
     # ``(Sample.key, objective, provenance)`` per graded cell.
     graded: list[tuple[str, float, str]]
-    unscoreable: bool = False
     # ``(slot, hit, degraded, failure_mode)`` per cell, in walk order; a slot in the fold's own bank.
     cells: list[tuple[int, bool, bool, str | None]] = Field(default_factory=list)
     # ``(slot, query, ground_truth)`` per sample this row was first to introduce.

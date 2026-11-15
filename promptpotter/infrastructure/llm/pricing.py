@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, cast
 
-from pydantic import TypeAdapter, ValidationError
+from pydantic import Field, TypeAdapter, ValidationError
 
 from promptpotter.config.paths import user_data_root
 from promptpotter.domain.strict_model import StrictModel
@@ -184,15 +184,6 @@ def _models_to_rates(models: Mapping[str, RateBody]) -> RateTable:
             listed_by[provider] = lister
     # `prefixed` last: where upstream lists a pair both ways, the row spelling its provider wins.
     return RateTable(bare | prefixed, listed_by)
-
-
-def _as_tokens(raw: object) -> int | None:
-    if isinstance(raw, bool) or not isinstance(raw, int | float | str):
-        return None
-    try:
-        return int(raw)
-    except ValueError:
-        return None
 
 
 def load_rates() -> RateTable:
@@ -442,10 +433,70 @@ def _openrouter_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeili
     return ceiling
 
 
-def _serves(endpoint: dict[str, Any], pinned: tuple[str, ...]) -> bool:
-    """OpenRouter's own matching: a bare slug admits each of its endpoints, a tagged one only itself."""
-    tag = str(endpoint.get("tag") or "")
-    return any(tag == host or tag.startswith(f"{host}/") for host in pinned)
+def _either(own: float | None, base: float | None) -> float | None:
+    return base if own is None else own
+
+
+def _rate(price: float | None, surcharge: float | None) -> float:
+    # An unlisted surcharge is none; an unlisted price leaves the host unpriced.
+    if price is None:
+        raise ValueError("no price is listed")
+    return price if surcharge is None else max(price, surcharge)
+
+
+class _Price(StrictModel):
+    """A price row as OpenRouter lists it, USD per token; ``None`` is unlisted."""
+
+    prompt: float | None = None
+    completion: float | None = None
+    input_cache_write: float | None = None
+    internal_reasoning: float | None = None
+
+    def tier(self, start: int, base: _Price) -> PriceTier:
+        """Its prices from *start* input tokens on; a price it leaves unlisted is *base*'s."""
+        return PriceTier(
+            start,
+            _rate(
+                _either(self.prompt, base.prompt),
+                _either(self.input_cache_write, base.input_cache_write),
+            ),
+            _rate(
+                _either(self.completion, base.completion),
+                _either(self.internal_reasoning, base.internal_reasoning),
+            ),
+        )
+
+
+class _PriceOverride(_Price):
+    # Listed: it prices prompts from this length on. Unlisted: a time-of-day row, from token 0.
+    min_prompt_tokens: int | None = None
+
+
+class _Pricing(_Price):
+    request: float = 0.0
+    overrides: list[_PriceOverride] = Field(default_factory=list)
+
+
+class _Endpoint(StrictModel):
+    tag: str = ""
+    pricing: _Pricing = _Pricing()
+    max_completion_tokens: int | None = None
+    context_length: int | None = None
+
+    def serves(self, pinned: tuple[str, ...]) -> bool:
+        """OpenRouter's own matching: a bare slug admits each of its endpoints, a tagged one only
+        itself."""
+        return any(self.tag == host or self.tag.startswith(f"{host}/") for host in pinned)
+
+
+class _Hosts(StrictModel):
+    endpoints: list[_Endpoint] = Field(default_factory=list)
+
+
+class _EndpointsPayload(StrictModel):
+    """OpenRouter's `/models/{model}/endpoints`, the fields a ceiling reads."""
+
+    data: _Hosts
 
 
 def _fetch_route_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeiling | None:
@@ -465,18 +516,18 @@ def _fetch_route_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeil
         raise PriceListUnreachableError(
             f"the host price list for {model} could not be fetched from {url}: {exc}"
         ) from exc
-    data = payload.get("data") if isinstance(payload, dict) else None
-    endpoints = [
-        e
-        for e in (data or {}).get("endpoints") or []
-        if isinstance(e, dict) and (not pinned or _serves(e, pinned))
-    ]
+    try:
+        listed = _EndpointsPayload.model_validate(payload, extra="ignore").data.endpoints
+    except ValidationError:
+        logger.warning("spend: %s lists hosts no ceiling can read", model)
+        return None
+    endpoints = [e for e in listed if not pinned or e.serves(pinned)]
     if not endpoints:
         logger.warning("spend: OpenRouter lists no host for %s among %s", model, pinned or "any")
         return None
     try:
-        hosts = [_host_tiers(e.get("pricing") or {}) for e in endpoints]
-    except (TypeError, ValueError):
+        hosts = [_host_tiers(e.pricing) for e in endpoints]
+    except ValueError:
         logger.warning("spend: %s lists a price no ceiling can read", model)
         return None
     # A negative price is OpenRouter's "decided per request" — a router, which no list bounds.
@@ -491,9 +542,7 @@ def _fetch_route_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeil
         )
         for start in starts
     )
-    replies = [
-        _as_tokens(e.get("max_completion_tokens") or e.get("context_length")) for e in endpoints
-    ]
+    replies = [e.max_completion_tokens or e.context_length for e in endpoints]
     return RateCeiling(
         tiers=tiers,
         per_request=max(request for _, request in hosts),
@@ -501,31 +550,17 @@ def _fetch_route_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeil
     )
 
 
-def _host_tiers(pricing: dict[str, Any]) -> tuple[list[PriceTier], float]:
-    def tier(start: int, prices: dict[str, Any], base: dict[str, Any]) -> PriceTier:
-        def rate(price: str, surcharge: str) -> float:
-            # An unlisted surcharge is none; an unlisted price leaves the host unpriced.
-            listed = [prices.get(k, base.get(k)) for k in (price, surcharge)]
-            if listed[0] is None:
-                raise ValueError(f"no {price} price is listed")
-            return max(float(v) for v in listed if v is not None)
-
-        return PriceTier(
-            start, rate("prompt", "input_cache_write"), rate("completion", "internal_reasoning")
-        )
-
-    overrides = pricing.get("overrides") or ()
+def _host_tiers(pricing: _Pricing) -> tuple[list[PriceTier], float]:
+    by_time = [o for o in pricing.overrides if o.min_prompt_tokens is None]
     # A time-of-day override (`utc_start`/`utc_end`) prices from token 0, so the dearest is the base.
-    base = [tier(0, p, pricing) for p in (pricing, *(o for o in overrides if not _by_length(o)))]
+    base = [p.tier(0, pricing) for p in (pricing, *by_time)]
     tiers = [PriceTier(0, max(t.input for t in base), max(t.output for t in base))]
-    for override in overrides:
-        if _by_length(override):
-            tiers.append(tier(int(override["min_prompt_tokens"]), override, pricing))
-    return tiers, float(pricing.get("request", 0.0))
-
-
-def _by_length(override: dict[str, Any]) -> bool:
-    return "min_prompt_tokens" in override
+    tiers += [
+        o.tier(o.min_prompt_tokens, pricing)
+        for o in pricing.overrides
+        if o.min_prompt_tokens is not None
+    ]
+    return tiers, pricing.request
 
 
 def _host_at(tiers: list[PriceTier], input_tokens: int) -> PriceTier:

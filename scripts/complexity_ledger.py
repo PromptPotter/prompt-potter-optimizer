@@ -76,9 +76,12 @@ BASELINE = {
     # tv-2's access fix (+9): a sandbox opens only off its store's own cycle, a moment stays on
     # its address's tree, and a deleted exhibit is followed by no one.
     # passb-2 typed log (+36): a command log row typed by its kind's recorded shape on load.
-    "package_lines": 110825,
+    # lite-2 + la-2 (+29): OpenRouter's endpoints payload as one model, validated at the fetch
+    # (+34); the hold fold beside its one reader, a sample fold's dead flag, a `--json` launch
+    # asked nothing (-5).
+    "package_lines": 110854,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
-    "model_copy_updates": 157,
+    "model_copy_updates": 156,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
@@ -107,14 +110,15 @@ BASELINE = {
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 21,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
-    "p_record_drift": 35,
+    # la-2 (+1): `Hold`'s one fold moved to its one reader (`holders.py`), so `ledger_scan` names
+    # it no longer.
+    "p_record_drift": 36,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
     # webb-5b (+1): `NodeOutputSchema.json_schema`, the backend's own document, served beside the
     # `contract` rows the browser now draws.
     # model-lines (+2): `call_target` on a served campaign config, which no surface edits yet.
     "p_served": 195,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
-    # faults-2b (+1): `SampleFoldRow.unscoreable`, whose one reader was the skip log it outlived.
     "p_unread_fields": 26,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,

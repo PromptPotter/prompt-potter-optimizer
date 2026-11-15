@@ -35,7 +35,6 @@ from promptpotter.domain.records.run_records import (
     ForkDirection,
     ForkGradedRecord,
     ForkSpec,
-    Hold,
     LaunchClockRecord,
     Paused,
     PhaseRecord,
@@ -255,33 +254,6 @@ class _CycleFactsFold:
 
     def value(self) -> CycleFacts:
         return self._held
-
-
-class CycleHold(NamedTuple):
-    """The last job's hold on the cycle, and whether a run declared itself since."""
-
-    hold: Hold
-    declared: bool
-
-
-class _CycleHold:
-    records: ClassVar[RecordClasses] = (Hold, RunPhaseRecord)
-
-    def __init__(self) -> None:
-        self._found: CycleHold | None = None
-
-    def feed(self, record: Hold | RunPhaseRecord) -> None:
-        match record:
-            case RunPhaseRecord():
-                if self._found is not None:
-                    self._found = self._found._replace(declared=True)
-            case Hold():
-                self._found = CycleHold(record, declared=False)
-            case _:
-                assert_never(record)
-
-    def value(self) -> CycleHold | None:
-        return self._found
 
 
 class StandingArm(NamedTuple):
@@ -741,7 +713,6 @@ LedgerIndex.readers(
     _ArmActs,
     _LaunchClocks,
     _CycleFactsFold,
-    _CycleHold,
     _StandingFold,
     _Answers,
     _Verification,
@@ -790,10 +761,6 @@ def scan_campaign_ceiling(root_ledger: Path) -> Budget:
     """The campaign's money axes, off its ROOT's ledger, which every cycle of it reads; none names none."""
     held = scan_last([LedgerSpan(root_ledger)], CampaignCeilingRecord)
     return Budget() if held is None else held.budget
-
-
-def scan_cycle_hold(ledger_path: Path) -> CycleHold | None:
-    return _view(ledger_path, _CycleHold)
 
 
 def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:

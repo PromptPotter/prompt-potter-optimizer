@@ -91,9 +91,11 @@ from promptpotter.shared.errors import (
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-def prepare_launch() -> None:
-    """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler."""
-    ensure_api_key()
+def prepare_launch(args: argparse.Namespace) -> None:
+    """Runs BEFORE the loop exists: a prompt or refusal here never meets a run's Ctrl+C handler.
+    A `--json` caller is a program, asked nothing: a launch no key pays refuses at its admission."""
+    if not args.json_output:
+        ensure_api_key()
 
 
 def pipeline_summary(session: Session, pipeline_params: PipelineParams) -> str:
@@ -458,7 +460,7 @@ def _named_mint(args: argparse.Namespace, dispatcher: CommandDispatcher) -> Mint
 
 
 def cmd_new(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
-    prepare_launch()
+    prepare_launch(args)
     return _new(args)
 
 
@@ -564,7 +566,7 @@ def head_to_head_command(mint: MintHeadToHeadPayload) -> str:
 
 
 def cmd_head_to_head(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
-    prepare_launch()
+    prepare_launch(args)
     return _head_to_head(args)
 
 
@@ -729,7 +731,7 @@ async def _pivot_to_fresh(
 
 
 def cmd_resume(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
-    prepare_launch()
+    prepare_launch(args)
     return _resume(args)
 
 
