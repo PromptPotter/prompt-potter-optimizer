@@ -1692,18 +1692,17 @@ export interface ServedDashboard {
   composite_fitness_anchors: Record<string, number> | null;
   lookahead: SampleLookahead;
   /** The cycle's spend under the campaign's ceiling meter, a manifest fact no
-   * ledger record carries; null where the campaign's manifest is gone. */
-  spend_metered: MeteredSpend | null;
+   * ledger record carries. */
+  spend_metered: MeteredSpend;
   /** `spend_metered` per round, in round order. */
-  spend_metered_by_round: Record<string, MeteredSpend> | null;
+  spend_metered_by_round: Record<string, MeteredSpend>;
   /** This cycle's spend in the campaign's meter, capped or not, a replay included —
-   * `domain/spend.py::metered_line`, the CLI's stop line; null where the
-   * manifest is gone. */
-  metered_line: string | null;
+   * `domain/spend.py::metered_line`, the CLI's stop line. */
+  metered_line: string;
   /** Beside `metered_line`: what the campaign's ceiling has counted in its meter,
    * every cycle of it once and deleted ones included, against each cap it
    * bounds — `domain/spend.py::campaign_cap_lines`; empty where nothing is
-   * capped, on a replay and where the manifest is gone. */
+   * capped and on a replay. */
   cap_lines: string[];
   /** This cycle's share of the campaign's ceiling — the most it may have metered in
    * all, and what its run's book binds; null where no run holds a share, and
@@ -5468,7 +5467,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "2fbce4f8a84b0615";
+export const SERVED_CONTRACT = "dcb444793d4212fd";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

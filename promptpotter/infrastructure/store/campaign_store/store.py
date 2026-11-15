@@ -217,11 +217,7 @@ class CampaignStore:
         """Its tombstone IS the delete: a delete torn after it reads deleted, whatever the manifest
         says."""
         campaign = self._read_declared(self._manifest_path(campaign_id), Campaign)
-        if (
-            campaign is None
-            or campaign.lifecycle_status == "deleted"
-            or not workspace_bank(self._base_dir).deleted(campaign_id)
-        ):
+        if campaign is None or not workspace_bank(self._base_dir).deleted(campaign_id):
             return campaign
         return campaign.model_copy(update={"lifecycle_status": "deleted"})
 
@@ -455,8 +451,8 @@ class CampaignStore:
         campaign_dir = self.campaign_root_dir(campaign_id)
         if not campaign_dir.is_dir():
             return False
-        # A keepsake is its manifest marked deleted, so one this build cannot read refuses before the bank.
-        # With no manifest nothing marks it deleted, and its rows would count beside the bank.
+        # A keepsake keeps its manifest, so one this build cannot read refuses before the bank.
+        # With no manifest nothing lists it deleted, and its rows would count beside the bank.
         keepsake = keep_results and self.load_campaign(campaign_id) is not None
         self._release_pointer(campaign_id)
         self._campaign_metered_bank(campaign_id)
@@ -470,7 +466,6 @@ class CampaignStore:
                 ):
                     self.delete_inner_sandbox(sandbox, campaign_id=campaign_id)
         if keepsake:
-            self.update_campaign(campaign_id, lifecycle_status="deleted")
             _strip_to_keepsake(campaign_dir)
         else:
             rmtree_robust(campaign_dir)

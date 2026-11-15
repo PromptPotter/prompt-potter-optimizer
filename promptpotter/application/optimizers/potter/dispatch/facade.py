@@ -345,12 +345,12 @@ class PotterView:
 
     @functools.cached_property
     def ability(self) -> AbilityReading | None:
-        return self.ctx.read(Ruler).difficulty.scale.frontier(self.trajectory_results)
+        return self.ctx.read(Ruler).difficulty.judging.frontier(self.trajectory_results)
 
     @functools.cached_property
     def parent_ability(self) -> AbilityReading | None:
         """θ on the parent's own rows: the side of every contrast an edit is judged against."""
-        return self.ctx.read(Ruler).difficulty.scale.frontier(
+        return self.ctx.read(Ruler).difficulty.judging.frontier(
             self.ctx.read(Frontier).parent_own_rows
         )
 

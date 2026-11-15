@@ -139,7 +139,7 @@ class ArmFit(FrozenModel):
     # Rasch ability on the round's joint-fit scale; `None` outside the election fit.
     theta: float | None = None
     theta_se: float | None = None
-    # This ARM's own reason θ is not ability (`bench/difficulty.py::AbilityScale.caveat`).
+    # This ARM's own reason θ is not ability (`bench/difficulty.py::JudgingRuler.caveat`).
     theta_caveat: ThetaCaveat | None = None
     # This arm over the individual it was judged against; `None` on an arm with no reference.
     vs_reference: PairedReading | None = None

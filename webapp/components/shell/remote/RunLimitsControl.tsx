@@ -35,8 +35,7 @@ function budgetKey(budget: Budget): string {
 }
 
 // The cap is the campaign's; `share` is this cycle's part of it, what its run's book binds.
-function usedText(axis: CapAxis, metered: MeteredSpend | null, share: Budget | null): string | null {
-  if (!metered) return null;
+function usedText(axis: CapAxis, metered: MeteredSpend, share: Budget | null): string | null {
   const of = share ? budgetAxis(share, axis) : null;
   if (axis === "usd") {
     const part = of != null ? ` of its ${fmtUsd(of)} share` : "";
@@ -53,7 +52,7 @@ interface Props {
   overshoot: boolean;
   overshot: Overshoot | null;
   share: Budget | null;
-  metered: MeteredSpend | null;
+  metered: MeteredSpend;
 }
 
 export function RunLimitsControl({ budget, overshoot, overshot, share, metered }: Props) {

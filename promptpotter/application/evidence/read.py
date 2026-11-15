@@ -7,7 +7,7 @@ from typing import NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.bench.difficulty import AbilityScale, restamped
+from promptpotter.application.bench.difficulty import JudgingRuler, restamped
 from promptpotter.application.evidence.comparison import (
     ArmReplicate,
     Comparability,
@@ -363,7 +363,7 @@ class _CycleFacts(NamedTuple):
     arm_id: str
     instrument_id: str
     # The fit the last close read its series on, so every subject of the cycle levels on one scale.
-    scale: AbilityScale | None
+    scale: JudgingRuler | None
     spend_usd: float | None
     rounds_scored: int
     spend_to_round: dict[str, float]
@@ -824,13 +824,11 @@ def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop, cycle_dir: P
     scale = (
         None
         if series is None
-        else AbilityScale(
-            restamped(
-                stores.ruler,
-                series.stamp,
-                n_min=opt.elimination_n_min,
-                enable_2pl=opt.enable_2pl_graduation,
-            ),
+        else restamped(
+            stores.ruler,
+            series.stamp,
+            n_min=opt.elimination_n_min,
+            enable_2pl=opt.enable_2pl_graduation,
         )
     )
     return _CycleFacts(

@@ -669,7 +669,7 @@ async def measure_population(
         key: ArmFit(
             theta=abilities.theta.get(key),
             theta_se=abilities.theta_se.get(key),
-            theta_caveat=cycle.difficulty.scale.caveat(raced[key].cells),
+            theta_caveat=cycle.difficulty.judging.caveat(raced[key].cells),
             vs_reference=readings.get(key),
             lift=theta_lift_over_parent(abilities, key),
         )

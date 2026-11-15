@@ -15636,7 +15636,7 @@
             "type": "string"
           },
           "cap_lines": {
-            "description": "Beside `metered_line`: what the campaign's ceiling has counted in its meter, every cycle of it once and deleted ones included, against each cap it bounds — `domain/spend.py::campaign_cap_lines`; empty where nothing is capped, on a replay and where the manifest is gone.",
+            "description": "Beside `metered_line`: what the campaign's ceiling has counted in its meter, every cycle of it once and deleted ones included, against each cap it bounds — `domain/spend.py::campaign_cap_lines`; empty where nothing is capped and on a replay.",
             "items": {
               "type": "string"
             },
@@ -15777,16 +15777,9 @@
             ]
           },
           "metered_line": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "This cycle's spend in the campaign's meter, capped or not, a replay included — `domain/spend.py::metered_line`, the CLI's stop line; null where the manifest is gone.",
-            "title": "Metered Line"
+            "description": "This cycle's spend in the campaign's meter, capped or not, a replay included — `domain/spend.py::metered_line`, the CLI's stop line.",
+            "title": "Metered Line",
+            "type": "string"
           },
           "observed": {
             "anyOf": [
@@ -15903,30 +15896,16 @@
             "type": "string"
           },
           "spend_metered": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MeteredSpend"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The cycle's spend under the campaign's ceiling meter, a manifest fact no ledger record carries; null where the campaign's manifest is gone."
+            "$ref": "#/components/schemas/MeteredSpend",
+            "description": "The cycle's spend under the campaign's ceiling meter, a manifest fact no ledger record carries."
           },
           "spend_metered_by_round": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "$ref": "#/components/schemas/MeteredSpend"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "additionalProperties": {
+              "$ref": "#/components/schemas/MeteredSpend"
+            },
             "description": "`spend_metered` per round, in round order.",
-            "title": "Spend Metered By Round"
+            "title": "Spend Metered By Round",
+            "type": "object"
           },
           "state": {
             "$ref": "#/components/schemas/DashboardState",

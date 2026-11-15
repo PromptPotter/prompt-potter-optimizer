@@ -189,11 +189,6 @@ row it closes.
   it from there. **Rides with:** money 2 (one book); its Owns gain `campaign_store/store.py`'s
   `read_standing_budget` and its `spend_book` import line. **Re-test:**
   `git grep -n "spend_book import" -- promptpotter/infrastructure/store` is empty.
-- **A tombstoned keepsake writes its lifecycle twice**: `campaign_store/store.py::CampaignStore.delete_campaign`'s
-  `_set_lifecycle(campaign_id, "deleted", …)` repeats what `list_campaigns` serves off
-  `WorkspaceBank.deleted`. Action: the second write goes. **Rides with:** money 5, which reads the
-  tombstone; its Owns gain `delete_campaign`'s `_set_lifecycle` line. **Re-test:**
-  `git grep -n '_set_lifecycle(campaign_id, "deleted"' -- promptpotter` is empty.
 - **The default claim moves a tree a pass may be scoring**: `identity/accounts.py::claim_default`
   reads `producer_attached` under the accounts lock, never the admission gate, so a registered pass on a
   terminal cycle is missed. `infrastructure/` may not import `admission.py` (`gate.py::_LAYERING`).
@@ -207,7 +202,8 @@ row it closes.
   `jobs/quota.py:781,859`, `campaign_store/store.py:262,326,526`, `mask/load.py:190`,
   `scoring/measurement_log.py:210`, `evidence/head_to_head.py:567`, `scoring/passes.py:637`
   (`BenchTriggerError`, unreachable: `campaign_sends` and the slot door 404 first) and
-  `initialization/scoring_scope.py:147` (`DiagnosticError`); one resume loads its campaign five times.
+  `initialization/scoring_scope.py:147` (`DiagnosticError`); `served_dashboard.py::fork_remainder`
+  serves a missing campaign's offshoot unbounded; one resume loads its campaign five times.
   Action: `CampaignStore.campaign(id) -> Campaign` raises `NotFoundError`, every site reads it, and
   `campaign_at` goes (`admission.py` sits above `quota.py`, so it cannot be the owner). **Rides with:**
   money 2, whose Owns gain `CampaignStore.campaign`, `admission.py::campaign_at` with its callers'
@@ -226,12 +222,6 @@ row it closes.
   `any(draws_coupon(send.payer) for send in sends)` at four sites (`launch_bound`, `admit_launch`,
   `_tier_bound`, `_clamped`). Root: one named fact of the sends that each site reads. **Rides with:**
   money. **Re-test:** `git grep -c "draws_coupon(send.payer) for send in sends" -- promptpotter` is 1.
-- **A run's meter is optional on the wire after it no longer can be** (narr-3's fix pass): the served
-  dashboard lost its `meter is None` branches, but `spend_metered` / `metered_line` stay nullable
-  (`spend_metered`'s description still says "null where the manifest is gone") and
-  `binding_run_limits` / `fork_remainder` still take `campaign: None`. Root: the meter and the
-  campaign are required wherever a run is served. **Rides with:** money. **Re-test:**
-  `spend_metered` is non-null in `webapp/lib/api/types.generated.ts`.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
@@ -1179,9 +1169,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `origin_panel.py::origin_panel(scope_of=…)` / `BenchScope` partition by benchmark under the word
   `RulerScope` owns. Action: one `Sample` reader of its benchmark; `scope_of` → `benchmark_of`.
   **Held:** the rename's digest. **Re-test:** `git grep -n "measured_dataset or\|scope_of=" -- promptpotter`.
-- **`AbilityScale` wraps one field**: Shape: `bench/difficulty.py::AbilityScale` holds `judging` alone,
-  and its `caveat` / `frontier` belong on `JudgingRuler`. Action: fold the wrapper. **Held:** none
-  claims it. **Re-test:** `git grep -n "class AbilityScale" -- promptpotter`.
 - **Nothing keeps an L4 edit L4-only**: Shape: nothing refuses a mark in `runner/inner/narrative.py` or
   an optimizer import of it, and potter's `panels.py` reaches `OuterSampleProxies`, `outer_proxies_of`,
   `inner_facts_of` and `InnerCellFacts`, so an edit to the scored term re-keys every potter campaign.

@@ -92,10 +92,7 @@ export function SpendBuckets({
         getRowId={(r) => r.key}
       />
       <p className="spend-buckets-replay">{replayShareLine(metered)}</p>
-      {[
-        ...(meterLines.metered_line === null ? [] : [meterLines.metered_line]),
-        ...meterLines.cap_lines,
-      ].map((line) => (
+      {[meterLines.metered_line, ...meterLines.cap_lines].map((line) => (
         <p key={line} className="spend-buckets-total">
           {line}
         </p>

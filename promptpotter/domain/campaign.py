@@ -311,7 +311,8 @@ class CampaignRefusedError(ConflictError):
 class CampaignEdit(TypedDict, total=False):
     label: str
     dataset_name: str
-    lifecycle_status: LifecycleStatus
+    # Never `deleted`: a delete is its tombstone (`WorkspaceBank.deleted`), which the load serves.
+    lifecycle_status: Literal["active", "archived"]
 
 
 class Campaign(FrozenModel):

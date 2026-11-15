@@ -125,7 +125,7 @@ def _origin_round(
 
 def _origin_fit(difficulty: DifficultyView, origin: ReadArm) -> dict[ArmKey, ArmFit]:
     """The origin read as a fresh floor, on the scale the cycle stands on."""
-    reading = difficulty.scale.frontier(origin.rows)
+    reading = difficulty.judging.frontier(origin.rows)
     if reading is None:
         return {}
     return {
@@ -281,7 +281,7 @@ class Cycle:
         held = self.measured_pool().get(individual_id)
         memo = (self.difficulty.stamp, individual_id)
         if memo not in self._pool_theta:
-            read = None if held is None else self.difficulty.scale.frontier(held[1])
+            read = None if held is None else self.difficulty.judging.frontier(held[1])
             self._pool_theta[memo] = None if read is None or read.caveat else read.theta
         return self._pool_theta[memo]
 

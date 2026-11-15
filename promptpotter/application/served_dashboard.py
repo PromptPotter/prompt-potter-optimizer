@@ -302,22 +302,21 @@ class ServedDashboard(DashboardFacts):
         description="The level each anchored dial in it is read against, by term."
     )
     lookahead: SampleLookahead
-    spend_metered: MeteredSpend | None = Field(
+    spend_metered: MeteredSpend = Field(
         description="The cycle's spend under the campaign's ceiling meter, a manifest fact no "
-        "ledger record carries; null where the campaign's manifest is gone."
+        "ledger record carries."
     )
-    spend_metered_by_round: dict[str, MeteredSpend] | None = Field(
+    spend_metered_by_round: dict[str, MeteredSpend] = Field(
         description="`spend_metered` per round, in round order."
     )
-    metered_line: str | None = Field(
+    metered_line: str = Field(
         description="This cycle's spend in the campaign's meter, capped or not, a replay included "
-        "— `domain/spend.py::metered_line`, the CLI's stop line; null where the manifest is gone."
+        "— `domain/spend.py::metered_line`, the CLI's stop line."
     )
     cap_lines: list[str] = Field(
         description="Beside `metered_line`: what the campaign's ceiling has counted in its meter, "
         "every cycle of it once and deleted ones included, against each cap it bounds — "
-        "`domain/spend.py::campaign_cap_lines`; empty where nothing is capped, on a replay and "
-        "where the manifest is gone."
+        "`domain/spend.py::campaign_cap_lines`; empty where nothing is capped and on a replay."
     )
     allotment: Budget | None = Field(
         description="This cycle's share of the campaign's ceiling — the most it may have metered "

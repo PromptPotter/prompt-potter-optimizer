@@ -7,7 +7,7 @@ from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.bench.difficulty import AbilityScale, judging_ruler, restamped
+from promptpotter.application.bench.difficulty import judging_ruler, restamped
 from promptpotter.application.datasets.authored import (
     dataset_scorer,
     load_dataset_campaign_config,
@@ -359,7 +359,7 @@ def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
     cells: list[GradedCell] = []
     for rr in rounds:
         cells = merge_known_outcomes(cells, rr.results)
-    frontier = None if judging is None else AbilityScale(judging).frontier(cells)
+    frontier = None if judging is None else judging.frontier(cells)
     return build_hard_samples(
         build_observations(rounds),
         None if judging is None else judging.ruler,

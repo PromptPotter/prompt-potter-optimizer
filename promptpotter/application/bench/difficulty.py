@@ -60,8 +60,40 @@ def calibrate_delta_ruler(
 
 
 class JudgingRuler(NamedTuple):
+    """What a θ is minted on: one judging fit, on the one `RulerScope` its session's fold writes."""
+
     ruler: DeltaRuler | None
     stamp: RulerStamp
+
+    def caveat(self, rows: Iterable[GradedCell]) -> ThetaCaveat | None:
+        rows = list(rows)
+        cells = [cell.key for cell in rows if cell.scored]
+        return theta_caveat(self.ruler, cells, prior_dominated=is_prior_dominated(rows))
+
+    def frontier(self, results: Iterable[GradedCell]) -> AbilityReading | None:
+        """The SOLE stamping site: θ, its scale and its caveat are minted together."""
+        results = list(results)
+        scored = [cell for cell in results if cell.scored]
+        ruler = self.ruler
+        responses = {cell.key: graded_response(cell) for cell in scored}
+        theta = fit_theta(responses, ruler.entries() if ruler is not None else None)
+        # The flat scale carries every cell.
+        on = [c.key for c in scored if ruler is None or c.key in ruler.delta]
+        if theta is None or not on:
+            return None
+        band = ruler.band_span(on) if ruler is not None else None
+        return AbilityReading(
+            theta=theta[0],
+            se=theta[1],
+            ruler=self.stamp,
+            cells=len(on),
+            ruler_span=ruler.delta_span if ruler is not None else None,
+            round_span=band[0] if band is not None else None,
+            calibration_model=ruler.calibration_model if ruler is not None else None,
+            caveat=self.caveat(results),
+            unlinked=ruler.unlinked(responses) if ruler is not None else 0,
+            pinned_share=ruler.pinned_share(on) if ruler is not None else None,
+        )
 
 
 def judging_ruler(
@@ -113,42 +145,6 @@ def restamped(
         n_min=n_min,
         enable_2pl=enable_2pl,
     )
-
-
-class AbilityScale(NamedTuple):
-    """What a θ is minted on: one judging fit, on the one `RulerScope` its session's fold writes."""
-
-    judging: JudgingRuler
-
-    def caveat(self, rows: Iterable[GradedCell]) -> ThetaCaveat | None:
-        rows = list(rows)
-        cells = [cell.key for cell in rows if cell.scored]
-        return theta_caveat(self.judging.ruler, cells, prior_dominated=is_prior_dominated(rows))
-
-    def frontier(self, results: Iterable[GradedCell]) -> AbilityReading | None:
-        """The SOLE stamping site: θ, its scale and its caveat are minted together."""
-        results = list(results)
-        scored = [cell for cell in results if cell.scored]
-        ruler = self.judging.ruler
-        responses = {cell.key: graded_response(cell) for cell in scored}
-        theta = fit_theta(responses, ruler.entries() if ruler is not None else None)
-        # The flat scale carries every cell.
-        on = [c.key for c in scored if ruler is None or c.key in ruler.delta]
-        if theta is None or not on:
-            return None
-        band = ruler.band_span(on) if ruler is not None else None
-        return AbilityReading(
-            theta=theta[0],
-            se=theta[1],
-            ruler=self.judging.stamp,
-            cells=len(on),
-            ruler_span=ruler.delta_span if ruler is not None else None,
-            round_span=band[0] if band is not None else None,
-            calibration_model=ruler.calibration_model if ruler is not None else None,
-            caveat=self.caveat(results),
-            unlinked=ruler.unlinked(responses) if ruler is not None else 0,
-            pinned_share=ruler.pinned_share(on) if ruler is not None else None,
-        )
 
 
 def session_ruler_scope(session: Session) -> RulerScope:
@@ -277,17 +273,13 @@ class DifficultyView:
             own=ruler_clock(session).own,
         )
 
-    @property
-    def scale(self) -> AbilityScale:
-        return AbilityScale(self.judging)
-
     def level_series(self, lines: Sequence[Sequence[RoundResult]]) -> list[LevelSeries]:
         """ONE fit less every line's parents, so lines' levels sum; each caveats on its own cells."""
         judged = frozenset(a for rounds in lines for a in parent_line(rounds))
-        scale = AbilityScale(self._read(ruler_clock(self.session), judged))
+        scale = self._read(ruler_clock(self.session), judged)
         return [
             LevelSeries(
-                stamp=scale.judging.stamp,
+                stamp=scale.stamp,
                 levels={rnd: scale.frontier(sheets[i]) for rnd, i in ended.items()},
                 caveat=scale.caveat(cell for sheet in sheets.values() for cell in sheet),
             )

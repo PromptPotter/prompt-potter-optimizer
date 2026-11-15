@@ -111,14 +111,13 @@ function RunFacts({ path, campaign }: { path: CyclePath; campaign: HierarchyCamp
   const cycle = useViewedCycle();
   const served = useServedCriterion();
   const innerLeaf = path.length > 1 ? pathLeaf(path) : null;
-  const metered = dash?.spend_metered ?? null;
   const figures = cycle?.figures.map((row) => ({ row, opens: familyOfGlance(row.key) })) ?? [];
   const unnamed = useUnnamedViews(figures.map((f) => f.opens));
   const [whole, setWhole] = useState(false);
   // What the masthead adds to a served figure's Term, by its key.
   const details: Partial<Record<FigureKey, ReactNode>> = {
     lift: TERMS.masthead_best,
-    spend: dash && metered && <SpendBuckets metered={metered} meterLines={dash} />,
+    spend: dash && <SpendBuckets metered={dash.spend_metered} meterLines={dash} />,
   };
   // The masthead draws no sub line, so a figure's sub leads its Term.
   const hover = (row: FigureType) => {
