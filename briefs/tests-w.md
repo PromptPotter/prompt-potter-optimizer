@@ -2,8 +2,9 @@
 
 Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chain id `tests-w`, arc `arc/tests-w`.
 
-- **Base:** `origin/main` at `fdad7947d` (landed 93: small-4's one `RoundContext` a round and the
-  archive's filing run, then addr-2's lineage keyed by address). Your `<base sha>` in common.md is
+- **Base:** `origin/main` at `6fa93bab0` (landed 93: small-4's one `RoundContext` a round and the
+  archive's filing run, addr-2's lineage keyed by address, then every read open retried past a
+  replace's swap). Your `<base sha>` in common.md is
   this commit. Since 91 a periodic step's faults are files under `jobs/unswept/`, and a `LineFold`
   names its own `kind`.
 - **Spec:** `### batch/32 · tests-w`, every row but "The freed lineage tree overflows its card under
