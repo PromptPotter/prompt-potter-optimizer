@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -63,10 +64,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from offline_world import Router
-from pydantic import SecretStr
+from pydantic import SecretStr, TypeAdapter, ValidationError
 from starlette.types import Message, Receive, Scope, Send
 
-from promptpotter.application import account, app_visits, health, notices, optimizers
+from promptpotter.application import account, app_visits, cycle_reads, health, notices, optimizers
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import RoundContext
 from promptpotter.application.bench.node_context import NodeContext
@@ -106,6 +107,7 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.head_to_head import AdmittedHeadToHead, CheckinArms
 from promptpotter.application.jobs.launcher.launch import Launched
+from promptpotter.application.jobs.launcher.run_job import JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
@@ -135,6 +137,7 @@ from promptpotter.config.paths import (
     PROJECTS_DIR,
     block_packs_root,
     default_projects_root,
+    install_datasets_root,
     jobs_dir,
 )
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
@@ -165,6 +168,7 @@ from promptpotter.domain.command_kinds import (
     HeadToHeadRequest,
     IngestUploadPayload,
     MintCampaignPayload,
+    OpenDatasetDraftPayload,
     PauseCyclePayload,
     ReadKind,
     SetApiKeyPayload,
@@ -228,6 +232,7 @@ from promptpotter.infrastructure.identity.accounts import (
     build_identity_bundle,
     claim_default,
     host_user_id,
+    identity_of_carrier,
     identity_of_session,
     is_host,
 )
@@ -254,6 +259,7 @@ from promptpotter.infrastructure.identity.oidc import (
     SessionData,
     load_provider_config,
 )
+from promptpotter.infrastructure.identity.tokens import MAX_LIVE_TOKENS, ApiToken, mint_token
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.producer_lock import hold_cycle, minted_producer, release_cycle
@@ -331,11 +337,15 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.hashing import ADDRESS_HEX
 from promptpotter.shared.identity import (
     ACCOUNT_KEYS_CAP,
+    ACCOUNT_TOKENS_CAP,
     CAMPAIGN_BUDGET_CAP,
+    CAMPAIGN_CAP_BY_NAME,
+    CAMPAIGN_CREATE_CAP,
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
     OWNER_COMMAND_CAPABILITIES,
     SYSTEM_PRINCIPAL,
+    Carrier,
     IdentityContext,
     Issuer,
     TenantId,
@@ -1422,6 +1432,17 @@ def test_a_hand_edited_over_grant_is_clamped_to_the_owner_set_at_read_time(
     with pytest.raises(NotFoundError):
         require_capability(ident, starting.capability, subject=starting.value)  # lacks campaign.run
     assert acting_principal(ident).id == "sub-1", "audit must name the delegate, not the delegator"
+
+
+@pytest.mark.usefixtures("offline")
+def test_delegation_is_one_level_both_ways(delegation: _Delegation) -> None:
+    # The read walks one level, so a delegator granted as a sub-principal would chain its delegates.
+    _, grants, _, _, grant = delegation
+    grant("sub-1", "owner-9", frozenset({CAMPAIGN_STEP_CAP}))
+    for sub, by in (("sub-2", "sub-1"), ("owner-9", "boss-1")):
+        with pytest.raises(ValueError, match="one-level"):
+            grant(sub, by, frozenset({CAMPAIGN_STEP_CAP}))
+    assert read_grant(grants, "owner-9") is None, "a delegator was made a sub-principal"
 
 
 @pytest.mark.usefixtures("offline")
@@ -4310,3 +4331,365 @@ def test_a_declared_write_is_what_orders_two_gate_checks() -> None:
     ):
         assert gate._producers(reader, (declared, reader)) == (declared,), f"{declared} unordered"
     assert gate._producers(reader, (writer, reader)) == (), "an undeclared write ordered"
+
+
+# 6. API tokens and the bearer door
+
+
+def _minted(browser: TestClient, *scopes: str) -> dict[str, Any]:
+    answer = browser.post(
+        f"/api/v1/commands/{CommandKind.MINT_API_TOKEN}",
+        json={"name": "ci", "scopes": list(scopes)},
+        headers={"Idempotency-Key": uuid.uuid4().hex},
+    )
+    assert answer.status_code == 200, answer.text
+    return cast(dict[str, Any], answer.json())
+
+
+class _TokenBox(NamedTuple):
+    paths: IdentityPaths
+    session_id: str
+    writer: IdentityContext
+    browser: TestClient
+
+
+@pytest.fixture
+def token_box(sign_up: _SignUp, monkeypatch: pytest.MonkeyPatch) -> _TokenBox:
+    """A signed-in writer's browser on a server holding its job registry, its rate buckets full."""
+    home, _, paths, bundle, _ = sign_up
+    monkeypatch.setattr(settings_mod.settings, "MAX_ACCOUNTS", 100)
+    monkeypatch.setattr(quota, "_rate_buckets", {})
+    monkeypatch.setattr(
+        app.state, "job_registry", JobRegistry(home / "jobs", capacity=lambda _: 1), raising=False
+    )
+    session_id, writer = _writer(bundle)
+    return _TokenBox(
+        paths, session_id, writer, TestClient(app, cookies={SESSION_COOKIE_NAME: session_id})
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_token_is_kept_as_its_hash_and_served_once_and_never_outranks_its_account(
+    token_box: _TokenBox,
+) -> None:
+    paths, _, writer, browser = token_box
+    minted = _minted(browser, "step", "run")
+    secret = minted["secret"]
+    assert secret.startswith("pp_") and secret not in paths.tokens.read_text(), (
+        "a token's text was kept at rest"
+    )
+    listed = browser.post(
+        f"/api/v1/commands/{CommandKind.LIST_API_TOKENS}",
+        json={},
+        headers={"Idempotency-Key": uuid.uuid4().hex},
+    )
+    assert secret not in listed.text, "a listing served a token's text again"
+    assert [t["scopes"] for t in listed.json()["tokens"]] == [["run", "step"]]
+    narrowed = dataclasses.replace(writer, capabilities=frozenset({CAMPAIGN_STEP_CAP}))
+    with pytest.raises(PayloadInvalidError) as unheld:
+        account.mint_token(build_stores_from_identity(narrowed), "wide", ["step", "run"])
+    assert unheld.value.code == "token_scope_unheld", "a mint outranked its account"
+
+
+def _bearer(secret: str) -> TestClient:
+    return TestClient(app, headers={"Authorization": f"Bearer {secret}"})
+
+
+def _sent(client: TestClient, kind: CommandKind, payload: dict[str, Any]) -> Any:
+    return client.post(
+        f"/api/v1/commands/{kind}", json=payload, headers={"Idempotency-Key": uuid.uuid4().hex}
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_bearer_reads_as_its_account_and_commands_only_within_its_scopes(
+    token_box: _TokenBox,
+) -> None:
+    draft = {"dataset_name": "email-tagging"}
+    creating = _bearer(_minted(token_box.browser, "create")["secret"])
+    stepping = _bearer(_minted(token_box.browser, "step")["secret"])
+    me = creating.get("/api/v1/auth/me")
+    assert me.status_code == 200 and me.json()["user_id"] == token_box.writer.user_id, (
+        "a bearer read as some other account"
+    )
+    assert _sent(creating, CommandKind.OPEN_DATASET_DRAFT, draft).status_code == 200, (
+        "a bearer was refused a command its scope names"
+    )
+    assert _sent(stepping, CommandKind.OPEN_DATASET_DRAFT, draft).status_code == 404, (
+        "a bearer commanded past its scopes"
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_command_a_bearer_filed_reads_back_under_its_token(token_box: _TokenBox) -> None:
+    minted = _minted(token_box.browser, "create")
+    read = []
+    for client in (_bearer(minted["secret"]), token_box.browser):
+        command_id = uuid.uuid4().hex
+        filed = client.post(
+            f"/api/v1/commands/{CommandKind.OPEN_DATASET_DRAFT}",
+            json={"dataset_name": "email-tagging"},
+            headers={"Idempotency-Key": command_id, "Command-Id": command_id},
+        )
+        assert filed.status_code == 200, filed.text
+        read.append(token_box.browser.get(f"/api/v1/commands/{command_id}").json()["token_id"])
+    assert read == [minted["token"]["id"], None], "a bearer's act read as its account's own"
+
+
+@pytest.mark.usefixtures("offline")
+def test_no_bearer_mints_lists_or_revokes_a_token_nor_sets_the_accounts_keys(
+    token_box: _TokenBox,
+) -> None:
+    every = _bearer(_minted(token_box.browser, *CAMPAIGN_CAP_BY_NAME)["secret"])
+    for kind, payload in (
+        (CommandKind.MINT_API_TOKEN, {"name": "again", "scopes": ["step"]}),
+        (CommandKind.LIST_API_TOKENS, {}),
+        (CommandKind.REVOKE_API_TOKEN, {"token_id": "x"}),
+        (CommandKind.SET_API_KEY, {"provider": "openai", "secret": "sk-x"}),
+    ):
+        assert _sent(every, kind, payload).status_code == 404, f"a bearer pressed {kind}"
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_mint_past_an_accounts_live_tokens_is_refused_naming_the_revoke(
+    token_box: _TokenBox,
+) -> None:
+    live = [_minted(token_box.browser, "step") for _ in range(MAX_LIVE_TOKENS)]
+    past = _sent(token_box.browser, CommandKind.MINT_API_TOKEN, {"name": "ci", "scopes": ["step"]})
+    assert past.json()["code"] == "tokens_full", "an account minted past its live tokens"
+    assert {act.get("kind") for act in past.json()["next_acts"]} == {"revoke-api-token"}
+    revoked = _sent(
+        token_box.browser, CommandKind.REVOKE_API_TOKEN, {"token_id": live[0]["token"]["id"]}
+    )
+    assert revoked.status_code == 202, revoked.text
+    _minted(token_box.browser, "step")
+
+
+@pytest.mark.usefixtures("offline")
+def test_no_bearer_accepts_the_terms_or_sets_its_accounts_preferences(
+    token_box: _TokenBox,
+) -> None:
+    every = _bearer(_minted(token_box.browser, *CAMPAIGN_CAP_BY_NAME)["secret"])
+    preferences = {"demo_mode_enabled": False}
+    for kind, payload in (
+        (CommandKind.ACCEPT_TERMS, {"version": TERMS_VERSION}),
+        (CommandKind.SET_USER_SETTINGS, preferences),
+    ):
+        assert _sent(every, kind, payload).status_code == 404, f"a bearer pressed {kind}"
+    owned = _sent(token_box.browser, CommandKind.SET_USER_SETTINGS, preferences)
+    assert owned.status_code == 200, "the account's own session was refused its own act"
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_revoked_token_is_refused_at_its_next_request_and_its_stream_ends_within_a_tick(
+    token_box: _TokenBox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    minted = _minted(token_box.browser, "step")
+    bearer = _bearer(minted["secret"])
+    bundle = cast(IdentityBundle, app.state.identity_bundle)
+    opened = identity_of_carrier(Carrier("bearer", minted["secret"]), bundle)
+    assert opened is not None
+    monkeypatch.setattr(cycle_reads, "_FEED_TICK_S", 0)
+    feed = cycle_reads.feed_frames(
+        Caller(
+            build_stores_from_identity(opened),
+            signing=bundle,
+            carrier=Carrier("bearer", minted["secret"]),
+        )
+    )
+    await anext(feed)
+    revoked = _sent(
+        token_box.browser, CommandKind.REVOKE_API_TOKEN, {"token_id": minted["token"]["id"]}
+    )
+    assert revoked.status_code == 202, revoked.text
+    refused = bearer.get("/api/v1/auth/me")
+    assert (refused.status_code, refused.json()["code"]) == (401, "token_revoked")
+    left = [frame async for frame in feed]
+    assert len(left) < 8, "a revoked token's stream went on past its tick"
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_token_of_a_revoked_sub_principal_acts_on_nothing_and_its_stream_ends(
+    token_box: _TokenBox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Minted while its account was its own; the grant read after it is what the bearer stands on.
+    secret = _minted(token_box.browser, "create")["secret"]
+    bundle = cast(IdentityBundle, app.state.identity_bundle)
+    carrier = Carrier("bearer", secret)
+    opened = identity_of_carrier(carrier, bundle)
+    assert opened is not None
+    monkeypatch.setattr(cycle_reads, "_FEED_TICK_S", 0)
+    feed = cycle_reads.feed_frames(
+        Caller(build_stores_from_identity(opened), signing=bundle, carrier=carrier)
+    )
+    await anext(feed)
+    grant_principal(
+        token_box.paths.grants,
+        sub_principal_user_id=token_box.writer.user_id,
+        delegated_by_user_id="",
+        capabilities=frozenset(),
+        note="revoked",
+        actor="host",
+        audit_path=token_box.paths.grants_audit,
+    )
+    acted = _sent(
+        _bearer(secret), CommandKind.OPEN_DATASET_DRAFT, {"dataset_name": "email-tagging"}
+    )
+    assert acted.status_code == 404, "a revoked sub-principal's token still acted"
+    left = [frame async for frame in feed]
+    assert len(left) < 8, "a revoked sub-principal's stream went on past its tick"
+
+
+def test_a_tokens_row_naming_a_scope_no_grant_may_carry_never_loads() -> None:
+    row = {"id": "t", "user_id": "u", "name": "n", "created_at": "2026-01-01"}
+    for scopes in ([ACCOUNT_KEYS_CAP], [ACCOUNT_TOKENS_CAP], [""], [CAMPAIGN_STEP_CAP, "admin"]):
+        with pytest.raises(ValidationError):
+            ApiToken.model_validate({**row, "scopes": scopes})
+    assert ApiToken.model_validate({**row, "scopes": [CAMPAIGN_STEP_CAP]}).scopes == {
+        CAMPAIGN_STEP_CAP
+    }
+
+
+@pytest.mark.usefixtures("offline")
+def test_no_launched_jobs_spec_holds_the_credential_its_caller_came_by(
+    token_box: _TokenBox,
+) -> None:
+    secret = _minted(token_box.browser, "step")["secret"]
+    bundle = cast(IdentityBundle, app.state.identity_bundle)
+    on_stdin: TypeAdapter[IdentityContext] = TypeAdapter(
+        JobSpec.model_fields["identity"].annotation
+    )
+    for carrier in (Carrier("bearer", secret), Carrier("cookie", token_box.session_id)):
+        identity = identity_of_carrier(carrier, bundle)
+        assert identity is not None and identity.carried_by == carrier.kind
+        assert carrier.key not in on_stdin.dump_json(identity).decode(), (
+            f"a launched run's spec carried its caller's {carrier.kind}"
+        )
+
+
+@pytest.mark.usefixtures("offline")
+async def test_a_hosts_token_is_refused_auth_on_or_off_and_two_credentials_at_once_are_refused(
+    sign_up: _SignUp, token_box: _TokenBox, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _, host_session = await sign_up.sign_in("root")
+    assert host_session is not None
+    host_browser = TestClient(app, cookies={SESSION_COOKIE_NAME: host_session})
+    refused_mint = _sent(
+        host_browser, CommandKind.MINT_API_TOKEN, {"name": "ci", "scopes": ["step"]}
+    )
+    assert refused_mint.json()["code"] == "host_bearer_refused", "the host minted a token"
+    # One minted past the door, as a row a store held before the mint refused: still refused.
+    host_token, _ = mint_token(
+        token_box.paths.tokens,
+        user_id=cast(dict[str, str], host_browser.get("/api/v1/auth/me").json())["user_id"],
+        name="ci",
+        scopes=frozenset({CAMPAIGN_STEP_CAP}),
+    )
+    for auth_mode in ("on", "off"):
+        monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", auth_mode)
+        refused = _bearer(host_token).get("/api/v1/auth/me")
+        assert (refused.status_code, refused.json()["code"]) == (401, "host_bearer_refused"), (
+            f"a host's bearer was let in with auth {auth_mode}"
+        )
+    monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "on")
+    doubled = TestClient(
+        app,
+        cookies={SESSION_COOKIE_NAME: token_box.session_id},
+        headers={"Authorization": f"Bearer {_minted(token_box.browser, 'step')['secret']}"},
+    ).get("/api/v1/auth/me")
+    assert (doubled.status_code, doubled.json()["code"]) == (401, "credentials_doubled")
+
+
+@pytest.mark.usefixtures("offline")
+async def test_whoever_reads_an_account_follows_a_command_filed_in_it_and_no_other_account_does(
+    tmp_path: Path,
+) -> None:
+    # A delegate's Start is followed by its owner reopening the draft, so the reading is tenancy's.
+    delegate = dataclasses.replace(
+        _who("owner-1"),
+        claims={"principal": "delegate-1", "delegated_by": "owner-1"},
+        capabilities=frozenset({CAMPAIGN_CREATE_CAP}),
+    )
+    filing = workspace(tmp_path, delegate)
+    shutil.copytree(
+        install_datasets_root() / "email-tagging", filing.install_datasets_root / "email-tagging"
+    )
+    filed = await CommandDispatcher(filing).dispatch(
+        CommandCall(OpenDatasetDraftPayload(dataset_name="email-tagging"), door=Door.API)
+    )
+    command_id = filed.accepted.command_id
+    owner = workspace(tmp_path, _who("owner-1"))
+    assert (
+        read_command(owner, JobRegistry.attach(owner.jobs_dir), command_id).status == "completed"
+    ), "an owner could not follow a command its delegate filed in its account"
+    stranger = workspace(tmp_path, _who("stranger-1"))
+    with pytest.raises(NotFoundError):
+        read_command(stranger, JobRegistry.attach(stranger.jobs_dir), command_id)
+
+
+async def test_a_delegate_cannot_cancel_a_command_it_could_not_have_filed(tmp_path: Path) -> None:
+    owner = workspace(tmp_path, _who("owner-1"))
+    minted = CommandKind.HEAD_TO_HEAD
+    owner.commands.append(_command(minted, "2026-01-01T00:00:00Z", WORKSPACE_SUBJECT))
+    for held, refused in ((CAMPAIGN_RUN_CAP, True), (minted.capability, False)):
+        delegate = dataclasses.replace(
+            _who("owner-1"),
+            claims={"principal": "delegate-1", "delegated_by": "owner-1"},
+            capabilities=frozenset({held}),
+        )
+        cancelling = CommandDispatcher(workspace(tmp_path, delegate)).dispatch(
+            CommandCall(CancelPayload(command_id=minted), door=Door.API)
+        )
+        if refused:
+            with pytest.raises(NotFoundError):
+                await cancelling
+        else:
+            await cancelling
+
+
+def _box_refusals() -> list[str]:
+    box = build_stores_from_identity(account.registered_or_default_identity())
+    return [
+        line.subject for line in account.tenant_trail(box).lines if line.what == "request_refused"
+    ]
+
+
+async def _provider_error_callback(query: bytes, flow: bytes) -> str:
+    request = Request(
+        {
+            "type": "http",
+            "app": app,
+            "scheme": "https",
+            "server": ("testserver", 443),
+            "path": "/auth/callback/google",
+            "query_string": query,
+            "headers": [(b"cookie", flow)] if flow else [],
+        }
+    )
+    return (await auth.callback(request, BackgroundTasks(), "google")).headers["location"]
+
+
+@pytest.mark.usefixtures("offline", "sign_up")
+async def test_a_provider_error_without_this_browsers_flow_files_nothing() -> None:
+    before = _box_refusals()
+    for query, flow in (
+        (b"error=access_denied", b""),
+        (b"error=access_denied&state=st", b""),
+        (
+            b"error=access_denied&state=forged",
+            f"{auth.OAUTH_FLOW_COOKIE_NAME}=google.st.n".encode(),
+        ),
+    ):
+        assert await _provider_error_callback(query, flow) != "/?auth_error=provider_returned_error"
+    assert _box_refusals() == before, "a stranger's ?error= wrote the box's trail"
+
+
+@pytest.mark.usefixtures("offline", "sign_up")
+async def test_a_provider_error_on_a_live_flow_files_one_refusal_in_fixed_words() -> None:
+    flow = f"{auth.OAUTH_FLOW_COOKIE_NAME}=google.st.n".encode()
+    for error, word in (("access_denied", "access_denied"), ("<b>pwned</b>", "unrecognized_error")):
+        before = _box_refusals()
+        answer = await _provider_error_callback(f"error={error}&state=st".encode(), flow)
+        assert answer == "/?auth_error=provider_returned_error"
+        filed = _box_refusals()[len(before) :]
+        assert len(filed) == 1 and word in filed[0] and "pwned" not in filed[0], filed

@@ -48,6 +48,8 @@ from promptpotter.domain.verification import VerifyStrategy
 from promptpotter.shared.errors import NextAct
 from promptpotter.shared.identity import (
     ACCOUNT_KEYS_CAP,
+    ACCOUNT_SELF_CAP,
+    ACCOUNT_TOKENS_CAP,
     CAMPAIGN_BUDGET_CAP,
     CAMPAIGN_CREATE_CAP,
     CAMPAIGN_LIFECYCLE_CAP,
@@ -99,11 +101,11 @@ type Answering = Literal["inline", "task"]
 
 class CommandKind(StrEnum):
     """A row is `kind, handler, capability, press[, destructive[, answering]]`: the handler is
-    `application/commands/{module}:{attr}`; a `None` capability is the account's own act;
+    `application/commands/{module}:{attr}`; every kind names its capability;
     `destructive` is MCP's `destructiveHint`, true for an apply that overwrites or removes."""
 
     handler: str
-    capability: str | None
+    capability: str
     press: Press | None
     destructive: bool
     answering: Answering
@@ -112,7 +114,7 @@ class CommandKind(StrEnum):
         cls,
         kind: str,
         handler: str,
-        capability: str | None,
+        capability: str,
         press: Press | None,
         destructive: bool = False,
         answering: Answering = "inline",
@@ -243,6 +245,7 @@ class CommandKind(StrEnum):
         "task",
     )
     # Its act is asking: the pass it names reads it as its pause (`run_phase_control.py::RunControl`).
+    # Acts under the rung of the command it stops (`dispatcher.py::_rung`); its own, for none filed.
     CANCEL = "cancel", "cancelling:cancel", CAMPAIGN_RUN_CAP, anyone("cancel"), True
     SET_LIMITS = (
         "set-limits",
@@ -371,12 +374,17 @@ class CommandKind(StrEnum):
     SET_USER_SETTINGS = (
         "set-user-settings",
         "workspace_edits:set_user_settings",
-        None,
+        ACCOUNT_SELF_CAP,
         anyone("set-user-settings"),
         True,
     )
     # A person's consent: their own act, never a host's.
-    ACCEPT_TERMS = "accept-terms", "workspace_edits:accept_terms", None, person("accept-terms")
+    ACCEPT_TERMS = (
+        "accept-terms",
+        "workspace_edits:accept_terms",
+        ACCOUNT_SELF_CAP,
+        person("accept-terms"),
+    )
     # Browser-only ON PURPOSE: a key on a terminal's argv lands in its shell history, and the
     # terminal sends on the box's own keys.
     SET_API_KEY = "set-api-key", "workspace_edits:set_api_key", ACCOUNT_KEYS_CAP, BROWSER, True
@@ -384,6 +392,22 @@ class CommandKind(StrEnum):
         "remove-api-key",
         "workspace_edits:remove_api_key",
         ACCOUNT_KEYS_CAP,
+        BROWSER,
+        True,
+    )
+    # Browser-only ON PURPOSE: the terminal is the host's own machine, and the host is refused on
+    # the bearer door; its capability is never a token's, so no bearer reaches these three.
+    MINT_API_TOKEN = "mint-api-token", "workspace_edits:mint_api_token", ACCOUNT_TOKENS_CAP, BROWSER
+    LIST_API_TOKENS = (
+        "list-api-tokens",
+        "workspace_edits:list_api_tokens",
+        ACCOUNT_TOKENS_CAP,
+        BROWSER,
+    )
+    REVOKE_API_TOKEN = (
+        "revoke-api-token",
+        "workspace_edits:revoke_api_token",
+        ACCOUNT_TOKENS_CAP,
         BROWSER,
         True,
     )
@@ -1112,6 +1136,31 @@ class RemoveApiKeyPayload(CommandPayload, kind=CommandKind.REMOVE_API_KEY):
     """Drop the caller's key for a provider; its next send there draws the coupon again."""
 
     provider: str = Field(min_length=1, max_length=64)
+
+
+class MintApiTokenPayload(CommandPayload, kind=CommandKind.MINT_API_TOKEN):
+    """Mint a named bearer token of the caller's account, scoped to what it may command; its text
+    is served by this answer alone."""
+
+    # Its answer holds the one copy of the text, so a retry mints again rather than replay it.
+    unmatched: ClassVar[bool] = True
+
+    name: str = Field(min_length=1, max_length=64)
+    scopes: list[str] = Field(
+        min_length=1,
+        max_length=16,
+        description="The `/grant` names it may command; reads need none.",
+    )
+
+
+class ListApiTokensPayload(CommandPayload, kind=CommandKind.LIST_API_TOKENS):
+    """List the caller's tokens, live and revoked, never their text."""
+
+
+class RevokeApiTokenPayload(CommandPayload, kind=CommandKind.REVOKE_API_TOKEN):
+    """Revoke one of the caller's tokens: its next request is refused, and its open streams end."""
+
+    token_id: str = Field(min_length=1, max_length=64)
 
 
 # The last payload model is declared above, so a kind carrying none fails right here.

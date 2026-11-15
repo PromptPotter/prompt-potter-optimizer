@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any, assert_never
 
 from promptpotter.application import account, library
-from promptpotter.application.account import AccountKey, put_account_key, remove_account_key
+from promptpotter.application.account import (
+    AccountKey,
+    AccountTokens,
+    MintedToken,
+    put_account_key,
+    remove_account_key,
+)
 from promptpotter.application.commands.dispatcher import Applier, Dispatched, Replaying, replays
 from promptpotter.application.commands.draft_editing import reread_draft_wire
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
@@ -23,9 +30,12 @@ from promptpotter.domain.command_kinds import (
     DeleteCampaignPayload,
     IngestUploadPayload,
     LifecyclePayload,
+    ListApiTokensPayload,
+    MintApiTokenPayload,
     OpenDatasetDraftPayload,
     OpenOriginDraftPayload,
     RemoveApiKeyPayload,
+    RevokeApiTokenPayload,
     SetApiKeyPayload,
     SetCampaignLabelPayload,
     SetUserSettingsPayload,
@@ -167,6 +177,33 @@ async def remove_api_key(dispatched: Dispatched[RemoveApiKeyPayload]) -> Applier
     stores, provider = dispatched.dispatcher.stores, dispatched.payload.provider
 
     return Applier.blocking(lambda: remove_account_key(stores, provider))
+
+
+async def mint_api_token(dispatched: Dispatched[MintApiTokenPayload]) -> Applier[MintedToken]:
+    """Its payload is `unmatched`: its answer is the text's one copy, so it replays nothing."""
+    stores, payload = dispatched.dispatcher.stores, dispatched.payload
+
+    return Applier.blocking(lambda: account.mint_token(stores, payload.name, payload.scopes))
+
+
+async def list_api_tokens(
+    dispatched: Dispatched[ListApiTokensPayload],
+) -> Applier[AccountTokens]:
+    stores = dispatched.dispatcher.stores
+
+    return Applier.blocking(lambda: account.account_tokens(stores))
+
+
+@replays(CommandKind.LIST_API_TOKENS)
+async def tokens_listed(replaying: Replaying[ListApiTokensPayload]) -> AccountTokens:
+    # A listing acts on nothing, so a retry lists again.
+    return await asyncio.to_thread(account.account_tokens, replaying.stores)
+
+
+async def revoke_api_token(dispatched: Dispatched[RevokeApiTokenPayload]) -> Applier[object]:
+    stores, token_id = dispatched.dispatcher.stores, dispatched.payload.token_id
+
+    return Applier.blocking(lambda: account.revoke_token(stores, token_id))
 
 
 async def bank_snippet(dispatched: Dispatched[BankSnippetPayload]) -> Applier[object]:

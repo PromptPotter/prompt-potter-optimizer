@@ -116,8 +116,7 @@ class HostTool:
     def description(self) -> str:
         doc = inspect.cleandoc(vars(self.model).get("__doc__") or "")
         if isinstance(self.kind, CommandKind):
-            gate = self.kind.capability or "the account's own act"
-            return f"{doc} (A recorded command; gate: {gate}.)"
+            return f"{doc} (A recorded command; gate: {self.kind.capability}.)"
         return doc
 
     @property

@@ -55,9 +55,12 @@ BASELINE = {
     # model-lines (+22): the bench's one optimizer call target, typed (`CallTarget`), laid under
     # every llm node by the one node fold (`PipelineManifest.calling`) and read by a bare selection
     # (`bench_choice`); net of the manifest validator selection already ran, and 22 yaml lines gone.
-    "package_lines": 110058,
+    # mkey (+516): a door, an account's API tokens: the token store and its SURVIVOR row, three
+    # command kinds, the bearer's resolution through the one identity builder, the stream's per-tick
+    # re-check; its fix pass the token cap, `account.self` and a cancel's rung.
+    "package_lines": 110569,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
-    "model_copy_updates": 157,
+    "model_copy_updates": 158,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.

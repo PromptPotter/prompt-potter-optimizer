@@ -1,4 +1,5 @@
 import { AccountSection } from "./AccountSection";
+import { ApiTokens } from "./ApiTokens";
 import { Button, CommitInput, Empty, FailureLine, ReadState } from "@/components/ui";
 import { couponRead, deleteApiKey, putApiKey } from "@/lib/api";
 import {
@@ -15,7 +16,12 @@ export function AccountKeysTab() {
   const read = useRead(couponRead());
   return (
     <ReadState read={read} subject="your provider keys">
-      {(coupon) => <ProviderKeys coupon={coupon} />}
+      {(coupon) => (
+        <>
+          <ProviderKeys coupon={coupon} />
+          <ApiTokens />
+        </>
+      )}
     </ReadState>
   );
 }

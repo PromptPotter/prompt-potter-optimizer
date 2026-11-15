@@ -120,7 +120,21 @@ Every frame carries `activity` whole — `status`, `notices`, and `decision` wit
 
 What each file holds is [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) § File reference. v1 promises only: inside `campaigns/{campaign_id}/cycles/{cycle_id}/`, **`rounds/round_NNNN.json` + `index.json` + `log.md`**, and `export.json` (§5c). Everything under `.runtime/` may change shape between minor versions — §6 promises the record family, not the file layout. Sibling cycles (forks) live flat under `cycles/`, each with its own `dashboard.json`, seeded from the parent at the cut.
 
+## 7b. A program's door: an API token
+
+A program reaches the campaign surface as an account, on a token that account minted in the webapp's API keys tab: `pp_` and 32 random bytes, shown once, kept as its SHA-256 (`infrastructure/identity/tokens.py`). It reads what its account reads and commands only within the scopes it was minted with (`account.py::mint_token`); it never mints, lists or revokes a token, nor sets the account's keys, and a host account's token is refused. Every request names it the same way:
+
+```bash
+H='Authorization: Bearer pp_…'                       # one credential: never beside the session cookie
+curl -sH "$H" -H 'Idempotency-Key: k1' -H 'Content-Type: application/json' \
+  -d '{"dataset_name":"email-tagging"}' $BOX/api/v1/commands/mint-campaign   # submit: 202 + command_id
+curl -sH "$H" $BOX/api/v1/commands/$COMMAND_ID       # poll: the command's status, then its answer
+curl -sH "$H" $BOX/api/v1/campaigns/$CAMPAIGN/cycles/$CYCLE/export   # fetch, once a round closed
+```
+
+A malformed, unknown or revoked token is a 401 naming its next act (`code` `token_malformed`, `token_unknown`, `token_revoked`); a revoke also ends the token's open streams within one tick (`cycle_reads.py::cycle_event_frames`, `::feed_frames`). The token draws its account's rate buckets as a session does.
+
 ## 8. What is NOT stable
 
 - **Internal module structure, private names, and runtime dataclass shapes** beyond §1–§7; package `__init__` files re-export nothing — this document is the public surface. In-memory caches. Prompt templates at `promptpotter/assets/optimizers/potter/pipeline.yaml::resolved_prompts` — data, tunable on any release. The optimizer node types (`application/optimizers/nodes.py`) and the `NodeContext` a member is handed. Test helpers and the `webapp/` layout.
-- **The REST API** (`docs/specs/openapi.generated.json`), the stream's §6 contract aside. Identity is a browser SESSION COOKIE (`promptpotter_session`, `presentation/api/middleware/oidc.py`); no route takes an API key or an inbound bearer token. A third party reaches the campaign surface only with `PROMPTPOTTER_AUTH=off` — not an integration surface.
+- **The REST API** (`docs/specs/openapi.generated.json`) beyond §6's stream and §7b's door: identity is a browser session cookie (`promptpotter_session`) or §7b's bearer, one resolver for both (`presentation/api/middleware/oidc.py`); a route's payload may move between minor versions.

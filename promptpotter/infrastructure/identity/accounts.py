@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
@@ -26,15 +26,18 @@ from promptpotter.infrastructure.identity.oidc import (
     SignInClient,
     load_provider_config,
 )
+from promptpotter.infrastructure.identity.tokens import TOKEN_CHARS, TOKEN_PREFIX, token_of
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import held_lock
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.user_store import User, UserStore, read_accounts
+from promptpotter.shared.errors import NextAct, UnauthorizedError
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import (
     OWNER_COMMAND_CAPABILITIES,
     TERMINAL_IDENTITY_ID,
     AccessState,
+    Carrier,
     IdentityContext,
     Issuer,
     TenantId,
@@ -156,53 +159,119 @@ def _session_capabilities(access_state: AccessState) -> frozenset[str]:
 
 
 def _delegated_identity(
-    data: SessionData, grant: PrincipalGrant, bundle: IdentityBundle
+    presented: IdentityContext, grant: PrincipalGrant, bundle: IdentityBundle
 ) -> IdentityContext:
     if grant.is_denied:
-        return IdentityContext(
-            user_id=UserId(data.user_id),
-            tenant_id=TenantId(data.tenant_id),
-            issuer=Issuer(data.issuer) if data.issuer else None,
-            email=data.email,
-            provider=data.provider,
-            # A sub-principal's entitlement IS its grant, never the blocklist: revoked reads blocked.
-            access_state="blocked",
-            claims={"subject": data.subject},
-            capabilities=frozenset(),
-        )
+        # A sub-principal's entitlement IS its grant, never the blocklist: revoked reads blocked.
+        return replace(presented, access_state="blocked", capabilities=frozenset())
     # A delegate stands on its delegator's access: blocking the delegator blocks it (bl4.B7).
     delegator = UserStore(tenant_workspace(default_projects_root(), grant.delegated_by)).load()
     access_state = resolve_access_state(None if delegator is None else delegator.email, bundle)
-    return IdentityContext(
+    return replace(
+        presented,
         user_id=UserId(grant.delegated_by),
         tenant_id=TenantId(grant.delegated_by),
-        issuer=Issuer(data.issuer) if data.issuer else None,
-        email=data.email,
-        provider=data.provider,
         access_state=access_state,
         claims={
-            "subject": data.subject,
-            "principal": data.user_id,
+            **presented.claims,
+            "principal": presented.user_id,
             "delegated_by": grant.delegated_by,
         },
         capabilities=resolve_effective_capabilities(grant, _session_capabilities(access_state)),
     )
 
 
-def identity_of_session(data: SessionData, bundle: IdentityBundle) -> IdentityContext:
-    grant = read_grant(bundle.paths.grants, data.user_id)
+def account_identity(presented: IdentityContext, bundle: IdentityBundle) -> IdentityContext:
+    """THE builder of who an account is, both doors': *presented* names the account as its door
+    read it, and its grant, its delegated path, its access state and its host are read here."""
+    grant = read_grant(bundle.paths.grants, presented.user_id)
     if grant is not None:
-        return _delegated_identity(data, grant, bundle)
-    access_state = resolve_access_state(data.email, bundle)
-    return IdentityContext(
-        user_id=UserId(data.user_id),
-        tenant_id=TenantId(data.tenant_id),
-        issuer=Issuer(data.issuer) if data.issuer else None,
-        email=data.email,
-        provider=data.provider,
+        # A delegate is never the host, whoever delegated it.
+        return _delegated_identity(presented, grant, bundle)
+    access_state = resolve_access_state(presented.email, bundle)
+    return replace(
+        presented,
         access_state=access_state,
-        claims={"subject": data.subject},
         capabilities=_session_capabilities(access_state),
-        # A delegate (above) is never the host, whoever delegated it.
-        host=is_declared_host(data.email),
+        host=presented.user_id == TERMINAL_IDENTITY_ID or is_declared_host(presented.email),
     )
+
+
+def identity_of_session(data: SessionData, bundle: IdentityBundle) -> IdentityContext:
+    return account_identity(
+        IdentityContext(
+            user_id=UserId(data.user_id),
+            tenant_id=TenantId(data.tenant_id),
+            issuer=Issuer(data.issuer) if data.issuer else None,
+            email=data.email,
+            provider=data.provider,
+            claims={"subject": data.subject},
+        ),
+        bundle,
+    )
+
+
+_LIVE_TOKEN = NextAct(
+    field="Authorization",
+    value="Bearer and a live token of your account, minted in its API keys tab",
+)
+
+
+def _token_identity(carrier: Carrier, bundle: IdentityBundle) -> IdentityContext:
+    """The token's account as a session of it reads, narrowed to the token's scopes; never the
+    host's, whose exemption from every bucket never rides a bearer."""
+    if not carrier.key.startswith(TOKEN_PREFIX) or len(carrier.key) != TOKEN_CHARS:
+        raise UnauthorizedError(
+            "That bearer is no PromptPotter token.",
+            code="token_malformed",
+            next_acts=(_LIVE_TOKEN,),
+        )
+    token = token_of(bundle.paths.tokens, carrier.key)
+    user = (
+        None
+        if token is None
+        else UserStore(tenant_workspace(default_projects_root(), token.user_id)).load()
+    )
+    if token is None or user is None:
+        raise UnauthorizedError(
+            "That token names no account here.", code="token_unknown", next_acts=(_LIVE_TOKEN,)
+        )
+    if token.revoked_at is not None:
+        raise UnauthorizedError(
+            f"That token was revoked at {token.revoked_at}.",
+            code="token_revoked",
+            next_acts=(_LIVE_TOKEN,),
+        )
+    account = account_identity(
+        IdentityContext(
+            user_id=UserId(user.user_id), tenant_id=TenantId(user.tenant_id), email=user.email
+        ),
+        bundle,
+    )
+    if account.host:
+        raise UnauthorizedError(
+            "The host acts through its own browser or terminal, never a bearer.",
+            code="host_bearer_refused",
+            next_acts=(NextAct(field="Cookie", value="the host's signed-in session"),),
+        )
+    return replace(account, capabilities=account.capabilities & token.scopes, token_id=token.id)
+
+
+def identity_of_carrier(carrier: Carrier, bundle: IdentityBundle) -> IdentityContext | None:
+    """THE caller door: a cookie's session or a bearer's token, as every request and every tick of
+    its streams resolves it; ``None`` for a session that is gone, a refusal for a bearer that is."""
+    if carrier.kind == "bearer":
+        identity: IdentityContext | None = _token_identity(carrier, bundle)
+    else:
+        data = bundle.session_store.read(carrier.key)
+        identity = None if data is None else identity_of_session(data, bundle)
+    return None if identity is None else replace(identity, carried_by=carrier.kind)
+
+
+def still_carried(opened: IdentityContext, carrier: Carrier, bundle: IdentityBundle) -> bool:
+    """Whether *carrier* still resolves to *opened*: a revoke, a logout, an expiry, a block or a
+    narrowed grant ends what it opened."""
+    try:
+        return identity_of_carrier(carrier, bundle) == opened
+    except UnauthorizedError:
+        return False

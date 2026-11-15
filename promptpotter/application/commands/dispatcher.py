@@ -27,7 +27,9 @@ from promptpotter.domain.command_events import (
 )
 from promptpotter.domain.command_kinds import (
     COMMAND_ID_CHARS,
+    PAYLOAD_MODEL_FOR_KIND,
     CampaignPayload,
+    CancelPayload,
     CommandAcceptedBody,
     CommandKind,
     CommandPayload,
@@ -265,6 +267,16 @@ def addressed[P: CommandPayload](stores: Stores, payload: P) -> P:
     return payload if resolved == subject else payload.model_copy(update=fields)
 
 
+def _rung(stores: Stores, payload: CommandPayload) -> str:
+    """The capability *payload* acts under: its kind's, but a cancel acts under the rung of the
+    command it stops, so a stop never reaches past what its caller could have filed."""
+    if isinstance(payload, CancelPayload):
+        filed = stores.commands.book().filing(payload.command_id)
+        if filed is not None:
+            return PAYLOAD_MODEL_FOR_KIND[filed.kind].kind.capability
+    return payload.kind.capability
+
+
 # `CommandPayload.recorded`: the act as its filing keeps it, and the digest its key names.
 type _Recorded = tuple[dict[str, JsonValue], str]
 
@@ -388,15 +400,14 @@ class CommandDispatcher:
 
     async def open(self, call: CommandCall[Any]) -> Opened[object, Any]:
         """The payload's address base IS its target ledger, acted on as `addressed` resolves it:
-        filed once every refusal before its act passed, which raises here."""
+        filed once every refusal before its act passed, which raises here. The rung is checked
+        first, so a caller without it learns nothing of which addresses resolve."""
+        kind = call.kind
+        acts_under = await asyncio.to_thread(_rung, self.stores, call.payload)
+        require_capability(self.stores.identity, acts_under, subject=f"command {kind.value!r}")
         acted = await asyncio.to_thread(addressed, self.stores, call.payload)
         if acted is not call.payload:
             call = replace(call, payload=acted)
-        kind = call.kind
-        if kind.capability is not None:
-            require_capability(
-                self.stores.identity, kind.capability, subject=f"command {kind.value!r}"
-            )
         if not kind.pressed_at(call.door):
             raise BadRequestError(
                 f"command {kind.value!r} is not pressed at the {call.door} door.",
@@ -562,6 +573,7 @@ class CommandDispatcher:
                 idempotency_key=call.idempotency_key,
                 act_digest=act_digest,
                 issued_by=acting_principal(self.stores.identity),
+                token_id=self.stores.identity.token_id,
                 subject=subject,
                 filer=filer,
             )

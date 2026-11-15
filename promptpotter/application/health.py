@@ -12,8 +12,13 @@ from typing import ClassVar, NamedTuple
 import httpx
 
 from promptpotter import connectors
-from promptpotter.application.account import registered_or_default_identity
+from promptpotter.application.account import (
+    SignInRefusal,
+    record_refusal,
+    registered_or_default_identity,
+)
 from promptpotter.application.jobs.launcher.admission import probe_backend
+from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
@@ -213,6 +218,35 @@ def standing(projects_root: Path) -> dict[str, HealthRecord]:
 def is_broken(projects_root: Path, name: str) -> bool:
     last = standing(projects_root).get(name)
     return last is not None and last.state == "broken"
+
+
+def sign_in_refused(provider: str, why: str, refusal: SignInRefusal) -> SignInRefusal:
+    """A sign-in the provider or its exchange turned down, filed once on the box's trail (nobody
+    signed in yet, so it is the box's own to keep). Here, beside the probe it reads: no retry of
+    the person's mends a provider the health check found refusing this server."""
+    box = build_stores(registered_or_default_identity(), projects_root=default_projects_root())
+    record_refusal(box, subject=f"sign-in through {provider}: {why}")
+    return "signin_unavailable" if is_broken(box.projects_root, signin_probe(provider)) else refusal
+
+
+# RFC 6749 § 4.1.2.1's closed set: a refusal is filed in these words, never the query's text.
+_PROVIDER_ERRORS = frozenset(
+    {
+        "invalid_request",
+        "unauthorized_client",
+        "access_denied",
+        "unsupported_response_type",
+        "invalid_scope",
+        "server_error",
+        "temporarily_unavailable",
+    }
+)
+
+
+def provider_refused(provider: str, error: str) -> SignInRefusal:
+    """The provider's `?error=` on a flow that checked out, in the RFC's words or one fixed word."""
+    word = error if error in _PROVIDER_ERRORS else "unrecognized_error"
+    return sign_in_refused(provider, f"the provider returned {word}", "provider_returned_error")
 
 
 class Checked(NamedTuple):

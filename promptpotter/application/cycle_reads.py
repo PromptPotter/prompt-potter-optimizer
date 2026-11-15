@@ -8,6 +8,7 @@ from pathlib import Path
 
 from pydantic import Field
 
+from promptpotter.application.caller import Caller
 from promptpotter.application.hierarchy import entries_version
 from promptpotter.application.hierarchy_subtree import subtree_cycle
 from promptpotter.application.jobs.machine_status import served_machine_status
@@ -167,7 +168,15 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     )
 
 
-async def cycle_event_frames(cycle: ViewedCycle) -> AsyncIterator[str]:
+async def _signed_ticks(caller: Caller, every_s: float) -> AsyncIterator[None]:
+    """A stream's ticks while its caller stands: each re-reads the carrier it opened on, so a
+    revoke, a logout or an expiry ends the stream within one tick."""
+    while await asyncio.to_thread(caller.still_signed):
+        yield
+        await asyncio.sleep(every_s)
+
+
+async def cycle_event_frames(caller: Caller, cycle: ViewedCycle) -> AsyncIterator[str]:
     tail = CycleLedgerTail(cycle.dir, cycle.hop.cycle_id)
     snapshot = await asyncio.to_thread(
         lambda: tail.snapshot_frame(
@@ -175,10 +184,9 @@ async def cycle_event_frames(cycle: ViewedCycle) -> AsyncIterator[str]:
         )
     )
     yield snapshot.model_dump_json()
-    while True:
+    async for _ in _signed_ticks(caller, _TAIL_POLL_INTERVAL_S):
         for envelope in await asyncio.to_thread(tail.read_new):
             yield envelope.model_dump_json()
-        await asyncio.sleep(_TAIL_POLL_INTERVAL_S)
 
 
 # A read names its subject, by prefix, and answers the versions it stood on: taken before its body,
@@ -224,15 +232,15 @@ def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[st
     }
 
 
-async def feed_frames(stores: Stores, jobs: JobRegistry) -> AsyncIterator[str]:
+async def feed_frames(caller: Caller) -> AsyncIterator[str]:
     """Every subject once, then each move: the server writes every ledger, so it says what moved."""
     sent: dict[str, str] = {}
-    while True:
-        for subject, version in (await asyncio.to_thread(feed_versions, stores, jobs)).items():
+    async for _ in _signed_ticks(caller, _FEED_TICK_S):
+        moved = await asyncio.to_thread(feed_versions, caller.stores, caller.jobs)
+        for subject, version in moved.items():
             if sent.get(subject) != version:
                 sent[subject] = version
                 yield FeedFrame(subject=subject, version=version).model_dump_json()
-        await asyncio.sleep(_FEED_TICK_S)
 
 
 @dataclass(frozen=True)

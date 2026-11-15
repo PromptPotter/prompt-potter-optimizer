@@ -62,6 +62,8 @@ class CommandRecord(FrozenModel):
     # `CommandPayload.recorded`: the act its key names, the fields `payload` leaves out included.
     act_digest: str
     issued_by: Principal
+    # The API token it was filed through; ``None`` for a session or the terminal.
+    token_id: str | None = None
     subject: str
     # The producer that files and acts it: gone with no end, the act died with it (`producer_alive`).
     filer: str

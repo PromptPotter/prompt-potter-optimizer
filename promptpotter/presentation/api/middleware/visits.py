@@ -13,6 +13,7 @@ from promptpotter.application.app_visits import keep_visit
 from promptpotter.presentation.api.middleware.headers import served_build_file
 from promptpotter.presentation.api.middleware.oidc import OWNER_DEVICE_COOKIE_NAME
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.identity import IdentityContext
 
 
 def _outside(host: str) -> bool:
@@ -25,7 +26,7 @@ def _outside(host: str) -> bool:
 
 def _kept(scope: Scope, status: int) -> bool:
     path: str = scope.get("path", "")
-    if scope.get("state", {}).get("identity_ctx") is not None:
+    if isinstance(scope.get("state", {}).get("identity_ctx"), IdentityContext):
         # A signed-in person's requests are their own trail's.
         return False
     if cookie_parser(Headers(scope=scope).get("cookie", "")).get(OWNER_DEVICE_COOKIE_NAME):

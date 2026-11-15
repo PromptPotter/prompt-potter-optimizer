@@ -500,18 +500,19 @@ class CycleEventsParams(
     Not found only for an unknown cycle; a running, paused or finished one answers one
     ``stream_snapshot`` frame (the served dashboard, ``sequence`` = the offset the tail picks up
     at), then every later record as a ``ProjectionEnvelope`` (``kind`` = its ``record_type``,
-    ``sequence`` = its ledger offset), with a heartbeat comment every 15 s.
+    ``sequence`` = its ledger offset), with a heartbeat comment every 15 s. It ends at the
+    first tick its caller's session or token no longer stands.
     """
 
     def answer(self, caller: Caller) -> AsyncIterator[str]:
-        return cycle_event_frames(self.viewed(caller.stores))
+        return cycle_event_frames(caller, self.viewed(caller.stores))
 
 
 class FeedParams(ReadParams, read=ReadKind.FEED, route="/feed"):
     """What moved, over SSE: a ``FeedFrame`` hints a re-ask; each read's body is the truth."""
 
     def answer(self, caller: Caller) -> AsyncIterator[str]:
-        return feed_frames(caller.stores, caller.jobs)
+        return feed_frames(caller)
 
 
 class CycleFilesParams(

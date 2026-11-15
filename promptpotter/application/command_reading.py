@@ -22,7 +22,6 @@ from promptpotter.domain.records.run_records import LaunchedEffect, LaunchedJob
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import NotFoundError
-from promptpotter.shared.identity import acting_principal
 
 type TaskStatus = Literal["working", "input_required", "completed", "failed", "cancelled"]
 
@@ -89,6 +88,8 @@ class CommandReading(FrozenModel):
     command_id: str
     kind: str
     subject: str
+    # The API token that filed it; ``None`` for a session or the terminal.
+    token_id: str | None
     status: TaskStatus
     said: str
     created_at: str
@@ -97,7 +98,7 @@ class CommandReading(FrozenModel):
 
 
 class OwnedCommand(FrozenModel):
-    """A command this principal filed: its filing and the status event that last moved it."""
+    """A command on the account's log: its filing and the status event that last moved it."""
 
     filed: CommandRecord
     end: CommandAckRecord | None
@@ -106,11 +107,12 @@ class OwnedCommand(FrozenModel):
 
 
 def owned_command(stores: Stores, command_id: str) -> OwnedCommand:
-    """*command_id* as this principal filed it: refused as absent for anyone else's."""
+    """*command_id* as the account's log holds it, whoever in the account filed it: a read is gated
+    by tenancy, as a reopen of the draft it was filed on is, so whoever may reopen a draft follows
+    the Start on it (`draft_build.py::HeldStart`); another account's log holds none of it."""
     book = stores.commands.book()
     filed, status = book.filing(command_id), book.status(command_id)
-    principal = acting_principal(stores.identity).id
-    if filed is None or status is None or filed.issued_by.id != principal:
+    if filed is None or status is None:
         raise NotFoundError(f"no command {command_id!r}")
     return OwnedCommand(filed=filed, end=book.end(command_id), status=status)
 
@@ -172,6 +174,7 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
         command_id=command_id,
         kind=filed.kind,
         subject=filed.subject,
+        token_id=filed.token_id,
         status=status,
         said=said,
         created_at=filed.timestamp,

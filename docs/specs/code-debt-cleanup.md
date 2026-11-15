@@ -882,55 +882,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   resolve. **Rides with:** xconn 3, the probe's link. **Re-test:** an L4 launch with an inner
   connector's endpoints unset is refused before its mint, naming the connector.
 
-### batch/29 · mkey
-
-- **No inbound credential for the campaign surface**: `presentation/api/deps.py` resolves a session
-  cookie alone and reads no bearer, so a third party needs `PROMPTPOTTER_AUTH=off`.
-  Action: an account mints a named, scoped, revocable token (hash at rest, a SURVIVOR row of
-  `store/data_root.py::KINDS`); a bearer resolves through the one caller dependency, a new auth door
-  reviewed in `access-model.md` (`identity/accounts.py::identity_of_session` per carrier; `deps.py::open_caller`
-  splits the rate draw from the `Caller` build, the seam mcp 2 rides); a new section of
-  `docs/developer/stable-api.md` (its § 8 is "What is NOT stable") shows submit → poll → fetch with it. **Rides with:** mkey 1, 2. **Re-test:** a bearer reader in
-  `promptpotter/presentation/api/`.
-- **The host's exemption ignores the door**: `jobs/quota.py::refuse_request_rate`
-  exempts the host from every bucket, and auth-off makes every caller the host (`deps.py::resolve_identity`),
-  so a leaked host bearer spends the box's keys unbounded. Action: the host is refused on a bearer door.
-  **Rides with:** mkey 2. **Re-test:** a host-account token minted at mkey 1 is refused.
-- **A new account's announcement is adapter code**: `presentation/api/routers/auth.py::_announce_new_account`
-  rings and forwards the arrival to the CRM, though `account.py::sign_in_oidc` already returns its
-  `rings`. Action: the announcement is an `account.py::Arrival` field the application acts on.
-  **Rides with:** mkey 1, whose acts are the account's; its Owns gain `presentation/api/routers/auth.py`
-  (the callback's announcement and refusal hunks). **Re-test:**
-  `git grep -n "def _announce_new_account" -- promptpotter/presentation` is empty.
-- **A provider's sign-in error is said only in a log**: `routers/auth.py::callback`'s `error` branch
-  (`:158`) logs a warning and files nothing, where the exchange failure files `account.record_refusal`
-  on the box's trail. Action: the provider's error is the same refusal, filed once in `application/`
-  by the one function the Held row "The sign-in exchange-failure refusal still reads `health`" asks
-  for, which both branches call; the router gains no `record_refusal` of its own. **Rides with:**
-  mkey 1, beside the row above, in the same hunk. **Re-test:** a callback with `?error=access_denied`
-  adds one refusal to the box's trail, and `git grep -c "record_refusal" -- promptpotter/presentation`
-  does not rise.
-- **A reopen serves a Start its reader may not follow**: `datasets/draft_build.py::HeldStart.of` serves
-  the last `start-checkin` on the draft whoever filed it, while `command_reading.py::owned_command` hides
-  a command another principal issued with a 404, so an owner reopening a delegate's Start sees
-  `useQueuedStart` wait past the mint. Root: one rule for who may follow a Start, whoever may reopen its
-  draft: the reopen serves the Start's own reading, or the command read lets an account in on a command
-  filed on a subject it owns, never two rules. **Rides with:** mkey 4, the access review; its Owns gain
-  `command_reading.py::owned_command` (mcp's file after, on mkey's tip), `draft_build.py::HeldStart`
-  (rk-run's file before) and `webapp/lib/hooks/useQueuedStart.ts`. **Re-test:** a delegate Starts a
-  check-in, the owner reopens it, and the page follows the Start to its mint.
-- **An SSE stream keeps the identity it opened with** (✓): `reads.py:158-161` calls
-  `read.answer(asked.caller)` once, `cycle_reads.py:178-181` and `:230-235` loop forever, and identity is
-  resolved only in the OIDC middleware (`oidc.py:18`) with no re-check and no lifetime cap, so a revoke,
-  logout or expiry leaves the stream open: a revoked delegate keeps streaming the host's ledger, prompts
-  included. Root: each tick re-reads the session (`session_store.read` + `identity_of_session`) and ends the
-  stream on a mismatch; `_events` (`reads.py:158`) runs once, so the check belongs in
-  `cycle_reads.py::cycle_event_frames` (`:170`) and `::feed_frames` (`:227`), or a wrapper around both. Beside it (reported, sub-threshold): one-level delegation is
-  enforced one way only (`identity/grants.py::grant_principal` vs `identity/accounts.py::identity_of_session`); `capability=None` kinds
-  (set-user-settings, accept-terms) act for blocked accounts and delegates; `dispatcher.py:354` resolves
-  the prefix before the capability check (`:358`). **Rides with:** mkey (the access review), ahead of
-  the edge tail's order if a delegate is ever granted on the box.
-
 ### batch/29 · mcp
 
 - **An arms gate's hold claims `input_required` and sends no input request**: `command_reading.py::job_status`
@@ -1194,11 +1145,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
-- **The sign-in exchange-failure refusal still reads `health` in the router**:
-  `presentation/api/routers/auth.py::callback` calls `account.record_refusal` and `health.is_broken`
-  itself (its log line beside the act went). Action: split `health`'s account dependency; the callback
-  calls one function. **Held:** `health`'s account split (M22, [`roadmap.md`](roadmap.md) § Host assistant).
-  **Re-test:** `git grep -n "record_refusal" -- promptpotter/presentation` is empty.
 - **The committed L4 panel resolves only on this account**: `research/datasets/promptpotter-self/panel/dataset.yaml`
   seats `hotpotqa-distractor` and `legalbench-fods`, account definitions no committed tier holds, so
   the box refuses the panel at init. Action: commit both to the research tier, or keep the README's

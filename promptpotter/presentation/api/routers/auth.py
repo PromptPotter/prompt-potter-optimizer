@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import hmac
 import ipaddress
-import logging
 import secrets
 from typing import Annotated
 
@@ -13,8 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
 from promptpotter.application import account, health
-from promptpotter.config.paths import default_projects_root
-from promptpotter.domain.records.run_records import Device, device_of
+from promptpotter.domain.records.run_records import device_of
 from promptpotter.infrastructure.identity.accounts import IdentityBundle
 from promptpotter.infrastructure.identity.oidc import (
     SUPPORTED_PROVIDERS,
@@ -22,22 +20,12 @@ from promptpotter.infrastructure.identity.oidc import (
     IDTokenInvalidError,
     SignInClient,
 )
-from promptpotter.infrastructure.outbound import forward_new_account_to_crm, notify_operator
-from promptpotter.infrastructure.store.user_store import count_accounts
-from promptpotter.presentation.api.deps import (
-    build_stores_from_identity,
-    require_identity_bundle,
-)
+from promptpotter.presentation.api.deps import require_identity_bundle
 from promptpotter.presentation.api.middleware.oidc import (
     OWNER_DEVICE_COOKIE_NAME,
     SESSION_COOKIE_NAME,
 )
-from promptpotter.shared.errors import (
-    NotFoundError,
-)
-from promptpotter.shared.identity import AccessState, IdentityContext, display_name
-
-logger = logging.getLogger(__name__)
+from promptpotter.shared.errors import NotFoundError
 
 auth_flow_router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -143,15 +131,6 @@ async def login(
     return response
 
 
-def _exchange_refused(provider: str, exc: Exception) -> account.SignInRefusal:
-    # Nobody signed in yet, so the refusal is the box's own to keep.
-    box = build_stores_from_identity(account.registered_or_default_identity())
-    account.record_refusal(box, subject=f"sign-in through {provider}: {exc}")
-    # No retry of the user's mends a provider the health check found refusing this server.
-    broken = health.is_broken(default_projects_root(), health.signin_probe(provider))
-    return "signin_unavailable" if broken else "code_exchange_failed"
-
-
 @auth_flow_router.get("/callback/{provider}")
 async def callback(
     request: Request,
@@ -163,35 +142,37 @@ async def callback(
     if bundle is None or client is None:
         return _redirect_with_error("signin_unavailable")
 
-    error = request.query_params.get("error")
-    if error:
-        logger.warning("OIDC callback error for %s: %s", provider, error)
-        return _redirect_with_error("provider_returned_error")
-
     state = request.query_params.get("state")
-    code = request.query_params.get("code")
-    if not state or not code:
+    if not state:
         return _redirect_with_error("callback_missing_params")
-
+    # Only a flow this browser started is filed: a stranger's query writes nothing.
     nonce = _flow_nonce(request, provider, state)
     if nonce is None:
         return _redirect_with_error("state_invalid_or_expired")
 
+    error = request.query_params.get("error")
+    if error:
+        return _redirect_with_error(
+            await asyncio.to_thread(health.provider_refused, provider, error)
+        )
+    code = request.query_params.get("code")
+    if not code:
+        return _redirect_with_error("callback_missing_params")
+
     try:
         identity = await client.exchange_code(code=code, nonce=nonce)
     except (CodeExchangeError, IDTokenInvalidError) as exc:
-        refusal = await asyncio.to_thread(_exchange_refused, provider, exc)
-        return _redirect_with_error(refusal)
+        refused = await asyncio.to_thread(
+            health.sign_in_refused, provider, str(exc), "code_exchange_failed"
+        )
+        return _redirect_with_error(refused)
 
     device = device_of(request.headers.get("sec-ch-ua-mobile"), request.headers.get("user-agent"))
     # Off the loop: an arrival and the default's claim wait on the accounts lock.
     signed = await asyncio.to_thread(account.sign_in_oidc, bundle, identity, device=device)
-    for ring in signed.rings:
-        background.add_task(notify_operator, ring, ring=True)
+    background.add_task(account.ring, signed)
     if isinstance(signed, account.SignInRefused):
         return _redirect_with_error(signed.refusal)
-    if signed.opened:
-        _announce(background, signed.identity, device)
 
     response = RedirectResponse(url="/", status_code=303)
     _set_auth_cookie(
@@ -216,42 +197,3 @@ async def logout(request: Request) -> JSONResponse:
     response = JSONResponse({"ok": True})
     response.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return response
-
-
-def _announce_new_account(
-    *,
-    email: str | None,
-    name: str | None,
-    user_id: str,
-    access_state: AccessState,
-    device: Device | None,
-) -> None:
-    who = email or f"(no email) {user_id}"
-    # Read once the account is on disk, so the arriving account is inside the total.
-    total = count_accounts(default_projects_root())
-    notify_operator(
-        f"New PromptPotter account: {who}\n"
-        f"Accounts now: {total}\n"
-        f"Access: {access_state}\n"
-        f"Device: {device or 'unknown'}" + (f"\nRevoke it with:  /block {email}" if email else ""),
-        # A stranger's arrival is the one decision this channel offers: /block it now, or not.
-        ring=True,
-    )
-    # Fires regardless of `access_state`: a blocked account is still a contact worth keeping.
-    forward_new_account_to_crm(
-        email=email, name=name, user_id=user_id, account_count=total, device=device
-    )
-
-
-def _announce(
-    background: BackgroundTasks, identity: IdentityContext, device: Device | None
-) -> None:
-    """After the response, never on it."""
-    background.add_task(
-        _announce_new_account,
-        email=identity.email,
-        name=display_name(identity.email),
-        user_id=str(identity.user_id),
-        access_state=identity.access_state,
-        device=device,
-    )

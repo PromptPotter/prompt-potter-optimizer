@@ -4,7 +4,7 @@ import logging
 import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from typing import Literal, NewType
+from typing import Literal, NamedTuple, NewType
 
 from promptpotter.shared.errors import NotFoundError
 
@@ -51,7 +51,22 @@ CAMPAIGN_CAP_BY_NAME: dict[str, str] = {
 DELEGABLE_CAPABILITIES = frozenset(CAMPAIGN_CAP_BY_NAME.values())
 # The account's own provider keys: its owner's alone, never delegated (bl4.B6).
 ACCOUNT_KEYS_CAP = "account.keys"
-OWNER_COMMAND_CAPABILITIES = DELEGABLE_CAPABILITIES | {ACCOUNT_KEYS_CAP}
+# The account's API tokens: minted, listed and revoked by its owner alone, so no token mints one.
+ACCOUNT_TOKENS_CAP = "account.tokens"
+# The account's own act (its preferences, its consent to the Terms): its owner's alone, so neither a
+# delegate, a bearer nor a blocked account presses it.
+ACCOUNT_SELF_CAP = "account.self"
+OWNER_COMMAND_CAPABILITIES = DELEGABLE_CAPABILITIES | {
+    ACCOUNT_KEYS_CAP,
+    ACCOUNT_TOKENS_CAP,
+    ACCOUNT_SELF_CAP,
+}
+_NAME_OF_CAPABILITY = {cap: name for name, cap in CAMPAIGN_CAP_BY_NAME.items()}
+
+
+def capability_names(capabilities: Iterable[str]) -> list[str]:
+    """The `/grant` names of *capabilities*, sorted: the inverse of `capabilities_from_names`."""
+    return sorted(_NAME_OF_CAPABILITY[cap] for cap in capabilities)
 
 
 def capabilities_from_names(names: Iterable[str]) -> frozenset[str]:
@@ -75,6 +90,20 @@ TERMINAL_IDENTITY_ID = "default"
 AccessState = Literal["active", "blocked"]
 
 
+CarrierKind = Literal["cookie", "bearer"]
+
+
+class Carrier(NamedTuple):
+    """What a request presented, held by its `Caller` alone, so no identity, spec or record carries
+    it. Its *key* is the cookie's session id or the bearer's text."""
+
+    kind: CarrierKind
+    key: str
+
+    def __repr__(self) -> str:
+        return f"Carrier({self.kind})"
+
+
 @dataclass(frozen=True)
 class IdentityContext:
     user_id: UserId
@@ -88,6 +117,10 @@ class IdentityContext:
     # Stamped where the identity is built, never re-derived from `user_id`: a delegate acting
     # for the host carries the host's `user_id` and is not the host.
     host: bool = False
+    # The door it came by, never its credential; ``None`` at the terminal and where auth is off.
+    carried_by: CarrierKind | None = None
+    # The API token a bearer came by (its id, never its text): what its acts are filed under.
+    token_id: str | None = None
 
 
 def default_identity(tenant_id: str = TERMINAL_IDENTITY_ID) -> IdentityContext:

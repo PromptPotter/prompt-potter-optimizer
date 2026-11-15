@@ -21,7 +21,7 @@ from promptpotter.domain.records.run_records import AccountEvent, AccountEventRe
 from promptpotter.domain.said import Tone
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.identity import accounts
+from promptpotter.infrastructure.identity import accounts, tokens
 from promptpotter.infrastructure.identity import grants as grant_files
 from promptpotter.infrastructure.identity.accounts import (
     IdentityBundle,
@@ -39,6 +39,7 @@ from promptpotter.infrastructure.identity.grants import (
 from promptpotter.infrastructure.identity.oidc import ProviderIdentity
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import providers
+from promptpotter.infrastructure.outbound import forward_new_account_to_crm, notify_operator
 from promptpotter.infrastructure.store.account_trail import (
     TrailLine,
     in_time_order,
@@ -61,16 +62,21 @@ from promptpotter.infrastructure.store.user_store import (
 from promptpotter.infrastructure.store.wallet_store import CouponGrant, GrantStore
 from promptpotter.shared.clock import epoch_seconds, utcnow_iso
 from promptpotter.shared.errors import (
+    BadRequestError,
     ConflictError,
     FileUnreadableError,
+    NextAct,
     NotFoundError,
     PayloadInvalidError,
     PotterError,
 )
 from promptpotter.shared.identity import (
+    DELEGABLE_CAPABILITIES,
     AccessState,
     IdentityContext,
     acting_principal,
+    capabilities_from_names,
+    capability_names,
     default_identity,
     display_name,
 )
@@ -224,8 +230,9 @@ def sign_in(stores: Stores, *, device: Device | None) -> Arrival:
 class SignedIn(NamedTuple):
     session_id: str
     identity: IdentityContext
-    # This sign-in opened the account: the one moment there is somebody new to announce.
-    opened: bool
+    # Its `opened` is the one moment there is somebody new to announce (`ring`).
+    arrival: Arrival
+    device: Device | None
     # The declared host admin: its browser is marked the owner's.
     host_admin: bool
     # What the operator is rung with: a claim the host's sign-in did not take.
@@ -281,8 +288,8 @@ def sign_in_oidc(
         # commands do.
         identity = identity_of_session(session, bundle)
         stores = build_stores(identity, projects_root=default_projects_root())
-        opened = sign_in(stores, device=device).opened
-        return SignedIn(session_id, identity, opened, host_admin, tuple(rings))
+        arrival = sign_in(stores, device=device)
+        return SignedIn(session_id, identity, arrival, device, host_admin, tuple(rings))
     except AccountCeilingError as full:
         rings.append(f"Sign-up refused for {verified.email or 'no email'}: {full.message}")
         refusal = "accounts_full"
@@ -293,6 +300,34 @@ def sign_in_oidc(
         refusal = "signin_unavailable"
     bundle.session_store.delete(session_id)
     return SignInRefused(refusal, tuple(rings))
+
+
+def ring(signed: SignedIn | SignInRefused) -> None:
+    """After the response, never on it: the operator's rings, then an opened account's arrival."""
+    for line in signed.rings:
+        notify_operator(line, ring=True)
+    if not isinstance(signed, SignedIn) or not signed.arrival.opened:
+        return
+    email, user_id = signed.arrival.user.email, signed.arrival.user.user_id
+    # Read once the account is on disk, so the arriving account is inside the total.
+    total = count_accounts(default_projects_root())
+    notify_operator(
+        f"New PromptPotter account: {email or f'(no email) {user_id}'}\n"
+        f"Accounts now: {total}\n"
+        f"Access: {signed.identity.access_state}\n"
+        f"Device: {signed.device or 'unknown'}"
+        + (f"\nRevoke it with:  /block {email}" if email else ""),
+        # A stranger's arrival is the one decision this channel offers: /block it now, or not.
+        ring=True,
+    )
+    # Fires regardless of access: a blocked account is still a contact worth keeping.
+    forward_new_account_to_crm(
+        email=email,
+        name=display_name(email),
+        user_id=user_id,
+        account_count=total,
+        device=signed.device,
+    )
 
 
 class ConnectedAccount(StrictModel):
@@ -606,3 +641,88 @@ def put_account_key(stores: Stores, provider: str, secret: SecretStr) -> Account
 
 def remove_account_key(stores: Stores, provider: str) -> bool:
     return stores.api_keys.remove(check_provider(provider))
+
+
+class TokenEntry(StrictModel):
+    """One of the account's API tokens, as every read after its mint serves it: never its text."""
+
+    id: str
+    name: str
+    scopes: list[str] = Field(description="The `/grant` names of what it may command.")
+    created_at: str
+    revoked_at: str | None
+
+
+class AccountTokens(StrictModel):
+    tokens: list[TokenEntry] = Field(description="Oldest first, the revoked kept beside the live.")
+    grantable: list[str] = Field(description="The scopes a token of this account may carry.")
+
+
+class MintedToken(StrictModel):
+    token: TokenEntry
+    secret: str = Field(description="The bearer's text, served by this answer alone: copy it now.")
+
+
+def _entry(token: tokens.ApiToken) -> TokenEntry:
+    return TokenEntry(
+        id=token.id,
+        name=token.name,
+        scopes=capability_names(token.scopes),
+        created_at=token.created_at,
+        revoked_at=token.revoked_at,
+    )
+
+
+def mint_token(stores: Stores, name: str, scope_names: Iterable[str]) -> MintedToken:
+    """Its scopes are what the account may delegate and holds, so a bearer never outranks it; the
+    host mints none, as every request would refuse it (`accounts.py::account_identity`)."""
+    if stores.identity.host:
+        raise BadRequestError(
+            "The host acts through its own browser or terminal, never a bearer.",
+            code="host_bearer_refused",
+            next_acts=(NextAct(field="Cookie", value="the host's signed-in session"),),
+        )
+    try:
+        scopes = capabilities_from_names(scope_names)
+    except ValueError as exc:
+        raise PayloadInvalidError(
+            str(exc),
+            code="token_scope_unknown",
+            next_acts=(NextAct(field="scopes", value="names from the list it gave"),),
+        ) from exc
+    if unheld := scopes - stores.identity.capabilities:
+        raise PayloadInvalidError(
+            f"Your account holds no {', '.join(capability_names(unheld))}, so no token of it may.",
+            code="token_scope_unheld",
+            next_acts=(NextAct(field="scopes", value="only what your account holds"),),
+        )
+    secret, token = tokens.mint_token(
+        default_identity_paths().tokens,
+        # Its first act opens the account, so the bearer names one.
+        user_id=account_of(stores).user_id,
+        name=name,
+        scopes=scopes,
+    )
+    return MintedToken(token=_entry(token), secret=secret)
+
+
+def account_tokens(stores: Stores) -> AccountTokens:
+    held = tokens.account_tokens(default_identity_paths().tokens, str(stores.identity.user_id))
+    return AccountTokens(
+        tokens=[_entry(token) for token in held],
+        # The host mints none (`mint_token`), so it is offered no scope to mint with.
+        grantable=[]
+        if stores.identity.host
+        else capability_names(stores.identity.capabilities & DELEGABLE_CAPABILITIES),
+    )
+
+
+def revoke_token(stores: Stores, token_id: str) -> None:
+    if not tokens.revoke_token(
+        default_identity_paths().tokens, user_id=str(stores.identity.user_id), token_id=token_id
+    ):
+        raise NotFoundError(
+            f"No live token {token_id!r} on your account.",
+            code="token_not_found",
+            next_acts=(NextAct(field="token_id", value="the id of a live token of yours"),),
+        )

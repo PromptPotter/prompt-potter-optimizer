@@ -53,6 +53,7 @@ from promptpotter.infrastructure.identity.grants import (
     IdentityPaths,
 )
 from promptpotter.infrastructure.identity.oidc import ProviderConfigBundle, SessionData
+from promptpotter.infrastructure.identity.tokens import TokensFile
 from promptpotter.infrastructure.llm import capabilities as caps
 from promptpotter.infrastructure.llm.base import LLMResponse
 from promptpotter.infrastructure.llm.pricing import ROUTE_ANSWER, ROUTE_ANSWERS_DIR, RatesFile
@@ -269,6 +270,8 @@ INSTALL_KINDS: tuple[Kind, ...] = (
     Kind("blocklist audit", _INSTALL, _IDENTITY.blocklist_audit.as_posix(), _SURVIVOR, _AUDIT),
     Kind("grants", _INSTALL, _IDENTITY.grants.as_posix(), _SURVIVOR, TypeAdapter(GrantsFile)),
     Kind("grants audit", _INSTALL, _IDENTITY.grants_audit.as_posix(), _SURVIVOR, _AUDIT),
+    # Who an account is: its API tokens survive as its keys do.
+    Kind("api tokens", _INSTALL, _IDENTITY.tokens.as_posix(), _SURVIVOR, TypeAdapter(TokensFile)),
     Kind(
         "session",
         _INSTALL,

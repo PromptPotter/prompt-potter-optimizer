@@ -141,6 +141,33 @@
         "title": "AccountKey",
         "type": "object"
       },
+      "AccountTokens": {
+        "additionalProperties": false,
+        "properties": {
+          "grantable": {
+            "description": "The scopes a token of this account may carry.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Grantable",
+            "type": "array"
+          },
+          "tokens": {
+            "description": "Oldest first, the revoked kept beside the live.",
+            "items": {
+              "$ref": "#/components/schemas/TokenEntry"
+            },
+            "title": "Tokens",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tokens",
+          "grantable"
+        ],
+        "title": "AccountTokens",
+        "type": "object"
+      },
       "ActiveSessionResponse": {
         "additionalProperties": false,
         "description": "The run to follow (`followed_cycle`): a running one first, else the latest launch.",
@@ -3980,12 +4007,24 @@
           "subject": {
             "title": "Subject",
             "type": "string"
+          },
+          "token_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Id"
           }
         },
         "required": [
           "command_id",
           "kind",
           "subject",
+          "token_id",
           "status",
           "said",
           "created_at",
@@ -9605,6 +9644,13 @@
         "title": "LineageDivergence",
         "type": "object"
       },
+      "ListApiTokensPayload": {
+        "additionalProperties": false,
+        "description": "List the caller's tokens, live and revoked, never their text.",
+        "properties": {},
+        "title": "ListApiTokensPayload",
+        "type": "object"
+      },
       "ListingLifecycle": {
         "enum": [
           "unstarted",
@@ -10645,6 +10691,34 @@
         "title": "MetricSpec",
         "type": "object"
       },
+      "MintApiTokenPayload": {
+        "additionalProperties": false,
+        "description": "Mint a named bearer token of the caller's account, scoped to what it may command; its text\nis served by this answer alone.",
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "description": "The `/grant` names it may command; reads need none.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "MintApiTokenPayload",
+        "type": "object"
+      },
       "MintCampaignPayload": {
         "additionalProperties": false,
         "description": "Mint a campaign on an authored dataset and launch its root cycle.",
@@ -10742,6 +10816,25 @@
           "head_to_head"
         ],
         "title": "MintHeadToHeadPayload",
+        "type": "object"
+      },
+      "MintedToken": {
+        "additionalProperties": false,
+        "properties": {
+          "secret": {
+            "description": "The bearer's text, served by this answer alone: copy it now.",
+            "title": "Secret",
+            "type": "string"
+          },
+          "token": {
+            "$ref": "#/components/schemas/TokenEntry"
+          }
+        },
+        "required": [
+          "token",
+          "secret"
+        ],
+        "title": "MintedToken",
         "type": "object"
       },
       "ModelCapability": {
@@ -10976,7 +11069,8 @@
               "verify-candidate",
               "mint-campaign",
               "fork-cycle",
-              "submit-arms"
+              "submit-arms",
+              "revoke-api-token"
             ],
             "title": "Kind",
             "type": "string"
@@ -14343,6 +14437,23 @@
         "title": "ResolveOriginResponse",
         "type": "object"
       },
+      "RevokeApiTokenPayload": {
+        "additionalProperties": false,
+        "description": "Revoke one of the caller's tokens: its next request is refused, and its open streams end.",
+        "properties": {
+          "token_id": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Token Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token_id"
+        ],
+        "title": "RevokeApiTokenPayload",
+        "type": "object"
+      },
       "RoleScope": {
         "description": "Which roles a reading of an individual's cells may see; two scopes never pair.",
         "enum": [
@@ -17650,6 +17761,52 @@
         "title": "TokenAccount",
         "type": "object"
       },
+      "TokenEntry": {
+        "additionalProperties": false,
+        "description": "One of the account's API tokens, as every read after its mint serves it: never its text.",
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "scopes": {
+            "description": "The `/grant` names of what it may command.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "created_at",
+          "revoked_at"
+        ],
+        "title": "TokenEntry",
+        "type": "object"
+      },
       "TokenUsageKind": {
         "enum": [
           "optimizer",
@@ -19080,7 +19237,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/events:subscribe": {
       "get": {
-        "description": "Subscribe to a cycle's live ledger over SSE, at any depth through ``descend``.\n\nNot found only for an unknown cycle; a running, paused or finished one answers one\n``stream_snapshot`` frame (the served dashboard, ``sequence`` = the offset the tail picks up\nat), then every later record as a ``ProjectionEnvelope`` (``kind`` = its ``record_type``,\n``sequence`` = its ledger offset), with a heartbeat comment every 15 s.",
+        "description": "Subscribe to a cycle's live ledger over SSE, at any depth through ``descend``.\n\nNot found only for an unknown cycle; a running, paused or finished one answers one\n``stream_snapshot`` frame (the served dashboard, ``sequence`` = the offset the tail picks up\nat), then every later record as a ``ProjectionEnvelope`` (``kind`` = its ``record_type``,\n``sequence`` = its ledger offset), with a heartbeat comment every 15 s. It ends at the\nfirst tick its caller's session or token no longer stands.",
         "operationId": "cycle_events_api_v1_campaigns__campaign_id__cycles__cycle_id__events_subscribe_get",
         "parameters": [
           {
@@ -20824,6 +20981,152 @@
         ]
       }
     },
+    "/api/v1/commands/list-api-tokens": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "list_api_tokens_api_v1_commands_list_api_tokens_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ListApiTokensPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountTokens"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "List-Api-Tokens",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/mint-api-token": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "mint_api_token_api_v1_commands_mint_api_token_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MintApiTokenPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MintedToken"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Mint-Api-Token",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
     "/api/v1/commands/mint-campaign": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -21330,6 +21633,79 @@
           }
         },
         "summary": "Resolve-Origin",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/revoke-api-token": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "revoke_api_token_api_v1_commands_revoke_api_token_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeApiTokenPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Revoke-Api-Token",
         "tags": [
           "Commands"
         ]

@@ -59,6 +59,8 @@ export function useCommand<V extends string>(
     // What the write moved, the feed says: the dispatcher files it on the account's log.
     try {
       const value = await send();
+      // Settled before `then`, so a send it chains is admitted, never dropped as a double press.
+      inFlight.current = false;
       then?.(value);
       return { ok: true, value };
     } catch (e) {

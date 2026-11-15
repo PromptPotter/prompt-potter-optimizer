@@ -217,7 +217,9 @@ class HeldStart(FrozenModel):
 
     @classmethod
     def of(cls, stores: Stores, draft_id: str, stage: LaunchStage) -> HeldStart:
-        """Its command is the last `start-checkin` filed on the draft; a Start's claim refuses every command until its mint closes."""
+        """Its command is the last `start-checkin` filed on the draft, whoever in the account filed
+        it, which every reader of the draft follows (`command_reading.py::owned_command`); a Start's
+        claim refuses every command until its mint closes."""
         filed = [
             event.command_id
             for event in stores.commands.book().subject_events(draft_subject(draft_id))

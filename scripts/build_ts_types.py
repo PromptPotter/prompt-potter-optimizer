@@ -490,6 +490,9 @@ def _emit_interface(model: type) -> str:
     ]
     if model.model_config.get("extra") == "allow":
         body_lines.append("  [key: string]: unknown;")
+    if not body_lines:
+        # An empty interface admits any non-nullish value; a model of no field admits `{}` alone.
+        return f"{_doc_block(model)}export type {model.__name__} = Record<string, never>;"
     return (
         f"{_doc_block(model)}export interface {model.__name__} {{\n" + "\n".join(body_lines) + "\n}"
     )

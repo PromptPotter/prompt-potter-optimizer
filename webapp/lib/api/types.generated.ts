@@ -29,7 +29,7 @@ export interface ErrorEnvelope {
  * Each is one a door takes (`command_kinds.py::takes_act`), a stop's at
  * import and a refusal's at the gate. */
 export interface NextAct {
-  kind: '' | 'start-run' | 'set-limits' | 'verify-candidate' | 'mint-campaign' | 'fork-cycle' | 'submit-arms';
+  kind: '' | 'start-run' | 'set-limits' | 'verify-candidate' | 'mint-campaign' | 'fork-cycle' | 'submit-arms' | 'revoke-api-token';
   field: string;
   value: string;
   reads: string;
@@ -348,6 +348,7 @@ export interface CommandReading {
   command_id: string;
   kind: string;
   subject: string;
+  token_id: string | null;
   status: 'working' | 'input_required' | 'completed' | 'failed' | 'cancelled';
   said: string;
   created_at: string;
@@ -4682,6 +4683,30 @@ export interface TermsConsent {
   terms_accepted_version: string | null;
 }
 
+export interface MintedToken {
+  token: TokenEntry;
+  /** The bearer's text, served by this answer alone: copy it now. */
+  secret: string;
+}
+
+/** One of the account's API tokens, as every read after its mint serves it: never
+ * its text. */
+export interface TokenEntry {
+  id: string;
+  name: string;
+  /** The `/grant` names of what it may command. */
+  scopes: string[];
+  created_at: string;
+  revoked_at: string | null;
+}
+
+export interface AccountTokens {
+  /** Oldest first, the revoked kept beside the live. */
+  tokens: TokenEntry[];
+  /** The scopes a token of this account may carry. */
+  grantable: string[];
+}
+
 /** Record the caller's acceptance of the Terms, server-stamped; a version other
  * than the live one is refused. */
 export interface AcceptTermsPayload {
@@ -4836,6 +4861,17 @@ export interface GradeBenchPayload {
    * dispatcher for every door; the root of a `descend` chain is named by its
    * full id. */
   campaign_id: string;
+}
+
+/** List the caller's tokens, live and revoked, never their text. */
+export type ListApiTokensPayload = Record<string, never>;
+
+/** Mint a named bearer token of the caller's account, scoped to what it may
+ * command; its text is served by this answer alone. */
+export interface MintApiTokenPayload {
+  name: string;
+  /** The `/grant` names it may command; reads need none. */
+  scopes: string[];
 }
 
 /** Mint a campaign on an authored dataset and launch its root cycle. */
@@ -5134,6 +5170,12 @@ export interface ResolveOriginPayload {
   rerun: boolean;
 }
 
+/** Revoke one of the caller's tokens: its next request is refused, and its open
+ * streams end. */
+export interface RevokeApiTokenPayload {
+  token_id: string;
+}
+
 /** Hold the caller's own key for a provider: its sends there go out on it, past
  * the coupon. Never served back, and recorded masked. */
 export interface SetApiKeyPayload {
@@ -5293,7 +5335,7 @@ export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"]
 export type Tone = (typeof TONES)[number];
 
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
-export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "list-api-tokens" | "mint-api-token" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "revoke-api-token" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -5317,6 +5359,8 @@ export interface CommandPayloads {
   "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id">;
   "grade-bench": CommandSent<GradeBenchPayload, "campaign_id">;
   "head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
+  "list-api-tokens": CommandSent<ListApiTokensPayload, never>;
+  "mint-api-token": CommandSent<MintApiTokenPayload, "name" | "scopes">;
   "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
   "open-dataset-draft": CommandSent<OpenDatasetDraftPayload, "dataset_name">;
   "open-origin-draft": CommandSent<OpenOriginDraftPayload, "origin_id">;
@@ -5324,6 +5368,7 @@ export interface CommandPayloads {
   "remove-api-key": CommandSent<RemoveApiKeyPayload, "provider">;
   "rename-campaign": CommandSent<SetCampaignLabelPayload, "campaign_id" | "label">;
   "resolve-origin": CommandSent<ResolveOriginPayload, "draft_id">;
+  "revoke-api-token": CommandSent<RevokeApiTokenPayload, "token_id">;
   "set-api-key": CommandSent<SetApiKeyPayload, "provider" | "secret">;
   "set-concurrent-cycles": CommandSent<SetConcurrentCyclesPayload, "max_concurrent_cycles">;
   "set-limits": CommandSent<ChangeRunLimitsPayload, "campaign_id" | "cycle_id">;
@@ -5354,6 +5399,8 @@ export interface CommandResponses {
   "grade-bench": BenchScore;
   "head-to-head": LaunchAnswer;
   "ingest-upload": DraftCampaignWire;
+  "list-api-tokens": AccountTokens;
+  "mint-api-token": MintedToken;
   "mint-campaign": LaunchAnswer;
   "open-dataset-draft": DraftCampaignWire;
   "open-origin-draft": DraftCampaignWire;
@@ -5361,6 +5408,7 @@ export interface CommandResponses {
   "remove-api-key": CommandAcceptedBody;
   "rename-campaign": CommandAcceptedBody;
   "resolve-origin": ResolveOriginResponse;
+  "revoke-api-token": CommandAcceptedBody;
   "set-api-key": AccountKey;
   "set-concurrent-cycles": CommandAcceptedBody;
   "set-limits": CommandAcceptedBody;
@@ -5420,7 +5468,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "acdf392c92642b4b";
+export const SERVED_CONTRACT = "2fbce4f8a84b0615";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

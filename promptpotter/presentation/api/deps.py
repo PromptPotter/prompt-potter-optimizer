@@ -20,8 +20,11 @@ from promptpotter.domain.command_kinds import CommandKind, ReadKind
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody
 from promptpotter.infrastructure.identity.accounts import IdentityBundle
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.presentation.api.middleware.oidc import Resolved
 from promptpotter.shared.errors import (
+    NextAct,
     PayloadInvalidError,
+    PotterError,
     ServiceUnavailableError,
     UnauthorizedError,
 )
@@ -34,12 +37,25 @@ def auth_is_open() -> bool:
 
 
 def resolve_identity(request: Request) -> IdentityContext:
+    """The one caller door (`OIDCMiddleware` resolved its carrier): a refusal or a bearer answers
+    first, auth off or not, so the host's exemption never rides a bearer; then auth off is the host."""
+    resolved: Resolved = getattr(request.state, "identity_ctx", None)
+    if isinstance(resolved, PotterError):
+        raise resolved
+    if resolved is not None and resolved.carried_by == "bearer":
+        return resolved
     if auth_is_open():
         return registered_or_default_identity()
-    identity_ctx: IdentityContext | None = getattr(request.state, "identity_ctx", None)
-    if identity_ctx is None:
-        raise UnauthorizedError("sign-in required")
-    return identity_ctx
+    if resolved is None:
+        raise UnauthorizedError(
+            "sign-in required",
+            code="sign_in_required",
+            next_acts=(
+                NextAct(field="Cookie", value="a browser signs in at /auth/login/{provider}"),
+                NextAct(field="Authorization", value="a program sends Bearer and a live token"),
+            ),
+        )
+    return resolved
 
 
 IdentityDep = Annotated[IdentityContext, Depends(resolve_identity)]
@@ -89,8 +105,8 @@ def open_caller(
     """A session mount's gate: the request drawn on its rate first (`_drawn`, solved before the
     stores), then its caller on the request's one `StoresDep`. It reads only: an account opens at
     sign-in or at its first act (`account_of`), never at a read."""
-    configured = tuple(require_identity_bundle(request).config.configured)
-    return Caller(stores, jobs, configured)
+    carrier = getattr(request.state, "carrier", None) if stores.identity.carried_by else None
+    return Caller(stores, jobs, require_identity_bundle(request), carrier)
 
 
 _NAMED: dict[str, CommandKind | ReadKind] = {k.value: k for k in (*CommandKind, *ReadKind)}

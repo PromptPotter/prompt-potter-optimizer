@@ -196,7 +196,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   thirteen implementations), "panel" is a set of cells only, and an optimizer node's call-target keys
   serve the layer that set them. No decision or request moved; the estimator digest moved by a rename
   (the C0 re-measure waits on l4-final, which re-keys it again).
-- **then:** mkey, then faults-2a beside rk-rest.
+- **landed 84, mkey:** an account mints API tokens (at most ten live, the host none), and a program
+  acts as the account through a bearer resolved by the one identity builder a session takes, narrowed
+  to the token's delegable scopes. A filing records its token, a stream re-checks its carrier each
+  tick, the account's own act is the owner-only `account.self`, a cancel acts under the rung of what it
+  stops, and the rung is checked before the target resolves. `tokens.json` is a survivor.
+- **then:** faults-2a beside rk-rest; then mcp on mkey's tip beside faults-2b; then tv-2.
 
 The re-keys end at the behaviour-key switch.
 

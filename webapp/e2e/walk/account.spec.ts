@@ -57,6 +57,14 @@ test.describe("account", () => {
     await ready(page);
   });
 
+  // The walk is the auth-open box's host, which acts through its browser and mints no bearer.
+  test("offers the host no token to mint, and lists none", async ({ page }) => {
+    await open(page, "#/account=keys");
+    await expect(account(page).getByText("No token yet.")).toBeVisible();
+    await expect(account(page).getByRole("textbox", { name: "New token name" })).toHaveCount(0);
+    await page.screenshot({ path: test.info().outputPath("account-tokens.png") });
+  });
+
   test("never claims a verification the brand does not declare", async ({ page, request }) => {
     await open(page, "#/account=about");
     // The PILL is the claim (`AccountAboutTab::ProvenancePill`); the tab's prose says "verified" too.

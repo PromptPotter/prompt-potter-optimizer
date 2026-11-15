@@ -35,6 +35,7 @@ const ACT_CONTROL: Record<Exclude<NextAct["kind"], "">, string> = {
   "mint-campaign": "New campaign",
   "fork-cycle": "Steer-fork",
   "submit-arms": "Submit arms",
+  "revoke-api-token": "Revoke",
 };
 
 /** An act past a stop in the browser's words: the control it presses and the field it fills, or

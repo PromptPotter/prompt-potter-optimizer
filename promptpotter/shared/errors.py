@@ -114,6 +114,7 @@ class NextAct(BaseModel):
         "mint-campaign",
         "fork-cycle",
         "submit-arms",
+        "revoke-api-token",
     ] = ""
     field: str = ""
     value: str = ""

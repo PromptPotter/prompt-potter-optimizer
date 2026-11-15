@@ -49,6 +49,10 @@ class IdentityPaths:
     def grants_audit(self) -> Path:
         return self.root / "grants_audit.jsonl"
 
+    @property
+    def tokens(self) -> Path:
+        return self.root / "tokens.json"
+
 
 IDENTITY_DIR = "identity"
 
@@ -127,18 +131,21 @@ def grant_principal(
     actor: str,
     audit_path: Path,
 ) -> None:
-    """Refuses a sub-principal AS delegator, the read-time ceiling walking one level only, and an
-    account as its own delegate, which would hand it its delegator's tenant as a grant (bl4.B8)."""
+    """Refuses a sub-principal AS delegator and a delegator as a sub-principal, the read-time
+    ceiling walking one level only, and an account as its own delegate, which would hand it its
+    delegator's tenant as a grant (bl4.B8)."""
     if sub_principal_user_id == delegated_by_user_id:
         raise ValueError(f"cannot delegate {delegated_by_user_id!r} to itself")
     # Read and rewritten under the file's write lock: two edits never both read it (bl2.B10). The
     # audit line lands first, so a crash leaves an intent on record, never an unrecorded effect.
     with write_lock(path):
         grants = _grants(path)
-        if delegated_by_user_id in grants:
+        if delegated_by_user_id in grants or any(
+            held.delegated_by == sub_principal_user_id for held in grants.values()
+        ):
             raise ValueError(
-                f"cannot delegate from {delegated_by_user_id!r}: it is itself a sub-principal "
-                "(one-level delegation only)"
+                f"cannot delegate {sub_principal_user_id!r} from {delegated_by_user_id!r}: one "
+                "of them already stands on the other side of a grant (one-level delegation only)"
             )
         _append_audit(
             audit_path,
