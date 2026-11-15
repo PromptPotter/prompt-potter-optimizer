@@ -14,7 +14,11 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
   - one key handler in the reading hook, not one per chart;
   - one subject key, the address, where a candidate id stood.
   - Report `git diff --shortstat <base> HEAD -- webapp promptpotter` per link.
-- **Webapp only.** Touch no Python, no served type and no generated file. Read `webapp/components/CLAUDE.md`
+- **Webapp first.** `ChannelMap.tsx` builds its subject with `lib/api/reads.ts::candidateSubject`,
+  whose served key is `candidate` over (campaign, cycle, individual). If a pick's own cycle path
+  (`pathOfAddress(armed.address)`, as `channel-hooks.ts` builds it) closes link 2, touch no Python.
+  If the served key must carry more of the address, change it at its parse in `promptpotter/`, with
+  its regenerated types, and name that hunk in the commit body. Read `webapp/components/CLAUDE.md`
   and `webapp/app/styles/foundation/tokens.css` first.
 - **Beside you:** **tests-w** (cloud, the same base) owns `tests/`, `scripts/offline_world.py`,
   `scripts/offline_run.py` and `runner/entry.py`. You own `webapp/`, its `e2e/` included.
@@ -50,7 +54,7 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
 
 ## Proof (beyond common.md)
 
-- `vitest`, `tsc`, `eslint` and `playwright` green at the tip. Equals-main UNMOVED: there is no Python change.
+- `vitest`, `tsc`, `eslint` and `playwright` green at the tip. Equals-main UNMOVED on every leg.
 - Shots at both widths, pushed with the report on `out/ws-2-report`:
   - a chart stepped by the keyboard;
   - one of two same-key arms lit in the freed tree and the channel map;
