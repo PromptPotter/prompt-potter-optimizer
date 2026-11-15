@@ -832,7 +832,9 @@ def _probe_count(pattern: str, where: str) -> int | str:
     code, listed = git("ls-files", "--", where)
     if code or not listed:
         return f"`{where}` names no tracked file"
-    code, out = git("grep", "-cE", "-e", pattern, "--", where)
+    # One thread: the pool runs the counts side by side, and git's own per-core threads made the
+    # job's peak scale with the box's cores (73 MB a count on 16, 33 MB on one).
+    code, out = git("grep", "--threads=1", "-cE", "-e", pattern, "--", where)
     if code not in (0, 1):  # 1 is "no line matched"
         return out
     return sum(int(line.rpartition(":")[2]) for line in out.splitlines())
@@ -1571,7 +1573,7 @@ CHECKS: tuple[Check, ...] = (
         reads=_ENGINE_RUNTIME,
     ),
     Check("instruction-files", "py", _instruction_files, mb=45, tier="commit", reads=_TREE),  # 33
-    Check("doc-claims", "py", _doc_claims, mb=270, tier="commit", reads=_TREE),  # 215
+    Check("doc-claims", "py", _doc_claims, mb=170, tier="commit", reads=_TREE),  # 135
     Check(
         "surface-ledger",
         "py",
