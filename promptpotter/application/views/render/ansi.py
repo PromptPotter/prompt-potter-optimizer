@@ -357,6 +357,8 @@ def render_run_spend(v: StopSpend) -> str:
 def _render_pass_enter(v: PassOpened) -> str:
     if v.verification == "verify":
         return f"  {DIM}verify {v.arm.label}: {v.rows} unseen cells, {v.strategy}{RESET}"
+    if v.verification == "noise_floor":
+        return f"  {DIM}noise floor {v.arm.label}: {v.rows} fresh cells on its own rows{RESET}"
     subject = "the origin" if v.subject == "origin" else f"the R{v.arm.round} selection"
     return f"  {DIM}bench pass: {subject} on {v.rows} held-out rows{RESET}"
 
