@@ -874,6 +874,12 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The offline run refuses outside a git clone**: `processes.py::clone_root`, so a base copy for
   `gate.py --only equals-main --against` needs a detached worktree. **Re-test:** run
   `scripts/offline_run.py` in a `git archive` copy.
+- **A landing holds every other entry for minutes, and they crash on it**: the l1-cite landing on this
+  desk (15 campaigns, all dropped) held `landing.py::holding_landing` ~12 min inside the first launch,
+  silent, while a concurrent `cycles` died on `store/io.py::write_lock`'s 5 s `TimeoutError` traceback.
+  Action: time `plan_landing` by phase and cut the slow one; an entry finding a landing in flight says
+  so and waits. **Re-test:** a landing over the same root under a minute; `cycles` during one prints
+  a wait line, no traceback.
 
 ## Held — no wave-4 chain yet
 

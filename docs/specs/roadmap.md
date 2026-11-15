@@ -434,7 +434,12 @@ round.
    reading under the measured prior would have held 40 of the 50 (fresh −0.17 ± 0.17). It becomes a
    reading on rk-dec's switch, and each reading is scored offline by the fresh lift of what it
    promotes. A noise promotion also resets the stall clock, so the first three-held run on
-   hotpotqa-cb lands about 1.5–2 rounds late.
+   hotpotqa-cb lands about 1.5–2 rounds late. The live pilots of 2026-11-15 agree: of 12 promoted
+   lines, one held up on a fresh held-out bench (justlogic on the old whole-prompt wire, +16.7 pts on
+   30 rows; on the edit wire it read +6.7 [−7.0, +20.3]). Three default-potter replicates on hotpotqa
+   claimed +10 to +20 points on the 20-row origin panel; on 100 held-out rows, against one shared
+   origin reading, they read −5 to −7, none separable from zero, each flipping 20 to 37 rows. No
+   origin retest yet says how many flips the origin makes against itself.
 2. **μ0, τ and hold-up are served every round; their falsifier is untested.** This is the early-AUC
    instrument L4 lacks: where μ0 < 0 and τ ≈ 0 no bar yields lift, and the lever is `l1_generate`. The
    test is τ from rounds 1–2 against the lineage's fresh θ trend from round 3 on.
@@ -443,9 +448,10 @@ round.
 4. **An inner run that elects in two rounds is read, not excluded**: a seat benches
    `every_adoption`, the end pass grading every selection its line adopted (one 20-row pass per extra
    election), and `runner/bench.py::read_curve` reads the area over them all. Owed: one C0 re-measure.
-5. **The outer critique broke a rule its prompt states**, on both repair rungs (C0 at landing 79: "a
-   row in two clusters", `potter/dispatch/schemas.py` `_one_cluster_per_row`), so round 0 banked no
-   critique. A tighter `l1_critique` prompt comes first (`potter-self`).
+5. **A row in two clusters no longer costs the critique**: it broke every repair rung at C0 (landing
+   79) and in a P4 hotpotqa round (2026-11-15), so those rounds banked none, and cost a P2 round two
+   paid re-asks; `potter/dispatch/schemas.py::_struck` strikes it from the later cluster, as it
+   strikes an unmarked id.
 
 ## L4 closure
 

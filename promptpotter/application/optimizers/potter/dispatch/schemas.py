@@ -202,9 +202,9 @@ class FailureCluster(OptimizerResponseModel):
     sample_ids: list[int] = Field(
         json_schema_extra={"minItems": CLUSTER_ROWS_MIN},
         description=(
-            "The rows this cluster spans, by the `[#id]` marks in the panels — at least two, and "
-            "as many as DETECTABLE MOVE names; an unmarked id is struck, and a cluster left "
-            "narrower is dropped. Two rows that fail for different reasons are two clusters, never one."
+            "The rows this cluster spans, by the `[#id]` marks in the panels — at least two, and as "
+            "many as DETECTABLE MOVE names; an id unmarked or held by an earlier cluster is struck. "
+            "Two rows that fail for different reasons are two clusters, never one."
         ),
     )
     mechanism: Annotated[
@@ -249,36 +249,36 @@ class L1CritiqueOutput(OptimizerResponseModel):
     @field_validator("failure_highlights", mode="after")
     @classmethod
     def _capped(cls, clusters: list[FailureCluster]) -> list[FailureCluster]:
-        # As `_truncate` heals an overrun: the reply keeps its first clusters.
-        return clusters[:CLUSTERS_MAX]
+        return _struck(clusters, marked=None, least=CLUSTER_ROWS_MIN)
 
     @model_validator(mode="after")
-    def _one_cluster_per_row(self) -> Self:
+    def _names_a_fix(self) -> Self:
         if not self.priority_fix.strip():
             raise ValueError("priority_fix is empty: name the one change")
-        owner: dict[int, int] = {}
-        for k, cluster in enumerate(self.failure_highlights, start=1):
-            for row in set(cluster.sample_ids):
-                if (first := owner.setdefault(row, k)) != k:
-                    raise ValueError(
-                        f"row {row} sits in clusters {first} and {k}: a row shows one mechanism"
-                    )
         return self
 
 
+def _struck(
+    clusters: list[FailureCluster], *, marked: frozenset[int] | None, least: int
+) -> list[FailureCluster]:
+    """A cluster keeps the ids *marked* by a panel (any, if None) that no earlier one holds: a row
+    shows one mechanism, the largest cluster first. One left under *least* rows is dropped and the
+    cap counts what stands. As `_truncate` heals an overrun: no bad cluster costs a paid repair."""
+    held: set[int] = set()
+    kept: list[FailureCluster] = []
+    for cluster in clusters:
+        ids = [i for i in dict.fromkeys(cluster.sample_ids) if i not in held]
+        if len(ids := [i for i in ids if marked is None or i in marked]) >= least:
+            kept.append(cluster.model_copy(update={"sample_ids": ids}))
+            held.update(ids)
+    return kept[:CLUSTERS_MAX]
+
+
 def critique_response_model(marked: frozenset[int], least: int) -> type[L1CritiqueOutput]:
-    """Each cluster keeps the ids of the *marked* roster it names, and one left spanning fewer
-    than *least* is dropped at parse, said in the log; the cap counts what stands, so a narrow
-    cluster never pushes out a valid one. The reply's valid clusters, fix and axes stand."""
+    """`_struck` over the *marked* roster; the reply's valid clusters, fix and axes stand."""
 
     def _capped(_cls: type, clusters: list[FailureCluster]) -> list[FailureCluster]:
-        # As `_truncate` heals an overrun: one bad cluster never costs the reply a paid repair.
-        kept = [
-            c.model_copy(update={"sample_ids": ids})
-            for c in clusters
-            if len(set(ids := [i for i in c.sample_ids if i in marked])) >= least
-        ]
-        return kept[:CLUSTERS_MAX]
+        return _struck(clusters, marked=marked, least=least)
 
     # Named as the base's, so it replaces the cap rather than run after it.
     return create_model(
