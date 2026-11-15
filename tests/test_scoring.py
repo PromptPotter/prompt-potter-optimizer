@@ -371,7 +371,7 @@ from promptpotter.domain.scoring import (
     turn_scalars,
 )
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import Budget, SpendRollup, TokenUsageKind
+from promptpotter.domain.spend import Budget, TokenUsageKind
 from promptpotter.domain.verification import (
     BenchPass,
     BenchPasses,
@@ -2622,7 +2622,7 @@ def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorde
         ledger.append(RoundEnteredRecord(round=0))
         walked = list(session.state.scoring.partition.search)[:4]
         with scoped(round=0):
-            asyncio.run(open_origin_round(cycle, walked, spend=SpendRollup(), resumed_ending=None))
+            asyncio.run(open_origin_round(cycle, walked, resumed_ending=None))
         bands = [
             record
             for record in ledger_records(ledger)

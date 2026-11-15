@@ -39,7 +39,6 @@ from promptpotter.domain.records.run_records import (
     StopLoop,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.run_scope import scoped
@@ -150,7 +149,6 @@ async def open_origin_round(
     cycle: Cycle,
     dataset: list[Sample],
     *,
-    spend: SpendRollup,
     resumed_ending: StopReason | None,
 ) -> LoopEnd | None:
     """Round 0's one door: the members initialize, the origin is walked (`walk_round_zero`), and
@@ -158,14 +156,13 @@ async def open_origin_round(
     gate halts the launch, holding nothing; a launch resuming the gate's halt (*resumed_ending*)
     still unhealthy is the operator's override. The gate decides before the bench spends, so a
     launch it halts runs no pass; an origin it lets through is benched before its close (a
-    replayed origin closed on the ledger already). ``None`` proceeds into round 1. *spend* is the
-    live rollup the bench pass counts its own delta on."""
+    replayed origin closed on the ledger already). ``None`` proceeds into round 1."""
     session = cycle.session
     open_round: int | None = None
     try:
         run_init(cycle)
         if session.state.resumed_from_round > 1:
-            await bench_line_origin(cycle, spend)
+            await bench_line_origin(cycle)
             return None
         open_round = 0
         await walk_round_zero(cycle, dataset)
@@ -175,7 +172,7 @@ async def open_origin_round(
             and origin_gate_tripped(cycle.origin_round.health, mode) is not None
         )
         if not gated:
-            await bench_line_origin(cycle, spend)
+            await bench_line_origin(cycle)
         if cycle.origin_round.at_offset is None:
             await emit_origin_round(cycle, session)
             replicates = cycle.config.origin_replicates
@@ -198,7 +195,7 @@ async def open_origin_round(
             return LoopEnd(StopReason.ORIGIN_GATE)
         # Resuming an origin the gate halted, still unhealthy, is the operator's override.
         pass_origin_gate(by="resume")
-        await bench_line_origin(cycle, spend)
+        await bench_line_origin(cycle)
     except RUN_ENDS as exc:
         return loop_end_on(exc, cycle, open_round=open_round)
     return None
@@ -238,7 +235,7 @@ async def walk_round_zero(cycle: Cycle, dataset: list[Sample]) -> None:
     cycle.seat_origin(read, origin.optimizer_state)
 
 
-async def bench_line_origin(cycle: Cycle, spend: SpendRollup) -> None:
+async def bench_line_origin(cycle: Cycle) -> None:
     """The origin's bench pass, its price set aside so the selection's pass still fits under the
     search's ceiling, then the line's bench declared."""
     session, config = cycle.session, cycle.config
@@ -250,7 +247,6 @@ async def bench_line_origin(cycle: Cycle, spend: SpendRollup) -> None:
             session,
             cycle.points.job(origin.individual),
             origin_id=origin.individual.id,
-            spend=spend,
         )
         if cycle.bench_passes is not None and book.binds("bench"):
             book.set_aside(cycle.bench_passes.reserve_usd, cycle.bench_passes.reserve_tokens)

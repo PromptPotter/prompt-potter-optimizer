@@ -147,19 +147,6 @@ row it closes.
   `RunArtifacts` drain re-renders the export off the ledger's newest bench reading
   (`ledger_scan.py::scan_closed_bench`), so `write_export` has one caller. **Rides with:** passb-2 2.
   **Re-test:** `git grep -c "restate_export_bench" -- promptpotter` is 0.
-- **A stopped paid pass exits 1 at the CLI**:
-  `presentation/cli/main.py::main` maps `PassStoppedError` to exit 1. Action: `cli/main.py`
-  answers it with the paused exit code. **Rides with:** passb-2 3. **Re-test:**
-  `git grep -lE "except PassStoppedError" -- promptpotter/presentation` names `cli/main.py` alone.
-- **`line_run` reads a paused pass as selecting**: a pass with a pause asked reads `PAUSED`
-  (`infrastructure/run_state.py:82`), so `runner/bench.py::live_cycle_run` takes its hold for the loop's.
-  Action: the pass's hold is read by its bracket (`producer_lock.pass_held`). **Rides with:** passb-2 3.
-  **Re-test:** a bench pass with a pause asked reads `selecting=False`.
-- **A bench pass's served delta is always zero**: `runner/bench.py::_bench_counted` (called at `:769`, `:780`
-  inside `bench_origin`) reads the one `SpendRollup` before and after the pass, but `live_dashboard.py` replaces
-  `state.spend` on each bank, so the snapshot never moves. Action: the delta is folded off the pass's own
-  charges, not two reads of one snapshot. **Rides with:** passb-2 3, whose Owns gain `_bench_counted`.
-  **Re-test:** a bench pass that spends serves a nonzero delta.
 - **The first verify after a pause starts 38 s late, and no verify is ever `accepted`**: `measuring.py:48`
   builds `Applier(_apply_verify)` without `ack="accepted"`, unlike `launching.py:476` and
   `dispatcher.py:161`. Action: attribute the wait by phase; the command acks `accepted` at admission.
@@ -167,10 +154,6 @@ row it closes.
   `accepted` would read as a standing loop command. **Rides with:** passb-2 4, whose Owns gain `store/command_log.py` and
   `command_reading.py`'s status mapping. **Re-test:** on a paused cycle, time `command` → the `verify`
   phase's `enter` in the ledger.
-- **The parity file mixes a served answer into the decision set**: `scripts/offline_run.py:1584` embeds
-  the served `BenchScore` dump in `decisions.json`, so a served field rename (`can_grade` → `can_run`)
-  reads as "decisions MOVED". Action: `decisions.json` holds decisions alone. **Rides with:** passb-2.
-  **Re-test:** rename a served `BenchStatus` field; the offline run reads decisions UNMOVED.
 - **A command log row is typed by no payload model**: `domain/command_events.py::CommandRecord` holds
   its payload untyped, so a row in a retired payload shape loads and refuses only when replayed.
   Typing it by `domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND` is blocked: `IngestUploadPayload.blob`

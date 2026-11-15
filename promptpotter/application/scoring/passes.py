@@ -601,7 +601,6 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                         session,
                         origin_sp,
                         origin_id=rounds[0].origin.individual.id,
-                        spend=dashboard.spend,
                     )
                     assert banked is not None, "the line holder holds its origin's pass"
                     banked = await bench_selection(

@@ -63,7 +63,7 @@ BASELINE = {
     # as typed `Refusal` rows with acts, checked against their payload; a field's positional or flag
     # declared beside the payload; served acts read at every door; the command log's own file kind;
     # YAML composed once, bounded in Python, through the one parse door capo's reply reads too.
-    "package_lines": 110740,
+    "package_lines": 110737,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 158,
     # The `__init__.py` files that re-export names instead of staying empty.

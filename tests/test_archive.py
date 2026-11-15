@@ -185,7 +185,7 @@ from promptpotter.domain.run_standing import line_reference, walked_position
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import Budget, SpendRollup
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SendBound
@@ -2530,7 +2530,7 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
         resumed = scan_cycle_facts(stores.campaigns.ledger(hop)).resumed_ending
 
         async def walk() -> LoopEnd:
-            gated = await open_origin_round(cycle, [], spend=SpendRollup(), resumed_ending=resumed)
+            gated = await open_origin_round(cycle, [], resumed_ending=resumed)
             return gated or await run_round_loop(cycle, cycle.config, session)
 
         with scoped(account=stores):

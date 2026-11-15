@@ -65,12 +65,7 @@ from promptpotter.domain.paired_reading import (
 )
 from promptpotter.domain.pass_kinds import PASSES, individual_cells
 from promptpotter.domain.phase_acts import PassOpened
-from promptpotter.domain.phases import (
-    STOP_REASON_INFO,
-    RunPhase,
-    StopOutcome,
-    StopReason,
-)
+from promptpotter.domain.phases import STOP_REASON_INFO, StopOutcome, StopReason
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import LaunchClockRecord, PhaseRecord
@@ -82,6 +77,7 @@ from promptpotter.domain.spend import Budget, SpendRollup
 from promptpotter.domain.verification import BenchPass, BenchPasses
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
+from promptpotter.infrastructure.producer_lock import pass_held
 from promptpotter.infrastructure.store.archive_queries import bench_reads
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_bench_open,
@@ -90,6 +86,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_spend,
     scan_ledger_wall_clock,
 )
+from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
@@ -663,7 +660,10 @@ def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
     )
 
 
-def _bench_counted(spend: SpendRollup) -> Budget:
+def _bench_counted(stores: Stores, hop: CycleHop) -> Budget:
+    """The cycle's bench bucket as its own ledger folds it: the run's rollup is a snapshot each
+    bank replaces, so two reads of one never move."""
+    spend = scan_ledger_spend([LedgerSpan(stores.campaigns.ledger(hop))]).spend
     bench = spend.by_kind["bench"]
     return Budget.amount(bench.incurred_usd, bench.input_tokens + bench.output_tokens)
 
@@ -673,7 +673,6 @@ async def bench_origin(
     origin_sp: JobSearchPoint,
     *,
     origin_id: str,
-    spend: SpendRollup,
 ) -> BenchPasses | None:
     stores, hop = session.store, session.hop
     if _line(stores, hop) is None:
@@ -687,7 +686,7 @@ async def bench_origin(
         passes = held
     else:
         # The bench bucket's own delta: a search call landing while this pass is out is not reserve.
-        before = _bench_counted(spend)
+        before = _bench_counted(stores, hop)
         origin_pass = await score_on_bench(
             session,
             origin_sp,
@@ -697,7 +696,7 @@ async def bench_origin(
             round_num=0,
         )
         split = session.state.scoring.partition.split
-        after = _bench_counted(spend)
+        after = _bench_counted(stores, hop)
         passes = BenchPasses(
             tolerance=split.tolerance if split is not None else 0,
             origin=origin_pass,
@@ -720,12 +719,13 @@ def live_cycle_run(stores: Stores, hop: CycleHop) -> LiveCycleRun:
     named = bool(hop.cycle_id)
     index = stores.campaigns.load(hop, moment=None) if named else None
     standing = None if index is None else index.standing
-    # A pass holds the cycle too, and reads SCORING: only the loop's hold is a run still selecting.
+    # A pass holds the cycle too: only the loop's hold is a run still selecting. Its own lock says
+    # so, as its phase cannot: a pass with a pause asked reads PAUSED.
     run = stores.run_state(hop) if named else None
     attached = run is not None and run.producer.attached
-    scoring = run is not None and run.run_phase is RunPhase.SCORING
+    passing = attached and pass_held(stores.campaigns.cycle_dir(hop))
     return LiveCycleRun(
-        selecting=attached and not scoring,
+        selecting=attached and not passing,
         # The bracket, not the lock alone: `grade-bench` reads this under its own pass's lock.
         pass_open=attached and scan_bench_open(stores.campaigns.ledger(hop)),
         ending=None if index is None else index.stop_reason,

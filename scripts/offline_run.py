@@ -1542,6 +1542,11 @@ LEDGER_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
     "run_phase": ("run_phases", ("run_phase", "stop_reason")),
     "llm_call": ("optimizer_calls", ("round", "node", "candidate_idx")),
     "round_warning": ("round_warnings", ("round", "kind", "severity", "detail")),
+    # The origin's reserve is the selection pass's set-aside: what the run holds back is decided.
+    "pass_graded": (
+        "passes_graded",
+        ("subject", "tolerance", "reserve_usd", "reserve_tokens", "state"),
+    ),
     "race_standing": (
         "standings",
         ("round", "member", "current", "n_samples", "p_best", "paired_breakdown"),
@@ -1592,6 +1597,9 @@ def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
     for name in ("decisions", "round_warnings", "optimizer_calls", "standings"):
         out[name].sort(key=lambda x: (x.get("round") or 0, json.dumps(x, sort_keys=True)))
     out["arms"].sort(key=lambda x: (x.get("round") or 0, json.dumps(x, sort_keys=True)))
+    # Each launch grades the line's held passes again: one reading of a pass is one decision.
+    graded = {json.dumps(x, sort_keys=True): x for x in out["passes_graded"]}
+    out["passes_graded"] = [graded[k] for k in sorted(graded)]
     return out
 
 
@@ -1626,7 +1634,17 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
             (f["composite_fitness"] for r in rounds[:1] if r["round"] == 0 for f in r["folds"].values()),
             None,
         ),
-        "bench": None if bench is None else bench.model_dump(mode="json"),
+        # What the held-out passes read and how far each got, never the served answer around
+        # them (can-run, the control, cost).
+        "bench": None if bench is None else bench.model_dump(
+            mode="json",
+            include={
+                "status": {"state", "stop", "scored", "expected"},
+                "origin": True,
+                "selected": True,
+                "vs_origin": True,
+            },
+        ),
         "round_index": index["rounds"],
     }  # fmt: skip
     return {

@@ -1062,7 +1062,12 @@ def main() -> None:
                 *getattr(exc, "__notes__", ()),
             ]
             print("\n\n".join(said), file=sys.stderr)
-        sys.exit(1)
+        # A pause that reached a paid pass banked its cells, so it exits paused, as a run's does.
+        stopped = cast(
+            "type[PotterError]",
+            imported("promptpotter.application.jobs.launcher", "admission:PassStoppedError"),
+        )
+        sys.exit(StopOutcome.PAUSED.exit_code if isinstance(exc, stopped) else 1)
     except (KeyboardInterrupt, asyncio.CancelledError) as exc:
         # The cycle already finalized itself as PAUSED; closing a loop a second SIGINT stopped mid-unwind raises.
         with contextlib.suppress(RuntimeError, KeyboardInterrupt):
