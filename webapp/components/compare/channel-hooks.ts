@@ -90,7 +90,7 @@ export function useInvalidated(index: LineageIndex): ReadonlySet<string> {
     () =>
       withdrawnUnder(
         index,
-        (c) => editsFor(edits, candidateSubject(pathOfAddress(c.address), c.facts.individual)).size > 0,
+        (c) => editsFor(edits, candidateSubject(c.address)).size > 0,
       ),
     [index, edits],
   );
@@ -127,8 +127,8 @@ export function usePickedPoint(
   // A round still scoring has no file: its point reads off the channel's own cycle, as it streams.
   const { unfiled, read: roundRead, cfg: cfgOf, reading: readingOf } = useRound(path, round);
   const at = useMemo(
-    () => (path && selected ? candidateSubject(path, selected.facts.individual) : ""),
-    [path, selected],
+    () => (selected ? candidateSubject(selected.address) : ""),
+    [selected],
   );
   const pickedCampaign = path?.at(-1)?.campaignId ?? "";
   const pipelineAt = useMemo(
@@ -146,13 +146,7 @@ export function usePickedPoint(
     () => (path && id && datasetName ? { path, datasetName, candidateId: id, scope: "cycle" } : null),
     [path, id, datasetName],
   );
-  const key = useMemo(
-    () =>
-      selected
-        ? candidateSubject(pathOfAddress(selected.address), selected.facts.individual) || subject
-        : subject,
-    [selected, subject],
-  );
+  const key = at || subject;
   // This cycle's ledger only: a pick on a fork's lane was billed to a file this read did not open.
   const spentTo = useMemo(() => {
     if (!reading || !selected || round == null) return null;

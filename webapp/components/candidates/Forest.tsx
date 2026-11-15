@@ -215,13 +215,9 @@ export function Forest({
       extents.find((e) => e.keys.has(n.candKey))?.ink ?? null,
     [extents],
   );
-  const altIds = useMemo(
-    () =>
-      new Set(
-        nodes
-          .map((n) => n.divergence?.alternative_candidate_id)
-          .filter((id): id is string => !!id),
-      ),
+  // By address: one arm key re-proposed on another branch is another candidate.
+  const alternatives = useMemo(
+    () => new Set(nodes.flatMap((n) => n.divergence?.alternative ?? [])),
     [nodes],
   );
   const height = TOP_PAD + totalLaneRows * LANE_H + 8;
@@ -428,7 +424,7 @@ export function Forest({
                 selected={isPicked(n)}
                 onPick={onPickCandidate}
                 dimmed={n.divergent}
-                alt={altIds.has(n.candidateId)}
+                alt={alternatives.has(n.candKey)}
                 divergence={n.divergence !== null}
                 invalidated={!!ctx.invalidated?.has(n.candKey)}
                 ink={inkOf(n)}

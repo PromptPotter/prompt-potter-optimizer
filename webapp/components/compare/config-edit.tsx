@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 import type { SubjectReading } from "@/lib/api/types";
-import { candidateSubject, readingPath } from "@/lib/api/reads";
-import { overlayEdits } from "@/lib/derivations";
+import { candidateSubject } from "@/lib/api/reads";
+import { overlayEdits, readingAddress } from "@/lib/derivations";
 import { CommitInput } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
@@ -9,7 +9,7 @@ import { cx } from "@/lib/cx";
 export type ScenarioEdits = ReadonlyMap<string, ReadonlyMap<string, string>>;
 
 export function pointKeyOf(reading: SubjectReading): string {
-  return candidateSubject(readingPath(reading), reading.candidate_id);
+  return candidateSubject(readingAddress(reading));
 }
 
 // Replaces the point's edits rather than merging, so a cleared value is not stranded.

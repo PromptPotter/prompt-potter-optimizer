@@ -259,12 +259,6 @@ row it closes.
   manifest, and archive-wide signatures serve as read versions (`evidence/read.py:551-554`,
   `measurement_log.py:271-280`), so any run's archive write invalidates every evidence and cells view.
   The same root: a writer-stamped version per subject.
-- **The freed tree and the channel map still key a candidate on `facts.individual`** (addr-2's
-  report): `Forest.tsx:431`'s `altIds` keys on `n.candidateId` and `ChannelMap.tsx:125::ArmedActions`
-  builds its subject from `armed.facts.individual`, so one arm key re-proposed on two branches
-  (`c8c1b433…` at r2 of the root and r3 of fork ·c56947) lights both, and the card's "Picked" fold
-  says "reads at C3.2" after C3.1 is armed. Action: both key on `address`, as the spines do since
-  addr-2. **Re-test:** `git grep -n "candidateId\|facts.individual" -- webapp/components/candidates/Forest.tsx webapp/components/compare/ChannelMap.tsx` is empty.
 
 ### passes-6 (what passes-5 and holders-3 left at landing 54)
 
@@ -660,14 +654,25 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/30 · ws
 
-- **A painted chart has no keyboard path** (ws 1's landing): `compare/EvidenceCharts.tsx:83` and
-  `dashboard/scoring/CostStrip.tsx:50` answer the pointer alone, against `webapp/components/CLAUDE.md:9`
-  ("a painted surface is a control"). Root: `ui/ChartReading`'s hook steps its column on the arrow keys,
-  so every chart that reads through it gains the path at once. **Rides with:** the next ws link.
-  **Re-test:** focusing either chart and pressing → moves its reading line one column.
 - **Compare cards are laid out for few wide columns**, not five thin stripes on a 16:9 display (the
   column rule is `webapp/app/styles/domains/compare.css:40-42`). **Rides with:** ws 3. **Re-test:** five
   candidates at 1920×1080 sit in a row, each card at its full content (a wrapped second row fails).
+- **A `candidate:` subject names no round** (ws-2's report): `cycle_paths.py::Subject.key` spells
+  `candidate:<campaign>/<cycle>/<arm>` and `evidence/read.py::_candidate_point` resolves the newest
+  scored round, so in the walk world "Compare C1.1 with C0" reads C2.1 · round 2 (one arm key,
+  `4fe6d83270e5bef5`, at both). The cells filter (`candidate_id`), `ScenarioEdits` and
+  `mask/tree_lens.py::_Overlay.readings` (cycle, arm) share the gap. Action: the subject carries the
+  round, keyed as the hierarchy address. **Rides with:** a chain after tests-w (`tests/` spells the
+  grammar). **Re-test:** comparing a same-key round-1 arm, its channel reads round 1.
+- **Compare resolves an inner campaign by its bare id** (ws-2's report): a channel on an inner
+  campaign asks `GET /hierarchy/<inner>` and `/campaigns/<inner>/pipeline` with no chain, a 404 the
+  walk's problem check reads red. Suspected root: `ChannelCards.tsx:47` and `ComparePane.tsx:70`
+  resolve a channel's run by `lib/derivations::campaignAt` over a bare `rootCampaignId`. **Rides with:** the candidate-subject chain. **Re-test:** comparing an inner
+  candidate, no request 404s.
+- **The freed tree crowds itself** (ws-2's report): its labels collide around an inner lane
+  (`R2 justlogic/d234` over `C2.1`, the `θ` labels overlapping), and once it is freed the Candidates
+  card sits at half width beside empty space (`dashboard-layout.css:8`'s auto-fit tracks). **Rides
+  with:** ws 3. **Re-test:** the freed tree's walk shot at 1280×800, no overlap, the card full width.
 
 ### batch/30 · forks
 
@@ -753,12 +758,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   a scripted world depends on wall time or scheduling. Root: the offline world's clock and order are
   its own, so no decision or warning reads the desk's load. **Rides with:** tests-w. **Re-test:** the
   proof run beside a busy pytest reads every leg UNMOVED (keep its `eq_*` home to diff the warning).
-- **The freed lineage tree overflows its card under load** (rk-rest's push gate, beside an offline
-  run): `e2e/walk/responsive.spec.ts` "the freed lineage tree fits its viewport" read
-  `div.card.cand-card +593px` at desktop-1440 [touch], and passed on the same tree alone. Either the
-  card is wide until a late style or measure lands, or `harness.ts::noSidewaysScroll` reads before
-  the pane settles. Root first: find which; a flash the user sees is the app's fix. **Rides with:**
-  tests-w. **Re-test:** the walk beside a busy offline run passes 5/5.
 
 - **`run_init_round`, `seat`, `_peer_cycle` and `close_round` replay production by hand**:
   `tests/factories.py::run_init_round` re-composes `runner/entry.py::run_optimization`'s preamble and

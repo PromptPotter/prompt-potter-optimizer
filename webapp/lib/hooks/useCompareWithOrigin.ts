@@ -2,7 +2,7 @@ import { useCallback, useMemo } from "react";
 import { candidateSubject } from "@/lib/api/reads";
 import { useCompareSelection, type CompareChannel } from "@/lib/state/compare-selection";
 import { armAt, originAt, originOf } from "@/lib/derivations";
-import { type CyclePath, pathOfAddress } from "@/lib/ids";
+import type { CyclePath } from "@/lib/ids";
 import { useViewedLineage } from "@/lib/state/lineage";
 import { useWorkspace } from "@/lib/state/workspace";
 
@@ -32,10 +32,10 @@ export function useCompareWithOrigin(
     const point = placed?.facts.reading.end === "invalid" ? null : placed;
     if (arm !== null && !point) return null;
     const origin = point ? originOf(index, point) : originAt(index, path);
-    const originKey = origin ? candidateSubject(pathOfAddress(origin.address), origin.facts.individual) : "";
-    if (!origin || !originKey) return null;
+    if (!origin) return null;
+    const originKey = candidateSubject(origin.address);
     const channels: CompareChannel[] = [{ rootCampaignId: top.campaignId, subject: originKey }];
-    const pointKey = point ? candidateSubject(pathOfAddress(point.address), point.facts.individual) : "";
+    const pointKey = point ? candidateSubject(point.address) : "";
     if (pointKey && pointKey !== originKey) {
       channels.push({ rootCampaignId: top.campaignId, subject: pointKey });
     }

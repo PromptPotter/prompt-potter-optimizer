@@ -13,9 +13,9 @@ ensureChartRegistered();
 export const CostStrip = memo(function CostStrip() {
   const { dash } = useViewedDashboard();
   useThemeVersion();
-  const { at, events } = useChartReading();
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const rounds = useMemo(() => roundCosts(dash), [dash?.spend_metered_by_round]);
+  const { at, events, frame } = useChartReading(rounds.length);
 
   const labels = rounds.map((r) => String(r.round));
   const series = costSeries(rounds);
@@ -48,7 +48,7 @@ export const CostStrip = memo(function CostStrip() {
 
   return (
     <CardFrame title={<span>Spend by round</span>}>
-      <div className="chart-frame">
+      <div className="chart-frame" {...frame}>
         {rounds.length === 0 ? (
           <div
             style={{
@@ -68,7 +68,7 @@ export const CostStrip = memo(function CostStrip() {
         )}
       </div>
       {rounds.length > 0 && (
-        <ChartReading hint="Hover or tap a round to read its bill.">
+        <ChartReading hint="Hover, tap or press ← → on the chart to read a round's bill.">
           {round === undefined
             ? null
             : `round ${round.round} · ${billed.join(" · ") || "nothing billed"}`}

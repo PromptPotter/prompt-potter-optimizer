@@ -422,8 +422,6 @@ export interface RoundNodePos {
   node: HierarchyCandidate;
   // The candidate's address.
   candKey: string;
-  // Its individual id.
-  candidateId: string;
   isWinner: boolean;
   crown: ArmElection["crown"];
   isExpanded: boolean;
@@ -477,7 +475,6 @@ function placedNode(
     label,
     node: cand,
     candKey: cand.address,
-    candidateId: cand.facts.individual,
     isWinner: selected,
     crown,
     isExpanded,

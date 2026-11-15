@@ -21,7 +21,8 @@ import {
   cycleAt,
   type LineageIndex,
 } from "@/lib/derivations";
-import { pathOfAddress, type CyclePath } from "@/lib/ids";
+import { pickedAddressOf } from "@/lib/address";
+import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/state/workspace";
 import { useCampaignForest } from "@/lib/hooks/useCampaignForest";
 import { useServedCriterion } from "@/lib/hooks/useServedCriterion";
@@ -57,7 +58,7 @@ export function useCandidatesModel(dash: ServedDashboard) {
 
   const compareKey =
     pick && viewed
-      ? withMask(candidateSubject(viewed.path, pick.arm), {
+      ? withMask(candidateSubject(pickedAddressOf(encodeCyclePath(viewed.path), pick)), {
           lens: activeLens, samples: sampleSet?.length ? sampleSet.join(",") : null,
         })
       : null;

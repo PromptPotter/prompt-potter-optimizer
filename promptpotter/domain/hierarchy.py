@@ -223,9 +223,9 @@ class LensShift(FrozenModel):
 class LineageDivergence(FrozenModel):
     """Where an alternative criterion would have elected someone else, on the candidate it names."""
 
-    alternative_candidate_id: str | None = Field(
-        description="The individual the masked criterion would have elected instead (measured, "
-        "so nameable); null when the round would simply have held on origin."
+    alternative: str | None = Field(
+        description="The address of the candidate the masked criterion would have elected instead "
+        "(measured, so nameable); null when the round would simply have held on origin."
     )
 
 

@@ -49,6 +49,7 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
   if (!level) return null;
   // The served nodes the reading sits on: its cycle, and the campaign that holds it.
   const branch = cycleAt(index, readingPath(reading));
+  const pickedAt = selected ?? head.own;
   const owner = branch?.parent ? index.byAddress.get(branch.parent) : undefined;
   return (
     <>
@@ -113,8 +114,10 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
         </div>
         <div>
           <dt>reads at</dt>
-          <dd title={reading.candidate_id}>
-            {head.own?.label ?? reading.label} · round {reading.round}
+          {/* The pick's own address, so one arm key on two branches reads as the one picked. */}
+          <dd title={pickedAt?.address ?? reading.candidate_id}>
+            {pickedAt?.label ?? reading.label} · round{" "}
+            {pickedAt?.facts.reading.arm.round ?? reading.round}
           </dd>
         </div>
         <div>

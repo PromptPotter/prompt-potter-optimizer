@@ -122,10 +122,10 @@ class _Overlay:
             sandbox, campaign_id = path[:-1], path[-1].campaign_id
             result = find_divergences(record, verdict)
             for d in result.divergences:
-                hop = CycleHop(campaign_id=campaign_id, cycle_id=d.cycle_id)
-                self.diverged[((*sandbox, hop), d.round)] = LineageDivergence(
-                    alternative_candidate_id=d.alternative_candidate_id
-                )
+                cycle = (*sandbox, CycleHop(campaign_id=campaign_id, cycle_id=d.cycle_id))
+                alt = d.alternative_candidate_id
+                at = Subject.of(cycle)._replace(round=d.round, candidate_id=alt or "")
+                self.diverged[(cycle, d.round)] = LineageDivergence(alternative=alt and at.address)
             dimmed.update(
                 ((*sandbox, CycleHop(campaign_id=campaign_id, cycle_id=cid)), rnd)
                 for cid, rnd in result.divergent

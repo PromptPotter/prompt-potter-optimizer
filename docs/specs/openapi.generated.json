@@ -9687,7 +9687,7 @@
         "additionalProperties": false,
         "description": "Where an alternative criterion would have elected someone else, on the candidate it names.",
         "properties": {
-          "alternative_candidate_id": {
+          "alternative": {
             "anyOf": [
               {
                 "type": "string"
@@ -9696,12 +9696,12 @@
                 "type": "null"
               }
             ],
-            "description": "The individual the masked criterion would have elected instead (measured, so nameable); null when the round would simply have held on origin.",
-            "title": "Alternative Candidate Id"
+            "description": "The address of the candidate the masked criterion would have elected instead (measured, so nameable); null when the round would simply have held on origin.",
+            "title": "Alternative"
           }
         },
         "required": [
-          "alternative_candidate_id"
+          "alternative"
         ],
         "title": "LineageDivergence",
         "type": "object"

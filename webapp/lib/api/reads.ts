@@ -1,7 +1,16 @@
 import { API, InvalidInputError, failureKind, jgetIfNoneMatch, jpost, send, toApiError } from "./client";
 import { operatorMessage } from "./errors";
 import { reportIncident } from "../diagnostics";
-import { encodeCyclePath, encodeDescend, pathRoot, type CyclePath } from "../ids";
+import { parsePick } from "../address";
+import {
+  cycleAddressOf,
+  encodeCyclePath,
+  encodeDescend,
+  pathLeaf,
+  pathOfAddress,
+  pathRoot,
+  type CyclePath,
+} from "../ids";
 import { heldRead, readThrough, type ReadDescriptor, type ReadResult } from "../read-cache";
 import {
   type NestedPipelineRef,
@@ -466,10 +475,14 @@ export function readingPath(reading: SubjectReading): CyclePath {
   ];
 }
 
-export function candidateSubject(path: CyclePath, candidateId: string): string {
-  const leaf = path.at(-1);
-  if (!leaf) return "";
-  return subjectKey("candidate", [leaf.campaignId, leaf.cycleId, candidateId], path.slice(0, -1));
+// A candidate's evidence subject, from its hierarchy address (`<cycle path>/r{round}/{arm}`).
+export function candidateSubject(address: string): string {
+  const cycle = cycleAddressOf(address);
+  const pick = parsePick(address.slice(cycle.length + 1));
+  if (!pick) throw new Error(`not a candidate address: ${address}`);
+  const path = pathOfAddress(cycle);
+  const leaf = pathLeaf(path);
+  return subjectKey("candidate", [leaf.campaignId, leaf.cycleId, pick.arm], path.slice(0, -1));
 }
 
 // `;` separates because it cannot appear in a safe-AST formula; the server splits on it.

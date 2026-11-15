@@ -1645,9 +1645,10 @@ export interface GeneSource {
 /** Where an alternative criterion would have elected someone else, on the
  * candidate it names. */
 export interface LineageDivergence {
-  /** The individual the masked criterion would have elected instead (measured, so
-   * nameable); null when the round would simply have held on origin. */
-  alternative_candidate_id: string | null;
+  /** The address of the candidate the masked criterion would have elected instead
+   * (measured, so nameable); null when the round would simply have held on
+   * origin. */
+  alternative: string | null;
 }
 
 /** A cycle's dashboard as it is SERVED: the fold's facts, and beside them what
@@ -5505,7 +5506,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "f9353726c154010d";
+export const SERVED_CONTRACT = "5e2f6f17b00b5720";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

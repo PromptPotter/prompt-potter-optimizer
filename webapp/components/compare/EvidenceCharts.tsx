@@ -51,7 +51,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   const cells = evidence.metric.covered_cells;
   const series = evidence.subjects;
   const axis = evidence.metric.spec.axis_label;
-  const { at, events } = useChartReading();
+  const { at, events, frame } = useChartReading(cells.length);
 
   // Merged before the empty guard: it needs no shared cell.
   if (view === "merged") {
@@ -79,7 +79,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   const labels = cells.map((_, i) => `#${i + 1}`);
   const cell = at === null ? undefined : cells[at];
   const reading = (
-    <ChartReading hint="Hover or tap a cell to read it.">
+    <ChartReading hint="Hover, tap or press ← → on the chart to read a cell.">
       {cell === undefined
         ? null
         : `${cell} · ${series
@@ -91,7 +91,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   if (view === "lines") {
     return (
       <>
-        <div className="cmp-canvas">
+        <div className="cmp-canvas" {...frame}>
           <Line
             aria-label={`${axis} across ${cells.length} cells, one line per subject`}
             data={{ labels, datasets }}
@@ -109,7 +109,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
 
   return (
     <>
-      <div className="cmp-canvas">
+      <div className="cmp-canvas" {...frame}>
         <Bar
           aria-label={`${axis} across ${cells.length} cells, one bar per subject`}
           data={{ labels, datasets }}

@@ -1,4 +1,4 @@
-import { act, render, renderHook, screen } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import type { ActiveElement, ChartEvent } from "chart.js";
 import { describe, expect, it } from "vitest";
 import { ChartReading, useChartReading } from "../ChartReading";
@@ -11,7 +11,7 @@ const column = (index: number) => [{ index, datasetIndex: 0 }] as unknown as Act
 
 describe("useChartReading", () => {
   it("a pointer's hover reads a column and leaving clears it", () => {
-    const { result } = renderHook(() => useChartReading());
+    const { result } = renderHook(() => useChartReading(5));
     act(() => result.current.events.onHover(mouse("mousemove"), column(2)));
     expect(result.current.at).toBe(2);
     act(() => result.current.events.onHover(mouse("mouseout"), []));
@@ -19,7 +19,7 @@ describe("useChartReading", () => {
   });
 
   it("a tap sets the line and a second tap on it clears it; a drag never sets it", () => {
-    const { result } = renderHook(() => useChartReading());
+    const { result } = renderHook(() => useChartReading(5));
     act(() => result.current.events.onHover(fingerDrag, column(1)));
     expect(result.current.at).toBeNull();
     // A tap: the browser's compat mousemove, then the click.
@@ -36,12 +36,48 @@ describe("useChartReading", () => {
   });
 
   it("a hover reads over a pin, and leaving falls back to the pin", () => {
-    const { result } = renderHook(() => useChartReading());
+    const { result } = renderHook(() => useChartReading(5));
     act(() => result.current.events.onClick(mouse("click"), column(0)));
     act(() => result.current.events.onHover(mouse("mousemove"), column(4)));
     expect(result.current.at).toBe(4);
     act(() => result.current.events.onHover(mouse("mouseout"), []));
     expect(result.current.at).toBe(0);
+  });
+});
+
+// The hook's frame on a host element, as a chart spreads it, read through its reading line.
+function KeyedChart({ columns }: { columns: number }) {
+  const { at, frame } = useChartReading(columns);
+  return (
+    <>
+      <div aria-label="chart" {...frame} />
+      <ChartReading hint="none">{at === null ? null : `column ${at}`}</ChartReading>
+    </>
+  );
+}
+
+describe("useChartReading's keyboard path", () => {
+  it("a focusable chart steps its column on → and ←, clamped, and Escape clears it", () => {
+    render(<KeyedChart columns={3} />);
+    const chart = screen.getByRole("group", { name: "chart" });
+    expect(chart.tabIndex).toBe(0);
+    const line = () => screen.getByRole("status").textContent;
+    const press = (...keys: string[]) => keys.forEach((key) => fireEvent.keyDown(chart, { key }));
+    press("ArrowRight");
+    expect(line()).toBe("column 0");
+    press("ArrowRight", "ArrowRight", "ArrowRight");
+    expect(line()).toBe("column 2");
+    press("ArrowLeft");
+    expect(line()).toBe("column 1");
+    press("Escape");
+    expect(line()).toBe("none");
+    press("ArrowLeft");
+    expect(line()).toBe("column 2");
+  });
+
+  it("a chart with no column is no tab stop", () => {
+    render(<KeyedChart columns={0} />);
+    expect(screen.getByLabelText("chart").hasAttribute("tabindex")).toBe(false);
   });
 });
 

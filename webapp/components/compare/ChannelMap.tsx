@@ -13,7 +13,7 @@ import { useSeededOnce } from "@/lib/hooks/useSeededOnce";
 import { useChannelView, useCompareSelection } from "@/lib/state/compare-selection";
 import { nodeOverlays, type CompareItem } from "@/lib/derivations";
 import { fmtUnit } from "@/lib/format";
-import { cycleAddressOf, encodeCyclePath, pathOfAddress } from "@/lib/ids";
+import { cycleAddressOf, encodeCyclePath, pathOfAddress, pathRoot } from "@/lib/ids";
 import { channelInk, useChannelTree, useInvalidated } from "./channel-hooks";
 
 export function ChannelMap({
@@ -118,11 +118,8 @@ function ArmedActions({ armed, subject }: { armed: HierarchyCandidate; subject: 
   const { hasSubject, addSubject, replace } = useCompareSelection();
   const { reading } = armed.facts;
   const fitness = reading.own?.fitness?.value ?? null;
-  const path = pathOfAddress(armed.address);
-  const leaf = path.at(-1);
-  const top = path.at(0);
-  if (!leaf || !top) return null;
-  const next = candidateSubject(path, armed.facts.individual);
+  const top = pathRoot(pathOfAddress(armed.address));
+  const next = candidateSubject(armed.address);
   if (next === subject) return null;
   const already = hasSubject(next);
   return (
