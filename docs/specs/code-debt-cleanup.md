@@ -862,11 +862,13 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   on `run_job`'s loop killed every server launch and head-to-head arm for two days with the gate green
   (fixed `d17fb2f83`). Action: one test drives `run_job` on a loop against a real registry (adopt,
   refuse, release). **Re-test:** reintroduce a sync `job_registry.adopt` in `run_job`; a test fails.
-- **A moved search point escapes the end pass unreported**: `domain/arms.py::BankedSearchPointError` is
-  not in `runner/termination.py::RUN_STOPS`, so `runner/entry.py::_run_single_cycle`'s end-pass `except`
-  lets it past `close_cycle`; under `every_adoption` every graded roster member can raise it. Action:
-  the end pass's refusal is a stop the cycle closes on. **Re-test:** a roster member whose point no
-  longer rebuilds ends the cycle with a stop reason, not a traceback.
+- **A moved roster point closes the cycle as a crash**: `domain/arms.py::BankedSearchPointError`,
+  raised by `runner/bench.py::bench_selection`'s rebuild, reaches the end pass's `end_run_on`, so the
+  cycle closes `CRASHED` with a traceback over its search's own stop, and every resume refuses again;
+  under `every_adoption` every graded roster member can raise it. Action: bank the refusal on that
+  member's pass (`PassGradedRecord.refusal`, as `scoring/passes.py::verify_on_saturation` banks a
+  verify's), read it refused in the bench fold, and keep the search's stop. **Re-test:** a member
+  whose point no longer rebuilds leaves the cycle on its search's stop, that member's pass read refused.
 - **A citation's panel is matched by substring, not by word**: `potter/validators.py::l1_evidence_grounding`
   tests `words in _words(panel)`, so a one-word quote is held by whichever panel sorts first.
   **Re-test:** a one-word citation that only one panel holds as a word names that panel.

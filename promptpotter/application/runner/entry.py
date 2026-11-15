@@ -35,8 +35,6 @@ from promptpotter.application.runner.termination import (
     RUN_ENDS,
     RUN_STOPS,
     end_run_on,
-    run_stop_detail,
-    run_stop_reason,
 )
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.bench import BenchCurve, BenchScore
@@ -339,9 +337,10 @@ async def _run_single_cycle(
                     banked=cycle.bench_passes,
                     trigger=cycle.config.bench_trigger,
                 )
-        except (*RUN_STOPS, KeyboardInterrupt, asyncio.CancelledError) as exc:
-            # Only a pause escapes the pass; the resume takes the pass again.
-            stop_reason, cycle_error, detail = run_stop_reason(exc), None, run_stop_detail(exc)
+        except RUN_ENDS as exc:
+            # A pause leaves the pass owed, which the resume takes again; anything else that ends it
+            # is the stop the cycle closes on, never an escape past `close_cycle`.
+            stop_reason, cycle_error, detail = end_run_on(exc)
             if isinstance(exc, asyncio.CancelledError):
                 cancel_exc = exc
 
