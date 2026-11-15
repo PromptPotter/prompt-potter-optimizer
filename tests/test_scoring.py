@@ -272,7 +272,7 @@ from promptpotter.domain.command_kinds import (
     CommandKind,
     CommandPayload,
     Door,
-    GradeBenchPayload,
+    HeldOutPayload,
     PauseCyclePayload,
     SkipSearchpointPayload,
     SubmitArmsPayload,
@@ -2536,9 +2536,9 @@ def test_a_campaigns_command_by_a_prefix_acts_on_its_full_id_as_a_cycles_does(
             benched.append(dispatched.payload.campaign_id)
             raise ConflictError("reached")
 
-        bench_by_prefix = GradeBenchPayload(campaign_id=_PEER_HOP.campaign_id[:3])
+        bench_by_prefix = HeldOutPayload(campaign_id=_PEER_HOP.campaign_id[:3])
         with monkeypatch.context() as patched:
-            patched.setattr(measuring, "grade_bench", _bench_reached)
+            patched.setattr(measuring, "held_out", _bench_reached)
             with pytest.raises(ConflictError):
                 asyncio.run(
                     CommandDispatcher(stores).dispatch(CommandCall(bench_by_prefix, door=Door.HOST))

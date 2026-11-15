@@ -307,7 +307,7 @@ async def _run_single_cycle(
     ):
         book.set_aside(0.0, 0)
         try:
-            # Under the last round, as the `bench` verb grades it (`scoring/passes.py::grade_line_bench`).
+            # Under the last round, as the `held-out` verb grades it (`scoring/passes.py::grade_line_bench`).
             with scoped(round=cycle.rounds[-1].round):
                 cycle.bench_passes = await bench_selection(
                     session,

@@ -568,7 +568,7 @@ class LiveDashboardProjection(Projection):
         self._move_to_round(record.round)
         act = record.act
         if record.phase == CampaignPhase.BENCH and record.step == "enter":
-            # Stopped included: `grade-bench` opens a pass outside any run, and its exit hands the state back.
+            # Stopped included: `held-out` opens a pass outside any run, and its exit hands the state back.
             self._around_bench = (s.state, s.optimizer_step, s.measuring_arm)
             self._set_state(DashboardState.BENCH)
         elif record.step == "enter" and s.state != DashboardState.STOPPED:

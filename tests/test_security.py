@@ -324,7 +324,7 @@ from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddlew
 from promptpotter.presentation.api.routers import auth
 from promptpotter.presentation.api.routers.reads import reads_router
 from promptpotter.presentation.cli import main as cli_main
-from promptpotter.presentation.cli.commands.measure import cmd_bench
+from promptpotter.presentation.cli.commands.measure import cmd_held_out
 from promptpotter.presentation.cli.commands.reads import cmd_read
 from promptpotter.presentation.cli.commands.writes import cmd_command
 from promptpotter.presentation.cli.main import said_text
@@ -2515,8 +2515,8 @@ async def test_a_terminals_bench_by_an_id_prefix_says_the_campaign_it_graded(
         return Applier(_score)
 
     with monkeypatch.context() as patched:
-        patched.setattr(measuring, "grade_bench", _graded)
-        benched = await cmd_bench(argparse.Namespace(campaign=prefix, tenant=None))
+        patched.setattr(measuring, "held_out", _graded)
+        benched = await cmd_held_out(argparse.Namespace(campaign=prefix, tenant=None))
     assert benched.human is not None and benched.human.startswith(SANDBOX_CAMPAIGN), (
         "a terminal's bench by an id prefix said the prefix as what it graded"
     )

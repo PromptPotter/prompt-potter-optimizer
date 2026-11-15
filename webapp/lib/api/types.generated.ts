@@ -3435,12 +3435,12 @@ export interface CampaignConfig {
   /** When the line's bench passes are sent — each a cell per bench row, the ranked
    * `dataset_split.bench` and every bench-only row the bank declares.
    * `manual` (default): a launch sends none and sets nothing aside for one;
-   * the operator asks for the headline (CLI `bench`, command `grade-bench`),
-   * which grades the origin and the selection as they then stand. `at_end`:
-   * the origin's pass at launch, its price set aside under the ceiling, and
-   * the selection's once the run ends. No round is graded on the bench, so no
-   * selection reads the test set. An arm of a head-to-head is minted `at_end`
-   * where this says `manual`: its comparison is the bench score. */
+   * the operator asks for the headline (`held-out`), which grades the origin
+   * and the selection as they then stand. `at_end`: the origin's pass at
+   * launch, its price set aside under the ceiling, and the selection's once
+   * the run ends. No round is graded on the bench, so no selection reads the
+   * test set. An arm of a head-to-head is minted `at_end` where this says
+   * `manual`: its comparison is the bench score. */
   bench_trigger: 'manual' | 'at_end';
   optimization: OptimizationConfig;
 }
@@ -4157,12 +4157,12 @@ export interface ConfigEdit {
   /** When the line's bench passes are sent — each a cell per bench row, the ranked
    * `dataset_split.bench` and every bench-only row the bank declares.
    * `manual` (default): a launch sends none and sets nothing aside for one;
-   * the operator asks for the headline (CLI `bench`, command `grade-bench`),
-   * which grades the origin and the selection as they then stand. `at_end`:
-   * the origin's pass at launch, its price set aside under the ceiling, and
-   * the selection's once the run ends. No round is graded on the bench, so no
-   * selection reads the test set. An arm of a head-to-head is minted `at_end`
-   * where this says `manual`: its comparison is the bench score. */
+   * the operator asks for the headline (`held-out`), which grades the origin
+   * and the selection as they then stand. `at_end`: the origin's pass at
+   * launch, its price set aside under the ceiling, and the selection's once
+   * the run ends. No round is graded on the bench, so no selection reads the
+   * test set. An arm of a head-to-head is minted `at_end` where this says
+   * `manual`: its comparison is the bench score. */
   bench_trigger: 'manual' | 'at_end' | null;
   optimization: OptimizationOverrides | null;
 }
@@ -4881,7 +4881,7 @@ export interface ConfigOverrides {
 }
 
 /** Grade the campaign's origin and its selection on the held-out bench rows. */
-export interface GradeBenchPayload {
+export interface HeldOutPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
    * full id. */
@@ -5023,12 +5023,12 @@ export interface CampaignLayer {
   /** When the line's bench passes are sent — each a cell per bench row, the ranked
    * `dataset_split.bench` and every bench-only row the bank declares.
    * `manual` (default): a launch sends none and sets nothing aside for one;
-   * the operator asks for the headline (CLI `bench`, command `grade-bench`),
-   * which grades the origin and the selection as they then stand. `at_end`:
-   * the origin's pass at launch, its price set aside under the ceiling, and
-   * the selection's once the run ends. No round is graded on the bench, so no
-   * selection reads the test set. An arm of a head-to-head is minted `at_end`
-   * where this says `manual`: its comparison is the bench score. */
+   * the operator asks for the headline (`held-out`), which grades the origin
+   * and the selection as they then stand. `at_end`: the origin's pass at
+   * launch, its price set aside under the ceiling, and the selection's once
+   * the run ends. No round is graded on the bench, so no selection reads the
+   * test set. An arm of a head-to-head is minted `at_end` where this says
+   * `manual`: its comparison is the bench score. */
   bench_trigger: 'manual' | 'at_end' | null;
   optimization: OptimizationLayer | null;
 }
@@ -5360,7 +5360,7 @@ export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"]
 export type Tone = (typeof TONES)[number];
 
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
-export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "grade-bench" | "ingest-upload" | "list-api-tokens" | "mint-api-token" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "revoke-api-token" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
+export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "held-out" | "ingest-upload" | "list-api-tokens" | "mint-api-token" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "revoke-api-token" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
 type DeepPartial<T> = T extends object ? { [P in keyof T]?: DeepPartial<T[P]> } : T;
 // A body as sent: its required keys, every other one omittable at any depth.
@@ -5382,8 +5382,8 @@ export interface CommandPayloads {
   "discard-draft": CommandSent<DiscardDraftPayload, "draft_id">;
   "edit-draft-campaign": CommandSent<EditDraftCampaignPayload, "draft_id" | "patch">;
   "fork-cycle": CommandSent<ForkCyclePayload, "campaign_id" | "cycle_id">;
-  "grade-bench": CommandSent<GradeBenchPayload, "campaign_id">;
   "head-to-head": CommandSent<MintHeadToHeadPayload, "dataset_name" | "head_to_head">;
+  "held-out": CommandSent<HeldOutPayload, "campaign_id">;
   "list-api-tokens": CommandSent<ListApiTokensPayload, never>;
   "mint-api-token": CommandSent<MintApiTokenPayload, "name" | "scopes">;
   "mint-campaign": CommandSent<MintCampaignPayload, "dataset_name">;
@@ -5421,8 +5421,8 @@ export interface CommandResponses {
   "discard-draft": CommandAcceptedBody;
   "edit-draft-campaign": DraftCampaignWire;
   "fork-cycle": LaunchAnswer;
-  "grade-bench": BenchScore;
   "head-to-head": LaunchAnswer;
+  "held-out": BenchScore;
   "ingest-upload": DraftCampaignWire;
   "list-api-tokens": AccountTokens;
   "mint-api-token": MintedToken;
@@ -5493,7 +5493,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "ee098960e81f604b";
+export const SERVED_CONTRACT = "f206c61f3180fa9c";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

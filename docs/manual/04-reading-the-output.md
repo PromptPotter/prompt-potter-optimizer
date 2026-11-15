@@ -78,7 +78,7 @@ Each run is a cycle under `.promptpotter/`. When it finishes:
 
 - `export.json` — the winning prompt and configuration, with its provenance
 - `log.md` — a per-round digest
-- `python -m promptpotter bench` — scores the winner on held-out samples, the headline number
+- `python -m promptpotter held-out` — scores the winner on held-out samples, the headline number
 - `python -m promptpotter export --tier package` — the winner as a folder another agent opens
 
 ## Stopping and resuming

@@ -13,7 +13,7 @@ from promptpotter.application.cycle_addressing import launched, named_campaign, 
 from promptpotter.application.initialization.scoring_scope import open_diagnostic
 from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.command_kinds import Door, GradeBenchPayload, VerifyCandidatePayload
+from promptpotter.domain.command_kinds import Door, HeldOutPayload, VerifyCandidatePayload
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.paired_reading import READING_STATE_INFO, Estimate
 from promptpotter.domain.records.run_records import VERIFY_WORDS, VerifySaturated
@@ -81,20 +81,20 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
         return CommandResult(data=report.to_dict(), human=human)
 
 
-logger = logging.getLogger("promptpotter.presentation.cli.bench")
+logger = logging.getLogger("promptpotter.presentation.cli.held_out")
 
 
-async def cmd_bench(args: argparse.Namespace) -> CommandResult:
+async def cmd_held_out(args: argparse.Namespace) -> CommandResult:
     store = local_stores(tenant=args.tenant)
     campaign_id = args.campaign or launched(store).campaign_id
-    call = CommandCall(GradeBenchPayload(campaign_id=campaign_id), door=Door.TERMINAL)
+    call = CommandCall(HeldOutPayload(campaign_id=campaign_id), door=Door.TERMINAL)
     dispatcher = CommandDispatcher(store)
     with ctrl_c_stops_pass(dispatcher, call):
-        sent = await dispatcher.answer(measuring.grade_bench, call)
+        sent = await dispatcher.answer(measuring.held_out, call)
     score, graded = sent.result, sent.payload.campaign_id
-    logger.info("bench: %s -> graded", graded)
+    logger.info("held-out: %s -> graded", graded)
     return CommandResult(
-        data=score.model_dump(mode="json"), human=f"{graded} -> bench: {bench_readout(score)}"
+        data=score.model_dump(mode="json"), human=f"{graded} -> held-out: {bench_readout(score)}"
     )
 
 

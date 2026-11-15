@@ -2228,7 +2228,7 @@
         "additionalProperties": false,
         "properties": {
           "bench_trigger": {
-            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (CLI `bench`, command `grade-bench`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
+            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
             "enum": [
               "manual",
               "at_end"
@@ -2471,7 +2471,7 @@
                 "type": "null"
               }
             ],
-            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (CLI `bench`, command `grade-bench`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
+            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
             "title": "Bench Trigger"
           },
           "dataset_split": {
@@ -4251,7 +4251,7 @@
                 "type": "null"
               }
             ],
-            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (CLI `bench`, command `grade-bench`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
+            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
             "title": "Bench Trigger"
           },
           "dataset_split": {
@@ -7694,24 +7694,6 @@
         "title": "GeneSource",
         "type": "object"
       },
-      "GradeBenchPayload": {
-        "additionalProperties": false,
-        "description": "Grade the campaign's origin and its selection on the held-out bench rows.",
-        "properties": {
-          "campaign_id": {
-            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
-            "maxLength": 128,
-            "minLength": 1,
-            "title": "Campaign Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "campaign_id"
-        ],
-        "title": "GradeBenchPayload",
-        "type": "object"
-      },
       "GuardDifference": {
         "description": "One thing two bench headlines can differ on. The first seven are ``BenchSet``'s fields.",
         "enum": [
@@ -8361,6 +8343,24 @@
           "version"
         ],
         "title": "HealthResponse",
+        "type": "object"
+      },
+      "HeldOutPayload": {
+        "additionalProperties": false,
+        "description": "Grade the campaign's origin and its selection on the held-out bench rows.",
+        "properties": {
+          "campaign_id": {
+            "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Campaign Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "campaign_id"
+        ],
+        "title": "HeldOutPayload",
         "type": "object"
       },
       "HeldStart": {
@@ -20883,79 +20883,6 @@
         ]
       }
     },
-    "/api/v1/commands/grade-bench": {
-      "post": {
-        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
-        "operationId": "grade_bench_api_v1_commands_grade_bench_post",
-        "parameters": [
-          {
-            "in": "header",
-            "name": "Command-Id",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "maxLength": 64,
-                  "minLength": 1,
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Command-Id"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": false,
-            "schema": {
-              "default": "",
-              "maxLength": 256,
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/GradeBenchPayload"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BenchScore"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "default": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Default Response"
-          }
-        },
-        "summary": "Grade-Bench",
-        "tags": [
-          "Commands"
-        ]
-      }
-    },
     "/api/v1/commands/head-to-head": {
       "post": {
         "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
@@ -21024,6 +20951,79 @@
           }
         },
         "summary": "Head-To-Head",
+        "tags": [
+          "Commands"
+        ]
+      }
+    },
+    "/api/v1/commands/held-out": {
+      "post": {
+        "description": "The kind's payload is the body; the answer is the outcome's (`CommandOutcome.answer`), a\nlaunch's once it is launched: a Start's mint closed, unless its job queued.",
+        "operationId": "held_out_api_v1_commands_held_out_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Command-Id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 64,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Command-Id"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "default": "",
+              "maxLength": 256,
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HeldOutPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BenchScore"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Held-Out",
         "tags": [
           "Commands"
         ]

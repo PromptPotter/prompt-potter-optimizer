@@ -67,9 +67,10 @@ BASELINE = {
     # Streamable HTTP, one session per caller, a mount a declared row.
     # passb-2 1 (+55): a verify's served admission (`PassAdmission`, its ladder on the shared
     # `PassRefusal`, the cycle's `verify` fact, the command refused by it); a slot's served stage.
-    "package_lines": 111064,
+    # passb-2 2 (-8): the held-out verb has one name; the export has one writer.
+    "package_lines": 111056,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
-    "model_copy_updates": 158,
+    "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.

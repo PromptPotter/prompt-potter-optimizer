@@ -215,7 +215,12 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   with each graded pass and its reserve in them; a task held at its arms gate asks its host for its
   input once, and the host registry serves over Streamable HTTP on the account's bearer, a mount a
   declared row. Every leg moved only on the origin reserve; behaviour keys rewritten.
-- **then:** faults-2b; passb-2 1, 2, 4 (local); then tv-2.
+- **landed 88, passb-2 1 + 2:** a cycle serves its verify admission (inner, the campaign's refusal,
+  a pass in flight, the loop selecting) on the one pass refusal, and the command refuses by that
+  answer; a slot serves its stage; the held-out pass has one verb at every door (`held-out`), and
+  the run's one writer re-renders its export. Every leg UNMOVED, digests unmoved; the landing key
+  moved on the renamed kinds.
+- **then:** faults-2b; the command log typed per kind; then tv-2. A cold verify is timed live.
 
 The re-keys end at the behaviour-key switch.
 

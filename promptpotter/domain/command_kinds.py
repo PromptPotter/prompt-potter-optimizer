@@ -238,11 +238,11 @@ class CommandKind(StrEnum):
         "task",
     )
     # It restates the line's headline in place.
-    GRADE_BENCH = (
-        "grade-bench",
-        "measuring:grade_bench",
+    HELD_OUT = (
+        "held-out",
+        "measuring:held_out",
         CAMPAIGN_RUN_CAP,
-        anyone("bench"),
+        anyone("held-out"),
         True,
         "task",
     )
@@ -788,7 +788,7 @@ class LiveCyclePayload(CampaignPayload):
     """Addressed to a campaign, applied to and recorded on the cycle holding its line."""
 
 
-class GradeBenchPayload(LiveCyclePayload, kind=CommandKind.GRADE_BENCH):
+class HeldOutPayload(LiveCyclePayload, kind=CommandKind.HELD_OUT):
     """Grade the campaign's origin and its selection on the held-out bench rows."""
 
 

@@ -686,8 +686,8 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         ),
     ),
     Verb(
-        "bench",
-        "cli.commands.measure:cmd_bench",
+        "held-out",
+        "cli.commands.measure:cmd_held_out",
         help="Grade the campaign's origin and its selection on the held-out bench rows and bank "
         "the headline — the pass a `bench_trigger: manual` campaign (the default) sends only "
         "when asked, on the cycle holding its line. Reuses a pass the line already holds; refuses "
@@ -1024,7 +1024,7 @@ def main() -> None:
                 "  promptpotter new <file.csv>  ingest a raw file → resolve origin → mint + run\n"
                 "  promptpotter resume          continue the active campaign\n"
                 "  promptpotter verify          re-score a candidate on more samples\n"
-                "  promptpotter bench           grade the origin and the selection on held-out rows\n"
+                "  promptpotter held-out        grade the origin and the selection on held-out rows\n"
                 "  promptpotter ab              re-derive the active cycle's decisions under the current engine\n\n"
                 "Run `promptpotter <verb> --help` for per-verb options.\n"
                 f"Docs: {settings.BRAND_DOCS_URL}"

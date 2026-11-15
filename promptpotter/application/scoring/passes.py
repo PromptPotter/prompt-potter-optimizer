@@ -640,6 +640,4 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                         finished_at=utcnow_iso(),
                         optimizer_phases=optimizer.phases,
                     )
-            # Before the drain renders the export's headline and hands the registry its copy.
-            stores.campaigns.restate_export_bench(hop, score)
         return score

@@ -11,7 +11,7 @@ export function BenchGradeAction() {
   const { viewed } = useWorkspace();
   const status = useViewedCycle()?.facts.bench?.status ?? null;
   const scope = viewed?.address ?? null;
-  const cmd = useCommand<"grade-bench">("grade-bench", { scope });
+  const cmd = useCommand<"held-out">("held-out", { scope });
   const stop = useCommand<"cancel">("cancel", { scope });
   const [acting, setActing] = useState<string | null>(null);
   if (!viewed || !status?.offered) return null;
@@ -21,12 +21,12 @@ export function BenchGradeAction() {
     const commandId = mintCommandId();
     setActing(commandId);
     void cmd
-      .run("grade-bench", () => commands["grade-bench"]({ campaign_id: campaignId }, commandId))
+      .run("held-out", () => commands["held-out"]({ campaign_id: campaignId }, commandId))
       .finally(() => setActing(null));
   }
   const button = (
     <Button disabled={grading || !status.can_run} onClick={grade}>
-      {grading ? "Grading…" : "Grade on bench"}
+      {grading ? "Grading…" : "Grade held-out"}
     </Button>
   );
   return (

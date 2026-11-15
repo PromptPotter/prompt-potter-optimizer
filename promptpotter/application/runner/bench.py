@@ -291,7 +291,7 @@ def read_bench(
     line: BenchLine,
 ) -> BenchScore:
     """*passes* is ``None`` for a line that banked none and for a cycle beside the line."""
-    graded = None if passes is None else _grade_bench(stores, passes, scorer, line)
+    graded = None if passes is None else _grade_line(stores, passes, scorer, line)
     selected = None if graded is None else graded.selected
     status = bench_status(
         trigger=line.trigger,
@@ -375,7 +375,7 @@ def bench_members(
     *,
     line: BenchLine,
 ) -> tuple[MemberRows | None, MemberRows | None]:
-    return _grade_bench(stores, passes, scorer, line).members
+    return _grade_line(stores, passes, scorer, line).members
 
 
 def _standing_pass(passes: BenchPasses, run: LiveCycleRun) -> BenchPass | None:
@@ -384,7 +384,7 @@ def _standing_pass(passes: BenchPasses, run: LiveCycleRun) -> BenchPass | None:
     return passes.pass_of(run.selection.key)
 
 
-def _grade_bench(stores: Stores, passes: BenchPasses, scorer: Scorer, line: BenchLine) -> _Graded:
+def _grade_line(stores: Stores, passes: BenchPasses, scorer: Scorer, line: BenchLine) -> _Graded:
     instrument_id = line.instrument_id
     assert instrument_id is not None, "a line that banked a pass drew its bank"
     read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
@@ -729,7 +729,7 @@ def live_cycle_run(stores: Stores, hop: CycleHop) -> LiveCycleRun:
     return LiveCycleRun(
         selecting=attached and not passing,
         passing=passing,
-        # The bracket, not the lock alone: `grade-bench` reads this under its own pass's lock.
+        # The bracket, not the lock alone: `held-out` reads this under its own pass's lock.
         pass_open=attached and scan_bench_open(stores.campaigns.ledger(hop)),
         ending=None if index is None else index.stop_reason,
         selection=None if standing is None else standing.selection,

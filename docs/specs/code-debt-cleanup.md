@@ -123,26 +123,13 @@ row it closes.
 
 ### The edge tail · passb-2 (after batch/26; `chain N` is passb's link N)
 
-- **The held-out verb has three names**: `verify`, `bench`, `grade-bench` and "Grade on bench"; `bench`
-  also collides with `application/bench/`. It is spelled in `domain/command_kinds.py` (`grade-bench`,
-  `measuring:grade_bench`, `anyone("bench")`), `cli/commands/measure.py`, `webapp/lib/api/commands.ts`,
-  `domain/campaign_config.py:421`,
-  `infrastructure/projections/live_dashboard.py`, `domain/bench.py:359` (`can_run`'s
-  description) and `webapp/components/searchpoint/BenchGradeAction.tsx:29` ("Grade on bench"). Action: "held-out" at
-  all five doors, at once. **Rides with:** passb-2 2, whose Owns gain those files. **Re-test:**
-  `git grep -n "grade_bench" -- promptpotter webapp scripts` is empty (8 hits in 5 files today).
-- **`restate_export_bench` rewrites `export.json` outside the roster**: `campaign_store/store.py::restate_export_bench`
-  (called from `scoring/passes.py:714`) patches the file after a later held-out pass. Action: the pass's
-  `RunArtifacts` drain re-renders the export off the ledger's newest bench reading
-  (`ledger_scan.py::scan_closed_bench`), so `write_export` has one caller. **Rides with:** passb-2 2.
-  **Re-test:** `git grep -c "restate_export_bench" -- promptpotter` is 0.
-- **The first verify after a pause starts 38 s late, and no verify is ever `accepted`**: `measuring.py:48`
-  builds `Applier(_apply_verify)` without `ack="accepted"`, unlike `launching.py:476` and
-  `dispatcher.py:161`. Action: attribute the wait by phase; the command acks `accepted` at admission.
-  `accepted` is the loop inbox's status (`store/command_log.py:104,318,341,408`), so a pass acked
-  `accepted` would read as a standing loop command. **Rides with:** passb-2 4, whose Owns gain `store/command_log.py` and
-  `command_reading.py`'s status mapping. **Re-test:** on a paused cycle, time `command` → the `verify`
-  phase's `enter` in the ledger.
+- **The first verify after a pause started 38 s late (2026-11-06, live)**: the click shows from admission now
+  (the pass's slot serves `starting` then `running`, and an unended command reads `working`), so no
+  `accepted` ack is owed: that status is a loop's standing command. Between the slot's START and the
+  phase's `enter`, `scoring/passes.py::verify_candidate` opens the session (`open_diagnostic`), scans
+  the archive (`measurements_for_config`) and fits the ruler (`judging_ruler`); a warm verify entered
+  in 1 s. Action: time those three on a cold verify, then cut the one that holds it. **Held:** a live
+  verify on a paused cycle. **Re-test:** time `command` → the `verify` phase's `enter` in the ledger.
 - **A command log row is typed by no payload model**: `domain/command_events.py::CommandRecord` holds
   its payload untyped, so a row in a retired payload shape loads and refuses only when replayed.
   Typing it by `domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND` is blocked: `IngestUploadPayload.blob`

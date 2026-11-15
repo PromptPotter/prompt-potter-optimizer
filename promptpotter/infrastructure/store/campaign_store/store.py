@@ -10,7 +10,6 @@ from typing import Unpack, get_args
 
 from pydantic import BaseModel
 
-from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.campaign import (
     Campaign,
     CampaignEdit,
@@ -536,11 +535,6 @@ class CampaignStore:
     def write_export(self, hop: CycleHop, export: PromptExport) -> None:
         """`runner/output.py::RunArtifacts` writes it off the ledger as the run drains."""
         write_text(self.layout(hop).export, export.to_json())
-
-    def restate_export_bench(self, hop: CycleHop, bench: BenchScore) -> None:
-        export = self.read_export(hop)
-        if export is not None:
-            self.write_export(hop, export.model_copy(update={"bench": bench}))
 
     def read_export(self, hop: CycleHop) -> PromptExport | None:
         """An export this build does not read is refused as one, by its path."""

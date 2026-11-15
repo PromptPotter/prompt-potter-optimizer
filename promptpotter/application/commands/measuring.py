@@ -5,7 +5,7 @@ from promptpotter.application.jobs.launcher.admission import campaign_sends, pai
 from promptpotter.application.scoring import passes
 from promptpotter.domain.bench import BenchScore
 from promptpotter.domain.command_kinds import (
-    GradeBenchPayload,
+    HeldOutPayload,
     VerifyCandidatePayload,
 )
 from promptpotter.domain.records.held_out import PassGradedRecord
@@ -45,7 +45,7 @@ async def verify_candidate(
     return Applier(_apply_verify)
 
 
-async def grade_bench(dispatched: DispatchedToCycle[GradeBenchPayload]) -> Applier[BenchScore]:
+async def held_out(dispatched: DispatchedToCycle[HeldOutPayload]) -> Applier[BenchScore]:
     """Answers the line's headline, which its end keeps."""
     stores, hop = dispatched.dispatcher.stores, dispatched.hop
     return Applier(

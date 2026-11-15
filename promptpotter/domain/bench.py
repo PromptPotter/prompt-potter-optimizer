@@ -129,7 +129,7 @@ def partition_bank(
 
 BenchSubject = Literal["origin", "selected"]
 
-# `manual`: only when asked (`bench`, `grade-bench`); `at_end`: the origin at launch, the selection at the end.
+# `manual`: only when asked (`held-out`); `at_end`: the origin at launch, the selection at the end.
 BenchTrigger = Literal["manual", "at_end"]
 
 

@@ -66,7 +66,7 @@ export const commands = {
   "discard-draft": json("discard-draft"),
   "edit-draft-campaign": json("edit-draft-campaign"),
   "fork-cycle": json("fork-cycle"),
-  "grade-bench": json("grade-bench"),
+  "held-out": json("held-out"),
   "ingest-upload": ingestUpload,
   "list-api-tokens": json("list-api-tokens"),
   "mint-api-token": json("mint-api-token"),

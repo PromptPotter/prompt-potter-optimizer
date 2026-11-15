@@ -152,7 +152,7 @@ The optimizer is itself a pipeline of nodes, so it can be pointed at its own opt
 
 - **Parameter-based optimization only** — prompts, thresholds, model settings; not model weights or architectures.
 - **Needs a known answer or a verifier** — the example's expected output, or the backend's own checker (Harbor).
-- **In-campaign figures are not held-out figures.** The headline is the winner's score on a held-out bench set no optimizer sees: `python -m promptpotter bench`.
+- **In-campaign figures are not held-out figures.** The headline is the winner's score on a held-out bench set no optimizer sees: `python -m promptpotter held-out`.
 
 ## Documentation
 

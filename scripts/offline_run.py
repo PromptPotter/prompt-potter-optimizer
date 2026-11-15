@@ -64,7 +64,7 @@ import promptpotter
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.commands.measuring import grade_bench
+from promptpotter.application.commands.measuring import held_out
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
 from promptpotter.application.embedded_run import host_dispatcher, run_campaign, run_head_to_head
@@ -103,8 +103,8 @@ from promptpotter.domain.command_kinds import (
     ArmRequest,
     Door,
     ForkCyclePayload,
-    GradeBenchPayload,
     HeadToHeadRequest,
+    HeldOutPayload,
     PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
@@ -931,10 +931,8 @@ async def banked(
             raise SystemExit(f"offline run: a manual launch of {name} sent bench cells")
         if bench.status.state != "not_asked" or not bench.status.can_run:
             raise SystemExit(f"offline run: a manual launch of {name} serves {bench}")
-        call = CommandCall(
-            GradeBenchPayload(campaign_id=session.hop.campaign_id), door=Door.TERMINAL
-        )
-        bench = (await (await host_dispatcher(stores)).answer(grade_bench, call)).result
+        call = CommandCall(HeldOutPayload(campaign_id=session.hop.campaign_id), door=Door.TERMINAL)
+        bench = (await (await host_dispatcher(stores)).answer(held_out, call)).result
     decisions = extract(cycle, bench)
     # An L4 outer's inner campaigns, as a set: cells measured at once land in any order.
     nested = inner_sandboxes_dir(default_projects_root()).glob("*/*/campaigns/*/cycles/*")
