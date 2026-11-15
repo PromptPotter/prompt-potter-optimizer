@@ -384,6 +384,13 @@ def origin_floor(rows: CellSheet) -> ConstantFloor | None:
     return ConstantFloor(label=constant.label, floor=constant.share, lift=lift)
 
 
+def mean_lift(measurand: Measurand, a_values: list[float], b_values: list[float]) -> MeasuredLift:
+    """*b_values* are means over several passes, so no row is 0 or 1: the t reads it, never the sign test."""
+    return _lift(
+        measurand.model_copy(update={"binary": False}), a_values, b_values, ROUND_LIFT_SPEC
+    )
+
+
 def _lift(
     measurand: Measurand, a_values: list[float], b_values: list[float], spec: EstimatorSpec
 ) -> MeasuredLift:

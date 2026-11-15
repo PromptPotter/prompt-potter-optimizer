@@ -15,9 +15,10 @@ from promptpotter.application.runner.bench import (
     bank_campaign_result,
     bench_selection,
     declare_line_bench,
-    line_bench_series,
+    line_round_budget,
     line_spans,
     own_level,
+    read_curve,
 )
 from promptpotter.application.runner.loop import open_origin_round, run_round_loop
 from promptpotter.application.runner.mint import (
@@ -38,7 +39,7 @@ from promptpotter.application.runner.termination import (
     run_stop_reason,
 )
 from promptpotter.application.served_dashboard import fork_remainder
-from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.bench import BenchCurve, BenchScore
 from promptpotter.domain.campaign import run_clamp
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig, start_layer
 from promptpotter.domain.cycle_result import CycleResult
@@ -84,20 +85,14 @@ def build_cycle_result(
     picked_sp = cycle.selected_sp if cycle is not None else None
     # Round 0 is the reference the result is differenced against, never a search result.
     cycle_rounds = [rr for rr in cycle.rounds if rr.round > 0] if cycle is not None else []
-    bench_origin: float | None = None
-    bench_levels: list[float | None] = []
-    spent = 0
-    round_budget: int | None = None
+    spent = round_budget = 0
+    curve: BenchCurve | None = None
     if cycle is not None:
         scorer = session.state.scoring.scorer
         spans = line_spans(session.store, scorer, session.hop)
         spent = sum(len(span.own) for span in spans)
-        bench_origin, bench_levels = line_bench_series(
-            session.store, cycle.bench_passes, scorer, spans
-        )
-        cap = cycle.config.optimization.budget.rounds
-        # The cycle's cap holds what its line had left: the line's adds every round a rebase left.
-        round_budget = None if cap is None else cap + spent - len(cycle_rounds)
+        round_budget = line_round_budget(spans, cycle.config.optimization.budget.rounds)
+        curve = read_curve(session.store, cycle.bench_passes, scorer, spans, budget=round_budget)
     return CycleResult(
         rounds=cycle_rounds,
         n_rounds_after_origin=spent,
@@ -112,8 +107,6 @@ def build_cycle_result(
             if cycle is not None
             else None
         ),
-        bench_origin_level=bench_origin,
-        bench_round_levels=bench_levels,
         round_budget=round_budget,
         result_prompt_fields=picked_sp.prompt_fields if picked_sp else {},
         result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
@@ -126,6 +119,7 @@ def build_cycle_result(
         spend=spend,
         error=cycle_error,
         bench=bench,
+        curve=curve,
     )
 
 
@@ -343,6 +337,7 @@ async def _run_single_cycle(
                     cycle.rounds,
                     points=cycle.points,
                     banked=cycle.bench_passes,
+                    trigger=cycle.config.bench_trigger,
                 )
         except (*RUN_STOPS, KeyboardInterrupt, asyncio.CancelledError) as exc:
             # Only a pause escapes the pass; the resume takes the pass again.

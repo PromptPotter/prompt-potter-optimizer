@@ -341,7 +341,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   banks), which `runner/entry.py` fills from the other field by field. Banking `CycleResult` whole
   would put every round's cells on the ledger beside `RoundClosedRecord`, against the chronology rule
   (`infrastructure/CLAUDE.md`). Action: one type, the rounds read back off the ledger by its
-  readers (`l4/proxies.py`, the narrative); the L4 estimator digest re-keys. **Rides with:** hubs.
+  readers (`l4/proxies.py`, the narrative). **Rides with:** hubs.
   **Re-test:** `git grep -c "class CycleFinal(" -- promptpotter` is 0.
 - **A moved panel is warned into a log**: `campaign_store/store.py::write_resolved_run` logs it as a
   `logger.warning` and appends anyway, a state the run enters and reports nowhere. Action: the moved
@@ -366,8 +366,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
     `archive_queries`, `dataset_access`, `spend_book`, `run_scope`, `connectors/protocol`. A
     narrower parameter cannot close these, so each part needs the protocol it reads in a module of
     its own;
-  - the domain: `spend` ↔ `run_records`, `sample`, `pipeline_schema`, `pass_kinds`. Moving the
-    scoring fold re-keys the estimator;
+  - the domain: `spend` ↔ `run_records`, `sample`, `pipeline_schema`, `pass_kinds`;
   - bench ↔ optimizers: bench still reads `nodes.py`'s `CycleRead`, member protocols and
     `NODE_MEMBERS`, because the plugin contract and the round types share that module. Moving
     `CycleRead` alone re-formed runtime cycles.
@@ -377,13 +376,12 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### bkeys-2 (what bkeys left at its landing)
 
-- **A rename re-keys every banked L4 cell**: the estimator id hashes its modules' source, so rn-conn's
-  `is_self_optimization(connector)` rename in `runner/inner/tasks.py` moved it `ff29c7fc` → `75e905b2`
-  and filed every banked L4 cell under an id no read finds, while `behaviour_keys.json` held. Root: the
-  estimator is keyed by its behaviour key, as the treatments are since bkeys. ren's renames moved it
-  again (`dadf1d74` → `4e88e431`) and all five treatment digests with it, every request byte-identical
-  (`nodes.py::behaviour_key` and `tasks.py::estimator` hash source text). **Rides with:** bkeys-2.
-  **Re-test:** a rename in `runner/inner/tasks.py` leaves the estimator id unchanged.
+- **A rename re-keys every banked L4 cell's treatment**: the cell estimator is the L4 leg's behaviour
+  (`nodes.py::BehaviourKeys.cell_estimator`), but `nodes.py::behaviour_key` still hashes each
+  optimizer package's source into `InnerTaskSpec.optimizer_treatment`, so ren's renames moved all five
+  treatment digests, every request byte-identical. Root: a treatment keyed by its fingerprint alone.
+  **Rides with:** bkeys-2. **Re-test:** a rename in `optimizers/potter/` leaves `treatment:potter`
+  (`offline_run.py --digests`) unchanged.
 - **The trace hashes a display field** (rec's landing, reported): `MemberAddress.pass_role` has no
   reader but rides the round-file readings the trace hashes, so deleting it moves the behaviour keys.
   Root: the behaviour key reads the decisions, not the display fields nor their spelling: ren's renames
@@ -391,9 +389,9 @@ and derived the knob couplings from each member's draws and the escalation ladde
   landing wiped the banked origins with them. **Rides with:** bkeys-2. **Re-test:** deleting
   `pass_role`, or renaming a trace field, leaves `behaviour_keys.json` unchanged.
 
-- **An L4 cell's instrument hashes a hand-picked subset, not what its session loads** (✓): the pin's
-  `InnerTaskSpec.instrument` (`runner/inner/tasks.py::InnerTasks`: node config, campaign identity,
-  estimator) skips what the inner session loads live (`wiring.py:228-307`: `origin.yaml`, the `source:`
+- **An L4 cell's key holds its config, not what its session loads** (✓): `InnerTaskSpec`
+  (`runner/inner/tasks.py::InnerTasks`: node config, laid campaign identity, treatment, estimator)
+  skips what the inner session loads live (`wiring.py:228-307`: `origin.yaml`, the `source:`
   cut and recipe, `task.md` framing, the pipelines walk, the backend revision), and pins freeze at outer
   run init while the session loads at each spawn; over-keying: `Seat.id` a label inside the pin, axes
   key order and mixed-manifest chain order. Root: the instrument hashes the seat's
@@ -401,15 +399,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   resolve and one backend read per seat), which `dataset_access.py::dataset_experiment`'s synchronous
   resolve cannot host. **Rides with:** bkeys-2. **Re-test:** an edit to an inner `task.md` moves the
   pin of every seat on that dataset.
-- **A seat's `n_rounds` takes `ge=1` under a panel floor of 2**: `domain/cells.py::Seat.n_rounds`
-  overrides `max_inner_rounds` (`ge=2`) per seat, so one seat still runs a single inner round, a
-  difference with no series behind it. Action: `ge=2`. **Rides with:** bkeys-2. **Re-test:** a seat
-  declaring `n_rounds: 1` is refused.
-- **A deepened inner campaign may stop at its old depth** (reported): depth leaves the inner id, so
-  raising `max_inner_rounds` continues the inner campaign, but `runner/inner/spawn.py:217-250` resumes
-  its stored declaration, whose round budget is the old depth. Action: verify first; if it
-  reproduces, the continued campaign takes the spec's depth as its round budget. **Rides with:**
-  bkeys-2. **Re-test:** a 2-round inner campaign, raised to 3, closes a third round.
 - **The paid L4 browser walk's stop was sized for one inner round** (reported):
   `research/datasets/promptpotter-self/e2e/dataset.yaml:30`'s `usd: 0.05` predates the depth-2 floor,
   so `webapp/e2e/spend/l4.spec.ts` may halt on its ceiling. Action: size it from one measured depth-2
@@ -561,8 +550,8 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 - **Wave B — `application/runner/` is 10 modules, not 8.** lb collapsed it by phase (21 modules to
   10) and deleted the ledger-scan forwarders. The two left over the target: `termination.py` (row
-  below) and `inner/narrative.py`, whose whole text is the L4 estimator digest
-  (`inner/tasks.py::estimator`). The registry fold is the row below.
+  below) and `inner/narrative.py`, which no digest hashes apart any more. The registry fold is the
+  row below.
   **Held:** the termination row. **Re-test:** `git ls-files 'promptpotter/application/runner/*.py' | grep -vc __init__` is 8 or fewer.
 - **`runner/termination.py` is a phase module that `jobs/` reads**: `jobs/registry.py` imports
   `run_stop_reason`, so the stop vocabulary cannot join a phase module without a cycle
@@ -868,8 +857,8 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ## Held — no wave-4 chain yet
 
-- **The estimator has no golden corpus**: its key reads `estimator()` over its source and the L4 leg, not
-  its outputs on fixed inputs. A corpus would read each inner cell's `CycleResult` (~255 KB each) and the
+- **The estimator has no golden corpus**: its key (`nodes.py::BehaviourKeys.cell_estimator`) reads the
+  L4 leg's trace on the offline world, not its outputs on fixed inputs. A corpus would read each inner cell's `CycleResult` (~255 KB each) and the
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
@@ -914,8 +903,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **Nothing keeps an L4 edit L4-only**: Shape: nothing refuses a mark in `runner/inner/narrative.py` or
   an optimizer import of it, and potter's `panels.py` reaches `OuterSampleProxies`, `outer_proxies_of`,
   `inner_facts_of` and `InnerCellFacts`, so an edit to the scored term re-keys every potter campaign.
-  Action: an import-time check in `runner/inner/tasks.py::estimator`' module that no estimator
-  module is a shaper; the injection reads L4 cells through the connector's served terms. **Held:** the
+  Action: the injection reads L4 cells through the connector's served terms (D6). **Held:** the
   re-key. **Re-test:** `git grep -n "domain.l4" -- promptpotter/application/optimizers`.
 - **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`
   reads `result.rounds`, the last cycle only, while the bench and `n_rounds_after_origin` read the line

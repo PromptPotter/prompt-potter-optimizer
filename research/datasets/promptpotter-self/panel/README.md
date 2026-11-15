@@ -5,8 +5,9 @@ inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/i
 [`docs/concepts/l4.md`](../../../../docs/concepts/l4.md).
 
 Each outer "sample" is one entry in `dataset.yaml::panel`: it mints and runs a full inner campaign on
-the seat's benchmark. Each inner run reports a vector of measurements
-(`domain/l4/proxies.py::OuterSampleProxies` is the scored one); the family formula
+the seat's benchmark under the panel's `inner_campaign`. Each inner run reports a vector of
+measurements (`domain/l4/proxies.py::OuterSampleProxies` is the scored one) and its held-out
+`bench_rows`; the family formula
 (`research/datasets/promptpotter-self/family.yaml::campaign.scoring`) re-anchors **one** of them — `held_out_lift`, the area
 under the inner run's held-out curve — into [0,1] and nothing else. The rationale lives in
 [`docs/concepts/l4.md`](../../../../docs/concepts/l4.md) § The measurand.

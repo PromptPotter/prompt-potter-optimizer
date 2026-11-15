@@ -9,6 +9,7 @@ from collections.abc import Callable, Coroutine, Iterable, Mapping, Sequence
 from dataclasses import replace
 from itertools import count
 from pathlib import Path
+from statistics import fmean
 from types import EllipsisType
 from typing import Any, cast
 
@@ -56,7 +57,7 @@ from promptpotter.application.runner.inner.tasks import cell_optimizer
 from promptpotter.application.runner.loop import walk_round_zero
 from promptpotter.application.runner.mint import open_launch
 from promptpotter.application.scoring.formula.compiler import compile_scorer
-from promptpotter.application.scoring.paired import MemberRows
+from promptpotter.application.scoring.paired import MemberRows, grade_measurands, mean_lift
 from promptpotter.config.paths import install_datasets_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import (
@@ -85,6 +86,7 @@ from promptpotter.domain.arms import (
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     BankPartition,
+    BenchCurve,
     BenchScore,
     LiftCost,
     LiveCycleRun,
@@ -987,12 +989,7 @@ async def inner_seat(
     laid = defaulted_config(
         {"optimization": {"optimizer": optimizer, "degradation_threshold": 0.0}}
     )
-    seats = inner_cells(
-        optimizer,
-        dataset=LAUNCHED_DATASET,
-        campaign_config=laid.model_dump(mode="json"),
-        n_samples=30,
-    )
+    seats = inner_cells(optimizer, dataset=LAUNCHED_DATASET, campaign=laid)
     (cell_seat,) = seats.cells
     owner = CycleHop(campaign_id="outer", cycle_id="cycle-0")
     spawning = InnerSpawnContext(
@@ -1031,29 +1028,26 @@ async def inner_seat(
 def inner_cells(
     *optimizers: str,
     dataset: str | None = None,
-    campaign_config: Mapping[str, Any] | None = None,
-    n_samples: int = 1,
+    campaign: CampaignConfig | None = None,
 ) -> InnerCells:
     """One seat per named manifest, on a dataset of its own, so each cell runs its own optimizer;
-    a lone seat runs on *dataset* where one is named, each cell's dataset under *campaign_config*."""
+    a lone seat runs on *dataset* where one is named, each cell's dataset laid as *campaign*."""
     assert dataset is None or len(optimizers) == 1, "two seats never share a dataset"
     on = {name: dataset or f"{name}ds" for name in optimizers}
+    laid = campaign or defaulted_config({})
     by_dataset: dict[str, InnerCell] = {}
     specs: dict[str, InnerTaskSpec] = {}
     for name in optimizers:
         selected = select_optimizer(bench_choice(name))
         treatment = selected.treatment(frozenset(Presumption), PackShelf(account=None)).digest
-        by_dataset[on[name]] = InnerCell(
-            campaign_config or {}, None, cell_optimizer(selected), treatment
-        )
+        by_dataset[on[name]] = InnerCell(laid, None, cell_optimizer(selected), treatment)
         specs[name] = InnerTaskSpec(
             inner_dataset=on[name],
             optimizer_treatment=treatment,
             run_seed=0,
-            n_samples=n_samples,
-            n_samples_bench=1,
-            n_rounds=1,
-            instrument="e",
+            campaign=laid.identity(),
+            nodes=None,
+            estimator="e",
         )
     cells = tuple(Seat(kind="seat", id=name, inner_dataset=on[name]) for name in optimizers)
     return InnerCells(cells=cells, by_dataset=by_dataset, specs=specs, estimator="e")
@@ -1400,6 +1394,18 @@ def level_series(
     )
 
 
+def bench_curve(origin: float | None, levels: list[float | None]) -> BenchCurve:
+    """Two bench rows reading *levels* alike, so the area is their mean less *origin*; an unread
+    level reads `PAST_TOLERANCE`, a line that spent no round `NO_SELECTION`."""
+    if origin is None or None in levels or not levels:
+        state = ReadingState.NO_SELECTION if not levels else ReadingState.PAST_TOLERANCE
+        return BenchCurve(state=state, origin=origin, levels=levels, area=None, rows={})
+    read = [level for level in levels if level is not None]
+    area = mean_lift(grade_measurands(scorer_of())[0], [origin] * 2, [fmean(read)] * 2)
+    rows = {key: [origin, *levels] for key in ("a", "b")}
+    return BenchCurve(state=ReadingState.READ, origin=origin, levels=levels, area=area, rows=rows)
+
+
 def cycle_result(
     levels: list[float | None],
     origin: float | None,
@@ -1419,11 +1425,12 @@ def cycle_result(
 ) -> CycleResult:
     """L1 rounds only in `rounds`/`levels`; `cost` is INCURRED, `billed` diverges under replay.
 
-    The held-out series defaults FLAT at the bench origin, one entry per level, so a test bending
+    The held-out curve defaults FLAT at the bench origin, one entry per level, so a test bending
     only the θ side still scores; `bench_origin=None` is an origin pass that read nothing.
     """
     if bench_levels is None:
         bench_levels = [bench_origin if bench_origin is not None else 0.5] * len(levels)
+    curve = bench_curve(bench_origin, bench_levels)
     unheld = PairedReading.unread(ReadingState.NOT_HELD)
     bench = BenchScore(
         bench_size=0,
@@ -1472,8 +1479,8 @@ def cycle_result(
         level_series=level_series(
             origin, levels, origin_se=origin_se, ses=ses, cold=cold, caveat=caveat
         ),
-        bench_origin_level=bench_origin,
-        bench_round_levels=bench_levels,
+        curve=curve,
+        round_budget=overrides.pop("round_budget", len(levels)),
         result_prompt_fields={},
         stop_reason=stop_reason,
         started_at="2026-01-01T00:00:00Z",

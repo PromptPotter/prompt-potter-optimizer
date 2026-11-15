@@ -283,7 +283,7 @@ class OptimizationConfig(OptimizerChoice):
             "campaign's trajectory and can name the host that produced each number. `None` "
             "(default) → every node runs at its own file settings and the gateway routes per "
             "call. An L4 inner cell is one caller among the rest: its panel's "
-            "`inner_optimizer_temperature` and its cell seed arrive here."
+            "`inner_campaign` lays it as any campaign block does."
         ),
     )
 
@@ -413,7 +413,9 @@ class CampaignConfig(StrictModel):
         "(default): a launch sends none and sets nothing aside for one; the operator asks for "
         "the headline (`held-out`), which grades the origin and the "
         "selection as they then stand. `at_end`: the origin's pass at launch, its price set "
-        "aside under the ceiling, and the selection's once the run ends. No round is graded "
+        "aside under the ceiling, and the selection's once the run ends. `every_adoption`: as "
+        "`at_end`, and the end grades every selection the line adopted, one pass each, so the "
+        "line's held-out curve reads. No round is graded "
         "on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
     )
 

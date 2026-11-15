@@ -737,6 +737,9 @@ export interface CycleEntryFacts {
    * null on every other cycle (the line's reads `held_elsewhere` there) and
    * under a moment. */
   bench: BenchScore | null;
+  /** The line's held-out curve and its area, where `bench` is served and the line
+   * banked an origin pass; null otherwise. */
+  curve: BenchCurve | null;
   /** Whether `verify-candidate` on this cycle is admitted now; null under a moment. */
   verify: PassAdmission | null;
 }
@@ -1038,7 +1041,7 @@ export interface BenchStatus {
   /** Why not, exactly where `can_run` is false. */
   refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
   state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
-  trigger: 'manual' | 'at_end';
+  trigger: 'manual' | 'at_end' | 'every_adoption';
   /** Whether the grade control shows: admitted, or a pass still waited on. Never on
    * an inner run, whose line no command grades. */
   offered: boolean;
@@ -1123,6 +1126,28 @@ export interface OwnLevel {
   /** Rows carrying a verdict — a miss the prompt caused included: the population
    * both columns are read over. */
   n: number;
+}
+
+/** A line's held-out curve: per round of its budget, the standing selection's
+ * headline on the bench rows, and its area, paired row by row with the
+ * origin's. */
+export interface BenchCurve {
+  /** `read`, or why the area reads nothing: the first unread pass of the origin and
+   * each standing selection, in the order they stood. */
+  state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
+  /** The origin's headline on its pass; null where it read nothing. */
+  origin: number | null;
+  /** Per round of the line's round budget, the standing selection's headline, the
+   * last held forward; null where its pass read nothing or was never sent. */
+  levels: (number | null)[];
+  /** Per bench row, the standing selection's grade averaged over the budget's
+   * rounds less the origin's, one paired t over the rows every pass scored.
+   * Null exactly where `state` is not `read`; a line that never adopted reads
+   * 0. */
+  area: MeasuredLift | null;
+  /** By `Sample.key`: the origin's headline grade, then the standing selection's
+   * per round; null where unscored. */
+  rows: Record<string, (number | null)[]>;
 }
 
 /** Whether asking for a pass on the cycle would be admitted now: a verify's
@@ -1306,6 +1331,9 @@ export interface SubtreeCycleEntryFacts {
    * null on every other cycle (the line's reads `held_elsewhere` there) and
    * under a moment. */
   bench: BenchScore | null;
+  /** The line's held-out curve and its area, where `bench` is served and the line
+   * banked an origin pass; null otherwise. */
+  curve: BenchCurve | null;
   /** Whether `verify-candidate` on this cycle is admitted now; null under a moment. */
   verify: PassAdmission | null;
   /** The `per_cell` formula this cycle was read under for the request's lens — a
@@ -1784,9 +1812,7 @@ export interface ServedRound {
   panel_precision: PanelPrecision | null;
   optimizer_facts: OptimizerFact[];
   lift_prior: LiftPrior | null;
-  /** Which lever `panel_precision` calls for, null where it is. Beside the reading
-   * and not on it: `PanelPrecision` is hashed into the L4 estimator's
-   * identity. */
+  /** Which lever `panel_precision` calls for, null where it is. */
   panel_precision_verdict: 'noise' | 'spread' | null;
   /** How each sample of `selection` moved against the round before it that measured
    * any, position for position with `selection` (`sample_movements`). */
@@ -3450,10 +3476,12 @@ export interface CampaignConfig {
    * the operator asks for the headline (`held-out`), which grades the origin
    * and the selection as they then stand. `at_end`: the origin's pass at
    * launch, its price set aside under the ceiling, and the selection's once
-   * the run ends. No round is graded on the bench, so no selection reads the
-   * test set. An arm of a head-to-head is minted `at_end` where this says
+   * the run ends. `every_adoption`: as `at_end`, and the end grades every
+   * selection the line adopted, one pass each, so the line's held-out curve
+   * reads. No round is graded on the bench, so no selection reads the test
+   * set. An arm of a head-to-head is minted `at_end` where this says
    * `manual`: its comparison is the bench score. */
-  bench_trigger: 'manual' | 'at_end';
+  bench_trigger: 'manual' | 'at_end' | 'every_adoption';
   optimization: OptimizationConfig;
 }
 
@@ -3591,7 +3619,7 @@ export interface OptimizationConfig {
    * campaign's trajectory and can name the host that produced each number.
    * `None` (default) → every node runs at its own file settings and the
    * gateway routes per call. An L4 inner cell is one caller among the rest:
-   * its panel's `inner_optimizer_temperature` and its cell seed arrive here. */
+   * its panel's `inner_campaign` lays it as any campaign block does. */
   determinism: DeterminismClamp | null;
 }
 
@@ -4172,10 +4200,12 @@ export interface ConfigEdit {
    * the operator asks for the headline (`held-out`), which grades the origin
    * and the selection as they then stand. `at_end`: the origin's pass at
    * launch, its price set aside under the ceiling, and the selection's once
-   * the run ends. No round is graded on the bench, so no selection reads the
-   * test set. An arm of a head-to-head is minted `at_end` where this says
+   * the run ends. `every_adoption`: as `at_end`, and the end grades every
+   * selection the line adopted, one pass each, so the line's held-out curve
+   * reads. No round is graded on the bench, so no selection reads the test
+   * set. An arm of a head-to-head is minted `at_end` where this says
    * `manual`: its comparison is the bench score. */
-  bench_trigger: 'manual' | 'at_end' | null;
+  bench_trigger: 'manual' | 'at_end' | 'every_adoption' | null;
   optimization: OptimizationOverrides | null;
 }
 
@@ -5041,10 +5071,12 @@ export interface CampaignLayer {
    * the operator asks for the headline (`held-out`), which grades the origin
    * and the selection as they then stand. `at_end`: the origin's pass at
    * launch, its price set aside under the ceiling, and the selection's once
-   * the run ends. No round is graded on the bench, so no selection reads the
-   * test set. An arm of a head-to-head is minted `at_end` where this says
+   * the run ends. `every_adoption`: as `at_end`, and the end grades every
+   * selection the line adopted, one pass each, so the line's held-out curve
+   * reads. No round is graded on the bench, so no selection reads the test
+   * set. An arm of a head-to-head is minted `at_end` where this says
    * `manual`: its comparison is the bench score. */
-  bench_trigger: 'manual' | 'at_end' | null;
+  bench_trigger: 'manual' | 'at_end' | 'every_adoption' | null;
   optimization: OptimizationLayer | null;
 }
 
@@ -5156,7 +5188,7 @@ export interface OptimizationLayer {
    * campaign's trajectory and can name the host that produced each number.
    * `None` (default) → every node runs at its own file settings and the
    * gateway routes per call. An L4 inner cell is one caller among the rest:
-   * its panel's `inner_optimizer_temperature` and its cell seed arrive here. */
+   * its panel's `inner_campaign` lays it as any campaign block does. */
   determinism: DeterminismClamp | null;
 }
 
@@ -5508,7 +5540,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "3d7f7d2447da4dda";
+export const SERVED_CONTRACT = "6b8f1a4f34a6d37d";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

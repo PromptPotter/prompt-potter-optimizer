@@ -745,22 +745,21 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         "inside `variant - origin` and stays out"
     )
 
-    # The scored term is the held-out lift, the bench levels held forward the same way less the
-    # bench origin's 0.40: churn on the search split's θ scores ZERO.
+    # The scored term is the held-out curve's area (`runner/bench.py::read_curve`): churn on the
+    # search split's θ scores ZERO.
     churned = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40])
     churn = (inner_cell_facts(churned).mean_round_delta, compute_outer_proxies(churned))
     assert (churn[0], churn[1].held_out_lift) == pytest.approx((0.25, 0.0))
-    assert lift([0.55, 0.55], [0.50, 0.50], round_budget=4) == pytest.approx(0.10)
-    assert lift([0.30, 0.55], [0.40, 0.50], round_budget=4) == pytest.approx(0.075)
+    assert lift([0.55, 0.55], [0.50, 0.50]) == pytest.approx(0.10)
 
     # EXCLUDED, never floored: the -1 floor would punish the optimizer prompt for a slow provider.
     tooling = [round_result(1, parse_failure=PARSE_FAILURE_TOOLING)]
     for unscoreable in (
-        cyc([], stop_reason=StopReason.TARGET_HIT),
         cyc([0.40, 0.55], stop_reason=StopReason.TOKEN_BUDGET),
         cyc([0.40], rounds=tooling, stop_reason=StopReason.TOKEN_BUDGET),
         cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.50, None]),
         cyc([0.55], bench_origin=None),
+        cyc([0.55]).model_copy(update={"curve": None}),
     ):
         with pytest.raises(CellUnscoreableError):
             compute_outer_proxies(unscoreable)

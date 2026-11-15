@@ -13,11 +13,11 @@ from promptpotter.application.pipeline_resolve import (
     campaign_runs_with,
     line_config,
 )
-from promptpotter.application.runner.bench import cycle_bench, cycle_verify
+from promptpotter.application.runner.bench import cycle_bench, cycle_curve, cycle_verify
 from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.served_dashboard import binding_run_limits, run_said
 from promptpotter.domain.arm_reading import ArmReading, fitness_terms_text
-from promptpotter.domain.bench import BenchScore
+from promptpotter.domain.bench import BenchCurve, BenchScore
 from promptpotter.domain.campaign import (
     LIFECYCLE_STATUS_LABELS,
     Campaign,
@@ -286,6 +286,7 @@ def cycle_entry(
     root: RootRunsWith,
     line: LineConfig,
     bench: BenchScore | None,
+    curve: BenchCurve | None,
 ) -> HierarchyCycle:
     hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
     runs_with = root.runs_with
@@ -343,6 +344,7 @@ def cycle_entry(
         elects_on=index.elects_on,
         spend=spent,
         bench=bench,
+        curve=curve,
         verify=None if moment is not None else cycle_verify(stores, campaign, hop),
     )
     return HierarchyCycle(
@@ -443,10 +445,12 @@ def campaign_entry(
     runs_with = root.runs_with
     held_line = line_config(stores, campaign, holder)
     bench: BenchScore | None = None
+    curve: BenchCurve | None = None
     # The bench passes are read whole, so a replayed moment has no bench reading, as on the dashboard.
     if moment is None and held_line.config is not None:
         try:
             bench = cycle_bench(stores, campaign, holder, held_line.config)
+            curve = cycle_curve(stores, campaign, holder, held_line.config)
         except ScoringFormulaError as exc:
             held_line = LineConfig(None, str(exc))
     cycles: dict[str, HierarchyCycle] = {}
@@ -465,6 +469,7 @@ def campaign_entry(
             root=root,
             line=held_line if hop == holder else line_config(stores, campaign, hop),
             bench=bench if hop == holder else None,
+            curve=curve if hop == holder else None,
         )
     live = cycles.get(holder.cycle_id)
     if live is None:

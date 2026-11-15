@@ -129,8 +129,9 @@ def partition_bank(
 
 BenchSubject = Literal["origin", "selected"]
 
-# `manual`: only when asked (`held-out`); `at_end`: the origin at launch, the selection at the end.
-BenchTrigger = Literal["manual", "at_end"]
+# `manual`: only when asked (`held-out`); `at_end`: the origin at launch, the selection at the end;
+# `every_adoption`: as `at_end`, the end grading every selection the line adopted.
+BenchTrigger = Literal["manual", "at_end", "every_adoption"]
 
 
 class PassStop(FrozenModel):
@@ -535,6 +536,38 @@ class BenchScore(FrozenModel):
 
     def lift(self, column: BenchColumn) -> MeasuredLift | None:
         return self.vs_origin.lift(COLUMN_GRADE[column])
+
+
+class BenchCurve(FrozenModel):
+    """A line's held-out curve: per round of its budget, the standing selection's headline on the
+    bench rows, and its area, paired row by row with the origin's."""
+
+    state: ReadingState = Field(
+        description="`read`, or why the area reads nothing: the first unread pass of the origin "
+        "and each standing selection, in the order they stood."
+    )
+    origin: float | None = Field(
+        description="The origin's headline on its pass; null where it read nothing."
+    )
+    levels: list[float | None] = Field(
+        description="Per round of the line's round budget, the standing selection's headline, "
+        "the last held forward; null where its pass read nothing or was never sent."
+    )
+    area: MeasuredLift | None = Field(
+        description="Per bench row, the standing selection's grade averaged over the budget's "
+        "rounds less the origin's, one paired t over the rows every pass scored. Null exactly "
+        "where `state` is not `read`; a line that never adopted reads 0."
+    )
+    rows: dict[str, list[float | None]] = Field(
+        description="By `Sample.key`: the origin's headline grade, then the standing selection's "
+        "per round; null where unscored."
+    )
+
+    @model_validator(mode="after")
+    def _area_where_read(self) -> Self:
+        if (self.area is None) is (self.state is ReadingState.READ):
+            raise ValueError("a curve holds its area exactly where it reads")
+        return self
 
 
 class CampaignRefusal(StrEnum):

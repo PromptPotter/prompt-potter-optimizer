@@ -89,7 +89,6 @@ from promptpotter.application.optimizers.nodes import (
     BehaviourKeys,
 )
 from promptpotter.application.pipeline_resolve import cycle_config
-from promptpotter.application.runner.inner.tasks import estimator
 from promptpotter.config.paths import (
     PACKAGE_ROOT,
     PROJECTS_DIR,
@@ -1417,6 +1416,7 @@ _HEX32 = re.compile(r"^[0-9a-f]{32}$")
 _HEX16 = re.compile(r"^[0-9a-f]{16}$")
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _EMBEDDED_HEX32 = re.compile(r"[0-9a-f]{32}")
+_EMBEDDED_HEX16 = re.compile(r"(?<![0-9a-f])[0-9a-f]{16}(?![0-9a-f])")
 _SHORT_HEX = re.compile(r"\b[0-9a-f]{6,12}\b")
 _CYCLE_ID = re.compile(r"cycle_[0-9a-f]{8,}")
 _FORK_ID = re.compile(r"cycle_[0-9a-f]{8,}_fork_[0-9a-f]{8}")
@@ -1445,6 +1445,10 @@ class Canon:
             # the trace keeps only which hashes are one; a behaviour key then reads alike anywhere.
             return self.hashes.setdefault(v, f"<hash {len(self.hashes)}>")
         v = _EMBEDDED_HEX32.sub(lambda m: self.ids.get(m.group(0), "<id>"), v)
+        # An L4 instrument id embeds the cell estimator, which hashes this very trace.
+        v = _EMBEDDED_HEX16.sub(
+            lambda m: self.hashes.setdefault(m.group(0), f"<hash {len(self.hashes)}>"), v
+        )
         v = _SHORT_HEX.sub(lambda m: self.short.get(m.group(0), m.group(0)), v)
         v = _CAMPAIGN_ID.sub("<campaign>", v)
         v = _FORK_ID.sub(lambda m: self.forks[m.group(0)], v)
@@ -1673,7 +1677,7 @@ def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
 
 def digests() -> dict[str, str]:
     check_every_treatment()
-    out = {"estimator": estimator()}
+    out = {"estimator": BehaviourKeys.held().cell_estimator}
     for name in sorted(optimizers.MANIFESTS.table):
         selected = select_optimizer(bench_choice(name))
         out[f"treatment:{name}"] = selected.treatment(
@@ -1698,11 +1702,8 @@ def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
         fingerprints[name] = stable_hash([trace.decisions, trace.requests])
     fingerprint = held.estimator
     if "potter" in names and (nested := home / "potter" / L4 / TRACE).is_file():
-        # Its pins carry the estimator the leg ran under, read out so the fingerprint is not its own input.
         trace = BehaviourTrace.read(nested.parent)
-        fingerprint = stable_hash(
-            json.dumps([trace.decisions, trace.requests], sort_keys=True).replace(estimator(), "")
-        )
+        fingerprint = stable_hash([trace.decisions, trace.requests])
     kept = BehaviourKeys(
         world=WORLD, fingerprints=dict(sorted(fingerprints.items())), estimator=fingerprint
     )

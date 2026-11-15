@@ -8,7 +8,6 @@ No I/O, no async (`scripts/gate.py::_LAYERING`). Every model inherits `StrictMod
 - **Two θ are differenced only through `AbilityReading.comparable_to` / `.lift_over`**, and a θ lift (an `Estimate`) is judged only by `ruler.py::clears` <!-- probe: git grep -cE "\.theta - " -- promptpotter/*.py <= 1 -->; a cell the `DeltaRuler` does not carry enters no θ.
 - **`CycleHop` is the `(campaign, cycle)` address** (`Session.hop`, `Job.hop`), never re-paired from two `str`s.
 - **`pipeline_params.py::PipelineParams` is built only by reading the laid document it dumps back to**, so whatever it builds reads back; `STEPS_KEY`, `NodeCall`'s fields and `node_rule` are the one spelling of the key, the call-key rosters and the node fold's rule. <!-- probe: git grep -cE "== .steps." -- promptpotter/*.py == 0 -->
-- **The estimator digest hashes `l4/proxies`**, so only what decides a cell's number lives there.
 - **`spend.py::TokenAccount` IS the carrier**: never hand-convert it at a call site.
 - **`deprecated` names the fatal-warning sample lifecycle only** (`is_deprecated`, `CellFold.deprecated`), never a back-compat shim: do not delete it as one.
 - **A command kind is ONE `command_kinds.py::CommandKind` row** (here because the lazy CLI `--help` and a ledger fold cannot import the dispatcher): its payload model declares the kind, the row names `handler`, `capability` and `press`; spec, TS types and `BrowserKind` are generated, and a kind the browser presses takes its sender in `webapp/lib/api/commands.ts::commands`.

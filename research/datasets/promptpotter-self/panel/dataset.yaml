@@ -22,27 +22,23 @@ panel:
   #
   # The cell itself is trimmed to pay for that width: 4 rounds x 3 variants instead of 5 x 4.
   #
-  # WHAT A CELL COSTS is unmeasured under this geometry (40 rows a round, up to the whole round
-  # budget a cell, three benchmarks). The next C0 reads it off the cycle ledgers; quote it
-  # from there, never from arithmetic over the knobs below.
-  #
-  # `max_inner_rounds` IS the estimand's budget, the width of the area `held_out_lift` reads, and
-  # an inner run carries no lives to stop it short. Raising it changes what the panel measures and
-  # costs proportional spend, so it is an operator decision, not a tuning detail; read a delta as
-  # "how soon the search gains, over a 4-round budget".
-  inner_benchmark_config:
-    n_samples_per_inner_round: 40
-    n_samples_origin: 40
-    # Drawn beside the 40-row bank under the same seed and never searched: the scored
-    # `held_out_lift` is read here.
-    n_samples_bench: 20
-    max_inner_rounds: 4
-    inner_nodes:
-      l1_generate:
-        config:
-          n_variants: 3
-    inner_optimizer_temperature: 0.0
-  # A seed picks WHICH 40 rows a cell draws (`runner/inner/spawn.py::_open_seat`, the ONE spelling).
+  # Laid over each seat dataset's own `campaign:` block, as any campaign block is. Two facts follow:
+  # - A round reads the first 40 search rows less the crowning cells, then refills from row 41
+  #   (`members.py::AdaptiveQueue.draw`, `adaptive_queue_mechanism.py::covered_prefix`).
+  # - `partition_bank` ranks rows by `stable_hash([seed, key])`, so the seats draw other rows than
+  #   the seed screens below read: those screens no longer describe the seats.
+  inner_campaign:
+    sp_budget_origin: 40
+    # `demo: 0` is load-bearing: justlogic's own `demo: 50` would open shots.
+    dataset_split: {bench: 20, demo: 0, tolerance: 2}
+    bench_trigger: every_adoption
+    optimization:
+      # The width of the area `held_out_lift` reads, and inside every cell's key.
+      budget: {rounds: 4}
+      determinism: {temperature: 0.0}
+      nodes:
+        adaptive_queue: {config: {sp_budget_round: 40, per_round_resubset: false}}
+        l1_generate: {config: {n_variants: 3}}
   #
   # The panel spans THREE benchmarks, two seats each, so an edit that helps one task family and
   # hurts another reads as the mixture it is. Each inner campaign reads its own benchmark's δ
@@ -77,8 +73,7 @@ panel:
   #   legalbench-fods seed-0 — origin 0.525, floor 0.250, margin +0.275 +/-0.000, 3 passes.
   #   legalbench-fods seed-1 — origin 0.392, floor 0.200, margin +0.192 +/-0.017, 3 passes.
   #
-  # Each task is its own sample's content address (`runner/inner/spawn.py::_extract_experiment`),
-  # so a swapped or edited seat voids only its own banked cells; every other seat replays.
+  # A swapped seat voids only its own banked cells; an `inner_campaign` edit voids every seat's.
   tasks:
     - kind: seat
       id: justlogic-d234/seed-20

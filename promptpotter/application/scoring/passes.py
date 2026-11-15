@@ -611,7 +611,11 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                     )
                     assert banked is not None, "the line holder holds its origin's pass"
                     banked = await bench_selection(
-                        session, rounds, points=opened.points, banked=banked
+                        session,
+                        rounds,
+                        points=opened.points,
+                        banked=banked,
+                        trigger=config.bench_trigger,
                     )
                 except (KeyboardInterrupt, asyncio.CancelledError) as stop:
                     # The pass banked itself stopped, so the line's reading over it is the answer.

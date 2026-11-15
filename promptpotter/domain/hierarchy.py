@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
-from promptpotter.domain.bench import BenchScore, PassAdmission
+from promptpotter.domain.bench import BenchCurve, BenchScore, PassAdmission
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
@@ -167,6 +167,10 @@ class CycleEntryFacts(FrozenModel):
         description="The campaign's bench, on the cycle holding the line, read whole at the "
         "head; null on every other cycle (the line's reads `held_elsewhere` there) and under a "
         "moment."
+    )
+    curve: BenchCurve | None = Field(
+        description="The line's held-out curve and its area, where `bench` is served and the "
+        "line banked an origin pass; null otherwise."
     )
     verify: PassAdmission | None = Field(
         description="Whether `verify-candidate` on this cycle is admitted now; null under a moment."

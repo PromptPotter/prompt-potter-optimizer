@@ -1658,6 +1658,81 @@
         "title": "BarRead",
         "type": "object"
       },
+      "BenchCurve": {
+        "additionalProperties": false,
+        "description": "A line's held-out curve: per round of its budget, the standing selection's headline on the\nbench rows, and its area, paired row by row with the origin's.",
+        "properties": {
+          "area": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredLift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per bench row, the standing selection's grade averaged over the budget's rounds less the origin's, one paired t over the rows every pass scored. Null exactly where `state` is not `read`; a line that never adopted reads 0."
+          },
+          "levels": {
+            "description": "Per round of the line's round budget, the standing selection's headline, the last held forward; null where its pass read nothing or was never sent.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The origin's headline on its pass; null where it read nothing.",
+            "title": "Origin"
+          },
+          "rows": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "description": "By `Sample.key`: the origin's headline grade, then the standing selection's per round; null where unscored.",
+            "title": "Rows",
+            "type": "object"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReadingState",
+            "description": "`read`, or why the area reads nothing: the first unread pass of the origin and each standing selection, in the order they stood."
+          }
+        },
+        "required": [
+          "state",
+          "origin",
+          "levels",
+          "area",
+          "rows"
+        ],
+        "title": "BenchCurve",
+        "type": "object"
+      },
       "BenchPass": {
         "additionalProperties": false,
         "properties": {
@@ -2109,7 +2184,8 @@
           "trigger": {
             "enum": [
               "manual",
-              "at_end"
+              "at_end",
+              "every_adoption"
             ],
             "title": "Trigger",
             "type": "string"
@@ -2244,10 +2320,11 @@
         "additionalProperties": false,
         "properties": {
           "bench_trigger": {
-            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
+            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. `every_adoption`: as `at_end`, and the end grades every selection the line adopted, one pass each, so the line's held-out curve reads. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
             "enum": [
               "manual",
-              "at_end"
+              "at_end",
+              "every_adoption"
             ],
             "title": "Bench Trigger",
             "type": "string"
@@ -2491,7 +2568,8 @@
               {
                 "enum": [
                   "manual",
-                  "at_end"
+                  "at_end",
+                  "every_adoption"
                 ],
                 "type": "string"
               },
@@ -2499,7 +2577,7 @@
                 "type": "null"
               }
             ],
-            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
+            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. `every_adoption`: as `at_end`, and the end grades every selection the line adopted, one pass each, so the line's held-out curve reads. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
             "title": "Bench Trigger"
           },
           "dataset_split": {
@@ -4256,7 +4334,8 @@
               {
                 "enum": [
                   "manual",
-                  "at_end"
+                  "at_end",
+                  "every_adoption"
                 ],
                 "type": "string"
               },
@@ -4264,7 +4343,7 @@
                 "type": "null"
               }
             ],
-            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
+            "description": "When the line's bench passes are sent — each a cell per bench row, the ranked `dataset_split.bench` and every bench-only row the bank declares. `manual` (default): a launch sends none and sets nothing aside for one; the operator asks for the headline (`held-out`), which grades the origin and the selection as they then stand. `at_end`: the origin's pass at launch, its price set aside under the ceiling, and the selection's once the run ends. `every_adoption`: as `at_end`, and the end grades every selection the line adopted, one pass each, so the line's held-out curve reads. No round is graded on the bench, so no selection reads the test set. An arm of a head-to-head is minted `at_end` where this says `manual`: its comparison is the bench score.",
             "title": "Bench Trigger"
           },
           "dataset_split": {
@@ -4966,6 +5045,17 @@
             ],
             "description": "The campaign's bench, on the cycle holding the line, read whole at the head; null on every other cycle (the line's reads `held_elsewhere` there) and under a moment."
           },
+          "curve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchCurve"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The line's held-out curve and its area, where `bench` is served and the line banked an origin pass; null otherwise."
+          },
           "elects_on": {
             "anyOf": [
               {
@@ -5045,6 +5135,7 @@
           "elects_on",
           "spend",
           "bench",
+          "curve",
           "verify"
         ],
         "title": "CycleEntryFacts",
@@ -11915,7 +12006,7 @@
                 "type": "null"
               }
             ],
-            "description": "Pin the optimizer's decoding and its route so a re-run reproduces this campaign's trajectory and can name the host that produced each number. `None` (default) → every node runs at its own file settings and the gateway routes per call. An L4 inner cell is one caller among the rest: its panel's `inner_optimizer_temperature` and its cell seed arrive here."
+            "description": "Pin the optimizer's decoding and its route so a re-run reproduces this campaign's trajectory and can name the host that produced each number. `None` (default) → every node runs at its own file settings and the gateway routes per call. An L4 inner cell is one caller among the rest: its panel's `inner_campaign` lays it as any campaign block does."
           },
           "elimination_n_min": {
             "description": "Minimum distinct samples before θ is read as ability: the δ ruler stays flat below it, and no eliminator cuts an arm (nor a selector crowns one) on fewer — the floor on n for a posterior to be meaningful.",
@@ -12106,7 +12197,7 @@
                 "type": "null"
               }
             ],
-            "description": "Pin the optimizer's decoding and its route so a re-run reproduces this campaign's trajectory and can name the host that produced each number. `None` (default) → every node runs at its own file settings and the gateway routes per call. An L4 inner cell is one caller among the rest: its panel's `inner_optimizer_temperature` and its cell seed arrive here."
+            "description": "Pin the optimizer's decoding and its route so a re-run reproduces this campaign's trajectory and can name the host that produced each number. `None` (default) → every node runs at its own file settings and the gateway routes per call. An L4 inner cell is one caller among the rest: its panel's `inner_campaign` lays it as any campaign block does."
           },
           "elimination_n_min": {
             "anyOf": [
@@ -16236,7 +16327,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which lever `panel_precision` calls for, null where it is. Beside the reading and not on it: `PanelPrecision` is hashed into the L4 estimator's identity.",
+            "description": "Which lever `panel_precision` calls for, null where it is.",
             "title": "Panel Precision Verdict"
           },
           "round": {
@@ -17647,6 +17738,17 @@
             ],
             "description": "The campaign's bench, on the cycle holding the line, read whole at the head; null on every other cycle (the line's reads `held_elsewhere` there) and under a moment."
           },
+          "curve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchCurve"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The line's held-out curve and its area, where `bench` is served and the line banked an origin pass; null otherwise."
+          },
           "elects_on": {
             "anyOf": [
               {
@@ -17773,6 +17875,7 @@
           "elects_on",
           "spend",
           "bench",
+          "curve",
           "verify",
           "lens_criterion",
           "lens_shift",

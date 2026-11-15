@@ -172,13 +172,16 @@ from promptpotter.application.optimizers.variation.members import (
     most_donated,
 )
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.runner import bench as line_bench
 from promptpotter.application.runner.bench import (
+    LineSpan,
     bank_campaign_result,
     bench_selection,
-    bench_series,
     line_launches,
+    line_round_budget,
     pair_on_bench,
     read_bench,
+    read_curve,
     score_on_bench,
 )
 from promptpotter.application.runner.entry import build_cycle_result
@@ -252,6 +255,7 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.bench import (
     COST_ABSENCE_WORDS,
+    BenchTrigger,
     CampaignRefusal,
     CostAbsence,
     DatasetSplit,
@@ -1409,18 +1413,25 @@ def _potter_says(*instructions: str) -> Callable[[dict[str, Any]], str]:
 
 
 def _bench_pass(
-    stores: Stores, individual: str, reward: float, *, cells: int = 4, stop: PassStop | None = None
+    stores: Stores,
+    individual: str,
+    reward: float | list[float],
+    *,
+    cells: int = 4,
+    stop: PassStop | None = None,
 ) -> BenchPass:
+    """*reward* is every row's, or each row's in turn."""
     held_out = samples(4, query="b")
+    rewards = reward if isinstance(reward, list) else [reward] * len(held_out)
     rows = [
         measurement(
             s.id,
             None,
             query=s.query,
             sample_key=f"key:{s.query}",
-            pipeline_data={"env_reward": reward},
+            pipeline_data={"env_reward": paid},
         )
-        for s in held_out[:cells]
+        for s, paid in zip(held_out[:cells], rewards, strict=False)
     ]
     return bench_pass(
         stores,
@@ -2188,7 +2199,9 @@ def _bench_cycle(
         def graded(*held: BenchPass) -> BenchPasses:
             banked = bench_passes(origin_pass, *held)
             return asyncio.run(
-                bench_selection(session, cycle.rounds, points=cycle.points, banked=banked)
+                bench_selection(
+                    session, cycle.rounds, points=cycle.points, banked=banked, trigger="at_end"
+                )
             )
 
         yield _Bench(
@@ -2238,6 +2251,7 @@ def _pause_mid_pass(
                 cycle.rounds,
                 points=cycle.points,
                 banked=bench_passes(bench.origin_pass),
+                trigger="at_end",
             )
 
     with monkeypatch.context() as patched:
@@ -2870,7 +2884,157 @@ def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing(
         assert line_bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
         pick_arm = arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1), individual=pick)
         on_line = round_result(1, arms={ArmKey(pick.id): pick_arm}, selected=pick.id, cells={})
-        assert bench_series(line_stores, line_passes, line_scorer, rounds=[on_line]) == series, case
+        curve = read_curve(
+            line_stores, line_passes, line_scorer, [LineSpan([on_line], None)], budget=1
+        )
+        assert ((None, []) if curve is None else (curve.origin, curve.levels)) == series, case
+
+
+def _adopting(rnd: int, individual: OptSearchPoint | None) -> RoundResult:
+    """Round *rnd* selecting *individual*, or selecting nothing."""
+    if individual is None:
+        return round_result(rnd, improved=False, cells={})
+    arm = arm_state(
+        f"C{rnd}.1", position=ArmPosition(round=rnd, idx=0, total=1), individual=individual
+    )
+    return round_result(rnd, arms={ArmKey(individual.id): arm}, selected=individual.id, cells={})
+
+
+def _area_passes(stores: Stores, first: str, second: str) -> tuple[BenchPass, ...]:
+    """The origin's and two selections' passes over four held-out rows."""
+    return (
+        _bench_pass(stores, "origin", [0.2, 0.4, 0.2, 0.4]),
+        _bench_pass(stores, first, [0.6, 0.4, 0.8, 0.6]),
+        _bench_pass(stores, second, [1.0, 0.8, 0.6, 1.0]),
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_the_held_out_area_averages_each_row_over_the_round_budget_against_the_origin(
+    tmp_path: Path,
+) -> None:
+    stores = workspace(tmp_path / "area")
+    scorer = scorer_of(_H2H_FORMULA)
+    first, second = prompted(instruction="first"), prompted(instruction="second")
+    origin, first_pass, second_pass = _area_passes(stores, first.id, second.id)
+    # Adopted at rounds 1 and 3 of a budget of 4: the second is held forward to round 4.
+    spans = [LineSpan([_adopting(1, first), _adopting(2, None), _adopting(3, second)], None)]
+    curve = read_curve(
+        stores, bench_passes(origin, first_pass, second_pass), scorer, spans, budget=4
+    )
+    assert curve is not None and curve.area is not None
+    area = curve.area.estimate
+    assert curve.state is ReadingState.READ and area.value == pytest.approx(0.425), (
+        "the area is not each row's mean over the budget less the origin's"
+    )
+    assert area.ci_lo is not None and area.ci_hi is not None and area.ci_lo < 0.425 < area.ci_hi
+    assert curve.levels == pytest.approx([0.6, 0.6, 0.85, 0.85]), "a level is not its standing's"
+    stopped = second_pass.model_copy(
+        update={"stop": PassStop(cause=StopReason.SPEND_BUDGET, warning=None)}
+    )
+    for passes, state in (
+        (bench_passes(origin, first_pass, stopped), ReadingState.PASS_STOPPED),
+        (bench_passes(origin, first_pass), ReadingState.NOT_ASKED),
+    ):
+        read = read_curve(stores, passes, scorer, spans, budget=4)
+        assert read is not None and (read.state, read.area) == (state, None), (
+            "an area read over a pass that read nothing"
+        )
+    held = [LineSpan([_adopting(rnd, None) for rnd in (1, 2, 3)], None)]
+    never = read_curve(stores, bench_passes(origin), scorer, held, budget=4)
+    assert never is not None and never.area is not None
+    assert (never.state, never.area.estimate.value) == (ReadingState.READ, 0.0), (
+        "a line that never adopted read anything but a zero area"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_rebase_discarded_adoption_stays_in_the_held_out_area(tmp_path: Path) -> None:
+    stores = workspace(tmp_path / "fork")
+    scorer = scorer_of(_H2H_FORMULA)
+    first, second = prompted(instruction="first"), prompted(instruction="second")
+    # The first cycle adopts twice; its fork cuts at round 2, standing on round 1's adoption.
+    spans = [
+        LineSpan([_adopting(1, first), _adopting(2, second)], None),
+        LineSpan([_adopting(1, first), _adopting(2, None), _adopting(3, None)], 2),
+    ]
+    budget = line_round_budget(spans, 4)
+    assert budget == 5, "the fork's cap did not add the round its line has left"
+    passes = bench_passes(*_area_passes(stores, first.id, second.id))
+    curve = read_curve(stores, passes, scorer, spans, budget=budget)
+    assert curve is not None and curve.area is not None
+    assert curve.levels == pytest.approx([0.6, 0.85, 0.6, 0.6, 0.6]), (
+        "a round the rebase discarded is not read at the selection it stood on"
+    )
+    assert curve.area.estimate.value == pytest.approx(0.35)
+
+
+def _adopting_twice(picked: _Bench, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """An earlier round of the line adopting the round's other measured arm: the pick and it."""
+    cycle, head, round_ = picked.cycle, picked.head, picked.picked
+    origin = cycle.origin_round.origin.individual.id
+    other = next(
+        key
+        for key, arm in round_.arms.items()
+        if key not in {head.individual.id, origin} and isinstance(arm, Measured | Cut)
+    )
+    assert round_.election is not None
+    earlier = round_.model_copy(
+        update={
+            "election": round_.election.model_copy(update={"selected": other, "ended_on": other})
+        }
+    )
+    spans = line_bench.line_spans
+    monkeypatch.setattr(
+        line_bench, "line_spans", lambda *a: [LineSpan([earlier], None), *spans(*a)]
+    )
+    return head.individual.id, other
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_every_adoption_grades_each_selection_the_line_adopted_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(tmp_path, monkeypatch, offline) as picked:
+        cycle, session = picked.cycle, picked.session
+        adopted = set(_adopting_twice(picked, monkeypatch))
+
+        def graded(trigger: BenchTrigger, banked: BenchPasses) -> BenchPasses:
+            return asyncio.run(
+                bench_selection(
+                    session, cycle.rounds, points=cycle.points, banked=banked, trigger=trigger
+                )
+            )
+
+        assert set(graded("at_end", bench_passes(picked.origin_pass)).selections) == {
+            picked.head.individual.id
+        }, "`at_end` graded more than the final selection"
+        every = graded("every_adoption", bench_passes(picked.origin_pass))
+        assert set(every.selections) == adopted, "an adoption of the line went ungraded"
+        again = graded("every_adoption", every)
+        assert all(again.selections[key] is every.selections[key] for key in adopted), (
+            "a pass that answers was sent again"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_every_adoption_sets_aside_one_pass_per_selection_it_will_grade(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(tmp_path, monkeypatch, offline) as picked:
+        cycle, session = picked.cycle, picked.session
+        _adopting_twice(picked, monkeypatch)
+        monkeypatch.setattr(line_bench, "cell_channels_of", lambda *_: {"cost": 0.01})
+        book = require_spend_book("the set-aside")
+        held: dict[BenchTrigger, float] = {}
+        for trigger in ("at_end", "every_adoption"):
+            book.set_aside(1e-9, 1)
+            cycle.config = cycle.config.model_copy(update={"bench_trigger": trigger})
+            line_bench.reserve_selection_pass(cycle, session)
+            held[trigger] = book.set_aside_usd
+        assert held["every_adoption"] == pytest.approx(2 * held["at_end"]), (
+            "the set-aside does not price every adoption the end pass grades"
+        )
 
 
 # 4. An authored round — the operator's arm in the seat a proposer fills

@@ -1,5 +1,3 @@
-"""What the outer model reads of one inner run: hashed with the L4 instrument, so an edit here re-keys L4's cells."""
-
 from __future__ import annotations
 
 from promptpotter.domain.arm_reading import ArmFit, fold_fitness_text, order_floor
@@ -9,7 +7,6 @@ from promptpotter.domain.l4.cells import InnerTaskSpec
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap, series_reason_head
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
-    effective_round_budget,
     floor_reason,
     parent_levels,
     unread_rounds,
@@ -30,8 +27,7 @@ def _lift_shape(result: CycleResult) -> str:
     if not marks:
         return "lifts: none — no L1 round closed."
     n = sum(1 for rr in l1 if rr.improved)
-    budget = effective_round_budget(result)
-    return f"lifts: {marks} ({n}/{budget}; target: early and often, thinning late)"
+    return f"lifts: {marks} ({n}/{result.round_budget};target: early and often, thinning late)"
 
 
 def narrative_head(spec: InnerTaskSpec) -> str:

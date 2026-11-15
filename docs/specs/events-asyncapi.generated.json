@@ -1156,7 +1156,8 @@
           "trigger": {
             "enum": [
               "manual",
-              "at_end"
+              "at_end",
+              "every_adoption"
             ],
             "title": "Trigger",
             "type": "string"

@@ -22,6 +22,7 @@ from promptpotter.application.scoring.paired import (
     MemberRows,
     absent_pair,
     grade_measurands,
+    mean_lift,
     read_pair,
 )
 from promptpotter.application.scoring.search_point_scorer import (
@@ -29,11 +30,12 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_point,
 )
 from promptpotter.application.scoring.selection import level_band
-from promptpotter.domain.arms import PointContext, candidate_label
+from promptpotter.domain.arms import Concluded, PointContext, candidate_label
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     COLUMN_GRADE,
     BenchColumn,
+    BenchCurve,
     BenchReading,
     BenchScope,
     BenchScore,
@@ -53,7 +55,6 @@ from promptpotter.domain.bench import (
 from promptpotter.domain.campaign import Campaign, worked_seconds
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
-from promptpotter.domain.l4.proxies import line_round_levels, spent_on_line
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
@@ -165,29 +166,9 @@ def _read_pass(
     return _PassReading(bench_pass, reading, outcome, sheet)
 
 
-def bench_series(
-    stores: Stores, passes: BenchPasses | None, scorer: Scorer, *, rounds: Sequence[RoundOutcome]
-) -> tuple[float | None, list[float | None]]:
-    """Per L1 round, the STANDING selection's headline on the bench rows, held forward across rounds that held; ``None`` where its pass read nothing or was never sent."""
-    if passes is None:
-        return None, []
-    read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
-
-    def headline(bench_pass: BenchPass) -> float | None:
-        reading = read(bench_pass).reading
-        return None if reading is None or reading.level is None else reading.level.value
-
-    standing = origin = headline(passes.origin)
-    series: list[float | None] = []
-    for outcome in rounds:
-        if outcome.election is not None and outcome.election.selected is not None:
-            head = outcome.head
-            assert head is not None, "a round that selected ends on the arm it selected"
-            taken = passes.pass_of(head.individual.id)
-            # Ungraded (an `at_end` line's) or stopped short: never the one it displaced.
-            standing = None if taken is None else headline(taken)
-        series.append(standing)
-    return origin, series
+def spent_on_line(rnd: int, cut_round: int | None) -> bool:
+    """A round its cycle ran itself (from *cut_round* on, a fork's), never the origin it is differenced against."""
+    return rnd > 0 and (cut_round is None or rnd >= cut_round)
 
 
 class LineSpan(NamedTuple):
@@ -211,19 +192,101 @@ def line_spans(stores: Stores, scorer: Scorer, hop: CycleHop) -> list[LineSpan]:
     return spans
 
 
-def line_bench_series(
-    stores: Stores, passes: BenchPasses | None, scorer: Scorer, spans: Sequence[LineSpan]
-) -> tuple[float | None, list[float | None]]:
-    """`bench_series` per cycle of the line, folded by the hashed `proxies.py::line_round_levels`."""
-    if passes is None:
-        return None, []
-    origin: float | None = None
-    per_cycle: list[tuple[list[tuple[int, float | None]], int | None]] = []
+def line_round_budget(spans: Sequence[LineSpan], cap: int | None) -> int:
+    """The held-out area's width: uncapped, the rounds the line spent."""
+    spent = sum(len(span.own) for span in spans)
+    if cap is None:
+        return spent
+    # The cycle's cap holds what its line had left: the line's adds every round a rebase left.
+    return max(spent, cap + spent - sum(1 for rr in spans[-1].rounds if rr.round > 0))
+
+
+def _adopted(rr: RoundOutcome) -> tuple[int, Concluded] | None:
+    if rr.election is None or rr.election.selected is None:
+        return None
+    head = rr.head
+    assert head is not None, "a round that selected ends on the arm it selected"
+    return rr.round, head
+
+
+def _stood_on(spans: Sequence[LineSpan]) -> list[tuple[int, Concluded] | None]:
+    """What each round the line spent stood on, oldest first: its adopting round and arm, ``None`` the origin."""
+    stood: list[tuple[int, Concluded] | None] = []
     for span in spans:
-        origin, series = bench_series(stores, passes, scorer, rounds=span.rounds)
-        rounds = [rr.round for rr in span.rounds]
-        per_cycle.append((list(zip(rounds, series, strict=True)), span.cut_round))
-    return origin, line_round_levels(per_cycle)
+        held = None
+        for rr in span.rounds:
+            held = _adopted(rr) or held
+            if spent_on_line(rr.round, span.cut_round):
+                stood.append(held)
+    return stood
+
+
+def _standing(spans: Sequence[LineSpan], origin: str) -> list[str]:
+    return [origin if held is None else held[1].individual.id for held in _stood_on(spans)]
+
+
+def read_curve(
+    stores: Stores,
+    passes: BenchPasses | None,
+    scorer: Scorer,
+    spans: Sequence[LineSpan],
+    *,
+    budget: int,
+) -> BenchCurve | None:
+    """The last standing selection held forward to *budget*; ``None`` where no origin pass banked."""
+    if passes is None:
+        return None
+    origin = passes.origin.arm.key
+    spent = _standing(spans, origin)
+    standing = [*spent, *[spent[-1] if spent else origin] * (budget - len(spent))]
+    read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
+    reads = {
+        key: None if (taken := passes.pass_of(key)) is None else read(taken)
+        for key in dict.fromkeys([origin, *standing])
+    }
+    state = next(
+        (
+            ReadingState.NOT_ASKED if held is None else held.outcome.state
+            for held in reads.values()
+            if held is None or held.reading is None
+        ),
+        ReadingState.READ,
+    )
+    grade = ROW_GRADES[COLUMN_GRADE[BENCH_HEADLINE]]
+    columns = {key: {} if held is None else held.sheet.column(grade) for key, held in reads.items()}
+    rows = {
+        row: [columns[key].get(row) for key in (origin, *standing)]
+        for row in passes.origin.sample_keys
+    }
+    paired = [
+        scored
+        for values in rows.values()
+        if len(scored := [value for value in values if value is not None]) == len(values)
+    ]
+    if state is ReadingState.READ and not standing:
+        state = ReadingState.NO_SELECTION
+    elif state is ReadingState.READ and len(paired) < 2:
+        state = ReadingState.UNDER_TWO_CELLS
+    area = (
+        mean_lift(
+            grade_measurands(scorer)[0], [r[0] for r in paired], [fmean(r[1:]) for r in paired]
+        )
+        if state is ReadingState.READ
+        else None
+    )
+
+    def level(key: str) -> float | None:
+        held = reads[key]
+        reading = None if held is None else held.reading
+        return None if reading is None or reading.level is None else reading.level.value
+
+    return BenchCurve(
+        state=state,
+        origin=level(origin),
+        levels=[level(key) for key in standing],
+        area=area,
+        rows=rows,
+    )
 
 
 def _bench_member(path: CyclePath, read: _PassReading, *, instrument_id: str) -> MemberRows | None:
@@ -546,6 +609,22 @@ def _with_selection(passes: BenchPasses, taken: BenchPass) -> BenchPasses:
     return passes.model_copy(update={"selections": {**passes.selections, taken.arm.key: taken}})
 
 
+def _adoptions(
+    session: Session, rounds: Sequence[RoundOutcome], *, origin: str, trigger: BenchTrigger
+) -> dict[str, tuple[ArmName, Concluded]]:
+    """The final selection first, then under `every_adoption` each other one its line stood on, latest first; never the origin."""
+    adopting = [_adopted(declared_selection(rounds))]
+    if trigger == "every_adoption":
+        spans = line_spans(session.store, session.state.scoring.scorer, session.hop)
+        adopting += reversed(_stood_on(spans))
+    roster: dict[str, tuple[ArmName, Concluded]] = {}
+    for rnd, head in filter(None, adopting):
+        arm = ArmName(key=ArmKey(head.individual.id), round=rnd, label=head.label)
+        roster.setdefault(head.individual.id, (arm, head))
+    roster.pop(origin, None)
+    return roster
+
+
 def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     """The set-aside opens at the ORIGIN's price; a selection that writes more would end its pass short."""
     book = require_spend_book("the selection's set-aside")
@@ -558,8 +637,18 @@ def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     ]
     if not costs:
         return
+    trigger = cycle.config.bench_trigger
+    origin = cycle.origin_round.head
+    assert origin is not None, "a closed origin round ends on the origin"
+    passes = (
+        len(_adoptions(session, cycle.rounds, origin=origin.individual.id, trigger=trigger))
+        if trigger == "every_adoption"
+        else 1
+    )
+    if not passes:
+        return
     # One cell on top of the mean: the last row is admitted at the dearest bill, never the average.
-    usd = len(session.state.scoring.partition.bench) * fmean(costs) + max(costs)
+    usd = passes * (len(session.state.scoring.partition.bench) * fmean(costs) + max(costs))
     if usd > book.set_aside_usd:
         book.set_aside(usd, round(book.set_aside_tokens * usd / book.set_aside_usd))
 
@@ -570,32 +659,28 @@ async def bench_selection(
     *,
     points: PointContext,
     banked: BenchPasses,
+    trigger: BenchTrigger,
 ) -> BenchPasses:
-    """Only a pause escapes the pass: any other stop ends it short, banked as a stopped pass."""
+    """Only a pause escapes a pass: any other stop ends it short, banked as a stopped pass, and sends no other."""
     origin = banked.origin
-    picked = declared_selection(rounds)
-    head = picked.head
-    assert head is not None, "a closed round names the individual it ended on"
-    if head.individual.id == origin.arm.key:
-        return banked
-    selected_sp = points.measured(head)
-    selected_hash = selected_sp.sp_hash(session.pipeline_schema)
-    held = banked.pass_of(head.individual.id)
-    if held is not None and held.answers(
-        selected_hash, origin.sample_keys, session.state.scoring.scorer.id
-    ):
-        return banked
-    selected, stop = await _send_on_bench(
-        session,
-        selected_sp,
-        arm=ArmName(key=ArmKey(head.individual.id), round=picked.round, label=head.label),
-        subject="selected",
-    )
-    if stop is None:
-        graded(session, selected, subject="selected")
-    elif STOP_REASON_INFO[run_stop_reason(stop)].outcome is StopOutcome.PAUSED:
-        raise stop
-    return _with_selection(banked, selected)
+    adopted = _adoptions(session, rounds, origin=origin.arm.key, trigger=trigger)
+    # Every member rebuilds before any sends: a moved searchpoint refuses the roster unspent.
+    roster = {key: (arm, points.measured(head)) for key, (arm, head) in adopted.items()}
+    for key, (arm, sp) in roster.items():
+        held = banked.pass_of(key)
+        if held is not None and held.answers(
+            sp.sp_hash(session.pipeline_schema), origin.sample_keys, session.state.scoring.scorer.id
+        ):
+            continue
+        taken, stop = await _send_on_bench(session, sp, arm=arm, subject="selected")
+        if stop is None:
+            graded(session, taken, subject="selected")
+        elif STOP_REASON_INFO[run_stop_reason(stop)].outcome is StopOutcome.PAUSED:
+            raise stop
+        banked = _with_selection(banked, taken)
+        if stop is not None:
+            return banked
+    return banked
 
 
 def _line(stores: Stores, hop: CycleHop) -> list[CycleHop] | None:
@@ -743,6 +828,18 @@ def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
     if campaign is None:
         return None
     return scan_bench_passes(stores.campaigns.line_spans(campaign.root_hop))
+
+
+def cycle_curve(
+    stores: Stores, campaign: Campaign, hop: CycleHop, config: CampaignConfig
+) -> BenchCurve | None:
+    passes = line_passes(stores, campaign.campaign_id)
+    if passes is None:
+        return None
+    scorer = scorer_of(config, verifier_graded=False)
+    spans = line_spans(stores, scorer, hop)
+    budget = line_round_budget(spans, config.optimization.budget.rounds)
+    return read_curve(stores, passes, scorer, spans, budget=budget)
 
 
 def read_cycle_bench(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScore:

@@ -432,6 +432,7 @@ export function subtreeCycle(
       rounds_closed: 0,
       spend: NO_METER,
       bench: null,
+      curve: null,
       verify: null,
       elects_on: "ability",
       lens_criterion: null,

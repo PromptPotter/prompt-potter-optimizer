@@ -9,6 +9,7 @@ from promptpotter.domain.arms import Cut
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
+from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
@@ -82,9 +83,12 @@ _FACT_OF_KEY: dict[str, str] = {
 }
 assert set(_FACT_OF_KEY.values()) <= set(InnerCellFacts.model_fields)
 
+# The per-row matrix the held-out area reads (`BenchCurve.rows`), banked whole on the cell's row.
+BENCH_ROWS_KEY = "bench_rows"
+
 # What the connector reports beside its terms (`Connector.reported_keys`).
-INNER_REPORTED_KEYS: tuple[str, ...] = (INNER_FACTS_KEY, "cost", "tokens")
-assert {*OUTER_PROXY_KEYS, *_FACT_OF_KEY, INNER_FACTS_KEY} == {
+INNER_REPORTED_KEYS: tuple[str, ...] = (INNER_FACTS_KEY, BENCH_ROWS_KEY, "cost", "tokens")
+assert {*OUTER_PROXY_KEYS, *_FACT_OF_KEY, INNER_FACTS_KEY, BENCH_ROWS_KEY} == {
     *(t.name for t in INNER_CELL_TERMS),
     *INNER_REPORTED_KEYS,
 }, "a reported key is no term, fact or proxy, or one went unreported"
@@ -172,8 +176,9 @@ def inner_cell_facts(result: CycleResult) -> InnerCellFacts:
     origin = None if held is None else held[0]
     levels = [] if held is None else held[1]
     padded = parent_level_series(result)
-    bench_origin = result.bench_origin_level
-    bench_last = result.bench_round_levels[-1] if result.bench_round_levels else None
+    curve = result.curve
+    bench_origin = None if curve is None else curve.origin
+    bench_last = curve.levels[-1] if curve is not None and curve.levels else None
     return InnerCellFacts(
         origin_level=origin,
         final_lift=None if origin is None else levels[-1] - origin,
@@ -182,7 +187,7 @@ def inner_cell_facts(result: CycleResult) -> InnerCellFacts:
         series_reason=series_reason(result),
         mean_parent_level_se=mean_parent_level_se(result),
         rounds_ran=result.n_rounds_after_origin,
-        round_budget=effective_round_budget(result),
+        round_budget=result.round_budget,
         stop_reason=result.stop_reason,
         floor_reason=floor_reason(result),
         origin_headroom=_origin_headroom(result),
@@ -195,42 +200,17 @@ def inner_cell_facts(result: CycleResult) -> InnerCellFacts:
     )
 
 
-def effective_round_budget(result: CycleResult) -> int:
-    ran = result.n_rounds_after_origin
-    return ran if result.round_budget is None else max(result.round_budget, ran)
-
-
 def _held_forward(levels: Sequence[float], result: CycleResult) -> list[float]:
     """Padded forward to the ROUND BUDGET: a mean over the series length is a different estimand per cell."""
     if not levels:
         return []
-    budget = len(levels) if result.round_budget is None else max(result.round_budget, len(levels))
+    budget = max(result.round_budget, len(levels))
     return [*levels, *([levels[-1]] * (budget - len(levels)))]
 
 
 def parent_level_series(result: CycleResult) -> list[float]:
     held = parent_levels(result)
     return [] if held is None else _held_forward(held[1], result)
-
-
-def spent_on_line(rnd: int, cut_round: int | None) -> bool:
-    """A round its cycle ran itself (from *cut_round* on, a fork's), never the origin it is differenced against."""
-    return rnd > 0 and (cut_round is None or rnd >= cut_round)
-
-
-def line_round_levels(
-    spans: Iterable[tuple[Sequence[tuple[int, float | None]], int | None]],
-) -> list[float | None]:
-    """Each cycle's whole ``(round, level)`` series and its cut round, oldest first."""
-    return [level for series, cut in spans for rnd, level in series if spent_on_line(rnd, cut)]
-
-
-def bench_level_series(result: CycleResult) -> list[float]:
-    """Empty where any round's bench pass read nothing: a hole held forward scores a pass nobody read."""
-    levels = result.bench_round_levels
-    if any(level is None for level in levels):
-        return []
-    return _held_forward([level for level in levels if level is not None], result)
 
 
 def mean_parent_level_se(result: CycleResult) -> float | None:
@@ -257,14 +237,6 @@ def no_evidence_reason(result: CycleResult) -> str | None:
             f"it did not end on its own terms — {outcome} (stop_reason={result.stop_reason}); "
             "its trajectory was cut short by something the optimizer prompt does not own"
         )
-    if not result.rounds:
-        return f"it ran no L1 rounds (stop_reason={result.stop_reason})"
-    if result.bench_origin_level is None:
-        return "its origin's bench pass read nothing, so there is no held-out floor to difference against"
-    if holes := [r + 1 for r, level in enumerate(result.bench_round_levels) if level is None]:
-        return f"the bench pass of round(s) {holes} read nothing, so its held-out series has a hole"
-    if not result.bench_round_levels:
-        return "it held no bench levels to difference against its origin's"
     return None
 
 
@@ -274,7 +246,7 @@ def floor_reason(result: CycleResult) -> str | None:
         return "its optimizer prompt terminated the inner campaign (optimizer_abort)"
     if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
         return None
-    spent = [r for r in result.rounds if spent_on_line(r.round, None)]
+    spent = [r for r in result.rounds if r.round > 0]
     if spent and all(_spoiled(r) for r in spent):
         return (
             f"no proposal of its {len(spent)} L1 round(s) reached a cell: a reply that yielded "
@@ -290,12 +262,13 @@ def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
     if (reason := no_evidence_reason(result)) is not None:
         # The inner cycle forwarded its own spend onto the outer ledger as it ran.
         raise CellUnscoreableError(reason, spent={})
-
-    # Guaranteed by no_evidence_reason.
-    assert result.bench_origin_level is not None
-    bench = bench_level_series(result)
-    lift = sum(bench) / len(bench) - result.bench_origin_level
-    return OuterSampleProxies(floored=0, held_out_lift=lift)
+    curve = result.curve
+    state = result.bench.status.state if curve is None else curve.state
+    if curve is None or curve.area is None:
+        raise CellUnscoreableError(
+            f"its held-out area reads {state}: {READING_STATE_INFO[state].sentence}", spent={}
+        )
+    return OuterSampleProxies(floored=0, held_out_lift=curve.area.estimate.value)
 
 
 class PanelPrecision(FrozenModel):

@@ -297,8 +297,7 @@ class ServedRound(RoundSummary):
     """A closed round as a dashboard serves it: the banked summary plus every reading derived from it."""
 
     panel_precision_verdict: PrecisionVerdict | None = Field(
-        description="Which lever `panel_precision` calls for, null where it is. Beside the "
-        "reading and not on it: `PanelPrecision` is hashed into the L4 estimator's identity."
+        description="Which lever `panel_precision` calls for, null where it is."
     )
     selection_movement: list[SampleMovement] = Field(
         description="How each sample of `selection` moved against the round before it that "

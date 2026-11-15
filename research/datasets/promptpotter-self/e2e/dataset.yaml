@@ -22,8 +22,8 @@ campaign:
     l3_plan: *e2e_models
     checkin: *e2e_models
   optimization:
-    # Round 0 (the origin) plus ONE optimization round. The inner campaigns stay at the floor
-    # `max_inner_rounds: 2` — depth is what costs money here, since every outer cell is a whole
+    # Round 0 (the origin) plus ONE optimization round. The inner campaigns stay at the floor of
+    # two rounds (`inner_campaign` below) — depth is what costs money here, since every outer cell is a whole
     # inner campaign, and one outer round is enough to exercise generate → score → elect.
     # The USD ceiling the browser walk runs under is a STOP, not a forecast: the fixture is
     # built to come in far below it, and the run halting there means the geometry drifted.
@@ -36,11 +36,11 @@ campaign:
           sp_budget_round: 1
       l1_generate:
         config:
-          # NOT 1, and this is a correctness bound rather than a coverage nicety. An inner cycle id is
-          # content-addressed on its optimizer prompt, so a single variant makes round 0's candidate
-          # byte-identical to the origin — the same inner cycle, spawned twice, and the second spawn
-          # hits `_open_inner_campaign`'s "another producer owns it" guard and errors the only cell on
-          # the panel. Two variants give the round a real candidate field and two distinct inner ids.
+          # NOT 1, and this is a correctness bound rather than a coverage nicety. An inner campaign id is
+          # content-addressed on the arm's edits, so a single variant makes round 0's candidate
+          # byte-identical to the origin — the same inner campaign, spawned twice, and the second spawn
+          # hits `_continue_inner_campaign`'s "another producer owns it" guard and errors the only cell
+          # on the panel. Two variants give the round a real candidate field and two distinct inner ids.
           n_variants: 2
       escalation:
         config:
@@ -53,9 +53,12 @@ panel:
   # `promptpotter-self/panel`'s `dataset.yaml::panel` is the real one and this is not a cheaper version of it:
   # every property that makes that panel MEASURE something has been removed here on purpose. One
   # cell, so PoBB can never reach its elimination floor of 4 and nothing is ever eliminated. Two
-  # inner rounds, the floor, so `held_out_lift` is a series of one step. One inner
-  # variant, so there is no candidate field to select from. Two samples, so the inner θ is noise,
-  # and ONE held-out row, so the scored lift is a coin.
+  # inner rounds, the floor the area is read over. One inner variant, so there is no candidate
+  # field to select from. Two samples, so the inner θ is noise, and two held-out rows, the fewest
+  # the area's paired t reads.
+  #
+  # The `inner_campaign` below is the real panel's shape at these sizes. Its bench draws by
+  # `partition_bank`'s `stable_hash([seed, key])`, so seed 0 sits other rows than its screen did.
   #
   # READ NOTHING OFF A RUN OF THIS. It answers exactly one question — does the L4 spawn path still
   # work end to end — and any number it emits is an artefact of the geometry above.
@@ -64,16 +67,16 @@ panel:
   # `README.md` beside this file owns all three. Do not restate them here — they are one argument
   # and it drifts the moment it has two homes.
   inner_benchmark: justlogic/d234
-  inner_benchmark_config:
-    n_samples_per_inner_round: 2
-    n_samples_origin: 2
-    n_samples_bench: 1
-    max_inner_rounds: 2
-    inner_nodes:
-      l1_generate:
-        config:
-          n_variants: 1
-    inner_optimizer_temperature: 0.0
+  inner_campaign:
+    sp_budget_origin: 2
+    dataset_split: {bench: 2, demo: 0, tolerance: 0}
+    bench_trigger: every_adoption
+    optimization:
+      budget: {rounds: 2}
+      determinism: {temperature: 0.0}
+      nodes:
+        adaptive_queue: {config: {sp_budget_round: 2, per_round_resubset: false}}
+        l1_generate: {config: {n_variants: 1}}
   tasks:
     # Seed 0 only. The real panel's six seeds were each chosen against a measured
     # constant-answer floor; one seed is not a sample of that work, it is a single cell that

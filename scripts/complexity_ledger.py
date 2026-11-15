@@ -139,7 +139,8 @@ BASELINE = {
     # webb-5b (+1): `NodeOutputSchema.json_schema`, the backend's own document, served beside the
     # `contract` rows the browser now draws.
     # model-lines (+2): `call_target` on a served campaign config, which no surface edits yet.
-    "p_served": 195,
+    # l4-measure (+3): `CycleEntryFacts.curve`, the held-out curve beside `BenchScore`, unrendered.
+    "p_served": 198,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     "p_unread_fields": 26,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.

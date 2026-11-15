@@ -201,11 +201,7 @@ from promptpotter.application.runner.inner.spawn import (
     inner_campaign_id,
     promptpotter_wire_adapter,
 )
-from promptpotter.application.runner.inner.tasks import (
-    InnerBenchmarkConfig,
-    InnerTasks,
-    inner_instrument_config,
-)
+from promptpotter.application.runner.inner.tasks import InnerTasks, inner_instrument_config
 from promptpotter.application.runner.round import author_arm, run_init
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
@@ -378,11 +374,17 @@ _SPEC = InnerTaskSpec(
     inner_dataset="justlogic/d234",
     optimizer_treatment="o",
     run_seed=3,
-    n_samples=28,
-    n_samples_bench=8,
-    n_rounds=4,
-    instrument="e",
+    campaign={"optimization": {"budget": {"rounds": 4}}},
+    nodes=None,
+    estimator="e",
 )
+# A panel's `inner_campaign` that reads a held-out area: two rounds, a bench, every adoption graded.
+_GEOMETRY: dict[str, Any] = {
+    "sp_budget_origin": 40,
+    "dataset_split": {"bench": 20, "demo": 0, "tolerance": 2},
+    "bench_trigger": "every_adoption",
+    "optimization": {"budget": {"rounds": 2}, "determinism": {"temperature": 0.0}},
+}
 
 
 def _connector_config(**fields: Any) -> CampaignConfig:
@@ -578,7 +580,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     )
 
 
-def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimators(
+def test_the_inner_campaign_id_separates_candidates_seeds_treatments_estimators_and_geometry(
     built_stores: Stores,
 ) -> None:
     capo = select_optimizer(bench_choice("capo"))
@@ -597,15 +599,18 @@ def test_the_inner_campaign_id_separates_candidates_seeds_treatments_and_estimat
     assert inner_campaign_id(_SPEC.model_copy(update={"run_seed": 6}), c1) != inner_campaign_id(
         _SPEC, c1
     ), "two seeds share one inner campaign"
-    moved = _SPEC.model_copy(update={"instrument": "f"})
+    moved = _SPEC.model_copy(update={"estimator": "f"})
     assert inner_campaign_id(_SPEC, c1) != inner_campaign_id(moved, c1), (
-        "a moved estimator continued the campaign the old one banked"
+        "a moved estimator resumed the campaign the old one banked"
     )
-    deeper = _SPEC.model_copy(update={"n_rounds": 6})
-    assert inner_campaign_id(deeper, c1) == inner_campaign_id(_SPEC, c1), "a deeper cell forked"
-    assert deeper.key() != _SPEC.key(), "a deeper cell replayed the shallow one's banked rows"
-    wider = _SPEC.model_copy(update={"n_samples": 30})
-    assert inner_campaign_id(wider, c1) != inner_campaign_id(_SPEC, c1), "a new draw continued"
+    deeper = _SPEC.model_copy(update={"campaign": {"optimization": {"budget": {"rounds": 6}}}})
+    assert inner_campaign_id(deeper, c1) != inner_campaign_id(_SPEC, c1), (
+        "a deeper cell resumed the shallow one's campaign, so its banked rows read as the deeper's"
+    )
+    wider = _SPEC.model_copy(
+        update={"campaign": {**_SPEC.campaign, "dataset_split": {"bench": 30}}}
+    )
+    assert inner_campaign_id(wider, c1) != inner_campaign_id(_SPEC, c1), "a new draw resumed"
     cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
     as_run, as_cut = (
         select_optimizer(OptimizerChoice(call_target=BENCH_TARGET, optimizer="potter", nodes=n))
@@ -1035,12 +1040,7 @@ def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: 
     # banked cell, and an edit to a seat's dataset re-keys that seat alone, off the tier it runs.
     panel: dict[str, Any] = {
         "inner_benchmark": "innerbench",
-        "inner_benchmark_config": {
-            "n_samples_per_inner_round": 4,
-            "n_samples_origin": 40,
-            "n_samples_bench": 2,
-            "max_inner_rounds": 2,
-        },
+        "inner_campaign": _GEOMETRY,
         "tasks": [{"kind": "seat", "id": "seed-0"}],
     }
     campaign = {"optimization": {"budget": {"rounds": 2}, "degradation_threshold": 0.4}}
@@ -2796,24 +2796,37 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     # An arm so declared runs what a campaign minted on that declaration resolves to.
     stores = built_stores
     opened, _, solve, _, _ = decl
-    panel = InnerTasks(
-        inner_benchmark="decl",
-        inner_benchmark_config=InnerBenchmarkConfig(
-            n_samples_per_inner_round=4,
-            n_samples_origin=40,
-            n_samples_bench=6,
-            max_inner_rounds=2,
-        ),
-        tasks=[Seat(kind="seat", id="decl/seed-3", run_seed=3)],
-    )
+    seats = [Seat(kind="seat", id="decl/seed-3", run_seed=3)]
+    panel = InnerTasks(inner_benchmark="decl", inner_campaign=_GEOMETRY, tasks=seats)
     cells = panel.resolve_cells(stores)
     (l4_seat,) = cells.cells
     seat_config = inner_instrument_config(
-        cells.spec(l4_seat),
-        CampaignConfig.model_validate(dict(cells.held(l4_seat).campaign_config)),
-        solver=[solve],
-        n_search=24,
+        cells.spec(l4_seat), cells.held(l4_seat).campaign, solver=[solve]
     )
+    clamp = seat_config.optimization.determinism
+    laid = (
+        seat_config.sp_budget_origin,
+        seat_config.dataset_split,
+        seat_config.bench_trigger,
+        seat_config.optimization.budget.rounds,
+        None if clamp is None else clamp.temperature,
+    )
+    assert laid == (
+        40,
+        DatasetSplit(bench=20, demo=0, tolerance=2),
+        "every_adoption",
+        2,
+        0.0,
+    ), "a seat ran another geometry than its panel's `inner_campaign` lays"
+    for unread in (
+        {},
+        {**_GEOMETRY, "bench_trigger": "at_end"},
+        {**_GEOMETRY, "optimization": {"budget": {"rounds": 1}}},
+    ):
+        with pytest.raises(PayloadInvalidError):
+            InnerTasks(inner_benchmark="decl", inner_campaign=unread, tasks=seats).resolve_cells(
+                stores
+            )
     l4 = declare(opened, seat_config, purpose=Optimize())
     assert effective_config(l4).model_dump() == seat_config.model_dump(), (
         "an L4 seat runs another config than the one its seat declared"
@@ -4038,12 +4051,7 @@ def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
     other = {**task, "id": "hotpotqa/8b", "inner_dataset": "hotpotqa"}
     seats = {
         "inner_benchmark": "gsm_hard",
-        "inner_benchmark_config": {
-            "n_samples_per_inner_round": 1,
-            "n_samples_origin": 40,
-            "n_samples_bench": 1,
-            "max_inner_rounds": 2,
-        },
+        "inner_campaign": _GEOMETRY,
     }
 
     def resolved(*tasks: dict[str, Any]) -> dict[str, Any]:

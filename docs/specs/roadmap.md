@@ -440,16 +440,9 @@ round.
    test is τ from rounds 1–2 against the lineage's fresh θ trend from round 3 on.
 3. **Three arms instead of five** would give +9% lift per dollar and −27% lift per round. This is a
    derivation only, and it matters only where τ > 0.
-4. **An inner run that elects in two rounds is excluded** (C0 at landing 79). Since `each_round` went
-   (operator, 2026-11-12), an L4 inner seat benches `at_end`: the origin and the last selection only.
-   `runner/bench.py::bench_series` reads a displaced selection as `None`, and
-   `domain/l4/proxies.py::no_evidence_reason` excludes a cell with any such hole. The panel therefore
-   drops exactly the runs that gain early and again (1 of 6 C0 cells). **The operator's call:** (a)
-   `held_out_lift` reads the one held-out lift `at_end` measures (last − origin), and early-round AUC
-   rides the panel's own series (`mean_round_delta`), with no spend added (recommended, since it
-   follows from dropping `each_round`); or (b) the end pass grades every selection that stood, which
-   brings back `each_round`'s spend at the end (one 20-row pass per extra election). Either one moves
-   the estimator digest and is owed a C0.
+4. **An inner run that elects in two rounds is read, not excluded**: a seat benches
+   `every_adoption`, the end pass grading every selection its line adopted (one 20-row pass per extra
+   election), and `runner/bench.py::read_curve` reads the area over them all. Owed: one C0 re-measure.
 5. **The outer critique broke a rule its prompt states**, on both repair rungs (C0 at landing 79: "a
    row in two clusters", `potter/dispatch/schemas.py` `_one_cluster_per_row`), so round 0 banked no
    critique. A tighter `l1_critique` prompt comes first (`potter-self`).

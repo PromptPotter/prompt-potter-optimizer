@@ -38,11 +38,10 @@ from promptpotter.application.runner.inner.tasks import (
     inner_spawn_context,
     panel_cell,
     parse_inner_panel,
-    seat_draw,
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
+from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
@@ -50,6 +49,7 @@ from promptpotter.domain.job import InnerRun
 from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
+    BENCH_ROWS_KEY,
     INNER_CELL_TERMS,
     INNER_REPORTED_KEYS,
     INNER_RESULT_KEY,
@@ -79,6 +79,7 @@ from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
 )
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import (
     MAX_INSTRUMENT_DEPTH,
     instrument_depth,
@@ -110,8 +111,9 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int, query: str) -> dic
 
 
 def inner_campaign_id(spec: InnerTaskSpec, overrides: Overrides) -> str:
-    """Content, never asker: the cell's continuation and the arm's edits, never why a pass ran."""
-    return f"{dataset_id_prefix(spec.inner_dataset)}__{spec.continuation(resolved_overrides(overrides))}"
+    """Content, never asker: the cell's key and the arm's edits, never why a pass ran."""
+    edits = stable_hash([spec.key(), resolved_overrides(overrides)], length=6)
+    return f"{dataset_id_prefix(spec.inner_dataset)}__{edits}"
 
 
 class _InnerCell(NamedTuple):
@@ -173,7 +175,9 @@ def inner_cell_envelope_s(sample: Sample, payload: dict[str, Any]) -> float:
     store = sandbox_stores(cell.ctx).campaigns
     campaign = store.load_campaign(cell.campaign_id)
     banked = _banked_inner_rounds(store, campaign.root_hop) if campaign else 0
-    return OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (cell.spec.n_rounds + 1) - banked)
+    rounds = _cells(cell.ctx).held(cell.cell).campaign.optimization.budget.rounds
+    assert rounds is not None, "a panel lays its seats' rounds (`InnerTasks.resolve_cells`)"
+    return OUTER_SAMPLE_WALL_S_PER_ROUND * max(1, (rounds + 1) - banked)
 
 
 def inner_cell_hop(sample: Sample, payload: dict[str, Any]) -> CycleHop | None:
@@ -246,26 +250,13 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
         session.state.control = RunControl(
             commands=store.commands, enclosing=ctx.enclosing, acting=ctx.acting
         )
-        all_samples = session.bank.samples
-        if not all_samples:
+        train_data = list(session.bank.samples)
+        if not train_data:
             raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
-        search, bench = seat_draw(all_samples, spec)
-        if len(bench) < spec.n_samples_bench:
-            # Before anything is minted or sent: a short bench is a panel geometry error, not a measurement.
-            raise CellUnscoreableError(
-                f"inner dataset {spec.inner_dataset!r} holds {len(all_samples)} rows; the bank takes "
-                f"{len(search)} and leaves {len(bench)} for a bench of {spec.n_samples_bench}. Lower "
-                "`n_samples_origin` / `n_samples_bench` or give the cell a larger dataset.",
-                spent={},
-            )
-        train_data = [*search, *bench]
         instrument = inner_instrument_config(
             spec,
-            CampaignConfig.model_validate(
-                dict(_cells(ctx).by_dataset[spec.inner_dataset].campaign_config)
-            ),
+            _cells(ctx).held(cell.cell).campaign,
             solver=session.pipeline_schema.prompt_nodes(),
-            n_search=len(search),
         )
         try:
             armed = instrument.overlaid(arm_layer(cell.overrides))
@@ -391,6 +382,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
         INNER_RESULT_KEY: [f"inner:{query} {held} D{delta}"],
         "reasoning_trace": inner_narrative(result, facts, scored, narrative_head(cell.spec)),
         **inner_cell_report(facts, scored),
+        **({} if result.curve is None else {BENCH_ROWS_KEY: result.curve.rows}),
         # An inner campaign consumes its optimizer's ENTIRE outer config, so the stamp is its terminal.
         "terminal_node": _cells(cell.ctx).terminal(cell.cell),
         # No `step_tokens`: every call was billed as it settled, and returning it bills the cell twice.

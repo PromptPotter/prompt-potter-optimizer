@@ -334,12 +334,17 @@ class BehaviourKeys(FrozenModel):
     world: str
     # By built-in optimizer: the hash of its straight run's trace in `world`.
     fingerprints: dict[str, str]
-    # The hash of the L4 leg's trace, its own estimator read out (`runner/inner/tasks.py::estimator`).
+    # The hash of the L4 leg's trace in `world`.
     estimator: str
 
     @classmethod
     def held(cls) -> BehaviourKeys:
         return cls.model_validate_json(BEHAVIOUR_KEYS_FILE.read_bytes())
+
+    @property
+    def cell_estimator(self) -> str:
+        """What reads an L4 cell's number (`InnerCells.estimator`): the L4 leg's behaviour in its world."""
+        return stable_hash([self.estimator, self.world])
 
 
 def _package_dir(member: NodeMember) -> Path:

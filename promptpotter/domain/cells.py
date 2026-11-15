@@ -32,7 +32,6 @@ class Seat(FrozenModel):
     # Graded, never elected on: where the cell sits this campaign, not what it measures.
     held_out: bool = False
     run_seed: int = Field(default=0, ge=0)
-    n_rounds: int | None = Field(default=None, ge=1)
     inner_dataset: str | None = None
     inner_model: str | None = None
     inner_provider: str | None = None
@@ -40,9 +39,9 @@ class Seat(FrozenModel):
     inner_route_order: list[str] | None = None
 
     def pin(self) -> dict[str, JsonValue]:
-        """What the cell IS, never its seat; its depth is the instrument's, resolved (`InnerTaskSpec.key`):
-        a default is one key spelled or not."""
-        return self.model_dump(mode="json", exclude_defaults=True, exclude={"held_out", "n_rounds"})
+        """What the cell IS, never its seat; its depth is the instrument's (`InnerTaskSpec.key`): a
+        default is one key spelled or not."""
+        return self.model_dump(mode="json", exclude_defaults=True, exclude={"held_out"})
 
 
 _INSTRUMENT = "instrument"
