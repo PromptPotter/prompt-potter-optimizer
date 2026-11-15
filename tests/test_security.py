@@ -1925,12 +1925,13 @@ def _cookies(response: Any) -> dict[str, str]:
 _GONE_FILER = "a-filer-long-gone"
 
 
-def _command(kind: str, at: str, subject: str) -> CommandRecord:
+def _command(payload: CommandPayload, at: str, subject: str) -> CommandRecord:
     return CommandRecord(
-        command_id=kind,
-        kind=kind,
-        idempotency_key=kind,
-        act_digest=kind,
+        command_id=f"{subject}@{at}",
+        kind=payload.kind,
+        payload=payload,
+        idempotency_key=f"{subject}@{at}",
+        act_digest=f"{subject}@{at}",
         issued_by=SYSTEM_PRINCIPAL,
         subject=subject,
         filer=_GONE_FILER,
@@ -2084,16 +2085,21 @@ async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_
     stores.campaigns.create_campaign(minted_campaign(trail_hop))
     stores.campaigns.mint_cycle(trail_hop)
     stores.commands.append(
-        _command("start-run", "2000-01-01T00:00:00Z", stores.subject(trail_hop).key),
-        _command("mint-campaign", "2999-01-01T00:00:00Z", WORKSPACE_SUBJECT),
+        _command(
+            StartRunPayload(campaign_id=trail_hop.campaign_id, cycle_id=trail_hop.cycle_id),
+            "2000-01-01T00:00:00Z",
+            stores.subject(trail_hop).key,
+        ),
+        _command(MintCampaignPayload(dataset_name="d"), "2999-01-01T00:00:00Z", WORKSPACE_SUBJECT),
     )
     # A third subject, off the workspace tree: a cycle of the campaign's inner sandbox.
     sandbox = inner_sandbox(stores, trail_hop.campaign_id, trail_hop.cycle_id)
     (inner_cycle,) = sandbox_cycle_dirs(sandbox)
     inner_hop = CycleHop(campaign_id=inner_cycle.parent.parent.name, cycle_id=inner_cycle.name)
     inner_subject = Subject.of((trail_hop, inner_hop)).key
-    stores.commands.append(_command("inner-run", "1999-01-01T00:00:00Z", inner_subject))
-    inner_line = ("inner-run", f"camp-trail>{inner_cycle.parent.parent.name}/{inner_cycle.name}")
+    inner_run = StartRunPayload(campaign_id=inner_hop.campaign_id, cycle_id=inner_hop.cycle_id)
+    stores.commands.append(_command(inner_run, "1999-01-01T00:00:00Z", inner_subject))
+    inner_line = ("start-run", f"camp-trail>{inner_cycle.parent.parent.name}/{inner_cycle.name}")
     trail = account.tenant_trail(stores)
     assert trail.lines[0][1:3] == inner_line, "what ran in a campaign's inner sandbox left no line"
     assert [(line.what, line.subject) for line in trail.lines[1:]] == [
@@ -2174,16 +2180,16 @@ async def test_an_unreadable_manifest_lists_its_campaigns_lines_naming_no_datase
         hop = CycleHop(campaign_id=campaign_id, cycle_id="cycle_survey000000")
         stores.campaigns.create_campaign(minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
-        stores.commands.append(
-            _command(f"run-{campaign_id}", "2001-01-01T00:00:00Z", stores.subject(hop).key)
-        )
+        run = StartRunPayload(campaign_id=campaign_id, cycle_id=hop.cycle_id)
+        stores.commands.append(_command(run, "2001-01-01T00:00:00Z", stores.subject(hop).key))
     torn = CampaignLayout(stores.campaigns.campaign_root_dir("camp-torn")).manifest
     torn.write_bytes(b"{not a manifest")
     surveyed, unreadable = account.trails_since(projects, 0.0)
     [ada_trail] = [trail for trail in surveyed if trail.who == "Ada@x.com"]
-    assert {line.what for line in ada_trail.trail.lines} >= {"run-camp-torn", "run-camp-whole"}, (
-        "an unreadable manifest hid its campaign's lines, or its neighbour's"
-    )
+    assert {line.subject for line in ada_trail.trail.lines} >= {
+        "camp-torn/cycle_survey000000",
+        "camp-whole/cycle_survey000000",
+    }, "an unreadable manifest hid its campaign's lines, or its neighbour's"
     assert ada_trail.datasets == {"camp-whole": "ds1"}, "an unreadable manifest named a dataset"
     assert unreadable == [], "an unreadable manifest cost its whole workspace"
 
@@ -3381,14 +3387,13 @@ async def test_a_command_whose_filer_died_reads_cancelled_and_its_id_stays_the_l
     # Every door reads it ended, and neither a run boundary nor the next pass on its cycle reads it.
     stores, sender, acts_hop, acts, _, _, verify, _, _, _, seen, _, walking, _ = command_log
     dead = verify("dead")
-    dead_payload, dead_digest = dead.payload.recorded()
     stores.commands.file(
         CommandRecord(
             command_id=dead.command_id,
             kind=dead.kind,
-            payload=dead_payload,
+            payload=dead.payload,
             idempotency_key="dead",
-            act_digest=dead_digest,
+            act_digest=dead.payload.act_digest(),
             issued_by=acting_principal(stores.identity),
             subject=subject_key(stores.subject(acts_hop)),
             filer=_GONE_FILER,
@@ -5030,16 +5035,18 @@ async def test_whoever_reads_an_account_follows_a_command_filed_in_it_and_no_oth
 
 async def test_a_delegate_cannot_cancel_a_command_it_could_not_have_filed(tmp_path: Path) -> None:
     owner = workspace(tmp_path, _who("owner-1"))
-    minted = CommandKind.HEAD_TO_HEAD
-    owner.commands.append(_command(minted, "2026-01-01T00:00:00Z", WORKSPACE_SUBJECT))
-    for held, refused in ((CAMPAIGN_RUN_CAP, True), (minted.capability, False)):
+    minted = _command(
+        MintCampaignPayload(dataset_name="d"), "2026-01-01T00:00:00Z", WORKSPACE_SUBJECT
+    )
+    owner.commands.append(minted)
+    for held, refused in ((CAMPAIGN_RUN_CAP, True), (minted.kind.capability, False)):
         delegate = dataclasses.replace(
             _who("owner-1"),
             claims={"principal": "delegate-1", "delegated_by": "owner-1"},
             capabilities=frozenset({held}),
         )
         cancelling = CommandDispatcher(workspace(tmp_path, delegate)).dispatch(
-            CommandCall(CancelPayload(command_id=minted), door=Door.API)
+            CommandCall(CancelPayload(command_id=minted.command_id), door=Door.API)
         )
         if refused:
             with pytest.raises(NotFoundError):

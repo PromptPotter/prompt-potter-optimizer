@@ -75,7 +75,8 @@ BASELINE = {
     # door's managers swept once their sessions end. tv-2 (+1): the exhibit's pipeline read.
     # tv-2's access fix (+9): a sandbox opens only off its store's own cycle, a moment stays on
     # its address's tree, and a deleted exhibit is followed by no one.
-    "package_lines": 110789,
+    # passb-2 typed log (+36): a command log row typed by its kind's recorded shape on load.
+    "package_lines": 110825,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     "model_copy_updates": 157,
     # The `__init__.py` files that re-export names instead of staying empty.
@@ -87,7 +88,7 @@ BASELINE = {
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     "settings_env": 39,
     # Parameters annotated `Any`.
-    "any_params": 35,
+    "any_params": 34,
     # `dict[str, Any]` maps declared in `domain/`.
     "domain_any_maps": 48,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.

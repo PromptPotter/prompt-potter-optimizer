@@ -269,7 +269,6 @@ from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
 from promptpotter.domain.command_events import CommandAckRecord
 from promptpotter.domain.command_kinds import (
     CancelPayload,
-    CommandKind,
     CommandPayload,
     Door,
     HeldOutPayload,
@@ -2392,9 +2391,10 @@ def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
         def cancels() -> list[object]:
             book = stores.commands.book()
             return [
-                record.payload["command_id"]
+                record.payload.command_id
                 for _, record in book.lines()
-                if record.kind == CommandKind.CANCEL and book.status(record.command_id) == "applied"
+                if isinstance(record.payload, CancelPayload)
+                and book.status(record.command_id) == "applied"
             ]
 
         def _passing(stop: Callable[[], Awaitable[object]]) -> Callable[[Any], Awaitable[Any]]:
@@ -2576,7 +2576,8 @@ def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
             patched.setattr(measuring, "verify_candidate", _verify_filed)
             tracked = asyncio.run(_tracked_by_prefix())
         filed = stores.commands.book().filing(tracked.task_id)
-        assert filed is not None and filed.payload["campaign_id"] == _PEER_HOP.campaign_id, (
+        assert filed is not None and isinstance(filed.payload, VerifyCandidatePayload), filed
+        assert filed.payload.campaign_id == _PEER_HOP.campaign_id, (
             "a host task filed the prefix it was sent by, which a later mint can make ambiguous"
         )
 

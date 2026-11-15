@@ -469,11 +469,12 @@ class CommandPayload(RequestBody):
         cls.kind = kind
         PAYLOAD_MODEL_FOR_KIND[kind] = cls
 
-    def recorded(self) -> tuple[dict[str, JsonValue], str]:
-        """The act as its `CommandRecord` keeps it, and what an idempotency key names; a secret's text enters no stored digest."""
-        dump = self.model_dump(mode="json")
+    def act_digest(self) -> str:
+        """What an idempotency key names: the act as its `CommandRecord` keeps it, and the bytes of
+        each field it leaves out; a secret's text enters no stored digest."""
+        dump = json.dumps(self.model_dump(mode="json"), ensure_ascii=False, separators=(",", ":"))
         digest = hashlib.sha256(f"{self.kind}\0".encode())
-        digest.update(json.dumps(dump, ensure_ascii=False, separators=(",", ":")).encode())
+        digest.update(dump.encode())
         for name, info in type(self).model_fields.items():
             value = getattr(self, name)
             if not info.exclude or value is None:
@@ -483,7 +484,7 @@ class CommandPayload(RequestBody):
                 raise TypeError(f"{type(self).__name__}.{name} drops a {type(value).__name__}")
             digest.update(f"\0{name}\0{len(raw)}\0".encode())
             digest.update(raw)
-        return dump, digest.hexdigest()
+        return digest.hexdigest()
 
 
 class ReasonedPayload(CommandPayload):

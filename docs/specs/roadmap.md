@@ -226,10 +226,11 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   signed-in account with nothing of its own running, else a served `Said`; a 2026 wire's held task
   asks on `tasks/get`, and the HTTP door sweeps its ended sessions. Its access review's fix pass:
   a descent follows only a cycle of the store it descends from, a read picks its stores by the
-  address's root, a moment stays on its own tree, a deleted exhibit is followed by no one. Only the
-  L4 leg's instrument ids moved (the estimator digest); the desk lands every file.
-- **then:** the command log typed per kind; `CampaignStore.campaign(id)`; then money's remainder,
-  tests-w, small-4 and the edge tail. A cold verify is timed live.
+  address's root, a moment stays on its own tree, a deleted exhibit is followed by no one. A
+  command log row is typed by its kind on load, so a retired shape refuses there. Only the L4
+  leg's instrument ids moved (the estimator digest); the desk lands every file.
+- **then:** addr and money-2 (`CampaignStore.campaign(id)` and money's remainder), beside each
+  other in the cloud; tests-w, small-4 and the edge tail. A cold verify is timed live.
 
 The re-keys end at the behaviour-key switch.
 

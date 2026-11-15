@@ -130,12 +130,6 @@ row it closes.
   the archive (`measurements_for_config`) and fits the ruler (`judging_ruler`); a warm verify entered
   in 1 s. Action: time those three on a cold verify, then cut the one that holds it. **Held:** a live
   verify on a paused cycle. **Re-test:** time `command` → the `verify` phase's `enter` in the ledger.
-- **A command log row is typed by no payload model**: `domain/command_events.py::CommandRecord` holds
-  its payload untyped, so a row in a retired payload shape loads and refuses only when replayed.
-  Typing it by `domain/command_kinds.py::PAYLOAD_MODEL_FOR_KIND` is blocked: `IngestUploadPayload.blob`
-  is excluded from the record yet required, so no recorded upload validates. Action: a recorded shape
-  per kind without its excluded fields. **Rides with:** passb-2, whose Owns gain
-  `domain/command_kinds.py`. **Re-test:** a command log row in a retired payload shape loads.
 
 ### batch/26 · money
 

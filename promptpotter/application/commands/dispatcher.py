@@ -7,7 +7,7 @@ from collections.abc import Awaitable, Callable, Coroutine
 from dataclasses import dataclass, field, replace
 from typing import Any, TypeAliasType, Union, cast, get_args, get_origin
 
-from pydantic import BaseModel, JsonValue, TypeAdapter
+from pydantic import BaseModel, TypeAdapter
 
 from promptpotter.application.cycle_addressing import resolve_cycle, resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
@@ -270,8 +270,8 @@ def _rung(stores: Stores, payload: CommandPayload) -> str:
     return payload.kind.capability
 
 
-# `CommandPayload.recorded`: the act as its filing keeps it, and the digest its key names.
-type _Recorded = tuple[dict[str, JsonValue], str]
+# The act as its filing keeps it, and the digest its key names (`CommandPayload.act_digest`).
+type _Recorded = tuple[CommandPayload, str]
 
 
 def _inner_refusal(payload: CommandPayload) -> str | None:
@@ -410,7 +410,7 @@ class CommandDispatcher:
             raise PayloadInvalidError(inner_refusal, code="inner_cycle_unaddressed")
         filed_as, subject = await asyncio.to_thread(self._filed_on, call.payload)
         # Off the loop: an upload's act hashes its bytes.
-        recorded = await asyncio.to_thread(filed_as.recorded)
+        recorded = (filed_as, await asyncio.to_thread(filed_as.act_digest))
         if subject is not None and not call.payload.unmatched:
             # Before any check of its target: the first act may have minted or deleted it.
             found = await self._settled(subject, kind, recorded[1], call.idempotency_key)

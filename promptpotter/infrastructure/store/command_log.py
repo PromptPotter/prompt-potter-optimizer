@@ -25,6 +25,7 @@ from promptpotter.domain.command_events import (
 )
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
+    CancelPayload,
     CommandKind,
     LoopPayload,
     PauseCyclePayload,
@@ -131,9 +132,9 @@ class _Inbox:
 
     def _arm(self, asked: CommandRecord, hold: str | None) -> None:
         command_id, held = asked.command_id, self._held
-        kind = PAYLOAD_MODEL_FOR_KIND[asked.kind]
-        assert issubclass(kind, LoopPayload), "only a kind in `LOOP_KINDS` is asked"
-        match kind.model_validate(asked.payload):
+        payload = asked.payload
+        assert isinstance(payload, LoopPayload), "only a kind in `LOOP_KINDS` is asked"
+        match payload:
             case PauseCyclePayload():
                 if any(p.hold == hold for p in held.pauses):
                     return
@@ -153,7 +154,7 @@ class _Inbox:
                 if not armed:
                     self._held = held
                     return
-        self._kinds[command_id] = kind
+        self._kinds[command_id] = type(payload)
         self._held = held
 
     def _take(self, command_id: str, kind: type[LoopPayload], *, dropped: bool) -> None:
@@ -243,8 +244,8 @@ class _State:
             if (stop := self.stopping.get(row.command_id)) is not None:
                 stop.set(line, None)
             asked = self.filed[row.command_id][1]
-            if to == "applied" and asked.kind == CommandKind.CANCEL:
-                target = str(asked.payload["command_id"])
+            if to == "applied" and isinstance(asked.payload, CancelPayload):
+                target = asked.payload.command_id
                 standing = self.moved.get(target)
                 if standing is not None and (now := standing.at(line)) and now.status == "filed":
                     ask = PauseAsk(row.command_id, asked.issued_by, asked.timestamp, None)

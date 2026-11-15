@@ -4,10 +4,20 @@ status is their fold by `COMMAND_TRANSITIONS`."""
 
 from __future__ import annotations
 
+from functools import cache
 from typing import Annotated, Any, Literal, Self, get_args
 
-from pydantic import Field, TypeAdapter, model_validator
+from pydantic import (
+    Field,
+    SerializeAsAny,
+    TypeAdapter,
+    ValidationInfo,
+    create_model,
+    field_validator,
+    model_validator,
+)
 
+from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind, CommandPayload
 from promptpotter.domain.cycle_paths import Subject
 from promptpotter.domain.records.run_records import (
     DraftOpenedEffect,
@@ -51,15 +61,31 @@ def subject_of(spelled: str) -> Subject | None:
     return Subject.parse(spelled)
 
 
+@cache
+def _recorded_shape(kind: CommandKind) -> type[CommandPayload]:
+    """*kind*'s payload as its record keeps it: a field the dump excludes is held elsewhere (an
+    upload's bytes in the upload store), so the record holds none of it."""
+    model = PAYLOAD_MODEL_FOR_KIND[kind]
+    held_elsewhere: dict[str, Any] = {
+        name: (None, Field(default=None, exclude=True))
+        for name, info in model.model_fields.items()
+        if info.exclude and info.is_required()
+    }
+    if not held_elsewhere:
+        return model
+    return create_model(f"Recorded{model.__name__}", __base__=model, **held_elsewhere)
+
+
 class CommandRecord(FrozenModel):
-    """``CommandDispatcher`` alone files it, on the subject it resolved."""
+    """``CommandDispatcher`` alone files it, on the subject it resolved. Its payload is typed by its
+    kind on load, so a row in a retired shape refuses there, never at its replay."""
 
     record_type: Literal["command"] = "command"
     command_id: str
-    kind: str
-    payload: dict[str, Any] = Field(default_factory=dict)
+    kind: CommandKind
+    payload: SerializeAsAny[CommandPayload]
     idempotency_key: str
-    # `CommandPayload.recorded`: the act its key names, the fields `payload` leaves out included.
+    # `CommandPayload.act_digest`: the act its key names, the fields `payload` leaves out included.
     act_digest: str
     issued_by: Principal
     # The API token it was filed through; ``None`` for a session or the terminal.
@@ -68,6 +94,14 @@ class CommandRecord(FrozenModel):
     # The producer that files and acts it: gone with no end, the act died with it (`producer_alive`).
     filer: str
     timestamp: str = Field(default_factory=utcnow_iso)
+
+    @field_validator("payload", mode="before")
+    @classmethod
+    def _typed_by_kind(cls, raw: object, info: ValidationInfo) -> object:
+        kind = info.data.get("kind")
+        if isinstance(raw, dict) and isinstance(kind, CommandKind):
+            return _recorded_shape(kind).model_validate(raw)
+        return raw
 
 
 CommandEffect = Annotated[

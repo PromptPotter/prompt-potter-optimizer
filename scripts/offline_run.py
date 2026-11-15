@@ -101,10 +101,13 @@ from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.command_events import WORKSPACE_SUBJECT, CommandRecord, subject_key
 from promptpotter.domain.command_kinds import (
     ArmRequest,
+    CommandKind,
+    CommandPayload,
     Door,
     ForkCyclePayload,
     HeadToHeadRequest,
     HeldOutPayload,
+    MintCampaignPayload,
     PauseCyclePayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
@@ -1189,10 +1192,10 @@ def run_terminal(
     cli_main.main()
 
 
-def _commands(stores: Stores, subject: str) -> dict[str, list[dict[str, Any]]]:
+def _commands(stores: Stores, subject: str) -> dict[CommandKind, list[CommandPayload]]:
     """The payloads of what *subject* was commanded and applied, by kind, off the account's log."""
     book = stores.commands.book()
-    out: dict[str, list[dict[str, Any]]] = {}
+    out: dict[CommandKind, list[CommandPayload]] = {}
     for r in book.subject_events(subject):
         if isinstance(r, CommandRecord) and book.status(r.command_id) == "applied":
             out.setdefault(r.kind, []).append(r.payload)
@@ -1216,13 +1219,14 @@ def interrupted(
         return False, f"`new` exited 130 still holding its cycle or its slot ({stopped})"
     if interrupts == 1 and stopped.run_phase is not RunPhase.PAUSED:
         return False, f"one SIGINT left the cycle {stopped.run_phase}, not paused"
-    (mint,) = _commands(stores, WORKSPACE_SUBJECT)["mint-campaign"]
-    if not mint["campaign_config"]:
-        return False, f"the mint-campaign record carries no config: {sorted(mint)}"
+    (mint,) = _commands(stores, WORKSPACE_SUBJECT)[CommandKind.MINT_CAMPAIGN]
+    assert isinstance(mint, MintCampaignPayload)
+    if mint.campaign_config is None:
+        return False, "the mint-campaign record carries no config"
     if rc := spawn_terminal(workspace, "resume", 0):
         return False, f"`resume` after {interrupts} SIGINT exited {rc}"
     ended = stores.run_state(hop)
-    started = _commands(stores, subject_key(stores.subject(hop))).get("start-run", [])
+    started = _commands(stores, subject_key(stores.subject(hop))).get(CommandKind.START_RUN, [])
     if ended.run_phase is not RunPhase.TERMINAL or len(started) != 1:
         return False, f"`resume` left the cycle {ended.run_phase} on {len(started)} start-run"
     return True, f"exit 130 {stopped.run_phase}, slot released; `resume` ran it to its end"
