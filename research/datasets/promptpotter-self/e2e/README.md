@@ -2,16 +2,17 @@
 
 **A test fixture, not an instrument. Read no result off it.**
 
-This is `promptpotter-self/panel`'s recursion with every property that makes an outer lift falsifiable
+This is `promptpotter-self/run`'s recursion with every property that makes an outer lift falsifiable
 taken out, so that the browser walk (`webapp/e2e/`) can exercise the L4 spawn path for a few cents:
-one cell, one inner round, one inner variant, two samples, one outer round of two variants.
-`dataset.yaml::campaign` and `dataset.yaml::panel` beside this file carry those numbers, and the real panel's
-are its own `dataset.yaml::panel`'s — the only place a per-cell cost may be read off.
+one search cell and one held-out seat the outer bench grades, two inner rounds, one inner variant,
+two samples, one outer round of two variants.
+`dataset.yaml::campaign` and `dataset.yaml::panel` beside this file carry those numbers, and the real
+panels' are `research/datasets/promptpotter-self/family.yaml::panel`'s — the only place a per-cell cost may be read off.
 
 At one cell PoBB can never reach its elimination floor of four, so nothing is ever eliminated
-and the outer δ ruler never warms. At one inner round `held_out_lift` is a single difference
-with no series behind it. At two samples the inner θ is noise, and at one held-out row the scored
-lift is a coin. **Every number this emits is an artefact of that geometry.**
+and the outer δ ruler never warms. At two inner rounds `held_out_lift` averages one adoption. At
+two samples the inner θ is noise, at two held-out rows the scored lift is a coin, and one held-out
+seat grades the outer crown on one cell. **Every number this emits is an artefact of that geometry.**
 
 ## Why it could not be made cheaper
 
@@ -20,7 +21,8 @@ Cost here is dominated by the inner **optimizer** call, which is roughly fixed p
 samples to two removes nearly all of the worker share and none of that, so one cell has a floor
 near 1.5¢ and **sub-1¢ per arm is not reachable while an inner optimization actually runs**. The
 campaign's `ceiling.usd` is a stop at $0.05, not a forecast: a run that halts there means the
-geometry has drifted and this file is wrong.
+geometry has drifted and this file is wrong. The held-out seat's bench passes, the origin's and one
+per outer adoption, are each a cell under that same stop.
 
 The inner benchmark stays `justlogic/d234` for the same reason. A shallower cut would save worker
 tokens that are already near zero at two samples, and it has no banked rows — it needs the

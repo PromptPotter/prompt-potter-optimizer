@@ -24,7 +24,7 @@ import { isStopReason } from "@/lib/derivations";
 
 const BUDGET_USD = Number(process.env.PP_E2E_BUDGET_USD || "0.05");
 const DATASET = "promptpotter-self/e2e";
-// One outer search round: every outer cell is a whole inner campaign.
+// The origin and one outer search round (`rounds` lists round 0): each outer cell is a whole inner campaign.
 const WANT_ROUNDS = 2;
 
 test.describe.configure({ mode: "serial" });
@@ -68,7 +68,7 @@ test.describe("the recursion, end to end", () => {
     const names = ((await res.json()).datasets ?? []).map((d: { name: string }) => d.name);
     // The research tier resolves by name and is never offered: the mint below is what finds it.
     expect(names, `${DATASET} is listed, so the research tier is offered`).not.toContain(DATASET);
-    expect(DATASET, "this tier must never run the calibrated panel").not.toBe("promptpotter-self/panel");
+    expect(["promptpotter-self/dev", "promptpotter-self/run"], "this tier must never run a calibrated panel").not.toContain(DATASET);
   });
 
   test("minting carries the ceiling, so there is no unclamped window", async ({ request }) => {

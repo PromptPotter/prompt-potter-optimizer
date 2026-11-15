@@ -1412,7 +1412,7 @@ def test_new_on_a_wheel_says_where_the_l4_panel_lives(
     with monkeypatch.context() as wheel:
         wheel.setattr(paths, "research_datasets_root", lambda: None)
         wheel.setenv("OPENROUTER_API_KEY", "not-a-key")
-        wheel.setattr(sys, "argv", ["promptpotter", "new", "promptpotter-self/panel"])
+        wheel.setattr(sys, "argv", ["promptpotter", "new", "promptpotter-self/run"])
         capsys.readouterr()
         with pytest.raises(SystemExit):
             cli_main.main()
@@ -3531,7 +3531,7 @@ def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrot
     # A checkout resolves its research tier with no setting; a seat no committed tier holds is the
     # account's: a panel the account cannot resolve refuses at init, naming the seat.
     outer_stores = build_stores(default_identity(), projects_root=tmp_path / "outer")
-    outer = resolve_dataset(outer_stores, "promptpotter-self/panel")
+    outer = resolve_dataset(outer_stores, "promptpotter-self/run")
     assert (outer.tier, outer.tier_root) == ("research", _RESEARCH), (
         "a checkout did not resolve the L4 panel from its own research tier"
     )

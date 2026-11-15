@@ -1,5 +1,5 @@
 pipeline:
-  # The browser walk's L4 fixture: the family's graph over the degenerate one-cell panel in
+  # The browser walk's L4 fixture: the family's graph over the degenerate one-search-cell panel in
   # `panel:` below. It proves the recursion still spawns and scores end to end, cheaply enough to
   # run often, and measures nothing.
   description: >-
@@ -22,15 +22,15 @@ campaign:
     l3_plan: *e2e_models
     checkin: *e2e_models
   optimization:
-    # Round 0 (the origin) plus ONE optimization round. The inner campaigns stay at the floor of
-    # two rounds (`inner_campaign` below) — depth is what costs money here, since every outer cell is a whole
-    # inner campaign, and one outer round is enough to exercise generate → score → elect.
+    # Round 0 (the origin) plus two search rounds: the second carries the first's winner forward.
+    # The inner campaigns stay at the floor of two rounds (`inner_campaign` below) — depth is what
+    # costs money here, since every outer cell is a whole inner campaign.
     # The USD ceiling the browser walk runs under is a STOP, not a forecast: the fixture is
     # built to come in far below it, and the run halting there means the geometry drifted.
     budget: {usd: 0.05, rounds: 2}
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
-      # = the panel size in dataset.yaml::panel. One cell.
+      # = the panel's search seats in dataset.yaml::panel. One cell.
       adaptive_queue:
         config:
           sp_budget_round: 1
@@ -50,9 +50,9 @@ campaign:
 panel:
   # The DEGENERATE panel — a plumbing fixture for the browser walk, not an instrument.
   #
-  # `promptpotter-self/panel`'s `dataset.yaml::panel` is the real one and this is not a cheaper version of it:
+  # `promptpotter-self/run` is the real one and this is not a cheaper version of it:
   # every property that makes that panel MEASURE something has been removed here on purpose. One
-  # cell, so PoBB can never reach its elimination floor of 4 and nothing is ever eliminated. Two
+  # search cell, so PoBB can never reach its elimination floor of 4 and nothing is ever eliminated. Two
   # inner rounds, the floor the area is read over. One inner variant, so there is no candidate
   # field to select from. Two samples, so the inner θ is noise, and two held-out rows, the fewest
   # the area's paired t reads.
@@ -63,10 +63,9 @@ panel:
   # READ NOTHING OFF A RUN OF THIS. It answers exactly one question — does the L4 spawn path still
   # work end to end — and any number it emits is an artefact of the geometry above.
   #
-  # What a cell costs, what the cost floor is, and why the benchmark below is not a shallower cut:
+  # What a cell costs, what the cost floor is, and why the family's benchmark is not a shallower cut:
   # `README.md` beside this file owns all three. Do not restate them here — they are one argument
   # and it drifts the moment it has two homes.
-  inner_benchmark: justlogic/d234
   inner_campaign:
     sp_budget_origin: 2
     dataset_split: {bench: 2, demo: 0, tolerance: 0}
@@ -78,9 +77,11 @@ panel:
         adaptive_queue: {config: {sp_budget_round: 2, per_round_resubset: false}}
         l1_generate: {config: {n_variants: 1}}
   tasks:
-    # Seed 0 only. The real panel's six seeds were each chosen against a measured
-    # constant-answer floor; one seed is not a sample of that work, it is a single cell that
-    # makes the machinery turn over.
+    # One search seat and one held-out seat: the fewest that turn the outer search and its bench over.
     - kind: seat
       id: justlogic-d234/seed-0
       run_seed: 0
+    - kind: seat
+      id: justlogic-d234/seed-1
+      held_out: true
+      run_seed: 1

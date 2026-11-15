@@ -2,24 +2,27 @@
 
 A self-referential dataset: outer PromptPotter optimizes the **optimizer prompts** that drive the
 inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/inner/spawn.py`. What is true of L4:
-[`docs/concepts/l4.md`](../../../../docs/concepts/l4.md).
+[`docs/concepts/l4.md`](../../../docs/concepts/l4.md).
 
-Each outer "sample" is one entry in `dataset.yaml::panel`: it mints and runs a full inner campaign on
-the seat's benchmark under the panel's `inner_campaign`. Each inner run reports a vector of
+Two members share one geometry, `family.yaml::panel`, and differ in their seats alone: `run/` is the
+instrument, six search seats and one held-out seat per benchmark, its outer crown graded on those
+three; `dev/` is the same six search seats with nothing held out, for code and pilots, and each of its
+cells is the one `run` reads. Each outer "sample" is one seat of a member's panel (`run/dataset.yaml::panel`):
+it mints and runs a full inner campaign on the seat's benchmark under the family's `inner_campaign`. Each inner run reports a vector of
 measurements (`domain/l4/proxies.py::OuterSampleProxies` is the scored one) and its held-out
 `bench_rows`; the family formula
 (`research/datasets/promptpotter-self/family.yaml::campaign.scoring`) re-anchors **one** of them — `held_out_lift`, the area
 under the inner run's held-out curve — into [0,1] and nothing else. The rationale lives in
-[`docs/concepts/l4.md`](../../../../docs/concepts/l4.md) § The measurand.
+[`docs/concepts/l4.md`](../../../docs/concepts/l4.md) § The measurand.
 
-**Prerequisite: the account holds `hotpotqa-distractor` and `legalbench-fods`.** Four seats measure
-those two account definitions (tenant tier), which no committed tier carries, so on any other account
+**Prerequisite: the account holds `hotpotqa-distractor` and `legalbench-fods`.** Four seats of `dev`
+and six of `run` measure those two account definitions (tenant tier), which no committed tier carries, so on any other account
 — the box included — the panel refuses at init and names the seat.
 
 **What remains** — owned by
-[`docs/specs/roadmap.md`](../../../../docs/specs/roadmap.md) § L4 closure.
+[`docs/specs/roadmap.md`](../../../docs/specs/roadmap.md) § L4 closure.
 
-**The panel geometry, its per-cell cost and why it is 6 cells** — owned by `dataset.yaml::panel`, whose
+**The panel geometry, its per-cell cost and why it searches 6 cells** — owned by `family.yaml::panel`, whose
 figures come off the banked cycle ledgers. Do not re-derive a cost from the knob values: the factors
 multiply, and an arithmetic estimate was 3× under the measured rate.
 
@@ -37,4 +40,4 @@ way was an order of magnitude optimistic. One trap: the duration distribution of
 is censored, since a cell that hits its wall-clock deadline emits no record at all.
 
 **Cut samples or rounds to save money, never tasks** — the panel width is what makes elimination and
-the winner election work, and `dataset.yaml::panel` states the floor and its reason.
+the winner election work, and `family.yaml::panel` states the floor and its reason.

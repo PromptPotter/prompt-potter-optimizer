@@ -1,0 +1,44 @@
+pipeline:
+  description: >-
+    Self-optimization: evolves the optimizer's own prompts on six search seats, its crown graded on
+    three held-out seats.
+
+panel:
+  # `dev`'s six seats searched, and one held-out seat per benchmark: the outer's bench.
+  tasks:
+    - kind: seat
+      id: justlogic-d234/seed-20
+      run_seed: 20
+    - kind: seat
+      id: justlogic-d234/seed-3
+      run_seed: 3
+    - kind: seat
+      id: hotpotqa-distractor/seed-1
+      inner_dataset: hotpotqa-distractor
+      run_seed: 1
+    - kind: seat
+      id: hotpotqa-distractor/seed-0
+      inner_dataset: hotpotqa-distractor
+      run_seed: 0
+    - kind: seat
+      id: legalbench-fods/seed-0
+      inner_dataset: legalbench-fods
+      run_seed: 0
+    - kind: seat
+      id: legalbench-fods/seed-1
+      inner_dataset: legalbench-fods
+      run_seed: 1
+    - kind: seat
+      id: justlogic-d234/seed-2
+      held_out: true
+      run_seed: 2
+    - kind: seat
+      id: hotpotqa-distractor/seed-2
+      held_out: true
+      inner_dataset: hotpotqa-distractor
+      run_seed: 2
+    - kind: seat
+      id: legalbench-fods/seed-2
+      held_out: true
+      inner_dataset: legalbench-fods
+      run_seed: 2

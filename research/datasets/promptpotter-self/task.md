@@ -27,7 +27,7 @@ gain **sooner** on the proxy benchmarks.
 
 ## What the inner cycle is solving (so you mutate toward the right behaviour)
 
-The panel spans three inner benchmarks (the seats are `panel/dataset.yaml::panel`'s —
+The panel spans three inner benchmarks (the seats are `run/dataset.yaml::panel`'s —
 not restated here, where a stale list would only anchor you):
 
 - **justlogic deductive reasoning**: premises plus a candidate conclusion, answered
@@ -99,7 +99,7 @@ not seen.
 
 ## Proxy realism
 
-The committed inner config (``panel/dataset.yaml::panel`` — the source of truth for the
+The committed inner config (``family.yaml::panel`` — the source of truth for the
 inner geometry; don't restate its numbers here) keeps each outer "sample" at
 order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
 publication runs.

@@ -115,7 +115,7 @@ def main() -> int:
     from promptpotter.shared.errors import DatasetAccessError
 
     try:
-        resolve_dataset(store, "promptpotter-self/panel")
+        resolve_dataset(store, "promptpotter-self/run")
     except DatasetAccessError as refused:
         assert "no research tier" in str(refused), f"the L4 panel refused unexplained: {refused}"
     else:

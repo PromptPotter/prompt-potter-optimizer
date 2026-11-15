@@ -401,6 +401,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   pin of every seat on that dataset.
 - **The paid L4 browser walk's stop was sized for one inner round** (reported):
   `research/datasets/promptpotter-self/e2e/dataset.yaml:30`'s `usd: 0.05` predates the depth-2 floor,
+  and the same stop now pays the held-out seat's outer bench passes (the origin's, one per adoption),
   so `webapp/e2e/spend/l4.spec.ts` may halt on its ceiling. Action: size it from one measured depth-2
   run. **Rides with:** the next paid walk.
 
@@ -880,6 +881,15 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   Action: time `plan_landing` by phase and cut the slow one; an entry finding a landing in flight says
   so and waits. **Re-test:** a landing over the same root under a minute; `cycles` during one prints
   a wait line, no traceback.
+- **A panel member restates the family's whole `inner_campaign`**: `store/dataset_access.py` merges
+  the `panel:` section with `|=`, one level deep, so `e2e` repeats every key to change one. Action:
+  fold the panel section by the rule every layered document uses (`layer_fold.py::fold_layers`).
+  **Re-test:** `e2e/dataset.yaml` names only the `inner_campaign` keys it changes.
+- **The outer's edit menu offers fields of inner nodes that never fire**: inner `l3_plan` made 0
+  calls and `l2_context` 1 across six inner runs (L4 audit C, 2026-11-15), yet both stay editable.
+  Action: a field is offered only where its node ran on the measured samples, for every campaign.
+  **Rides with:** the outer chain (D7). **Re-test:** a C0 on `promptpotter-self/run` offers no
+  `l3_plan` field until one inner run calls it.
 
 ## Held — no wave-4 chain yet
 
@@ -888,11 +898,11 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
-- **The committed L4 panel resolves only on this account**: `research/datasets/promptpotter-self/panel/dataset.yaml`
-  seats `hotpotqa-distractor` and `legalbench-fods`, account definitions no committed tier holds, so
+- **The committed L4 panels resolve only on this account**: `research/datasets/promptpotter-self/run/dataset.yaml`
+  (and `dev/`) seats `hotpotqa-distractor` and `legalbench-fods`, account definitions no committed tier holds, so
   the box refuses the panel at init. Action: commit both to the research tier, or keep the README's
   prerequisite. **Held:** the operator's call (a research-tier definition gets `defaults.yaml` laid
-  under it, a tenant one does not). **Re-test:** `promptpotter-self/panel` inits on a fresh account.
+  under it, a tenant one does not). **Re-test:** `promptpotter-self/run` inits on a fresh account.
 - **An outer early cut can skip a benchmark**: `intelligence/rasch.py::build_round_order` orders a round's cells by
   δ, not by benchmark, so an arm PoBB cuts at 4 of 6 cells may read none of one benchmark's seats.
   Action: draw the outer round stratified by `Sample.measured_dataset` (potter's `_strata` exists).
@@ -902,9 +912,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   hotpotqa's `escalation.l1_patience: 5` differs from the others; `runner/inner/tasks.py::_lever`
   leaves knobs out, so nothing flags it. Action: one inner measurand and one ladder across seats, or a
   refusal. **Held:** a decision. **Re-test:** the three definitions' `scoring` and `escalation` blocks.
-- **Merge hazard at landing**: MAIN's uncommitted `promptpotter-self/panel/dataset.yaml`,
-  `openapi.generated.json` and `types.generated.ts` overlap `arc/l4-robust2`. Action: regenerate the
-  specs and types after the merge. **Held:** the landing. **Re-test:** `git status` on MAIN.
 - **Two builders of one sandbox store**: `infrastructure/store/stores.py::inner_sandbox_store` and
   `runner/inner/spawn.py::sandbox_stores`; the first takes `(stores, campaign_id, cycle_id)`, so its
   callers split a `CycleHop` to call it (`hierarchy_subtree.py:380`, `stores.py:268`,

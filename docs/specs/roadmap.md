@@ -434,20 +434,37 @@ round.
    reading under the measured prior would have held 40 of the 50 (fresh −0.17 ± 0.17). It becomes a
    reading on rk-dec's switch, and each reading is scored offline by the fresh lift of what it
    promotes. A noise promotion also resets the stall clock, so the first three-held run on
-   hotpotqa-cb lands about 1.5–2 rounds late. The live pilots of 2026-11-15 agree: of 12 promoted
+   hotpotqa-cb lands about 1.5–2 rounds late. The live pilots of 2026-11-15 agree: of 15 promoted
    lines, one held up on a fresh held-out bench (justlogic on the old whole-prompt wire, +16.7 pts on
    30 rows; on the edit wire it read +6.7 [−7.0, +20.3]). Three default-potter replicates on hotpotqa
    claimed +10 to +20 points on the 20-row origin panel; on 100 held-out rows, against one shared
-   origin reading, they read −5 to −7, none separable from zero, each flipping 20 to 37 rows. No
-   origin retest yet says how many flips the origin makes against itself.
-2. **μ0, τ and hold-up are served every round; their falsifier is untested.** This is the early-AUC
-   instrument L4 lacks: where μ0 < 0 and τ ≈ 0 no bar yields lift, and the lever is `l1_generate`. The
-   test is τ from rounds 1–2 against the lineage's fresh θ trend from round 3 on.
+   origin reading, they read −5 to −7, none separable from zero, each flipping 20 to 37 rows. Three
+   on legalbench claimed +10 to +25 and read −1 to −4 (replicate SD 1.5 points, a row SE about 5).
+   The origin against itself (`origin_replicates: 5`, the same 40 rows, temperature 0): hotpotqa
+   read 0.40 five times, as recorded; legalbench 0.45 five times against 0.40 recorded, 3 of 40 rows
+   changing grade (one between calls six hours apart, two between back-to-back replicates). The
+   origin's own noise is about one row in 20, so the claims of 2 to 5 rows in 20 come from search,
+   not from the origin's own noise.
+2. **μ0, τ and hold-up are served every round; three lineages agree with their falsifier.** This is
+   the early-AUC instrument L4 lacks: where μ0 < 0 and τ ≈ 0 no bar yields lift, and the lever is
+   `l1_generate`. The test is τ from rounds 1–2 against the lineage's fresh θ trend from round 3 on.
+   The hotpotqa replicates above served μ0 < 0 in 14 of 15 rounds and τ = 0 in 11; the legalbench
+   ones τ = 0 in 15 of 15, with μ0 > 0 in each of their 5 promoting rounds (the round's own winner
+   lifts it). None of the 10 promotions held up. A τ at 0 made the `empirical_bayes` posterior a
+   point mass, so that bar read sign(μ0) alone: it held hotpotqa's 5, and under each round's own
+   prior would have passed every legalbench arm with more wins than losses in a promoting round.
+   μ0's own error now rides the posterior. A
+   head-to-head arm cannot set `crowning_bar` (`draft_edit.py::OptimizationOverrides`), so that bar
+   is scored offline.
 3. **Three arms instead of five** would give +9% lift per dollar and −27% lift per round. This is a
    derivation only, and it matters only where τ > 0.
 4. **An inner run that elects in two rounds is read, not excluded**: a seat benches
    `every_adoption`, the end pass grading every selection its line adopted (one 20-row pass per extra
-   election), and `runner/bench.py::read_curve` reads the area over them all. Owed: one C0 re-measure.
+   election), and `runner/bench.py::read_curve` reads the area over them all. C0 re-measured
+   (2026-11-15, `promptpotter-self/panel`, now `dev`, $0.335, 85 min one cell at a time): the six seats read
+   +7.5, 0, 0, 0, −5 and +10 held-out points, mean +2.1, fitness 0.52. Two inner runs adopted
+   nothing; the four that did claimed +7.5 to +17.5 on their origin panels and read +7.5, +10, 0
+   and −5 held out.
 5. **A row in two clusters no longer costs the critique**: it broke every repair rung at C0 (landing
    79) and in a P4 hotpotqa round (2026-11-15), so those rounds banked none, and cost a P2 round two
    paid re-asks; `potter/dispatch/schemas.py::_struck` strikes it from the later cluster, as it

@@ -50,6 +50,10 @@ campaign:
   scoring:
     per_sample: 0.0 if floored else max(0.0, min(1.0, held_out_lift + 0.5))
   display_metric: ability
+  # The bench is the seats a panel declares `held_out`, which the outer search never draws; the
+  # origin and each outer adoption are graded on them once.
+  dataset_split: {bench: 0}
+  bench_trigger: every_adoption
   optimization:
     # What C0 and a round cost is unmeasured under the panel's geometry (40 rows a round, three
     # benchmarks, up to the whole round budget an inner run). The next C0 reads it off the
@@ -58,23 +62,20 @@ campaign:
     # It must also be falsifiable: ONE optimizing round is a coin toss rather than a test of a
     # challenger, whatever the outer SE reads under the held-out measurand.
     budget: {usd: 5.0, rounds: 4}
-    # `degradation_threshold` stays at the default, and that is calibrated, not inherited: it is
-    # on the fitness scale, so it moves with the re-anchor above. What it must NOT reject, from
-    # the inner cycles at the retired 28-row geometry: a WINNING inner round bought 1-4 rows in 28
-    # (+0.036 / +0.071 / +0.107 / +0.143) and 10 of 17 rounds bought exactly zero; re-check it
-    # against the first corpus the panel banks.
-    # Improvement here is granular and infrequent by nature; a bar that rejects a 1-row win
-    # rejects most real wins.
     elimination_n_min: 4
     # Potter's knobs — the overlay on its manifest's nodes (assets/optimizers/potter/).
     nodes:
+      # = a panel's search seats: the draw leaves out the parent's crowning seats, and the origin
+      # panel tops every arm walked to its draw's end back up to all six (`round.py::read_origin_panel`).
+      adaptive_queue:
+        config:
+          sp_budget_round: 6
       l1_generate:
         config:
           prompt_family: l1_generate_self_optimizing
           block_access: 'off'
-          # Affordable rather than merely tolerable, and the inner cycles are why: PoBB cut an arm in
-          # 14 of 17 inner rounds, so a 3-variant round runs ~2 arms to completion and the third is
-          # mostly refunded. That is `elimination_n_min` earning its keep.
+          # No outer round is banked to set it from: 3 variants send at most 3 x 6 = 18 inner
+          # campaigns a round, 3 x 4 = 12 once PoBB cuts each loser at `elimination_n_min`.
           n_variants: 3
       l1_critique:
         config:
@@ -93,7 +94,9 @@ campaign:
           # headroom (`start` well under `budget.rounds`) when the outer loop runs long enough for
           # a measurement-driven brake to mean something — the `lives_no_headroom` coupling
           # warns if it goes back in without it.
-          l1_patience: 2
+          # `budget.rounds: 4` is four search rounds past the origin. Stalled throughout, L2 steers
+          # rounds 2 and 3 and L3 round 4 (default `l2_patience: 2`); at `l1_patience: 2`, round 3 alone.
+          l1_patience: 1
       pobb:
         config:
           # Per-campaign, NOT the global default (0.15, whose false-cut curve was measured on the
@@ -103,3 +106,62 @@ campaign:
           # Racing at the global epsilon captured about a quarter of the headroom its own p_best
           # stream offered on `promptpotter-self__af6252`.
           epsilon: 0.30
+
+panel:
+  # Each outer cell runs an inner campaign on a cheap proxy benchmark; docs/concepts/l4.md. One
+  # geometry for every member: each names only its seats, so a `dev` cell replays inside `run`.
+  inner_benchmark: justlogic/d234
+  # A panel searches 6 cells because the OUTER loop's elimination floor is 4: at 2 cells PoBB could
+  # never reach it, so nothing was ever eliminated, the outer δ ruler never warmed, and a dud
+  # variant cost exactly as much as the winner. 6 > 4 makes all three work — and elimination is
+  # what keeps the wider panel from costing proportionally more, since a dud is cut at 4 cells.
+  #
+  # The cell itself is trimmed to pay for that width: 4 rounds x 3 variants instead of 5 x 4.
+  #
+  # Laid over each seat dataset's own `campaign:` block, as any campaign block is. Two facts follow:
+  # - A round reads the first 40 search rows less the crowning cells, then refills from row 41
+  #   (`members.py::AdaptiveQueue.draw`, `adaptive_queue_mechanism.py::covered_prefix`).
+  # - `partition_bank` ranks rows by `stable_hash([seed, key])`, so the seats draw other rows than
+  #   the seed screens below read: those screens no longer describe the seats.
+  inner_campaign:
+    sp_budget_origin: 40
+    # `demo: 0` is load-bearing: justlogic's own `demo: 50` would open shots.
+    dataset_split: {bench: 20, demo: 0, tolerance: 2}
+    bench_trigger: every_adoption
+    optimization:
+      # The width of the area `held_out_lift` reads, and inside every cell's key.
+      budget: {rounds: 4}
+      determinism: {temperature: 0.0}
+      nodes:
+        adaptive_queue: {config: {sp_budget_round: 40, per_round_resubset: false}}
+        l1_generate: {config: {n_variants: 3}}
+  #
+  # A panel spans THREE benchmarks, two search seats each, so an edit that helps one task family
+  # and hurts another reads as the mixture it is. Each inner campaign reads its own benchmark's δ
+  # scale; an outer cell is filed under the outer run's ruler scope
+  # (`bench/difficulty.py::session_ruler_scope`) and tagged with the dataset its inner campaign
+  # measured (`Sample.measured_dataset`).
+  # `hotpotqa-distractor` and `legalbench-fods` are the account's own definitions (tenant tier,
+  # `termnorm`-backed); a sandbox resolves them at the account, beside the caches.
+  #
+  # RETIRED on `justlogic/d234`, each on the strongest evidence available for it:
+  #   seed-1 — REWARDS COLLAPSE. Constant-answer floor 0.550 (exact) against origin reads of 0.525
+  #     and 0.500: below on both, so a candidate that stops reasoning and answers a single label
+  #     outscores the parent, every round.
+  #   seed-5 — 11 of its 40 rows carried NO information (7 that nothing solved, 4 that everything
+  #     solved): a 16-row instrument at a 40-row price. Its collapse reading did NOT hold on a second
+  #     read; do not cite it.
+  #   seed-4 — margin +0.021 over 6 settled passes: about ONE row in 40 of credit for reasoning.
+  #   seed-7 — EXCLUDED from the pool (operator, 2026-08-02): lowest measured origin is how seed-5
+  #     got a seat, and a fresh screen cannot tell hard from impossible. Do not re-propose it.
+  #
+  # THE LESSON THAT COST THE MOST: the floor is EXACT, the origin is MEASURED at ~0.08 SE per
+  # 40-row pass, and only the measured side decides. Compare banks on the GAP (`reasoning_margin`),
+  # never on floor or accuracy alone, and treat a thin positive margin as disqualifying. The
+  # thin-margin rule is written here and nowhere in code: an origin round's collapse verdict reads
+  # only floor > origin.
+  #
+  # The six search seats were seated on 2026-11-11 screens of rows they no longer draw; `run`'s
+  # three held-out seats are unscreened on purpose: pilots set seats (operator, 2026-11-15).
+  #
+  # A swapped seat voids only its own banked cells; an `inner_campaign` edit voids every seat's.

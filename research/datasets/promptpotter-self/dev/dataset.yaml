@@ -1,0 +1,29 @@
+pipeline:
+  description: >-
+    Self-optimization, dev panel: the six search seats and nothing held out, for code and pilots.
+
+panel:
+  # `run`'s six search seats, so each cell here is the one `run` reads.
+  tasks:
+    - kind: seat
+      id: justlogic-d234/seed-20
+      run_seed: 20
+    - kind: seat
+      id: justlogic-d234/seed-3
+      run_seed: 3
+    - kind: seat
+      id: hotpotqa-distractor/seed-1
+      inner_dataset: hotpotqa-distractor
+      run_seed: 1
+    - kind: seat
+      id: hotpotqa-distractor/seed-0
+      inner_dataset: hotpotqa-distractor
+      run_seed: 0
+    - kind: seat
+      id: legalbench-fods/seed-0
+      inner_dataset: legalbench-fods
+      run_seed: 0
+    - kind: seat
+      id: legalbench-fods/seed-1
+      inner_dataset: legalbench-fods
+      run_seed: 1

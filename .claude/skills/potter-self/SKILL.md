@@ -31,7 +31,7 @@ optimizer prompt survives** (`llm_call` records' `template_fields` + `variables`
 
 ## Live-run supervision
 
-**Run `new promptpotter-self/panel` ONCE, in the FOREGROUND, to completion**, from a checkout. A kill
+**Run `new promptpotter-self/run` (a pilot: `promptpotter-self/dev`) ONCE, in the FOREGROUND, to completion**, from a checkout. A kill
 orphans the open inner run (`producer_vanished`); a relaunch continues the same inner campaign, so it costs
 the interrupted round, not the cell. The outer `cycle_id` hashes optimizer prompts + benchmark: **iterate
 with `resume`**, `new` only after a prompt/config change.

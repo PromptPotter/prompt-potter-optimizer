@@ -1158,8 +1158,6 @@ async def run_l4(workspace: Path, *, rows: int) -> None:
     samples = synthetic_rows(rows)
     stand_in_fetch(stores, samples)
     raw = dict(dataset_campaign_block(resolve_dataset(stores, L4_DATASET)))
-    # One seat holds out no row, so no bench is ever asked for.
-    raw.update(bench_trigger="at_end")
     opt = raw["optimization"]
     opt.update(budget={**opt["budget"], "usd": 1000.0}, determinism={"seed": 0})
     config = CampaignConfig.model_validate(raw)
@@ -1172,7 +1170,9 @@ async def run_l4(workspace: Path, *, rows: int) -> None:
         budget=Budget(),
         mode=RunMode(),
     )
-    await banked(stores, session, result, harness, workspace, name=L4, bench_trigger="at_end")
+    await banked(
+        stores, session, result, harness, workspace, name=L4, bench_trigger=config.bench_trigger
+    )
     askers = {asker for asker, _, _ in harness.llm.turns if asker}
     print(
         f"{L4} outer {result.stop_reason}: {len(askers)} inner campaigns asked, "
