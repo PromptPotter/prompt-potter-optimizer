@@ -246,8 +246,13 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   inner campaign), `compact-archive inventory` names each entry's runs, and `reclaim` deletes one
   dataset's answers, planning unless `--apply` and refusing while a producer appends. Every leg
   UNMOVED, digests unmoved; answers filed before it load with the stamp unset.
-- **then:** addr-2 (cloud, in flight); tests-w on small-4's tip; the feed's per-subject version, the
-  lineage fold and the inline launch's queued answer; the edge tail. A cold verify is timed live.
+- **landed 93, addr-2:** a cycle's family root and a retired arm are read from the index, never
+  parsed from an id; the lineage spines key on a candidate's address, so one arm key re-proposed on
+  two branches lights one; each subject and node serves its short label, and two client parsers go.
+  Every leg UNMOVED, digests unmoved, no wipe.
+- **then:** tests-w and ws (cloud, side by side); `HeldRun.of` reads the cycle its mint opened; the
+  feed's per-subject version, the lineage fold and the inline launch's queued answer; the edge
+  tail. A cold verify is timed live.
 
 The re-keys end at the behaviour-key switch.
 

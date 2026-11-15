@@ -8,7 +8,7 @@ import type {
   SubtreeCampaign,
   SubtreeCycle,
 } from "@/lib/api/types";
-import { candidatesOf, descentOf, tagLabel, type Descent } from "@/lib/derivations";
+import { candidatesOf, descentOf, tagLabel, tagValue, type Descent } from "@/lib/derivations";
 import { type CyclePath, pathOfAddress } from "@/lib/ids";
 import { fmtUnit } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
@@ -75,14 +75,26 @@ export function barRound(bar: CandidateBar): number {
   return bar.reading?.arm.round ?? 0;
 }
 
+// Its round's election as recorded; an arm off its line (the served `retired` verdict) wears no crown.
+function standingElection(
+  node: HierarchyCandidate,
+  election: ArmElection,
+): Pick<ArmElection, "selected" | "crown"> {
+  return tagValue(node, "verdict") === "retired" ? { selected: false, crown: null } : election;
+}
+
 export function pairedRow(bar: CandidateBar): PairedRow {
+  const { selected, crown } =
+    bar.reading === null
+      ? { selected: false, crown: null }
+      : standingElection(bar.node, bar.reading.election);
   return {
     key: bar.key,
     round: barRound(bar),
     label: bar.label,
     address: bar.node.address,
-    is_selected: bar.reading?.election.selected ?? false,
-    crown: bar.reading?.election.crown ?? null,
+    is_selected: selected,
+    crown,
     descent: descentOf(bar.node),
   };
 }
@@ -246,7 +258,7 @@ function groupRounds(cands: readonly HierarchyCandidate[]): Map<number, Hierarch
 }
 
 function pickWinner(cands: readonly HierarchyCandidate[]): HierarchyCandidate | null {
-  return cands.find((c) => c.facts.reading.election.selected) ?? null;
+  return cands.find((c) => standingElection(c, c.facts.reading.election).selected) ?? null;
 }
 
 const innerCycles = (cand: HierarchyCandidate): SubtreeCycle[] =>
@@ -277,9 +289,8 @@ export interface LaneLayout {
 }
 
 export interface CladogramAnchor {
-  cyclePathKey: string;
-  // The individual id.
-  candidateId: string;
+  // The candidate's address.
+  address: string;
 }
 
 // The campaigns hung inside a cycle: off its candidates, and off the cycle where none claims one.
@@ -288,14 +299,12 @@ const campaignsIn = (cycle: SubtreeCycle): SubtreeCampaign[] => [
   ...cycle.children.filter((c) => c.entry_kind === "campaign"),
 ];
 
-function pointAt(campaign: SubtreeCampaign, anchor: CladogramAnchor): HierarchyCandidate | null {
+function pointAt(campaign: SubtreeCampaign, address: string): HierarchyCandidate | null {
   for (const cycle of campaign.children) {
-    if (cycle.address === anchor.cyclePathKey) {
-      const own = candidatesOf(cycle).find((c) => c.facts.individual === anchor.candidateId);
-      if (own) return own;
-    }
+    const own = candidatesOf(cycle).find((c) => c.address === address);
+    if (own) return own;
     for (const inner of campaignsIn(cycle)) {
-      const found = pointAt(inner, anchor);
+      const found = pointAt(inner, address);
       if (found) return found;
     }
   }
@@ -308,7 +317,7 @@ export function extentKeys(
   root: SubtreeCampaign,
   anchor: CladogramAnchor,
 ): ReadonlySet<string> | null {
-  const point = pointAt(root, anchor);
+  const point = pointAt(root, anchor.address);
   if (point === null) return null;
   const keys = new Set([point.address, ...point.facts.main_line.flatMap((s) => s.candidates)]);
   const addMeasurements = (cand: HierarchyCandidate): void => {
@@ -456,7 +465,7 @@ function placedNode(
   label: string,
 ): RoundNodePos {
   const { round } = cand.facts.reading.arm;
-  const { selected, crown } = cand.facts.reading.election;
+  const { selected, crown } = standingElection(cand, cand.facts.reading.election);
   return {
     cycleKey: laneKey,
     cyclePath: pathOfAddress(l.cycle.address),

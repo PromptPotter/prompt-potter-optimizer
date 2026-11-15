@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NamedTuple
 
-from promptpotter.domain.arm_reading import ArmElection, ArmReading
+from promptpotter.domain.arm_reading import ArmElection, ArmReading, panel_counts, panel_cuts
 from promptpotter.domain.arms import ArmState, arm_name
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
@@ -179,6 +179,22 @@ def read_cycle(
         held = standing.rounds.get(rnd)
         return None if held is None else held.close.election
 
+    # A round's panel is its proposals': a re-read parent is no arm of it.
+    proposals: dict[int, list[tuple[int, ArmKey]]] = {}
+    for at, held in standing.arms.items():
+        if held.state.role != MeasurementRole.PARENT:
+            proposals.setdefault(at[0], []).append(at)
+    cut = {
+        at: flag
+        for ats in proposals.values()
+        for at, flag in zip(
+            ats,
+            panel_cuts(
+                [panel_counts(standing.arms[at].state, standing.arms[at].fold) for at in ats]
+            ),
+            strict=True,
+        )
+    }
     arms: list[CycleArm] = []
     rereads: dict[tuple[int, ArmKey], RoundArm] = {}
     for (rnd, key), held in sorted(
@@ -194,7 +210,7 @@ def read_cycle(
             arm_name(key, held.state, rnd),
             held.state,
             fold=held.fold,
-            cut=False,
+            cut=cut[rnd, key],
             election=_NO_ELECTION
             if election is None
             else ArmElection.of(

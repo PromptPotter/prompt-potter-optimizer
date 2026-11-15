@@ -2416,6 +2416,11 @@
             "title": "Root",
             "type": "string"
           },
+          "root_label": {
+            "description": "The root cycle's served `label`.",
+            "title": "Root Label",
+            "type": "string"
+          },
           "runs_with": {
             "anyOf": [
               {
@@ -2426,11 +2431,18 @@
               }
             ],
             "description": "What the root cycle runs with; null where its pipeline did not resolve."
+          },
+          "short_label": {
+            "description": "Its name where runs stand side by side: `label`, else its dataset and the suffix that tells two runs of it apart.",
+            "title": "Short Label",
+            "type": "string"
           }
         },
         "required": [
           "label",
+          "short_label",
           "root",
+          "root_label",
           "live_cycle",
           "lifecycle",
           "runs_with"
@@ -2911,11 +2923,6 @@
         "additionalProperties": false,
         "description": "One arm a round proposed; everything measured or decided about it is its `reading`.",
         "properties": {
-          "answers_for_id": {
-            "description": "The ONE candidate across the subtree a remembered individual id resolves to: the live one where a supersede left the individual on two, the first where several stand.",
-            "title": "Answers For Id",
-            "type": "boolean"
-          },
           "cycle_latest": {
             "description": "The newest candidate its cycle proposed.",
             "title": "Cycle Latest",
@@ -3013,17 +3020,9 @@
             "title": "Main Line",
             "type": "array"
           },
-          "parent_ids": {
-            "description": "Every individual this one derives from — one for a mutation, several for a crossover; empty only at an origin.",
-            "items": {
-              "type": "string"
-            },
-            "title": "Parent Ids",
-            "type": "array"
-          },
           "reading": {
             "$ref": "#/components/schemas/ArmReading",
-            "description": "`reading.arm` is the key every per-cycle document of this cycle speaks; `reading.sp_hash` joins to the archive rows. A retired candidate's election wears no crown: the cycle that took its place re-asks it."
+            "description": "`reading.arm` is the key every per-cycle document of this cycle speaks; `reading.sp_hash` joins to the archive rows. A retired candidate's election is its round's as recorded: its `retired` verdict says it no longer stands."
           },
           "sample_set_fitness": {
             "anyOf": [
@@ -3068,13 +3067,11 @@
         },
         "required": [
           "individual",
-          "parent_ids",
           "variations",
           "standing",
           "reading",
           "stands",
           "cycle_latest",
-          "answers_for_id",
           "main_line",
           "descends_from",
           "donor",
@@ -14397,6 +14394,10 @@
             "title": "Campaign Id",
             "type": "string"
           },
+          "campaign_label": {
+            "title": "Campaign Label",
+            "type": "string"
+          },
           "label": {
             "title": "Label",
             "type": "string"
@@ -14420,6 +14421,7 @@
         "required": [
           "sp_hash",
           "campaign_id",
+          "campaign_label",
           "label",
           "provenance",
           "reading"
@@ -17456,6 +17458,11 @@
             "title": "Root",
             "type": "string"
           },
+          "root_label": {
+            "description": "The root cycle's served `label`.",
+            "title": "Root Label",
+            "type": "string"
+          },
           "runs_with": {
             "anyOf": [
               {
@@ -17466,11 +17473,18 @@
               }
             ],
             "description": "What the root cycle runs with; null where its pipeline did not resolve."
+          },
+          "short_label": {
+            "description": "Its name where runs stand side by side: `label`, else its dataset and the suffix that tells two runs of it apart.",
+            "title": "Short Label",
+            "type": "string"
           }
         },
         "required": [
           "label",
+          "short_label",
           "root",
+          "root_label",
           "live_cycle",
           "lifecycle",
           "runs_with",

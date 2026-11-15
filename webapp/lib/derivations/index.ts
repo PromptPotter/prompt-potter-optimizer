@@ -8,7 +8,6 @@ export * from "./fitness-shade";
 export * from "./headline-stats";
 export * from "./hierarchy";
 export * from "./lineage-candidates";
-export * from "./lineage-descendants";
 export * from "./live-candidates";
 export * from "./node-config";
 export * from "./paired-reading";

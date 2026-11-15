@@ -23,7 +23,6 @@ import {
   fmtSigned,
   fmtUnit,
   PLACEHOLDER,
-  shortId,
 } from "@/lib/format";
 import { maskedSubject } from "@/lib/api/reads";
 import { ChannelCards } from "./ChannelCards";
@@ -49,7 +48,7 @@ const VIEWS: readonly { value: CompareView; label: string; hint: string }[] = [
 
 function channelNames(subjects: readonly SubjectReading[]): ReadonlyMap<string, string> {
   return new Map(
-    subjects.map((s) => [s.key, s.kind === "campaign" ? shortId(s.label) : s.label]),
+    subjects.map((s) => [s.key, s.label]),
   );
 }
 
@@ -557,7 +556,7 @@ function rankColumns(label: string): Column<RankedEdit>[] {
       cell: ({ row }) => (
         <span className="l4-label" title={`${row.label} · ${row.campaign_id}`}>
           <code>{row.sp_hash}</code> {row.label}
-          <span className="l4-dim"> {shortId(row.campaign_id)}</span>
+          <span className="l4-dim"> {row.campaign_label}</span>
         </span>
       ),
     },

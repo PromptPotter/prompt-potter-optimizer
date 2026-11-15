@@ -5,8 +5,8 @@ import { candidateSubject, readingPath } from "@/lib/api/reads";
 import {
   applyFlatEdits,
   type channelArms,
-  descendantsOf,
   mainLineOf,
+  withdrawnUnder,
   type CompareItem,
   type LineageIndex,
 } from "@/lib/derivations";
@@ -83,17 +83,17 @@ export function useChannelHead(
   }, [own, winner, latest, selected]);
 }
 
-// The individuals an unrun scenario edit withdrew: every edited seed and its descendants.
+// The candidates an unrun scenario edit withdrew, by address.
 export function useInvalidated(index: LineageIndex): ReadonlySet<string> {
   const { edits } = useScenarioEdits();
-  return useMemo(() => {
-    const seeds: string[] = [];
-    for (const c of index.candidates) {
-      const id = c.facts.individual;
-      if (editsFor(edits, candidateSubject(pathOfAddress(c.address), id)).size > 0) seeds.push(id);
-    }
-    return descendantsOf(index, seeds);
-  }, [index, edits]);
+  return useMemo(
+    () =>
+      withdrawnUnder(
+        index,
+        (c) => editsFor(edits, candidateSubject(pathOfAddress(c.address), c.facts.individual)).size > 0,
+      ),
+    [index, edits],
+  );
 }
 
 // The channel's headline number, or `?` once an edit above it withdrew every measurement.

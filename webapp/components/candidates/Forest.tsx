@@ -430,7 +430,7 @@ export function Forest({
                 dimmed={n.divergent}
                 alt={altIds.has(n.candidateId)}
                 divergence={n.divergence !== null}
-                invalidated={!!ctx.invalidated?.has(n.candidateId)}
+                invalidated={!!ctx.invalidated?.has(n.candKey)}
                 ink={inkOf(n)}
                 d={d}
               />

@@ -635,8 +635,13 @@ export interface CampaignFacts {
   /** The operator's own name for it; null where none was given, and the envelope's
    * `label` falls back to the dataset. */
   label: string | null;
+  /** Its name where runs stand side by side: `label`, else its dataset and the
+   * suffix that tells two runs of it apart. */
+  short_label: string;
   /** The root cycle's address. */
   root: string;
+  /** The root cycle's served `label`. */
+  root_label: string;
   /** The live cycle's address: the root, or the fork a supersede handed the line
    * to. */
   live_cycle: string;
@@ -1225,8 +1230,13 @@ export interface SubtreeCampaignFacts {
   /** The operator's own name for it; null where none was given, and the envelope's
    * `label` falls back to the dataset. */
   label: string | null;
+  /** Its name where runs stand side by side: `label`, else its dataset and the
+   * suffix that tells two runs of it apart. */
+  short_label: string;
   /** The root cycle's address. */
   root: string;
+  /** The root cycle's served `label`. */
+  root_label: string;
   /** The live cycle's address: the root, or the fork a supersede handed the line
    * to. */
   live_cycle: string;
@@ -1381,26 +1391,20 @@ export interface CandidateFacts {
   /** `OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one
    * individual again. */
   individual: string;
-  /** Every individual this one derives from — one for a mutation, several for a
-   * crossover; empty only at an origin. */
-  parent_ids: string[];
   /** The variation nodes that wrote this individual, in the order they ran. Empty
    * on an origin. */
   variations: Variation[];
   standing: 'origin' | 'proposed' | 'rewound' | 'rewound_stood_on' | 'retired';
   /** `reading.arm` is the key every per-cycle document of this cycle speaks;
    * `reading.sp_hash` joins to the archive rows. A retired candidate's
-   * election wears no crown: the cycle that took its place re-asks it. */
+   * election is its round's as recorded: its `retired` verdict says it no
+   * longer stands. */
   reading: ArmReading;
   /** The newest crowned live candidate of its cycle — the parent the next round
    * mutates from. At most one per cycle. */
   stands: boolean;
   /** The newest candidate its cycle proposed. */
   cycle_latest: boolean;
-  /** The ONE candidate across the subtree a remembered individual id resolves to:
-   * the live one where a supersede left the individual on two, the first
-   * where several stand. */
-  answers_for_id: boolean;
   /** The main line to THIS candidate, origin first: the line of the candidate its
    * cycle hangs from (a fork's from-candidate, an inner cycle's host) up to
    * the cut, each elected round of its cycle before it with the candidates
@@ -3085,6 +3089,7 @@ export interface LiftProfile {
 export interface RankedEdit {
   sp_hash: string;
   campaign_id: string;
+  campaign_label: string;
   label: string;
   provenance: EffectProvenance[];
   /** The searchpoint over its campaign's origin under the selected metric, on the
@@ -5500,7 +5505,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "5bd7536a43f8e866";
+export const SERVED_CONTRACT = "f9353726c154010d";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

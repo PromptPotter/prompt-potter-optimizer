@@ -239,29 +239,6 @@ row it closes.
 
 ### batch/26 · addr
 
-- **Lineage spines key on `facts.individual` and on the origin**: the compare pane's spine builder
-  resolves a subject by individual id across the whole tree (`hierarchy_subtree.py::_answering` picks
-  one row per id; keys at `hierarchy_subtree.py:610-631`, `:620-622`) and merges a campaign's subjects
-  into one spine, so a diverging branch drops out; `SearchpointPanels.tsx::buildSpines` walks
-  `parent_ids[0]` the same way (`:238`, `:257`). The browser folds genealogy beside it, against
-  `webapp/lib/CLAUDE.md`'s "key entries on `address`, never `facts.individual`":
-  `lib/derivations/lineage-descendants.ts:3,11` keys the invalidation closure by `facts.individual`,
-  which repeats across cycles, `lib/derivations/lineage-candidates.ts:107,123` keys on it too, and
-  `components/compare/channel-hooks.ts:53,103` falls back to `mine[0]`. `webapp/CLAUDE.md` `:9` and `:33` now
-  endorse `descendantsOf` (51231a4b5, which predates served lineage 52b76f719 and "the browser reads
-  served facts" 0d8011635); the server now serves descent (`hierarchy_subtree.py::_descent`). Action:
-  resolve by address, spines from the served `main_line`, invalidation from served descent;
-  `descendantsOf` and its test go, and `webapp/CLAUDE.md` `:9` and `:33` stop endorsing it. **Rides
-  with:** addr-2, whose Owns gain `webapp/CLAUDE.md` and `lineage-candidates.ts`. **Re-test:** compare
-  two branches of one campaign; both draw, and `git grep -n "facts.individual" -- webapp/lib/derivations` is empty.
-- **The tree rewrites a retired arm's election**: `hierarchy_subtree.py` (`:551-555`) copies a retired
-  candidate's reading with `selected=False`, `crown=None` and its `panel.cut`, against
-  `store/CLAUDE.md`'s "the tree is a read model and decides nothing", though `arm_reading.py::arm_verdict`
-  already takes `retired=`. Action: retirement and the cut land on the record that owns them and the
-  served reading carries them; the copies go. The served field comes first: the copies alone gone,
-  `webapp/components/candidates/lineage-tree.ts:84-85,248` crowns a retired arm off
-  `election.selected`/`crown` (addr's report). **Rides with:** addr-2. **Re-test:**
-  `git grep -c "model_copy" -- promptpotter/application/hierarchy_subtree.py` falls by three.
 - **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::_earlier`,
   O(n² log n) per read; reported beside it, the subtree read builds the whole top family per request,
   and `_descent` compares O(n²) pairs with `SequenceMatcher` behind an lru of 4096 that thrashes from
@@ -282,17 +259,12 @@ row it closes.
   manifest, and archive-wide signatures serve as read versions (`evidence/read.py:551-554`,
   `measurement_log.py:271-280`), so any run's archive write invalidates every evidence and cells view.
   The same root: a writer-stamped version per subject.
-- **A campaign's short label is parsed two ways**: `format.ts::shortId`, `ForestRows::shortOrigin`
-  (a cycle's is its served `label` since addr 4); `EvidenceCharts.tsx:81` labels cells with
-  `c.split("/").pop()`, so two datasets' cells share one label. Action: a served short label per
-  subject and node, on `application/hierarchy.py` and `application/evidence/read.py`. **Re-test:**
-  `git grep -nE "shortId\(|shortOrigin\(" -- webapp/components webapp/lib` (15 hits at addr 4).
-- **A cycle's family root is still parsed from its id** (addr's report): `store/layout.py::root_cycle_id`
-  regexes `_fork_`, read at `campaign_store/store.py::_stub_deletion_blocked` / `stub_forks` and
-  `fork_siblings.py::_sibling_id`, though a campaign's root is `Campaign.root_cycle_id` and "is a
-  root" is the mint's `ForkSpec` (`CycleIndex.minted_as`). Action: the stub checks read the index
-  they load, and the sibling id takes the campaign's root. **Rides with:** addr-2. **Re-test:**
-  `git grep -n "_SIBLING_SEP_RE\|root_cycle_id(" -- promptpotter/infrastructure` is empty.
+- **The freed tree and the channel map still key a candidate on `facts.individual`** (addr-2's
+  report): `Forest.tsx:431`'s `altIds` keys on `n.candidateId` and `ChannelMap.tsx:125::ArmedActions`
+  builds its subject from `armed.facts.individual`, so one arm key re-proposed on two branches
+  (`c8c1b433…` at r2 of the root and r3 of fork ·c56947) lights both, and the card's "Picked" fold
+  says "reads at C3.2" after C3.1 is armed. Action: both key on `address`, as the spines do since
+  addr-2. **Re-test:** `git grep -n "candidateId\|facts.individual" -- webapp/components/candidates/Forest.tsx webapp/components/compare/ChannelMap.tsx` is empty.
 
 ### passes-6 (what passes-5 and holders-3 left at landing 54)
 

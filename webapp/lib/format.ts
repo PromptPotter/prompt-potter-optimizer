@@ -142,12 +142,6 @@ export function fmtMetric(metric: MetricFormat, v: number | null | undefined): s
 
 
 
-// Campaign ids are `{dataset}__{rand6}`; the suffix is what tells two runs of one origin apart.
-export function shortId(campaignId: string): string {
-  const cut = campaignId.lastIndexOf("__");
-  return cut === -1 ? campaignId : campaignId.slice(cut + 2);
-}
-
 export function fmtSigned(v: number | null | undefined, digits: number): string {
   if (typeof v !== "number" || !Number.isFinite(v)) return PLACEHOLDER;
   return `${v >= 0 ? "+" : ""}${v.toFixed(digits)}`;

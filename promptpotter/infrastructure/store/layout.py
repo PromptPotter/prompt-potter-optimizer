@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
@@ -21,18 +20,11 @@ from promptpotter.shared.identity import IdentityContext
 
 logger = logging.getLogger(__name__)
 
-_SIBLING_SEP_RE = re.compile(r"_fork_")
-
 
 def dataset_id_prefix(name: str) -> str:
     """The name wherever ONE path segment holds it — a campaign id, a tenant file or folder named for a
     dataset. Joined on ``.``, which no name may hold, so two names never share a prefix."""
     return validate_dataset_name(name).replace("/", ".")
-
-
-def root_cycle_id(cycle_id: str) -> str:
-    m = _SIBLING_SEP_RE.search(cycle_id)
-    return cycle_id[: m.start()] if m else cycle_id
 
 
 def tenant_workspace(projects_root: Path, tenant_id: str) -> WorkspaceDir:

@@ -31,7 +31,6 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.run_standing import line_reference
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
-from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
@@ -96,9 +95,9 @@ def _fork_suffix(*parts: str) -> str:
     return stable_hash([*parts, stamp], length=8)
 
 
-def _sibling_id(parent: CycleHop, payload: ForkSpec) -> str:
+def _sibling_id(root_cycle_id: str, parent: CycleHop, payload: ForkSpec) -> str:
     """Fixed length at any depth: the line is the `CycleMintedRecord` chain, never the id."""
-    return f"{root_cycle_id(parent.cycle_id)}_fork_{_fork_suffix(parent.cycle_id, payload.trigger)}"
+    return f"{root_cycle_id}_fork_{_fork_suffix(parent.cycle_id, payload.trigger)}"
 
 
 def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) -> RoundArm:
@@ -202,7 +201,8 @@ def cut_fork(
         )
     edge = fork_edge(standing, fork_from_round, named)
     payload = ForkSpec(trigger=trigger, reason=reason, issued_by=issued_by, from_candidate=edge)
-    child = parent.model_copy(update={"cycle_id": _sibling_id(parent, payload)})
+    root_cycle_id = campaign_store.campaign(parent.campaign_id).root_cycle_id
+    child = parent.model_copy(update={"cycle_id": _sibling_id(root_cycle_id, parent, payload)})
     _fork_sibling_setup(
         stores,
         parent,

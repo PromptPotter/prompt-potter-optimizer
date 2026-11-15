@@ -158,9 +158,7 @@ def _live(cycle: SubtreeCycle) -> list[HierarchyCandidate]:
 def chat_text(cycle: SubtreeCycle, unit: MeasuredUnit) -> str:
     """One block per candidate in round order, every number a served one under its served name."""
     arms = _live(cycle)
-    label_of: dict[str, str] = {}
-    for c in arms:
-        label_of.setdefault(c.facts.individual, c.label)
+    label_of = {c.address: c.label for c in arms}
     lines = [
         f"candidates of {cycle.label} · {len(arms)} rows · elected on "
         f"{cycle.facts.elects_on or '—'} · in round order"
@@ -172,7 +170,8 @@ def chat_text(cycle: SubtreeCycle, unit: MeasuredUnit) -> str:
 
 def _arm_lines(c: HierarchyCandidate, label_of: dict[str, str], unit: MeasuredUnit) -> list[str]:
     r = c.facts.reading
-    parents = [label_of.get(p, p) for p in c.facts.parent_ids]
+    # The served descent, by address: a parent off this cycle is named by its address.
+    parents = [label_of.get(a, a) for a in (c.facts.descends_from, c.facts.donor) if a is not None]
     verdict = c.tag("verdict")
     head = [
         c.label,
@@ -276,7 +275,8 @@ def candidate_records(cycle: SubtreeCycle) -> list[dict[str, Any]]:
         {
             "label": c.label,
             "id": c.facts.individual,
-            "parent_ids": c.facts.parent_ids,
+            "descends_from": c.facts.descends_from,
+            "donor": c.facts.donor,
             "verdict": None if (verdict := c.tag("verdict")) is None else verdict.value,
             "stands": c.facts.stands,
             "loci": list(dict.fromkeys(locus for v in c.facts.variations for locus in v.loci)),

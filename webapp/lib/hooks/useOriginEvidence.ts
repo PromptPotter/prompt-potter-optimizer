@@ -1,5 +1,5 @@
 import type { Evidence, PairwiseComparison, SubjectReading } from "@/lib/api/types";
-import { armAt, individualOf, type ObservePoint } from "@/lib/derivations";
+import { armAt, type ObservePoint } from "@/lib/derivations";
 import { useViewedLineage } from "@/lib/state/lineage";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useWorkspace } from "@/lib/state/workspace";
@@ -71,7 +71,7 @@ export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
     changes:
       point !== null && placed === null
         ? null
-        : placed !== null && individualOf(index, placed) === null
+        : placed?.facts.reading.end === "invalid"
           ? { status: "unrecorded" }
           : changesOf(evidence, origin, shownKey === undefined ? undefined : shown),
     compare: pair.run,

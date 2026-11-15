@@ -346,11 +346,9 @@ export function hierarchyCandidate(
     ...over,
     facts: {
       individual: id,
-      parent_ids: [],
       variations: [],
       stands: false,
       cycle_latest: false,
-      answers_for_id: true,
       main_line: [],
       descends_from: null,
       donor: null,
@@ -462,7 +460,9 @@ export function subtreeCampaign(
     children: [],
     facts: {
       label: null,
+      short_label: over.address,
       root,
+      root_label: "root ·root",
       live_cycle: root,
       lifecycle: "active",
       runs_with: null,

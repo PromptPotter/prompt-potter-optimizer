@@ -3,8 +3,9 @@ import { VerifyAction } from "@/components/searchpoint/VerifyAction";
 import { SearchpointDrillIn } from "@/components/searchpoint/SearchpointDrillIn";
 import { SubjectSignals } from "@/components/searchpoint/SubjectSignals";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
-import { COPY_WITHOUT_CELLS, selectedNodeOf } from "@/lib/derivations";
-import { fmtUnit, PLACEHOLDER, shortId } from "@/lib/format";
+import { COPY_WITHOUT_CELLS, cycleAt, selectedNodeOf } from "@/lib/derivations";
+import { readingPath } from "@/lib/api/reads";
+import { fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { failureOf } from "@/lib/hooks/useRead";
 import { useSearchpointCopy } from "@/lib/hooks/useSearchpointCopy";
 import { CopyButton, FailureLine, Said, SegmentedControl, Term } from "@/components/ui";
@@ -40,12 +41,15 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
     datasetName: reading?.dataset_name ?? null,
   });
   const invalidated = useInvalidated(index);
-  const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
+  const withdrawn = !!arms.own && invalidated.has(arms.own.address);
   const rulerNote = rulerNoteOf(item, ownNote);
   const level = channelLevel(reading, withdrawn);
   const map = <ChannelMap item={item} run={run} points={points} />;
   if (reading === null) return map;
   if (!level) return null;
+  // The served nodes the reading sits on: its cycle, and the campaign that holds it.
+  const branch = cycleAt(index, readingPath(reading));
+  const owner = branch?.parent ? index.byAddress.get(branch.parent) : undefined;
   return (
     <>
       {head.options.length > 1 && (
@@ -91,19 +95,21 @@ export function ChannelDetail({ item, ownNote, points, spec, run }: ChannelProps
         </div>
         <div>
           <dt>campaign</dt>
-          <dd title={reading.campaign_id}>{shortId(reading.campaign_id)}</dd>
+          <dd title={reading.campaign_id}>
+            {owner?.entry_kind === "campaign" ? owner.facts.short_label : reading.campaign_id}
+          </dd>
         </div>
         {reading.inside.length > 0 && (
           <div>
             <dt>seed of</dt>
             <dd title={reading.inside.map((h) => h.campaign_id).join(" → ")}>
-              {shortId(reading.inside[reading.inside.length - 1]?.campaign_id ?? "")}
+              {run ? run.facts.short_label : PLACEHOLDER}
             </dd>
           </div>
         )}
         <div>
           <dt>branch</dt>
-          <dd title={reading.cycle_id}>{shortId(reading.cycle_id)}</dd>
+          <dd title={reading.cycle_id}>{branch ? branch.label : reading.cycle_id}</dd>
         </div>
         <div>
           <dt>reads at</dt>

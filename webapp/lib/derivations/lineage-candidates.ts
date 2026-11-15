@@ -11,7 +11,7 @@ import type {
 } from "@/lib/api/types";
 import { readingPath } from "@/lib/api/reads";
 import { selectedCandidateOf, type SelectedCandidate } from "@/lib/types";
-import type { CandidatePick } from "@/lib/address";
+import { pickedAddressOf, type CandidatePick } from "@/lib/address";
 import { tagValue } from "./hierarchy";
 import { cycleAddressOf, encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { metricLevel } from "./headline-stats";
@@ -95,12 +95,17 @@ function candidateAt(index: LineageIndex, address: string | null): HierarchyCand
   return entry?.entry_kind === "candidate" ? entry : null;
 }
 
-// A channel's arms on its reading's cycle: its own (a repair re-measures an individual another
-// cycle answers for), the one standing, and the newest; `seed` is what its pick reads until picked.
+// The address of the candidate a reading resolved to: its cycle, its round, its arm.
+export function readingAddress(reading: SubjectReading): string {
+  const cycle = encodeCyclePath(readingPath(reading));
+  return pickedAddressOf(cycle, { round: reading.round, arm: reading.candidate_id });
+}
+
+// A channel's arms on its reading's cycle: its own, the one standing, and the newest; `seed` is
+// what its pick reads until picked.
 export function channelArms(index: LineageIndex, reading: SubjectReading | null, headline: boolean) {
   const candidates = candidatesAtPath(index, reading && readingPath(reading));
-  const mine = reading ? candidates.filter((c) => c.facts.individual === reading.candidate_id) : [];
-  const own = mine.find((c) => c.facts.answers_for_id) ?? mine[0] ?? null;
+  const own = reading ? candidateAt(index, readingAddress(reading)) : null;
   const winner = candidates.find((c) => c.facts.stands) ?? own;
   const latest = candidates.find((c) => c.facts.cycle_latest) ?? null;
   return { own, winner, latest, seed: headline ? winner : own };
@@ -116,10 +121,6 @@ export function candidatesOf(cycle: SubtreeCycle): HierarchyCandidate[] {
   return cycle.children.flatMap((c) => (c.entry_kind === "round" ? c.children : []));
 }
 
-function armOfId(index: LineageIndex, id: string): HierarchyCandidate | null {
-  return index.candidates.find((c) => c.facts.individual === id && c.facts.answers_for_id) ?? null;
-}
-
 export function armAt(
   index: LineageIndex,
   path: CyclePath | null,
@@ -128,12 +129,25 @@ export function armAt(
   return candidatesAtPath(index, path).find((c) => c.facts.reading.arm.key === key) ?? null;
 }
 
-// The candidate answering for the arm's individual; null for a refused proposal, which measured none.
-export function individualOf(
+// Every candidate *edited* holds and each descending from one along the served descent
+// (`descends_from`, `donor`), by address: an edit withdraws every measurement under it.
+export function withdrawnUnder(
   index: LineageIndex,
-  node: HierarchyCandidate,
-): HierarchyCandidate | null {
-  return node.facts.reading.end === "invalid" ? null : armOfId(index, node.facts.individual);
+  edited: (c: HierarchyCandidate) => boolean,
+): ReadonlySet<string> {
+  const settled = new Map<string, boolean>();
+  const walk = (address: string | null): boolean => {
+    const c = candidateAt(index, address);
+    if (c === null) return false;
+    const held = settled.get(c.address);
+    if (held !== undefined) return held;
+    // Settled false first, so a cycle in the served edges terminates instead of hanging the tab.
+    settled.set(c.address, false);
+    const out = edited(c) || walk(c.facts.descends_from) || walk(c.facts.donor);
+    settled.set(c.address, out);
+    return out;
+  };
+  return new Set(index.candidates.filter((c) => walk(c.address)).map((c) => c.address));
 }
 
 export type LineStep = { kind: "step"; node: HierarchyCandidate } | { kind: "held"; round: number };

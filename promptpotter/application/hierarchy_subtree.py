@@ -29,7 +29,6 @@ from promptpotter.application.mask.tree_lens import lensed, read_samples
 from promptpotter.domain.arm_reading import (
     ARM_VERDICT_LABELS,
     arm_verdict,
-    panel_cuts,
 )
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
@@ -474,15 +473,6 @@ class _Build:
         ]
         stands = crowned[-1].address if crowned else None
         latest = next((c.address for c in reversed(cycle.candidates) if c.read_in is head), None)
-        cohorts: dict[tuple[int, bool], list[_Candidate]] = {}
-        for c in cycle.candidates:
-            cohorts.setdefault((c.round, c.status == "live"), []).append(c)
-        cut: dict[str, bool] = {}
-        for cohort in cohorts.values():
-            flags = panel_cuts(
-                [(c.arm.reading.samples.scored, c.arm.reading.samples.expected) for c in cohort]
-            )
-            cut |= {c.address: flag for c, flag in zip(cohort, flags, strict=True)}
         rounds: list[HierarchyRound] = []
         # A round re-run in place short of where a fork's cut stood still lists what ran there.
         for round_ in sorted(head.elections.keys() | {c.round for c in cycle.candidates}):
@@ -492,7 +482,6 @@ class _Build:
                 self._candidate(
                     cycle,
                     c,
-                    cut=cut[c.address],
                     stands=stands,
                     latest=latest,
                     stood_on=any(s.head.holds(c) for s in siblings),
@@ -530,22 +519,12 @@ class _Build:
         cycle: _ListedCycle,
         c: _Candidate,
         *,
-        cut: bool,
         stands: str | None,
         latest: str | None,
         stood_on: bool,
     ) -> HierarchyCandidate:
         retired = c.status != "live"
         reading = c.arm.reading
-        election = reading.election
-        if retired:
-            election = election.model_copy(update={"selected": False, "crown": None})
-        reading = reading.model_copy(
-            update={
-                "election": election,
-                "samples": reading.samples.model_copy(update={"cut": cut}),
-            }
-        )
         verdict = arm_verdict(reading, retired=retired)
         tags = [HierarchyTag(kind="verdict", value=verdict, label=ARM_VERDICT_LABELS[verdict])]
         if retired:
@@ -555,13 +534,11 @@ class _Build:
         standing = _standing(c, stood_on=stood_on)
         facts = CandidateFacts(
             individual=c.arm.state.individual.id,
-            parent_ids=list(lineage.parent_ids),
             variations=list(lineage.variations),
             standing=standing,
             reading=reading,
             stands=c.address == stands,
             cycle_latest=c.address == latest,
-            answers_for_id=False,
             main_line=_main_line(c),
             descends_from=None if c.descends_from is None else c.descends_from.address,
             donor=None if c.donor is None else c.donor.address,
@@ -598,30 +575,6 @@ def _restamped(
     rebuilt = walk(root)
     assert isinstance(rebuilt, SubtreeCampaign)
     return rebuilt
-
-
-def _answering(root: SubtreeCampaign) -> SubtreeCampaign:
-    """The ONE candidate a remembered id resolves to: the first live measured one, else the first."""
-
-    def rank(c: HierarchyCandidate) -> tuple[bool, bool]:
-        return c.tag("superseded") is not None, c.facts.reading.end == "invalid"
-
-    chosen: dict[str, HierarchyCandidate] = {}
-    for entry in entries_under(root):
-        if not isinstance(entry, HierarchyCandidate):
-            continue
-        held = chosen.get(entry.facts.individual)
-        if held is None or rank(entry) < rank(held):
-            chosen[entry.facts.individual] = entry
-    answering = {c.address for c in chosen.values()}
-    return _restamped(
-        root,
-        lambda e: (
-            {"facts": e.facts.model_copy(update={"answers_for_id": e.address in answering})}
-            if isinstance(e, HierarchyCandidate)
-            else {}
-        ),
-    )
 
 
 def _read_under(
@@ -681,9 +634,7 @@ def hierarchy_subtree(
     """The entry at *address* with everything under it; *moment* replays the ledgers only."""
     campaign = stores.campaigns.campaign(Subject.parse_address(address).root_campaign_id)
     held = campaign_cycle_reads(stores, campaign, moment=moment)
-    root = _answering(
-        _Build(moment).campaign(stores, (), campaign, held, depth=MAX_CYCLE_DEPTH, host=None)
-    )
+    root = _Build(moment).campaign(stores, (), campaign, held, depth=MAX_CYCLE_DEPTH, host=None)
     if lens is not None or samples:
         root = lensed(stores, root, lens, samples)
     root = _read_under(root, lens, samples, moment)

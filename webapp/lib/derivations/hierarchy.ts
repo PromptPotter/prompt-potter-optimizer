@@ -13,6 +13,8 @@ import { dockPriority } from "./run-phase";
 
 export interface RootGroup {
   rootCycleId: string;
+  // The root cycle's served label.
+  label: string;
   campaigns: ListedCampaign[];
 }
 
@@ -22,15 +24,15 @@ export function groupByRoot(entries: readonly ListedCampaign[]): RootGroup[] {
   const groups: RootGroup[] = [];
   for (const campaign of entries) {
     if (campaign.entry_kind === "unstarted") {
-      groups.push({ rootCycleId: campaign.address, campaigns: [campaign] });
+      groups.push({ rootCycleId: campaign.address, label: campaign.label, campaigns: [campaign] });
       continue;
     }
-    const { root } = campaign.facts;
+    const { root, root_label: label } = campaign.facts;
     const rootCycleId = decodeCyclePath(root)?.at(-1)?.cycleId;
     if (rootCycleId === undefined) throw new Error(`undecodable root ${root}`);
     const last = groups.at(-1);
     if (last?.rootCycleId === rootCycleId) last.campaigns.push(campaign);
-    else groups.push({ rootCycleId, campaigns: [campaign] });
+    else groups.push({ rootCycleId, label, campaigns: [campaign] });
   }
   return groups;
 }

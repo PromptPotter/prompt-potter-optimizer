@@ -6,7 +6,7 @@ import { cx } from "@/lib/cx";
 import { Said } from "@/components/ui";
 import { ChannelDetail } from "./ChannelDetail";
 import { HeadlineBadges, HeadlineFacts, Metric, Swatch, benchLead } from "./channel-parts";
-import { shortId, type MetricFormat } from "@/lib/format";
+import type { MetricFormat } from "@/lib/format";
 import {
   channelInk,
   channelLevel,
@@ -29,7 +29,7 @@ export function ChannelCard(props: ChannelProps) {
   const { index } = useChannelTree(run);
   const view = useChannelView(item, index);
   const invalidated = useInvalidated(index);
-  const withdrawn = reading !== null && invalidated.has(reading.candidate_id);
+  const withdrawn = !!view.arms.own && invalidated.has(view.arms.own.address);
   return (
     <li className="cmp-channel">
       <ChannelIdRow
@@ -83,9 +83,11 @@ function ChannelIdRow({
           <Swatch ink={ink} />
           {headline
             ? headline.optimizer
-            : reading && reading.kind !== "campaign"
+            : reading
               ? reading.label
-              : run?.label || shortId(channel.rootCampaignId)}
+              : run
+                ? run.facts.short_label
+                : channel.rootCampaignId}
         </span>
         <span className="cmp-channel-sub" title={subject}>
           {reading ? `${SUBJECT_KIND_LABELS[reading.kind]} · ${reading.campaign_id}` : "nothing measured"}

@@ -2,9 +2,8 @@ import { useMemo } from "react";
 import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api/types";
 import { CardFrame, DataTable, Empty, ReadState, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import type { LineageIndex } from "@/lib/derivations";
-import { pathOfAddress } from "@/lib/ids";
-import { shortId } from "@/lib/format";
+import { mainLineOf, readingAddress, type LineageIndex } from "@/lib/derivations";
+import { cycleAddressOf } from "@/lib/ids";
 import { shownData } from "@/lib/hooks/useRead";
 import { lineageIndexOf, useLineageTree } from "@/lib/state/lineage";
 import { seriesVar } from "@/lib/theme";
@@ -112,7 +111,7 @@ function configColumns(
               style={{ background: seriesVar(subjects.indexOf(r)) }}
               aria-hidden="true"
             />
-            {r.kind === "campaign" ? shortId(r.label) : r.label}
+            {r.label}
             <ChannelRestore subjectKey={pointKeyOf(r)} />
           </span>
         ),
@@ -134,8 +133,9 @@ function configColumns(
 }
 
 interface Spine {
-  campaignId: string;
-  cycleId: string;
+  // The head's cycle address.
+  address: string;
+  name: string;
   chain: HierarchyCandidate[];
   marked: Map<string, string[]>;
 }
@@ -181,7 +181,7 @@ function CampaignSpines({
 
   if (root === null) {
     return (
-      <ReadState read={read} subject={`${shortId(campaignId)}’s lineage`}>
+      <ReadState read={read} subject={`${campaignId}’s lineage`}>
         {() => null}
       </ReadState>
     );
@@ -189,7 +189,7 @@ function CampaignSpines({
   if (spines.length === 0) {
     return (
       <p className="note-info">
-        {shortId(campaignId)}: no ancestry to draw — its channels read at points the tree does not
+        {root.facts.short_label}: no ancestry to draw — its channels read at points the tree does not
         place, which is the case for an L4 inner run in its own sandbox.
       </p>
     );
@@ -198,13 +198,13 @@ function CampaignSpines({
   return (
     <>
       {spines.map((spine) => (
-        <div className="cmp-spine" key={`${spine.campaignId}|${spine.cycleId}`}>
-          <span className="cmp-spine-name" title={`${spine.campaignId} / ${spine.cycleId}`}>
-            {shortId(spine.campaignId)} · {shortId(spine.cycleId)}
+        <div className="cmp-spine" key={spine.chain[0]?.address ?? spine.address}>
+          <span className="cmp-spine-name" title={spine.address}>
+            {spine.name}
           </span>
           <ol className="cmp-spine-chain">
             {spine.chain.map((node) => {
-              const marks = spine.marked.get(node.facts.individual) ?? [];
+              const marks = spine.marked.get(node.address) ?? [];
               return (
                 <li
                   key={node.address}
@@ -239,38 +239,38 @@ function buildSpines(
   index: LineageIndex,
   subjects: readonly SubjectReading[],
 ): Spine[] {
-  const nodes = new Map<string, HierarchyCandidate>();
-  for (const cand of index.candidates) {
-    if (cand.facts.answers_for_id) nodes.set(cand.facts.individual, cand);
-  }
-
-  const chains = new Map<string, { chain: HierarchyCandidate[]; marked: Map<string, string[]> }>();
-  for (const s of subjects) {
-    const head = nodes.get(s.candidate_id);
-    if (!head) continue;
-    const chain: HierarchyCandidate[] = [];
-    const seen = new Set<string>();
-    let cursor: HierarchyCandidate | undefined = head;
-    while (cursor && !seen.has(cursor.facts.individual)) {
-      seen.add(cursor.facts.individual);
-      chain.unshift(cursor);
-      const parent: string | undefined = cursor.facts.parent_ids[0];
-      cursor = parent ? nodes.get(parent) : undefined;
+  // Each subject's served `main_line`, by address; the longest first, so a prefix joins its spine.
+  const lines = subjects
+    .flatMap((s) => {
+      const head = index.byAddress.get(readingAddress(s));
+      if (head?.entry_kind !== "candidate") return [];
+      const chain = mainLineOf(index, head).flatMap((step) => (step.kind === "step" ? [step.node] : []));
+      return [{ s, head, chain }];
+    })
+    .sort((a, b) => b.chain.length - a.chain.length);
+  const spines: { chain: HierarchyCandidate[]; marked: Map<string, string[]> }[] = [];
+  for (const { s, head, chain } of lines) {
+    let spine = spines.find((sp) => chain.every((node, i) => sp.chain[i]?.address === node.address));
+    if (!spine) {
+      spine = { chain, marked: new Map() };
+      spines.push(spine);
     }
-    const rootId = chain[0]?.facts.individual ?? s.candidate_id;
-    const prior = chains.get(rootId);
-    const merged = !prior || chain.length > prior.chain.length ? chain : prior.chain;
-    const marked = prior?.marked ?? new Map<string, string[]>();
-    marked.set(s.candidate_id, [...(marked.get(s.candidate_id) ?? []), s.label]);
-    chains.set(rootId, { chain: merged, marked });
+    spine.marked.set(head.address, [...(spine.marked.get(head.address) ?? []), s.label]);
   }
 
-  return [...chains.values()].map(({ chain, marked }) => {
+  // Named by the served nodes its head sits on: the campaign's short label, the cycle's label.
+  return spines.map(({ chain, marked }) => {
     const head = chain.at(-1);
-    const leaf = head ? pathOfAddress(head.address).at(-1) : undefined;
+    const cycle = head ? index.byAddress.get(cycleAddressOf(head.address)) : undefined;
+    const campaign = cycle?.parent ? index.byAddress.get(cycle.parent) : undefined;
     return {
-      campaignId: leaf?.campaignId ?? "",
-      cycleId: leaf?.cycleId ?? "",
+      address: cycle?.address ?? "",
+      name: [
+        campaign?.entry_kind === "campaign" ? campaign.facts.short_label : null,
+        cycle?.label ?? null,
+      ]
+        .filter(Boolean)
+        .join(" · "),
       chain,
       marked,
     };

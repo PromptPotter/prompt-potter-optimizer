@@ -88,6 +88,11 @@ def _cycle_label(mint: CycleMint, cycle_id: str) -> str:
     return f"{_MINT_WORDS[mint]} ·{cycle_id.rpartition('_')[2][:6]}"
 
 
+def campaign_short_label(campaign: Campaign) -> str:
+    """Two runs of one dataset never share it: the id's suffix is what was minted to part them."""
+    return campaign.label or f"{campaign.dataset_name} ·{campaign.campaign_id.rpartition('__')[2]}"
+
+
 def _figure(key: FigureKey, label: str, value: str, sub: str | None = None) -> Figure:
     return Figure(key=key, tone="quiet", label=label, value=value, sub=sub)
 
@@ -496,7 +501,9 @@ def campaign_entry(
         children=list(cycles.values()) if depth > 0 else [],
         facts=CampaignFacts(
             label=campaign.label or None,
+            short_label=campaign_short_label(campaign),
             root=Subject(campaign.campaign_id, campaign.root_cycle_id, inside=inside).address,
+            root_label=_cycle_label("root", campaign.root_cycle_id),
             live_cycle=Subject(campaign.campaign_id, holder.cycle_id, inside=inside).address,
             lifecycle=campaign.lifecycle_status,
             runs_with=runs_with,

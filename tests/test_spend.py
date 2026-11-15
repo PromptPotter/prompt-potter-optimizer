@@ -4805,9 +4805,26 @@ def spent_campaign(built_stores: Stores) -> _SpentCampaign:
     stub, retried = f"{root}_fork_aaaa", f"{root}_fork_bbbb"
     stores.campaigns.create_campaign(minted_campaign(CycleHop(campaign_id="camp-2", cycle_id=root)))
 
-    def spent_cycle(cycle_id: str, *, cost_usd: float, campaign_id: str = "camp-2") -> Path:
+    def spent_cycle(
+        cycle_id: str, *, cost_usd: float, campaign_id: str = "camp-2", parent: Path | None = None
+    ) -> Path:
         hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_id)
-        stores.campaigns.mint_cycle(hop)
+        if parent is None:
+            stores.campaigns.mint_cycle(hop)
+        else:
+            mint_fork(
+                stores.campaigns,
+                hop,
+                parent,
+                ForkSpec(
+                    trigger=ForkTrigger.OPERATOR_REWIND,
+                    reason="",
+                    issued_by=SYSTEM_PRINCIPAL,
+                    from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
+                ),
+                cut=CycleEventLog.open(CycleDir(parent)).next_offset,
+                cut_round=0,
+            )
         cycle_dir = stores.campaigns.cycle_dir(hop)
         _pay(
             CycleEventLog.open(CycleDir(cycle_dir)), cost_usd, input_tokens=2_000, output_tokens=800
@@ -4815,8 +4832,9 @@ def spent_campaign(built_stores: Stores) -> _SpentCampaign:
         return CycleLayout(cycle_dir).ledger
 
     spent_cycle(root, cost_usd=0.07)
-    stub_ledger = spent_cycle(stub, cost_usd=0.11)
-    retried_ledger = spent_cycle(retried, cost_usd=0.05)
+    root_dir = stores.campaigns.cycle_dir(CycleHop(campaign_id="camp-2", cycle_id=root))
+    stub_ledger = spent_cycle(stub, cost_usd=0.11, parent=root_dir)
+    retried_ledger = spent_cycle(retried, cost_usd=0.05, parent=root_dir)
 
     def account_usd() -> float:
         return account_bill(stores.charges).host.used_usd

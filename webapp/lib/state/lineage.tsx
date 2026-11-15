@@ -1,5 +1,3 @@
-// A remembered individual id resolves through `answers_for_id`, never the first row holding it.
-
 import { useMemo } from "react";
 import { subtreeRead, type SubtreeMask, type SubtreeMoment } from "@/lib/api/reads";
 import type { Said, SubtreeCampaign, SubtreeCycle } from "@/lib/api/types";

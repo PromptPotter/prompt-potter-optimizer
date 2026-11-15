@@ -88,6 +88,11 @@ function cycle(
   return subtreeCycle({ address, tags: cycleTags(mint, "ds"), children }, { mint, spawn });
 }
 
+// The candidate `c{round}_{i}` of *cycle*, by its address.
+const anchor = (cycle: string, id: string) => ({
+  address: `${cycle}/r${/^c(\d+)_/.exec(id)![1]}/${id}`,
+});
+
 const campaign = (address: string, cycles: SubtreeCycle[]): SubtreeCampaign =>
   subtreeCampaign({ address, children: cycles });
 
@@ -219,7 +224,7 @@ describe("layout, freed: lanes", () => {
   it("cut at a candidate: its served line; later rounds and the cycles cut after it take no row", () => {
     const a = cycle(A, [2, 2, 2]);
     const tree = campaign("camp", [a, forkAt(a, 3, [1])]);
-    const keep = extentKeys(tree, { cyclePathKey: A, candidateId: "c2_0" })!;
+    const keep = extentKeys(tree, anchor(A, "c2_0"))!;
     const cut = freed(tree, new Set([A]), keep);
     expect(cut.laneByKey.size).toBe(1);
     expect(cut.maxCol).toBe(2);
@@ -230,7 +235,7 @@ describe("layout, freed: lanes", () => {
   it("a fork keeps its parent's line up to the candidate it hangs from", () => {
     const a = cycle(A, [2, 2, 2]);
     const tree = campaign("camp", [a, forkAt(a, 2, [1, 1])]);
-    const keep = extentKeys(tree, { cyclePathKey: B, candidateId: "c3_0" })!;
+    const keep = extentKeys(tree, anchor(B, "c3_0"))!;
     const { laneByKey } = freed(tree, new Set([A]), keep);
     expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_1", "c2_1"]);
     expect(ids(laneByKey.get(B)!.candidates)).toEqual(["c3_0"]);
@@ -254,7 +259,7 @@ describe("layout, freed: lanes", () => {
       forkAt(a, 2, [1]),
       { ...steered, facts: { ...steered.facts, from_candidate: from.address } },
     ]);
-    const keep = extentKeys(tree, { cyclePathKey: C, candidateId: "c0_0" })!;
+    const keep = extentKeys(tree, anchor(C, "c0_0"))!;
     const { laneByKey } = freed(tree, new Set([A]), keep);
     expect(ids(laneByKey.get(A)!.candidates)).toEqual(["c1_1"]);
     expect(laneByKey.has(B)).toBe(false);
@@ -264,7 +269,7 @@ describe("layout, freed: lanes", () => {
     const measured = inner(A, "inner_camp", "cycle_seed", [1, 1]);
     const a = hangOffWinner(cycle(A, [1, 1]), 1, measured.campaign);
     const tree = campaign("camp", [a, forkAt(a, 1, [1])]);
-    const keep = extentKeys(tree, { cyclePathKey: A, candidateId: "c1_0" })!;
+    const keep = extentKeys(tree, anchor(A, "c1_0"))!;
     const { laneByKey } = freed(tree, new Set(), keep);
     const seedLane = laneByKey.get(measured.run.address)!;
     expect(seedLane.candidates.length).toBe(2);
@@ -278,7 +283,7 @@ describe("layout, freed: lanes", () => {
     const sibling = inner(A, "seed1", "cycle_seed", [1, 1, 1], winnerAt(host, 1));
     const a = hangOffWinner(hangOffWinner(host, 1, mine.campaign), 1, sibling.campaign);
     const tree = campaign("camp", [a]);
-    const keep = extentKeys(tree, { cyclePathKey: mine.run.address, candidateId: "c2_0" })!;
+    const keep = extentKeys(tree, anchor(mine.run.address, "c2_0"))!;
     const { laneByKey } = freed(tree, new Set(), keep);
     expect(ids(laneByKey.get(mine.run.address)!.candidates)).toEqual(["c1_0", "c2_0"]);
     expect(laneByKey.has(sibling.run.address)).toBe(false);
@@ -289,7 +294,7 @@ describe("layout, freed: lanes", () => {
     const loose = inner(A, "seed0", "cycle_seed", [1, 1, 1]);
     const host = cycle(A, [1, 1]);
     const tree = campaign("camp", [{ ...host, children: [...host.children, loose.campaign] }]);
-    const keep = extentKeys(tree, { cyclePathKey: loose.run.address, candidateId: "c2_0" })!;
+    const keep = extentKeys(tree, anchor(loose.run.address, "c2_0"))!;
     const { laneByKey } = freed(tree, new Set(), keep);
     expect(ids(laneByKey.get(loose.run.address)!.candidates)).toEqual(["c1_0", "c2_0"]);
     expect(ids(laneByKey.get(A)!.candidates)).toEqual([]);
@@ -297,8 +302,8 @@ describe("layout, freed: lanes", () => {
 
   it("an anchor this tree does not hold has no extent", () => {
     const tree = campaign("camp", [cycle(A, [2])]);
-    expect(extentKeys(tree, { cyclePathKey: A, candidateId: "nope" })).toBeNull();
-    expect(extentKeys(tree, { cyclePathKey: "other::cycle_z", candidateId: "c1_0" })).toBeNull();
+    expect(extentKeys(tree, anchor(A, "c9_0"))).toBeNull();
+    expect(extentKeys(tree, anchor("other::cycle_z", "c1_0"))).toBeNull();
   });
 });
 

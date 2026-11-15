@@ -1,18 +1,15 @@
 import { useMemo } from "react";
 import type { Evidence, SubjectReading, HierarchyEntry } from "@/lib/api/types";
-import { readingPath } from "@/lib/api/reads";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import { useCompareSelection } from "@/lib/state/compare-selection";
-import { campaignAt, compareItems } from "@/lib/derivations";
-import { encodeCyclePath } from "@/lib/ids";
+import { campaignAt, compareItems, readingAddress } from "@/lib/derivations";
 import { seriesVar } from "@/lib/theme";
 import { ChannelCard } from "./ChannelCard";
 import { HeadToHeadVerdict } from "./HeadToHeadVerdict";
 
 function channelPoints(subjects: readonly SubjectReading[]): CladogramChannel[] {
   return subjects.map((s, i) => ({
-    cyclePathKey: encodeCyclePath(readingPath(s)),
-    candidateId: s.candidate_id,
+    address: readingAddress(s),
     // Served order: the index the bars, legend and pairwise table read, so one channel is one colour.
     ink: seriesVar(i),
   }));

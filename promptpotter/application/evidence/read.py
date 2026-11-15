@@ -60,6 +60,7 @@ from promptpotter.application.evidence.subjects import (
     authorship_of,
     scenario_said,
 )
+from promptpotter.application.hierarchy import campaign_short_label
 from promptpotter.application.mask.divergence import scenario_spine
 from promptpotter.application.mask.load import load_mask_record
 from promptpotter.application.pipeline_resolve import cycle_config
@@ -151,6 +152,8 @@ class RankedEdit(StrictModel):
 
     sp_hash: str
     campaign_id: str
+    # Its campaign subject's `label` (`hierarchy.py::campaign_short_label`).
+    campaign_label: str
     label: str
     provenance: list[EffectProvenance]
     reading: PairedReading = Field(
@@ -469,7 +472,9 @@ def subject_evidence(
             anchor = "" if report is None else report.sp_hash
             cycle = _graded_cycle(leaves[row.key], row.campaign_id, head.cycle_dir)
             if cycle is not None:
-                unranked += _campaign_edits(cycle, members[row.key], measurand, anchor_hash=anchor)
+                unranked += _campaign_edits(
+                    cycle, members[row.key], measurand, anchor_hash=anchor, campaign_label=row.label
+                )
 
     edits = _ranked(unranked, f"edits:{measurand.key}")
     scored = {r.key: r.values for r in rows if r.values}
@@ -624,7 +629,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
         c0_index = read_cycle_index(cycle_dir, moment=None)
         return _Head(
             cycle_dir=cycle_dir,
-            label=spec.campaign_id,
+            label=campaign_short_label(at.campaign),
             dataset_name=dataset_name,
             created_at=at.campaign.created_at,
             point=c0,
@@ -935,7 +940,12 @@ def _ranked(edits: list[RankedEdit], family_id: str) -> list[RankedEdit]:
 
 
 def _campaign_edits(
-    cycle: _Cycle, origin: SubjectMember, measurand: Measurand, *, anchor_hash: str
+    cycle: _Cycle,
+    origin: SubjectMember,
+    measurand: Measurand,
+    *,
+    anchor_hash: str,
+    campaign_label: str,
 ) -> list[RankedEdit]:
     address = origin.rows.address
     hop = address.path[-1]
@@ -963,6 +973,7 @@ def _campaign_edits(
         RankedEdit(
             sp_hash=sp_hash,
             campaign_id=hop.campaign_id,
+            campaign_label=campaign_label,
             label=acc.arm.label,
             provenance=acc.provenance,
             reading=pair_subjects(

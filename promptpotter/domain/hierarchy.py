@@ -118,7 +118,12 @@ class CampaignFacts(FrozenModel):
         description="The operator's own name for it; null where none was given, and the envelope's "
         "`label` falls back to the dataset."
     )
+    short_label: str = Field(
+        description="Its name where runs stand side by side: `label`, else its dataset and the "
+        "suffix that tells two runs of it apart."
+    )
     root: str = Field(description="The root cycle's address.")
+    root_label: str = Field(description="The root cycle's served `label`.")
     live_cycle: str = Field(
         description="The live cycle's address: the root, or the fork a supersede handed the "
         "line to."
@@ -262,10 +267,6 @@ class CandidateFacts(FrozenModel):
         description="`OptSearchPoint.id`. Not a key: a later round, or a fork, can propose one "
         "individual again."
     )
-    parent_ids: list[str] = Field(
-        description="Every individual this one derives from — one for a mutation, several for a "
-        "crossover; empty only at an origin."
-    )
     variations: list[Variation] = Field(
         description="The variation nodes that wrote this individual, in the order they ran. Empty "
         "on an origin."
@@ -273,19 +274,14 @@ class CandidateFacts(FrozenModel):
     standing: CandidateStanding
     reading: ArmReading = Field(
         description="`reading.arm` is the key every per-cycle document of this cycle speaks; "
-        "`reading.sp_hash` joins to the archive rows. A retired candidate's election wears no "
-        "crown: the cycle that took its place re-asks it."
+        "`reading.sp_hash` joins to the archive rows. A retired candidate's election is its "
+        "round's as recorded: its `retired` verdict says it no longer stands."
     )
     stands: bool = Field(
         description="The newest crowned live candidate of its cycle — the parent the next round "
         "mutates from. At most one per cycle."
     )
     cycle_latest: bool = Field(description="The newest candidate its cycle proposed.")
-    answers_for_id: bool = Field(
-        description="The ONE candidate across the subtree a remembered individual id resolves "
-        "to: the live one where a supersede left the individual on two, the first where several "
-        "stand."
-    )
     main_line: list[MainLineStep] = Field(
         description="The main line to THIS candidate, origin first: the line of the candidate its "
         "cycle hangs from (a fork's from-candidate, an inner cycle's host) up to the cut, each elected round of its cycle before it with the "

@@ -1,7 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { candidateSubject } from "@/lib/api/reads";
 import { useCompareSelection, type CompareChannel } from "@/lib/state/compare-selection";
-import { armAt, individualOf, originAt, originOf } from "@/lib/derivations";
+import { armAt, originAt, originOf } from "@/lib/derivations";
 import { type CyclePath, pathOfAddress } from "@/lib/ids";
 import { useViewedLineage } from "@/lib/state/lineage";
 import { useWorkspace } from "@/lib/state/workspace";
@@ -28,7 +28,8 @@ export function useCompareWithOrigin(
     const top = path?.[0];
     if (!top) return null;
     const placed = arm === null ? null : armAt(index, path, arm);
-    const point = placed ? individualOf(index, placed) : null;
+    // A refused proposal measured no individual: there is no point to compare.
+    const point = placed?.facts.reading.end === "invalid" ? null : placed;
     if (arm !== null && !point) return null;
     const origin = point ? originOf(index, point) : originAt(index, path);
     const originKey = origin ? candidateSubject(pathOfAddress(origin.address), origin.facts.individual) : "";

@@ -87,7 +87,6 @@ from promptpotter.infrastructure.store.layout import (
     dataset_id_prefix,
     head_to_head_path,
     read_sandbox_owner,
-    root_cycle_id,
 )
 from promptpotter.infrastructure.store.read_model import (
     LedgerIndex,
@@ -615,9 +614,10 @@ class CampaignStore:
         """What makes *hop* no stub; whether a run or a pass holds it is asked of each delete under
         the admission gate (`admission.py::destroying`)."""
         cycle_dir = self.cycle_dir(hop)
-        if self.load(hop, moment=None) is None:
+        index = self.load(hop, moment=None)
+        if index is None:
             return "not on disk"
-        if root_cycle_id(hop.cycle_id) == hop.cycle_id:
+        if index.minted_as == "root":
             return "family root — deletion is for sibling stubs only"
         # Its OWN ledger, not the chain: a rebase fork stands on parent rounds it never closed.
         own = scan_standing_rounds([LedgerSpan(self.ledger(hop))]).rounds
@@ -633,17 +633,15 @@ class CampaignStore:
     def stub_forks(self, hop: CycleHop) -> list[CycleHop]:
         """*hop*'s root's stub forks, never the active cycle; which of them a run or a pass holds
         is the application's to ask (`admission.py::deletable_stubs`)."""
-        root_id = root_cycle_id(hop.cycle_id)
+        root_id = self.campaign(hop.campaign_id).root_cycle_id
         active = read_active_pointer(self._base_dir)
-        stubs: list[CycleHop] = []
-        for cycle_dir in self.campaign_cycle_dirs(hop.campaign_id):
-            fork = CycleHop(campaign_id=hop.campaign_id, cycle_id=cycle_dir.name)
-            index = read_cycle_index(cycle_dir, moment=None)
-            if index is None or index.parent_cycle_id != root_id or fork.cycle_id == root_id:
-                continue
-            if fork != active and (self._stub_deletion_blocked(fork) is None):
-                stubs.append(fork)
-        return stubs
+        return [
+            fork
+            for fork, index in self.campaign_cycles(hop.campaign_id)
+            if index.parent_cycle_id == root_id
+            and fork != active
+            and self._stub_deletion_blocked(fork) is None
+        ]
 
     def try_delete_stub_cycle(self, hop: CycleHop) -> tuple[bool, str]:
         blocked = self._stub_deletion_blocked(hop)

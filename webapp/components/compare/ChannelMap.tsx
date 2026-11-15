@@ -13,7 +13,7 @@ import { useSeededOnce } from "@/lib/hooks/useSeededOnce";
 import { useChannelView, useCompareSelection } from "@/lib/state/compare-selection";
 import { nodeOverlays, type CompareItem } from "@/lib/derivations";
 import { fmtUnit } from "@/lib/format";
-import { encodeCyclePath, pathOfAddress } from "@/lib/ids";
+import { cycleAddressOf, encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import { channelInk, useChannelTree, useInvalidated } from "./channel-hooks";
 
 export function ChannelMap({
@@ -45,9 +45,10 @@ export function ChannelMap({
   const laneKeys = useMemo(() => {
     const keys = [
       ...new Set(
-        points.flatMap((p) =>
-          index.byAddress.get(p.cyclePathKey)?.entry_kind === "cycle" ? [p.cyclePathKey] : [],
-        ),
+        points.flatMap((p) => {
+          const cycle = cycleAddressOf(p.address);
+          return index.byAddress.get(cycle)?.entry_kind === "cycle" ? [cycle] : [];
+        }),
       ),
     ];
     if (keys.length > 0) return keys;

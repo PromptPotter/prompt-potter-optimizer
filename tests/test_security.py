@@ -2540,10 +2540,22 @@ def test_a_cycle_named_alone_is_the_active_campaigns_by_an_id_prefix(
 async def test_a_pass_registered_on_a_stub_not_yet_holding_it_refuses_the_stubs_delete(
     built_stores: Stores, tmp_path: Path, held_cycle: _HeldCycle
 ) -> None:
-    campaigns, hop = built_stores.campaigns, held_cycle.hop
+    campaigns, (hop, cycle_dir, _, _) = built_stores.campaigns, held_cycle
     passes = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     stub = CycleHop(campaign_id=hop.campaign_id, cycle_id=f"{hop.cycle_id}_fork_1")
-    campaigns.mint_cycle(stub)
+    mint_fork(
+        campaigns,
+        stub,
+        cycle_dir,
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_REWIND,
+            reason="",
+            issued_by=SYSTEM_PRINCIPAL,
+            from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
+        ),
+        cut=CycleEventLog.open(CycleDir(cycle_dir)).next_offset,
+        cut_round=0,
+    )
     stub_delete = DeleteCyclePayload(campaign_id=hop.campaign_id, cycle_id=stub.cycle_id)
     (stub_pass,) = await asyncio.to_thread(
         request_jobs,
@@ -3544,7 +3556,20 @@ async def test_deleting_its_campaign_or_its_cycle_moves_nothing_of_a_command(
         )
 
     stub = CycleHop(campaign_id="acts", cycle_id="cycle_acts_fork_1")
-    stores.campaigns.mint_cycle(stub)
+    root_dir = stores.campaigns.cycle_dir(CycleHop(campaign_id="acts", cycle_id="cycle_acts"))
+    mint_fork(
+        stores.campaigns,
+        stub,
+        root_dir,
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_REWIND,
+            reason="",
+            issued_by=SYSTEM_PRINCIPAL,
+            from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
+        ),
+        cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
+        cut_round=0,
+    )
     acts["stub"] = _returns
     await sender.dispatch(verify("stub", stub))
     before = standing("stub")

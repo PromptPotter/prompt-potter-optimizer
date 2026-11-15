@@ -13,7 +13,7 @@ import {
   useChartReading,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtMetric, PLACEHOLDER, shortId } from "@/lib/format";
+import { fmtMetric, PLACEHOLDER } from "@/lib/format";
 
 import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
 import { getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
@@ -38,10 +38,6 @@ function axisScales(title: string, stacked: boolean) {
       },
     },
   };
-}
-
-function seriesLabel(row: SubjectReading): string {
-  return row.kind === "campaign" ? shortId(row.label) : row.label;
 }
 
 export const EvidenceCharts = memo(function EvidenceCharts({
@@ -69,7 +65,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
   }
 
   const datasets = series.map((s, i) => ({
-    label: seriesLabel(s),
+    label: s.label,
     data: cells.map((cell) => s.values[cell] ?? null),
     borderColor: seriesColor(i),
     backgroundColor: seriesColor(i),
@@ -78,14 +74,16 @@ export const EvidenceCharts = memo(function EvidenceCharts({
     tension: 0.25,
   }));
 
-  const labels = cells.map((c) => c.split("/").pop() ?? c);
+  // A cell is keyed by its whole query, which no part of names alone: the axis counts cells in
+  // served order, and the reading line below names the one under the pointer.
+  const labels = cells.map((_, i) => `#${i + 1}`);
   const cell = at === null ? undefined : cells[at];
   const reading = (
     <ChartReading hint="Hover or tap a cell to read it.">
       {cell === undefined
         ? null
         : `${cell} · ${series
-            .map((s) => `${seriesLabel(s)} ${fmtMetric(evidence.metric.spec, s.values[cell])}`)
+            .map((s) => `${s.label} ${fmtMetric(evidence.metric.spec, s.values[cell])}`)
             .join(" · ")}`}
     </ChartReading>
   );
@@ -140,7 +138,7 @@ export function Coverage({ evidence }: { evidence: Evidence }) {
       width: "minmax(10ch, 18ch)",
       cell: (s) => (
         <span className="cmp-coverage-name" title={s.key}>
-          {seriesLabel(s)}
+          {s.label}
         </span>
       ),
     },
@@ -200,7 +198,7 @@ function Merged({ evidence }: { evidence: Evidence }) {
       {rows.map((r, i) => (
         <div key={r.key}>
           <MergedRow
-            label={seriesLabel(r)}
+            label={r.label}
             title={r.key}
             row={r}
             domain={domain}
@@ -288,7 +286,7 @@ export function SeriesLegend({
               style={{ background: seriesVar(i) }}
               aria-hidden="true"
             />
-            <code title={s.key}>{seriesLabel(s)}</code>
+            <code title={s.key}>{s.label}</code>
             <span className="l4-dim">{s.kind}</span>
             {s.mask?.lens && <span className="cmp-tag">masked</span>}
             {s.mask?.samples && (

@@ -1,6 +1,6 @@
 import { CardFrame, DataTable, Empty, type Column } from "@/components/ui";
 import type { MeasuredLift, MetricReading, PairwiseComparison } from "@/lib/api/types";
-import { PLACEHOLDER, fmtPValue, shortId } from "@/lib/format";
+import { PLACEHOLDER, fmtPValue } from "@/lib/format";
 import { liftColumns, pairedCells, type PairedCells } from "./lift-columns";
 
 export function PairwisePanel({
@@ -56,7 +56,8 @@ function pairRow(row: PairwiseComparison): PairRow {
 }
 
 function pairColumns(names: ReadonlyMap<string, string>): Column<PairRow>[] {
-  const subject = (key: string) => <code title={key}>{names.get(key) ?? shortId(key)}</code>;
+  // A pair names served subjects; a key the roster lacks is shown whole.
+  const subject = (key: string) => <code title={key}>{names.get(key) ?? key}</code>;
   const num = (
     id: string,
     label: string,

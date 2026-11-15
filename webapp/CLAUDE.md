@@ -6,7 +6,7 @@ A React app built by Vite into `out/`, mounted at `/` by FastAPI beside `/api/v1
 
 - **No local re-sort, no recomputed mask.** An ordering is a score; masked values, the criterion's dials and anchors and the lens vocabulary are served. `lib/derivations/*` group, lay out and format, and introduce no number.
 - **A criterion is ONE rendering** (`components/criterion/Criterion`); `lensOf` alone mints `?lens=` / `;lens=`. A dial is a weight only; a served lens re-opens in Expression mode, never decomposed into weights. Say **mask** and **lens**.
-- **No number kept alive under a changed setup: render `?`**: an edited node parameter, model or prompt field invalidates every measurement at that searchpoint and its `lib/derivations/lineage-descendants.ts::descendantsOf` closure, the one client fold until the address serves it. **invalidated** ≠ **divergent** (server counterfactual) ≠ **retired** (what ran). `NodeSurface` emits the WHOLE running config: diff against the seed first.
+- **No number kept alive under a changed setup: render `?`**: an edited node parameter, model or prompt field invalidates every measurement at that searchpoint and every candidate under it along the served descent (`lib/derivations/lineage-candidates.ts::withdrawnUnder`, by address). **invalidated** ≠ **divergent** (server counterfactual) ≠ **retired** (what ran). `NodeSurface` emits the WHOLE running config: diff against the seed first.
 - **A new served field lands on the record that owns it**: per arm `domain/arm_reading.py::ArmReading`, per round `domain/dashboard_rows.py::RoundSummary`. **A display field is not done until you have SEEN it render**: a field nothing writes passes every check.
 - **Never `?? <default>` on an index miss** (`noUncheckedIndexedAccess` does not enforce it): handle the miss.
 
@@ -30,7 +30,7 @@ A data-backed surface is `anon` (public preview, demo content), `auth_empty` (no
 - **One tag exception, `mint`**, served typed as `facts.mint`. <!-- probe: git grep -cE "tagValue\(.*mint" -- webapp == 0 -->
 - **One run-state derivation**: a campaign's `state` IS its line cycle's. <!-- probe: git grep -cE "HierarchyState\.of\(" -- promptpotter == 2 --> <!-- probe: git grep -cE "RunStatus\.of\(" -- promptpotter == 2 --> The listing serves `attached` and no clock, so it answers 304 between writes.
 - **One listing read** over every lifecycle; the sidebar filter is layout over `facts.lifecycle`. <!-- probe: git grep -cE "hierarchyRead\(" -- webapp/lib/hooks/useRegistry.ts == 1 -->
-- **The genealogy is the same entry, read deep** (`GET /hierarchy/{address}`), no second route and no client fold but `descendantsOf`. <!-- probe: git grep -cE "\}/tree" -- promptpotter/presentation == 0 --> A cycle's chronology is its STEPS (`GET /hierarchy/{cycle}/@`), never `children`.
+- **The genealogy is the same entry, read deep** (`GET /hierarchy/{address}`), no second route and no client fold of genealogy: a spine is the served `main_line`, a withdrawal the served descent, each keyed by address. <!-- probe: git grep -cE "\}/tree" -- promptpotter/presentation == 0 --> A cycle's chronology is its STEPS (`GET /hierarchy/{cycle}/@`), never `children`.
 
 ## The chat thread — rendered, never authored
 

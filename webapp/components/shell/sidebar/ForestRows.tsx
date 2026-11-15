@@ -96,7 +96,7 @@ function GroupRow({
 }
 
 function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
-  const { rootCycleId, campaigns } = group;
+  const { rootCycleId, label, campaigns } = group;
   if (campaigns.length === 1) return <ListedRow campaign={campaigns[0]!} ctx={ctx} />;
   return (
     <GroupRow
@@ -107,7 +107,7 @@ function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
       hint={`${campaigns.length} campaigns start from this same specification (${rootCycleId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
       name={
         <>
-          spec {shortOrigin(rootCycleId)}
+          spec {label}
           <span className="unit-library-kind">{campaigns.length} runs</span>
         </>
       }
@@ -119,10 +119,6 @@ function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
       ))}
     </GroupRow>
   );
-}
-
-function shortOrigin(originId: string): string {
-  return originId.startsWith("cycle_") ? originId.slice(6, 14) : originId.slice(0, 8);
 }
 
 function ListedRow({ campaign, ctx }: { campaign: ListedCampaign; ctx: TreeCtx }) {
