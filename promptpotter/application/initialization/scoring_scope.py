@@ -133,9 +133,7 @@ async def open_diagnostic(
     """The one opener of every verb that scores a cycle's points outside its loop: its scope is
     the block's, so a pass the loop runs leaves the loop's own standing. *acting* is the command
     the pass acts for, whose `cancel` stops it."""
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        raise DiagnosticError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
+    campaign = stores.campaigns.campaign(hop.campaign_id)
     cycle = cycle_config(stores, campaign, hop)
     config = cycle.config
     async with bind_cycle_session(stores, campaign, hop) as bound:

@@ -45,7 +45,6 @@ from promptpotter.infrastructure.producer_lock import this_producer
 from promptpotter.infrastructure.store.draft_store import DraftClaim
 from promptpotter.infrastructure.store.stores import (
     Stores,
-    owned_campaign,
     resolve_cycle_path,
 )
 from promptpotter.shared.errors import (
@@ -480,7 +479,7 @@ class CommandDispatcher:
     async def _on_campaign(
         self, call: CommandCall[CampaignPayload], recorded: _Recorded
     ) -> Opened[object, CampaignPayload]:
-        owned_campaign(self.stores, call.payload.campaign_id)
+        self.stores.campaigns.campaign(call.payload.campaign_id)
         applier = await self._applier(
             Dispatched(self, call.payload, call.command_id, door=call.door)
         )
@@ -490,7 +489,7 @@ class CommandDispatcher:
     async def _on_live_cycle(
         self, call: CommandCall[LiveCyclePayload], recorded: _Recorded
     ) -> Opened[object, LiveCyclePayload]:
-        campaign = owned_campaign(self.stores, call.payload.campaign_id)
+        campaign = self.stores.campaigns.campaign(call.payload.campaign_id)
         hop = self.stores.campaigns.live_cycle(campaign.root_hop)
         applier = await self._applier(
             DispatchedToCycle(self, call.payload, call.command_id, campaign, hop, door=call.door)
@@ -510,7 +509,7 @@ class CommandDispatcher:
                 leaf_stores, job_registry=self._attached, inline=self.inline
             )._on_cycle(replace(call, payload=_at_leaf(payload, leaf)), recorded)
         campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
-        campaign = owned_campaign(self.stores, campaign_id)
+        campaign = self.stores.campaigns.campaign(campaign_id)
         if self.stores.campaigns.load(hop, moment=None) is None:
             raise NotFoundError(
                 f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"

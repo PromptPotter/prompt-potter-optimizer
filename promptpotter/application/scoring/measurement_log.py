@@ -209,10 +209,7 @@ async def open_cell(stores: Stores, name: str, answer: str) -> Cell:
 
 def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:
     """One cycle, the line's holder: a ruler is a cycle's, so a sibling's cell lies on no scale this read holds."""
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
-        raise NotFoundError(f"Campaign '{campaign_id}' not found")
-    return stores.campaigns.live_cycle(campaign.root_hop)
+    return stores.campaigns.live_cycle(stores.campaigns.campaign(campaign_id).root_hop)
 
 
 def _scope_cycle(
@@ -338,10 +335,9 @@ def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
     """A cycle's scale, folded off its ledger: its closed rounds read on the last election's stamp, re-fit."""
     if not cycle_dir_for(stores.base_dir, hop).exists():
         raise NotFoundError(f"Cycle '{hop.campaign_id}/{hop.cycle_id}' not found")
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    campaign = stores.campaigns.campaign(hop.campaign_id)
     scorer = campaign_scorer(stores, hop.campaign_id)
-    if campaign is None or scorer is None:
-        raise NotFoundError(f"Campaign '{hop.campaign_id}' not found")
+    assert scorer is not None, "its campaign stands"
     knobs = cycle_config(stores, campaign, hop).config.optimization
     rounds = closed_rounds(stores, hop, scorer, moment=None)
     bank = cycle_bank(stores, hop) if rounds else Bank.of(())

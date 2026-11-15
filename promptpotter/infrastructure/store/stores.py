@@ -7,7 +7,6 @@ from typing import Any, Literal
 from promptpotter.config import paths
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import settings
-from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, WorkspaceDir
 from promptpotter.domain.phases import ProducerState, RunState, StopReason
 from promptpotter.domain.records.error import ErrorRecord
@@ -208,15 +207,6 @@ def complete_definition_swap(swap: Path) -> None:
         else:
             unlink_robust(swap.parent / name)
     rmtree_robust(swap)
-
-
-def owned_campaign(stores: Stores, campaign_id: str) -> Campaign:
-    """The tenant directory is the owner: another account's campaign is in another directory, so
-    it is NOT FOUND, never forbidden."""
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
-        raise NotFoundError(f"Campaign not found: {campaign_id}")
-    return campaign
 
 
 def build_stores(

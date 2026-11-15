@@ -2191,8 +2191,8 @@ export interface SampleRounds {
   rounds: number;
 }
 
-/** The budget a launch declared, beside its optimizer's own bounds; a served
- * dashboard lays the standing budget over it. */
+/** A cycle's limits: its launch's wiring and every standing patch, folded in
+ * order of arrival (`RunLimitsProjection`). */
 export interface RunLimits {
   budget: Budget;
   /** Whether a call holds its node's mean billed cost in the run rather than its
@@ -5497,7 +5497,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "ef4ff6ea56a33c6b";
+export const SERVED_CONTRACT = "94154feca44d7e3f";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

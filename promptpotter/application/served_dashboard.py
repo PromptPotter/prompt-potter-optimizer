@@ -5,7 +5,7 @@ from typing import Any, Literal, NamedTuple
 
 from pydantic import Field
 
-from promptpotter.application.jobs.launcher.admission import admitted, campaign_at
+from promptpotter.application.jobs.launcher.admission import admitted
 from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
@@ -458,10 +458,8 @@ def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkR
 
 
 def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    run = stores.run_state(hop)
-    config = None if campaign is None else cycle_config(stores, campaign, hop).config
-    return _remainder(stores, hop, binding_run_limits(stores, hop, config, run))
+    config = cycle_config(stores, stores.campaigns.campaign(hop.campaign_id), hop).config
+    return _remainder(stores, hop, binding_run_limits(stores, hop, config, stores.run_state(hop)))
 
 
 def _lookahead(
@@ -606,7 +604,7 @@ def served_dashboard(
     """``at`` replays to that ledger offset: live ``run_phase`` and ``producer``, nothing armed."""
     cycle_path = cycle_dir_for(stores.base_dir, hop)
     run = stores.run_state(hop)
-    campaign = campaign_at(stores, hop)
+    campaign = stores.campaigns.campaign(hop.campaign_id)
     meter = ceiling_meter(campaign.declaration.purpose)
     # The read's own join, never the checkout's: the campaign's refusal moves no ledger.
     admission = admitted(stores, campaign, run)

@@ -952,27 +952,32 @@ class DashboardCheckout:
 
 
 class RunLimitsProjection(Projection):
-    """The limits each launch declares, every later standing budget laid over: the campaign's
-    ceiling rides its root's ledger (`CampaignStore.run_limits`)."""
+    """Each patch of the limits in order of arrival: a launch's wiring names its budget and its
+    optimizer's bounds, a standing record what it changes. The campaign's ceiling rides its root's
+    ledger (`CampaignStore.run_limits`)."""
 
     def __init__(self) -> None:
-        self._limits: RunLimits | None = None
+        self._limits = RunLimits()
+        self._wired = False
 
     def _handle_run_wiring(self, record: RunWiringRecord) -> None:
-        self._limits = record.run_limits
+        limits = self._limits
+        self._limits = RunLimits(
+            budget=record.budget, overshoot=limits.overshoot, optimizer=record.optimizer_limits
+        )
+        self._wired = True
 
     def _handle_standing_budget(self, record: StandingBudgetRecord) -> None:
-        # Last wins and names every cycle axis it stands, so laying each over the last is laying the last.
-        if self._limits is not None:
-            self._limits = self._limits.model_copy(
-                update={
-                    "budget": self._limits.budget.over(record.budget),
-                    "overshoot": record.overshoot,
-                }
-            )
+        limits = self._limits
+        named = "overshoot" in record.model_fields_set
+        self._limits = RunLimits(
+            budget=limits.budget.over(record.budget),
+            overshoot=record.overshoot if named else limits.overshoot,
+            optimizer=limits.optimizer,
+        )
 
     def value(self) -> RunLimits | None:
-        return self._limits
+        return self._limits if self._wired else None
 
 
 def fold_at(cut: CycleAt) -> LiveDashboardState | None:

@@ -551,9 +551,9 @@ async def measure_noise_floor(
 def refuse_unverifiable(stores: Stores, hop: CycleHop) -> None:
     """An asked verify is admitted exactly where the served answer says so
     (`CycleEntryFacts.verify`), read before its own pass holds the cycle; the loop's own verify
-    runs under the loop's hold and asks nothing. No manifest is `open_diagnostic`'s to refuse."""
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is not None and (refusal := cycle_verify(stores, campaign, hop).refusal):
+    runs under the loop's hold and asks nothing."""
+    campaign = stores.campaigns.campaign(hop.campaign_id)
+    if (refusal := cycle_verify(stores, campaign, hop).refusal) is not None:
         raise DiagnosticError(PASS_REFUSAL_INFO[refusal])
 
 
@@ -571,10 +571,7 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> Ben
         sends=campaign_sends(stores, hop),
         acting=acting,
     ):
-        campaign = stores.campaigns.load_campaign(hop.campaign_id)
-        if campaign is None:
-            raise BenchTriggerError(f"campaign {hop.campaign_id!r} has no manifest on disk.")
-        status = read_cycle_bench(stores, campaign, hop).status
+        status = read_cycle_bench(stores, stores.campaigns.campaign(hop.campaign_id), hop).status
         if status.refusal is not None:
             held = "" if status.held_by is None else f" Holder: {status.held_by}."
             raise BenchTriggerError(PASS_REFUSAL_INFO[status.refusal] + held)

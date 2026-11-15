@@ -133,48 +133,18 @@ row it closes.
 
 ### batch/26 · money
 
-- **Two carriers**: the run's `infrastructure/run_scope.py::RunScope`, bound once where the cycle opens, carries
-  the plan, the ledger and the sender; the member's node context yields a per-call context holding
-  node, config, round and index only. **Rides with:** money 1.
-- **The campaign store reaches into the LLM layer for a ledger read**: `campaign_store/store.py:58`
-  imports `standing_budget` from `infrastructure/llm/spend_book.py:80`, and
-  `CampaignStore.read_standing_budget` answers it. Root: the read lives with the store, and the book takes
-  it from there. **Rides with:** money 2 (one book); its Owns gain `campaign_store/store.py`'s
-  `read_standing_budget` and its `spend_book` import line. **Re-test:**
-  `git grep -n "spend_book import" -- promptpotter/infrastructure/store` is empty.
-- **The default claim moves a tree a pass may be scoring**: `identity/accounts.py::claim_default`
-  reads `producer_attached` under the accounts lock, never the admission gate, so a registered pass on a
-  terminal cycle is missed. `infrastructure/` may not import `admission.py` (`gate.py::_LAYERING`).
-  Root: its caller, `application/account.py:256`, holds `admission.py::destroying` of each of the
-  terminal's campaigns around the claim, and `claim_default`'s `producer_attached` read goes. **Rides
-  with:** money 5, which rewrites the claim; its Owns gain `account.py`'s `claim_default` call (`:256`).
-  **Re-test:** `git grep -n "producer_attached" -- promptpotter/infrastructure/identity` is empty, and a
-  pass registered on a terminal cycle refuses the host's claim.
-- **A campaign's absence is refused in eleven spellings and three error types**:
-  `jobs/launcher/admission.py::campaign_at` loads and 404s, and the same load-and-refuse stands at
-  `jobs/quota.py:781,859`, `campaign_store/store.py:262,326,526`, `mask/load.py:190`,
-  `scoring/measurement_log.py:210`, `evidence/head_to_head.py:567`, `scoring/passes.py:637`
-  (`BenchTriggerError`, unreachable: `campaign_sends` and the slot door 404 first) and
-  `initialization/scoring_scope.py:147` (`DiagnosticError`); `served_dashboard.py::fork_remainder`
-  serves a missing campaign's offshoot unbounded; one resume loads its campaign five times.
-  Action: `CampaignStore.campaign(id) -> Campaign` raises `NotFoundError`, every site reads it, and
-  `campaign_at` goes (`admission.py` sits above `quota.py`, so it cannot be the owner). **Rides with:**
-  money 2, whose Owns gain `CampaignStore.campaign`, `admission.py::campaign_at` with its callers'
-  lines, and each site's load line. **Re-test:** `git grep -n "def campaign_at" -- promptpotter` is empty.
-- **A run's limits are one record for two facts, restated whole by three writers** (overshoot's
-  census): `RunLimits` is both `RunWiringRecord`'s persisted declaration and the served limits laid over
-  it, so a served-only fact (the overshoot count) rides beside it as `ServedDashboard.overshot`;
-  `StandingBudgetRecord` is restated whole by `change_budget`, `stand_held_budget` and
-  `declare_round_allowance`, each carrying every other field forward (`stand_held_budget` drops
-  `pause_at_round` so); `RunLimitsProjection` drops a standing record landing before the launch's wiring,
-  so `declare_run_wiring` copies the standing switch for the served view to hold it. Root: the declared
-  limits are one record, each change a patch of the fields it names, and the projection folds in order of
-  arrival. **Rides with:** money. **Re-test:** a `stand_held_budget` keeps `pause_at_round`; a standing
-  record before the wiring is served.
-- **Whether a launch draws the coupon has no name** (coupon's report): `jobs/quota.py` spells
-  `any(draws_coupon(send.payer) for send in sends)` at four sites (`launch_bound`, `admit_launch`,
-  `_tier_bound`, `_clamped`). Root: one named fact of the sends that each site reads. **Rides with:**
-  money. **Re-test:** `git grep -c "draws_coupon(send.payer) for send in sends" -- promptpotter` is 1.
+- **A run's ambient state rides three carriers** (money-2's report): `infrastructure/run_scope.py::RunScope`
+  names no plan or sender and carries `round`, which the node context carries too, and
+  `shared/measurement_context.py` holds two more ContextVars (`_MODE`, `_MEASURED`) against
+  application `CLAUDE.md`'s "never a second ContextVar". Root: they ride `RunScope`, and the
+  carriers' doc says what each holds. **Rides with:** a run-scope chain. **Re-test:**
+  `git grep -c "ContextVar(" -- promptpotter` is 1.
+- **A campaign's absence is still refused beside `CampaignStore.campaign`**: `cycle_reads.py:127`
+  loads and raises its own `_not_found`; `scoring/measurement_log.py:464` refuses
+  `campaign_scorer`'s `None` with its own `NotFoundError` (`campaign_scorer` should take a
+  `Campaign`); a resume loads its campaign 4× (the door, `ceiling_meter_of`, `armed_budget`,
+  `runner/mint.py::open_launch`). Action: those reads take the door's `Campaign`. **Rides with:**
+  the next chain in `cycle_reads.py`. **Re-test:** one load per resume, by money-2's load counter.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
@@ -282,24 +252,27 @@ row it closes.
   served facts" 0d8011635); the server now serves descent (`hierarchy_subtree.py::_descent`). Action:
   resolve by address, spines from the served `main_line`, invalidation from served descent;
   `descendantsOf` and its test go, and `webapp/CLAUDE.md` `:9` and `:33` stop endorsing it. **Rides
-  with:** addr 3, whose Owns gain `webapp/CLAUDE.md` and `lineage-candidates.ts`. **Re-test:** compare
+  with:** addr-2, whose Owns gain `webapp/CLAUDE.md` and `lineage-candidates.ts`. **Re-test:** compare
   two branches of one campaign; both draw, and `git grep -n "facts.individual" -- webapp/lib/derivations` is empty.
 - **The tree rewrites a retired arm's election**: `hierarchy_subtree.py` (`:551-555`) copies a retired
   candidate's reading with `selected=False`, `crown=None` and its `panel.cut`, against
   `store/CLAUDE.md`'s "the tree is a read model and decides nothing", though `arm_reading.py::arm_verdict`
   already takes `retired=`. Action: retirement and the cut land on the record that owns them and the
-  served reading carries them; the copies go. **Rides with:** addr 3. **Re-test:**
+  served reading carries them; the copies go. The served field comes first: the copies alone gone,
+  `webapp/components/candidates/lineage-tree.ts:84-85,248` crowns a retired arm off
+  `election.selected`/`crown` (addr's report). **Rides with:** addr-2. **Re-test:**
   `git grep -c "model_copy" -- promptpotter/application/hierarchy_subtree.py` falls by three.
 - **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::_earlier`,
   O(n² log n) per read; reported beside it, the subtree read builds the whole top family per request,
   and `_descent` compares O(n²) pairs with `SequenceMatcher` behind an lru of 4096 that thrashes from
   ~90 candidates (`hierarchy_subtree.py:154-231`). Action: "closer to" and descent are folded once per
-  candidate on the ledger. **Rides with:** addr 3. **Re-test:** `git grep -n "def _earlier" -- promptpotter/application/hierarchy_subtree.py` is empty.
+  candidate on the ledger: a record kind. **Rides with:** a lineage-fold chain of its own. **Re-test:** `git grep -n "def _earlier" -- promptpotter/application/hierarchy_subtree.py` is empty.
 - **The feed's version spans a whole store**: `GET /feed`'s tick (`application/cycle_reads.py::feed_frames`) runs
   `application/hierarchy.py::entries_version` over every store, per connected tab, and a campaign
   subtree's version (`hierarchy_subtree.py`) covers its whole store, so any run's append re-asks every
   mounted tree. Action: one version per subject, kept by the append door and the sweep, so no tick walks
-  a store. **Rides with:** addr 2. **Re-test:** `git grep -n "entries_version(" -- promptpotter/application/cycle_reads.py` is empty.
+  a store; every writer stamps it (the ledger ingress, drafts, archive, ruler, commands,
+  definitions). **Rides with:** a version chain of its own. **Re-test:** `git grep -n "entries_version(" -- promptpotter/application/cycle_reads.py` is empty.
   Beside it (a hot-path pass, ✓ unless reported): `read_model.py:224`'s `LEDGER_INDEX_MAX` = 256, so past
   256 cycles (one 20-round L4 campaign is ~240 inner campaigns) the feed's `_store_subjects` walk misses
   every tick and each miss re-folds with `model_validate_json` per line; reported, every `store:`-subject
@@ -314,6 +287,16 @@ row it closes.
   `c.split("/").pop()`, so two datasets' cells share one label. Action: a served short label per
   subject and node, on `application/hierarchy.py` and `application/evidence/read.py`. **Re-test:**
   `git grep -nE "shortId\(|shortOrigin\(" -- webapp/components webapp/lib` (15 hits at addr 4).
+- **A cycle's family root is still parsed from its id** (addr's report): `store/layout.py::root_cycle_id`
+  regexes `_fork_`, read at `campaign_store/store.py::_stub_deletion_blocked` / `stub_forks` and
+  `fork_siblings.py::_sibling_id`, though a campaign's root is `Campaign.root_cycle_id` and "is a
+  root" is the mint's `ForkSpec` (`CycleIndex.minted_as`). Action: the stub checks read the index
+  they load, and the sibling id takes the campaign's root. **Rides with:** addr-2. **Re-test:**
+  `git grep -n "_SIBLING_SEP_RE\|root_cycle_id(" -- promptpotter/infrastructure` is empty.
+- **The reaper swallows an unreadable cycle** (addr's report): `jobs/reaper.py::_reap` has
+  `except FileUnreadableError: pass`, so a cycle the sweep cannot read is neither reaped nor
+  reported. Action: a fault of the sweep, served. **Rides with:** faults 3. **Re-test:**
+  `git grep -n "pass$" -- promptpotter/application/jobs/reaper.py` is empty.
 
 ### passes-6 (what passes-5 and holders-3 left at landing 54)
 

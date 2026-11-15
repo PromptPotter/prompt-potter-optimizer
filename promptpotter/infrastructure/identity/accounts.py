@@ -5,10 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
+from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root
 from promptpotter.config.settings import LOCK_TIMEOUT, settings
-from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.infrastructure.holders import holder_of
 from promptpotter.infrastructure.identity.grants import (
     IdentityPaths,
     PrincipalGrant,
@@ -27,7 +25,6 @@ from promptpotter.infrastructure.identity.oidc import (
     load_provider_config,
 )
 from promptpotter.infrastructure.identity.tokens import TOKEN_CHARS, TOKEN_PREFIX, token_of
-from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import held_lock
 from promptpotter.infrastructure.store.layout import tenant_workspace
 from promptpotter.infrastructure.store.user_store import User, UserStore, read_accounts
@@ -55,9 +52,9 @@ logger = logging.getLogger(__name__)
 
 def claim_default(*, projects_root: Path, user_id: str, email: str | None) -> str | None:
     """The host's account takes the terminal's: ONE act under the accounts lock, so no sign-in
-    opens either directory meanwhile, refused while any job or run holds a terminal cycle
-    (`holders.py::holder_of`). ``None`` once claimed; else why it refused, the terminal's tree
-    left in place so the host's next sign-in asks again."""
+    opens either directory meanwhile; its caller holds the admission gate over the terminal's
+    cycles (`application/browser_sign_in.py::claim_box`). ``None`` once claimed; else why it refused, the
+    terminal's tree left in place so the host's next sign-in asks again."""
     with held_lock(projects_root / ACCOUNTS_LOCK, wait_s=LOCK_TIMEOUT):
         user_dir = projects_root / user_id
         default_dir = projects_root / TERMINAL_IDENTITY_ID
@@ -65,14 +62,6 @@ def claim_default(*, projects_root: Path, user_id: str, email: str | None) -> st
             return None
         if user_dir.exists():
             return f"both {default_dir} and {user_dir} exist: merge or remove one, then sign in"
-        jobs = jobs_dir(projects_root)
-        terminal = CampaignStore(WorkspaceDir(default_dir), jobs)
-        if any(
-            holder_of(jobs, cycle_dir) is not None
-            for campaign_id in terminal.list_campaign_ids()
-            for cycle_dir in terminal.campaign_cycle_dirs(campaign_id)
-        ):
-            return f"a run holds a cycle under {default_dir}: pause it or let it end, then sign in"
         # The terminal's record becomes the signer's before the rename, which commits the claim: a
         # crash between the two leaves the terminal's tree for the next sign-in to claim again.
         users = UserStore(default_dir)

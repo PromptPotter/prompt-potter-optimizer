@@ -15019,7 +15019,7 @@
       },
       "RunLimits": {
         "additionalProperties": false,
-        "description": "The budget a launch declared, beside its optimizer's own bounds; a served dashboard lays\nthe standing budget over it.",
+        "description": "A cycle's limits: its launch's wiring and every standing patch, folded in order of arrival\n(`RunLimitsProjection`).",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget",

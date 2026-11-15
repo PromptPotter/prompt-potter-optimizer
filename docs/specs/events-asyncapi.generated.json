@@ -7572,31 +7572,6 @@
         "title": "RulerStamp",
         "type": "object"
       },
-      "RunLimits": {
-        "additionalProperties": false,
-        "description": "The budget a launch declared, beside its optimizer's own bounds; a served dashboard lays\nthe standing budget over it.",
-        "properties": {
-          "budget": {
-            "$ref": "#/components/schemas/Budget",
-            "default": {}
-          },
-          "optimizer": {
-            "items": {
-              "$ref": "#/components/schemas/OptimizerLimit"
-            },
-            "title": "Optimizer",
-            "type": "array"
-          },
-          "overshoot": {
-            "default": false,
-            "description": "Whether a call holds its node's mean billed cost in the run rather than its worst case, a bill past it drawn on the run's hold (`set-limits --overshoot`).",
-            "title": "Overshoot",
-            "type": "boolean"
-          }
-        },
-        "title": "RunLimits",
-        "type": "object"
-      },
       "RunPhaseRecord": {
         "additionalProperties": false,
         "description": "The runner's own declaration: every other phase is derived off the last one, never said.",
@@ -7770,6 +7745,9 @@
               }
             ]
           },
+          "budget": {
+            "$ref": "#/components/schemas/Budget"
+          },
           "defaults_drift": {
             "anyOf": [
               {
@@ -7802,6 +7780,13 @@
             "title": "Measurement Node",
             "type": "string"
           },
+          "optimizer_limits": {
+            "items": {
+              "$ref": "#/components/schemas/OptimizerLimit"
+            },
+            "title": "Optimizer Limits",
+            "type": "array"
+          },
           "record_type": {
             "const": "run_wiring",
             "default": "run_wiring",
@@ -7811,9 +7796,6 @@
           "round_cells_ceiling": {
             "title": "Round Cells Ceiling",
             "type": "integer"
-          },
-          "run_limits": {
-            "$ref": "#/components/schemas/RunLimits"
           },
           "timestamp": {
             "title": "Timestamp",
@@ -7827,7 +7809,8 @@
           "max_cells_in_flight",
           "measured_unit",
           "measurement_node",
-          "run_limits",
+          "budget",
+          "optimizer_limits",
           "defaults_drift",
           "backend_revision"
         ],
@@ -8546,7 +8529,7 @@
       },
       "StandingBudgetRecord": {
         "additionalProperties": false,
-        "description": "A cycle's standing budget, LAST wins; read PHYSICALLY, so a fork never inherits one.",
+        "description": "A patch of a cycle's standing budget: it names the fields it changes and the rest stand, a\nnamed null clearing (`Budget`'s rule). Folded in order of arrival, PHYSICALLY, so a fork never\ninherits one.",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget",

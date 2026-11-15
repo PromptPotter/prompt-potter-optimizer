@@ -116,6 +116,7 @@ from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.loop import round_bounds
+from promptpotter.application.runner.mint import stand_held_budget
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring import catch_up, query_loop
 from promptpotter.application.scoring.catch_up import CatchUpPool
@@ -2431,6 +2432,36 @@ def test_a_bill_past_its_overshoot_hold_draws_on_the_run_and_the_dashboard_serve
         "the dashboard served another overshoot than the one call billed past its mean"
     )
     assert dash.run_limits.overshoot, "the dashboard served the switch off"
+
+
+def test_an_overshoot_switched_on_before_the_launch_wires_its_cycle_is_served_on(
+    built_stores: Stores,
+) -> None:
+    hop = CycleHop(campaign_id="camp", cycle_id="cyc")
+    stored_campaign(built_stores, minted_campaign(hop))
+    built_stores.campaigns.mint_cycle(hop)
+    built_stores.campaigns.append(hop, StandingBudgetRecord(overshoot=True))
+    built_stores.campaigns.append(hop, run_wiring())
+    limits = built_stores.campaigns.run_limits(hop)
+    assert limits is not None and limits.overshoot, (
+        "a standing switch landing before the wiring was dropped from the served limits"
+    )
+
+
+def test_a_launch_standing_its_held_budget_keeps_the_pause_its_allowance_declared(
+    tmp_path: Path, built_stores: Stores
+) -> None:
+    hop = CycleHop(campaign_id="camp", cycle_id="cyc")
+    stored_campaign(built_stores, minted_campaign(hop))
+    built_stores.campaigns.mint_cycle(hop)
+    built_stores.campaigns.append(hop, StandingBudgetRecord(pause_at_round=4))
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    held = _held(built_stores, jobs, Budget(usd=1.0), standing=Budget(rounds=2))
+    stand_held_budget(built_stores, hop, held)
+    standing = built_stores.campaigns.read_standing_budget(hop)
+    assert standing.budget.rounds == 2 and standing.pause_at_round == 4, (
+        "standing the held budget dropped the pause the launch's allowance declared"
+    )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")

@@ -650,8 +650,8 @@ def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
     """What the line has paid by now: every cycle's spend read whole, and the worked seconds of
     each ended launch and of this one to now."""
     stores, clock = session.store, session.state.clock
-    campaign = stores.campaigns.load_campaign(session.hop.campaign_id)
-    assert campaign is not None and clock is not None, "a closing round's launch is on a line"
+    assert clock is not None, "a closing round's launch is on a line"
+    campaign = stores.campaigns.campaign(session.hop.campaign_id)
     line = stores.campaigns.line(campaign.root_hop)
     closing = launch_clock_record(stores, line, clock, utcnow_iso(), phases)
     return LineOutlay(

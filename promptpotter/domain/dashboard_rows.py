@@ -187,8 +187,8 @@ class OptimizerLimit(FrozenModel):
 
 
 class RunLimits(StrictModel):
-    """The budget a launch declared, beside its optimizer's own bounds; a served dashboard lays
-    the standing budget over it."""
+    """A cycle's limits: its launch's wiring and every standing patch, folded in order of arrival
+    (`RunLimitsProjection`)."""
 
     # Its money axes are the CAMPAIGN's ceiling, which every live cycle shares.
     budget: Budget = Budget()

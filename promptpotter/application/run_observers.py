@@ -15,7 +15,6 @@ from promptpotter.application.views.readout import ReadoutProjection, StatusFn
 from promptpotter.domain.campaign import Campaign, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.phases import (
     PauseCause,
     StopOutcome,
@@ -89,11 +88,8 @@ def declare_run_wiring(
             max_cells_in_flight=session.backend_client.connector.max_cells_in_flight,
             measured_unit=session.backend_client.connector.measured_unit,
             measurement_node=selected.plan.measurement,
-            run_limits=RunLimits(
-                budget=campaign_config.optimization.budget,
-                overshoot=session.store.campaigns.read_standing_budget(session.hop).overshoot,
-                optimizer=list(selected.limits),
-            ),
+            budget=campaign_config.optimization.budget,
+            optimizer_limits=list(selected.limits),
             defaults_drift=defaults_drift(
                 campaign,
                 running=selected.treatment(

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, Self
 from pydantic import TypeAdapter, model_validator
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
-from promptpotter.application.jobs.launcher.admission import RunStart, campaign_at, refuse_campaign
+from promptpotter.application.jobs.launcher.admission import RunStart, refuse_campaign
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.maintenance.landing import land_at_entry
@@ -241,12 +241,10 @@ class HeldRun:
         was made from."""
         session = opened.session
         stores, hop = session.store, session.hop
-        campaign = stores.campaigns.load_campaign(hop.campaign_id)
-        assert campaign is not None, "the hold minted or loaded it"
         return cls(
             start=start,
             session=session,
-            cycle=cycle_config(stores, campaign, hop),
+            cycle=cycle_config(stores, stores.campaigns.campaign(hop.campaign_id), hop),
             budget=budget,
             optimizer=opened.optimizer,
             closing=closing,
@@ -309,7 +307,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     _tell_spawner()
     try:
         # Asked again here, under the claim: the admitting process's answer is a handoff old.
-        refuse_campaign(stores, campaign := campaign_at(stores, spec.hop))
+        refuse_campaign(stores, campaign := stores.campaigns.campaign(spec.hop.campaign_id))
     except CampaignRefusedError as refused:
         # The job's refusal, never the cycle's stop: the cycle keeps the one it had.
         start.release(refused)

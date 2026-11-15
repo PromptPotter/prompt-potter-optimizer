@@ -18,7 +18,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     active_pointer_exists,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import MINT_FRESH, BadRequestError, NextAct, NotFoundError
 
 
@@ -146,8 +146,8 @@ def resolve_subject(stores: Stores, subject: Subject) -> Subject:
 
 def named_campaign(stores: Stores, needle: str) -> Campaign:
     """The caller's campaign an id prefix names, resolved as every door's (`resolve_subject`);
-    another user's or none is ``not_found`` (`owned_campaign`)."""
-    return owned_campaign(stores, resolve_subject(stores, Subject(needle)).campaign_id)
+    another user's or none is ``not_found`` (`CampaignStore.campaign`)."""
+    return stores.campaigns.campaign(resolve_subject(stores, Subject(needle)).campaign_id)
 
 
 def resolve_cycle(stores: Stores, subject: Subject) -> Subject:

@@ -68,11 +68,19 @@ from offline_world import Router
 from pydantic import SecretStr, TypeAdapter, ValidationError
 from starlette.types import Message, Receive, Scope, Send
 
-from promptpotter.application import account, app_visits, cycle_reads, health, notices
+from promptpotter.application import (
+    account,
+    app_visits,
+    browser_sign_in,
+    cycle_reads,
+    health,
+    notices,
+)
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import RoundContext
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
+from promptpotter.application.browser_sign_in import claim_box
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
 from promptpotter.application.commands import cycle_cleanup, draft_editing, launching, measuring
@@ -103,7 +111,6 @@ from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     RunStart,
     admitted,
-    campaign_at,
     destroying,
     paid_call,
     paid_pass,
@@ -199,7 +206,6 @@ from promptpotter.domain.cycle_paths import (
     WorkspaceDir,
     encode_cycle_path,
 )
-from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.hierarchy import SubtreeCampaign
@@ -252,7 +258,6 @@ from promptpotter.infrastructure import docker_host
 from promptpotter.infrastructure.identity.accounts import (
     IdentityBundle,
     build_identity_bundle,
-    claim_default,
     host_user_id,
     identity_of_carrier,
     identity_of_session,
@@ -1616,7 +1621,7 @@ def test_the_hosts_first_sign_in_takes_the_terminals_account_in_one_act_or_asks_
     (projects / "owner-9").mkdir(parents=True)
 
     def claim() -> str | None:
-        return claim_default(projects_root=projects, user_id="owner-9", email="owner-9@x.com")
+        return claim_box(projects, user_id="owner-9", email="owner-9@x.com")
 
     assert claim() is not None and (projects / "default").is_dir(), "a claim merged two accounts"
     (projects / "owner-9").rmdir()
@@ -1641,7 +1646,7 @@ def test_a_pass_registered_on_a_terminal_cycle_refuses_the_hosts_claim(tmp_path:
         holder=ScoringPass(MeasurementRole.BENCH),
         hop=scored,
     )
-    assert claim_default(projects_root=projects, user_id="owner-9", email=None) is not None, (
+    assert claim_box(projects, user_id="owner-9", email=None) is not None, (
         "the host's claim moved a tree a registered pass scores"
     )
     assert (projects / "default" / "campaigns" / "terminal-camp").is_dir()
@@ -2202,7 +2207,7 @@ async def test_a_sign_in_the_trail_cannot_record_is_refused_and_leaves_no_sessio
     def unrecordable(_: object, **__: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(account, "sign_in", unrecordable)
+    monkeypatch.setattr(browser_sign_in, "sign_in", unrecordable)
     open_sessions = sorted(paths.sessions_dir.iterdir())
     unrecorded = await auth.callback(request, BackgroundTasks(), "google")
     assert SESSION_COOKIE_NAME not in _cookies(unrecorded), (
@@ -2296,7 +2301,8 @@ def _running(cycle_dir: Path) -> Path:
             max_cells_in_flight=1,
             measured_unit="sample",
             measurement_node="l1_score",
-            run_limits=RunLimits(),
+            budget=Budget(),
+            optimizer_limits=[],
             defaults_drift=None,
             backend_revision=None,
         )
@@ -3705,7 +3711,7 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     CycleEventLog.open(CycleDir(leaf_dir)).append(RunPhaseRecord(state=Running()))
     await asyncio.to_thread(hold_cycle, leaf_dir)
     controls["inner, its own loop running"] = _refusal_said(
-        admitted(inner, campaign_at(inner, leaf), inner.run_state(leaf))
+        admitted(inner, inner.campaigns.campaign(leaf.campaign_id), inner.run_state(leaf))
     )
     paused = CommandCall(PauseCyclePayload(**into_leaf, reason="stop"), "inner-run", door=Door.HOST)
     with pytest.raises(PayloadInvalidError):
@@ -3770,7 +3776,9 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Com
             pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
             await sender.dispatch(CommandCall(pause, door=Door.HOST))
             controls["outer, paused under a pass"] = _refusal_said(
-                admitted(stores, campaign_at(stores, held), stores.run_state(held))
+                admitted(
+                    stores, stores.campaigns.campaign(held.campaign_id), stores.run_state(held)
+                )
             )
             raise asyncio.CancelledError("aborted")
     parked = RUN_PHASE_INFO[RunPhase.PAUSED].refusal

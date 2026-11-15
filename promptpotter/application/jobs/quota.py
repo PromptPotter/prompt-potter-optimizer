@@ -65,6 +65,7 @@ from promptpotter.infrastructure.llm.wallet import (
     paying_key,
     provider_send,
     read_coupon,
+    sends_draw_coupon,
     unpaid,
 )
 from promptpotter.infrastructure.store.account_spend import account_bill, campaign_spend
@@ -75,7 +76,6 @@ from promptpotter.shared.errors import (
     BudgetUnenforceableError,
     LaunchRefusalReason,
     NextAct,
-    NotFoundError,
     PayloadInvalidError,
     PotterError,
     SendRefusedError,
@@ -367,7 +367,7 @@ def sends_on(stores: Stores, config: CampaignConfig, connector: str) -> tuple[Se
 
 def launch_bound(wallet: AccountWallet, sends: tuple[Send, ...]) -> Budget:
     """The most a launch sending *sends* may declare before ``admit_launch`` refuses it whole."""
-    if wallet.contended or not any(draws_coupon(send.payer) for send in sends):
+    if wallet.contended or not sends_draw_coupon(sends):
         return Budget()
     return wallet.headroom
 
@@ -526,7 +526,7 @@ def admit_launch(
     if refusal is not None:
         raise refusal
     admitted = _admitted(stores, declared, sends)
-    if not any(draws_coupon(send.payer) for send in sends):
+    if not sends_draw_coupon(sends):
         return admitted, _nothing_on(wallet.coupon.face)
     if wallet.contended:
         raise _contended("what this account has left")
@@ -546,7 +546,7 @@ def _admitted(stores: Stores, declared: Budget, sends: tuple[Send, ...]) -> Budg
 
 def _tier_bound(stores: Stores, sends: tuple[Send, ...]) -> float | None:
     """The free tier's dollar ceiling on a run any of whose *sends* draws the coupon."""
-    return tier_ceiling(stores) if any(draws_coupon(send.payer) for send in sends) else None
+    return tier_ceiling(stores) if sends_draw_coupon(sends) else None
 
 
 def _unenforceable(
@@ -750,9 +750,7 @@ def move_campaign_money(
     if not money.named:
         return
     with job_registry.admission_gate():
-        campaign = stores.campaigns.load_campaign(campaign_id)
-        if campaign is None:
-            raise NotFoundError(f"campaign not found: {campaign_id}")
+        campaign = stores.campaigns.campaign(campaign_id)
         prior = stores.campaigns.read_campaign_ceiling(campaign.root_hop)
         standing = prior.over(money)
         if standing == prior:
@@ -805,8 +803,6 @@ def declare_run_budget(
     second, the axes an operator named (campaign, cycle, *requested*)."""
     asked = Budget()
     if hop is not None:
-        if stores.campaigns.load_campaign(hop.campaign_id) is None:
-            raise NotFoundError(f"campaign not found: {hop.campaign_id}")
         asked = stores.campaigns.armed_budget(hop)
     asked = asked.over(requested)
     return declared.over(asked), asked
@@ -849,18 +845,13 @@ def change_budget(
             change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
         )
     cycle = change.only(CYCLE_AXES)
-    prior = campaigns.read_standing_budget(hop)
-    switched = overshoot is not None and overshoot != prior.overshoot
-    if cycle.named or switched:
-        campaigns.append(
-            hop,
-            StandingBudgetRecord(
-                budget=prior.budget.over(cycle),
-                pause_at_round=prior.pause_at_round,
-                overshoot=prior.overshoot if overshoot is None else overshoot,
-            ),
-        )
-    return switched or campaigns.armed_budget(hop) != armed
+    if overshoot == campaigns.read_standing_budget(hop).overshoot:
+        overshoot = None
+    if overshoot is not None:
+        campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=overshoot))
+    elif cycle.named:
+        campaigns.append(hop, StandingBudgetRecord(budget=cycle))
+    return overshoot is not None or campaigns.armed_budget(hop) != armed
 
 
 def _clamped(
@@ -892,7 +883,7 @@ def _clamped(
     ):
         raise unpriced
     # A campaign ceiling is the operator's: past the coupon only where none of its sends draws it.
-    draws = any(draws_coupon(send.payer) for send in sends)
+    draws = sends_draw_coupon(sends)
     clamp = room.over(Budget(usd=_lowest(room.usd, bound))) if draws else Budget(usd=bound)
     change = requested.over(
         Budget.model_validate(

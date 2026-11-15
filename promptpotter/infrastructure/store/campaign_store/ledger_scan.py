@@ -150,6 +150,20 @@ class _LaunchClocks:
         return list(self._found)
 
 
+class _StandingBudget:
+    records: ClassVar[RecordClasses] = (StandingBudgetRecord,)
+
+    def __init__(self) -> None:
+        # No record stands no axis, which the empty record says.
+        self._standing = StandingBudgetRecord()
+
+    def feed(self, record: StandingBudgetRecord) -> None:
+        self._standing = self._standing.over(record)
+
+    def value(self) -> StandingBudgetRecord:
+        return self._standing
+
+
 class CycleFacts(NamedTuple):
     minted: CycleMintedRecord | None = None
     ended: Ended | None = None
@@ -703,7 +717,6 @@ LedgerIndex.readers(
             CycleMintedRecord,
             CycleShareRecord,
             PartitionRecord,
-            StandingBudgetRecord,
             RunPhaseRecord,
             RunWiringRecord,
             ScoringLockedRecord,
@@ -712,6 +725,7 @@ LedgerIndex.readers(
     _ResolvedRun,
     _ArmActs,
     _LaunchClocks,
+    _StandingBudget,
     _CycleFactsFold,
     _StandingFold,
     _Answers,
@@ -761,6 +775,11 @@ def scan_campaign_ceiling(root_ledger: Path) -> Budget:
     """The campaign's money axes, off its ROOT's ledger, which every cycle of it reads; none names none."""
     held = scan_last([LedgerSpan(root_ledger)], CampaignCeilingRecord)
     return Budget() if held is None else held.budget
+
+
+def scan_standing_budget(ledger_path: Path) -> StandingBudgetRecord:
+    """The cycle's own patches, folded in order of arrival."""
+    return _view(ledger_path, _StandingBudget)
 
 
 def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:

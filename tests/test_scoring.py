@@ -280,7 +280,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
-from promptpotter.domain.dashboard_rows import RoundHealth, RunLimits
+from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import PARSE_FAILURE_ALL_NO_OP
@@ -2665,7 +2665,8 @@ def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
                 max_cells_in_flight=1,
                 measured_unit="sample",
                 measurement_node="solve",
-                run_limits=RunLimits(),
+                budget=Budget(),
+                optimizer_limits=[],
                 defaults_drift=None,
                 backend_revision=None,
             )

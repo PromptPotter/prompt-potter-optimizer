@@ -107,6 +107,11 @@ class BackendCells(NamedTuple):
 type Send = ProviderSend | BackendCells
 
 
+def sends_draw_coupon(sends: tuple[Send, ...]) -> bool:
+    """Whether a launch sending *sends* draws the coupon: any of them is paid from it."""
+    return any(draws_coupon(send.payer) for send in sends)
+
+
 def paying_key(keys: Mapping[str, HeldKey], provider: str) -> ProviderKey | None:
     """THE payer rule: the account's own key for *provider*, else the box's; ``None`` where
     neither holds one. Every send, admission, the free tier and `/auth/coupon` ask it."""

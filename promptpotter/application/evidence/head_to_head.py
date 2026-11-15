@@ -56,7 +56,7 @@ from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.errors import BadRequestError, NotFoundError
+from promptpotter.shared.errors import BadRequestError
 from promptpotter.shared.statistics import bh_adjusted
 from promptpotter.shared.worded import Worded
 
@@ -426,7 +426,7 @@ def head_to_head(
     """*entries* oldest first: the ratio reference and the reference-row tie both read that order."""
     if not entries:
         return None
-    campaigns = [_campaign(entry) for entry in entries]
+    campaigns = [entry.stores.campaigns.campaign(entry.reading.campaign_id) for entry in entries]
     configs = [
         cycle_config(e.stores, c, c.root_hop).config
         for e, c in zip(entries, campaigns, strict=True)
@@ -545,15 +545,6 @@ def _read_alike(a: _Entry, b: _Entry, scorer: Scorer) -> bool:
         instrument_id=a.origin.instrument_id,
     ).headline
     return gap is None or gap.side == "spans"
-
-
-def _campaign(entry: HeadToHeadEntry) -> Campaign:
-    campaign = entry.stores.campaigns.load_campaign(entry.reading.campaign_id)
-    if campaign is None:
-        raise NotFoundError(
-            f"campaign {entry.reading.campaign_id} has no manifest to read its bench from"
-        )
-    return campaign
 
 
 def _status(stores: Stores, campaign: Campaign) -> RunStatus:

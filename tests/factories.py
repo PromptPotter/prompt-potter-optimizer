@@ -106,7 +106,6 @@ from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult
-from promptpotter.domain.dashboard_rows import RunLimits
 from promptpotter.domain.job import EmbeddedRun, InnerRun
 from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
@@ -870,7 +869,8 @@ def run_wiring() -> RunWiringRecord:
         max_cells_in_flight=1,
         measured_unit="sample",
         measurement_node="l1_score",
-        run_limits=RunLimits(),
+        budget=Budget(),
+        optimizer_limits=[],
         defaults_drift=None,
         backend_revision=None,
     )

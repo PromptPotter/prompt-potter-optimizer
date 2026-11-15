@@ -78,10 +78,13 @@ BASELINE = {
     # passb-2 typed log (+36): a command log row typed by its kind's recorded shape on load.
     # lite-2 + la-2 (+29): OpenRouter's endpoints payload as one model, validated at the fetch
     # (+34); the hold fold beside its one reader, a sample fold's dead flag, a `--json` launch
-    # asked nothing (-5).
-    "package_lines": 110854,
+    # asked nothing (-5). addr (-9).
+    # money-2 (+18): the standing budget's named-only patch and its arrival-order fold, and the
+    # browser sign-in moved above admission so the host's claim holds the destroyers' gate; the
+    # `owned_campaign` alias gone.
+    "package_lines": 110863,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
-    "model_copy_updates": 156,
+    "model_copy_updates": 155,
     # The `__init__.py` files that re-export names instead of staying empty.
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.

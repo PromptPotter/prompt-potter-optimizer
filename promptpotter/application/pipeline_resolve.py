@@ -142,7 +142,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.read_model import derived
-from promptpotter.infrastructure.store.stores import Stores, descend_store, owned_campaign
+from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import (
     BadRequestError,
     FileKind,
@@ -1025,7 +1025,7 @@ def resolve_pipeline_at(stores: Stores, campaign_id: str, at: str) -> CampaignPi
     spec = pipeline_subject(at, campaign_id)
     # An inner searchpoint lives in the sandbox `;in=` names; the tenant tree answers for the OUTER.
     leaf = descend_store(stores, spec.inside)
-    return resolve_pipeline_for_campaign(leaf, owned_campaign(leaf, campaign_id), at=spec)
+    return resolve_pipeline_for_campaign(leaf, leaf.campaigns.campaign(campaign_id), at=spec)
 
 
 def permitted_narrowing(
@@ -1056,7 +1056,7 @@ def steer_verdict(
 
 
 def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> ForkPreviewResponse:
-    narrowing = permitted_narrowing(stores, owned_campaign(stores, campaign_id))
+    narrowing = permitted_narrowing(stores, stores.campaigns.campaign(campaign_id))
     return ForkPreviewResponse(
         steer=steer_verdict(stores, narrowing, overlay),
         permitted=permitted_models_from_narrowing(narrowing),
@@ -1064,7 +1064,7 @@ def fork_preview(stores: Stores, campaign_id: str, overlay: dict[str, Any]) -> F
 
 
 def campaign_config_map(stores: Stores, campaign_id: str) -> ConfigMapResponse:
-    campaign = owned_campaign(stores, campaign_id)
+    campaign = stores.campaigns.campaign(campaign_id)
     m = _campaign_merge(stores, campaign, Subject(campaign_id))
     return config_map(m.cfg, m.optimizer, m.knob_layers)
 

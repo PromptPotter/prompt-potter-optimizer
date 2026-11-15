@@ -16,7 +16,6 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
     admit_slotless,
-    campaign_at,
     refuse_campaign,
     refuse_unreachable,
 )
@@ -139,7 +138,7 @@ async def run_campaign(
                     "no config and no rows to resume it",
                     code="resume_declared",
                 )
-            refuse_campaign(stores, campaign := campaign_at(stores, target))
+            refuse_campaign(stores, campaign := stores.campaigns.campaign(target.campaign_id))
             resuming = ExistingCycle(target, campaign, budget)
             config = cycle_config(stores, campaign, target).config
             connector, measured = campaign.connector, campaign.dataset_name

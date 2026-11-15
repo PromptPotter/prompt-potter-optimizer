@@ -70,7 +70,6 @@ from promptpotter.infrastructure.store.stores import (
     Stores,
     descend_store,
     inner_sandbox_store,
-    owned_campaign,
     resolve_cycle_path,
 )
 from promptpotter.shared.errors import NotFoundError
@@ -680,7 +679,7 @@ def hierarchy_subtree(
     moment: Moment | None,
 ) -> HierarchyEntry:
     """The entry at *address* with everything under it; *moment* replays the ledgers only."""
-    campaign = owned_campaign(stores, Subject.parse_address(address).root_campaign_id)
+    campaign = stores.campaigns.campaign(Subject.parse_address(address).root_campaign_id)
     held = campaign_cycle_reads(stores, campaign, moment=moment)
     root = _answering(
         _Build(moment).campaign(stores, (), campaign, held, depth=MAX_CYCLE_DEPTH, host=None)
@@ -697,7 +696,7 @@ def hierarchy_subtree(
 def _root_path(stores: Stores, address: str) -> CyclePath:
     subject = Subject.parse_address(address)
     inside = subject.inside
-    return (*inside, owned_campaign(descend_store(stores, inside), subject.campaign_id).root_hop)
+    return (*inside, descend_store(stores, inside).campaigns.campaign(subject.campaign_id).root_hop)
 
 
 def subtree_moment(
@@ -719,7 +718,7 @@ def subtree_moment(
 
 def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
     """Every store the TOP campaign's family spans: the body is built from all of them."""
-    top = (owned_campaign(stores, Subject.parse_address(address).root_campaign_id).root_hop,)
+    top = (stores.campaigns.campaign(Subject.parse_address(address).root_campaign_id).root_hop,)
     held = [c.store for c in iter_family_cycles(stores, top)]
     workspaces = {str(s.campaigns.workspace) for s in held}
     passes = sorted(
@@ -733,7 +732,7 @@ def subtree_version(stores: Stores, address: str) -> tuple[object, ...]:
 
 def subtree_cycle(stores: Stores, path: CyclePath) -> SubtreeCycle:
     """One cycle and its rounds, unlensed and at the head: only its own campaign is built."""
-    owned_campaign(stores, path[0].campaign_id)
+    stores.campaigns.campaign(path[0].campaign_id)
     inside, hop = path[:-1], path[-1]
     leaf = descend_store(stores, inside)
     campaign = leaf.campaigns.load_campaign(hop.campaign_id)

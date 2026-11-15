@@ -229,8 +229,16 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   address's root, a moment stays on its own tree, a deleted exhibit is followed by no one. A
   command log row is typed by its kind on load, so a retired shape refuses there. Only the L4
   leg's instrument ids moved (the estimator digest); the desk lands every file.
-- **then:** addr and money-2 (`CampaignStore.campaign(id)` and money's remainder), beside each
-  other in the cloud; tests-w, small-4 and the edge tail. A cold verify is timed live.
+- **landed 90, lite-2 + la-2, addr + money-2:** OpenRouter's endpoints payload is one model
+  validated at the fetch, the hold fold sits beside its one reader, and a `--json` launch asks
+  nothing; a cycle's kind is its recorded mint, a cycle is listed by its `CycleHop`, the viewed
+  dataset is the served subtree tag and a cycle's short name its served label;
+  `CampaignStore.campaign(id)` is the one refusing campaign read, the standing budget is patches
+  folded in arrival order, a launch's coupon draw is one fact, and the host's claim holds the
+  admission gate. A doc probe's `git grep` runs one thread (doc-claims 304 → 135 MB). Every leg
+  UNMOVED, digests unmoved; the landing key moved on the budget records, which wipes run data.
+- **then:** addr-2 and small-4 beside each other in the cloud; tests-w, faults-3, the feed's
+  per-subject version and the lineage fold; the edge tail. A cold verify is timed live.
 
 The re-keys end at the behaviour-key switch.
 

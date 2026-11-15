@@ -61,6 +61,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_each_last,
     scan_ledger_metered,
     scan_resolved_run,
+    scan_standing_budget,
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.data_root import campaign_row
@@ -223,6 +224,13 @@ class CampaignStore:
             return campaign
         return campaign.model_copy(update={"lifecycle_status": "deleted"})
 
+    def campaign(self, campaign_id: str) -> Campaign:
+        """THE read of a campaign a caller acts on. The tenant directory is the owner: another
+        account's campaign is in another directory, so it is NOT FOUND, never forbidden."""
+        if (campaign := self.load_campaign(campaign_id)) is None:
+            raise NotFoundError(f"campaign not found: {campaign_id}")
+        return campaign
+
     def _campaigns_root(self) -> Path:
         return campaigns_root_dir_for(self._base_dir)
 
@@ -284,10 +292,7 @@ class CampaignStore:
         return _ledger_meters([self.ledger(hop)])[meter]
 
     def ceiling_meter_of(self, campaign_id: str) -> CeilingMeter:
-        campaign = self.load_campaign(campaign_id)
-        if campaign is None:
-            raise NotFoundError(f"campaign not found: {campaign_id}")
-        return ceiling_meter(campaign.declaration.purpose)
+        return ceiling_meter(self.campaign(campaign_id).declaration.purpose)
 
     def campaign_walk_spans(self, campaign_id: str) -> list[LedgerSpan]:
         """Each cycle's whole chain, so a cycle lifted from another tree remembers its prefix."""
@@ -352,10 +357,9 @@ class CampaignStore:
         loses neither."""
         path = self._manifest_path(campaign_id)
         with write_lock(path):
-            manifest = self.load_campaign(campaign_id)
-            if manifest is None:
-                raise NotFoundError(f"campaign not found: {campaign_id}")
-            write_json(path, manifest.model_copy(update=changes).model_dump(mode="json"))
+            write_json(
+                path, self.campaign(campaign_id).model_copy(update=changes).model_dump(mode="json")
+            )
 
     def list_campaign_ids(self) -> list[str]:
         return sorted(p.name for p in self.iter_campaign_dirs())
@@ -676,15 +680,11 @@ class CampaignStore:
 
     def read_standing_budget(self, hop: CycleHop) -> StandingBudgetRecord:
         """Read live by the book at each send, so a running change binds its next one."""
-        # No record stands no axis, which the empty record says.
-        return self.last(hop, StandingBudgetRecord) or StandingBudgetRecord()
+        return scan_standing_budget(self.ledger(hop))
 
     def read_campaign_ceiling(self, hop: CycleHop) -> Budget:
         """Off any cycle of the campaign: each reads its root's, which its manifest names."""
-        campaign = self.load_campaign(hop.campaign_id)
-        if campaign is None:
-            raise NotFoundError(f"Campaign not found: {hop.campaign_id}")
-        return scan_campaign_ceiling(self.ledger(campaign.root_hop))
+        return scan_campaign_ceiling(self.ledger(self.campaign(hop.campaign_id).root_hop))
 
     def armed_budget(self, hop: CycleHop) -> Budget:
         """The axes an operator named: the campaign's money and the cycle's own."""

@@ -128,8 +128,7 @@ async def open_launch(
         }
     )
     session.state.held = budget
-    campaign = campaigns.load_campaign(session.campaign_id)
-    assert campaign is not None, "a launch runs a campaign its session is bound to"
+    campaign = campaigns.campaign(session.campaign_id)
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
     declare_run_wiring(session, campaign_config, campaign=campaign, selected=optimizer)
     # A fresh mint was admitted before its campaign existed: its ceiling is stored here, off the
@@ -194,9 +193,8 @@ def arm_run_controls(session: Session, observers: RunObservers) -> None:
 def stand_held_budget(stores: Stores, hop: CycleHop, held: HeldBudget) -> None:
     """This cycle's own axes; its money is the campaign's (``move_campaign_money``), its hold the job's."""
     cycle = held.standing.only(CYCLE_AXES)
-    prior = stores.campaigns.read_standing_budget(hop)
-    if prior.budget != cycle:
-        stores.campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=prior.overshoot))
+    if stores.campaigns.read_standing_budget(hop).budget != cycle:
+        stores.campaigns.append(hop, StandingBudgetRecord(budget=cycle))
 
 
 def _rebased_observers(
@@ -253,19 +251,11 @@ async def onto_fork(
 def declare_round_allowance(session: Session, step_rounds: int | None) -> None:
     """A launch with no allowance clears the last launch's."""
     campaigns = session.store.campaigns
-    standing = campaigns.read_standing_budget(session.hop)
     pause_at_round = (
         None if step_rounds is None else max(session.state.resumed_from_round - 1, 0) + step_rounds
     )
-    if standing.pause_at_round != pause_at_round:
-        campaigns.append(
-            session.hop,
-            StandingBudgetRecord(
-                budget=standing.budget,
-                pause_at_round=pause_at_round,
-                overshoot=standing.overshoot,
-            ),
-        )
+    if campaigns.read_standing_budget(session.hop).pause_at_round != pause_at_round:
+        campaigns.append(session.hop, StandingBudgetRecord(pause_at_round=pause_at_round))
 
 
 def _init_cycle(session: Session, *, resume_from_round_override: int | None) -> None:

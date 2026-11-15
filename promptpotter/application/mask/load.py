@@ -47,7 +47,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.errors import NotFoundError
 
 if TYPE_CHECKING:
     from promptpotter.application.bench.difficulty import DifficultyView
@@ -187,9 +186,7 @@ def load_mask_record(
     lens: Lens | None,
     with_replay: bool = False,
 ) -> MaskRecord:
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
-        raise NotFoundError(f"Campaign '{campaign_id}' not found")
+    campaign = stores.campaigns.campaign(campaign_id)
 
     # Each cycle's WHOLE line off its chain: a lifted round is crowned where its parent ran it.
     files: dict[str, dict[int, RoundResult]] = {}

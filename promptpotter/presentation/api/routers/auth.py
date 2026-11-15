@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, BackgroundTasks, Path, Request, Response
 from fastapi.responses import JSONResponse, RedirectResponse
 
-from promptpotter.application import account, health
+from promptpotter.application import account, browser_sign_in, health
 from promptpotter.domain.records.run_records import device_of
 from promptpotter.infrastructure.identity.accounts import IdentityBundle
 from promptpotter.infrastructure.identity.oidc import (
@@ -169,9 +169,9 @@ async def callback(
 
     device = device_of(request.headers.get("sec-ch-ua-mobile"), request.headers.get("user-agent"))
     # Off the loop: an arrival and the default's claim wait on the accounts lock.
-    signed = await asyncio.to_thread(account.sign_in_oidc, bundle, identity, device=device)
-    background.add_task(account.ring, signed)
-    if isinstance(signed, account.SignInRefused):
+    signed = await asyncio.to_thread(browser_sign_in.sign_in_oidc, bundle, identity, device=device)
+    background.add_task(browser_sign_in.ring, signed)
+    if isinstance(signed, browser_sign_in.SignInRefused):
         return _redirect_with_error(signed.refusal)
 
     response = RedirectResponse(url="/", status_code=303)

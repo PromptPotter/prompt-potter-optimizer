@@ -16,7 +16,7 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.data_root import LEAF_INFO, Leaf, campaign_row
 from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
 from promptpotter.infrastructure.store.layout import ArchiveHomeOwner
-from promptpotter.infrastructure.store.stores import Stores, owned_campaign
+from promptpotter.infrastructure.store.stores import Stores
 
 _SAMPLE_ROWS = list[dict[str, Any]]
 
@@ -85,7 +85,7 @@ def _dir_size(root: Path, *, skip: frozenset[str] = frozenset()) -> int:
 
 def campaign_storage(stores: Stores, campaign_id: str) -> LeafBytes:
     """Raises ``NotFoundError`` on a campaign the caller does not own, as on a missing one."""
-    owned_campaign(stores, campaign_id)
+    stores.campaigns.campaign(campaign_id)
     return _campaign_split(stores.campaigns.campaign_root_dir(campaign_id))
 
 

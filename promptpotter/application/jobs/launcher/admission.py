@@ -78,7 +78,6 @@ from promptpotter.shared.errors import (
     ConflictError,
     CycleBusyError,
     MachineBusyError,
-    NotFoundError,
 )
 from promptpotter.shared.extras import MissingExtraError, missing
 from promptpotter.shared.identity import acting_principal
@@ -263,7 +262,7 @@ def request_jobs(
         # First, under the gate an archive or a delete takes too: a refused campaign's act is
         # queued, claimed and debited nothing.
         if hop != UNRESOLVED_HOP:
-            refuse_campaign(stores, campaign_at(stores, hop))
+            refuse_campaign(stores, stores.campaigns.campaign(hop.campaign_id))
         # A scoring pass is load, never a campaign the concurrent and daily ceilings count.
         if isinstance(holder, CampaignLaunch):
             check_launch_quotas(
@@ -388,7 +387,7 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
         if hop is not None:
             # Asked again past the wait: the slot door's claim held off an archive or a delete,
             # never a definition moved while the job waited.
-            refuse_campaign(stores, campaign_at(stores, hop))
+            refuse_campaign(stores, stores.campaigns.campaign(hop.campaign_id))
 
     await refuse_unreachable(request.connector(stores), request.endpoint(stores))
     declared, asked = declare_run_budget(
@@ -820,18 +819,12 @@ def _close_pass(
 
 
 def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:
-    config = cycle_config(stores, campaign_at(stores, hop), hop).config
+    config = cycle_config(stores, stores.campaigns.campaign(hop.campaign_id), hop).config
     return next_launch_budget(config, stores=stores, hop=hop).only(MONEY_AXES)
-
-
-def campaign_at(stores: Stores, hop: CycleHop) -> Campaign:
-    if (campaign := stores.campaigns.load_campaign(hop.campaign_id)) is None:
-        raise NotFoundError(f"campaign not found: {hop.campaign_id}")
-    return campaign
 
 
 def campaign_sends(stores: Stores, hop: CycleHop) -> tuple[Send, ...]:
     """What a run or pass on *hop* sends, under its campaign's resolved config and connector."""
-    campaign = campaign_at(stores, hop)
+    campaign = stores.campaigns.campaign(hop.campaign_id)
     config = cycle_config(stores, campaign, hop).config
     return sends_on(stores, config, campaign.connector)

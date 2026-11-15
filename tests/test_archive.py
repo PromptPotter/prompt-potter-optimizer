@@ -221,7 +221,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
 )
 from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, owned_campaign
+from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -1476,7 +1476,7 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
     # A steer outside what the campaign permits is the babysit act, and a fork of that fork lays
     # its start over its parent's: a steer back inside the menu still runs babysat, and its mint
     # stamps the intervention every answer it files is graded by.
-    campaign = owned_campaign(stores, scenario.campaign_id)
+    campaign = stores.campaigns.campaign(scenario.campaign_id)
 
     def steered_fork(hop: CycleHop, model: str) -> CycleHop:
         start = parse_cycle_start(
@@ -1513,7 +1513,7 @@ def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operato
 ) -> None:
     stores, store = built_stores, built_stores.campaigns
     scenario, scenario_log, scenario_rounds, *_, closing = scenario_line
-    campaign = owned_campaign(stores, scenario.campaign_id)
+    campaign = stores.campaigns.campaign(scenario.campaign_id)
     permitted = permitted_narrowing(stores, campaign)
     # Provider and route included.
     candidate_record = {"a": {"model": "m", "provider": "p", "route_order": ["r"]}}
@@ -1552,7 +1552,7 @@ def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_b
 ) -> None:
     stores = built_stores
     scenario, scenario_log, scenario_rounds, *_, closing = scenario_line
-    campaign = owned_campaign(stores, scenario.campaign_id)
+    campaign = stores.campaigns.campaign(scenario.campaign_id)
     candidate_record = {"a": {"model": "m", "provider": "p", "route_order": ["r"]}}
     candidate_key = _emit_round(
         closing, scenario_log, scenario_rounds, "s2", resolved_params=candidate_record

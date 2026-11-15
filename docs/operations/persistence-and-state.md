@@ -98,7 +98,7 @@ A command is taken at the next **per-sample** checkpoint, so a pause asked mid-c
 
 ### No control file; the budget rides the ledger
 
-`.runtime/` holds no control file. The standing budget is the last `standing_budget` record on the cycle's ledger; its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger.
+`.runtime/` holds no control file. The standing budget is the cycle's own `standing_budget` patches folded in order of arrival, each naming only what it changes; its money axes are the campaign's, the last `campaign_ceiling` record on the ROOT's ledger.
 
 Every call holds its worst case, so no ceiling is ever passed; `set-limits --overshoot on` (the standing record's `overshoot`, off by default) holds a call at its node's mean billed cost in the run once one has billed (`spend_book.py::SpendBook.expected`), a bill past it drawn on every hold above and served as the dashboard's `overshot`.
 

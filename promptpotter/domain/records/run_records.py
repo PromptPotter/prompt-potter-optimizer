@@ -12,10 +12,15 @@ from pydantic import (
     AfterValidator,
     ConfigDict,
     Field,
+    GetJsonSchemaHandler,
     SerializeAsAny,
+    SerializerFunctionWrapHandler,
     field_validator,
+    model_serializer,
     model_validator,
 )
+from pydantic.json_schema import JsonSchemaValue
+from pydantic_core import CoreSchema
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import ArmRole, ArmState, Proposal, arm_name
@@ -26,9 +31,9 @@ from promptpotter.domain.crowning_bar import lift_prior
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
+    OptimizerLimit,
     RoundHealth,
     RoundSummary,
-    RunLimits,
 )
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.l4.proxies import PanelPrecision, panel_precision
@@ -1059,7 +1064,9 @@ class ElectionRecord(Election, CycleRecord):
 
 
 class StandingBudgetRecord(CycleRecord):
-    """A cycle's standing budget, LAST wins; read PHYSICALLY, so a fork never inherits one."""
+    """A patch of a cycle's standing budget: it names the fields it changes and the rest stand, a
+    named null clearing (`Budget`'s rule). Folded in order of arrival, PHYSICALLY, so a fork never
+    inherits one."""
 
     forks_inherit: ClassVar[bool] = False
     record_type: Literal["standing_budget"] = "standing_budget"
@@ -1072,6 +1079,31 @@ class StandingBudgetRecord(CycleRecord):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     _cycle_axes = field_validator("budget")(cycle_axes_only)
+
+    @model_serializer(mode="wrap")
+    def _named_only(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        """An unnamed field written out would read back as a change nobody asked for."""
+        data: dict[str, object] = handler(self)
+        return {k: v for k, v in data.items() if k not in _PATCHED or k in self.model_fields_set}
+
+    @classmethod
+    def __get_pydantic_json_schema__(
+        cls, core: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        """The wire omits what the input omits, so both directions are the fields' one schema."""
+        return handler({key: value for key, value in core.items() if key != "serialization"})
+
+    def over(self, patch: StandingBudgetRecord) -> StandingBudgetRecord:
+        """*patch* laid on this fold: its named fields win, its budget's named axes over this one's."""
+        named = {
+            field: getattr(layer, field)
+            for layer in (self, patch)
+            for field in _PATCHED & layer.model_fields_set
+        }
+        return StandingBudgetRecord(budget=self.budget.over(patch.budget), **named)
+
+
+_PATCHED = frozenset({"pause_at_round", "overshoot"})
 
 
 class CampaignCeilingRecord(CycleRecord):
@@ -1156,7 +1188,9 @@ class RunWiringRecord(CycleRecord):
     measured_unit: MeasuredUnit
     # The optimizer's gateway node: every scoring pass of the run, the origin's included, runs as it.
     measurement_node: str
-    run_limits: RunLimits
+    # The launch's declared budget and its optimizer's own bounds; the standing patches lay over them.
+    budget: Budget
+    optimizer_limits: list[OptimizerLimit]
     # `None` on a mint's record: nothing has moved since the declaration was made.
     defaults_drift: DefaultsDrift | None
     # `None` where the connector checks no revision; a drift is served, never refused (`wiring.py`).

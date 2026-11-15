@@ -33,7 +33,7 @@ from promptpotter.domain.run_standing import line_reference
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import StandingRounds
 from promptpotter.infrastructure.store.layout import root_cycle_id
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
-from promptpotter.infrastructure.store.stores import Stores, owned_campaign
+from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import (
     MINT_FRESH,
     ConflictError,
@@ -57,9 +57,7 @@ def _fork_sibling_setup(
     start: CycleStart | None,
 ) -> None:
     campaign_store = stores.campaigns
-    campaign = campaign_store.load_campaign(child.campaign_id)
-    if campaign is None:
-        raise ConflictError(f"campaign {child.campaign_id} holds no manifest to fork under")
+    campaign = campaign_store.campaign(child.campaign_id)
     # Decided before anything is written: a refusal here leaves no minted, unstamped child.
     babysat = CycleConfig.laid(
         cycle_config(stores, campaign, None).config,
@@ -254,7 +252,7 @@ def operator_start(stores: Stores, payload: ForkCyclePayload, start: CycleStart)
                 update={"origin_params": lay_nodes(params, payload.start.cleared)}
             )
     # Against what the parent's nodes permit, so the child lays over what its parent ran.
-    campaign = owned_campaign(stores, hop.campaign_id)
+    campaign = stores.campaigns.campaign(hop.campaign_id)
     start = declare_steered_values(start, permitted_narrowing(stores, campaign, hop))
     if payload.keep_rounds:
         return start

@@ -223,14 +223,14 @@ def resolve_cycle_plan(
     dataset: Sequence[Sample],
     *,
     origin_override: dict[str, NodePrompt] | None = None,
+    resumed: Campaign | None = None,
 ) -> CyclePlan:
-    """Bound to a cycle, what it RUNS: its line's starts, the origin among them, as the configure lays them."""
+    """What a cycle RUNS: its line's starts, the origin among them, as the configure lays them. A
+    *resumed* campaign's session is bound to one of its cycles, which the caller loaded once."""
     schema = session.pipeline_schema
-    if session.cycle_id:
+    if resumed is not None:
         assert origin_override is None, "a minted cycle's origin is its line's starts"
-        campaign = session.store.campaigns.load_campaign(session.hop.campaign_id)
-        assert campaign is not None, "a hop names a minted campaign"
-        cycle = cycle_config(session.store, campaign, session.hop)
+        cycle = cycle_config(session.store, resumed, session.hop)
     else:
         spans = (
             [
@@ -350,12 +350,12 @@ def _revision_moved(
 
 def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> CyclePlan:
     """*session* is bound to the cycle the resume runs, past the campaign's own refusals."""
-    plan = resolve_cycle_plan(session, campaign.declaration, dataset)
+    plan = resolve_cycle_plan(session, campaign.declaration, dataset, resumed=campaign)
     checked = plan
     if session.hop != campaign.root_hop:
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
         root = session.bound(campaign.root_hop, purpose=session.purpose)
-        checked = resolve_cycle_plan(root, campaign.declaration, dataset)
+        checked = resolve_cycle_plan(root, campaign.declaration, dataset, resumed=campaign)
     if campaign.root_content_hash == checked.origin_hash:
         return plan
     campaigns = session.store.campaigns
