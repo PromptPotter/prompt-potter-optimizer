@@ -92,7 +92,8 @@ BASELINE = {
     # pass and one mode table; one RoundContext per round (0). addr-2 (-29): a family root and a
     # retired arm read from the index, lineage keyed by address, a served short label. io (+14):
     # one read open retried past a replace's swap, for every reader (only one text read retried).
-    "package_lines": 110992,
+    # valid 4 (-7): a fresh mint lays the one span it writes, so `HeldRun.of` reads nothing again.
+    "package_lines": 110985,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

@@ -329,9 +329,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### valid (after rk-dec, before the behaviour keys)
 
-- **`HeldRun.of`'s second config read**: `jobs/launcher/run_job.py::HeldRun.of` reloads the campaign
-  and `cycle_config` after `open` and the admission already read them. Action: the opened cycle carries
-  the config it read. **Rides with:** valid 4.
 - **A fork's share lands at its landing**: a running cycle's job moves onto its fork through
   `jobs/launcher/admission.py::land_job`, which writes the fork's `CycleShareRecord` there, so a
   `set-limits` filed between the cut and the landing re-shares the campaign without the fork. Action:
@@ -843,6 +840,17 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The dev loop still serializes on Vitest**: its pool fails a worker past its hard-coded 90 s start,
   which a host loaded from outside the gate lock still trips. **Rides with:** rel 2. **Re-test:** five
   builders plus one full gate, no reap.
+- **Playwright's server starts beside the gate's heaviest checks**: the push gate of 6fa93bab0 read
+  `Timed out waiting 120000ms from config.webServer` (`webapp/playwright.config.ts::server`'s
+  `timeout`) with its server ready ~5 s late, beside mypy (428 s, cold cache), pytest and offline-run;
+  `gate.py --only playwright` alone was green in 276 s. The rail measures the desk's load, as Vitest's
+  90 s start does. Root: the gate admits a check by memory alone, so a timed start runs beside the
+  CPU-bound checks. **Rides with:** rel 2. **Re-test:** the push gate with a cold mypy cache, playwright green.
+- **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
+  and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
+  past `store/io.py::_atomic_replace`'s three tries, at 6fa93bab0 (whose reads retry, 0 refused, where
+  fdad7947d's refused 49). Root: a read opens without `FILE_SHARE_DELETE`, so the swap waits on every
+  open reader; the box (Linux) is untouched. **Rides with:** rel 2. **Re-test:** the hammer, 0 refused writes.
 - **Run data is stat'ed bare outside `store/io.py`**: `store/read_model.py::file_sig`, six more
   `.stat()` sites (`optimizer_manifest.py:96`, `pricing.py:114`, `event_stream.py:49`,
   `run_state.py:39`, `measurement_archive.py:480`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger

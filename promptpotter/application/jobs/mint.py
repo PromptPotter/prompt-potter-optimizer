@@ -232,19 +232,15 @@ def resolve_cycle_plan(
         assert origin_override is None, "a minted cycle's origin is its line's starts"
         cycle = cycle_config(session.store, resumed, session.hop)
     else:
-        spans = (
-            [
-                LaidSpan(
-                    start=CycleStart(
-                        origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN
-                    ),
-                    scoring_lock=None,
-                )
-            ]
+        # The one span the mint writes, so the cycle is what it reads back as.
+        start = (
+            CycleStart(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
             if origin_override
-            else []
+            else None
         )
-        cycle = CycleConfig.laid(effective_config(declaration), spans)
+        cycle = CycleConfig.laid(
+            effective_config(declaration), [LaidSpan(start=start, scoring_lock=None)]
+        )
     configured = configure_and_apply_pipeline(session, cycle)
     pipeline_params = configured.pipeline_params
     selected = select_optimizer(cycle.config.optimization)

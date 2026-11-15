@@ -249,10 +249,13 @@ before more L4, so run data stops migrating; the edge tail follows over the week
 - **landed 93, addr-2:** a cycle's family root and a retired arm are read from the index, never
   parsed from an id; the lineage spines key on a candidate's address, so one arm key re-proposed on
   two branches lights one; each subject and node serves its short label, and two client parsers go.
-  Every leg UNMOVED, digests unmoved, no wipe.
-- **then:** tests-w and ws (cloud, side by side); `HeldRun.of` reads the cycle its mint opened; the
-  feed's per-subject version, the lineage fold and the inline launch's queued answer; the edge
-  tail. A cold verify is timed live.
+  Every leg UNMOVED, digests unmoved, no wipe. Beside it, every read open retries past a replace's
+  swap (a Windows race the push gate read on `user.json`).
+- **landed 94, valid 4:** a fresh mint lays the one span it writes, so the cycle a launch holds is
+  the one a detached run reads back, and `HeldRun.of` reads nothing again.
+- **then:** tests-w links 1–4 and ws-2 (cloud, side by side); next week, tests-w's separating round
+  (`hold_up`), the lineage fold, the feed's per-subject version and the inline launch's queued
+  answer; the edge tail. A cold verify is timed live.
 
 The re-keys end at the behaviour-key switch.
 

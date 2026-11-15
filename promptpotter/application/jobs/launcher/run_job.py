@@ -21,7 +21,6 @@ from promptpotter.application.jobs.launcher.admission import RunStart, refuse_ca
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.maintenance.landing import land_at_entry
-from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.logging import setup_logging
@@ -237,14 +236,12 @@ class HeldRun:
         closing: AsyncExitStack,
         mode: RunMode,
     ) -> HeldRun:
-        """The config the cycle reads back as, which a detached run rebuilds, never the one a mint
-        was made from."""
-        session = opened.session
-        stores, hop = session.store, session.hop
+        """The opened cycle is what it reads back as, which a detached run rebuilds: a mint lays
+        the one span it writes, a resume reads its line."""
         return cls(
             start=start,
-            session=session,
-            cycle=cycle_config(stores, stores.campaigns.campaign(hop.campaign_id), hop),
+            session=opened.session,
+            cycle=opened.cycle,
             budget=budget,
             optimizer=opened.optimizer,
             closing=closing,
