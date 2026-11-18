@@ -28,10 +28,10 @@ def _validate(c: object, origin: str) -> Connector:
         if not callable(fn):
             raise RuntimeError(f"{where}: {hook} is not callable.")
     if c.owns_panel != (c.experiment_model is not None) or (
-        c.resolve_experiment and not c.owns_panel
+        (c.resolve_experiment or c.declared_panel_model) and not c.owns_panel
     ):
         raise RuntimeError(
-            f"{where}: an owned panel, and only one, declares its experiment's model."
+            f"{where}: an owned panel, and only one, declares its experiment's and panel's models."
         )
     valid_execution = set(typing.get_args(ConnectorExecution))
     if c.execution not in valid_execution:

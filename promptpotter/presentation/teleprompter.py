@@ -27,7 +27,7 @@ else:
 
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.loaders import samples_from_dicts
-from promptpotter.application.embedded_run import enter, run_campaign
+from promptpotter.application.embedded_run import HostDefinition, run_campaign
 from promptpotter.connectors.dspy_module import (
     PROGRAM_NODE,
     SCORE_KEY,
@@ -108,9 +108,8 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             )
         program = DspyProgram(student=student, metric=self.metric, examples=list(trainset))
 
-        # Landed first: the definition is written under the root as this code reads it.
-        stores = await enter()
-        stores.write_own_definition(
+        # The definition IS the projection of `loop` and `node`, so the run lays no config over it.
+        definition = HostDefinition(
             self.dataset_name,
             # In trainset order: the connector reads a sample's example off its position.
             source={"recipe": "rows", "shuffled": False, "items": items},
@@ -131,9 +130,8 @@ class PromptPotterOpt(Teleprompter):  # type: ignore[misc]  # dspy is follow_imp
             framing=TaskDecomposition(),
             origin={},
         )
-        # No config: the file this compile just wrote IS the projection of `loop` and `node`.
         session, result = await run_campaign(
-            self.dataset_name, stores=stores, program=program, budget=Budget(), mode=RunMode()
+            definition, program=program, budget=Budget(), mode=RunMode()
         )
 
         if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:

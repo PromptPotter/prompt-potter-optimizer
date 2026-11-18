@@ -37,7 +37,6 @@ from promptpotter.application.runner.inner.tasks import (
     inner_instrument_config,
     inner_spawn_context,
     panel_cell,
-    parse_inner_panel,
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
 from promptpotter.domain.campaign import Campaign
@@ -453,7 +452,7 @@ def promptpotter_wire_adapter(
 def _resolve_inner_panel(stores: Stores, panel: Mapping[str, Any]) -> ResolvedInnerPanel:
     """Each cell's instrument beside the panel; only what was declared survives the pin's dump,
     so a field that gains a default re-keys no banked cell."""
-    parsed = parse_inner_panel(panel)
+    parsed = InnerTasks.model_validate(panel)
     cells = parsed.resolve_cells(stores)
     return ResolvedInnerPanel(
         inner_panel=parsed,

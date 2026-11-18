@@ -135,7 +135,9 @@ BASELINE = {
     # stop record and the dashboard word the book's count by part.
     # panel-rule-2 (+24): `Connector.declared_panel_model` and `layer_fold.py::LaidAs`, so a
     # panel folds family→member by its connector's rule and `inner_campaign` by `CAMPAIGN_RULE`.
-    "package_lines": 111825,
+    # small-9 (+18): `embedded_run.py::HostDefinition`, a host's definition written past the run's
+    # one `enter`, so a compile lands and sweeps once.
+    "package_lines": 111843,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -869,8 +871,15 @@ if __name__ == "__main__":
     if "--check" not in sys.argv[1:]:
         print(_format(counted))
         raise SystemExit(0)
-    merge_base = _git("merge-base", "HEAD", _MAIN)
+    main = _git("rev-parse", _MAIN)
+    merge_base = _git("merge-base", "HEAD", main)
     risen = check(counted, _counted_at(merge_base), _baseline_at(merge_base))
     if risen:
-        print("\n".join(risen) + "\nBASELINE lives in scripts/complexity_ledger.py.")
+        print(
+            "\n".join(risen)
+            + f"\nMeasured at {_MAIN} {main[:12]}, merge-base {merge_base[:12]}; BASELINE lives in scripts/complexity_ledger.py."
+        )
+        # A stale ref reads red only, for growth main itself made: so a red, never a green, asks origin.
+        if (held := _git("ls-remote", "origin", "refs/heads/main").split()[0]) != main:
+            raise SystemExit(f"surface-ledger: {_MAIN} is stale, origin holds {held[:12]}: fetch.")
     raise SystemExit(bool(risen))

@@ -180,10 +180,16 @@ class DatasetDefinition:
         return named if isinstance(named := self.pipeline.get("endpoint"), str) else None
 
 
+def connector_of(pipeline: Mapping[str, Any]) -> Connector | None:
+    """The connector *pipeline* names, ``None`` where it names none; one this PROCESS lacks raises,
+    since its panel and identity are unreadable, never empty."""
+    named = pipeline.get("connector")
+    return connectors.CONNECTORS.get(str(named)) if named else None
+
+
 def with_node_templates(pipeline: Mapping[str, Any]) -> dict[str, Any]:
-    """*pipeline* with its connector's template under each node it declares; a connector this
-    install does not register declares none."""
-    connector = connectors.CONNECTORS.table.get(str(pipeline.get("connector")))
+    """*pipeline* with its connector's template under each node it declares."""
+    connector = connector_of(pipeline)
     nodes = pipeline.get("nodes") or {}
     if connector is None or not nodes:
         return dict(pipeline)
@@ -235,7 +241,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
             panel_dir = path.parent
     if nodes:
         top["nodes"] = nodes
-    owner = connectors.CONNECTORS.table.get(str(top.get("connector")))
+    owner = connector_of(top)
     panel = fold_layers(owner.panel_rule, panels).document if owner and owner.owns_panel else None
     return DatasetDefinition(
         dataset.directory,
@@ -461,13 +467,12 @@ def extract_panel_rows(
 
 
 def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
-    """``None`` where the definition names no backend; one naming a connector this PROCESS lacks
-    raises, since its panel and identity are unreadable, never empty."""
+    """``None`` where the definition names no backend (`connector_of`)."""
     try:
-        named = runnable_definition(dataset).connector
-    except (FileUnreadableError, PayloadInvalidError):
+        definition = read_dataset_definition(dataset)
+    except FileUnreadableError:
         return None
-    return connectors.CONNECTORS.get(named)
+    return None if definition is None else connector_of(definition.pipeline)
 
 
 def dataset_panel_rows(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]] | None:

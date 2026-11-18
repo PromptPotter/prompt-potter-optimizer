@@ -211,10 +211,6 @@ class InnerTasks(FrozenModel):
         return self
 
 
-def parse_inner_panel(raw: object) -> InnerTasks:
-    return InnerTasks.model_validate(raw)
-
-
 class ResolvedInnerPanel(FrozenModel):
     """The panel with each cell's instrument (`spawn.py::_resolve_inner_panel`): the ONE document run
     init, the samples and the fingerprint read."""

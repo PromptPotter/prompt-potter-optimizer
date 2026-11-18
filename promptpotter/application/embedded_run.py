@@ -6,7 +6,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import AsyncIterator, Sequence
 from contextlib import AsyncExitStack, asynccontextmanager
-from dataclasses import replace
+from dataclasses import dataclass, replace
+from typing import Any
 
 from promptpotter.application.account import local_stores
 from promptpotter.application.caller import Caller
@@ -48,6 +49,7 @@ from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.job import EmbeddedRun
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
+from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import resolve_dataset, runnable_definition
 from promptpotter.infrastructure.store.stores import Stores
@@ -60,6 +62,7 @@ __all__ = [
     "CommandCall",
     "CycleDashboardParams",
     "Door",
+    "HostDefinition",
     "answer_read",
     "enter",
     "host_dispatcher",
@@ -89,6 +92,20 @@ async def answer_read(params: ReadParams, stores: Stores | None = None) -> objec
     return await params.answered(Caller(await enter(stores)))
 
 
+@dataclass(frozen=True)
+class HostDefinition:
+    """An account definition a host runs, as `Stores.write_own_definition` takes it: `run_campaign`
+    writes it past its one `enter`, since a landing drops a definition written before it."""
+
+    slug: str
+    source: dict[str, Any]
+    pipeline: dict[str, Any]
+    campaign: dict[str, Any]
+    description: str
+    framing: TaskDecomposition
+    origin: dict[str, dict[str, Any]]
+
+
 @asynccontextmanager
 async def _dataset_session(
     stores: Stores,
@@ -113,7 +130,7 @@ async def _dataset_session(
 
 
 async def run_campaign(
-    target: str | CycleHop,
+    target: str | CycleHop | HostDefinition,
     campaign_config: CampaignLayer | None = None,
     *,
     stores: Stores | None = None,
@@ -124,12 +141,15 @@ async def run_campaign(
     step_rounds: int | None = None,
     mode: RunMode,
 ) -> tuple[Session, CycleResult]:
-    """*target* is a dataset, whose campaign the run mints under *campaign_config* (the dataset's
+    """*target* is a dataset (a host's, written first), whose campaign the run mints under *campaign_config* (the dataset's
     own where none), or a cycle, which it resumes under its campaign's declaration. Answers the
     session bound to the cycle the run ended on, whose backend client it closes on every exit.
     Under ``origin_gate: strict`` an unhealthy origin halts it, and a resume proceeds; under an
     ``arm_gate`` it blocks until ``submit-arms`` answers."""
     stores = await enter(stores)
+    if isinstance(target, HostDefinition):
+        stores.write_own_definition(**vars(target))
+        target = target.slug
     resuming: ExistingCycle | None = None
     declaration: RunDeclaration | None = None
     async with AsyncExitStack() as clients:
