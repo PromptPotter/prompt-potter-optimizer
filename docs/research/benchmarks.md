@@ -114,6 +114,19 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   gate adopts at 1.1–2.0 SE (`won on θ lift +0.343 logits, se 0.250`), the best of up to 12 looks
   (3 variants × 4 rounds), so on these seats a winner is a draw. A no-adoption seat scores 0.50 and the
   origin panel reads 0.49: on this measurand the optimizer equals one that never adopts.
+- L4 known-sign check (`promptpotter-self.dyck__2bd880`, cycle_4ec5c80c24a4, bfd0d772b, 2026-11-18,
+  `arm_gate: author`, $0.768 billed): two hand-written `l1_generate` arms on the `bbh-dyck` seats, a
+  positive arm (stack procedures) and a crippled control (L1 may only reword). Bar fixed with only
+  s2 read: mean(positive − crippled) raw held-out lift (the inner 20-row bench; a clip at fit 1.00
+  counts +50) ≥ +10 pts AND ≥ 4 seats > 0. **PASS, n=5: +19.5, 4 of 5** (s1 +12.5, s2 +23.8,
+  s3 +32.5, s4 0.0, s5 +28.8; s0, dead on the per-round ruler, apart). Two cells were re-asked after
+  infra losses (the gate collision; a 504 that cut the inner run) under a rule fixed before the last
+  cell landed; the re-asked positive s5 elected its inner rounds 2–4 on ruler v1125, every other
+  round-1 cell on v1087 (the resume re-opened the round on the live ruler; cloud `l4-valid`).
+  Without s5: +17.2, n=4, 3 of 4. Across rounds, on different rulers, the s1–s5 mean lift reads
+  origin 0.30 (round 0, v1052), positive 0.29, crippled 0.09; the election HELD (positive θ −0.078
+  ± 0.609 vs the origin). The instrument reads a broken optimizer prompt's sign on a one-key smoke
+  seat; the positive arm does not beat the origin.
 - Inner headroom probes (2026-11-18, one hand-written target arm per dataset, written before any row
   was read, inside potter's 800-char `length_budget`, `arm_gate: author`, 100 paired rows):
   `hotpotqa-distractor__3b0221` (shortest-span arm) **40% vs 40%** on search, θ +0.075 ± 0.339; 55 of
@@ -128,6 +141,14 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   headroom); hotpotqa was not graded held-out; justlogic is unprobed. A well-aimed edit's ~5 pts sits
   under the 20-row inner bench's ~10-pt SD: these seats offer too little reachable headroom for
   the bench to read, before any optimizer prompt is compared.
+- Seat screens, same method (2026-11-18 evening, `--max-rounds 1`, `sp_budget_round=100`, one arm in
+  `<scratch>/screen/<ds>.yaml`): `logic-fld__0aba75` (`gpt-oss-20b@low`; two-direction derivation
+  arm) parent **63% vs 57%** on 100 paired search rows, θ +0.010 ± 0.555, $0.026 billed: this arm
+  found no lift (one arm, a lower bound). `banking77__1101ce` (`gemma-3-4b`; object-then-state
+  arm) parent **52%** on 100; the arm is unread: it was cut `broken` at row 18 (9 of 18 hit) by ONE
+  empty answer, which `results_health.py` grades fatal on one sighting (cloud `small-6`). Prose
+  replies instead of a label come from both prompts (the parent's too), a 4B format miss; $0.005. `logic-logicnli` and `logic-proverqa` were refused `admission_gate_stuck` at launch
+  (cloud `gate-hold`) and are owed.
 
 ## Protocol
 

@@ -759,7 +759,8 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   **Rides with:** rel 2. **Re-test:** the same on the Windows desk, no reap.
 - **`Check.slots` is a guess beside `mb`'s measured peak**: Playwright claimed 3 slots and used 0.5;
   offline-run claims `min(8, cores)`. Action: derive slots from measured CPU-s ÷ wall as `mb` is.
-  **Held:** none claims it. **Re-test:** each `slots` within a quarter of its measured ratio.- **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
+  **Held:** none claims it. **Re-test:** each `slots` within a quarter of its measured ratio.
+- **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
   and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
   past `store/io.py::_atomic_replace`'s three tries, at 6fa93bab0 (whose reads retry, 0 refused, where
   fdad7947d's refused 49). Root: a read opens without `FILE_SHARE_DELETE`, so the swap waits on every

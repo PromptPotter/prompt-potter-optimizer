@@ -204,7 +204,7 @@ def parent_line(rounds: Sequence[RoundResult]) -> set[str]:
 @dataclass
 class DifficultyView:
     """The δ scale an election reads: the tenant ruler at the version its clock names, less the
-    rows of the parent line. A round's own cells fold in before its election (`link`)."""
+    rows of the parent line."""
 
     session: Session
     n_min: int

@@ -469,6 +469,29 @@ round.
    79) and in a P4 hotpotqa round (2026-11-15), so those rounds banked none, and cost a P2 round two
    paid re-asks; `potter/dispatch/schemas.py::_struck` strikes it from the later cluster, as it
    strikes an unmarked id.
+6. **What moves the L4 signal next, ranked** (2026-11-18, nothing bought). The knobs that can bias a
+   reading come before the knobs that sharpen it.
+   - *Validity.* One ruler per outer cycle (landed with `l4-valid`, which also re-asks a 504's
+     hole). Optimizer-prompt arms compared as a COMPARE run, every arm on every seat on one frozen ruler,
+     not through an optimize round's race (PoBB cuts, send-ahead order, uneven n). Open: can a
+     compare campaign seat optimizer-prompt arms?
+   - *Seats are the amplitude, the largest lever.* Screen dataset × solver × rung on 100 held-out
+     rows: the origin, the best authored prompt (what is reachable), then one shipped inner run (what
+     is delivered). Keep seats where delivered/reachable is mid-range: near 1 every arm finds it,
+     near 0 none does. The disqualifiers are already paid for: a search gain that vanishes held out,
+     misses that `answer_format` owns, a thin margin over the constant floor, a seed shared with a
+     bigger-bench warmer. Re-sweep the roster's rows that are above band on one solver and floored
+     on the other at other solvers and rungs before adding datasets. The panel is task family ×
+     solver band, and its held-out seats are families the search never draws (§ L4 closure, item 8).
+   - *A validated fast proxy.* Each arm's generator on frozen inner decision points, with its
+     candidates scored held out. It is valid once it ranks dyck's known-sign pair as the full cells
+     do (+19.5 pts, n=5: benchmarks § What the roster decided), at the arm level, and it doubles as
+     authored mode's "the edit changes what the node emits" check.
+   - *Wall clock binds before dollars.* `--abreast` trades money for clock and is the operator's ask.
+   - *Noise knobs: one `inner_campaign` edit, re-measured once.* Bench 20→100, the inner adoption
+     bar (scored offline first), rounds × variants. The outer clip (±0.5) ties dyck's best arms at
+     1.00, and widening it re-keys.
+   - *Free first:* `evidence --subject campaign:<id>` on a finished control sizes all of the above.
 
 ## L4 closure
 
