@@ -3879,7 +3879,22 @@ def test_every_committed_datasets_framing_reads_within_its_budget(
         committed_task_context(checkout, resolve_dataset(checkout, name))
 
 
-# 3. Contamination of a scored prompt
+def test_a_members_panel_lays_over_its_familys_key_by_key_at_every_depth(tmp_path: Path) -> None:
+    family = {
+        "inner_campaign": {"optimization": {"budget": {"rounds": 4}, "seed": 7}},
+        "tasks": [1],
+    }
+    (tmp_path / "fam" / "m").mkdir(parents=True)
+    (tmp_path / "fam" / "family.yaml").write_text(json.dumps({"panel": family}))
+    member = {"inner_campaign": {"optimization": {"budget": {"rounds": 2}}}, "tasks": [2]}
+    (tmp_path / "fam" / "m" / "dataset.yaml").write_text(json.dumps({"panel": member}))
+    read = read_dataset_definition(
+        ResolvedDataset("fam/m", tmp_path / "fam" / "m", "research", tmp_path)
+    )
+    assert read is not None and read.panel == {
+        "inner_campaign": {"optimization": {"budget": {"rounds": 2}, "seed": 7}},
+        "tasks": [2],
+    }, "a member naming one nested key dropped the family's keys beside it"
 
 
 _EXPORTED_ROWS = [

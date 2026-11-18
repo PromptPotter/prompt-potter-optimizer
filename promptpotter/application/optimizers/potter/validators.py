@@ -12,6 +12,10 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L1_HELD_PROMPT_FIELDS,
     SCHEMA_DESCRIPTION_MAX_CHARS,
 )
+from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
+    holds_run,
+    word_tokens,
+)
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     STALL_EXPLORATION,
 )
@@ -61,25 +65,20 @@ def l1_prompt_fields_open(
     ]
 
 
-_NOT_A_WORD_RE = re.compile(r"[^a-z0-9]+")
-
-
-def _words(text: str) -> str:
-    return _NOT_A_WORD_RE.sub(" ", text.lower()).strip()
-
-
 def l1_evidence_grounding(
     citation: str | None, *, citable: Sequence[str], rendered: Mapping[str, str]
 ) -> tuple[EvidenceGrounding | None, list[ValidationFailure]]:
-    """Its panel the first of *citable* holding it by its words, each ellipsis-free part: a citation
+    """Its panel the first of *citable* holding each ellipsis-free part as a run of its words: a citation
     re-types a line and may elide. An empty one is ``STALL_EXPLORATION`` where *citable* offers it."""
     if citation is None:
         return None, []
     citation = citation.strip()
-    parts = [words for part in re.split(r"[.]{3}|…", citation) if (words := _words(part))]
+    parts = [words for part in re.split(r"[.]{3}|…", citation) if (words := word_tokens(part))]
     panels = [name for name in citable if name != STALL_EXPLORATION]
     if parts:
-        held = next((n for n in panels if all(w in _words(rendered[n]) for w in parts)), None)
+        held = next(
+            (n for n in panels if all(holds_run(word_tokens(rendered[n]), w) for w in parts)), None
+        )
     else:
         held = STALL_EXPLORATION if STALL_EXPLORATION in citable else None
     if held is not None:

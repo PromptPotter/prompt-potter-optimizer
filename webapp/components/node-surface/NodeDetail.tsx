@@ -18,6 +18,7 @@ import { readGap, shownData } from "@/lib/hooks/useRead";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { useObserveSubject } from "@/lib/hooks/useObserveSubject";
 import { useSearchpointRead, type SearchpointRead } from "@/lib/hooks/useSearchpointRead";
+import { useRound } from "@/lib/hooks/useRound";
 import { useRoundNodes } from "@/lib/hooks/useRoundNodes";
 import { fmtSecs, fmtUnit, fmtValue, PLACEHOLDER } from "@/lib/format";
 import { CopyButton, Empty, FailureLine, Loading, SegmentedControl, Term } from "@/components/ui";
@@ -330,7 +331,7 @@ function RunSection({
       ) : kind === "measurement" ? (
         <MeasurementRun round={round} />
       ) : (
-        <CallRun block={block} loading={loading} inFlight={inFlight} />
+        <CallRun block={block} round={round} loading={loading} inFlight={inFlight} />
       )}
 
       {block && (
@@ -347,10 +348,12 @@ function RunSection({
 
 function CallRun({
   block,
+  round,
   loading,
   inFlight,
 }: {
   block: NodeBlock | null;
+  round: number;
   loading: boolean;
   inFlight: boolean;
 }) {
@@ -359,6 +362,10 @@ function CallRun({
   const reasoning = block?.output.reasoning;
   const usage = block?.usage;
   const variants = variantsOf(response);
+  const { viewed } = useWorkspace();
+  const { arms: read } = useRound(variants ? (viewed?.path ?? null) : null, round);
+  // A parent re-read in this round was held by its own round's panels.
+  const arms = read.filter((a) => a.reading.arm.round === round);
   const prefix = block?.prefix;
 
   // The ask carries the routing suffix; OpenRouter echoes `block.model` bare, dropping `:nitro`.
@@ -407,7 +414,7 @@ function CallRun({
         )
       ) : (
         <>
-          {variants && variants.length > 0 && <L1Variants variants={variants} />}
+          {variants && variants.length > 0 && <L1Variants variants={variants} arms={arms} />}
 
           <div className="opt-detail-cols">
             <section className="opt-detail-col opt-detail-col-fields" aria-label="Template fields">

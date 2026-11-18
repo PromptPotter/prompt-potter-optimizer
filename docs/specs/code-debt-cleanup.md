@@ -801,15 +801,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
 
-- **A citation's panel is matched by substring, not by word**: `potter/validators.py::l1_evidence_grounding`
-  tests `words in _words(panel)`, so a one-word quote is held by whichever panel sorts first.
-  **Re-test:** a one-word citation that only one panel holds as a word names that panel.
-- **The derived citation panel is not served**: `L1Variants.tsx` reads the raw reply, which no longer
-  names a panel. Action: serve the child's `EvidenceGrounding.field` on its variant row.
-- **A panel member restates the family's whole `inner_campaign`**: `store/dataset_access.py` merges
-  the `panel:` section with `|=`, one level deep, so `e2e` repeats every key to change one. Action:
-  fold the panel section by the rule every layered document uses (`layer_fold.py::fold_layers`).
-  **Re-test:** `e2e/dataset.yaml` names only the `inner_campaign` keys it changes.
 - **The outer's edit menu offers fields of inner nodes that never fire**: inner `l3_plan` made 0
   calls and `l2_context` 1 across six inner runs (L4 audit C, 2026-11-15), yet both stay editable.
   Action: a field is offered only where its node ran on the measured samples, for every campaign.
@@ -887,6 +878,15 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `Broken(degradation={})` raises `KeyError: 'fatal'` in `render/candidate.py::individual_summary`
   (small-6's report). Action: the factory builds a reading `degradation_reading` makes.
   **Re-test:** `individual_summary` renders a factory-cut arm.
+- **A panel's `inner_campaign` folds family→member by key, not by `CAMPAIGN_RULE`** (cite-fold's
+  report): `store/dataset_access.py::read_dataset_definition` lays the panel by an untyped
+  every-mapping-by-key rule, so a member that changes a node's `model` or names another `optimizer`
+  keeps the family's `route_order` or `nodes`, which a campaign block's fold drops or clears. The
+  same untyped rule is spelled twice (`datasets/prompts.py:88`, `dataset_access.py`), and
+  `source |= …` (`dataset_access.py:230`) is the one-level merge the panel had. Action: `InnerTasks`
+  types `inner_campaign` so the connector declares its panel's rule, `layer_fold.py` names it once,
+  and `source` folds by it. **Re-test:** a member changing `l1_generate`'s `model` under a family
+  that sets `route_order` resolves without that `route_order`.
 
 ## Held — no wave-4 chain yet
 

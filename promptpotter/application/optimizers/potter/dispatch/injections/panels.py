@@ -589,11 +589,12 @@ def _cluster_rows(b: PotterView) -> frozenset[int]:
     return frozenset(i for c in critique.get("failure_highlights") or [] for i in c["sample_ids"])
 
 
-def _words(text: str) -> tuple[str, ...]:
+def word_tokens(text: str) -> tuple[str, ...]:
     return tuple(re.findall(r"\w+", text.lower()))
 
 
-def _contains(outer: tuple[str, ...], inner: tuple[str, ...]) -> bool:
+def holds_run(outer: tuple[str, ...], inner: tuple[str, ...]) -> bool:
+    """*inner* is a contiguous run of *outer*'s words: whole tokens, in order."""
     n = len(inner)
     return any(outer[i : i + n] == inner for i in range(len(outer) - n + 1))
 
@@ -605,10 +606,10 @@ def _extent_can_miss(b: PotterView) -> bool:
 
 def _span_near_miss(cell: GradedCell) -> bool:
     """The answer and the truth share a contiguous word span: the reasoning landed, the extent did not."""
-    said, true = _words(cell.grade.span or ""), _words(cell.facts.ground_truth)
+    said, true = word_tokens(cell.grade.span or ""), word_tokens(cell.facts.ground_truth)
     if not said or not true:
         return False
-    return _contains(said, true) if len(said) >= len(true) else _contains(true, said)
+    return holds_run(said, true) if len(said) >= len(true) else holds_run(true, said)
 
 
 def _tied_deltas(ordered: Sequence[tuple[float | None, GradedCell]]) -> frozenset[float]:

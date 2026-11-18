@@ -25,6 +25,7 @@ interface Round {
   unfiled: boolean;
   read: ReadResult<RoundView>;
   rows: ArmRow[];
+  arms: ServedArm[];
   cfg: (key: string | null, display: string, nodeId?: string | null) => ObserveConfig | null;
   start: (key: string) => CandidateSearchPoint | null;
   reading: (key: string | null) => ArmReading | null;
@@ -59,5 +60,8 @@ export function useRound(path: CyclePath | null, round: number | null): Round {
     }),
     [arms],
   );
-  return useMemo(() => ({ unfiled, read, rows, ...answers }), [unfiled, read, rows, answers]);
+  return useMemo(
+    () => ({ unfiled, read, rows, arms, ...answers }),
+    [unfiled, read, rows, arms, answers],
+  );
 }

@@ -7105,6 +7105,28 @@
         "title": "Evidence",
         "type": "object"
       },
+      "EvidenceGrounding": {
+        "additionalProperties": false,
+        "description": "The citation L1 declares to justify a mutation, and the panel found holding it.",
+        "properties": {
+          "citation": {
+            "description": "The verbatim span L1 quoted.",
+            "title": "Citation",
+            "type": "string"
+          },
+          "field": {
+            "description": "The first citable panel holding the citation; stall_exploration for an empty one.",
+            "title": "Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "citation"
+        ],
+        "title": "EvidenceGrounding",
+        "type": "object"
+      },
       "EvidencePower": {
         "additionalProperties": false,
         "description": "What this instrument can and cannot resolve, at the width it is currently run.\n\n``cells_for_largest_gap`` prices the question actually on the table — how many cells per subject\nit would take to resolve the biggest gap the roster already shows. What a pair's WIDTH permits\nat any effect size is that pair's own ``estimate.p_floor``.",
@@ -9986,6 +10008,16 @@
         "additionalProperties": false,
         "description": "A candidate of the round in flight, with its sample tape beside its served arm.",
         "properties": {
+          "evidence_grounding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceGrounding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "pipeline_overlay": {
             "anyOf": [
               {
@@ -15989,6 +16021,16 @@
         "additionalProperties": false,
         "description": "One arm as every round read serves it, in flight (`current_round.candidates`) or filed\n(`RoundView.candidates`): its reading, its searchpoint and why it was refused.",
         "properties": {
+          "evidence_grounding": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvidenceGrounding"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "prompts": {
             "anyOf": [
               {

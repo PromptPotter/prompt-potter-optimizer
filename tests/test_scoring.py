@@ -166,6 +166,7 @@ from promptpotter.application.optimizers.potter.records import (
     Ladder,
     LayerCounters,
 )
+from promptpotter.application.optimizers.potter.validators import l1_evidence_grounding
 from promptpotter.application.optimizers.variation.members import (
     Cross,
     donor_take,
@@ -4235,6 +4236,18 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
         7,
         {"no_op_variant": 1, missed: 2, unheld: 1, long: 1},
     ), "a round's per-arm refusals were not booked against what L1 generated"
+
+
+def test_a_citation_names_the_panel_holding_its_words_whole_and_in_order() -> None:
+    rendered = {"first": "concatenate the strings", "second": "the cat sat"}
+    for citation, panel in [("cat", "second"), ("conc", None), ("the … sat", "second")]:
+        grounding, failures = l1_evidence_grounding(
+            citation, citable=list(rendered), rendered=rendered
+        )
+        assert (None if grounding is None else grounding.field) == panel, (
+            f"{citation!r} was filed under a panel holding it only inside another word"
+        )
+        assert bool(failures) == (panel is None), f"{citation!r} cited nothing yet stood"
 
 
 @pytest.mark.usefixtures("optimizing_memory")

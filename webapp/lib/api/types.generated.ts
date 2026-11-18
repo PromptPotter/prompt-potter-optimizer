@@ -2079,6 +2079,7 @@ export interface LiveCandidate {
   prompts: Record<string, NodePrompt> | null;
   resolved_params: Record<string, unknown> | null;
   validation_failures: ValidationFailure[];
+  evidence_grounding: EvidenceGrounding | null;
   pipeline_overlay: Record<string, Record<string, unknown>> | null;
   samples: DashboardSample[];
 }
@@ -2110,6 +2111,16 @@ export interface ValidationFailure {
    * mode-based (parse error, forbidden axis) rather than membership-based. */
   allowed: string[];
   reason: 'forbidden_axis' | 'unknown_param' | 'type_mismatch' | 'not_in_available_models' | 'not_in_param_allowed_values' | 'not_accepted_by_model' | 'reproposes_known_failing_config' | 'hallucinated_node' | 'dropped_mandatory_placeholder' | 'shots_without_demo_pool' | 'shot_not_in_demo_pool' | 'shot_repeated' | 'shots_over_cap' | 'not_in_block_pool' | 'citation_not_in_panel' | 'over_ceiling' | 'edit_anchor_not_one_span' | 'optimizer_prompt_parse_failure' | 'l1_provider_empty_response' | 'layout_node_not_l4_editable' | 'l1_layout_unparseable' | 'l1_layout_missing_mandatory' | 'l1_layout_unknown_placeholder' | 'l1_layout_voids_prefix' | 'l1_layout_unchanged_from_prior' | 'no_op_variant' | 'duplicate_variant' | 'repeat_variant';
+}
+
+/** The citation L1 declares to justify a mutation, and the panel found holding
+ * it. */
+export interface EvidenceGrounding {
+  /** The first citable panel holding the citation; stall_exploration for an empty
+   * one. */
+  field: string;
+  /** The verbatim span L1 quoted. */
+  citation: string;
 }
 
 /** One scored sample as `dashboard.json` serves it, display-trimmed and one shape
@@ -2543,6 +2554,7 @@ export interface ServedArm {
   prompts: Record<string, NodePrompt> | null;
   resolved_params: Record<string, unknown> | null;
   validation_failures: ValidationFailure[];
+  evidence_grounding: EvidenceGrounding | null;
 }
 
 /** One round's audit twin: each optimizer node's call in firing order, and the
@@ -5644,7 +5656,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "37b0dfec554b5c48";
+export const SERVED_CONTRACT = "f2a69e5d59f06fc5";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

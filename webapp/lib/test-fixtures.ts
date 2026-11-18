@@ -515,6 +515,7 @@ export function liveRow(over: Partial<LiveCandidate> = {}): LiveCandidate {
     pipeline_overlay: null,
     samples: [],
     validation_failures: [],
+    evidence_grounding: null,
     ...over,
   };
 }
@@ -541,6 +542,7 @@ export function roundOfArms(
       prompts: {},
       resolved_params: {},
       validation_failures: [],
+      evidence_grounding: null,
       ...over,
     })),
   });

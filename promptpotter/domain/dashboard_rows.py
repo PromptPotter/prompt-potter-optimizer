@@ -10,7 +10,7 @@ from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.arms import ArmState, Proposed
 from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.l4.proxies import PanelPrecision
-from promptpotter.domain.opt_search_point import NodePrompt
+from promptpotter.domain.opt_search_point import EvidenceGrounding, NodePrompt
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, ArmName, Estimate, ReadingState
 from promptpotter.domain.results import OptimizerFact
@@ -153,12 +153,14 @@ class ServedArm(DashboardCandidate):
     )
     resolved_params: dict[str, Any] | None = None
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
+    evidence_grounding: EvidenceGrounding | None = None
 
     @classmethod
     def of(cls, reading: ArmReading, arm: ArmState) -> ServedArm:
         return cls(
             reading=reading,
             prompts=arm.individual.prompts,
+            evidence_grounding=arm.individual.lineage.evidence_grounding,
             resolved_params=None if isinstance(arm, Proposed) else arm.resolved_params,
             validation_failures=arm.validation_failures,
         )

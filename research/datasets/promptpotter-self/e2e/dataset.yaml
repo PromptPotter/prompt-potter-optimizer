@@ -57,7 +57,7 @@ panel:
   # field to select from. Two samples, so the inner θ is noise, and two held-out rows, the fewest
   # the area's paired t reads.
   #
-  # The `inner_campaign` below is the real panel's shape at these sizes. Its bench draws by
+  # The `inner_campaign` below names only the sizes; the family's lays the rest. Its bench draws by
   # `partition_bank`'s `stable_hash([seed, key])`, so seed 0 sits other rows than its screen did.
   #
   # READ NOTHING OFF A RUN OF THIS. It answers exactly one question — does the L4 spawn path still
@@ -68,13 +68,11 @@ panel:
   # and it drifts the moment it has two homes.
   inner_campaign:
     sp_budget_origin: 2
-    dataset_split: {bench: 2, demo: 0, tolerance: 0}
-    bench_trigger: every_adoption
+    dataset_split: {bench: 2, tolerance: 0}
     optimization:
       budget: {rounds: 2}
-      determinism: {temperature: 0.0}
       nodes:
-        adaptive_queue: {config: {sp_budget_round: 2, per_round_resubset: false}}
+        adaptive_queue: {config: {sp_budget_round: 2}}
         l1_generate: {config: {n_variants: 1}}
   tasks:
     # One search seat and one held-out seat: the fewest that turn the outer search and its bench over.

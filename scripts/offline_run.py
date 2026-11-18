@@ -571,10 +571,10 @@ class ByCallIdentity:
     ) -> dict[str, Any]:
         """*generation* is the call's turn whatever its seed: the `SKILL` trajectory is keyed on it."""
         v: dict[str, Any] = filler.fill(item, ("variants", str(i)))
-        # A citation quotes one panel, at an offset that is the call's, not the text's.
+        # A citation quotes one panel's whole words, at an offset that is the call's, not the text's.
         assert self.cites in prompt, f"offline run: no {self.cites!r} panel to cite"
         start = prompt.index(self.cites) + len(self.cites) + draw("cite", generation, i) % 20
-        v["evidence_grounding"] = {"citation": prompt[start : start + 40]}
+        v["evidence_grounding"] = {"citation": " ".join(prompt[start : start + 40].split()[1:-1])}
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
         second = ("thinking_style",) if self.crossing else ()
 

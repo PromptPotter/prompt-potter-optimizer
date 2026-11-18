@@ -17,6 +17,7 @@ from promptpotter.config.paths import install_datasets_root
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import CampaignLayer
+from promptpotter.domain.layer_fold import Laid, Lay, Layer, fold_layers
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
@@ -209,20 +210,19 @@ def campaign_defaults() -> dict[str, Any]:
 
 def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | None:
     """Per section, root first: ``pipeline`` replaces its top-level keys and merges its nodes,
-    ``campaign`` layers depth-first, ``source`` and ``panel`` merge by key, and the deepest
+    ``campaign`` layers depth-first, ``source`` merges by key, ``panel`` at every depth, the deepest
     ``card`` stands whole; its connector's node templates lie under the nodes (`with_node_templates`).
     A layer that is no definition layer raises ``FileUnreadableError`` by its path."""
     if not is_dataset_dir(dataset.directory):
         return None
-    layers = _layers(dataset)
     top: dict[str, Any] = {}
     nodes: dict[str, Any] = {}
     campaign: list[dict[str, Any]] = []
     source: dict[str, Any] = {}
-    panel: dict[str, Any] = {}
+    panels: list[Layer[str]] = []
     card: dict[str, Any] = {}
     panel_dir: Path | None = None
-    for path, layer in layers:
+    for path, layer in _layers(dataset):
         pipeline = _section(layer, "pipeline")
         nodes = merge_node_blocks(nodes, pipeline.get("nodes") or {})
         top |= {k: v for k, v in pipeline.items() if k != "nodes"}
@@ -231,7 +231,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
         if "card" in layer:
             card = _section(layer, "card")
         if "panel" in layer:
-            panel |= _section(layer, "panel")
+            panels.append(Layer("panel", _section(layer, "panel")))
             panel_dir = path.parent
     if nodes:
         top["nodes"] = nodes
@@ -240,7 +240,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
         with_node_templates(top),
         tuple(campaign),
         source,
-        panel or None,
+        fold_layers(lambda _at: Laid(Lay.KEYS), panels).document or None,
         panel_dir,
         _card(card),
     )

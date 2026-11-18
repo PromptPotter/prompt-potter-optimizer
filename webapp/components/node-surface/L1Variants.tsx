@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SegmentedControl } from "@/components/ui";
 import { promptFieldLabel } from "@/lib/derivations";
+import type { ServedArm } from "@/lib/api/types";
 import { fmtSampleTag, fmtValue } from "@/lib/format";
 
 // One edit on a prompt field of the parent: `anchor` a verbatim span of its text.
@@ -85,7 +86,7 @@ function Overrides({ title, map }: { title: string; map: Record<string, unknown>
   );
 }
 
-export function L1Variants({ variants }: { variants: Variant[] }) {
+export function L1Variants({ variants, arms }: { variants: Variant[]; arms: ServedArm[] }) {
   // Index is the key: a variant's POSITION mints its candidate label (`C{round}.{idx}`).
   const [pick, setPick] = useState("0");
   // A pick past a shrunk list reads its last variant, the one the control shows lit.
@@ -94,6 +95,11 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
   if (!shown) return null;
 
   const citation = shown.evidence_grounding?.citation;
+  // The panel is the quote's: every arm of the round quoting it was held by the same one.
+  const held = citation
+    ? arms.find((a) => a.evidence_grounding?.citation === citation.trim())
+    : undefined;
+  const panel = held?.evidence_grounding?.field;
 
   return (
     <section className="l1-variants" aria-label="Generated candidates">
@@ -118,7 +124,9 @@ export function L1Variants({ variants }: { variants: Variant[] }) {
 
       {citation && (
         <div className="l1v-block">
-          <span className="l1v-block-head">Grounded in</span>
+          <span className="l1v-block-head">
+            Grounded in{panel && <code className="l1v-panel">{panel}</code>}
+          </span>
           <blockquote className="l1v-cite">{citation}</blockquote>
         </div>
       )}
