@@ -147,8 +147,29 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   found no lift (one arm, a lower bound). `banking77__1101ce` (`gemma-3-4b`; object-then-state
   arm) parent **52%** on 100; the arm is unread: it was cut `broken` at row 18 (9 of 18 hit) by ONE
   empty answer, which `results_health.py` grades fatal on one sighting (cloud `small-6`). Prose
-  replies instead of a label come from both prompts (the parent's too), a 4B format miss; $0.005. `logic-logicnli` and `logic-proverqa` were refused `admission_gate_stuck` at launch
-  (cloud `gate-hold`) and are owed.
+  replies instead of a label come from both prompts (the parent's too), a 4B format miss; $0.005.
+  Re-read on `small-6` (`banking77__6cae77`, 2975f7225, the empty answer graded a miss): arm
+  **55% vs parent 50%** on 100 paired search rows (+5.0 pts raw), θ lift −0.407 ± 0.727 logits
+  (θ leaves rows out), not elected; $0.008, 17% replayed. A reachable gain of ~5 pts under its own
+  noise: not a mid-band seat on this solver. `logic-logicnli__e7b7f5` (`llama-3.1-8b-instruct`;
+  2975f7225) origin 22% on 40, parent **15% vs arm 6%** on 100 paired, θ lift −0.865 ± 1.441, both
+  under the 30% constant-answer floor (always `contradiction`); most misses are prose, not a label,
+  which `answer_format` owns: disqualified on this solver, $0.035. `logic-proverqa__c4ea6f`
+  (`llama-3.1-8b-instruct`; forward-chaining both-directions arm) origin 30% on 40, parent **42% vs
+  arm 24%** on 100 paired search rows (−18 pts, θ −1.03 ± 0.78, eliminated `p_best` 4.6%), $0.014.
+  Split per candidate (`<scratch>/screen/split.py` over each ledger's `sample_scored`), a label-shaped
+  reply's accuracy apart from the share that lands a label: proverqa's −18 is the token cap (34% of
+  the arm's replies cut at 1,536, parent 0%), equal 43% vs 43% among labels; its headroom is the
+  uncertain class (36% of rows, the parent hits 2 of 36). logicnli's 8B is cap-bound on both prompts
+  (cut 36% parent, 68% arm; 28% vs 19% among labels). banking77 lands labels alike (88% / 87%) and
+  the arm's +6 holds among them (57% → 63%). logic-fld lands every label: its −6 is reasoning.
+  proverqa round 2 (a decision-rule arm written after that split, reasoning bounded to five lines):
+  **26% vs parent 31%** on a fresh 100 (θ −0.18 ± 0.61), 32% vs 32% among labels; it moved answers
+  from false to uncertain (uncertain hits 1 → 4 of 40, false 18 → 5 of 35): the 8B cannot tell the
+  two apart, and a prompt shifts the boundary, not the discrimination. The parent read 42% and 31%
+  on two 100-row draws. Not a seat on this solver; $0.024. A
+  seat where a reasoning edit runs into the cap punishes potter's own variants too, so a screen
+  reads the label-shaped share per candidate before the seat is crowned.
 
 ## Protocol
 
