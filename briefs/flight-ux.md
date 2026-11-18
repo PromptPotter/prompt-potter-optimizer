@@ -37,6 +37,20 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
   inherited). It lives in `runner/inner/**`, which the l4-outer chain owns: file it under "Rows to
   file" with its `file:line` and the one-line mechanism, do not build it.
 
+## Three ways to run, all kept (the operator, 2026-11-18 ~11:10)
+"we wanna have this new upgrade as well as being able to have the old style going, as well as the
+fastest option that exists. the controls might become more in toggles or so, that's okay."
+- **One at a time** (the old style): depth 1, the δ-order walk an early cut reads cheapest, zero
+  discards. It stays the default and a named first segment ("One at a time"), never only "1".
+- **The upgrade**: a chosen depth, this round or every round (the switch above).
+- **Fastest**: a `Max` segment that tracks the ceiling the backend admits (`most`), never a frozen
+  number, so it stays the fastest that exists as the ceiling moves; CLI `--lookahead max`. With every
+  round on, it is the fastest an outer can run until "inner runs too" (filed, not yours) adds the
+  inner walk.
+- Toggles are fine where they read better than segments (every round is one); one control per axis.
+If this section reaches you after your links are pushed, the orchestrator builds it in the landing's
+fix pass; do not reopen a pushed link for it.
+
 ## Beside you
 - **limits-ux** (cloud) owns `RunLimitsControl.tsx`, `lib/run-limits.ts`,
   `application/commands/limits_and_queue.py`, and may add a disabled-reason line inside
