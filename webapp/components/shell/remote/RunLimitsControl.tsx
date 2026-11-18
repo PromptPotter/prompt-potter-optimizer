@@ -2,69 +2,64 @@ import { useState } from "react";
 import { commands, cycleAddress } from "@/lib/api";
 import {
   type Budget,
-  type MeteredSpend,
+  type CapReading,
   type Overshoot,
-  ACCOUNT_TAB_INFO,
   CAP_AXIS_INFO,
+  CAP_BOOK_WORDS,
+  CAP_CLAMP_WORDS,
   CEILING_METER_LABELS,
   type CapAxis,
 } from "@/lib/api/types";
-import { wordKeys } from "@/lib/api/words";
-import { budgetAxis } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
-import { fmtUnit, fmtUsd } from "@/lib/format";
-import { capInput, capText, parseCapIn, type Cap } from "@/lib/run-limits";
+import { fmtUsd } from "@/lib/format";
+import { capInput, capWords, parseCapIn, type Cap } from "@/lib/run-limits";
 import { useWorkspace } from "@/lib/state/workspace";
 import { Button, Dialog, FailureLine, Switch } from "@/components/ui";
 
-const AXES = wordKeys(CAP_AXIS_INFO);
-
 type Drafts = Record<CapAxis, string>;
 
-function draftsOf(budget: Budget): Drafts {
+function draftsOf(caps: CapReading[]): Drafts {
   const out = {} as Drafts;
-  for (const axis of AXES) {
-    const v = budgetAxis(budget, axis);
-    out[axis] = v != null ? String(v / CAP_AXIS_INFO[axis].scale) : "";
+  for (const cap of caps) {
+    out[cap.axis] = cap.armed != null ? String(cap.armed / CAP_AXIS_INFO[cap.axis].scale) : "";
   }
   return out;
 }
 
-function budgetKey(budget: Budget): string {
-  return AXES.map((axis) => budgetAxis(budget, axis)).join("|");
+function capsKey(caps: CapReading[]): string {
+  return caps.map((cap) => cap.armed).join("|");
 }
 
-// The cap is the campaign's; `share` is this cycle's part of it, what its run's book binds.
-function usedText(axis: CapAxis, metered: MeteredSpend, share: Budget | null): string | null {
-  const of = share ? budgetAxis(share, axis) : null;
-  if (axis === "usd") {
-    const part = of != null ? ` of its ${fmtUsd(of)} share` : "";
-    return `${fmtUsd(metered.metered_usd)} this cycle${part}, ${CEILING_METER_LABELS[metered.meter]}`;
-  }
-  if (axis === "tokens") {
-    return `${fmtUnit("tokens", metered.metered_tokens)} this cycle${of != null ? ` of its ${fmtUnit("tokens", of)} share` : ""}`;
-  }
-  return null;
+// What the cap's own book has used, against the cap where one stands.
+function usedText({ axis, armed, used }: CapReading): string | null {
+  if (used == null) return null;
+  const word = CAP_AXIS_INFO[axis].used;
+  return armed == null
+    ? `${capWords(axis, used)} ${word}`
+    : `${capWords(axis, used)} of ${capWords(axis, armed)} ${word}`;
+}
+
+function bookText({ axis, meter }: CapReading): string {
+  const book = CAP_BOOK_WORDS[CAP_AXIS_INFO[axis].book];
+  return meter ? `${book} · ${CEILING_METER_LABELS[meter]}` : book;
 }
 
 interface Props {
-  budget: Budget;
+  caps: CapReading[];
   overshoot: boolean;
   overshot: Overshoot | null;
-  share: Budget | null;
-  metered: MeteredSpend;
 }
 
-export function RunLimitsControl({ budget, overshoot, overshot, share, metered }: Props) {
+export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
-  const [drafts, setDrafts] = useState<Drafts>(() => draftsOf(budget));
+  const [drafts, setDrafts] = useState<Drafts>(() => draftsOf(caps));
   // Never remounted on a unit switch: unseeded, `apply()` writes the prior cycle's caps on the new.
-  const key = budgetKey(budget);
+  const key = capsKey(caps);
   const [prevKey, setPrevKey] = useState(key);
   if (key !== prevKey) {
     setPrevKey(key);
-    setDrafts(draftsOf(budget));
+    setDrafts(draftsOf(caps));
   }
   const cmd = useCommand<"set-limits">("run-limits", { scope: viewed?.leaf.cycleId ?? null });
   const [confirmingHalt, setConfirmingHalt] = useState(false);
@@ -75,16 +70,16 @@ export function RunLimitsControl({ budget, overshoot, overshot, share, metered }
   // Only a CHANGED axis is named: an unnamed one stays as it stands, and a named null would lift it.
   const typed = {} as Record<CapAxis, Cap>;
   const next: Budget = {};
-  for (const axis of AXES) {
-    const cap = (typed[axis] = parseCapIn(drafts[axis], CAP_AXIS_INFO[axis]));
-    const value = "value" in cap ? cap.value : null;
-    if (value != null && value !== budgetAxis(budget, axis)) next[axis] = value;
+  for (const cap of caps) {
+    const parsed = (typed[cap.axis] = parseCapIn(drafts[cap.axis], CAP_AXIS_INFO[cap.axis]));
+    const value = "value" in parsed ? parsed.value : null;
+    if (value != null && value !== cap.armed) next[cap.axis] = value;
   }
   // A refused axis holds Set: sending the rest would read as the whole edit taking.
-  const refused = AXES.some((axis) => "refused" in typed[axis]);
+  const refused = caps.some((cap) => "refused" in typed[cap.axis]);
   const hasChange = !refused && Object.keys(next).length > 0;
   // A refused 0 never reaches `next`, so a 0 there is a legal cap admitting nothing more.
-  const isHalt = AXES.some((axis) => next[axis] === 0);
+  const isHalt = caps.some((cap) => next[cap.axis] === 0);
 
   const send = async (change: { budget?: Budget; overshoot?: boolean }, applied: string) => {
     if (!viewedPath) return;
@@ -96,13 +91,11 @@ export function RunLimitsControl({ budget, overshoot, overshot, share, metered }
     if (r.ok) setNote(applied);
   };
 
-  // Quotes NO number: `quota.py::change_budget` mins the request against the allowance.
+  // Quotes NO number: the rows re-read what armed, a clamp by the allowance on its own row.
   const apply = () =>
     void send(
       { budget: next },
-      isHalt
-        ? "Applied — halting after this round."
-        : "Applied — the armed cap is shown above; it takes at the next round.",
+      isHalt ? "Applied — halting after this round." : "Applied — it takes at the next round.",
     );
 
   const onSet = () => {
@@ -116,56 +109,65 @@ export function RunLimitsControl({ budget, overshoot, overshot, share, metered }
 
   return (
     <div className="run-limits-control">
-      {AXES.map((axis) => {
-        const spec = { axis, ...CAP_AXIS_INFO[axis] };
-        const current = budgetAxis(budget, axis);
-        const used = usedText(axis, metered, share);
+      {caps.map((cap) => {
+        const info = CAP_AXIS_INFO[cap.axis];
+        const used = usedText(cap);
+        const label = info.short;
         return (
-          <div key={axis}>
-            <div className="row">
-              <span className="lbl">{spec.title}</span>
-              <span className="val">
-                {current != null ? capText(spec, current) : "Uncapped"}
-                {used ? <span className="run-limits-control-used"> · {used}</span> : null}
-              </span>
-            </div>
-            <div className="run-limits-control-edit">
-              <span className="run-limits-control-prefix">{spec.unit}</span>
+          <div key={cap.axis} className="run-limits-row">
+            <span className="run-limits-axis">{label}</span>
+            <span className="run-limits-input">
               <input
-                {...capInput(spec)}
-                value={drafts[spec.axis]}
-                aria-invalid={"refused" in typed[axis] || undefined}
+                {...capInput(info)}
+                value={drafts[cap.axis]}
+                aria-invalid={"refused" in typed[cap.axis] || undefined}
                 disabled={disabled || pending}
-                placeholder={current != null ? undefined : "no cap"}
+                placeholder="no cap"
                 onChange={(e) => {
                   const value = e.target.value;
-                  setDrafts((d) => ({ ...d, [spec.axis]: value }));
+                  setDrafts((d) => ({ ...d, [cap.axis]: value }));
                   setNote(null);
                   cmd.clear();
                 }}
-                aria-label={`${spec.title} in ${spec.unit}`}
+                aria-label={`${info.title} in ${info.unit}`}
               />
-              {current != null ? (
-                <Button
-                  className="run-limits-control-lift"
-                  disabled={disabled || pending}
-                  onClick={() =>
-                    void send(
-                      { budget: { [spec.axis]: null } },
-                      `Applied — no ${spec.title.toLowerCase()} from the next round; the other caps govern.`,
-                    )
-                  }
-                  aria-label={`Lift the ${spec.title.toLowerCase()}`}
-                >
-                  Uncap
-                </Button>
+              <span className="run-limits-unit">{info.unit}</span>
+            </span>
+            <span className="run-limits-used">
+              {used}
+              {cap.fill != null ? (
+                <>
+                  <meter min={0} max={1} value={Math.min(cap.fill, 1)} aria-label={`${label} used`} />
+                  {`${Math.round(cap.fill * 100)}%`}
+                </>
               ) : null}
-            </div>
+            </span>
+            <small className="run-limits-book">{bookText(cap)}</small>
+            {cap.armed != null ? (
+              <Button
+                className="run-limits-lift"
+                disabled={disabled || pending}
+                onClick={() =>
+                  void send(
+                    { budget: { [cap.axis]: null } },
+                    `Applied — no ${info.title.toLowerCase()} from the next round; the other caps govern.`,
+                  )
+                }
+                aria-label={`Lift the ${info.title.toLowerCase()}`}
+              >
+                Uncap
+              </Button>
+            ) : null}
+            {cap.clamped_by != null && cap.asked != null && cap.armed != null ? (
+              <small className="run-limits-clamp">
+                {`asked ${capWords(cap.axis, cap.asked)} → armed ${capWords(cap.axis, cap.armed)}: ${CAP_CLAMP_WORDS[cap.clamped_by]}`}
+              </small>
+            ) : null}
           </div>
         );
       })}
       <div className="row">
-        <span className="lbl">Overshoot</span>
+        <span className="lbl">Hold calls at mean bill</span>
         <span className="val">
           <Switch
             checked={overshoot}
@@ -182,28 +184,24 @@ export function RunLimitsControl({ budget, overshoot, overshot, share, metered }
             }
           />
           {overshot && overshot.calls > 0 ? (
-            <span className="run-limits-control-used">
+            <span className="run-limits-used">
               {` · ${overshot.calls} ${overshot.calls === 1 ? "call" : "calls"} past their hold by ${fmtUsd(overshot.usd)}`}
             </span>
           ) : null}
         </span>
       </div>
-      <div className="run-limits-control-edit">
+      <div className="run-limits-actions">
+        {isHalt ? <small className="run-limits-book">Halts the run after the current round.</small> : null}
         <button
           type="button"
-          className="run-limits-control-set"
+          className="run-limits-set"
           disabled={disabled || pending || !hasChange}
           onClick={onSet}
         >
           {pending ? "Setting…" : "Set caps"}
         </button>
       </div>
-      <small className="run-limits-control-hint">
-        {isHalt
-          ? "Halts the run after the current round."
-          : `Re-read each round — raise to release, set a cap to 0 to halt. Whichever trips first wins. Spend and token caps are the campaign's, one book its live cycles share; the round cap is this cycle's; the wall clock bounds one launch and restarts at the next, cutting a remote cell still open at its edge. A spend raise is also clamped by your account allowance (${ACCOUNT_TAB_INFO.usage.place}).`}
-      </small>
-      {note ? <small className="run-limits-control-note">{note}</small> : null}
+      {note ? <small className="run-limits-note">{note}</small> : null}
       <FailureLine failure={cmd.failure} />
       <Dialog
         open={confirmingHalt}

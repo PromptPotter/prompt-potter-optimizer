@@ -41,12 +41,9 @@ export function useRemoteModel() {
     toInner: (campaignId: string, cycleId: string) =>
       navigate({ path: [...viewedPath, { campaignId, cycleId }] }),
     skipRefusal: dash.skip_refusal,
-    // RunLimitsControl reads the cycle's spend beside the caps it edits.
-    metered: dash.spend_metered,
-    budget: dash.run_limits.budget,
+    caps: dash.caps.caps,
     overshoot: dash.run_limits.overshoot,
     overshot: dash.overshot,
-    share: dash.allotment,
     lookahead,
     heldCall: dash.held_call,
     providerHeld: dash.backpressure,

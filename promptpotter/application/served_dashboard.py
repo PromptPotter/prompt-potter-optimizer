@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Mapping
 from typing import Any, Literal, NamedTuple
 
 from pydantic import Field
@@ -13,6 +14,8 @@ from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import (
+    ArmedCaps,
+    CapReading,
     RoundHealth,
     RunLimits,
     SampleCoverage,
@@ -38,8 +41,11 @@ from promptpotter.domain.said import Said, pinned
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.scoring import anchored_criterion_dials
 from promptpotter.domain.spend import (
+    CAP_AXIS_INFO,
+    MONEY_AXES,
     NO_OVERSHOOT,
     Budget,
+    CapAxis,
     CeilingMeter,
     MeteredSpend,
     Overshoot,
@@ -64,7 +70,7 @@ from promptpotter.infrastructure.store.command_log import (
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.clock import duration_words
+from promptpotter.shared.clock import duration_words, epoch_seconds
 from promptpotter.shared.worded import Worded
 
 
@@ -184,6 +190,10 @@ class SampleLookahead(StrictModel):
     )
     depths: list[LookaheadDepth] = Field(
         description="Each depth the control draws, 1 to `ceiling`."
+    )
+    refusal: str = Field(
+        description="Why no depth is pressable now (`RunState.lookahead_refusal`); empty where the "
+        "run admits a press."
     )
 
 
@@ -318,9 +328,9 @@ class ServedDashboard(DashboardFacts):
         "every cycle of it once and deleted ones included, against each cap it bounds — "
         "`domain/spend.py::campaign_cap_lines`; empty where nothing is capped and on a replay."
     )
-    allotment: Budget | None = Field(
-        description="This cycle's share of the campaign's ceiling — the most it may have metered "
-        "in all, and what its run's book binds; null where no run holds a share, and on a replay."
+    caps: ArmedCaps = Field(
+        description="Every cap of `run_limits.budget` read against its own book "
+        "(`armed_caps`); on a replay, the caps it stood under and no book read."
     )
     overshot: Overshoot | None = Field(
         description="The cycle's calls billed past their hold (`run_limits.overshoot`), off the "
@@ -417,6 +427,7 @@ class _Present(NamedTuple):
     orphaned: bool
     fork_remainder: ForkRemainder
     campaign_metered: Budget
+    caps: ArmedCaps
     overshot: Overshoot
     at: float
 
@@ -446,6 +457,75 @@ def _allotment(stores: Stores, hop: CycleHop, run: RunState) -> Budget | None:
         return None
     held = stores.campaigns.last(hop, CycleShareRecord)
     return None if held is None else held.allotment
+
+
+def _caps(
+    limits: RunLimits,
+    meter: CeilingMeter,
+    *,
+    asked: Budget,
+    used: Mapping[CapAxis, float | None],
+) -> ArmedCaps:
+    return ArmedCaps.of(
+        [
+            CapReading.of(
+                axis,
+                asked=getattr(limits.budget.over(asked), axis),
+                armed=getattr(limits.budget, axis),
+                used=used.get(axis),
+                meter=meter if axis in MONEY_AXES else None,
+            )
+            for axis in CAP_AXIS_INFO
+        ]
+    )
+
+
+def armed_caps(
+    stores: Stores,
+    hop: CycleHop,
+    *,
+    limits: RunLimits,
+    run: RunState,
+    meter: CeilingMeter,
+    campaign_metered: Budget,
+    rounds_closed: int,
+) -> ArmedCaps:
+    """THE caps as they bind now, each against its own book: the campaign's metered spend, this
+    cycle's rounds closed after the origin, the clock of the launch in flight."""
+    held = stores.campaigns.holder(hop) if run.producer.appending else None
+    job = None if held is None else held.run
+    started = None if job is None else epoch_seconds(job.started_at)
+    return _caps(
+        limits,
+        meter,
+        asked=stores.campaigns.read_campaign_ceiling(hop).asked,
+        used={
+            "usd": campaign_metered.usd_amount,
+            "tokens": campaign_metered.token_amount,
+            "rounds": rounds_closed,
+            "wall_clock_s": None if started is None else max(0.0, time.time() - started),
+        },
+    )
+
+
+def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:
+    """`armed_caps` read whole off the stores: what `set-limits` answers once it applied."""
+    campaign = stores.campaigns.campaign(hop.campaign_id)
+    run = stores.run_state(hop)
+    config = cycle_config(stores, campaign, hop).config
+    # Unwired yet, it stands under what its operator armed, as its first launch will.
+    wired = stores.campaigns.run_limits(hop) or RunLimits(budget=stores.campaigns.armed_budget(hop))
+    limits = _binding(stores, hop, config, run, wired)
+    meter = ceiling_meter(campaign.declaration.purpose)
+    return armed_caps(
+        stores,
+        hop,
+        limits=limits,
+        run=run,
+        meter=meter,
+        campaign_metered=stores.campaigns.metered_spend(hop.campaign_id, meter),
+        rounds_closed=_remainder(stores, hop, limits).rounds_closed,
+    )
 
 
 def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkRemainder:
@@ -509,6 +589,7 @@ def _lookahead(
             )
             for n in range(1, ceiling + 1)
         ],
+        refusal=run.lookahead_refusal,
     )
 
 
@@ -582,7 +663,9 @@ def _serve(
         cap_lines=[]
         if standing is None
         else campaign_cap_lines(meter, campaign=standing.campaign_metered, cap=run_limits.budget),
-        allotment=None if standing is None else standing.allotment,
+        caps=_caps(run_limits, meter, asked=Budget(), used={})
+        if standing is None
+        else standing.caps,
         overshot=None if standing is None else standing.overshot,
         fork_remainder=None if standing is None else standing.fork_remainder,
         observed=_observed(state, live=live),
@@ -634,6 +717,8 @@ def served_dashboard(
     config = cycle_config(stores, campaign, hop).config
     limits = _binding(stores, hop, config, run, folded)
     armed = stores.inbox(hop)
+    remainder = _remainder(stores, hop, limits)
+    campaign_metered = stores.campaigns.metered_spend(hop.campaign_id, meter)
     return _serve(
         state,
         hop=hop,
@@ -648,8 +733,17 @@ def served_dashboard(
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
             orphaned=any(mark.state == "running" for mark in state.verification)
             and stores.campaigns.holder(hop) is None,
-            fork_remainder=_remainder(stores, hop, limits),
-            campaign_metered=stores.campaigns.metered_spend(hop.campaign_id, meter),
+            fork_remainder=remainder,
+            campaign_metered=campaign_metered,
+            caps=armed_caps(
+                stores,
+                hop,
+                limits=limits,
+                run=run,
+                meter=meter,
+                campaign_metered=campaign_metered,
+                rounds_closed=remainder.rounds_closed,
+            ),
             overshot=money_on(stores.charges.path).overshot.get(
                 stores.charges.held_on(CycleLayout(cycle_path).ledger), NO_OVERSHOOT
             ),

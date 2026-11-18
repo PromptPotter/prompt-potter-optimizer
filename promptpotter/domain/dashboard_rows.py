@@ -19,10 +19,21 @@ from promptpotter.domain.round_health import DegradationHealth, HealthGrade, Hea
 from promptpotter.domain.ruler import LevelSeries, SeriesReading
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.spend import (
+    CAP_AXIS_INFO,
+    CAP_BOOK_WORDS,
+    CAP_CLAMP_WORDS,
+    CEILING_METER_LABELS,
+    Budget,
+    CapAxis,
+    CapClamp,
+    CeilingMeter,
+    usd_text,
+)
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.verification import VerifyReading
 from promptpotter.domain.wounds import ValidationFailure
+from promptpotter.shared.clock import duration_words
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
@@ -198,6 +209,90 @@ class RunLimits(StrictModel):
         "worst case, a bill past it drawn on the run's hold (`set-limits --overshoot`).",
     )
     optimizer: list[OptimizerLimit] = Field(default_factory=list)
+
+
+class CapReading(FrozenModel):
+    """One cap as it binds, read against its OWN book (`CAP_AXIS_INFO[axis].book`), every figure
+    in the axis's wire unit."""
+
+    axis: CapAxis
+    asked: float | None = Field(
+        description="What the operator asked; it differs from `armed` only where `clamped_by` "
+        "says why. Null asked no cap."
+    )
+    armed: float | None = Field(description="The cap that binds; null is no cap.")
+    used: float | None = Field(
+        description="What the axis's book has used; null where it reads nothing now (no launch "
+        "in flight for the clock, a replay)."
+    )
+    meter: CeilingMeter | None = Field(
+        description="What a money axis's book counts; null on rounds and the clock."
+    )
+    fill: float | None = Field(
+        description="`used` over `armed`, where both stand (a cap of 0 is full): the one meter a "
+        "surface draws."
+    )
+    clamped_by: CapClamp | None
+
+    @classmethod
+    def of(
+        cls,
+        axis: CapAxis,
+        *,
+        asked: float | None,
+        armed: float | None,
+        used: float | None,
+        meter: CeilingMeter | None,
+    ) -> CapReading:
+        fill = None if armed is None or used is None else used / armed if armed else 1.0
+        return cls(
+            axis=axis,
+            asked=asked,
+            armed=armed,
+            used=used,
+            meter=meter,
+            fill=fill,
+            clamped_by=None if asked is None or asked == armed else "allowance",
+        )
+
+    def lines(self) -> list[str]:
+        """THE terminal wording of the row, the panel's in words: the cap and its clamp, then
+        what its book has used."""
+        info = CAP_AXIS_INFO[self.axis]
+        head = f"{info.short.lower():<7}"
+        cap = "no cap" if self.armed is None else _cap_words(self.axis, self.armed)
+        if self.clamped_by is not None and self.asked is not None:
+            cap = (
+                f"armed {cap} (asked {_cap_words(self.axis, self.asked)}, "
+                f"{CAP_CLAMP_WORDS[self.clamped_by]})"
+            )
+        book = [CAP_BOOK_WORDS[info.book]]
+        if self.meter is not None:
+            book.append(CEILING_METER_LABELS[self.meter])
+        used = [] if self.used is None else [f"{_cap_words(self.axis, self.used)} {info.used}"]
+        if self.clamped_by is None:
+            return [head + " · ".join([cap, *used, *book])]
+        return [head + cap, " " * len(head) + " · ".join([*used, *book])]
+
+
+class ArmedCaps(FrozenModel):
+    """Every cap of a cycle as it binds, in `CAP_AXIS_INFO` order: the dashboard's, and what
+    `set-limits` answers at every door once it applied."""
+
+    caps: list[CapReading]
+    said: str = Field(description="The rows in words, one per line: the terminal's rendering.")
+
+    @classmethod
+    def of(cls, caps: list[CapReading]) -> ArmedCaps:
+        return cls(caps=caps, said="\n".join(line for cap in caps for line in cap.lines()))
+
+
+def _cap_words(axis: CapAxis, value: float) -> str:
+    if axis == "usd":
+        return usd_text(value)
+    if axis == "wall_clock_s":
+        return duration_words(value)
+    return f"{int(value):,}" if axis == "rounds" else f"{int(value):,} tokens"
 
 
 VerificationState = Literal["running", "done", "failed"]

@@ -27,6 +27,7 @@ from promptpotter.domain.records import CycleRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
     ArmActRecord,
+    CampaignCeilingRecord,
     CycleMintedRecord,
     PipelineRead,
     ResolvedRunRecord,
@@ -680,13 +681,13 @@ class CampaignStore:
         """Read live by the book at each send, so a running change binds its next one."""
         return scan_standing_budget(self.ledger(hop))
 
-    def read_campaign_ceiling(self, hop: CycleHop) -> Budget:
+    def read_campaign_ceiling(self, hop: CycleHop) -> CampaignCeilingRecord:
         """Off any cycle of the campaign: each reads its root's, which its manifest names."""
         return scan_campaign_ceiling(self.ledger(self.campaign(hop.campaign_id).root_hop))
 
     def armed_budget(self, hop: CycleHop) -> Budget:
         """The axes an operator named: the campaign's money and the cycle's own."""
-        return self.read_campaign_ceiling(hop).over(self.read_standing_budget(hop).budget)
+        return self.read_campaign_ceiling(hop).budget.over(self.read_standing_budget(hop).budget)
 
     def run_limits(self, hop: CycleHop, *, at: int | None = None) -> RunLimits | None:
         """The cycle's fold to *at*, its line's root ceiling laid over; ``None`` before its first wiring."""
@@ -694,7 +695,7 @@ class CampaignStore:
         if folded is None:
             return None
         return folded.model_copy(
-            update={"budget": folded.budget.over(self.read_campaign_ceiling(hop))}
+            update={"budget": folded.budget.over(self.read_campaign_ceiling(hop).budget)}
         )
 
     def chain(self, hop: CycleHop) -> list[LedgerSpan]:

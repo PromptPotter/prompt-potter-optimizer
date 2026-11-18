@@ -82,6 +82,7 @@ async def cmd_command(args: argparse.Namespace) -> CommandResult:
             **acted,
             "command_id": sent.accepted.command_id,
             "ack": sent.ack,
+            **({"answer": answered} if answered else {}),
         },
         human=" ".join(
             filter(None, (f"{'/'.join(ids.values())} -> {kind} {sent.ack}.", follow_up))

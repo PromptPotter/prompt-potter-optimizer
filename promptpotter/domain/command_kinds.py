@@ -637,8 +637,8 @@ class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.SET_LIMITS):
         "An inner run spends under the outer run's ceiling. Change the outer run's limits instead."
     )
     follow_up: ClassVar[str] = (
-        "It is clamped against your account allowance, and `resume` picks it up; an arm of a "
-        "head-to-head leaves its comparison only when a ceiling moved."
+        "`resume` picks it up; an arm of a head-to-head leaves its comparison only when a ceiling "
+        "moved. Armed now:\n{said}"
     )
 
     # An axis it does not name stays as it stands; a named null lifts it.

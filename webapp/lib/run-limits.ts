@@ -1,4 +1,5 @@
 import { CAP_AXIS_INFO, type CapAxis, type CapAxisInfo } from "@/lib/api/types";
+import { fmtDuration, fmtUnit, fmtUsd } from "@/lib/format";
 
 export interface CapBounds {
   integer?: boolean | undefined;
@@ -36,9 +37,17 @@ export function parseCapIn(raw: string, spec: CapBounds & { scale: number }): Ca
   return "value" in typed ? bounded(typed.value * spec.scale, spec) : typed;
 }
 
-// A cap's wire value as an operator types it: in the axis's unit.
+// A cap's wire value as an operator types it: in the axis's unit, one of it singular.
 export function capText(axis: CapAxisInfo, value: number): string {
-  return `${value / axis.scale} ${axis.unit}`;
+  const n = value / axis.scale;
+  return `${n} ${n === 1 ? axis.unit.replace(/s$/, "") : axis.unit}`;
+}
+
+// A wire value of *axis* as a row reads it, `domain/dashboard_rows.py::_cap_words`'s wording.
+export function capWords(axis: CapAxis, value: number): string {
+  if (axis === "usd") return fmtUsd(value);
+  if (axis === "wall_clock_s") return fmtDuration(value);
+  return axis === "tokens" ? fmtUnit("tokens", value) : value.toLocaleString("en-US");
 }
 
 // An axis's input bounds in its unit; an exclusive floor sits at `min` too, and `parseCap` refuses it.

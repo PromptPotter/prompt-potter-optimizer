@@ -101,7 +101,9 @@ BASELINE = {
     # all-no-op round and the pool twin gone. l4-runs (+39): a bench member whose point moved banks
     # its pass refused and the fold reads it so, and a nested run is filed as its spawner's kind;
     # (+28) an entry finding a landing in flight says so and waits, off the CLI's loop.
-    "package_lines": 111071,
+    # limits-ux (+268): one served reading per cap (`ArmedCaps`), its clamp on the ceiling record,
+    # its wording table, and `set-limits` answering it at every door.
+    "package_lines": 111302,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -142,7 +144,8 @@ BASELINE = {
     # `contract` rows the browser now draws.
     # model-lines (+2): `call_target` on a served campaign config, which no surface edits yet.
     # l4-measure (+3): `CycleEntryFacts.curve`, the held-out curve beside `BenchScore`, unrendered.
-    "p_served": 198,
+    # limits-ux (+1): `ArmedCaps.said`, the terminal's rendering of the rows the browser draws.
+    "p_served": 199,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     "p_unread_fields": 26,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.

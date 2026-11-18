@@ -7,15 +7,20 @@ from promptpotter.application.commands.dispatcher import (
     CommandDispatcher,
     Dispatched,
     DispatchedToCycle,
+    Replaying,
+    replays,
 )
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import campaign_sends
+from promptpotter.application.served_dashboard import current_caps
 from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
     ChangeRunLimitsPayload,
+    CommandKind,
     SetConcurrentCyclesPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.dashboard_rows import ArmedCaps
 from promptpotter.domain.records.run_records import ArmAct
 from promptpotter.domain.spend import MONEY_AXES
 from promptpotter.shared.errors import NotFoundError
@@ -24,9 +29,24 @@ from promptpotter.shared.identity import acting_principal
 
 async def change_run_limits(
     dispatched: DispatchedToCycle[ChangeRunLimitsPayload],
-) -> Applier[object]:
+) -> Applier[ArmedCaps]:
+    """Answers the caps as ARMED, each against its own book: a clamp is said where it was made."""
     dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload
-    return Applier.silent(lambda: _apply_change_run_limits(dispatcher, hop, change))
+
+    async def _apply() -> ArmedCaps:
+        await _apply_change_run_limits(dispatcher, hop, change)
+        return await asyncio.to_thread(current_caps, dispatcher.stores, hop)
+
+    return Applier(_apply)
+
+
+@replays(CommandKind.SET_LIMITS)
+async def limits_armed(replaying: Replaying[ChangeRunLimitsPayload]) -> ArmedCaps:
+    """Off the cycle as it stands: caps are a standing state, so what binds now is the honest answer
+    to a retry, whatever moved them since; a cycle deleted since answers its 404."""
+    sent = replaying.payload
+    hop = CycleHop(campaign_id=sent.campaign_id, cycle_id=sent.cycle_id)
+    return await asyncio.to_thread(current_caps, replaying.stores, hop)
 
 
 def _change_budget(

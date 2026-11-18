@@ -137,7 +137,11 @@ from promptpotter.application.scoring.search_point_scorer import (
     replayable_on,
     score_search_point,
 )
-from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
+from promptpotter.application.served_dashboard import (
+    ServedDashboard,
+    current_caps,
+    served_dashboard,
+)
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
@@ -163,6 +167,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, WorkspaceDir
 from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.dashboard_rows import ArmedCaps
 from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.head_to_head_plan import HeadToHeadPlan
 from promptpotter.domain.job import (
@@ -433,14 +438,14 @@ def _change_run_limits(
         dispatcher, payload, "limits", minted_campaign(hop), hop, door=Door.HOST
     )
 
-    async def apply() -> Applier[object]:
+    async def apply() -> Applier[ArmedCaps]:
         applier = await change_run_limits(dispatched)
         await applier.run()
         return applier
 
     asyncio.run(apply())
     campaigns = dispatcher.stores.campaigns
-    return campaigns.read_campaign_ceiling(hop).over(campaigns.read_standing_budget(hop).budget)
+    return campaigns.armed_budget(hop)
 
 
 # 1. What a call costs
@@ -4167,15 +4172,15 @@ def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(tmp_path: Path) 
     assert standing.budget == Budget(rounds=3), (
         "the standing record is written WHOLE: a spend move must carry the round cap it did not touch"
     )
-    assert metered.campaigns.read_campaign_ceiling(campaign.root_hop) == Budget(tokens=1_000), (
-        "a money ceiling landed on one cycle, not the campaign every cycle shares"
-    )
+    assert metered.campaigns.read_campaign_ceiling(campaign.root_hop).budget == Budget(
+        tokens=1_000
+    ), "a money ceiling landed on one cycle, not the campaign every cycle shares"
     # An UNCAP lifts the campaign's ceiling; the account still binds it through the reservation.
     armed = _change_run_limits(dispatcher, hop, Budget(usd=None))
     assert armed == Budget(usd=None, tokens=1_000, rounds=3), (
         "the armed ceiling is not what a stop fires at: the campaign's money and the cycle's own"
     )
-    lifted, held = metered.campaigns.read_campaign_ceiling(hop), registry.get(job.job_id)
+    lifted, held = metered.campaigns.read_campaign_ceiling(hop).budget, registry.get(job.job_id)
     assert lifted == Budget(usd=None, tokens=1_000), (
         "an uncapped campaign ceiling was stored as the account's headroom"
     )
@@ -4239,7 +4244,7 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
             Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_UNPRICED_CELLS
         )
     change_budget(Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_CELLS)
-    caps = forker.campaigns.read_campaign_ceiling(fork)
+    caps = forker.campaigns.read_campaign_ceiling(fork).budget
     _, relaunched = admit_launch(
         declared=Budget(),
         user=allowance,
@@ -4255,6 +4260,48 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
     )
     assert relaunched.usd == _reserve_of(forker, job.job_id).usd == pytest.approx(0.5), (
         "the reservation held past the $0.50 the coupon has left"
+    )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_clamped_spend_cap_reads_asked_armed_and_the_campaigns_own_spend(
+    tmp_path: Path,
+) -> None:
+    # A cap read against another book than its own, or a clamp nobody hears of, misleads a spend.
+    clamped = _web_account(tmp_path, "sub-6")
+    root = CycleHop(campaign_id="camp-6", cycle_id="cycle_budget0006")
+    sibling = CycleHop(campaign_id="camp-6", cycle_id="cycle_budget0006_fork_r1")
+    clamped.campaigns.create_campaign(minted_campaign(root))
+    clamped.campaigns.mint_cycle(root)
+    root_dir = clamped.campaigns.cycle_dir(root)
+    mint_fork(
+        clamped.campaigns,
+        sibling,
+        root_dir,
+        ForkSpec(
+            trigger=ForkTrigger.OPERATOR_REWIND,
+            reason="",
+            issued_by=SYSTEM_PRINCIPAL,
+            from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
+        ),
+        cut=CycleEventLog.open(CycleDir(root_dir)).next_offset,
+        cut_round=1,
+    )
+    for at, usd in ((root, 0.2), (sibling, 0.3)):
+        with scoped(account=clamped):
+            ledger = CycleEventLog.open(CycleDir(clamped.campaigns.cycle_dir(at)))
+            _pay(ledger, usd, input_tokens=1_000, output_tokens=0)
+    registry = JobRegistry(clamped.jobs_dir, capacity=lambda _live: 1)
+    clamped.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
+    dispatcher = CommandDispatcher(clamped, registry)
+    armed = _change_run_limits(dispatcher, sibling, Budget(usd=5.0))
+    assert armed.usd == pytest.approx(1.0), "a $5 ask past the $1 allowance was not clamped"
+    spend = next(cap for cap in current_caps(clamped, sibling).caps if cap.axis == "usd")
+    assert spend.asked == pytest.approx(5.0) and spend.clamped_by == "allowance", (
+        "the clamp of a $5 ask to the $1 allowance went unsaid"
+    )
+    assert spend.used == pytest.approx(0.5) and spend.fill == pytest.approx(0.5), (
+        "the campaign's cap was read against one cycle's spend, not the campaign's $0.50"
     )
 
 

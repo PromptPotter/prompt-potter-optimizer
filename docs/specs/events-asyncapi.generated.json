@@ -1376,6 +1376,9 @@
         "additionalProperties": false,
         "description": "The money axes an operator named for the whole campaign (`set-limits`), LAST wins on its ROOT's\nledger, so every cycle of it reads one; every move lands through `jobs/quota.py::move_campaign_money`.",
         "properties": {
+          "asked": {
+            "$ref": "#/components/schemas/Budget"
+          },
           "budget": {
             "$ref": "#/components/schemas/Budget"
           },
@@ -1391,7 +1394,8 @@
           }
         },
         "required": [
-          "budget"
+          "budget",
+          "asked"
         ],
         "title": "CampaignCeilingRecord",
         "type": "object"

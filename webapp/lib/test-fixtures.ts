@@ -1,4 +1,6 @@
 import type {
+  ArmedCaps,
+  CapReading,
   Estimate,
   AccountKey,
   CouponStatus,
@@ -253,6 +255,24 @@ export function runStanding(
 }
 
 // No producer, every reading off: a test sets the served fields its case reads, never derives them.
+// Every cap uncapped and nothing read, as a replay serves them; `caps` replaces rows by axis.
+export function armedCaps(caps: CapReading[] = []): ArmedCaps {
+  const uncapped = (axis: CapReading["axis"]): CapReading => ({
+    axis,
+    asked: null,
+    armed: null,
+    used: null,
+    meter: axis === "usd" || axis === "tokens" ? "bill" : null,
+    fill: null,
+    clamped_by: null,
+  });
+  const axes = ["usd", "tokens", "rounds", "wall_clock_s"] as const;
+  return {
+    caps: axes.map((axis) => caps.find((cap) => cap.axis === axis) ?? uncapped(axis)),
+    said: "",
+  };
+}
+
 export function producerReading(over: Partial<ProducerReading> = {}): ProducerReading {
   return {
     state: "absent",
@@ -566,6 +586,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
       discards: 0,
       auto_refusal: "one_at_a_time",
       depths: [{ cells: 1, fill: null, pickable: true }],
+      refusal: "",
     },
     held_call: null,
     producer: producerReading(),
@@ -582,7 +603,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     spend_metered_by_round: {},
     metered_line: "",
     cap_lines: [],
-    allotment: null,
+    caps: armedCaps(),
     overshot: null,
     catch_up_log: [],
     current_round: currentRound(),

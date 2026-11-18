@@ -93,6 +93,8 @@ function SamplesInFlight({ model: m }: { model: RemoteModel }) {
           }))}
         />
       </span>
+      {/* I3: a depth the run refuses says why where the segments are. */}
+      {la.refusal ? <small className="remote-cells-refusal">{la.refusal}</small> : null}
       <div className="row">
         <span className="lbl">Every round</span>
         <span className="val">
@@ -115,14 +117,10 @@ export function RemotePanel({ model: m }: { model: RemoteModel }) {
       {m.babysat && <Provenance />}
       <SamplesInFlight model={m} />
       <div className="remote-panel-section">
-        <div className="section-title">Finishing criteria</div>
-        <RunLimitsControl
-          budget={m.budget}
-          overshoot={m.overshoot}
-          overshot={m.overshot}
-          share={m.share}
-          metered={m.metered}
-        />
+        <div className="section-title">
+          Finishing criteria <span className="section-aside">whichever trips first</span>
+        </div>
+        <RunLimitsControl caps={m.caps} overshoot={m.overshoot} overshot={m.overshot} />
       </div>
     </div>
   );

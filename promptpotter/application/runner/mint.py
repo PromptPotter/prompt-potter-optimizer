@@ -136,6 +136,7 @@ async def open_launch(
     await asyncio.to_thread(
         move_campaign_money,
         budget.standing,
+        asked=budget.standing,
         stores=session.store,
         job_registry=JobRegistry.attach(session.store.jobs_dir),
         campaign_id=session.hop.campaign_id,

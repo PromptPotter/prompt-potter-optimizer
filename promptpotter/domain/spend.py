@@ -345,8 +345,27 @@ class Remainder(NamedTuple):
 NOTHING_METERED = Budget.amount(0.0, 0)
 
 
+#: The book a cap reads its used figure off: the campaign's ceiling its live cycles share, this
+#: cycle's closed rounds, or this launch's clock, afresh at every launch.
+CapBook = Literal["campaign", "cycle", "launch"]
+
+CAP_BOOK_WORDS: Worded[CapBook, str] = Worded(
+    {"campaign": "campaign book", "cycle": "this cycle", "launch": "this launch"}
+)
+
+#: Why a cap is armed below what was asked: the account's allowance (`quota.py::_clamped`).
+CapClamp = Literal["allowance"]
+
+CAP_CLAMP_WORDS: Worded[CapClamp, str] = Worded({"allowance": "allowance"})
+
+
 class CapAxisInfo(NamedTuple):
     title: str
+    # The axis's name on a row that the section already heads as caps.
+    short: str
+    book: CapBook
+    # What its book's figure is called beside the cap: spent, done, elapsed.
+    used: str
     # What an operator types the axis in; the wire carries `scale` times it.
     unit: str
     scale: float
@@ -358,14 +377,32 @@ class CapAxisInfo(NamedTuple):
     exclusive_minimum: float | None
 
 
-def _cap_axis(axis: str, title: str, unit: str, scale: float, step: float) -> CapAxisInfo:
+def _cap_axis(
+    axis: str,
+    title: str,
+    short: str,
+    book: CapBook,
+    used: str,
+    unit: str,
+    scale: float,
+    step: float,
+) -> CapAxisInfo:
     """Integrality and floor are the axis's `Budget` field's, read off it."""
     field = Budget.model_fields[axis]
     ge = [float(m.ge) for m in field.metadata if hasattr(m, "ge")]
     gt = [float(m.gt) for m in field.metadata if hasattr(m, "gt")]
     number = get_args(get_args(field.annotation)[0])[0]
     return CapAxisInfo(
-        title, unit, scale, step, number is int, ge[0] if ge else None, gt[0] if gt else None
+        title,
+        short,
+        book,
+        used,
+        unit,
+        scale,
+        step,
+        number is int,
+        ge[0] if ge else None,
+        gt[0] if gt else None,
     )
 
 
@@ -374,10 +411,14 @@ type CapAxis = Literal["usd", "tokens", "rounds", "wall_clock_s"]
 #: THE run cap axes, on every surface that sets or shows one.
 CAP_AXIS_INFO: Worded[CapAxis, CapAxisInfo] = Worded(
     {
-        "usd": _cap_axis("usd", "Spend cap", "USD", 1, 0.01),
-        "tokens": _cap_axis("tokens", "Token cap", "tokens", 1, 1000),
-        "rounds": _cap_axis("rounds", "Round cap", "rounds", 1, 1),
-        "wall_clock_s": _cap_axis("wall_clock_s", "Wall-clock cap", "minutes", 60, 5),
+        "usd": _cap_axis("usd", "Spend cap", "Spend", "campaign", "spent", "USD", 1, 0.01),
+        "tokens": _cap_axis(
+            "tokens", "Token cap", "Tokens", "campaign", "spent", "tokens", 1, 1000
+        ),
+        "rounds": _cap_axis("rounds", "Round cap", "Rounds", "cycle", "done", "rounds", 1, 1),
+        "wall_clock_s": _cap_axis(
+            "wall_clock_s", "Wall-clock cap", "Clock", "launch", "elapsed", "minutes", 60, 5
+        ),
     }
 )
 assert list(CAP_AXIS_INFO) == list(Budget.model_fields) == list(get_args(CapAxis.__value__))

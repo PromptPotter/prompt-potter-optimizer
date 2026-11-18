@@ -743,19 +743,22 @@ def hold_moved(stores: Stores, hop: CycleHop, allotment: Budget) -> None:
 
 
 def move_campaign_money(
-    money: Budget, *, stores: Stores, job_registry: JobRegistry, campaign_id: str
+    money: Budget, *, asked: Budget, stores: Stores, job_registry: JobRegistry, campaign_id: str
 ) -> None:
-    """THE move of a campaign's ceiling: stored as asked (``None`` lifts), then re-shared."""
+    """THE move of a campaign's ceiling: stored as armed (``None`` lifts) beside what was *asked*
+    of the axes it moves, then re-shared."""
     money = money.only(MONEY_AXES)
     if not money.named:
         return
     with job_registry.admission_gate():
         campaign = stores.campaigns.campaign(campaign_id)
         prior = stores.campaigns.read_campaign_ceiling(campaign.root_hop)
-        standing = prior.over(money)
-        if standing == prior:
+        standing = CampaignCeilingRecord(
+            budget=prior.budget.over(money), asked=prior.asked.over(asked.only(money.named))
+        )
+        if (standing.budget, standing.asked) == (prior.budget, prior.asked):
             return
-        stores.campaigns.append(campaign.root_hop, CampaignCeilingRecord(budget=standing))
+        stores.campaigns.append(campaign.root_hop, standing)
         _reshare_campaign_ceiling(
             money, stores=stores, job_registry=job_registry, campaign_id=campaign_id
         )
@@ -842,7 +845,11 @@ def change_budget(
                 hold = money_on(stores.charges.path).holds[job.job_id]
                 hold_run(stores, job.job_id, hold.bound.over(reserve), parent=hold.parent)
         move_campaign_money(
-            change, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
+            change,
+            asked=requested,
+            stores=stores,
+            job_registry=job_registry,
+            campaign_id=hop.campaign_id,
         )
     cycle = change.only(CYCLE_AXES)
     if overshoot == campaigns.read_standing_budget(hop).overshoot:

@@ -461,7 +461,11 @@ def admit_and_share(
         if hop is not None:
             hold_moved(stores, hop, allotment)
             move_campaign_money(
-                asked, stores=stores, job_registry=job_registry, campaign_id=hop.campaign_id
+                asked,
+                asked=asked,
+                stores=stores,
+                job_registry=job_registry,
+                campaign_id=hop.campaign_id,
             )
     return HeldBudget(
         admitted=admitted,

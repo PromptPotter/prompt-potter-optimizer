@@ -1112,9 +1112,12 @@ class CampaignCeilingRecord(CycleRecord):
 
     record_type: Literal["campaign_ceiling"] = "campaign_ceiling"
     budget: Budget
+    # What the operator asked of each axis `budget` names; lower there only where the account's
+    # allowance clamped it (`quota.py::_clamped`).
+    asked: Budget
     timestamp: str = Field(default_factory=utcnow_iso)
 
-    _money_axes = field_validator("budget")(money_axes_only)
+    _money_axes = field_validator("budget", "asked")(money_axes_only)
 
 
 class CycleShareRecord(CycleRecord):

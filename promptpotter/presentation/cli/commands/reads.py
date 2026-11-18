@@ -248,6 +248,7 @@ def dashboard_human(
         lines[0] += f" · round {dash.round} · {len(dash.rounds)} closed"
         if dash.said is not None:
             lines.append(said_text(dash.said))
+        lines.append(dash.caps.said)
     if dash.stop is not None:
         lines.append(dash.stop.said)
     if admission.refusal is None:

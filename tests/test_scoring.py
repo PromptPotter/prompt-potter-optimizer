@@ -5610,7 +5610,8 @@ def test_the_arms_of_one_declared_head_to_head_are_controlled_only_on_their_reco
             capped = h2h_stores.campaigns.load_campaign(f"capo_capped_{h2h_id}")
             assert capped is not None
             h2h_stores.campaigns.append(
-                capped.root_hop, CampaignCeilingRecord(budget=Budget(usd=1.0))
+                capped.root_hop,
+                CampaignCeilingRecord(budget=Budget(usd=1.0), asked=Budget(usd=1.0)),
             )
         if "rewound" in arms:
             rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")

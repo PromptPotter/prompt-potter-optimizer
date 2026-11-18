@@ -771,10 +771,10 @@ def scan_launch_clocks(spans: Iterable[LedgerSpan]) -> list[LaunchClockRecord]:
     ]
 
 
-def scan_campaign_ceiling(root_ledger: Path) -> Budget:
+def scan_campaign_ceiling(root_ledger: Path) -> CampaignCeilingRecord:
     """The campaign's money axes, off its ROOT's ledger, which every cycle of it reads; none names none."""
     held = scan_last([LedgerSpan(root_ledger)], CampaignCeilingRecord)
-    return Budget() if held is None else held.budget
+    return CampaignCeilingRecord(budget=Budget(), asked=Budget()) if held is None else held
 
 
 def scan_standing_budget(ledger_path: Path) -> StandingBudgetRecord:

@@ -1767,10 +1767,9 @@ export interface ServedDashboard {
    * bounds — `domain/spend.py::campaign_cap_lines`; empty where nothing is
    * capped and on a replay. */
   cap_lines: string[];
-  /** This cycle's share of the campaign's ceiling — the most it may have metered in
-   * all, and what its run's book binds; null where no run holds a share, and
-   * on a replay. */
-  allotment: Budget | null;
+  /** Every cap of `run_limits.budget` read against its own book (`armed_caps`); on
+   * a replay, the caps it stood under and no book read. */
+  caps: ArmedCaps;
   /** The cycle's calls billed past their hold (`run_limits.overshoot`), off the
    * account's charge book; null on a replay, which reads none. */
   overshot: Overshoot | null;
@@ -2316,6 +2315,9 @@ export interface SampleLookahead {
   auto_refusal: 'one_at_a_time' | 'settled' | null;
   /** Each depth the control draws, 1 to `ceiling`. */
   depths: LookaheadDepth[];
+  /** Why no depth is pressable now (`RunState.lookahead_refusal`); empty where the
+   * run admits a press. */
+  refusal: string;
 }
 
 /** One depth the look-ahead control offers: that many calls held in flight. */
@@ -2327,6 +2329,34 @@ export interface LookaheadDepth {
   /** Whether a press of this depth is admitted now: the control applies, the run
    * admits `set-sample-lookahead` and the next walk can take that many. */
   pickable: boolean;
+}
+
+/** Every cap of a cycle as it binds, in `CAP_AXIS_INFO` order: the dashboard's,
+ * and what `set-limits` answers at every door once it applied. */
+export interface ArmedCaps {
+  caps: CapReading[];
+  /** The rows in words, one per line: the terminal's rendering. */
+  said: string;
+}
+
+/** One cap as it binds, read against its OWN book (`CAP_AXIS_INFO[axis].book`),
+ * every figure in the axis's wire unit. */
+export interface CapReading {
+  axis: 'usd' | 'tokens' | 'rounds' | 'wall_clock_s';
+  /** What the operator asked; it differs from `armed` only where `clamped_by` says
+   * why. Null asked no cap. */
+  asked: number | null;
+  /** The cap that binds; null is no cap. */
+  armed: number | null;
+  /** What the axis's book has used; null where it reads nothing now (no launch in
+   * flight for the clock, a replay). */
+  used: number | null;
+  /** What a money axis's book counts; null on rounds and the clock. */
+  meter: 'bill' | 'search_incurred' | null;
+  /** `used` over `armed`, where both stand (a cap of 0 is full): the one meter a
+   * surface draws. */
+  fill: number | null;
+  clamped_by: 'allowance' | null;
 }
 
 /** The calls whose bills passed what their hold held, each drawn on every hold
@@ -5484,7 +5514,7 @@ export interface CommandResponses {
   "revoke-api-token": CommandAcceptedBody;
   "set-api-key": AccountKey;
   "set-concurrent-cycles": CommandAcceptedBody;
-  "set-limits": CommandAcceptedBody;
+  "set-limits": ArmedCaps;
   "set-sample-lookahead": CommandAcceptedBody;
   "set-user-settings": UserSettings;
   "skip-searchpoint": CommandAcceptedBody;
@@ -5541,7 +5571,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "7495e370a037c272";
+export const SERVED_CONTRACT = "6fce5d1243925289";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5774,6 +5804,9 @@ export interface ThetaCaveatInfo {
 
 export interface CapAxisInfo {
   title: string;
+  short: string;
+  book: 'campaign' | 'cycle' | 'launch';
+  used: string;
   unit: string;
   scale: number;
   step: number;
@@ -6292,10 +6325,22 @@ export const SAMPLE_STATUS_LABELS: Record<'HIT' | 'MISS' | 'ERR' | 'UNSC', strin
 
 // Mirror of domain/spend.py::CAP_AXIS_INFO, in display order.
 export const CAP_AXIS_INFO: Record<CapAxis, CapAxisInfo> = {
-  "usd": { title: "Spend cap", unit: "USD", scale: 1, step: 0.01, integer: false, minimum: null, exclusive_minimum: null },
-  "tokens": { title: "Token cap", unit: "tokens", scale: 1, step: 1000, integer: true, minimum: 0.0, exclusive_minimum: null },
-  "rounds": { title: "Round cap", unit: "rounds", scale: 1, step: 1, integer: true, minimum: 0.0, exclusive_minimum: null },
-  "wall_clock_s": { title: "Wall-clock cap", unit: "minutes", scale: 60, step: 5, integer: false, minimum: null, exclusive_minimum: null },
+  "usd": { title: "Spend cap", short: "Spend", book: "campaign", used: "spent", unit: "USD", scale: 1, step: 0.01, integer: false, minimum: null, exclusive_minimum: null },
+  "tokens": { title: "Token cap", short: "Tokens", book: "campaign", used: "spent", unit: "tokens", scale: 1, step: 1000, integer: true, minimum: 0.0, exclusive_minimum: null },
+  "rounds": { title: "Round cap", short: "Rounds", book: "cycle", used: "done", unit: "rounds", scale: 1, step: 1, integer: true, minimum: 0.0, exclusive_minimum: null },
+  "wall_clock_s": { title: "Wall-clock cap", short: "Clock", book: "launch", used: "elapsed", unit: "minutes", scale: 60, step: 5, integer: false, minimum: null, exclusive_minimum: null },
+};
+
+// Mirror of domain/spend.py::CAP_BOOK_WORDS, in display order.
+export const CAP_BOOK_WORDS: Record<'campaign' | 'cycle' | 'launch', string> = {
+  "campaign": "campaign book",
+  "cycle": "this cycle",
+  "launch": "this launch",
+};
+
+// Mirror of domain/spend.py::CAP_CLAMP_WORDS, in display order.
+export const CAP_CLAMP_WORDS: Record<'allowance', string> = {
+  "allowance": "allowance",
 };
 
 // Mirror of domain/spend.py::CEILING_METER_LABELS, in display order.
@@ -6397,6 +6442,8 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [LIVES_WORDS, ["banked", "spent_pip", "empty", "empty_sentence", "life", "lives"]],
   [SAMPLE_STATUS_LABELS, ["HIT", "MISS", "ERR", "UNSC"]],
   [CAP_AXIS_INFO, ["usd", "tokens", "rounds", "wall_clock_s"]],
+  [CAP_BOOK_WORDS, ["campaign", "cycle", "launch"]],
+  [CAP_CLAMP_WORDS, ["allowance"]],
   [CEILING_METER_LABELS, ["bill", "search_incurred"]],
   [KEY_SOURCE_LABELS, ["host", "user"]],
   [PREFIX_STATE_TITLES, ["discounted", "cold", "unreported", "replayed"]],

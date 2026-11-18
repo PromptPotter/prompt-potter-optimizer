@@ -50,9 +50,10 @@ are `{dataset}/dataset.yaml::campaign`, never guessed. `head-to-head` mints ever
 `price-head-to-head <plan>` prices one at $0. `pause` is the HALT; a queued launch takes
 `cancel-queued <job_id>` (`machine-status` names it).
 
-**Every ending states its next verb** (the readout's `cli:` line). A `set-limits` raise fails silently two
-ways: the ceiling is clamped to the account allowance (read the ARMED value off
-`dashboard --json`'s `run_limits.budget`), and the counter is CUMULATIVE across resumes and cycles. A hard
+**Every ending states its next verb** (the readout's `cli:` line). `set-limits` answers the caps as
+ARMED, each against its own book (`ArmedCaps`, also `dashboard`'s `caps`): a raise past the account
+allowance says `armed $X (asked $Y, allowance)`, and the spend counter is the CAMPAIGN's, cumulative
+across resumes and cycles. A hard
 kill loses nothing: every query lands in `measurements/cells/{config_key}.jsonl` at once.
 
 ## Supervise

@@ -1341,6 +1341,30 @@
         "title": "ArmSamples",
         "type": "object"
       },
+      "ArmedCaps": {
+        "additionalProperties": false,
+        "description": "Every cap of a cycle as it binds, in `CAP_AXIS_INFO` order: the dashboard's, and what\n`set-limits` answers at every door once it applied.",
+        "properties": {
+          "caps": {
+            "items": {
+              "$ref": "#/components/schemas/CapReading"
+            },
+            "title": "Caps",
+            "type": "array"
+          },
+          "said": {
+            "description": "The rows in words, one per line: the terminal's rendering.",
+            "title": "Said",
+            "type": "string"
+          }
+        },
+        "required": [
+          "caps",
+          "said"
+        ],
+        "title": "ArmedCaps",
+        "type": "object"
+      },
       "ArmsHold": {
         "additionalProperties": false,
         "description": "A launched job's cycle holding at its arms gate, the hold `submit-arms` answers: named by\nits declaration's stamp, since each round holds afresh, with the drafts it offers to keep.",
@@ -3176,6 +3200,111 @@
         ],
         "title": "CandidateStanding",
         "type": "string"
+      },
+      "CapAxis": {
+        "enum": [
+          "usd",
+          "tokens",
+          "rounds",
+          "wall_clock_s"
+        ],
+        "type": "string"
+      },
+      "CapReading": {
+        "additionalProperties": false,
+        "description": "One cap as it binds, read against its OWN book (`CAP_AXIS_INFO[axis].book`), every figure\nin the axis's wire unit.",
+        "properties": {
+          "armed": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cap that binds; null is no cap.",
+            "title": "Armed"
+          },
+          "asked": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the operator asked; it differs from `armed` only where `clamped_by` says why. Null asked no cap.",
+            "title": "Asked"
+          },
+          "axis": {
+            "$ref": "#/components/schemas/CapAxis"
+          },
+          "clamped_by": {
+            "anyOf": [
+              {
+                "const": "allowance",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Clamped By"
+          },
+          "fill": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`used` over `armed`, where both stand (a cap of 0 is full): the one meter a surface draws.",
+            "title": "Fill"
+          },
+          "meter": {
+            "anyOf": [
+              {
+                "enum": [
+                  "bill",
+                  "search_incurred"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a money axis's book counts; null on rounds and the clock.",
+            "title": "Meter"
+          },
+          "used": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the axis's book has used; null where it reads nothing now (no launch in flight for the clock, a replay).",
+            "title": "Used"
+          }
+        },
+        "required": [
+          "axis",
+          "asked",
+          "armed",
+          "used",
+          "meter",
+          "fill",
+          "clamped_by"
+        ],
+        "title": "CapReading",
+        "type": "object"
       },
       "CatchUpLogEntry": {
         "additionalProperties": false,
@@ -15573,6 +15702,11 @@
             "title": "Pick Max",
             "type": "integer"
           },
+          "refusal": {
+            "description": "Why no depth is pressable now (`RunState.lookahead_refusal`); empty where the run admits a press.",
+            "title": "Refusal",
+            "type": "string"
+          },
           "scoring_now": {
             "description": "Whether a walk holds or admits any call now; otherwise `most` speaks for the next round alone.",
             "title": "Scoring Now",
@@ -15592,7 +15726,8 @@
           "cell_reserve_usd",
           "discards",
           "auto_refusal",
-          "depths"
+          "depths",
+          "refusal"
         ],
         "title": "SampleLookahead",
         "type": "object"
@@ -15837,17 +15972,6 @@
             "$ref": "#/components/schemas/RunAdmission",
             "description": "The verb the run control offers now, its campaign's refusal joined (`admission.py::admitted`), or the sentence where it offers none."
           },
-          "allotment": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Budget"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "This cycle's share of the campaign's ceiling — the most it may have metered in all, and what its run's book binds; null where no run holds a share, and on a replay."
-          },
           "at_offset": {
             "default": -1,
             "title": "At Offset",
@@ -15890,6 +16014,10 @@
             },
             "title": "Cap Lines",
             "type": "array"
+          },
+          "caps": {
+            "$ref": "#/components/schemas/ArmedCaps",
+            "description": "Every cap of `run_limits.budget` read against its own book (`armed_caps`); on a replay, the caps it stood under and no book read."
           },
           "catch_up_log": {
             "items": {
@@ -16230,7 +16358,7 @@
           "spend_metered_by_round",
           "metered_line",
           "cap_lines",
-          "allotment",
+          "caps",
           "overshot",
           "fork_remainder",
           "observed",
@@ -22167,11 +22295,11 @@
           "required": true
         },
         "responses": {
-          "202": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CommandAcceptedBody"
+                  "$ref": "#/components/schemas/ArmedCaps"
                 }
               }
             },
