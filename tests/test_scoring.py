@@ -195,7 +195,7 @@ from promptpotter.application.runner.round import (
     hold_for_operator,
     run_init,
 )
-from promptpotter.application.runner.termination import standing_tripped
+from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.scoring import closed_rounds, evaluators, query_loop
 from promptpotter.application.scoring import passes as held_out
 from promptpotter.application.scoring.classification import DegradationCheck, scoreable_rows
@@ -330,7 +330,14 @@ from promptpotter.domain.phase_acts import (
     StepOpened,
     TextFact,
 )
-from promptpotter.domain.phases import PauseCause, RunPhase, StopReason, WalkEnd
+from promptpotter.domain.phases import (
+    PauseCause,
+    RunPhase,
+    StopOutcome,
+    StopReason,
+    WalkEnd,
+    stop_reason_outcome,
+)
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
@@ -4668,6 +4675,42 @@ def test_a_population_table_holds_each_candidates_own_rendered_prompt() -> None:
     )
     assert Locus("solve", "prompt").name in table, (
         "the diff table dropped a candidate's rendered prompt"
+    )
+
+
+def test_a_holed_panel_stops_in_its_rows_words_and_the_backends_hole_on_its_own_stop() -> None:
+    # The dyck shape: one UNSCOREABLE row per arm, its error set.
+    holed = [
+        measurement(arm, None, error=f"arm {arm}: no evidence", error_category="UNSCOREABLE")
+        for arm in (0, 1)
+    ]
+    stop = panel_gate_tripped(holed, None, "strict")
+    assert stop is not None and stop_reason_outcome(stop.reason) is not StopOutcome.PAUSED, (
+        "a hole no signal made paused the run, so it read as an interrupt"
+    )
+    reading = RunPhaseRecord.stop(stop.reason, detail=stop.detail).stop_reading
+    assert reading is not None and all(
+        f"arm {arm}: no evidence" in reading.said for arm in (0, 1)
+    ), "the holed panel's stop did not say its rows' errors"
+    backend = measurement(2, None, error="504: no reply in 164s", error_category="SERVER")
+    served = panel_gate_tripped([*holed, backend], None, "strict")
+    assert served is not None and served.reason is StopReason.BACKEND_HOLE, (
+        "a backend's hole lost the stop its L4 outer re-asks on"
+    )
+    assert "no reply in 164s" in served.detail, "the backend's hole lost its words"
+
+
+def test_a_holed_panels_detail_is_bounded_and_never_says_none() -> None:
+    # An L4 outage holes every cell, each in words of its own; one row carries no error at all.
+    outage = [
+        measurement(arm, None, error=f"cell {arm}: 503", error_category="SERVER")
+        for arm in range(9)
+    ]
+    bare = measurement(9, None, error_category="UNSCOREABLE")
+    stop = panel_gate_tripped([*outage, bare], None, "strict")
+    assert stop is not None and "None" not in stop.detail, "a row with no error said 'None'"
+    assert stop.detail.count("503") == 3 and stop.detail.endswith("; 7 more"), (
+        f"an outage's detail grew with its holes: {stop.detail}"
     )
 
 

@@ -33,7 +33,8 @@ class StopReason(enum.StrEnum):
     ROUNDS_BUDGET = "rounds_budget"
     LIVES_EXHAUSTED = "lives_exhausted"
     PAUSED = "paused"
-    PANEL_CUT = "panel_cut"
+    # The panel gate's, on a round whose panel holds an errored cell, whatever its category.
+    PANEL_HOLE = "panel_hole"
     # The round before's adapter landed nothing, and its re-runs before this walk failed.
     ADAPTER_OWED = "adapter_output_owed"
     CRASHED = "crashed"
@@ -49,7 +50,7 @@ class StopReason(enum.StrEnum):
     ORIGIN_GATE = "origin_gate"
     # Raised at the first cell the backend could not reach once its own retries were spent.
     BACKEND_UNREACHABLE = "backend_unreachable"
-    # The panel gate's, on a cell the backend reached and left unanswered (a 5xx, its timeout).
+    # PANEL_HOLE's, where a hole is the backend's (``SERVER``): the one re-measuring may heal.
     BACKEND_HOLE = "backend_hole"
     PROVIDER_CREDIT = "provider_credit_exhausted"
     PROVIDER_THROTTLED = "provider_throttled"
@@ -117,8 +118,6 @@ class PauseCause(enum.StrEnum):
     CANCELLED = "cancelled"
     # The launch reached the round allowance it was started with (``start-run {step_rounds}``).
     STEP = "step"
-    # A declared bound cut the round's panel (``StopReason.PANEL_CUT``).
-    BOUND = "bound"
     # An adapter's round output stayed owed past its re-runs (``StopReason.ADAPTER_OWED``).
     OWED = "owed"
 
@@ -593,18 +592,18 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             (NextAct(kind="start-run"),),
         ),
-        # Unlike PAUSED the round is discarded, not persisted partial: `resume` alone re-buys the cut.
-        StopReason.PANEL_CUT: StopReasonInfo(
-            "Panel cut by a declared bound",
-            StopOutcome.PAUSED,
+        StopReason.PANEL_HOLE: StopReasonInfo(
+            "Panel left holed",
+            StopOutcome.HALTED,
             StopCategory.LIMIT,
             False,
             False,
-            "Cells were cut at their time bound. Give them room (the connector's cell envelope) "
-            "before resuming, or turn the panel gate off to elect on the holed panel.",
-            False,
+            "The round is discarded, each hole named by its category and error: resuming re-measures "
+            "them, but a cell our time bound cut (HALTED) is cut again unless the connector's cell "
+            "envelope first gives it room. The panel gate off elects on the holed panel.",
+            True,
             (
-                NextAct(field="Connector.cell_envelope_s"),
+                NextAct(field="Connector.cell_envelope_s", value="room for a cell cut (HALTED)"),
                 NextAct(field="optimization.panel_gate", value="off"),
                 NextAct(kind="start-run"),
             ),
@@ -713,7 +712,6 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             True,
             (NextAct(kind="start-run"),),
         ),
-        # Not PANEL_CUT: no bound of ours cut the cell; the round is discarded, as a cut one is.
         StopReason.BACKEND_HOLE: StopReasonInfo(
             "Backend left a cell unanswered",
             StopOutcome.HALTED,
@@ -857,7 +855,6 @@ if _unspelled:
 
 # A pause the run raises on itself names its own cause, whatever else reached the process.
 SELF_PAUSE_CAUSE: dict[StopReason, PauseCause] = {
-    StopReason.PANEL_CUT: PauseCause.BOUND,
     StopReason.ADAPTER_OWED: PauseCause.OWED,
 }
 assert all(STOP_REASON_INFO[r].outcome is StopOutcome.PAUSED for r in SELF_PAUSE_CAUSE)

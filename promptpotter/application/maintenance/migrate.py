@@ -12,6 +12,7 @@ from promptpotter.application.maintenance.migrations import (
     grant_ceiling,
     host_account,
     live_jobs_index,
+    panel_hole_ending,
     terms_consent,
 )
 from promptpotter.infrastructure.store.data_root import Staged
@@ -20,5 +21,6 @@ MIGRATIONS: dict[str, Callable[[Path, Mapping[Path, bytes]], list[Staged]]] = {
     "grant ceiling": grant_ceiling.staged,
     "host account": host_account.staged,
     "live-jobs index": live_jobs_index.staged,
+    "panel-hole ending": panel_hole_ending.staged,
     "terms consent": terms_consent.staged,
 }

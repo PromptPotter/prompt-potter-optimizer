@@ -29,6 +29,7 @@ import httpx
 import pytest
 from factories import (
     INNER_RUN,
+    LAUNCHED_DATASET,
     PROMPT_INFO,
     SANDBOX_CAMPAIGN,
     archive_row,
@@ -43,8 +44,10 @@ from factories import (
     inner_cells,
     inner_sandbox,
     jumping_clock,
+    launched_bank,
     ledger_records,
     loop_session,
+    measurement,
     mint_fork,
     minted_campaign,
     minted_dataset,
@@ -115,11 +118,12 @@ from promptpotter.application.optimizer_manifest import checkin_manifest, select
 from promptpotter.application.optimizers.nodes import Race
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config
 from promptpotter.application.run_phase_control import FlightGauge, RunControl, budget_stop
+from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.mint import stand_held_budget
-from promptpotter.application.runner.termination import run_stop_reason
+from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
 from promptpotter.application.scoring import catch_up, query_loop
 from promptpotter.application.scoring.catch_up import CatchUpPool
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
@@ -183,6 +187,7 @@ from promptpotter.domain.job import (
     PaidCall,
 )
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
+from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
     inner_cell_facts,
@@ -223,6 +228,7 @@ from promptpotter.domain.records.run_records import (
     LaunchAnswer,
     PhaseRecord,
     PricedKeyRecord,
+    RebaseRequest,
     Release,
     RoundEnteredRecord,
     RoundWarningRecord,
@@ -1531,6 +1537,77 @@ async def test_a_skip_holds_and_its_replay_records_the_depth_it_skipped_at(
     )
 
 
+def _inner_seat(stores: Stores, seats: InnerCells) -> tuple[InnerSpawnContext, Sample]:
+    """An outer cycle's one seat, and the cell that asks it."""
+    owner = CycleHop(campaign_id="ppself__aaaaaa", cycle_id="cycle_deadbeef0000")
+    spawning = InnerSpawnContext(
+        inner_sandbox_root=inner_sandbox(stores, owner.campaign_id, owner.cycle_id),
+        identity=stores.identity,
+        shared_root=stores.shared_root,
+        install_datasets_root=stores.install_datasets_root,
+        research_datasets_root=None,
+        inside=(owner,),
+        enclosing=(),
+        acting=(),
+        cells=seats,
+        purpose=Optimize(),
+        ruler=0,
+    )
+    (seat,) = seats.cells
+    pin = PinnedCell(cell=seat, instrument="i").pin()
+    return spawning, Sample(id=0, query=seat.id, ground_truth=None, source_pin=pin)
+
+
+@pytest.mark.usefixtures("run_bound")
+async def test_an_inner_runs_stop_reaches_its_outer_cell_off_the_cycle_it_ended_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Any
+) -> None:
+    # A journey: the backend's hole is re-asked, and the re-ask rebases before the provider refuses.
+    launched_bank(built_stores, offline, samples(40, "TRUE"))
+    laid = defaulted_config({"optimization": {"optimizer": "potter", "degradation_threshold": 0.0}})
+    spawning, cell = _inner_seat(
+        built_stores, inner_cells("potter", dataset=LAUNCHED_DATASET, campaign=laid)
+    )
+    rounds: list[str] = []
+
+    async def _round(cycle: Any, round_num: int, **_final: bool) -> Any:
+        """Ask 1's round holed by the backend's 504; ask 2's rebases; its fork's, refused."""
+        rounds.append(cycle.session.hop.cycle_id)
+        if len(rounds) == 1:
+            hole = measurement(0, None, error="504: no reply in 164s", error_category="SERVER")
+            stop = panel_gate_tripped([hole], None, "strict")
+            assert stop is not None
+            raise stop
+        if len(rounds) == 2:
+            raise StopLoop(
+                StopReason.REBASED,
+                fork=RebaseRequest(
+                    fork_from_round=round_num,
+                    trigger=ForkTrigger.OPTIMIZER_REBASE,
+                    reason="rebased",
+                    issued_by=SYSTEM_PRINCIPAL,
+                ),
+            )
+        raise SendRefusedError("Insufficient credits", category=ErrorCategory.PROVIDER_CREDIT)
+
+    monkeypatch.setattr(loop, "execute_round", _round)
+    # The process's outage memo, which an earlier fact's real fetch can leave set.
+    monkeypatch.setattr(pricing, "_ROUTE_OUTAGE", {})
+    with (
+        scoped(account=built_stores),
+        scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
+        scoped(book=spend_book(1000.0), round=0),
+        pytest.raises(CellSendRefusedError) as refused,
+    ):
+        await spawn.run_inner_cycle(cell, {})
+    assert len(rounds) == 3 and rounds[1] != rounds[2], (
+        f"no fork re-asked: {rounds}, {refused.value}"
+    )
+    assert "Insufficient credits" in str(refused.value), (
+        "the outer cell read the stop off the cycle its run rebased from, not the one it ended on"
+    )
+
+
 @pytest.mark.usefixtures("run_bound", "offline")
 @on_jumping_clock
 async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
@@ -1548,31 +1625,13 @@ async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
         return cycle_result([], 0.0, [])
 
     monkeypatch.setattr(spawn, "_run_inner_campaign", _hanging_inner)
-    seats = inner_cells("potter")
-    owner = CycleHop(campaign_id="ppself__aaaaaa", cycle_id="cycle_deadbeef0000")
-    spawning = InnerSpawnContext(
-        inner_sandbox_root=inner_sandbox(built_stores, owner.campaign_id, owner.cycle_id),
-        identity=built_stores.identity,
-        shared_root=built_stores.shared_root,
-        install_datasets_root=built_stores.install_datasets_root,
-        research_datasets_root=None,
-        inside=(owner,),
-        enclosing=(),
-        acting=(),
-        cells=seats,
-        purpose=Optimize(),
-        ruler=0,
-    )
-    (seat,) = seats.cells
-    query = seat.id
-    pin = PinnedCell(cell=seat, instrument="i").pin()
-    cell = Sample(id=0, query=query, ground_truth=None, source_pin=pin)
+    spawning, cell = _inner_seat(built_stores, inner_cells("potter"))
     with (
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
         scoped(round=0),
     ):
         # The connector DECLARES the seconds, the scoring seam enforces them, as in `measure_sample`.
-        envelope = CellEnvelope(spawn.inner_cell_envelope_s(cell, {}), attempts=1, label=query)
+        envelope = CellEnvelope(spawn.inner_cell_envelope_s(cell, {}), attempts=1, label=cell.query)
         with pytest.raises(CellUnscoreableError):
             async with envelope:
                 await spawn.run_inner_cycle(cell, {})

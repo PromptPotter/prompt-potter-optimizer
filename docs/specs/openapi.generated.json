@@ -13924,7 +13924,6 @@
           "interrupt",
           "cancelled",
           "step",
-          "bound",
           "owed"
         ],
         "title": "PauseCause",
@@ -17404,7 +17403,7 @@
           "rounds_budget",
           "lives_exhausted",
           "paused",
-          "panel_cut",
+          "panel_hole",
           "adapter_output_owed",
           "crashed",
           "diverged",

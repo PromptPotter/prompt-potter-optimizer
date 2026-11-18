@@ -60,7 +60,12 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.records.run_records import RoundStatement, SpawnedBy, SpawnedRecord
+from promptpotter.domain.records.run_records import (
+    RoundStatement,
+    RunPhaseRecord,
+    SpawnedBy,
+    SpawnedRecord,
+)
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import split_rendered_prompt
@@ -287,9 +292,9 @@ async def _run_inner_campaign(
     cell: _InnerCell,
     minted: list[CycleHop],
     spawned_by: dict[str, Any],
-) -> tuple[CycleResult, list[RoundStatement]]:
+) -> tuple[CycleResult, list[RoundStatement], str]:
     """Runs in a FRESH task, so every ContextVar bound below is this cell's alone. The rounds are
-    the ended cycle's standing closes, off its ledger."""
+    the ended cycle's standing closes, and the words its stop was declared in, off its ledger."""
     store = claim_sandbox(cell.ctx)
     # Over the seat too: its init reads what this cell remembers.
     with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
@@ -320,7 +325,9 @@ async def _run_inner_campaign(
                 ),
             )
             standing = ended.store.campaigns.standing_rounds(ended.hop, moment=None)
-    return result, [held.close for held in standing.rounds.values()]
+            declared = ended.store.campaigns.last(ended.hop, RunPhaseRecord)
+    assert declared is not None and declared.stop_reading is not None, "an inner run ends declared"
+    return result, [held.close for held in standing.rounds.values()], declared.stop_reading.said
 
 
 def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
@@ -361,7 +368,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
             context=scope_context(measured=None),
         )
         try:
-            result, rounds = await inner_task
+            result, rounds, stopped = await inner_task
         except asyncio.CancelledError:
             if not inner_task.done():
                 inner_task.cancel()
@@ -372,15 +379,15 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
             raise
         if result.stop_reason is not StopReason.BACKEND_HOLE:
             break
+    said = f"its inner campaign {cell.campaign_id} stopped: {stopped}"
     if (refused := _REFUSALS.get(result.stop_reason)) is not None:
         # The inner run spends the outer's key and ceiling, so the refusal halts the walk for every later cell.
-        raise CellSendRefusedError(
-            f"its inner campaign {cell.campaign_id} stopped on {result.stop_reason}",
-            category=refused,
-            spent={},
-        )
-    # Raises `CellUnscoreableError` on every other no-evidence shape, which `measure_sample` resolves.
-    scored = compute_outer_proxies(result, rounds)
+        raise CellSendRefusedError(said, category=refused, spent={})
+    try:
+        scored = compute_outer_proxies(result, rounds)
+    except CellUnscoreableError as unscored:
+        # Every other no-evidence shape, which `measure_sample` resolves.
+        raise CellUnscoreableError(f"{unscored}; {said}", spent=unscored.spent) from unscored
     run = InnerRunAddress(sandbox=cell.ctx.inside[-1], campaign_id=cell.campaign_id)
     facts = inner_cell_facts(result, rounds, run)
     delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"

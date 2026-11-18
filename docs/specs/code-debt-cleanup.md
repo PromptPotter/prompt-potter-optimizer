@@ -838,19 +838,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   (`runner/loop.py::LoopEnd`) carry no words. Action: the set-aside lands where every door reads it,
   and a budget stop travels as its `StopLoop`. **Rides with:** none yet. **Re-test:** a halt at a
   round boundary names the book's parts in its `run_phase` `detail`.
-- **A holed panel pauses "by interrupt", with no words, unless the hole is the backend's or our
-  bound's** (l4-valid's report; seen live: dyck cycle_4ec5c80c24a4 round 1, 2026-11-18, holes
-  {positive 1, crippled 1} read "Paused by interrupt"): `runner/termination.py::panel_gate_tripped`
-  ends on a bare `StopLoop(PAUSED)` for any other hole (an UNSCOREABLE inner cell, a 503 raised
-  into a cell), and `phases.py::SELF_PAUSE_CAUSE` has no row for it, so no signal is named as its
-  cause. Root: the gate has no stop for a hole no bound of ours made. Action: one stop the panel
-  gate raises on its own holes, worded by its rows, which a resume re-measures. **Re-test:** the
-  dyck shape (one UNSCOREABLE row per arm) reads its rows' error, never "interrupt".
-- **An L4 outer's errored cell carries no backend words** (l4-valid's report): `CycleResult` holds
-  no stop detail, so `runner/inner/spawn.py::run_inner_cycle` grades a second `backend_hole` as
-  "stopped on backend_hole" and the backend's status and message stay on the inner ledger. Action:
-  the outer cell's error reads the inner stop's detail. **Re-test:** two injected 504s in one inner
-  cell put the backend's words in the outer cell's error.
 - **The wallet read under the admission gate grows with the account's charges** (gate-hold's
   report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
   `campaign_spend` under the gate, admission's last scan that grows with history. Unmeasured.

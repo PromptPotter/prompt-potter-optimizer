@@ -3060,6 +3060,24 @@ def test_a_job_in_flight_before_the_live_jobs_index_holds_its_slot_past_the_land
     )
 
 
+def test_a_job_v0_8_20_ended_on_a_panel_cut_lands_ended_on_its_panel_hole(tmp_path: Path) -> None:
+    # Today's launches stay in `jobs/`, which the daily quota counts: a SURVIVOR.
+    projects_root = tmp_path / "projects"
+    registry = JobRegistry.attach(jobs_dir(projects_root))
+    job = registry.create(
+        user_id="u", principal_id="u", workspace=WorkspaceDir(tmp_path / "w"),
+        hop=UNRESOLVED_HOP, holder=CampaignLaunch("ds1"),
+    )  # fmt: skip
+    path = jobs_dir(projects_root) / f"{job.job_id}.json"
+    ended = {"released_at": "2026-11-18T00:00:00Z", "ending": "panel_cut"}
+    write_json(path, json.loads(path.read_bytes()) | ended)
+    staged = {one.path: one.data for one in MIGRATIONS["panel-hole ending"](projects_root, {})}
+    landed = JobRegistry.as_staged(jobs_dir(projects_root), staged).get(job.job_id)
+    assert landed is not None and landed.ending is StopReason.PANEL_HOLE, (
+        "a job v0.8.20 ended on a panel cut refused the landing"
+    )
+
+
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_write_a_crash_cut_short_under_an_authored_tree_is_run_data_never_a_survivor() -> None:
     torn = PurePosixPath(PROJECTS_DIR, "u", "datasets", "d", ".x.tmp")

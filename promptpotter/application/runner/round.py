@@ -1074,11 +1074,8 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopLoop | No
     holed = sorted(key for key, arm in proposed.items() if is_leader_eligible(arm) and holes[key])
     # Sink is the LEDGER: the halt below unwinds before `close_round`.
     append_record(decision(PanelCoverage(holes_by_arm=holes), holed, node=None, round=round_num))
-    holed_rows = [
-        (key, cell) for key in holed for cell in round_result.rows(key) if cell.facts.errored
-    ]
     tripped = panel_gate_tripped(
-        [cell for _, cell in holed_rows],
+        [cell for key in holed for cell in round_result.rows(key) if cell.facts.errored],
         cut if any(unbought[cid] for cid in holed) else None,
         ctx.cycle.config.optimization.panel_gate,
     )

@@ -129,7 +129,9 @@ BASELINE = {
     # nothing the old code still serves or a roll-back would run on.
     # small-7 (+3): a line-file rewrite left empty deletes the file, so a reclaim leaves no 0-byte cells.
     # small-7 (+27): `archive-datasets`, the served scopes the archive control picks from.
-    "package_lines": 111768,
+    # l4-words-fix (+25, all the migration): job files v0.8.20 ended on `panel_cut` land on
+    # `panel_hole` (`migrations/panel_hole_ending.py`); the chain is net 0 beside it.
+    "package_lines": 111793,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

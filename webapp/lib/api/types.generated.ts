@@ -588,7 +588,7 @@ export interface HierarchyState {
 export interface RunStatus {
   run_phase: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'terminal';
   /** Null while the run has not stopped. */
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_hole' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   mark: 'queued' | 'starting' | 'running' | 'scoring' | 'paused' | 'gate' | 'detached' | 'success' | 'halted' | 'failed' | 'archived' | 'unknown';
 }
 
@@ -596,9 +596,9 @@ export interface RunStatus {
  * reached. */
 export interface StopReading {
   /** Null on an accepted pause the loop has yet to reach. */
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_hole' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   /** What paused it; null on a run that ended. */
-  cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'bound' | 'owed' | null;
+  cause: 'command' | 'enclosing' | 'interrupt' | 'cancelled' | 'step' | 'owed' | null;
   /** Who asked, or what its raiser said, in its own words. */
   detail: string;
   at: string;
@@ -1064,7 +1064,7 @@ export interface BenchStatus {
 export interface PassStop {
   /** The walk's own end, or the run stop that cut the pass: a pause mid-walk, a
    * spent budget before it was sent. */
-  cause: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'parameter_refused' | 'pipeline_error' | 'consecutive_errors';
+  cause: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_hole' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | 'skip' | 'stop_rule' | 'budget' | 'client_error' | 'parameter_refused' | 'pipeline_error' | 'consecutive_errors';
   /** The backend's dominant warning, where errors ended the pass. */
   warning: string | null;
 }
@@ -1693,7 +1693,7 @@ export interface ServedDashboard {
   at_offset: number;
   state: 'init' | 'origin' | 'proposing' | 'scoring' | 'between_samples' | 'between_candidates' | 'optimizer_step' | 'bench' | 'stopped';
   optimizer_step: string | null;
-  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
+  stop_reason: 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_hole' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted' | null;
   round: number;
   measuring_arm: ArmName | null;
   rounds: ServedRound[];
@@ -5676,7 +5676,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "1b1f890e05c18d85";
+export const SERVED_CONTRACT = "c2bf0b70135301ed";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5739,7 +5739,7 @@ export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_se
 export type CellSetName = 'origin_panel' | 'reference_cells' | 'bench_split' | 'measured_by_both';
 
 // promptpotter.domain.phases::StopReason
-export type StopReason = 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_cut' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
+export type StopReason = 'rounds_budget' | 'lives_exhausted' | 'paused' | 'panel_hole' | 'adapter_output_owed' | 'crashed' | 'diverged' | 'optimizer_abort' | 'optimizer_exhausted' | 'hard_cap_reached' | 'target_hit' | 'spend_budget' | 'token_budget' | 'host_allowance' | 'wall_clock' | 'origin_gate' | 'backend_unreachable' | 'backend_hole' | 'provider_credit_exhausted' | 'provider_throttled' | 'price_list_unreachable' | 'no_rate' | 'render_error' | 'optimizer_timeout' | 'rebased_to_fork' | 'producer_vanished' | 'input_refused' | 'not_admitted';
 
 // promptpotter.domain.phases::StopOutcome
 export type StopOutcome = 'success' | 'halted' | 'failed' | 'paused';
@@ -6334,7 +6334,7 @@ export const STOP_REASON_INFO: Record<StopReason, StopReasonInfo> = {
   "optimizer_exhausted": { label: "Optimizer out of moves", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: true, next_acts: [] },
   "rebased_to_fork": { label: "Rebased to fork", outcome: "success", category: "search", halts_mid_round: false, has_traceback: false, next_step: "", grades_selection: false, next_acts: [] },
   "paused": { label: "Paused", outcome: "paused", category: "operator", halts_mid_round: true, has_traceback: false, next_step: "Resuming picks it up at the next checkpoint.", grades_selection: false, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
-  "panel_cut": { label: "Panel cut by a declared bound", outcome: "paused", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "Cells were cut at their time bound. Give them room (the connector's cell envelope) before resuming, or turn the panel gate off to elect on the holed panel.", grades_selection: false, next_acts: [{ kind: "", field: "Connector.cell_envelope_s", value: "", reads: "" }, { kind: "", field: "optimization.panel_gate", value: "off", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },
+  "panel_hole": { label: "Panel left holed", outcome: "halted", category: "limit", halts_mid_round: false, has_traceback: false, next_step: "The round is discarded, each hole named by its category and error: resuming re-measures them, but a cell our time bound cut (HALTED) is cut again unless the connector's cell envelope first gives it room. The panel gate off elects on the holed panel.", grades_selection: true, next_acts: [{ kind: "", field: "Connector.cell_envelope_s", value: "room for a cell cut (HALTED)", reads: "" }, { kind: "", field: "optimization.panel_gate", value: "off", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },
   "adapter_output_owed": { label: "Adapter output owed", outcome: "paused", category: "failure", halts_mid_round: true, has_traceback: false, next_step: "The round before's adapter landed nothing in its re-runs; resuming re-runs it before the next walk.", grades_selection: false, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }] },
   "optimizer_abort": { label: "Optimizer abort", outcome: "halted", category: "search", halts_mid_round: false, has_traceback: false, next_step: "The optimizer judged the run past recovering and said why: fix what it names, then resume, or start a fresh campaign.", grades_selection: true, next_acts: [{ kind: "start-run", field: "", value: "", reads: "" }, { kind: "mint-campaign", field: "", value: "", reads: "" }] },
   "spend_budget": { label: "Spend budget reached", outcome: "halted", category: "budget", halts_mid_round: true, has_traceback: false, next_step: "The spend cap counts every launch so far: raise it above what it already counts, then resume.", grades_selection: true, next_acts: [{ kind: "set-limits", field: "budget.usd", value: "above what the cap already counts", reads: "" }, { kind: "start-run", field: "", value: "", reads: "" }] },
@@ -6554,7 +6554,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [UNIT_FORMATS, ["rate", "score", "theta", "seconds", "usd", "tokens", "rank", "rounds"]],
   [DASHBOARD_STATE_PAUSE_WORDS, ["init", "origin", "proposing", "scoring", "between_samples", "between_candidates", "optimizer_step", "bench", "stopped"]],
   [RUN_PHASE_INFO, ["queued", "starting", "running", "scoring", "paused", "gate", "detached", "terminal"]],
-  [STOP_REASON_INFO, ["rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_cut", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "backend_hole", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
+  [STOP_REASON_INFO, ["rounds_budget", "target_hit", "lives_exhausted", "hard_cap_reached", "optimizer_exhausted", "rebased_to_fork", "paused", "panel_hole", "adapter_output_owed", "optimizer_abort", "spend_budget", "token_budget", "host_allowance", "wall_clock", "origin_gate", "backend_unreachable", "backend_hole", "provider_credit_exhausted", "provider_throttled", "price_list_unreachable", "no_rate", "crashed", "input_refused", "not_admitted", "producer_vanished", "render_error", "diverged", "optimizer_timeout"]],
   [MOVABLE_AGENT_LABELS, ["proposer", "optimizer"]],
   [NODE_KIND_INFO, ["io", "llm", "tool", "retriever", "cache", "measurement", "member"]],
   [POOL_SOURCE_INFO, ["packs", "partition"]],

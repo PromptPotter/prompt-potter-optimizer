@@ -95,21 +95,20 @@ def origin_gate_tripped(health: DegradationHealth, mode: GateMode) -> StopReason
 def panel_gate_tripped(
     holed_rows: Sequence[GradedCell], cut: StopLoop | None, mode: GateMode
 ) -> StopLoop | None:
-    """The stop names what made the hole, in its rows' words: a budget's own, the backend's
-    (``BACKEND_HOLE``), our bound's (``PANEL_CUT``); a resume re-measures each, unlike ``PAUSED``."""
+    """A budget's cut stops in its own words; every other hole in its holed rows' category and error:
+    ``BACKEND_HOLE`` where one is the backend's, the hole a re-measure may heal, else ``PANEL_HOLE``."""
     if mode == "off":
         return None
     if cut is not None:
         return cut
-    for category, reason in (
-        (ErrorCategory.SERVER, StopReason.BACKEND_HOLE),
-        (ErrorCategory.HALTED, StopReason.PANEL_CUT),
-    ):
-        if said := sorted(
-            {c.facts.error or "" for c in holed_rows if c.facts.error_category is category}
-        ):
-            return StopLoop(reason, detail="; ".join(filter(None, said)))
-    return StopLoop(StopReason.PAUSED) if holed_rows else None
+    facts = [c.facts for c in holed_rows]
+    if not (said := sorted({": ".join(filter(None, (f.error_category, f.error))) for f in facts})):
+        return None
+    # The first three: every door serves it, and an L4 outage holes every cell.
+    more = f"; {len(said) - 3} more" if len(said) > 3 else ""
+    server = any(f.error_category is ErrorCategory.SERVER for f in facts)
+    reason = StopReason.BACKEND_HOLE if server else StopReason.PANEL_HOLE
+    return StopLoop(reason, detail="; ".join(said[:3]) + more)
 
 
 def standing_tripped(standing: RunStanding, optimization: OptimizationConfig) -> StopReason | None:
