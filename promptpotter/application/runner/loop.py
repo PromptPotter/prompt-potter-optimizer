@@ -235,7 +235,8 @@ async def bench_line_origin(cycle: Cycle) -> None:
             origin_id=origin.individual.id,
         )
         if cycle.bench_passes is not None and book.binds("bench"):
-            book.set_aside(cycle.bench_passes.reserve_usd, cycle.bench_passes.reserve_tokens)
+            passes, paid_by = cycle.bench_passes, session.backend_client.connector.cell_payer
+            book.set_aside(passes.reserve_usd, passes.reserve_tokens, paid_by=paid_by)
     declare_line_bench(session, config, passes=cycle.bench_passes, selecting=True, ending=None)
 
 

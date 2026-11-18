@@ -219,23 +219,6 @@ class LiveCycle(NamedTuple):
 _ENCLOSED: TokenUsageKind = "backend"
 
 
-def cycle_count(
-    charges: ChargeBook, *, hold_id: str | None, metered_on: Path, meters: CeilingMeter
-) -> SpendCount:
-    """A cycle's count as a door reads it, its live run's job holding *hold_id*: the book's own
-    fold, short only the set-aside, which the run's book holds alone."""
-    return SpendBook(
-        declared=Budget(),
-        share=Budget(),
-        charges=charges,
-        hold_id=hold_id or "",
-        headroom=Budget(),
-        metered_on=metered_on,
-        meters=meters,
-        opened=0.0,
-    ).count()
-
-
 class SpendBook:
     """A run's admission, read at each send off the one fold of money (`read_model.Money`): its
     share off the ledger it meters, its reserve off its job's hold on the account."""
@@ -268,8 +251,6 @@ class SpendBook:
         self.meters = meters
         # The launch's ``time.monotonic()``: a book re-armed mid-launch keeps its clock.
         self.opened = opened
-        self.set_aside_usd = 0.0
-        self.set_aside_tokens = 0
         # The ledger a nested run's sends are copied onto, as this book's root.
         self.ledger: CycleEventLog | None = None
         # A nested run's book: each send is admitted against it AND every book enclosing it, which
@@ -307,13 +288,9 @@ class SpendBook:
     def binds(self, kind: TokenUsageKind) -> bool:
         return kind in METER_KINDS[self.meters]
 
-    @property
-    def prices_replays(self) -> bool:
-        return METER_PRICES_REPLAYS[self.meters]
-
     def replays_free(self, cell_key: str) -> bool:
         """A bill meter prices no replay; the other prices one the first time its campaign reads it."""
-        return not self.prices_replays or campaign_priced(cell_key)
+        return not METER_PRICES_REPLAYS[self.meters] or campaign_priced(cell_key)
 
     @property
     def spent(self) -> UserSpend:
@@ -358,7 +335,7 @@ class SpendBook:
         usd, tokens = 0.0, 0
         for hold in money.open.values():
             kind = hold.resource or _ENCLOSED
-            if hold.parent != self.hold_id or kind == beside:
+            if hold.parent != self.hold_id or hold.hold_id == self._aside_id or kind == beside:
                 continue
             if host or self.binds(kind):
                 held_usd, held_tokens = money.kept(hold, host=host)
@@ -368,10 +345,11 @@ class SpendBook:
     def _count(self, money: Money, *, host: bool, beside: TokenUsageKind | None) -> SpendCount:
         spent = self._spent(money, host=host)
         out_usd, out_tokens = self._out(money, host=host, beside=beside)
+        aside = money.open.get(self._aside_id)
         return SpendCount(
             billed=Budget(usd=spent.sent_usd, tokens=spent.used_tokens),
             unreported=Budget(usd=spent.unreported_usd, tokens=spent.unreported_tokens),
-            set_aside=Budget(usd=self.set_aside_usd, tokens=self.set_aside_tokens),
+            set_aside=Budget.amount(*(money.kept(aside, host=host) if aside else (0.0, 0))),
             out=Budget(usd=out_usd, tokens=out_tokens),
         )
 
@@ -552,7 +530,10 @@ class SpendBook:
             # Only a bounded axis refuses, so the cap it names is set.
             cap = bounds.usd_amount
             left = cap - count.counted.usd_amount - count.out.usd_amount
-            said = count.words(CEILING_METER_LABELS["bill" if reserve else self.meters])
+            # The room is left past the calls out, too, so they are named beside `counted`'s parts.
+            out = [f"{usd_text(count.out.usd_amount)} in calls still out"] if count.out.usd else []
+            label = CEILING_METER_LABELS["bill" if reserve else self.meters]
+            said = ", ".join(part for part in (count.words(label), *out) if part)
             if left <= 0 or each.usd is None:
                 return f"{what} was not sent: the {usd_text(cap)} {limit} is used up ({said})"
             return (
@@ -568,9 +549,28 @@ class SpendBook:
             f"out and {count.set_aside.token_amount:,} set aside for the bench"
         )
 
-    def set_aside(self, usd: float, tokens: int) -> None:
-        self.set_aside_usd = usd
-        self.set_aside_tokens = tokens
+    @property
+    def _aside_id(self) -> str:
+        return f"{self.hold_id}:set-aside"
+
+    def set_aside(self, usd: float, tokens: int, *, paid_by: KeySource) -> None:
+        """The bench's set-aside, a hold under the job on the key source its cells draw, so every
+        door folds it and the coupon holds none of it for a run on the account's own keys."""
+        self.charges.append(
+            Hold(
+                hold_id=self._aside_id,
+                parent=self.hold_id,
+                key_source=paid_by,
+                bound=Budget(usd=usd, tokens=tokens),
+                resource="bench",
+                node=None,
+                ledger=None,
+            )
+        )
+
+    def release_aside(self) -> None:
+        if self._aside_id in self._money().open:
+            self.charges.append(Release(hold_id=self._aside_id))
 
     @property
     def nested(self) -> bool:

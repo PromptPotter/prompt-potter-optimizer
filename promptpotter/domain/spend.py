@@ -365,14 +365,20 @@ class SpendCount(FrozenModel):
         )
 
     def words(self, billed: str) -> str:
-        """The parts that hold money, *billed* naming what the first counts."""
+        """The parts of `counted` that hold money, *billed* naming what the first counts."""
         parts = (
             (self.billed, billed),
             (self.unreported, "unreported"),
-            (self.out, "in calls still out"),
             (self.set_aside, "set aside for the bench"),
         )
         return ", ".join(f"{usd_text(part.usd_amount)} {name}" for part, name in parts if part.usd)
+
+    def beside(self, billed: Budget) -> SpendCount:
+        """*billed* (a cycle's, or its campaign's) beside this count's other parts."""
+        return SpendCount(**{**dict(self), "billed": billed})
+
+
+NO_SPEND_COUNT = SpendCount(**dict.fromkeys(SpendCount.model_fields, NOTHING_METERED))
 
 
 #: The book a cap reads its used figure off: the campaign's ceiling its live cycles share, this
@@ -459,29 +465,16 @@ def usd_text(usd: float) -> str:
     return f"${usd:.4f}" if usd < 1 else f"${usd:.2f}"
 
 
-def metered_line(meter: CeilingMeter, *, metered: Budget, cap: Budget, share: Budget) -> str:
+def metered_line(meter: CeilingMeter, *, count: SpendCount, cap: Budget, share: Budget) -> str:
     """THE cycle's spend in its campaign's meter, said on every run, capped or not, a replay
-    included: *metered* is this cycle's, *share* its part of the caps; tokens where they bind."""
+    included: *count* is this cycle's, by part, *share* its part of the caps; tokens where they bind."""
+    label, counted = CEILING_METER_LABELS[meter], count.counted
     usd = "" if share.usd is None else f" of its {usd_text(share.usd)} share"
-    said = f"this cycle {usd_text(metered.usd_amount)}{usd}"
+    said = f"this cycle {usd_text(counted.usd_amount)}{usd}"
     if cap.tokens is not None:
         tokens = "" if share.tokens is None else f" of its {share.tokens:,} share"
-        said += f", {metered.token_amount:,} tokens{tokens}"
-    return f"{said} {CEILING_METER_LABELS[meter]}"
-
-
-def campaign_cap_lines(meter: CeilingMeter, *, campaign: Budget, cap: Budget) -> list[str]:
-    """THE cap lines, beside `metered_line`: the CAMPAIGN's metered spend, every cycle's, against
-    each cap it bounds."""
-    counted = CEILING_METER_LABELS[meter]
-    lines: list[str] = []
-    if cap.usd is not None:
-        lines.append(
-            f"campaign cap {usd_text(campaign.usd_amount)} of {usd_text(cap.usd)} {counted}"
-        )
-    if cap.tokens is not None:
-        lines.append(f"campaign cap {campaign.token_amount:,} of {cap.tokens:,} tokens {counted}")
-    return lines
+        said += f", {counted.token_amount:,} tokens{tokens}"
+    return f"{said} ({count.words(label) or label})"
 
 
 def money_text(budget: Budget, *, on: Budget | None = None) -> str:
@@ -994,22 +987,30 @@ class MeteredSpend(StrictModel):
 
 
 class StopSpend(FrozenModel):
-    """A stop's spend: the caps bound the CAMPAIGN, so they pair with its metered spend; the cycle's beside."""
+    """A stop's spend: the caps bound the CAMPAIGN, so they pair with its count; the cycle's beside."""
 
     spent: MeteredSpend
-    campaign: Budget
+    # The campaign's bills, with the stopping book's other parts (`served_dashboard.campaign_count`).
+    campaign: SpendCount
     cap: Budget
     # This cycle's part of the caps, what its run's book bound at the stop.
     share: Budget
 
     def meter_lines(self) -> list[str]:
-        """The metered line, then the cap lines beside it."""
-        meter, spent = self.spent.meter, self.spent
-        metered = Budget.amount(spent.metered_usd, spent.metered_tokens)
-        return [
-            metered_line(meter, metered=metered, cap=self.cap, share=self.share),
-            *campaign_cap_lines(meter, campaign=self.campaign, cap=self.cap),
-        ]
+        """The metered line, the cycle's bills beside its book's other parts, then a line per cap
+        the CAMPAIGN's count (every cycle's bills, the book's other parts) is set against."""
+        meter, spent, cap = self.spent.meter, self.spent, self.cap
+        cycle = self.campaign.beside(Budget.amount(spent.metered_usd, spent.metered_tokens))
+        label, counted = CEILING_METER_LABELS[meter], self.campaign.counted
+        lines = [metered_line(meter, count=cycle, cap=cap, share=self.share)]
+        if cap.usd is not None:
+            said = self.campaign.words(label) or label
+            lines.append(
+                f"campaign cap {usd_text(counted.usd_amount)} of {usd_text(cap.usd)} ({said})"
+            )
+        if cap.tokens is not None:
+            lines.append(f"campaign cap {counted.token_amount:,} of {cap.tokens:,} tokens {label}")
+        return lines
 
 
 # The spend that FINDS a result, which a lift is priced in; a bench pass and a diagnostic grade it.

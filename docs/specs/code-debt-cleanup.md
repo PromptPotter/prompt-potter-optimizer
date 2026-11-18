@@ -807,19 +807,18 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   spawner's kind on `InstrumentMode` and clears `filed_as`; `arm_spend_book` reads `enclosed_as` off
   the mode. **Rides with:** the outer chain (`runner/inner/**`). **Re-test:** the `--l4 --straight
   --bench-trigger every_adoption` leg's inner ledger files no call as `bench`.
-- **A send a pause cuts is never filed, so a paused inner run reads $0.000**: the operator paused
-  `promptpotter-self.run__54ccef` (2026-11-18 ~11:35) while seat #001's inner run
-  `justlogic.d234__edf685/cycle_2cca0ea37091` was live; its sidebar spend dropped from a live figure
-  to `$0.000`. Its ledger holds 0 `token_usage` and 1 `bill`; the outer's ledger mirrors 0 calls of
-  it (its last mirrored call is 10:19:15Z, 3 s before the inner launched); the sidebar reads
-  `hierarchy.py:302-308`'s `scan_ledger_spend` of the cycle's own ledger. So the live figure was
-  sends in flight, and the pause cancelled them unfiled: a call the provider may have billed reads
-  as nothing (root `<one-budget>`: spend = the provider's bill). Action: a send a stop cuts is filed
-  at the cut as sent-unreported (`MeteredSpend.sends_unreported`, which the row already renders as
-  "up to $X more unreported"), and its late usage files when it returns; never dropped. Unverified:
-  whether the provider charged the cut calls. **Rides with:** none yet (spend book +
-  `runner/inner/**`). **Re-test:** pause an outer mid inner-round; the inner row reads
-  "≥$0 · up to $X more unreported", never `$0.000`, and the outer's mirror matches.
+- **A cycle's sidebar spend reads its ledger alone, so a cut send reads $0.000**:
+  `hierarchy.py:302-308` builds the cycle row from `scan_ledger_spend` and passes `None` as
+  unreported (`_spend_row("spend", …, None)`). A send a pause cuts is already filed at the cut as a
+  `Lapse` (`spend_book.py::admitted`), but on the charge book, and for a nested run under the ROOT's
+  ledger (`Admission`: `held_on((root.ledger or ledger).path)`), so neither the inner row nor the
+  inner ledger can see it. `MeteredSpend` carries no `sends_unreported` (the paused-inner row's text
+  says it does). Action: the cycle row reads its unreported off the hold tree
+  (`Money.unreported_holds` under the cycle's jobs), not by ledger; and decide whether a cut send's
+  late usage is collected at all (the cancelled request never returns). **Rides with:** hierarchy.py
+  and the inner chain. **Re-test:** pause an outer mid inner-round (operator 2026-11-18: seat #001
+  of `promptpotter-self.run__54ccef`); the inner row reads its cut sends as unreported, never
+  `$0.000`, and the outer's mirror matches.
 - **A CLI payload refusal reads pydantic's union text**: `set-sample-lookahead bogus` answers
   "cells.constrained-int: … cells.literal['max']: …" (`presentation/cli/main.py`'s payload arm prints
   the `ValidationError` raw). Action: the CLI renders a payload refusal by field and expected form,
@@ -831,12 +830,9 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   aside for the bench, $2.38, so the cells still out (each held at its $0.02 bound) tipped it.
   A send's room fired (`SpendBook.refuse_unless_room`, which counts calls out; `exhausted()` does
   not, and read under $2.50 even after the halt's own lapses), and the halt's `detail` is `""`
-  because a kept cut returns a bare `StopReason`. Left open: the cap is served by part off the
-  book's count (`spend_book.py::cycle_count`) except the set-aside, which only the run's book holds
-  (`SpendBook.set_aside`, from `runner/bench.py` and `runner/loop.py`); and only a walk's own stop
-  names the parts, while a kept cut (`run_walks`' return, `runner/round.py`) and a round boundary
-  (`runner/loop.py::LoopEnd`) carry no words. Action: the set-aside lands where every door reads it,
-  and a budget stop travels as its `StopLoop`. **Rides with:** none yet. **Re-test:** a halt at a
+  because a kept cut returns a bare `StopReason`. Left open: only a walk's own stop names the
+  parts, while a kept cut (`run_walks`' return, `runner/round.py`) and a round boundary
+  (`runner/loop.py::LoopEnd`) carry no words. Action: a budget stop travels as its `StopLoop`. **Rides with:** none yet. **Re-test:** a halt at a
   round boundary names the book's parts in its `run_phase` `detail`.
 - **The wallet read under the admission gate grows with the account's charges** (gate-hold's
   report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
@@ -924,15 +920,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   refactor that moves no decision (l4-outer-6's `Frontier` → `Parent`) re-keys every banked L4 cell
   for potter, capo-pobb and gepa. Action: the digest hashes what the member decides, not its text.
   **Re-test:** a pure rename in `potter/members.py` leaves `--digests` unmoved.
-- **The bench's set-aside lives only on the run's book, so no door serves it**: `runner/loop.py`,
-  `runner/bench.py::reserve_selection_pass` and `runner/entry.py` set `SpendBook.set_aside_usd` in
-  memory; `exhausted()` counts it while `spend_book.py::cycle_count` serves 0. Action: the set-aside
-  lands where the book reads it back (a ledger fact or a hold on the charge book). **Rides with:**
-  the rows below. **Re-test:** a fold during a run holding a bench reserve serves the figure
-  `exhausted()` reads.
-- **The stop record's campaign spend reads the bills alone**: `run_observers.py::declare_run_stop`
-  fills `StopSpend.campaign` from `metered_spend`, so its cap lines omit unreported money. Action:
-  `StopSpend` carries the book's `SpendCount`. **Re-test:** a halted run's stop record names its lapsed cells.
 - **A machine's cell ceiling is counted twice**: `infrastructure/backend.py::MachineSlots` (a
   file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
   in-process count per backend. Action: one count of one machine fact, reaching both. **Rides

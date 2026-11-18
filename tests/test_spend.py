@@ -144,6 +144,7 @@ from promptpotter.application.scoring.search_point_scorer import (
 )
 from promptpotter.application.served_dashboard import (
     ServedDashboard,
+    campaign_count,
     current_caps,
     served_dashboard,
 )
@@ -2790,7 +2791,7 @@ def test_a_sends_room_is_the_ceiling_less_bills_unpriced_sends_and_the_set_aside
     owed = spend_book(0.5)
     _drawn(owed, 0.125, lapsed=True)
     assert owed.fits(worst, paid_by="host") == 3, "a send no bill priced left its room open"
-    owed.set_aside(0.25, 0)
+    owed.set_aside(0.25, 0, paid_by="host")
     assert owed.fits(worst, paid_by="host") == 1, (
         "the search could spend what the bench was set aside"
     )
@@ -4668,6 +4669,57 @@ def test_the_served_spend_cap_reads_the_count_its_books_stop_reads(tmp_path: Pat
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
+def test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it(tmp_path: Path) -> None:
+    # C0 run__265c4d's shape: billed, a lapsed cell and the bench's set-aside tip the cap together.
+    stores = _web_account(tmp_path, "sub-9")
+    hop = CycleHop(campaign_id="camp-9", cycle_id="cycle_budget0009")
+    stores.campaigns.create_campaign(minted_campaign(hop))
+    stores.campaigns.mint_cycle(hop)
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    with scoped(account=stores):
+        _pay(ledger, 0.2, input_tokens=1_000, output_tokens=0)
+    job, cell, bound = uuid.uuid4().hex, uuid.uuid4().hex, Budget(usd=0.2, tokens=0)
+    for record in (
+        Hold.of_job(job, Budget(usd=1.0, tokens=0), parent=None),
+        Hold(
+            hold_id=cell,
+            parent=job,
+            key_source="host",
+            bound=bound,
+            resource="backend",
+            node="cell",
+            ledger=stores.charges.held_on(ledger.path),
+        ),
+        Lapse(hold_id=cell, bound=bound),
+    ):
+        stores.charges.append(record)
+    meters = stores.campaigns.ceiling_meter_of(hop.campaign_id)
+    book = SpendBook(
+        declared=Budget(),
+        share=Budget(usd=0.5),
+        charges=stores.charges,
+        hold_id=job,
+        headroom=Budget(),
+        metered_on=ledger.path,
+        meters=meters,
+        opened=0.0,
+    )
+    assert book.exhausted() is None, "vacuous — the cap tipped before the set-aside"
+    book.set_aside(0.1, 0, paid_by="host")
+    assert book.exhausted() is ErrorCategory.SPEND_CEILING, "the set-aside never tipped the cap"
+    served = campaign_count(stores, hop, meters, hold_id=job)
+    for part in ("billed", "unreported", "set_aside", "out"):
+        assert getattr(served, part).usd_amount == pytest.approx(
+            getattr(book.count(), part).usd_amount
+        ), f"a door served the {part} short of the count the book stopped on"
+    book.release_aside()
+    assert (
+        campaign_count(stores, hop, meters, hold_id=job).set_aside.usd_amount == 0
+        and book.exhausted() is None
+    ), "a released set-aside still binds"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
 def test_of_two_set_limits_raises_the_second_reads_the_wallet_after_the_firsts_reserve(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -4762,7 +4814,7 @@ def test_set_limits_inside_a_launchs_admission_window_answers_its_limits_or_a_ty
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_set_limits_on_a_run_its_own_key_pays_holds_none_of_the_coupon(tmp_path: Path) -> None:
+def test_a_run_its_own_key_pays_holds_none_of_the_coupon(tmp_path: Path) -> None:
     own = _web_account(tmp_path, "sub-5")
     own.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
     registry = JobRegistry(own.jobs_dir, capacity=lambda _live: 1)
@@ -4784,6 +4836,22 @@ def test_set_limits_on_a_run_its_own_key_pays_holds_none_of_the_coupon(tmp_path:
         "a raise on a run no send of which draws the coupon reserved the coupon for it"
     )
     assert account_wallet(own).state is AllowanceState.OPEN, "the account's next launch read held"
+    room = account_wallet(own).headroom.usd
+    book = SpendBook(
+        declared=Budget(),
+        share=Budget(),
+        charges=own.charges,
+        hold_id=job.job_id,
+        headroom=Budget(),
+        metered_on=None,
+        meters="bill",
+        opened=0.0,
+    )
+    book.set_aside(0.25, 0, paid_by="user")
+    assert book.count().set_aside.usd_amount == 0.25, "vacuous — the share never saw the set-aside"
+    assert account_wallet(own).headroom.usd == room, (
+        "the bench's set-aside on the account's own keys held back the coupon from other launches"
+    )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")

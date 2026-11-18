@@ -11,6 +11,7 @@ from promptpotter.application.pipeline_resolve import campaign_admits, defaults_
 from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
 from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
+from promptpotter.application.served_dashboard import campaign_count
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
 from promptpotter.domain.campaign import Campaign, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -55,9 +56,12 @@ def declare_run_stop(
     meter = ceiling_meter(session.purpose)
     # The cycle's share record, which its book reads live; none lands before admission's.
     held = session.store.campaigns.last(session.hop, CycleShareRecord)
+    book = run_scope().book
     spend = StopSpend(
         spent=observers.dashboard.live.spend_metered(meter),
-        campaign=session.store.campaigns.metered_spend(session.campaign_id, meter),
+        campaign=campaign_count(
+            session.store, session.hop, meter, hold_id=None if book is None else book.hold_id
+        ),
         cap=Budget(usd=budget.usd, tokens=budget.tokens),
         share=Budget() if held is None else held.allotment.only(MONEY_AXES),
     )

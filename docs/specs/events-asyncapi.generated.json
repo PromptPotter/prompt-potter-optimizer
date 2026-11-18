@@ -8759,6 +8759,36 @@
         "title": "SpendBucket",
         "type": "object"
       },
+      "SpendCount": {
+        "additionalProperties": false,
+        "description": "A spend book's count, by part, each an amount: the ceiling's stop reads `counted`; a send's\nroom reads `out` beside it.",
+        "properties": {
+          "billed": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Sent and billed, or priced off the rate table."
+          },
+          "out": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "What the calls and cells still out hold."
+          },
+          "set_aside": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Held back for the bench's passes."
+          },
+          "unreported": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Sends that ended with no bill, each counted at the bound it was held at."
+          }
+        },
+        "required": [
+          "billed",
+          "unreported",
+          "set_aside",
+          "out"
+        ],
+        "title": "SpendCount",
+        "type": "object"
+      },
       "SpendRollup": {
         "additionalProperties": false,
         "description": "A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.\n\nA budget caps ``total_used_usd`` and ``total_rate_priced_usd`` together; ``total_incurred_usd``\nprices cache hits too.",
@@ -9052,10 +9082,10 @@
       },
       "StopSpend": {
         "additionalProperties": false,
-        "description": "A stop's spend: the caps bound the CAMPAIGN, so they pair with its metered spend; the cycle's beside.",
+        "description": "A stop's spend: the caps bound the CAMPAIGN, so they pair with its count; the cycle's beside.",
         "properties": {
           "campaign": {
-            "$ref": "#/components/schemas/Budget"
+            "$ref": "#/components/schemas/SpendCount"
           },
           "cap": {
             "$ref": "#/components/schemas/Budget"

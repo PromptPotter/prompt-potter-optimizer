@@ -303,6 +303,8 @@ from promptpotter.domain.records.run_records import (
     ConfigOverrides,
     CycleMintedRecord,
     CycleStart,
+    Hold,
+    Lapse,
     PipelineRead,
     RoundWarningRecord,
     RunPhaseRecord,
@@ -313,7 +315,7 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, ScoringFormulaError
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
-from promptpotter.domain.spend import Budget, HeldBudget
+from promptpotter.domain.spend import Budget, HeldBudget, usd_text
 from promptpotter.domain.wounds import (
     ValidationFailure,
     ValidationReason,
@@ -3358,6 +3360,56 @@ def test_a_verb_refuses_a_scope_it_would_not_land_on_before_it_opens_its_cycle(
         ):
             pass
     assert not stores.campaigns.cycle_dir(hop).exists(), "a refused verb opened its cycle"
+
+
+def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # The stop record's lines read the count the book stopped on, never the bills alone. A pause
+    # grades no selection, so its record lands with the set-aside held (`entry.py::_run_single_cycle`);
+    # a halt that grades it releases the set-aside first, and the bench pass bills what it spends.
+    stores = built_stores
+    opened, held_campaign = held
+    launched = effective_config(decl.declared)
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
+    declare_run_wiring(
+        opened, launched, campaign=held_campaign, selected=select_optimizer(launched.optimization)
+    )
+    observers = build_run_observers(session=opened, campaign_config=launched)
+    with scoped(account=stores):
+        book = spend_book(1.0, metered_on=ledger.path)
+    cell, bound = "lapsed-cell", Budget(usd=0.25, tokens=0)
+    stores.charges.append(
+        Hold(
+            hold_id=cell,
+            parent=book.hold_id,
+            key_source="host",
+            bound=bound,
+            resource="backend",
+            node="cell",
+            ledger=stores.charges.held_on(ledger.path),
+        ),
+        Lapse(hold_id=cell, bound=bound),
+    )
+    book.set_aside(0.125, 0, paid_by="host")
+    with scoped(book=book):
+        declare_run_stop(opened, observers, StopReason.PAUSED, interrupted_by=PauseCause.INTERRUPT)
+    observers.drain_all()
+    observers.release()
+    stop = stores.campaigns.last(opened.hop, RunPhaseRecord)
+    assert stop is not None and stop.spend is not None, "vacuous — no stop record landed"
+    counted = book.count()
+    assert counted.unreported.usd_amount and counted.set_aside.usd_amount, "vacuous — nothing held"
+    assert (stop.spend.campaign.unreported, stop.spend.campaign.set_aside) == (
+        counted.unreported,
+        counted.set_aside,
+    ), (
+        "the stop record's campaign count dropped the lapsed cell or the set-aside its book stopped on"
+    )
+    cycle_line = stop.spend.meter_lines()[0]
+    assert usd_text(counted.counted.usd_amount) in cycle_line, (
+        f"the stop record's cycle line set the bills alone against its share: {cycle_line}"
+    )
 
 
 def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(

@@ -314,7 +314,7 @@ async def _run_single_cycle(
         and cycle.bench_passes is not None
         and STOP_REASON_INFO[stop_reason].grades_selection
     ):
-        book.set_aside(0.0, 0)
+        book.release_aside()
         try:
             # Under the last round, as the `held-out` verb grades it (`scoring/passes.py::grade_line_bench`).
             with scoped(round=cycle.rounds[-1].round):
@@ -346,6 +346,9 @@ async def _run_single_cycle(
         selected=prep.optimizer,
         detail=detail,
     )
+    if book is not None:
+        # Past the stop record, which names what is left of it: no later run's book holds it.
+        book.release_aside()
     return _CycleOutcome(
         session=session,
         cycle_result=cycle_result,

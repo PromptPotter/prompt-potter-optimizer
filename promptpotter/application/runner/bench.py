@@ -642,7 +642,8 @@ def _adoptions(
 def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
     """The set-aside opens at the ORIGIN's price; a selection that writes more would end its pass short."""
     book = require_spend_book("the selection's set-aside")
-    if not book.set_aside_usd:
+    aside = book.count().set_aside
+    if not aside.usd_amount:
         return
     costs = [
         cost
@@ -663,8 +664,9 @@ def reserve_selection_pass(cycle: Cycle, session: Session) -> None:
         return
     # One cell on top of the mean: the last row is admitted at the dearest bill, never the average.
     usd = passes * (len(session.state.scoring.partition.bench) * fmean(costs) + max(costs))
-    if usd > book.set_aside_usd:
-        book.set_aside(usd, round(book.set_aside_tokens * usd / book.set_aside_usd))
+    if usd > aside.usd_amount:
+        tokens = round(aside.token_amount * usd / aside.usd_amount)
+        book.set_aside(usd, tokens, paid_by=session.backend_client.connector.cell_payer)
 
 
 async def bench_selection(

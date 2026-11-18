@@ -46,6 +46,7 @@ from promptpotter.domain.spend import (
     CAP_AXIS_INFO,
     MONEY_AXES,
     NO_OVERSHOOT,
+    NO_SPEND_COUNT,
     Budget,
     CapAxis,
     CeilingMeter,
@@ -55,7 +56,7 @@ from promptpotter.domain.spend import (
     metered_line,
 )
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.llm.spend_book import cycle_count
+from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardFacts,
     LiveDashboardState,
@@ -571,7 +572,6 @@ def armed_caps(
     limits: RunLimits,
     run: RunState,
     meter: CeilingMeter,
-    campaign_metered: Budget,
     rounds_closed: int,
 ) -> ArmedCaps:
     """THE caps as they bind now, each against its own book: the spend book's count, this cycle's
@@ -579,12 +579,6 @@ def armed_caps(
     held = stores.campaigns.holder(hop) if run.producer.appending else None
     job = None if held is None else held.run
     started = None if job is None else epoch_seconds(job.started_at)
-    count = cycle_count(
-        stores.charges,
-        hold_id=None if job is None else job.job_id,
-        metered_on=stores.campaigns.ledger(hop),
-        meters=meter,
-    )
     return _caps(
         limits,
         meter,
@@ -593,13 +587,26 @@ def armed_caps(
             "rounds": rounds_closed,
             "wall_clock_s": None if started is None else max(0.0, time.time() - started),
         },
-        count=SpendCount(
-            billed=campaign_metered,
-            unreported=count.unreported,
-            set_aside=count.set_aside,
-            out=count.out,
-        ),
+        count=campaign_count(stores, hop, meter, hold_id=None if job is None else job.job_id),
     )
+
+
+def campaign_count(
+    stores: Stores, hop: CycleHop, meter: CeilingMeter, *, hold_id: str | None
+) -> SpendCount:
+    """The count the caps bind on: the campaign's bills, every cycle's, beside the other parts of
+    this cycle's book, its live run's job holding *hold_id*."""
+    count = SpendBook(
+        declared=Budget(),
+        share=Budget(),
+        charges=stores.charges,
+        hold_id=hold_id or "",
+        headroom=Budget(),
+        metered_on=stores.campaigns.ledger(hop),
+        meters=meter,
+        opened=0.0,
+    ).count()
+    return count.beside(stores.campaigns.metered_spend(hop.campaign_id, meter))
 
 
 def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:
@@ -617,7 +624,6 @@ def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:
         limits=limits,
         run=run,
         meter=meter,
-        campaign_metered=stores.campaigns.metered_spend(hop.campaign_id, meter),
         rounds_closed=_remainder(stores, hop, limits).rounds_closed,
     )
 
@@ -781,7 +787,11 @@ def _serve(
         },
         metered_line=metered_line(
             meter,
-            metered=state.spend.metered(meter),
+            # The live book's parts ride the caps' count; a replay has none.
+            count=next(
+                (c.count for c in ([] if standing is None else standing.caps.caps) if c.count),
+                NO_SPEND_COUNT,
+            ).beside(state.spend.metered(meter)),
             cap=Budget() if standing is None else run_limits.budget,
             share=Budget() if standing is None else standing.allotment or Budget(),
         ),
@@ -847,7 +857,6 @@ def served_dashboard(
     config = cycle_config(stores, campaign, hop).config
     limits = _binding(stores, hop, config, run, folded)
     remainder = _remainder(stores, hop, limits)
-    campaign_metered = stores.campaigns.metered_spend(hop.campaign_id, meter)
     return _serve(
         state,
         hop=hop,
@@ -868,7 +877,6 @@ def served_dashboard(
                 limits=limits,
                 run=run,
                 meter=meter,
-                campaign_metered=campaign_metered,
                 rounds_closed=remainder.rounds_closed,
             ),
             overshot=money_on(stores.charges.path).overshot.get(

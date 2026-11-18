@@ -3116,10 +3116,12 @@ def test_every_adoption_sets_aside_one_pass_per_selection_it_will_grade(
         book = require_spend_book("the set-aside")
         held: dict[BenchTrigger, float] = {}
         for trigger in ("at_end", "every_adoption"):
-            book.set_aside(1e-9, 1)
+            # A set-aside the fold reads (`Budget.amount` keeps 6 places), below one pass's price.
+            book.set_aside(0.001, 1, paid_by="host")
             cycle.config = cycle.config.model_copy(update={"bench_trigger": trigger})
             line_bench.reserve_selection_pass(cycle, session)
-            held[trigger] = book.set_aside_usd
+            held[trigger] = book.count().set_aside.usd_amount
+        assert held["at_end"] > 0.001, "vacuous — the selection's pass never raised the set-aside"
         assert held["every_adoption"] == pytest.approx(2 * held["at_end"]), (
             "the set-aside does not price every adoption the end pass grades"
         )
