@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from promptpotter.domain.command_kinds import LookaheadCells, SubmitArmsPayload
+from promptpotter.domain.command_kinds import UNARMED, LookaheadPress, SubmitArmsPayload
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
@@ -26,7 +26,6 @@ from promptpotter.infrastructure.store.command_log import (
     CommandLog,
     Controls,
     PauseAsk,
-    requested_lookahead,
 )
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -104,8 +103,8 @@ class RunControl:
 
     commands: CommandLog | None = None
     cycle: Subject | None = None
-    # Outermost first. Their pause stops this run; their look-ahead never reaches it — inherited,
-    # one arming would multiply concurrency at every nested level.
+    # Outermost first. Their pause stops this run; of their look-ahead only Max speed reaches it,
+    # through its cycle's subject (`CommandBook.lookahead`).
     enclosing: tuple[Subject, ...] = ()
     # The commands whose passes this control acts for, outermost first: a `cancel` of one is its
     # pause while that command acts, and of no other act on its cycle.
@@ -187,11 +186,14 @@ class RunControl:
     def take_submission(self, command_id: str) -> None:
         self._log().ack(command_id, "applied")
 
-    def sample_lookahead(self) -> LookaheadCells:
-        return requested_lookahead(self._inbox())
+    def sample_lookahead(self) -> LookaheadPress:
+        if self.cycle is None:
+            return UNARMED
+        return self._log().book().lookahead(self.cycle).press
 
     def spend_sample_lookahead(self) -> None:
-        """One ack per round removes a plain press and leaves an ``auto`` one standing."""
+        """One ack per round removes a plain press and leaves an ``auto`` one standing; a
+        followed Max speed is its enclosing run's to spend."""
         asked = self._inbox().lookahead
         if asked is not None and not asked.taken:
             self._log().ack(asked.command_id, "applied")

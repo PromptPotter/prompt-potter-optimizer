@@ -4,6 +4,8 @@ only a CHANGE of state lands on the box's own workspace ledger, which is also wh
 from __future__ import annotations
 
 import asyncio
+import json
+import subprocess
 from collections.abc import Awaitable, Callable
 from functools import partial
 from pathlib import Path
@@ -18,7 +20,11 @@ from promptpotter.application.account import (
     registered_or_default_identity,
 )
 from promptpotter.application.jobs.launcher.admission import probe_backend
-from promptpotter.config.paths import default_projects_root
+from promptpotter.config.paths import (
+    default_projects_root,
+    source_checkout_root,
+    webapp_static_root,
+)
 from promptpotter.config.settings import settings
 from promptpotter.domain.connector import BACKEND_REACHABILITY_INFO
 from promptpotter.domain.cycle_paths import WorkspaceDir
@@ -161,9 +167,54 @@ def _operator_channel(token: str) -> Probe:
     return Probe(_CHANNEL, check, fix)
 
 
+# What `npm run build` stamps beside the bundle (`webapp/vite.config.ts::BUILD_SOURCE`).
+BUILD_SOURCE = "build-source.json"
+WEBAPP_BUNDLE = "webapp:bundle"
+REBUILD = "run `npm run build` in webapp/, then reload the page"
+
+
+def webapp_bundle() -> Reading | None:
+    """A checkout serves `webapp/out/` as last built, however old: a bundle built from another
+    `webapp/` tree than the checkout's is broken, refusing nothing. None where nothing is built."""
+    checkout, served = source_checkout_root(), webapp_static_root()
+    if checkout is None or not served.is_dir():
+        return None
+    try:
+        git = subprocess.run(
+            ["git", "rev-parse", "HEAD:webapp"],
+            cwd=checkout,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return Reading("unverified", f"no webapp/ tree to compare: {exc}")
+    if git.returncode:
+        return Reading("unverified", f"no webapp/ tree to compare: {git.stderr.strip()}")
+    try:
+        built = json.loads((served / BUILD_SOURCE).read_text(encoding="utf-8")).get("webapp_tree")
+    except (OSError, ValueError, AttributeError):
+        built = None
+    if built == git.stdout.strip():
+        return Reading("held", "built from this checkout's webapp/")
+    if built is None:
+        return Reading("broken", "the page carries no build stamp")
+    return Reading("broken", "the page was built from another webapp/ than this checkout's")
+
+
+def _webapp_probe() -> Probe:
+    async def check() -> Reading:
+        reading = await asyncio.to_thread(webapp_bundle)
+        return reading if reading is not None else Reading("unverified", "no webapp/out/ built")
+
+    return Probe(WEBAPP_BUNDLE, check, REBUILD)
+
+
 def probes() -> list[Probe]:
     """The roster: every remote backend endpoint, an unaddressed backend included, every configured
-    sign-in provider, every LLM key, and the operator's channel where one is configured."""
+    sign-in provider, every LLM key, the operator's channel where one is configured, and a
+    checkout's built page."""
     paths = default_identity_paths()
     bundle = build_identity_bundle(paths)
     redeem = {
@@ -184,6 +235,7 @@ def probes() -> list[Probe]:
             if (token := settings.ADMIN_BOT_TELEGRAM_TOKEN.get_secret_value().strip())
             else []
         ),
+        *([_webapp_probe()] if source_checkout_root() is not None else []),
     ]
 
 

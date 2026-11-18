@@ -70,8 +70,8 @@ HELD_PROMPT_FIELD_MARK = " — held, not yours to replace"
 @signal(
     "rendered_prompt",
     kind=InjectionKind.TRACE,
-    # A runaway backstop, NOT a budget knob: a WHOLE-field replacement must never see it truncated.
-    char_cap=16000,
+    # Never cut: an edit anchors on its text, and `L1GenerateKnobs.length_budget` bounds its growth.
+    char_cap=None,
     citable=False,
 )
 def _r_rendered_prompt(b: PotterView) -> list[Item]:

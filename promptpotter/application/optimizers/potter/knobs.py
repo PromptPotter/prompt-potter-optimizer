@@ -65,9 +65,36 @@ class AdaptiveQueueKnobs(StrictModel):
     )
 
 
-class L1GenerateKnobs(StrictModel):
+class TranscriptKnobs(StrictModel):
+    """How much of the parent's failing rows' runs a node reads in ``sample_transcripts``."""
+
+    transcripts: Annotated[int | None, Knob(Estimand.SEARCH)] = Field(
+        ge=1,
+        description=(
+            "The most rows ``sample_transcripts`` shows, the parent's lowest-scoring misses first; "
+            "``null`` shows every one."
+        ),
+    )
+    transcript_chars: Annotated[int | None, Knob(Estimand.SEARCH)] = Field(
+        ge=1,
+        description=(
+            "The most characters of one row's transcript, its head and tail kept around an elided "
+            "middle; ``null`` shows each whole."
+        ),
+    )
+
+
+class L1GenerateKnobs(TranscriptKnobs):
     n_variants: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1, description="Candidates per round"
+    )
+    length_budget: Annotated[int, Knob(Estimand.SEARCH)] = Field(
+        ge=1,
+        description=(
+            "The most characters a variant's edits may lengthen or shorten its parent's prompt by, "
+            "summed over every field; past it, either way, the variant is refused. A parent is one "
+            "generation from its own, so it also bounds the prompt every later call is shown."
+        ),
     )
     k_max: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0,

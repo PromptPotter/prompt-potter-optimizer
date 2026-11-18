@@ -107,8 +107,11 @@ BASELINE = {
     # flight-ux (+140): the sample look-ahead at every door: a launch's depth filed as its press,
     # the CLI verb, and the served reason a deeper press is not admitted, with its readout.
     # strata-flight (-39): limits-ux's look-ahead refusal is flight-ux's `shallow`, and the Max
-    # press rides the one payload by name (`LookaheadCells`).
-    "package_lines": 111411,
+    # press rides the one payload by name (`LookaheadCells`). flight-axes (+159): samples per
+    # candidate and candidates at once on the one press, an inner run following Max speed, words.
+    # l4-outer link 4 + its fold (+138): the critique's own-row panel, the length budget, and the
+    # webapp:bundle probe that says a page older than its checkout.
+    "package_lines": 111538,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -117,7 +120,10 @@ BASELINE = {
     "reexport_shims": 0,
     # Campaign-config knobs, plus the node knobs each optimizer member declares.
     # model-lines (+1): `optimization.call_target`, which replaced eleven node `model` lines.
-    "config_leaf_fields": 89,
+    # l4-outer-4 (+4): `TranscriptKnobs` on `l1_generate` and `l1_critique`, the transcript caps
+    # a family declares (the L4 critique reads every seat's whole inner run); +1 `length_budget`,
+    # the one bound on a proposal's length, replacing a 3,200-char cap and a 35% rewrite floor.
+    "config_leaf_fields": 94,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     "settings_env": 39,

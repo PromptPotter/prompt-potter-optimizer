@@ -3,9 +3,10 @@ import { Said, SegmentedControl, Switch, Term } from "@/components/ui";
 import { TERMS } from "@/lib/terms";
 import {
   affordableText,
+  lookaheadAbreastHint,
+  lookaheadAbreastLabel,
   lookaheadDepthHint,
   lookaheadDepthLabel,
-  lookaheadFlight,
   lookaheadScope,
   lookaheadShallow,
 } from "@/lib/derivations";
@@ -24,6 +25,7 @@ export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
   const pending = m.pending !== null;
   const shallow = lookaheadShallow(la);
   const scope = lookaheadScope(la);
+  const maxOffered = la.depths.some((d) => d.cells === "max" && d.pickable);
   return (
     <div className="remote-panel-section">
       <div className="section-title">Samples in flight</div>
@@ -69,9 +71,9 @@ export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
         </div>
       ) : null}
       <div className="remote-cells-group">
-        <span className="lbl">Parallel calls</span>
+        <span className="lbl">Samples per candidate</span>
         <SegmentedControl
-          ariaLabel={`Parallel calls: how many to hold in flight, up to ${la.pick_max}`}
+          ariaLabel={`Samples per candidate: how many calls each holds in flight, up to ${la.pick_max}`}
           className="remote-cells"
           value={String(la.pressed)}
           onChange={m.armCells}
@@ -79,22 +81,49 @@ export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
             value: String(d.cells),
             label: lookaheadDepthLabel(d, la),
             fill: d.fill ?? undefined,
-            disabled: pending || !d.pickable,
+            disabled: pending || la.max_speed || !d.pickable,
             hint: lookaheadDepthHint(d, la),
           }))}
         />
-        <p className="remote-note">{lookaheadFlight(la)}</p>
+        <span className="lbl">Candidates at once</span>
+        <SegmentedControl
+          ariaLabel="Candidates at once: how many candidates send ahead together"
+          className="remote-cells"
+          value={String(la.abreast)}
+          onChange={m.armAbreast}
+          options={la.abreasts.map((s) => ({
+            value: String(s.abreast),
+            label: lookaheadAbreastLabel(s),
+            disabled: pending || la.max_speed || !s.pickable,
+            hint: lookaheadAbreastHint(s),
+          }))}
+        />
+        <p className="remote-note">{la.flight}</p>
         {shallow !== null ? <p className="remote-note remote-note-why">{shallow}</p> : null}
+      </div>
+      <div className="row">
+        <Term className="lbl" content={LOOKAHEAD_WORDS.max_speed_hint}>
+          {LOOKAHEAD_WORDS.max_speed}
+        </Term>
+        <span className="val">
+          <Switch
+            checked={la.max_speed}
+            label={`${LOOKAHEAD_WORDS.max_speed}: both rows at their right end`}
+            locked={pending || !maxOffered}
+            lockedNote={pending || shallow === null ? "saving" : shallow}
+            onChange={m.toggleMaxSpeed}
+          />
+        </span>
       </div>
       <div className="row">
         <span className="lbl">Every round</span>
         <span className="val">
           <Switch
             checked={la.auto}
-            label="Keep this depth every round"
+            label="Keep this press every round"
             locked={pending || la.auto_refusal !== null}
             lockedNote={la.auto_refusal === null ? "saving" : LOOKAHEAD_WORDS[la.auto_refusal]}
-            onChange={() => m.arm(la.pressed, !la.auto)}
+            onChange={() => m.arm(la.pressed, la.abreast, !la.auto)}
           />
         </span>
       </div>

@@ -388,7 +388,9 @@ class SampleStartedRecord(_Pass):
     position: int
     # Capped at the writer: the whole query is a dataset fact, in every measurement row.
     query_preview: Annotated[str, AfterValidator(lambda q: q[:120])] = ""
+    # The look-ahead the walk ran under: cells out per candidate, candidates sending at once.
     sample_lookahead: int = 1
+    sample_abreast: int | Literal["all"] = 1
 
 
 class SampleScoredRecord(_Pass):

@@ -34,8 +34,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     SAMPLE_RENDER_CAP,
     TRANSCRIPT_PREDICTED_CAP,
     TRANSCRIPT_QUERY_CAP,
-    TRANSCRIPT_REASONING_CAP,
-    TRANSCRIPT_RENDER_CAP,
     InjectionKind,
     Item,
     signal,
@@ -384,16 +382,19 @@ def _transcript_plan(b: PotterView) -> _TranscriptPlan | None:
     rows = [r for r in _misses(b) if r.key not in lost_keys]
     if not rows and not lost:
         return None
-    # Rotated by round: the pool's order froze at round 0, so freshness alone serves one head forever.
+    shown = b.transcript_knobs.transcripts
+    # Ties rotate by round: the pool's order froze at round 0, so a fixed one serves one head forever.
     latest = b.latest_sample_keys
     fresh = [r for r in rows if r.key in latest]
     stale = [r for r in rows if r.key not in latest]
     if fresh:
-        off = (b.round_num * TRANSCRIPT_RENDER_CAP) % len(fresh)
+        off = (b.round_num * (shown or len(fresh))) % len(fresh)
         fresh = fresh[off:] + fresh[:off]
+    # Lowest-scoring first, an unscored one last; a stable sort keeps the rotation among ties.
+    worst = sorted(fresh + stale, key=lambda r: (r.grade.fitness is None, r.grade.fitness))
     losing = [loss.run for _, loss in lost if loss.run is not None]
-    pool = [r for pair in zip_longest(fresh + stale, losing) for r in pair if r is not None]
-    return _TranscriptPlan(pool[:TRANSCRIPT_RENDER_CAP], dict(lost), len(rows), len(lost))
+    pool = [r for pair in zip_longest(worst, losing) for r in pair if r is not None]
+    return _TranscriptPlan(pool[:shown], dict(lost), len(rows), len(lost))
 
 
 def _looping(trace: str) -> bool:
@@ -404,10 +405,10 @@ def _looping(trace: str) -> bool:
     return added / (len(trace) - half) < LOOP_NOVELTY
 
 
-def _trace_excerpt(trace: str) -> str:
+def _trace_excerpt(trace: str, cap: int | None) -> str:
     if _looping(trace):
         return "[looping — head and tail only]\n" + _edges_at_line(trace, DEGENERATE_TRACE_CAP)
-    return _edges_at_line(trace, TRANSCRIPT_REASONING_CAP)
+    return trace if cap is None else _edges_at_line(trace, cap)
 
 
 @signal(
@@ -442,7 +443,8 @@ def _r_sample_transcripts(b: PotterView) -> list[Item]:
                 f"this is {loss.by}'s run."
             )
         if (said := b.transcript(r)) is not None:
-            parts.append(f"{said.heading}:\n{_trace_excerpt(said.text)}")
+            excerpt = _trace_excerpt(said.text, b.transcript_knobs.transcript_chars)
+            parts.append(f"{said.heading}:\n{excerpt}")
         if r.facts.verifier_graded:
             parts.append(f"VERIFIER SCORE: {r.grade.fitness}")
         else:
@@ -490,15 +492,15 @@ def clustered_sample_ids(b: PotterView) -> list[int]:
 
 def _misses(b: PotterView) -> list[GradedCell]:
     """An errored sample is not a miss: the measurement never happened, so no mutation wins it back."""
-    return [r for r in b.trajectory_results if not r.hit and not r.facts.errored]
+    return [r for r in b.parent_rows if not r.hit and not r.facts.errored]
 
 
 def _no_labels(b: PotterView) -> bool:
-    return all_verifier_graded(r.facts.ground_truth for r in b.trajectory_results)
+    return all_verifier_graded(r.facts.ground_truth for r in b.parent_rows)
 
 
 def _errored(b: PotterView) -> list[GradedCell]:
-    return [r for r in b.trajectory_results if r.facts.errored]
+    return [r for r in b.parent_rows if r.facts.errored]
 
 
 def _predicted_counts(cells: Sequence[GradedCell]) -> Counter[str]:
@@ -598,7 +600,7 @@ def _contains(outer: tuple[str, ...], inner: tuple[str, ...]) -> bool:
 
 def _extent_can_miss(b: PotterView) -> bool:
     """A label answer has no extent to overlap."""
-    return not _no_labels(b) and not enumerable_truth_labels(b.trajectory_results)
+    return not _no_labels(b) and not enumerable_truth_labels(b.parent_rows)
 
 
 def _span_near_miss(cell: GradedCell) -> bool:
@@ -678,7 +680,7 @@ def _r_failing_samples(b: PotterView) -> list[Item]:
             return []
         return [
             Item(
-                f"NOT MEASURED — {len(errored)}/{len(b.trajectory_results)} "
+                f"NOT MEASURED — {len(errored)}/{len(b.parent_rows)} "
                 f"{unit_plural(b.measured_unit)} errored before "
                 "producing an answer. The measurement never happened: there is no miss here to win "
                 "back and no prompt edit that reaches it. Do not propose a mutation to chase this "
@@ -709,8 +711,8 @@ def _r_failing_samples(b: PotterView) -> list[Item]:
     else:
         order.append("the difficulty ruler is still cold, so unordered")
     header = (
-        f"FAILING SAMPLES ({len(rows)} still unsolved{held} — latest outcome per "
-        f"{b.measured_unit} across every configuration tried; {'; '.join(order)}):"
+        f"FAILING SAMPLES ({len(rows)} the parent still misses{held} — its own latest outcome "
+        f"per {b.measured_unit}; {'; '.join(order)}):"
     )
     out = [Item(header)]
     if ceiling := sum(1 for r in rows if ran_to_output_ceiling(r.facts)):

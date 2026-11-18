@@ -4105,7 +4105,7 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
         _PEER_HOP,
         monkeypatch,
         "potter",
-        {"l1_generate": {"config": {"n_variants": 6}}},
+        {"l1_generate": {"config": {"n_variants": 7}}},
         lambda _p, _s: True,
     ) as (cycle, _):
         parent = cycle.parent.prompts["solve"].fields["instruction"]
@@ -4122,13 +4122,15 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
             [edit("insert_after", parent, " Zq7. Zq7."), edit("replace", "Zq7.", "Check.")],
             [edit("replace", "", "Rewritten whole.")],
             [edit("insert_after", parent, " Zq9.")],
+            # Past the length budget, the edits summed.
+            [edit("insert_after", parent, " Zq7."), edit("insert_after", "Zq7.", " Zq8." * 200)],
         ]
 
         def says(body: dict[str, Any]) -> str:
             # A line of one panel, cited under no name; two lines joined are held by none.
             prompt = body["messages"][0]["content"]
             line = prompt[prompt.index("ESCALATION: ") :].splitlines()[0]
-            cites = [None, None, line, None, None, "SCORED: 1 | true: 2"]
+            cites = [None, None, line, None, None, "SCORED: 1 | true: 2", None]
             return json.dumps(
                 {
                     "variants": [
@@ -4153,9 +4155,12 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
         [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
         for cp in proposed.proposals
     ]
-    missed, unheld = "edit_anchor_not_one_span", "citation_not_in_panel"
-    assert fatal == [["no_op_variant"], [missed], [], [missed], [], [unheld]], (
-        "a restating, mis-anchored or unheld-citing variant was not refused as its own arm"
+    missed, unheld, long = "edit_anchor_not_one_span", "citation_not_in_panel", "over_ceiling"
+    assert fatal == [["no_op_variant"], [missed], [], [missed], [], [unheld], [long]], (
+        "a restating, mis-anchored, unheld-citing or overlong variant was not refused as its own arm"
+    )
+    assert "at most 800 characters" in json.dumps(offline.llm.sent[0]), (
+        "the length budget the variant was refused by was never stated on the wire"
     )
     written = [cp.individual.prompts["solve"].fields["instruction"] for cp in proposed.proposals]
     assert written[2] == f"{parent} Check twice.", "two edits on one field did not apply in order"
@@ -4166,8 +4171,8 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
     )
     assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
         None,
-        6,
-        {"no_op_variant": 1, missed: 2, unheld: 1},
+        7,
+        {"no_op_variant": 1, missed: 2, unheld: 1, long: 1},
     ), "a round's per-arm refusals were not booked against what L1 generated"
 
 

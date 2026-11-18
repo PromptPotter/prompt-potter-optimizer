@@ -102,12 +102,13 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     ),
     # The rows and their transcripts sit on the floor; an L4 row's transcript is its inner run.
     "l1_critique": NodeLayoutSpec(
-        # Every miss is admitted ahead of this, so it decides only how many transcripts fit beside them.
         discretionary_chars=7_500,
         extras=frozenset({"measurand", "axis_memory"}),
-        # The rows a cluster may span: a marked row always renders.
+        # The rows a cluster may span and their runs, as many as its `TranscriptKnobs` declare.
         # `mutation_memory` is the one carrier of the tried mechanisms a cluster must not restate.
-        mandatory=frozenset({"diagnostics", "failing_samples", "mutation_memory"}),
+        mandatory=frozenset(
+            {"diagnostics", "failing_samples", "sample_transcripts", "mutation_memory"}
+        ),
         floor=L1Layout(
             problem_description=[
                 # The rows a cluster must span, or `schemas.py::critique_response_model` drops it.

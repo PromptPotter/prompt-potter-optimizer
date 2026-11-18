@@ -12,7 +12,7 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.command_kinds import LookaheadCells
+from promptpotter.domain.command_kinds import UNARMED, LookaheadAbreast, LookaheadCells
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import (
     ArmedCaps,
@@ -65,10 +65,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     VerifyLedger,
     scan_ledger_verify,
 )
-from promptpotter.infrastructure.store.command_log import (
-    effective_lookahead,
-    requested_lookahead,
-)
+from promptpotter.infrastructure.store.command_log import HeldLookahead, effective_lookahead
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.read_model import money_on
 from promptpotter.infrastructure.store.stores import Stores
@@ -107,7 +104,7 @@ class SampleWalk(StrictModel):
     key: str = Field(description="Changes when the walk does — a new arm is a new axis.")
 
 
-LookaheadShut = Literal["one_at_a_time", "settled"]
+LookaheadShut = Literal["one_at_a_time", "settled", "followed"]
 # Why no deeper press is admitted now, the switch's reasons first.
 LookaheadShallow = Literal[LookaheadShut, "no_run", "past_money", "past_most"]
 # `SampleLookahead` worded; `{name}` is the field of that name.
@@ -117,11 +114,20 @@ LookaheadWord = Literal[
     "more_affordable",
     "holds_every_round",
     "holds_this_round",
-    "discarded",
     "depth_one",
     "depth_many",
     "depth_max",
     "depth_max_hint",
+    "abreast_one",
+    "abreast_one_hint",
+    "abreast_many",
+    "abreast_all",
+    "abreast_all_hint",
+    "axes",
+    "axes_one",
+    "axes_all",
+    "max_speed",
+    "max_speed_hint",
     "flight",
     "scope_every_round",
     "scope_this_round",
@@ -131,32 +137,50 @@ LOOKAHEAD_WORDS: Worded[LookaheadWord, str] = Worded(
         "one_at_a_time": "This backend runs one sample at a time — a single call has no latency to "
         "overlap.",
         "settled": "This cycle has settled: no walk is left to hold calls ahead for.",
+        "followed": "This run follows its enclosing run's Max speed; switch it off there.",
         "no_run": LOOKAHEAD_NO_RUN,
         "past_money": "The spend limits afford {affordable} more call(s) out.",
         "past_most": "The stop rules allow {pick_max} out at most.",
-        "flight": "{in_flight} of {most} out · depth {held} {scope}",
+        "flight": "{in_flight} of {most} out · {axes} {scope} · {discards} discarded so far.",
         "scope_every_round": "every round",
         "scope_this_round": "this round",
         "no_further_cell": "holds no further cell",
         "more_affordable": "more affordable",
-        "holds_every_round": "Every round's scoring runs with this many calls in flight, up to "
-        "{pick_max}, until switched off. A cut discards at most one call. The measurement is "
-        "unchanged and the cycle is NOT marked babysat.",
-        "holds_this_round": "Runs this round's scoring with this many calls in flight, up to "
-        "{pick_max}, then resets to 1. A cut discards at most one call. The measurement is unchanged "
-        "and the cycle is NOT marked babysat.",
-        "discarded": "{discards} discarded so far.",
+        "holds_every_round": "Every round's scoring runs with these calls in flight, up to "
+        "{pick_max} per candidate, until switched off. A cut discards at most one call. The "
+        "measurement is unchanged and the cycle is NOT marked babysat.",
+        "holds_this_round": "Runs this round's scoring with these calls in flight, up to "
+        "{pick_max} per candidate, then resets to one at a time. A cut discards at most one call. "
+        "The measurement is unchanged and the cycle is NOT marked babysat.",
         "depth_one": "One at a time",
-        "depth_many": "Hold {cells} in flight",
+        "depth_many": "Hold {cells} in flight per candidate",
         "depth_max": "Max · {ceiling}",
-        "depth_max_hint": "Hold as many in flight as the backend admits: {ceiling} now, and more "
-        "if its ceiling rises.",
+        "depth_max_hint": "Hold as many in flight per candidate as the backend admits: {ceiling} "
+        "now, and more if its ceiling rises.",
+        "abreast_one": "One after another",
+        "abreast_one_hint": "Only the deciding candidate sends ahead; what it sent stays out.",
+        "abreast_many": "{abreast} candidates send ahead at once",
+        "abreast_all": "All",
+        "abreast_all_hint": "Every candidate still walking sends ahead at once.",
+        "axes": "depth {held} per candidate · {abreast} candidates send ahead",
+        "axes_one": "depth {held} per candidate · one candidate sends ahead",
+        "axes_all": "depth {held} per candidate · every candidate sends ahead",
+        "max_speed": "Max speed",
+        "max_speed_hint": "Both rows at their right end: as many calls per candidate as the "
+        "backend admits, every candidate at once. The backend's ceiling and the spend limits "
+        "still bound the calls out.",
     }
 )
 
 
+def lookahead_axes(held: int | str, abreast: LookaheadAbreast) -> str:
+    """Both axes in one phrase, the readout's and the panel's."""
+    word: LookaheadWord = "axes_one" if abreast == 1 else "axes_all" if abreast == "all" else "axes"
+    return LOOKAHEAD_WORDS[word].format(held=held, abreast=abreast)
+
+
 class LookaheadDepth(StrictModel):
-    """One depth the look-ahead control offers: that many calls held in flight."""
+    """One depth the look-ahead control offers: that many calls held in flight per candidate."""
 
     cells: LookaheadCells
     fill: Literal["full", "part"] | None = Field(
@@ -169,20 +193,39 @@ class LookaheadDepth(StrictModel):
     )
 
 
+class LookaheadAbreastStep(StrictModel):
+    """One count of candidates sending at once the look-ahead control offers."""
+
+    abreast: LookaheadAbreast
+    pickable: bool = Field(
+        description="Whether a press of this count is admitted now: the control applies and the "
+        "run admits `set-sample-lookahead`."
+    )
+
+
 class SampleLookahead(StrictModel):
-    """The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its
-    control offers. A replay takes no armed control, so it reads depth 1 and nothing armed."""
+    """The sample look-ahead: the depth per candidate and the candidates at once in force, the
+    gauge of calls held ahead, and what its control offers. A replay takes no armed control, so it
+    reads one at a time and nothing armed."""
 
     depth: int = Field(
-        description="The depth IN FORCE — how many cells the walk holds in flight: the armed "
-        "request bounded by `ceiling`."
+        description="The depth IN FORCE — how many cells each candidate holds in flight: the "
+        "armed request bounded by `ceiling`."
     )
     pressed: LookaheadCells = Field(
         description="The depth the control shows pressed: `max` where the ceiling is armed by "
         "name, else `depth`."
     )
+    abreast: LookaheadAbreast = Field(
+        description="How many candidates send ahead at once, counted from the one deciding: a "
+        "count, or `all`."
+    )
+    max_speed: bool = Field(
+        description="Both axes at their right end, `max` per candidate and `all` candidates: the "
+        "Max speed switch, which no press stores apart from them."
+    )
     auto: bool = Field(
-        description="Whether that depth outlives its round — the operator's auto-arm."
+        description="Whether that press outlives its round — the operator's auto-arm."
     )
     ceiling: int = Field(
         description="The backend's `max_cells_in_flight`; 1 says the control does not apply."
@@ -204,36 +247,35 @@ class SampleLookahead(StrictModel):
     cell_reserve_usd: float | None = Field(
         description="What each call out holds of the ceiling; null where no book binds."
     )
-    discards: int = Field(description="Calls a cut has discarded so far.")
     auto_refusal: LookaheadShut | None = Field(
         description="Why the auto-arm switch is shut: `one_at_a_time` where holding calls ahead "
-        "does not apply to this backend at all, `settled` once the cycle has. A mode, not a "
-        "press, so a paused run takes it for its relaunch; null where offered."
+        "does not apply to this backend at all, `settled` once the cycle has, `followed` where "
+        "an inner run follows its enclosing run's Max speed. A mode, not a press, so a paused run "
+        "takes it for its relaunch; null where offered."
     )
     depths: list[LookaheadDepth] = Field(
         description="Each depth the control draws, 1 to `ceiling`, then `max` where `ceiling` "
         "exceeds 1."
     )
+    abreasts: list[LookaheadAbreastStep] = Field(
+        description="Each count of candidates at once the control draws, 1 to `ceiling`, then "
+        "`all` where `ceiling` exceeds 1."
+    )
     shallow: LookaheadShallow | None = Field(
         description="Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the "
-        "backend's ceiling, the cycle settled, no run to hold calls for, money, or the stop "
-        "rules; null where a deeper one is."
+        "backend's ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls "
+        "for, money, or the stop rules; null where a deeper one is."
+    )
+    flight: str = Field(
+        description="The look-ahead now in one line: calls out, both axes in force and their "
+        "scope, the calls cut so far."
     )
 
     def lines(self) -> list[str]:
         """The panel's rows as text, for a door that prints them: one wording, `LOOKAHEAD_WORDS`."""
-        dumped = self.model_dump()
-        said = {
-            **dumped,
-            "scope": LOOKAHEAD_WORDS["scope_every_round" if self.auto else "scope_this_round"],
-            "held": LOOKAHEAD_WORDS["depth_max"].format_map(dumped)
-            if self.pressed == "max"
-            else self.depth,
-        }
-        words: list[LookaheadWord] = ["flight", "discarded"]
-        if self.shallow is not None:
-            words.append(self.shallow)
-        return [LOOKAHEAD_WORDS[w].format_map(said) for w in words]
+        if self.shallow is None:
+            return [self.flight]
+        return [self.flight, LOOKAHEAD_WORDS[self.shallow].format_map(self.model_dump())]
 
 
 class RoundAxis(StrictModel):
@@ -459,8 +501,7 @@ class _Present(NamedTuple):
     """Only the PRESENT holds these; a replay takes none — a past moment never had them."""
 
     allotment: Budget | None
-    lookahead: LookaheadCells
-    lookahead_auto: bool
+    lookahead: HeldLookahead
     verify: VerifyLedger
     # A pass still running on the ledger that no attached run and no paid pass's job scores.
     orphaned: bool
@@ -590,36 +631,48 @@ def _lookahead(
     allowed: int,
 ) -> SampleLookahead:
     ceiling = state.max_cells_in_flight
-    asked: LookaheadCells = 1 if standing is None else standing.lookahead
-    depth = effective_lookahead(asked, ceiling)
+    held = HeldLookahead(UNARMED) if standing is None else standing.lookahead
+    depth, asked_abreast = effective_lookahead(held.press, ceiling)
+    pressed: LookaheadCells = "max" if ceiling > 1 and held.press.cells == "max" else depth
+    abreast: LookaheadAbreast = asked_abreast if ceiling > 1 else 1
+    # The most calls both axes together hold out, the ceiling bounding them.
+    window = min(ceiling, depth * (ceiling if abreast == "all" else abreast))
     affordable, most = state.lookahead_affordable, state.lookahead_most
     # Both verdicts read the depth and the gauge as just corrected.
     held_by_money = (
         affordable
         if standing is not None
         and affordable is not None
-        and in_flight + affordable < min(depth, allowed)
+        and in_flight + affordable < min(window, allowed)
         else None
     )
     pick_max = max(1, min(ceiling, most)) if most > 0 else ceiling
-    auto = standing is not None and standing.lookahead_auto
-    pressable = ceiling > 1 and run.lookahead_refusal == ""
+    auto = held.press.auto
     auto_refusal: LookaheadShut | None = (
         "one_at_a_time"
         if ceiling <= 1
         else "settled"
         if RUN_PHASE_INFO[run.run_phase].settled
+        else "followed"
+        if held.followed
         else None
     )
+    pressable = ceiling > 1 and run.lookahead_refusal == "" and not held.followed
     shallow: LookaheadShallow | None = (
         auto_refusal
         or ("no_run" if not pressable else None)
         or ("past_money" if held_by_money is not None else None)
         or ("past_most" if depth >= pick_max and pick_max < ceiling else None)
     )
+    shown = LOOKAHEAD_WORDS["depth_max"].format(ceiling=ceiling) if pressed == "max" else depth
+    offered: list[LookaheadAbreast] = list(range(1, ceiling + 1))
+    if ceiling > 1:
+        offered.append("all")
     return SampleLookahead(
         depth=depth,
-        pressed="max" if ceiling > 1 and asked == "max" else depth,
+        pressed=pressed,
+        abreast=abreast,
+        max_speed=pressed == "max" and abreast == "all",
         auto=auto,
         ceiling=ceiling,
         in_flight=in_flight,
@@ -629,7 +682,6 @@ def _lookahead(
         pick_max=pick_max,
         affordable=held_by_money,
         cell_reserve_usd=state.cell_reserve_usd,
-        discards=state.sample_lookahead_discards,
         auto_refusal=auto_refusal,
         depths=[
             LookaheadDepth(
@@ -640,7 +692,15 @@ def _lookahead(
             for n in range(1, ceiling + 1)
         ]
         + ([LookaheadDepth(cells="max", fill=None, pickable=pressable)] if ceiling > 1 else []),
+        abreasts=[LookaheadAbreastStep(abreast=n, pickable=pressable) for n in offered],
         shallow=shallow,
+        flight=LOOKAHEAD_WORDS["flight"].format(
+            in_flight=in_flight,
+            most=most,
+            axes=lookahead_axes(shown, abreast),
+            scope=LOOKAHEAD_WORDS["scope_every_round" if auto else "scope_this_round"],
+            discards=state.sample_lookahead_discards,
+        ),
     )
 
 
@@ -767,7 +827,6 @@ def served_dashboard(
         )
     config = cycle_config(stores, campaign, hop).config
     limits = _binding(stores, hop, config, run, folded)
-    armed = stores.inbox(hop)
     remainder = _remainder(stores, hop, limits)
     campaign_metered = stores.campaigns.metered_spend(hop.campaign_id, meter)
     return _serve(
@@ -779,8 +838,7 @@ def served_dashboard(
         run_limits=limits,
         standing=_Present(
             allotment=_allotment(stores, hop, run),
-            lookahead=requested_lookahead(armed),
-            lookahead_auto=armed.lookahead is not None and armed.lookahead.auto,
+            lookahead=stores.commands.book().lookahead(stores.subject(hop)),
             verify=scan_ledger_verify(CycleLayout(cycle_path).ledger),
             orphaned=any(mark.state == "running" for mark in state.verification)
             and stores.campaigns.holder(hop) is None,

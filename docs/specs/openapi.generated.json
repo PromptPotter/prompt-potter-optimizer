@@ -7716,7 +7716,7 @@
                 "type": "null"
               }
             ],
-            "description": "The depth this launch's walk starts at, pressed as `set-sample-lookahead`."
+            "description": "The look-ahead this launch's walk starts at, pressed as `set-sample-lookahead`."
           },
           "mode": {
             "$ref": "#/components/schemas/RunMode",
@@ -8578,6 +8578,17 @@
             "description": "`APP_VERSION` — the browser's one source of it",
             "title": "Version",
             "type": "string"
+          },
+          "webapp": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Said"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The page's own build, said where the checkout's moved past it."
           }
         },
         "required": [
@@ -10079,6 +10090,38 @@
         "title": "LivesReading",
         "type": "object"
       },
+      "LookaheadAbreast": {
+        "anyOf": [
+          {
+            "minimum": 1.0,
+            "type": "integer"
+          },
+          {
+            "const": "all",
+            "type": "string"
+          }
+        ]
+      },
+      "LookaheadAbreastStep": {
+        "additionalProperties": false,
+        "description": "One count of candidates sending at once the look-ahead control offers.",
+        "properties": {
+          "abreast": {
+            "$ref": "#/components/schemas/LookaheadAbreast"
+          },
+          "pickable": {
+            "description": "Whether a press of this count is admitted now: the control applies and the run admits `set-sample-lookahead`.",
+            "title": "Pickable",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "abreast",
+          "pickable"
+        ],
+        "title": "LookaheadAbreastStep",
+        "type": "object"
+      },
       "LookaheadCells": {
         "anyOf": [
           {
@@ -10093,7 +10136,7 @@
       },
       "LookaheadDepth": {
         "additionalProperties": false,
-        "description": "One depth the look-ahead control offers: that many calls held in flight.",
+        "description": "One depth the look-ahead control offers: that many calls held in flight per candidate.",
         "properties": {
           "cells": {
             "$ref": "#/components/schemas/LookaheadCells"
@@ -10130,17 +10173,22 @@
       },
       "LookaheadPress": {
         "additionalProperties": false,
-        "description": "How many cells ahead the walk sends, and whether that depth stands every round.",
+        "description": "How many cells ahead each candidate sends, how many candidates send at once, and whether\nthat stands every round.",
         "properties": {
+          "abreast": {
+            "$ref": "#/components/schemas/LookaheadAbreast",
+            "default": 1,
+            "description": "Candidates at once, counted from the one deciding in walk order: 1 sends ahead for that one alone; `all` for every candidate still walking."
+          },
           "auto": {
             "default": false,
-            "description": "This depth stands every round, until pressed off.",
+            "description": "This press stands every round, until pressed off.",
             "title": "Auto",
             "type": "boolean"
           },
           "cells": {
             "$ref": "#/components/schemas/LookaheadCells",
-            "description": "1 disarms; `max` holds as many as the backend admits, wherever its ceiling moves."
+            "description": "Samples per candidate: 1 is one at a time; `max` holds as many as the backend admits, wherever its ceiling moves."
           }
         },
         "required": [
@@ -11103,7 +11151,7 @@
                 "type": "null"
               }
             ],
-            "description": "The depth this launch's walk starts at, pressed as `set-sample-lookahead`."
+            "description": "The look-ahead this launch's walk starts at, pressed as `set-sample-lookahead`."
           },
           "optimization": {
             "anyOf": [
@@ -15666,8 +15714,20 @@
       },
       "SampleLookahead": {
         "additionalProperties": false,
-        "description": "The sample look-ahead: the depth in force, the gauge of calls held ahead, and what its\ncontrol offers. A replay takes no armed control, so it reads depth 1 and nothing armed.",
+        "description": "The sample look-ahead: the depth per candidate and the candidates at once in force, the\ngauge of calls held ahead, and what its control offers. A replay takes no armed control, so it\nreads one at a time and nothing armed.",
         "properties": {
+          "abreast": {
+            "$ref": "#/components/schemas/LookaheadAbreast",
+            "description": "How many candidates send ahead at once, counted from the one deciding: a count, or `all`."
+          },
+          "abreasts": {
+            "description": "Each count of candidates at once the control draws, 1 to `ceiling`, then `all` where `ceiling` exceeds 1.",
+            "items": {
+              "$ref": "#/components/schemas/LookaheadAbreastStep"
+            },
+            "title": "Abreasts",
+            "type": "array"
+          },
           "affordable": {
             "anyOf": [
               {
@@ -15686,7 +15746,7 @@
             "type": "integer"
           },
           "auto": {
-            "description": "Whether that depth outlives its round — the operator's auto-arm.",
+            "description": "Whether that press outlives its round — the operator's auto-arm.",
             "title": "Auto",
             "type": "boolean"
           },
@@ -15695,7 +15755,8 @@
               {
                 "enum": [
                   "one_at_a_time",
-                  "settled"
+                  "settled",
+                  "followed"
                 ],
                 "type": "string"
               },
@@ -15703,7 +15764,7 @@
                 "type": "null"
               }
             ],
-            "description": "Why the auto-arm switch is shut: `one_at_a_time` where holding calls ahead does not apply to this backend at all, `settled` once the cycle has. A mode, not a press, so a paused run takes it for its relaunch; null where offered.",
+            "description": "Why the auto-arm switch is shut: `one_at_a_time` where holding calls ahead does not apply to this backend at all, `settled` once the cycle has, `followed` where an inner run follows its enclosing run's Max speed. A mode, not a press, so a paused run takes it for its relaunch; null where offered.",
             "title": "Auto Refusal"
           },
           "ceiling": {
@@ -15724,7 +15785,7 @@
             "title": "Cell Reserve Usd"
           },
           "depth": {
-            "description": "The depth IN FORCE — how many cells the walk holds in flight: the armed request bounded by `ceiling`.",
+            "description": "The depth IN FORCE — how many cells each candidate holds in flight: the armed request bounded by `ceiling`.",
             "title": "Depth",
             "type": "integer"
           },
@@ -15736,15 +15797,20 @@
             "title": "Depths",
             "type": "array"
           },
-          "discards": {
-            "description": "Calls a cut has discarded so far.",
-            "title": "Discards",
-            "type": "integer"
+          "flight": {
+            "description": "The look-ahead now in one line: calls out, both axes in force and their scope, the calls cut so far.",
+            "title": "Flight",
+            "type": "string"
           },
           "in_flight": {
             "description": "Calls out now; 0 once no producer is appending.",
             "title": "In Flight",
             "type": "integer"
+          },
+          "max_speed": {
+            "description": "Both axes at their right end, `max` per candidate and `all` candidates: the Max speed switch, which no press stores apart from them.",
+            "title": "Max Speed",
+            "type": "boolean"
           },
           "most": {
             "description": "The most calls the stop rules allow out; between phases, the next round's.",
@@ -15771,6 +15837,7 @@
                 "enum": [
                   "one_at_a_time",
                   "settled",
+                  "followed",
                   "no_run",
                   "past_money",
                   "past_most"
@@ -15781,13 +15848,15 @@
                 "type": "null"
               }
             ],
-            "description": "Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the backend's ceiling, the cycle settled, no run to hold calls for, money, or the stop rules; null where a deeper one is.",
+            "description": "Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the backend's ceiling, the cycle settled, an enclosing run's Max speed, no run to hold calls for, money, or the stop rules; null where a deeper one is.",
             "title": "Shallow"
           }
         },
         "required": [
           "depth",
           "pressed",
+          "abreast",
+          "max_speed",
           "auto",
           "ceiling",
           "in_flight",
@@ -15797,10 +15866,11 @@
           "pick_max",
           "affordable",
           "cell_reserve_usd",
-          "discards",
           "auto_refusal",
           "depths",
-          "shallow"
+          "abreasts",
+          "shallow",
+          "flight"
         ],
         "title": "SampleLookahead",
         "type": "object"
@@ -16678,11 +16748,16 @@
       },
       "SetSampleLookaheadPayload": {
         "additionalProperties": false,
-        "description": "Arm how many cells ahead the walk sends.",
+        "description": "Arm how many cells ahead each candidate sends and how many candidates send at once.",
         "properties": {
+          "abreast": {
+            "$ref": "#/components/schemas/LookaheadAbreast",
+            "default": 1,
+            "description": "Candidates at once, counted from the one deciding in walk order: 1 sends ahead for that one alone; `all` for every candidate still walking."
+          },
           "auto": {
             "default": false,
-            "description": "This depth stands every round, until pressed off.",
+            "description": "This press stands every round, until pressed off.",
             "title": "Auto",
             "type": "boolean"
           },
@@ -16695,7 +16770,7 @@
           },
           "cells": {
             "$ref": "#/components/schemas/LookaheadCells",
-            "description": "1 disarms; `max` holds as many as the backend admits, wherever its ceiling moves."
+            "description": "Samples per candidate: 1 is one at a time; `max` holds as many as the backend admits, wherever its ceiling moves."
           },
           "cycle_id": {
             "maxLength": 128,
@@ -16951,7 +17026,7 @@
                 "type": "null"
               }
             ],
-            "description": "The depth this launch's walk starts at, pressed as `set-sample-lookahead`."
+            "description": "The look-ahead this launch's walk starts at, pressed as `set-sample-lookahead`."
           }
         },
         "required": [
@@ -17002,7 +17077,7 @@
                 "type": "null"
               }
             ],
-            "description": "The depth this launch's walk starts at, pressed as `set-sample-lookahead`."
+            "description": "The look-ahead this launch's walk starts at, pressed as `set-sample-lookahead`."
           },
           "mode": {
             "$ref": "#/components/schemas/RunMode",

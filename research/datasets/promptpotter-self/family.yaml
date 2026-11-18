@@ -76,6 +76,18 @@ campaign:
           # No outer round is banked to set it from: 3 variants send at most 3 x 6 = 18 inner
           # campaigns a round, 3 x 4 = 12 once PoBB cuts each loser at `elimination_n_min`.
           n_variants: 3
+          # The start renders 7,485 chars, so 4 rounds at this leave a subject of at most 15,485.
+          # Outer round 1's rewrites moved +730 and +765.
+          length_budget: 2000
+          # A seat's whole inner run, every round and arm: 4.8–6.3k chars on the `run` C0. Placed
+          # last in the generator's 11,000-char discretionary share, one or two fit whole.
+          transcripts: 2
+          transcript_chars: null
+      # The critique reads every search seat's whole inner run.
+      l1_critique:
+        config:
+          transcripts: null
+          transcript_chars: null
       escalation:
         config:
           # No `optimization.lives`, and its absence is deliberate rather than an omission. It read

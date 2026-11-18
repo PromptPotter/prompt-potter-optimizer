@@ -86,6 +86,7 @@ from promptpotter.application.optimizers.potter.knobs import (
     EscalationKnobs,
     L1GenerateKnobs,
     PoBBKnobs,
+    TranscriptKnobs,
 )
 from promptpotter.application.optimizers.potter.l1 import (
     critique_facts,
@@ -336,6 +337,7 @@ class L1Critique(LayoutNode, nodes.Adapter):
     """A malformed response is survived: the next walk re-runs it (`round.py::settle_owed_outputs`)."""
 
     name: ClassVar[str] = "l1_critique"
+    knobs: ClassVar[type[StrictModel]] = TranscriptKnobs
     reads: ClassVar[frozenset[type[StatePart]]] = VIEW_READS
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({Critique})
     sees: ClassVar[frozenset[type[CycleRead]]] = VIEW_SEES | {Calls}

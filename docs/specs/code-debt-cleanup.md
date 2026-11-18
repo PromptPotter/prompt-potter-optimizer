@@ -780,16 +780,13 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ### batch/32 · rel
 
-- **The dev loop still serializes on Vitest**: its pool fails a worker past its hard-coded 90 s start,
-  which a host loaded from outside the gate lock still trips. **Rides with:** rel 2. **Re-test:** five
-  builders plus one full gate, no reap.
-- **Playwright's server starts beside the gate's heaviest checks**: the push gate of 6fa93bab0 read
-  `Timed out waiting 120000ms from config.webServer` (`webapp/playwright.config.ts::server`'s
-  `timeout`) with its server ready ~5 s late, beside mypy (428 s, cold cache), pytest and offline-run;
-  `gate.py --only playwright` alone was green in 276 s. The rail measures the desk's load, as Vitest's
-  90 s start does. Root: the gate admits a check by memory alone, so a timed start runs beside the
-  CPU-bound checks. **Rides with:** rel 2. **Re-test:** the push gate with a cold mypy cache, playwright green.
-- **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
+- **Vitest's start still meets load from outside the gate lock**: inside a gate it starts beside no
+  check (`gate.py::Check`'s `started`), but a builder outside the lock still shares its hard-coded 90 s
+  worker start; five looping builders plus one full gate reaped none on a 4-core Linux box (127 runs).
+  **Rides with:** rel 2. **Re-test:** the same on the Windows desk, no reap.
+- **`Check.slots` is a guess beside `mb`'s measured peak**: Playwright claimed 3 slots and used 0.5;
+  offline-run claims `min(8, cores)`. Action: derive slots from measured CPU-s ÷ wall as `mb` is.
+  **Held:** none claims it. **Re-test:** each `slots` within a quarter of its measured ratio.- **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
   and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
   past `store/io.py::_atomic_replace`'s three tries, at 6fa93bab0 (whose reads retry, 0 refused, where
   fdad7947d's refused 49). Root: a read opens without `FILE_SHARE_DELETE`, so the swap waits on every
@@ -879,10 +876,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   "cells.constrained-int: … cells.literal['max']: …" (`presentation/cli/main.py`'s payload arm prints
   the `ValidationError` raw). Action: the CLI renders a payload refusal by field and expected form,
   once, for every verb. **Re-test:** `set-sample-lookahead bogus` reads "cells: a count ≥ 1 or max".
-- **The look-ahead flight line is composed twice**: `webapp/lib/derivations/run-phase.ts::lookaheadFlight`
-  repeats `served_dashboard.py::SampleLookahead.lines()`'s pick of scope and held word. Action: serve
-  the composed line on `SampleLookahead` and render it. **Re-test:** the panel's flight line and
-  `dashboard`'s `parallel calls:` line are one string.
 - **The fence test never sends a row's query to `l1_generate`**: its fixture's query is fenced on
   `diagnostics`, a panel `l1_generate` does not place, and the composed request holds no query.
   Action: seat a row a placed panel quotes, and assert it sits fenced in the request. **Re-test:**
@@ -935,3 +928,25 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   leave the `per_sample` of `research/datasets/promptpotter-self/family.yaml` unscored; no reader reads both
   shapes. Action: none past the landing that ships it, which re-measures C0. **Held:** that landing.
   **Re-test:** after it, `promptpotter-self` scores every outer cell it reads.
+- **Panel shares are code, not declared knobs, so L2 under L4 never sees the subject**: Shape:
+  `potter/dispatch/layout.py::NODE_LAYOUTS["l2_context"]`'s 5,500 discretionary chars drop
+  `rendered_prompt` (7,485 under the family) whole; the generator's 11,000 share holds one or two whole
+  seat transcripts, and the critique's whole seats (`TranscriptKnobs` null/null) run near 30k unmeasured.
+  Action: each node's share a declared knob beside `TranscriptKnobs`, sized on a real outer round.
+  **Held:** a decision, after round 1. **Re-test:** an offline L4 leg's `l2_context` request holds CURRENT PROMPTS.
+- **The length budget binds the `l1_generate` loop, not where a child is minted**: Shape:
+  `potter/validators.py::l1_length_within_budget` runs on proposals; `_recombined` and
+  `locus_crossover` children go unchecked (each crossed field was measured, so the bound holds per field,
+  not per child). Action: the check moves to `Children.child`. **Held:** l4-outer-5. **Re-test:** a
+  crossover child past the budget is refused.
+- **`answer_distribution` and `ability` read the frontier's rows, not the subject's**: link 4 moved
+  `failing_samples` and `sample_transcripts` onto `PotterView.parent_rows`; these two still read
+  `trajectory_results`. Action: the subject arm owns every row panel. **Held:** l4-outer-5.
+  **Re-test:** `git grep -n "trajectory_results" -- promptpotter/application/optimizers/potter/dispatch/injections`.
+- **Open cells are keyed by position, not by candidate**: Shape:
+  `infrastructure/projections/live_dashboard.py::_open_samples` is keyed by position alone and
+  `domain/records/run_records.py::FlightWaiting` carries only `position`, so two walks with a cell out
+  at one position (`--abreast` past 1) overwrite each other: a cut can undercount discards, and
+  "waiting on" can name the wrong arm. Action: key by (arm, position); `FlightWaiting` names its arm.
+  **Held:** l4-outer-5. **Re-test:** an offline world at `--abreast all` with two walks out at one
+  position; the served discards and `waiting on` match the ledger.

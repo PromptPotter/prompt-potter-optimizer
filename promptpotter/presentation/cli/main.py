@@ -28,6 +28,7 @@ from promptpotter.domain.command_kinds import (
     CyclePayload,
     ForkCyclePayload,
     LaunchPayload,
+    LookaheadAbreast,
     LookaheadCells,
     LookaheadPress,
     ReadKind,
@@ -158,7 +159,8 @@ BUDGET_AXES = (
 
 
 def _cells_arg(raw: str) -> int | str:
-    """A count, or the word `LookaheadCells` names; the payload refuses any other."""
+    """A count, or the word `LookaheadCells` or `LookaheadAbreast` names; the payload refuses any
+    other."""
     return int(raw) if raw.isdigit() else raw
 
 
@@ -169,28 +171,39 @@ LOOKAHEAD_ARGS = (
         type=_cells_arg,
         default=None,
         metavar="N|max",
-        help="Start the walk with N calls in flight (`set-sample-lookahead`), this round only "
-        "unless `--every-round`; the backend's ceiling bounds it, and `max` holds it.",
+        help="Start the walk with N calls in flight per candidate (`set-sample-lookahead`), this "
+        "round only unless `--every-round`; the backend's ceiling bounds it, and `max` holds it.",
+    ),
+    Arg(
+        LaunchPayload.cli_spelling("lookahead.abreast"),
+        dest="abreast",
+        type=_cells_arg,
+        default=None,
+        metavar="N|all",
+        help="How many candidates send ahead at once beside `--lookahead`, counted from the one "
+        "deciding; `all` is every candidate still walking. `--lookahead max --abreast all` is "
+        "Max speed.",
     ),
     Arg(
         LaunchPayload.cli_spelling("lookahead.auto"),
         dest="every_round",
         action="store_true",
-        help="Keep the `--lookahead` depth every round, until pressed off.",
+        help="Keep the `--lookahead` press every round, until pressed off.",
     ),
 )
 
 
 def lookahead_from_args(args: argparse.Namespace) -> LookaheadPress | None:
-    """The launch's depth as its payload carries it, refused as every door refuses one."""
+    """The launch's look-ahead as its payload carries it, refused as every door refuses one."""
     if args.lookahead is None:
-        if args.every_round:
+        if args.every_round or args.abreast is not None:
             raise PayloadInvalidError(
-                "--every-round keeps a depth: name it with --lookahead N|max."
+                "--abreast and --every-round ride a depth: name it with --lookahead N|max."
             )
         return None
+    press = {"cells": args.lookahead, "auto": args.every_round}
     return PayloadInvalidError.validating(
-        LookaheadPress, {"cells": args.lookahead, "auto": args.every_round}
+        LookaheadPress, press if args.abreast is None else {**press, "abreast": args.abreast}
     )
 
 
@@ -925,6 +938,8 @@ def _field_args(model: type[CommandPayload], name: str, field: FieldInfo) -> tup
         return (Arg(spelled, dest=name, action="store_true", **spec),)
     if annotation == LookaheadCells.__value__:
         spec |= {"type": _cells_arg, "metavar": "N|max"}
+    elif annotation == LookaheadAbreast.__value__:
+        spec |= {"type": _cells_arg, "metavar": "N|all"}
     elif get_origin(annotation) is Literal:
         spec["choices"] = get_args(annotation)
     elif annotation is int:

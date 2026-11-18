@@ -155,14 +155,21 @@ from promptpotter.application.optimizers.nodes import (
     unfit_pipeline,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
-from promptpotter.application.optimizers.potter.dispatch.injections.panels import detectable_rows
+from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
+    clustered_sample_ids,
+    detectable_rows,
+)
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
     build_l1_response_schema,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
+from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.l1 import parse_population
 from promptpotter.application.optimizers.potter.records import Ladder
-from promptpotter.application.optimizers.potter.validators import l1_shots_in_demo_pool
+from promptpotter.application.optimizers.potter.validators import (
+    l1_length_within_budget,
+    l1_shots_in_demo_pool,
+)
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
@@ -306,9 +313,10 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.scoring import ScoringFormulaError
+from promptpotter.domain.scoring import GradedCell, ScoringFormulaError
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
 from promptpotter.domain.spend import Budget, HeldBudget
+from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure.identity import grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
@@ -3671,7 +3679,7 @@ def _gepa_seat(stores: Stores, population: list[OptSearchPoint]) -> RoundContext
 def test_l1s_wire_offers_the_roster_the_second_prompt_node_declares() -> None:
     # A SECOND prompt node, on a roster of its own, is written as the first is.
     two = _two_prompt_nodes()
-    wire = build_l1_response_schema(two, field_names={})
+    wire = build_l1_response_schema(two, field_names={}, length_budget=800)
     edits = wire["properties"]["variants"]["items"]["properties"]["edits"]
     offered = {at for at in edits["items"]["properties"]["at"]["enum"] if at.startswith("review.")}
     assert offered == {"review.instruction", "review.rubric"}, (
@@ -4353,6 +4361,64 @@ def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
     )
 
 
+def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_origins(
+    built_stores: Stores,
+) -> None:
+    # The origin misses rows 0-7; the elected parent ran 0-3 and was topped up on 4, so the frontier
+    # keeps the origin's 5-7.
+    trace = "\n".join(
+        f"step {i}: premise {i * 7 % 13} rules out case {i * 5 % 11}" for i in range(140)
+    )
+    bank = samples(8)
+
+    def ran(sid: int, grade: float) -> GradedCell:
+        return measurement(
+            sid,
+            grade,
+            objective=grade,
+            sample_key=bank[sid].key,
+            pipeline_data={"reasoning_trace": trace},
+        )
+
+    missed = [ran(sid, 0.0) for sid in range(8)]
+    grades = {0: 0.6, 1: 0.1, 2: 0.4, 3: 0.1, 4: 0.3}
+    own = [ran(sid, g) for sid, g in grades.items() if sid < 4]
+    seated = seat(
+        built_stores,
+        bank=bank,
+        origin=(OptSearchPoint(), lambda _s: sheet(missed)),
+        optimization={
+            "nodes": {"l1_critique": {"config": {"transcripts": None, "transcript_chars": None}}}
+        },
+    )
+    run_init(RoundContext(seated.cycle, 0))
+    parent = ArmKey(prompted(instruction="parent").id)
+    latest = round_result(
+        1,
+        arms={parent: arm_state("parent")},
+        cells={parent: sheet(own)},
+        overlap_results={parent: sheet([ran(4, grades[4])])},
+        voted={"ended_on": parent},
+    )
+    set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
+    view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_critique")), Ladder())
+    assert view.parent.id == parent, "vacuous — the subject is still the origin"
+    spans = sorted(clustered_sample_ids(view))
+    assert spans == sorted(view.position_of[bank[sid].key] for sid in grades), (
+        f"the critique may cluster rows {spans}, not every one the parent itself ran"
+    )
+    shown = [k for i in DispatchHub.render_items("sample_transcripts", view) for k in i.quotes]
+    worst = [bank[sid].key for sid in (1, 3, 4, 2, 0)]
+    assert shown == worst, f"transcripts run {shown}, not the parent's worst first"
+    potter = select_optimizer(bench_choice("potter"))
+    critique = running_prompt("l1_critique", potter.node_config("l1_critique"), potter.manifest)
+    with scoped(book=spend_book()):
+        filled = DispatchHub.fill(critique, view, node="l1_critique")
+    assert filled.rendered["sample_transcripts"].count(trace) == len(grades), (
+        "the critique was not handed every run its knobs declare, whole, past its budget"
+    )
+
+
 def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
     built_stores: Stores,
 ) -> None:
@@ -4397,15 +4463,23 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
 def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
     built_stores: Stores,
 ) -> None:
-    # The INNER campaign's manifest's, as the outer's origin, and no mandatory panel is refused.
-    schema, origin = _outer(inner_cells("potter"))
-    inner = _view(built_stores, origin, TaskDecomposition(), schema)
-    subject_chars = sum(len(i.text) for i in DispatchHub.render_items("rendered_prompt", inner))
-    start_chars = sum(len(t) for p in origin.prompts.values() for t in p.fields.values())
-    assert start_chars and subject_chars >= start_chars, (
-        f"the outer's origin carries {start_chars}c of inner prompts, its panel shows {subject_chars}c"
-    )
+    # The INNER campaign's manifest's, as the outer's origin, grown by whole length budgets past
+    # 16,000 chars, shown whole, and no mandatory panel is refused.
     potter = select_optimizer(bench_choice("potter"))
+    budget = potter.knobs_of("l1_generate", L1GenerateKnobs).length_budget
+    schema, start = _outer(inner_cells("potter"))
+    start_chars = sum(len(t) for p in start.prompts.values() for t in p.fields.values())
+    grown_by = budget * -(-(16_001 - start_chars) // budget)
+    fields = start.prompts["l1_generate"].fields
+    grown_text = fields["instruction"] + ("\nRead every panel." * grown_by)[:grown_by]
+    grown = NodePrompt(fields={**fields, "instruction": grown_text})
+    origin = OptSearchPoint(prompts={**start.prompts, "l1_generate": grown})
+    inner = _view(built_stores, origin, TaskDecomposition(), schema)
+    shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", inner))
+    subject_chars = len(shown)
+    assert grown_text in shown and subject_chars > 16_000, (
+        f"a {start_chars + grown_by}c parent the length budget admits renders as {subject_chars}c"
+    )
     generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
     with scoped(book=spend_book()):
         filled = DispatchHub.fill(generator, inner, node="l1_generate")
@@ -4414,6 +4488,24 @@ def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
     )
     refused_panels = set(filled.injections.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
     assert not refused_panels, f"mandatory panel(s) refused by the budget: {sorted(refused_panels)}"
+
+
+def test_a_variant_moving_its_prompt_past_the_length_budget_is_refused_grown_or_trimmed() -> None:
+    budget = select_optimizer(bench_choice("potter")).knobs_of("l1_generate", L1GenerateKnobs)
+    n = budget.length_budget
+    parent = prompted(instruction="x" * (2 * n), rubric="r" * n)
+    at, rubric = Locus("solve", "instruction"), Locus("solve", "rubric")
+    for moved, refused in (
+        ({at: "x" * (3 * n)}, False),
+        ({at: "x" * n, rubric: ""}, True),
+        ({at: "x" * (3 * n + 1)}, True),
+        ({at: "x" * (n - 1)}, True),
+        ({at: "x" * (3 * n), rubric: "r" * (n // 2)}, False),
+    ):
+        failures = l1_length_within_budget(moved, parent, budget=n)
+        assert [f.reason for f in failures] == (
+            [ValidationReason.OVER_CEILING] if refused else []
+        ), f"a variant moving its parent by {[len(t) for t in moved.values()]} was judged wrong"
 
 
 def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifests(

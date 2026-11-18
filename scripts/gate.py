@@ -5,12 +5,14 @@ import ast
 import contextlib
 import dataclasses
 import fnmatch
+import http.client
 import json
 import logging
 import os
 import posixpath
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import sysconfig
@@ -19,6 +21,7 @@ import threading
 import time
 import tomllib
 import urllib.parse
+from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -1124,13 +1127,40 @@ def _eslint(sel: Selection) -> Outcome:
     return run(_node("npm", "run", *lint), _WEBAPP)
 
 
+@cache
+def _e2e_ports() -> dict[str, str]:
+    """Its servers' ports, free when asked, so no sibling clone's walk shares one."""
+    ports = {}
+    for name in ("PP_E2E_PORT", "PP_E2E_COLD_PORT"):
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            ports[name] = str(probe.getsockname()[1])
+    return ports
+
+
+def _e2e_served() -> bool:
+    """Both servers answer health, what its `webServer` start waits for; asked bare, as a proxy
+    `urllib` would read off the env never sees the loopback."""
+    for port in _e2e_ports().values():
+        health = http.client.HTTPConnection("127.0.0.1", int(port), timeout=1)
+        try:
+            health.request("GET", "/api/v1/health")
+            health.getresponse()
+        except (OSError, http.client.HTTPException):
+            return False
+        finally:
+            health.close()
+    return True
+
+
 def _playwright(sel: Selection) -> Outcome:
     # `walk` serves a copy of the walk world, in this gate's own home; `spend` costs real money.
     tiers = _node(
         "npx", "playwright", "test", "--project=cold", "--project=walk", "--project=touch"
     )
     walk_home = str(Path(os.environ["PROMPTPOTTER_HOME"]) / "e2e-walk")
-    return run(tiers, _WEBAPP, PP_E2E_WALK_WORLD=str(sel.world), PP_E2E_WALK_HOME=walk_home)
+    world = {"PP_E2E_WALK_WORLD": str(sel.world), "PP_E2E_WALK_HOME": walk_home}
+    return run(tiers, _WEBAPP, **world, **_e2e_ports())
 
 
 def _lock_satisfies(requirer: str, dep: str, entries: frozenset[str]) -> bool:
@@ -1274,6 +1304,10 @@ class Check:
     tier: Literal["commit", "edit", "landing"] = "edit"
     # The cores it keeps busy; the schedule never runs more beside each other than the box has.
     slots: int = 1
+    # Set where it starts under a hard-coded timeout (Playwright's `webServer`, Vitest's worker
+    # start), which beside a CPU-bound check trips on the desk's load, not on a defect: until it
+    # answers that its start is behind it, the check takes every core.
+    started: Callable[[], bool] | None = None
     # Empty is its kind's prefixes; `!prefix` is everything outside one. A product it reads is
     # named by its directory (`builds`).
     reads: tuple[str, ...] = ()
@@ -1339,16 +1373,11 @@ def _web_modules(changed: Sequence[str]) -> tuple[str, ...] | None:
     return tuple(path[len("webapp/") :] for path in changed if (REPO / path).is_file())
 
 
-# Its pool's default width is every core, past which its worker timeout trips on a busy box.
-_VITEST_SLOTS = 4
-
-
 def _vitest(sel: Selection) -> Outcome:
-    width = f"--maxWorkers={_VITEST_SLOTS}"
     if sel.narrowed:
-        related = ("vitest", "related", "--run", "--passWithNoTests", width, *sel.narrowed)
+        related = ("vitest", "related", "--run", "--passWithNoTests", *sel.narrowed)
         return run(_node("npx", *related), _WEBAPP)
-    return run(_node("npm", "run", "test", "--", width), _WEBAPP)
+    return run(_node("npm", "run", "test"), _WEBAPP)
 
 
 def _pytest(_: Selection) -> Outcome:
@@ -1706,7 +1735,8 @@ CHECKS: tuple[Check, ...] = (
     ),
     Check("lockfile", "web", _lockfile, mb=0, tier="commit"),
     Check("eslint", "web", _eslint, mb=2135, tier="commit", narrow=_web_modules),  # 1706
-    Check("vitest", "web", _vitest, mb=735, slots=_VITEST_SLOTS, narrow=_web_modules),  # 586
+    # Its pool starts a worker per project inside the run, which nothing outside it sees.
+    Check("vitest", "web", _vitest, mb=735, started=lambda: False, narrow=_web_modules),  # 586
     Check(
         "vite-build",
         "web",
@@ -1724,7 +1754,8 @@ CHECKS: tuple[Check, ...] = (
         _playwright,
         mb=1680,  # 1344
         tier="landing",
-        slots=3,  # its browser and both servers
+        # Past its servers' start, the walk keeps half a core busy (89 CPU-s in 173 s, Linux).
+        started=_e2e_served,
         # Both servers' backend is the offline world's (`e2e/serve_app.py`); `walk` walks its run.
         reads=(*_WEBAPP_READS, *OFFLINE_RUN_READS, "webapp/out/", os.path.join(_WALK_WORLDS, "")),
     ),
@@ -1806,16 +1837,30 @@ def _schedule(
     checks: Sequence[Check], sel: Selection, store: LastGreen | None, free_mb: int
 ) -> list[Result]:
     """Each check once its producers are done, beside every other the box's free memory and cores
-    still hold; the widest first. One too big for the box runs when nothing else does."""
+    still hold; first the one most others wait on, then the widest. One too big for the box runs
+    when nothing else does, and none starts past a timed check waiting for it to empty."""
     done: dict[Check, Result] = {}
     running: set[Check] = set()
+    started: set[Check] = set()
+    waiting = Counter(p for c in checks for p in _producers(c, checks))
     moved = threading.Condition()
+
+    def cores(check: Check) -> int:
+        return _CORES if check.started is not None and check not in started else check.slots
 
     def execute(check: Check) -> None:
         result = _execute(check, sel, store)
         with moved:
             running.discard(check)
             done[check] = result
+            moved.notify()
+
+    def watch_start(check: Check, probe: Callable[[], bool]) -> None:
+        # A start says nothing on its own: its probe beats here, off the lock, until it answers.
+        while check not in done and not probe():
+            time.sleep(1)
+        with moved:
+            started.add(check)
             moved.notify()
 
     with moved:
@@ -1825,13 +1870,20 @@ def _schedule(
                 for c in checks
                 if c not in done and c not in running and done.keys() >= set(_producers(c, checks))
             ]
-            for check in sorted(ready, key=lambda c: (-c.slots, -c.mb)):
+            for check in sorted(ready, key=lambda c: (-waiting[c], -cores(c), -c.mb)):
                 mb = sum(c.mb for c in running) + check.mb
-                slots = sum(c.slots for c in running) + check.slots
-                if not running or (mb <= free_mb and slots <= _CORES):
-                    running.add(check)
-                    # A daemon, so Ctrl+C ends the gate rather than waiting out each check.
-                    threading.Thread(target=execute, args=(check,), daemon=True).start()
+                if running and (mb > free_mb or sum(map(cores, running)) + cores(check) > _CORES):
+                    # Behind a running timed check it waits out that check, not the narrow ones.
+                    if check.started is not None and all(c.started is None for c in running):
+                        break
+                    continue
+                running.add(check)
+                # Daemons, so Ctrl+C ends the gate rather than waiting out each check.
+                threading.Thread(target=execute, args=(check,), daemon=True).start()
+                if check.started is not None:
+                    threading.Thread(
+                        target=watch_start, args=(check, check.started), daemon=True
+                    ).start()
             moved.wait()
     return [done[check] for check in checks]
 

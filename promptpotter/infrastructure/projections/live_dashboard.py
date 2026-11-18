@@ -435,7 +435,8 @@ class LiveDashboardProjection(Projection):
         self._election: Election | None = None
         self._race: RaceStandingRecord | None = None
         self._race_standings: dict[str, float] = {}
-        self._open_samples: dict[int, tuple[str, ArmKey | None, int]] = {}
+        # Each open cell's query, arm, and whether it went out into an armed window.
+        self._open_samples: dict[int, tuple[str, ArmKey | None, bool]] = {}
         self._bench_readings: dict[int, BenchReading] = {}
         self._around_bench: tuple[DashboardState, str | None, ArmName | None] | None = None
         # Between a bench or verify bracket: its cells move no run state.
@@ -631,12 +632,13 @@ class LiveDashboardProjection(Projection):
         self._narration.announce(record)
         if record.round != self._live:
             return
-        # A walk ending: a sample launched INTO an armed window is a discard; one left open at depth 1 failed on its own.
-        if isinstance(record.state, Concluded) and self._open_samples:
+        # A walk ending: its sample launched INTO an armed window is a discard; one left open
+        # unarmed failed on its own. Another walk's open cells are still its own to take.
+        if isinstance(record.state, Concluded):
+            ended = [p for p, (_, arm, _) in self._open_samples.items() if arm == record.arm]
             self.state.sample_lookahead_discards += sum(
-                1 for *_, depth in self._open_samples.values() if depth > 1
+                1 for p in ended if self._open_samples.pop(p)[2]
             )
-            self._open_samples.clear()
         if isinstance(record.state, Measuring) and record.state.sample_order:
             self.state.declared_sample_order = record.state.sample_order
 
@@ -672,7 +674,7 @@ class LiveDashboardProjection(Projection):
         self._open_samples[record.position] = (
             record.query_preview,
             record.arm,
-            record.sample_lookahead,
+            record.sample_lookahead > 1 or record.sample_abreast != 1,
         )
         self._refresh_open_sample_markers()
         if not self._in_pass:
@@ -732,7 +734,7 @@ class LiveDashboardProjection(Projection):
             s.current_query_payload = None
             s.current_position = None
             return
-        sid, (query_text, arm, _depth) = next(iter(self._open_samples.items()))
+        sid, (query_text, arm, _ahead) = next(iter(self._open_samples.items()))
         s.current_query_payload = query_text
         s.current_position = sid
         s.measuring_arm = None if arm is None else self._name(arm)

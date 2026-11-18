@@ -4,8 +4,10 @@ import re
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.served_dashboard import lookahead_axes
 from promptpotter.application.views.render.ansi import (
     render_bench_scored,
     render_pass_graded,
@@ -59,6 +61,7 @@ from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.narration import NarratedRecord, Narration
 from promptpotter.domain.paired_reading import level_text, lift_text
+from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phase_acts import (
     CellFormula,
     InitClosed,
@@ -136,7 +139,8 @@ class ReadoutProjection(Projection):
         # Folded off the launch's INIT, and the wiring's display metric.
         self._formula: CellFormula | None = None
         self._display_metric: DisplayMetric = "fitness"
-        self._sample_lookahead_depth: int | None = None
+        # The look-ahead last read: cells per candidate, candidates at once.
+        self._sample_lookahead: tuple[int, int | Literal["all"]] | None = None
         self._round_best_key: ScoreboardRankKey | None = None
         self._round_best_fitness: float | None = None
         self._round_best_label: str | None = None
@@ -333,26 +337,28 @@ class ReadoutProjection(Projection):
         )
 
     def _handle_sample_started(self, record: SampleStartedRecord) -> None:
-        depth, qt = record.sample_lookahead, record.sample_total
-        if depth == self._sample_lookahead_depth:
+        window, qt = (record.sample_lookahead, record.sample_abreast), record.sample_total
+        if window == self._sample_lookahead:
             return
-        opening = self._sample_lookahead_depth is None
-        self._sample_lookahead_depth = depth
-        if depth > 1 and record.role is MeasurementRole.BENCH:
-            tail = " (a bench pass holds the backend's ceiling; no press reaches it)"
-        elif opening and depth <= 1:
+        opening = self._sample_lookahead is None
+        self._sample_lookahead = window
+        armed = window != (1, 1)
+        if armed and PASSES[record.role].max_speed:
+            tail = f" (a {record.role.value} pass runs at Max speed; no press reaches it)"
+        elif opening and not armed:
             tail = (
-                f" — {qt} samples run one at a time; `set-sample-lookahead N|max` overlaps them"
+                f" — {qt} samples run one at a time; `set-sample-lookahead N|max --abreast N|all` "
+                "overlaps them"
                 if qt > 1
                 else ""
             )
         elif opening:
-            tail = f" — up to {depth} of {qt} in flight (armed)" if qt else " (armed)"
-        elif depth > 1:
+            tail = f" — of {qt} samples (armed)" if qt else " (armed)"
+        elif armed:
             tail = " (armed — expires when this round finishes scoring)"
         else:
             tail = " (back to sequential)"
-        self._write(f"  {DIM}⇉ sample look-ahead depth {depth}{tail}{RESET}")
+        self._write(f"  {DIM}⇉ sample look-ahead {lookahead_axes(*window)}{tail}{RESET}")
 
     def _handle_round_entered(self, record: RoundEnteredRecord) -> None:
         self._narration.read(self.at_offset, record)

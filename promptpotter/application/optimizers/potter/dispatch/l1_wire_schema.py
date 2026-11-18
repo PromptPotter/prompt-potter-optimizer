@@ -9,6 +9,7 @@ from promptpotter.application.bench.llm_call import wire_closed
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     BLOCK_ID_INSTRUCTION,
     LAYOUT_SCHEMA_INSTRUCTION,
+    LENGTH_BUDGET_TEXT,
     SCHEMA_DESCRIPTION_MAX_CHARS,
     SCHEMA_DESCRIPTIONS_INSTRUCTION,
     SCHEMA_RENAME_INSTRUCTION,
@@ -114,6 +115,7 @@ def build_l1_response_schema(
     pooled_fields: Mapping[str, Sequence[str]] | None = None,
     recombination: RecombinationOffer | None = None,
     field_names: Mapping[str, str],
+    length_budget: int,
 ) -> dict[str, Any]:
     """Returns the BARE schema: an envelope nests it where the provider reads no ``type`` and every constraint goes inert.
     ``None`` *recombination* withdraws the slot."""
@@ -188,7 +190,13 @@ def build_l1_response_schema(
     }
     # STRICTER than the parse twin on purpose: tolerated missing at the parse boundary, never OFFERED as `null`.
     if loci:
-        edits = variant_props["edits"] = {**_said(variant_props["edits"]), "minItems": 1}
+        # Stated, never a `maxLength`: `validators.py::l1_length_within_budget` refuses past it.
+        stated = LENGTH_BUDGET_TEXT.format(length_budget)
+        edits = variant_props["edits"] = {
+            **_said(variant_props["edits"]),
+            "minItems": 1,
+            "description": stated,
+        }
         edit = edits["items"]
         if pooled_fields is None:
             edit["properties"]["at"]["enum"] = list(loci)
@@ -203,7 +211,7 @@ def build_l1_response_schema(
                     for locus, f in loci.items()
                 ]
             }
-            edits["description"] = BLOCK_ID_INSTRUCTION
+            edits["description"] = f"{BLOCK_ID_INSTRUCTION} {stated}"
     else:
         del variant_props["edits"]
     if prompt_nodes:

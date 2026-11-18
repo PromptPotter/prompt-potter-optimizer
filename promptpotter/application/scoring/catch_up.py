@@ -14,6 +14,7 @@ from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.infrastructure.store.command_log import LookaheadWindow
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
@@ -131,7 +132,7 @@ def _catch_up(
         measured=prior,
     )
     walk.release()
-    _, cell = walk.launch(1)
+    _, cell = walk.launch(LookaheadWindow(1, 1))
 
     def commit() -> Sequence[GradedCell]:
         walk.collect()

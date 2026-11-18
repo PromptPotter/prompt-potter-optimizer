@@ -354,11 +354,12 @@ class Frontier(CycleRead):
 
     @property
     def parent_own_rows(self) -> list[GradedCell]:
-        """Each sample's latest cell of the parent ITSELF, never one another individual answered."""
+        """Each sample's latest cell of the parent ITSELF, its origin-panel top-ups included, never
+        one another individual answered."""
         key = ArmKey(self._cycle.parent.id)
         rows: list[GradedCell] = []
         for rr in self._cycle.rounds:
-            rows = merge_known_outcomes(rows, rr.rows(key))
+            rows = merge_known_outcomes(rows, rr.raced(key))
         return rows
 
     @property

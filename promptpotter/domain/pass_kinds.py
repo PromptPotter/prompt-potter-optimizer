@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
@@ -32,8 +32,8 @@ class Pass:
     keeps: bool
     # The ledger bracket a held-out pass is entered, graded and exited under.
     phase: CampaignPhase | None
-    # Its look-ahead: the operator's request, which a round spends, or `max`, the backend's ceiling.
-    depth: Literal["requested", "max"]
+    # It sends at Max speed whatever is pressed; else at the operator's press, which a round spends.
+    max_speed: bool
     # It ends early on the campaign's degradation checks.
     checks: bool
 
@@ -59,10 +59,12 @@ def _pass(
     fresh: bool = False,
     keeps: bool = False,
     phase: CampaignPhase | None = None,
-    depth: Literal["requested", "max"] = "requested",
+    max_speed: bool = False,
     checks: bool = False,
 ) -> Pass:
-    return Pass(kind, scopes, arm, recorded, deliberate, spend, fresh, keeps, phase, depth, checks)
+    return Pass(
+        kind, scopes, arm, recorded, deliberate, spend, fresh, keeps, phase, max_speed, checks
+    )
 
 
 PASSES: dict[MeasurementRole, Pass] = {
@@ -82,7 +84,7 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="diagnostic",
             keeps=True,
             phase=CampaignPhase.VERIFY,
-            depth="max",
+            max_speed=True,
             checks=True,
         ),
         _pass(
@@ -92,7 +94,7 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="bench",
             keeps=True,
             phase=CampaignPhase.BENCH,
-            depth="max",
+            max_speed=True,
             checks=True,
         ),
         # It re-reads rows already standing, so it joins no reading.
@@ -103,7 +105,7 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="diagnostic",
             fresh=True,
             phase=CampaignPhase.VERIFY,
-            depth="max",
+            max_speed=True,
             checks=True,
         ),
     )

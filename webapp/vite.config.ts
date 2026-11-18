@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type HtmlTagDescriptor, type Plugin } from "vite";
@@ -72,7 +73,18 @@ export function defines(brand: Brand): Record<string, string> {
   return { __BRAND__: JSON.stringify(brand) };
 }
 
-// What every page shares: the head, the theme script, the manifest.
+// The `webapp/` tree a build came from, which the server compares with its checkout's
+// (`application/health.py::webapp_bundle`); null outside git.
+const BUILD_SOURCE = "build-source.json";
+function webappTree(): string | null {
+  try {
+    return execFileSync("git", ["rev-parse", "HEAD:./"], { cwd: WEBAPP, encoding: "utf8" }).trim();
+  } catch {
+    return null;
+  }
+}
+
+// What every page shares: the head, the theme script, the manifest, the build's source.
 function shell(brand: Brand): Plugin {
   return {
     name: "promptpotter-shell",
@@ -99,6 +111,7 @@ function shell(brand: Brand): Plugin {
         icons: [{ src: "/brand/app-icon-pot-512.png", sizes: "512x512", type: "image/png" }],
       };
       this.emitFile({ type: "asset", fileName: "manifest.webmanifest", source: JSON.stringify(manifest) });
+      this.emitFile({ type: "asset", fileName: BUILD_SOURCE, source: JSON.stringify({ webapp_tree: webappTree() }) });
     },
   };
 }

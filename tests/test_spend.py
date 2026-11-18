@@ -156,6 +156,8 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.cells import PinnedCell
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_kinds import (
+    MAX_SPEED,
+    UNARMED,
     ArmRequest,
     ChangeRunLimitsPayload,
     DiscardDraftPayload,
@@ -163,6 +165,7 @@ from promptpotter.domain.command_kinds import (
     EditDraftCampaignPayload,
     HeadToHeadRequest,
     LookaheadCells,
+    LookaheadPress,
     MintHeadToHeadPayload,
     StartCheckinPayload,
 )
@@ -783,12 +786,12 @@ def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
     return ReplayFeed(stores.archive, entry.node_configs)
 
 
-def _control_pausing(pressed: Callable[[], bool], *, lookahead: LookaheadCells) -> RunControl:
+def _control_pausing(pressed: Callable[[], bool], *, lookahead: LookaheadPress) -> RunControl:
     class _Pressed(RunControl):
         def pause_requested(self) -> bool:
             return pressed()
 
-        def sample_lookahead(self) -> LookaheadCells:
+        def sample_lookahead(self) -> LookaheadPress:
             return lookahead
 
     return _Pressed()
@@ -889,7 +892,7 @@ async def _walk(
             scorer=_HIT,
             control=_control_pausing(
                 lambda: pause_after_call is not None and len(returned) >= pause_after_call,
-                lookahead=armed,
+                lookahead=LookaheadPress(cells=armed),
             ),
             client=backend_client(stores.jobs_dir, max_cells_in_flight=max_cells),
         )
@@ -938,12 +941,12 @@ async def _round(
     stores: Stores,
     dataset: list[Sample],
     *,
-    armed: int,
+    armed: LookaheadPress = UNARMED,
     cuts: list[int | None],
     slowest_last: bool = False,
     pause_after_call: int | None = None,
     kind: MeasurementRole = MeasurementRole.PANEL,
-    ceiling: int | None = None,
+    ceiling: int = 1,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
     flag = {"pause": False}
@@ -958,12 +961,20 @@ async def _round(
 
     # Each call beside how many cells the round had absorbed when it went out.
     asked: list[tuple[int, int, int]] = []
+    # Each walk's calls out now, and the most it ever had out at once.
+    out: dict[int, int] = {}
+    peaks: dict[int, int] = {}
 
     async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
         call = len(backend.calls) + 1
         walk = int(cast("MeasuredPass", measured_pass()).individual_id[1:])
         asked.append((walk, sample.id, len(absorbed())))
-        row = await backend.measure(sample)
+        out[walk] = out.get(walk, 0) + 1
+        peaks[walk] = max(peaks.get(walk, 0), out[walk])
+        try:
+            row = await backend.measure(sample)
+        finally:
+            out[walk] -= 1
         if call == pause_after_call:
             flag["pause"] = True
         return row
@@ -974,9 +985,7 @@ async def _round(
         dataset,
         scorer=_HIT,
         control=_control_pausing(lambda: flag["pause"], lookahead=armed),
-        client=backend_client(
-            stores.jobs_dir, max_cells_in_flight=ceiling or armed, holds_own_sends=True
-        ),
+        client=backend_client(stores.jobs_dir, max_cells_in_flight=ceiling, holds_own_sends=True),
     )
     walks = [
         open_walk(
@@ -1003,6 +1012,7 @@ async def _round(
         "asked": asked,
         "calls": list(backend.calls),
         "peak": max(backend.entries),
+        "peaks": peaks,
     }
 
 
@@ -1119,6 +1129,17 @@ async def test_a_lookahead_window_changes_the_bill_and_never_the_record(
     assert deep["billed"] == len(deep["calls"]), (
         "a discarded remote call still bills: the provider charges whether or not anyone waits"
     )
+    # The candidates axis: three walks, one record whatever either axis is pressed to.
+    cuts: list[int | None] = [4, None, 6]
+    serial = await _round(built_stores, dataset, cuts=cuts, ceiling=8)
+    for press in (LookaheadPress(cells=4), LookaheadPress(cells=1, abreast="all"), MAX_SPEED):
+        pressed = await _round(built_stores, dataset, armed=press, cuts=cuts, ceiling=8)
+        assert pressed["peak"] > 1, f"{press} never opened a window — the rest proves nothing"
+        assert (pressed["rows"], pressed["stops"], pressed["absorbed"]) == (
+            serial["rows"],
+            serial["stops"],
+            serial["absorbed"],
+        ), f"{press} moved the record"
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -1158,28 +1179,50 @@ async def test_a_catch_up_holds_a_cells_slot_and_is_archived_only_for_a_cell_abs
 async def test_a_verify_pass_sends_at_the_backends_ceiling_under_a_one_cell_press(
     built_stores: Stores,
 ) -> None:
+    dataset = _dataset()
     sent = await _round(
-        built_stores, _dataset(), armed=1, cuts=[None], kind=MeasurementRole.VERIFY, ceiling=4
+        built_stores, dataset, cuts=[None, None], kind=MeasurementRole.VERIFY, ceiling=16
     )
-    assert sent["peak"] > 1, "a verify pass sent one cell at a time"
+    # More out than the first walk's rows: the second walk sent beside it, at Max speed too.
+    assert sent["peak"] > len(dataset), "a verify pass sent short of Max speed"
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
 @on_jumping_clock
-async def test_a_rounds_walks_measure_at_once_decide_in_turn_and_share_one_depth(
+async def test_a_rounds_walks_each_send_to_their_own_depth_as_many_at_once_as_pressed(
     built_stores: Stores,
 ) -> None:
     dataset = _dataset()
-    serial = await _round(built_stores, dataset, armed=1, cuts=[4, None, 6])
-    fanned = await _round(built_stores, dataset, armed=4, cuts=[4, None, 6])
-    assert serial["peak"] == 1 and fanned["peak"] <= 4, "the depth did not bound the round"
-    assert fanned["rows"] == serial["rows"], "measuring walks at once moved a record"
-    assert fanned["stops"] == serial["stops"] == ["stop_rule", None, "stop_rule"], (
-        "measuring walks at once moved a cut"
+    cuts: list[int | None] = [4, None, 6]
+    serial = await _round(built_stores, dataset, cuts=cuts, ceiling=8)
+    assert serial["peak"] == 1 and serial["stops"] == ["stop_rule", None, "stop_rule"]
+    # Each walk's cells absorbed before its own turn: walk 0 cuts at 4 rows, walk 1 takes all 8.
+    before_turn = {0: 0, 1: 4, 2: 12}
+    deep = await _round(built_stores, dataset, armed=LookaheadPress(cells=4), cuts=cuts, ceiling=8)
+    assert all(before >= before_turn[w] for w, _, before in deep["asked"]), (
+        "one candidate at a time sent a later candidate's cell before its turn"
     )
-    assert fanned["absorbed"] == serial["absorbed"], "walks decided out of turn"
+    assert max(deep["peaks"].values()) == 4 and deep["peak"] <= 4 + 1, (
+        "the deciding walk never filled its own depth, or another filled beside it"
+    )
+    wide = await _round(
+        built_stores, dataset, armed=LookaheadPress(cells=1, abreast="all"), cuts=cuts, ceiling=8
+    )
+    assert max(wide["peaks"].values()) == 1, "a walk held more than its one cell per candidate"
+    assert any(before < before_turn[w] for w, _, before in wide["asked"]), (
+        "all candidates at once never sent a later candidate's cell ahead of its turn"
+    )
+    fastest = await _round(built_stores, dataset, armed=MAX_SPEED, cuts=cuts, ceiling=4)
+    assert fastest["peak"] == 4, "Max speed never reached the backend's ceiling"
     # First cells fastest: the second walk's calls go out while the first still has cells to take.
-    ahead = await _round(built_stores, dataset, armed=4, cuts=[None, None], slowest_last=True)
+    ahead = await _round(
+        built_stores,
+        dataset,
+        armed=LookaheadPress(cells=4, abreast="all"),
+        cuts=[None, None],
+        slowest_last=True,
+        ceiling=4,
+    )
     assert ahead["absorbed"] == [(w, s.id) for w in (0, 1) for s in dataset], (
         "a later candidate's cell was absorbed before an earlier one's"
     )
@@ -1198,7 +1241,7 @@ async def test_the_call_back_as_a_pause_is_pressed_is_absorbed_and_never_paid_ag
     built_stores: Stores,
 ) -> None:
     dataset = _dataset()
-    paused = await _round(built_stores, dataset, armed=1, cuts=[None], pause_after_call=3)
+    paused = await _round(built_stores, dataset, cuts=[None], pause_after_call=3)
     assert paused["stops"] == ["graceful"], "a pause read as another stop"
     assert len(paused["rows"][0]) == len(paused["calls"]) == 3, (
         "the call that returned as the pause was pressed is absorbed, not paid again on resume"

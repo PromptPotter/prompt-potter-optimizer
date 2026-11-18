@@ -1,16 +1,17 @@
 import { FailureLine, Said } from "@/components/ui";
 import { BACKEND_REACHABILITY_INFO, TONES, type Said as SaidRow } from "@/lib/api/types";
+import { healthRead } from "@/lib/api";
 import { commands, cycleAddress } from "@/lib/api/commands";
 import { cx } from "@/lib/cx";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useBackend } from "@/lib/hooks/useConnector";
-import { failureOf } from "@/lib/hooks/useRead";
+import { failureOf, readyData, useRead } from "@/lib/hooks/useRead";
 import { connectionSaid, useViewedDashboard } from "@/lib/state/poll";
 import { useActivePointer, useRegistry } from "@/lib/hooks/useRegistry";
 import { useWorkspace } from "@/lib/state/workspace";
 
-// The pinned line: the connection's own row, else the louder of the run's served `said` and its
-// backend probe's. A connection row is the one said row the client makes.
+// The pinned line: the connection's own row, else the loudest of the run's served `said`, its
+// backend probe's and the page's own build. A connection row is the one said row the client makes.
 export function CriticalAlertBanner() {
   const { read, dash } = useViewedDashboard();
   const { viewed, pinned, goneAddress } = useWorkspace();
@@ -20,6 +21,7 @@ export function CriticalAlertBanner() {
   const pointerFailure = failureOf(useActivePointer().read);
   const pause = useCommand<"pause">("critical-alert", { scope: cycleId });
   const { health } = useBackend();
+  const page = readyData(useRead(healthRead()))?.webapp ?? null;
 
   // The workspace's verdict wins: the dashboard has already reset onto another address. With no
   // unit in view, the reads that list and point at runs are the connection.
@@ -33,7 +35,7 @@ export function CriticalAlertBanner() {
       : { key: "backend", ...BACKEND_REACHABILITY_INFO[health.status], value: null, sub: null, detail: null };
   const said: SaidRow | null =
     connection ??
-    ([dash?.said ?? null, backend]
+    ([dash?.said ?? null, backend, page]
       .filter((row) => row !== null)
       .sort((a, b) => TONES.indexOf(b.tone) - TONES.indexOf(a.tone))[0] ?? null);
   if (!said) return null;

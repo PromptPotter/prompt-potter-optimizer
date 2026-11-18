@@ -69,9 +69,7 @@ LAYOUT_SCHEMA_INSTRUCTION = (
 AXES_ENUM_PREVIEW = 4
 NEAR_MISS_RENDER_CAP = 2
 SAMPLE_RENDER_CAP = 2
-TRANSCRIPT_RENDER_CAP = 3
 TRANSCRIPT_QUERY_CAP = 1200
-TRANSCRIPT_REASONING_CAP = 2200
 TRANSCRIPT_PREDICTED_CAP = 60
 # Compressed bytes per char a trace's second half adds to its first; below it the trace loops.
 LOOP_NOVELTY = 0.05
@@ -99,6 +97,10 @@ DEMO_QUERY_STEM = 80
 RECOMBINATION_VALUE_STEM = 160
 # An id is shown, and answered, by its head, resolved over every individual the cycle measured.
 RECOMBINATION_ID_CHARS = 8
+LENGTH_BUDGET_TEXT = (
+    "Together a variant's edits may lengthen or shorten CURRENT PROMPTS by at most {} characters; "
+    "past it, either way, the variant is refused."
+)
 BLOCK_ID_INSTRUCTION = (
     "Each edit replaces its pooled field whole: `text` is the id of a block the PROMPT BLOCK "
     "POOL panel lists for that field."

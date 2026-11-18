@@ -55,7 +55,7 @@ without it rather than inherit one.
 | Variable | Default | For |
 |---|---|---|
 | `PP_E2E_PORT` | `8123` | the walk server, started only when `walk` is among the projects run |
-| `PP_E2E_COLD_PORT` | `8124` | the throwaway server |
+| `PP_E2E_COLD_PORT` | `8124` | the throwaway server; the gate hands each run two free ports, and holds every core until both answer health |
 | `PP_E2E_FAKEAUTH_PORT` | `8125` | the auth-CLOSED server `onboarding-signed-in.spec.ts` raises for itself |
 | `PP_E2E_COLD_HOME` | `<tmp>/promptpotter-e2e` | where the throwaway world lives; it must sit under the system temp dir or `reset_world.py` refuses to wipe it |
 | `PP_E2E_WALK_WORLD` | `gate.py --walk-world` | the run `walk` serves a copy of, at `PP_E2E_WALK_HOME`, with the `offline` backend; never reuses a server already up |

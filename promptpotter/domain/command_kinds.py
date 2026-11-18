@@ -538,25 +538,47 @@ class PauseCyclePayload(ReasonedPayload, LoopPayload, kind=CommandKind.PAUSE):
 
 # `max` names the backend's ceiling, resolved at each cell, so it moves with the ceiling.
 type LookaheadCells = Annotated[WireInt, Field(ge=1)] | Literal["max"]
+# `all` names every candidate still walking, however many the round has left.
+type LookaheadAbreast = Annotated[WireInt, Field(ge=1)] | Literal["all"]
 
 
 class LookaheadPress(StrictModel):
-    """How many cells ahead the walk sends, and whether that depth stands every round."""
+    """How many cells ahead each candidate sends, how many candidates send at once, and whether
+    that stands every round."""
 
     cells: LookaheadCells = Field(
-        description="1 disarms; `max` holds as many as the backend admits, wherever its ceiling "
-        "moves."
+        description="Samples per candidate: 1 is one at a time; `max` holds as many as the backend "
+        "admits, wherever its ceiling moves."
+    )
+    abreast: LookaheadAbreast = Field(
+        default=1,
+        description="Candidates at once, counted from the one deciding in walk order: 1 sends "
+        "ahead for that one alone; `all` for every candidate still walking.",
     )
     auto: bool = Field(
         default=False,
-        description="This depth stands every round, until pressed off.",
+        description="This press stands every round, until pressed off.",
     )
+
+    @property
+    def armed(self) -> bool:
+        """False on a disarm: one at a time on both axes, this round only."""
+        return self.auto or self.cells != 1 or self.abreast != 1
+
+    @property
+    def max_speed(self) -> bool:
+        return self.cells == "max" and self.abreast == "all"
+
+
+UNARMED = LookaheadPress(cells=1)
+MAX_SPEED = LookaheadPress(cells="max", abreast="all")
 
 
 class SetSampleLookaheadPayload(LookaheadPress, LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHEAD):
-    """Arm how many cells ahead the walk sends."""
+    """Arm how many cells ahead each candidate sends and how many candidates send at once."""
 
-    # Throughput is what an inner run answers for itself: the outer's depth is never inherited.
+    # Pressed on an inner run, it is that run's own; unpressed, an inner run follows its
+    # enclosing run's Max speed (`CommandBook.lookahead`).
     inner_refusal: ClassVar[str | None] = None
     follow_up: ClassVar[str] = (
         "The walk takes it at its next cell; `dashboard` reads the depth in force."
@@ -565,17 +587,19 @@ class SetSampleLookaheadPayload(LookaheadPress, LoopPayload, kind=CommandKind.SE
 
 
 class LaunchPayload(CommandPayload):
-    """A launch kind: its run may start at a look-ahead depth, filed as `set-sample-lookahead` on
-    its cycle once the run holds it, before the walk's first cell."""
+    """A launch kind: its run may start at a look-ahead, filed as `set-sample-lookahead` on its
+    cycle once the run holds it, before the walk's first cell."""
 
     cli_spellings: ClassVar[Mapping[str, str]] = {
         "lookahead.cells": "--lookahead",
+        "lookahead.abreast": "--abreast",
         "lookahead.auto": "--every-round",
     }
 
     lookahead: LookaheadPress | None = Field(
         default=None,
-        description="The depth this launch's walk starts at, pressed as `set-sample-lookahead`.",
+        description="The look-ahead this launch's walk starts at, pressed as "
+        "`set-sample-lookahead`.",
     )
 
 

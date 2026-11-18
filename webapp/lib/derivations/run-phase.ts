@@ -1,6 +1,7 @@
 import {
   type DashboardState,
   type HierarchyState,
+  type LookaheadAbreastStep,
   type LookaheadDepth,
   type NextAct,
   type Refusal,
@@ -83,15 +84,6 @@ export function affordableText(affordable: number): string {
     : `${affordable} ${LOOKAHEAD_WORDS.more_affordable}`;
 }
 
-/** The look-ahead now, as the terminal's `SampleLookahead.lines` words it: calls out, the depth in
- *  force and its scope, the calls cut so far. */
-export function lookaheadFlight(la: SampleLookahead): string {
-  const scope = LOOKAHEAD_WORDS[la.auto ? "scope_every_round" : "scope_this_round"];
-  const held = la.pressed === "max" ? filled(LOOKAHEAD_WORDS.depth_max, la) : la.depth;
-  const cut = filled(LOOKAHEAD_WORDS.discarded, { discards: la.discards });
-  return `${filled(LOOKAHEAD_WORDS.flight, { ...la, scope, held })} · ${cut}`;
-}
-
 /** What the depth in force holds and until when; null where the switch is shut (its own note says why). */
 export function lookaheadScope(la: SampleLookahead): string | null {
   if (la.auto_refusal !== null) return null;
@@ -112,6 +104,17 @@ export function lookaheadDepthLabel(d: LookaheadDepth, la: SampleLookahead): str
 export function lookaheadDepthHint(d: LookaheadDepth, la: SampleLookahead): string {
   if (d.cells === "max") return filled(LOOKAHEAD_WORDS.depth_max_hint, la);
   return d.cells === 1 ? LOOKAHEAD_WORDS.depth_one : filled(LOOKAHEAD_WORDS.depth_many, d);
+}
+
+/** A candidates-at-once segment's label: words for one after another and for all, the count between. */
+export function lookaheadAbreastLabel(s: LookaheadAbreastStep): string {
+  if (s.abreast === "all") return LOOKAHEAD_WORDS.abreast_all;
+  return s.abreast === 1 ? LOOKAHEAD_WORDS.abreast_one : String(s.abreast);
+}
+
+export function lookaheadAbreastHint(s: LookaheadAbreastStep): string {
+  if (s.abreast === "all") return LOOKAHEAD_WORDS.abreast_all_hint;
+  return s.abreast === 1 ? LOOKAHEAD_WORDS.abreast_one_hint : filled(LOOKAHEAD_WORDS.abreast_many, s);
 }
 
 export function phasePauseLabel(state: DashboardState, optimizerStep: string | null): string {

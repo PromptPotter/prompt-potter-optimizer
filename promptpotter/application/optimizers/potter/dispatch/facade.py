@@ -40,6 +40,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import node_lay
 from promptpotter.application.optimizers.potter.knobs import (
     EscalationKnobs,
     L1GenerateKnobs,
+    TranscriptKnobs,
 )
 from promptpotter.application.optimizers.potter.records import (
     ExplorationBudget,
@@ -353,11 +354,18 @@ class PotterView:
     @functools.cached_property
     def parent_ability(self) -> AbilityReading | None:
         """θ on the parent's own rows: the side of every contrast an edit is judged against."""
-        return self.ctx.read(Ruler).difficulty.judging.frontier(
-            self.ctx.read(Frontier).parent_own_rows
-        )
+        return self.ctx.read(Ruler).difficulty.judging.frontier(self.parent_rows)
 
     # -- the evidence
+    @functools.cached_property
+    def parent_rows(self) -> tuple[GradedCell, ...]:
+        """The rows an edit of the parent must win back: its own cells, never another's."""
+        return tuple(self.ctx.read(Frontier).parent_own_rows)
+
+    @property
+    def transcript_knobs(self) -> TranscriptKnobs:
+        return self.ctx.knobs(TranscriptKnobs)
+
     @functools.cached_property
     def origin_per_sample(self) -> CellSheet:
         return self.measured_rounds[0].results

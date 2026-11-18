@@ -66,6 +66,9 @@ nodes:
       # A truncated answer is a zero-candidate round, and 12000 was measured truncating.
       max_tokens: 20000
       n_variants: 5
+      # Above the largest of 199 measured L1 proposals (+785 chars on the `run` C0's inner runs,
+      # every one of them a growth).
+      length_budget: 800
       k_max: 5
       pool_window: 8
       # Recombination by an LLM host, off at 0; `mating` + `locus_crossover` host it by a draw.
@@ -73,6 +76,8 @@ nodes:
       recombination_host: l1_generate
       block_access: open
       schema_field_rename: false
+      transcripts: 3
+      transcript_chars: 2200
     description: >-
       L1 Generate: produces N candidate prompts from current framing + critique.
   # Crossover, off at 0: after L1's variants, each a main (higher θ of two from the population)
@@ -119,6 +124,8 @@ nodes:
       reasoning_effort: low
       # A truncated critique never lands; the measured tail at `low` was 11,370 tokens.
       max_tokens: 16000
+      transcripts: 3
+      transcript_chars: 2200
     description: >-
       L1 Critique: reads round results, writes the critique L1 Generate reads next round.
   l2_context:
@@ -222,7 +229,7 @@ resolved_prompts:
         - "edits": the changes, at least one, each {at, op, anchor, text} on one field of CURRENT PROMPTS:
           * "at": the field as `node.field`.
           * "op": "replace" swaps the verbatim `anchor` span for `text`; "insert_after" puts `text` right after it; "delete" removes it (`text` empty). An empty `anchor` is the whole field.
-          * Only what changes: a field you keep gets no edit, and an edit whose result equals the parent is rejected mechanically. Rewrite the sentence your change supersedes instead of appending beside it, and stay within the parent field's length unless the mechanism names what the extra buys.
+          * Only what changes: a field you keep gets no edit, and an edit whose result equals the parent is rejected mechanically. Rewrite the sentence your change supersedes instead of appending beside it.
         - "pipeline_overlay": nested {node: {param: value}}, as its schema description states; null where nothing changes.
   l1_critique/1:
     persona: You are a pipeline evaluation analyst.

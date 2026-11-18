@@ -42,6 +42,7 @@ from promptpotter.config.paths import (
 from promptpotter.config.settings import APP_VERSION, non_utf8_encoding, settings
 from promptpotter.domain.command_kinds import CommandAcceptedBody, CommandKind, ReadKind
 from promptpotter.domain.refusal import Refusal
+from promptpotter.domain.said import Said
 from promptpotter.domain.strict_model import MAX_UPLOAD_BYTES, RequestBody, StrictModel
 from promptpotter.infrastructure.identity.accounts import IdentityBundle, build_identity_bundle
 from promptpotter.infrastructure.identity.grants import default_identity_paths
@@ -307,15 +308,27 @@ class HealthResponse(StrictModel):
     service: str
     timestamp: str
     version: str = Field(description="`APP_VERSION` — the browser's one source of it")
+    webapp: Said | None = Field(
+        default=None, description="The page's own build, said where the checkout's moved past it."
+    )
 
 
 @_health.get("/health")
 async def health_check() -> HealthResponse:
+    bundle = await asyncio.to_thread(health.webapp_bundle)
     return HealthResponse(
         status="healthy",
         service=settings.BRAND_SERVICE_NAME,
         timestamp=utcnow_iso(),
         version=APP_VERSION,
+        webapp=Said(
+            key=health.WEBAPP_BUNDLE,
+            tone="warn",
+            label="This page is out of date",
+            sub=f"{bundle.said}: {health.REBUILD}.",
+        )
+        if bundle is not None and bundle.state == "broken"
+        else None,
     )
 
 

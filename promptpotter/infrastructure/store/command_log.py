@@ -25,9 +25,11 @@ from promptpotter.domain.command_events import (
 )
 from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
+    UNARMED,
     CancelPayload,
     CommandKind,
-    LookaheadCells,
+    LookaheadAbreast,
+    LookaheadPress,
     LoopPayload,
     PauseCyclePayload,
     SetSampleLookaheadPayload,
@@ -60,8 +62,7 @@ class PauseAsk(NamedTuple):
 
 class LookaheadAsk(NamedTuple):
     command_id: str
-    cells: LookaheadCells
-    auto: bool
+    press: LookaheadPress
     taken: bool = False
 
 
@@ -82,16 +83,26 @@ class Controls(NamedTuple):
         return self._replace(pauses=tuple(p for p in self.pauses if p.hold == hold))
 
 
-def requested_lookahead(controls: Controls) -> LookaheadCells:
-    ask = controls.lookahead
-    if ask is None:
-        return 1
-    return ask.cells
+class HeldLookahead(NamedTuple):
+    """The press a run reads; ``followed`` where it is its enclosing run's Max speed."""
+
+    press: LookaheadPress
+    followed: bool = False
 
 
-def effective_lookahead(requested: LookaheadCells, ceiling: int) -> int:
+class LookaheadWindow(NamedTuple):
+    """A press against the backend's ceiling: cells out per candidate, candidates sending at once."""
+
+    cells: int
+    abreast: LookaheadAbreast
+
+
+def effective_lookahead(press: LookaheadPress, ceiling: int) -> LookaheadWindow:
     """The one clamp: the command records the request UNCLAMPED, the ceiling being the backend's."""
-    return max(1, ceiling if requested == "max" else min(requested, ceiling))
+    cells = press.cells
+    return LookaheadWindow(
+        max(1, ceiling if cells == "max" else min(cells, ceiling)), press.abreast
+    )
 
 
 LOOP_KINDS = frozenset(
@@ -145,14 +156,14 @@ class _Inbox:
                 held = held._replace(skips=(*held.skips, command_id))
             case SubmitArmsPayload() as submitted:
                 held = held._replace(submissions=(*held.submissions, (command_id, submitted)))
-            case SetSampleLookaheadPayload(cells=cells, auto=auto):
+            case SetSampleLookaheadPayload(cells=cells, abreast=abreast, auto=auto):
                 if held.lookahead is not None:
                     self._kinds.pop(held.lookahead.command_id, None)
-                armed = auto or cells != 1
+                press = LookaheadPress(cells=cells, abreast=abreast, auto=auto)
                 held = held._replace(
-                    lookahead=LookaheadAsk(command_id, cells, auto) if armed else None
+                    lookahead=LookaheadAsk(command_id, press) if press.armed else None
                 )
-                if not armed:
+                if not press.armed:
                     self._held = held
                     return
         self._kinds[command_id] = type(payload)
@@ -170,7 +181,7 @@ class _Inbox:
             )
         else:
             ask = held.lookahead
-            if ask is not None and ask.auto and not dropped:
+            if ask is not None and ask.press.auto and not dropped:
                 held = held._replace(lookahead=ask._replace(taken=True))
             else:
                 held = held._replace(lookahead=None)
@@ -333,12 +344,22 @@ class CommandBook:
         live = tuple(p for p in controls.pauses if not hold_released(self._jobs_dir, p.hold))
         return controls if live == controls.pauses else controls._replace(pauses=live)
 
+    def lookahead(self, subject: Subject) -> HeldLookahead:
+        """*subject*'s own press; unpressed, an inner run follows its enclosing run's Max speed."""
+        if (ask := self.controls(subject).lookahead) is not None:
+            return HeldLookahead(ask.press)
+        if subject.inside:
+            outer = self.lookahead(Subject.of(subject.inside))
+            if outer.press.max_speed:
+                return HeldLookahead(outer.press, followed=True)
+        return HeldLookahead(UNARMED)
+
     def untaken(self, subject: Subject, *, sparing: str | None = None) -> list[str]:
         """The loop commands on *subject* accepted and never taken, less an ``auto`` look-ahead,
         which is a mode, and less those standing for the hold *sparing* names: what a run
         boundary voids."""
         kept = self.controls(subject).lookahead
-        keep = kept.command_id if kept is not None and kept.auto else None
+        keep = kept.command_id if kept is not None and kept.press.auto else None
         return [
             record.command_id
             for record in self.subject_events(subject)

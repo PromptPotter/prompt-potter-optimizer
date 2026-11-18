@@ -18,6 +18,7 @@ from promptpotter.application.scoring.sample_measurement import (
     measure_sample,
 )
 from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.command_kinds import MAX_SPEED
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phases import (
@@ -59,7 +60,7 @@ from promptpotter.infrastructure.llm.telemetry import (
     claim_campaign_price,
 )
 from promptpotter.infrastructure.run_scope import run_scope
-from promptpotter.infrastructure.store.command_log import effective_lookahead
+from promptpotter.infrastructure.store.command_log import LookaheadWindow, effective_lookahead
 from promptpotter.infrastructure.store.io import HeldLock
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -208,10 +209,10 @@ class QueryLoopState:
         return cell is None or claim_campaign_price(cell)
 
 
-def _armed_cells(session: Session, kind: MeasurementRole) -> int:
+def _armed(session: Session, kind: MeasurementRole) -> LookaheadWindow:
     """Sample look-ahead is LIVE though it defaults off: any dataset, the moment the operator arms it."""
     ceiling = session.backend_client.connector.max_cells_in_flight
-    asked = "max" if PASSES[kind].depth == "max" else session.state.control.sample_lookahead()
+    asked = MAX_SPEED if PASSES[kind].max_speed else session.state.control.sample_lookahead()
     return effective_lookahead(asked, ceiling)
 
 
@@ -296,7 +297,7 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
     )
 
 
-LaunchEvent = tuple["Sample", int, int]
+LaunchEvent = tuple["Sample", int, LookaheadWindow]
 
 
 @dataclass
@@ -332,10 +333,10 @@ class Walk:
     def enter_block(self, end: int) -> None:
         self.boundary = min(self.n, end)
 
-    def launch(self, armed: int) -> tuple[Sample, asyncio.Task[_Acquired]]:
+    def launch(self, armed: LookaheadWindow) -> tuple[Sample, asyncio.Task[_Acquired]]:
         idx = self.submitted
         sample = self.dataset[idx]
-        # `armed` is the depth the round RUNS at, never the in-flight count, empty at each candidate's start.
+        # `armed` is the window the round RUNS at, never the in-flight count, empty at each candidate's start.
         event: LaunchEvent = (sample, idx, armed)
         if self.held is not None:
             self.held.append(event)
@@ -368,7 +369,8 @@ class Walk:
                     sample_total=self.n,
                     position=sample.id,
                     query_preview=sample.query,
-                    sample_lookahead=armed,
+                    sample_lookahead=armed.cells,
+                    sample_abreast=armed.abreast,
                 )
             )
 
@@ -601,6 +603,7 @@ class _ScoringPhase[K: Hashable]:
         self.gauge = self.session.state.flight
         self.cancels = self.session.backend_client.connector.cancel_stops_billing
         self.payer = self.session.backend_client.connector.cell_payer
+        self.ceiling = self.session.backend_client.connector.max_cells_in_flight
         self.book = run_scope().book
         self.label = filed(CELL)
         # A pass the book's ceilings do not meter is neither admitted against them nor stopped by them.
@@ -701,7 +704,7 @@ class _ScoringPhase[K: Hashable]:
         assert walk is not None
         if self.gauge is not None:
             self.gauge.touch()
-        armed = _armed_cells(self.session, walk.ctx.kind)
+        armed = _armed(self.session, walk.ctx.kind)
         if walk.skip_at is not None and len(walk.results) >= walk.skip_at:
             return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         now = self.turn_state(walk)
@@ -783,21 +786,44 @@ class _ScoringPhase[K: Hashable]:
             return self.advance()
         return True
 
-    def launch(self, walk: Walk, armed: int) -> None:
+    def held(self, walk: Walk) -> int:
+        """A walk's own calls out: its cells, and the catch-ups started on its cells not yet settled."""
+        out = len(walk.running)
         if self.backfills is not None:
-            room = min(armed - self.out(), self.affordable())
+            for sample in walk.dataset[max(0, len(walk.results) - 1) : walk.submitted]:
+                out += sum(not call.done() for call in self.backfills.backfills_for(sample))
+        return out
+
+    def room(self, walk: Walk, armed: LookaheadWindow, ceiling: int) -> int:
+        return min(armed.cells - self.held(walk), ceiling - self.out())
+
+    def abreast(self, armed: LookaheadWindow) -> list[Walk]:
+        """The live walks that send ahead, counted from the turn's in walk order."""
+        n = len(self.walks)
+        turning = [
+            walk
+            for k in range(n)
+            if (walk := self.walks[(self.turn + k) % n]) is not None and walk.outcome is None
+        ]
+        return turning if armed.abreast == "all" else turning[: armed.abreast]
+
+    def launch(self, walk: Walk, armed: LookaheadWindow) -> None:
+        if self.backfills is not None:
+            room = min(self.room(walk, armed, self.ceiling), self.affordable())
             owing = [walk.settling] if walk.settling is not None else []
             owing += [walk.dataset[idx] for idx in sorted(walk.finished)]
             for sample in owing:
                 room -= len(self.backfills.start_backfill(sample, room))
-        self.fill(walk, armed, armed)
-        for ahead in self.live():
-            if ahead is not walk:
-                self.fill(ahead, armed - 1, armed)
+        for ahead in self.abreast(armed):
+            # A walk behind the turn leaves it one slot, so its next cell never waits on another's.
+            self.fill(ahead, armed, self.ceiling if ahead is walk else self.ceiling - 1)
 
-    def fill(self, walk: Walk, cap: int, armed: int) -> None:
+    def fill(self, walk: Walk, armed: LookaheadWindow, ceiling: int) -> None:
         backfills = self.backfills
-        room = min(cap - self.out(), max(self.affordable(), walk.rereads_ahead(walk.submitted)))
+        room = min(
+            self.room(walk, armed, ceiling),
+            max(self.affordable(), walk.rereads_ahead(walk.submitted)),
+        )
         last = min(walk.n if walk.skip_at is None else walk.skip_at, walk.submitted + room) - 1
         if walk.boundary is not None:
             # One cell past a pending close at most, whatever the rules allow.
@@ -813,12 +839,12 @@ class _ScoringPhase[K: Hashable]:
             if backfills is not None:
                 room -= len(backfills.start_backfill(sample, min(room, self.affordable())))
 
-    async def depth_raised(self, armed: int, kind: MeasurementRole) -> None:
+    async def pressed(self, armed: LookaheadWindow, kind: MeasurementRole) -> None:
         """Polled: the press is a command another process records on the ledger, which no signal carries."""
-        while _armed_cells(self.session, kind) <= armed:  # noqa: ASYNC110 — a cross-process ledger wait
+        while _armed(self.session, kind) == armed:  # noqa: ASYNC110 — a cross-process ledger wait
             await asyncio.sleep(HELD_POLL_S)
 
-    async def wait(self, walk: Walk, armed: int) -> None:
+    async def wait(self, walk: Walk, armed: LookaheadWindow) -> None:
         book, cell = self.book, self.cell
         calls = self.outstanding()
         if not calls:
@@ -831,8 +857,8 @@ class _ScoringPhase[K: Hashable]:
             )
         watched = set[asyncio.Future[Any]](calls)
         raised: asyncio.Future[None] | None = None
-        if armed < self.session.backend_client.connector.max_cells_in_flight:
-            raised = asyncio.ensure_future(self.depth_raised(armed, walk.ctx.kind))
+        if armed != effective_lookahead(MAX_SPEED, self.ceiling):
+            raised = asyncio.ensure_future(self.pressed(armed, walk.ctx.kind))
             watched.add(raised)
         try:
             await asyncio.wait(watched, return_when=asyncio.FIRST_COMPLETED)

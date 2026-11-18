@@ -8160,6 +8160,19 @@
             "title": "Round",
             "type": "integer"
           },
+          "sample_abreast": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "const": "all",
+                "type": "string"
+              }
+            ],
+            "default": 1,
+            "title": "Sample Abreast"
+          },
           "sample_idx": {
             "title": "Sample Idx",
             "type": "integer"

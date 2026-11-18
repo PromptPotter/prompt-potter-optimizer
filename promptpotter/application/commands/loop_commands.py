@@ -47,7 +47,7 @@ async def set_sample_lookahead(
     dispatched: DispatchedToCycle[SetSampleLookaheadPayload],
 ) -> Applier[object]:
     payload = dispatched.payload
-    if payload.cells == 1 and not payload.auto:
+    if not payload.armed:
         # A disarm leaves the loop nothing to take: the record removes the arming.
         async def _disarm() -> None:
             return None
