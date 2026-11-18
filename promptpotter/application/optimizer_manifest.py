@@ -859,7 +859,7 @@ def _select(
         schema=schema,
         resolved_schemas=schemas,
         plan=_round_plan(name, schema, manifest.initial_population_walks, gate),
-        member_nodes=_roster(schema),
+        member_nodes=tuple(_reach(schema)),
         node_configs=node_configs,
         node_knobs=node_knobs,
         node_levers=node_levers,
@@ -890,8 +890,8 @@ def _edges_of(member: NodeMember) -> frozenset[type]:
 
 
 def _reach(schema: PipelineSchema) -> dict[str, set[str]]:
-    """Each member a walk reaches, by the walks reaching it: those listing it, and those of every
-    member whose edges reach it."""
+    """Each member a walk reaches, in declared order, by the walks reaching it: those listing it,
+    and those of every member whose edges reach it."""
     table = NODE_MEMBERS.table
     declared = [n.name for n in schema.declared_nodes if n.name in table]
     reach: dict[str, set[str]] = {}
@@ -907,12 +907,7 @@ def _reach(schema: PipelineSchema) -> dict[str, set[str]]:
                 if isinstance(table[n], edge) and not reach.setdefault(n, set()) >= reach[node]:
                     reach[n] |= reach[node]
                     frontier.append(n)
-    return reach
-
-
-def _roster(schema: PipelineSchema) -> tuple[str, ...]:
-    reach = _reach(schema)
-    return tuple(n.name for n in schema.declared_nodes if n.name in reach)
+    return {n: reach[n] for n in declared if n in reach}
 
 
 def fired_on(schema: PipelineSchema) -> dict[str, list[str]]:

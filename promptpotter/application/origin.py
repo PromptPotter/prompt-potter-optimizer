@@ -64,7 +64,7 @@ def lock_criterion(cycle: Cycle, read: ReadArm) -> ReadArm:
     block = cycle.config.scoring
     if not isinstance(block, dict) or DIALS_KEY not in block:
         return read
-    terms = campaign_terms(session.backend_client.connector.name)
+    terms = campaign_terms(session.backend_client.connector)
     formula = realize_dials(
         parse_dials(block[DIALS_KEY], terms), origin_anchors(read.rows, terms), terms
     )

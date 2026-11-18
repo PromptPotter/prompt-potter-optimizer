@@ -10,13 +10,13 @@ from collections.abc import Callable, Iterable, Mapping
 from types import SimpleNamespace
 from typing import Any, NamedTuple
 
-from promptpotter import connectors
 from promptpotter.application.scoring.formula.matchers import (
     MATCHERS,
     backend_rank,
     fitness_unit_of,
     matcher_of,
 )
+from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.cell_terms import CELL_BOUND_NAMES, CELL_TERMS, CellTerm
 from promptpotter.domain.results_health import is_degraded
 from promptpotter.domain.scoring import (
@@ -292,10 +292,9 @@ REPORTABLE_CORE_TERMS: frozenset[str] = frozenset(_CHANNEL_READERS)
 ROW_HEALTH_TERMS: frozenset[str] = frozenset(_ROW_HEALTH)
 
 
-def campaign_terms(connector: str) -> dict[str, CellTerm]:
+def campaign_terms(connector: Connector) -> dict[str, CellTerm]:
     """What a campaign's criterion, dial or anchor may name: the core's terms, then its connector's own."""
-    declared = connectors.CONNECTORS.get(connector).cell_terms
-    return {**CELL_TERMS, **{term.name: term for term in declared}}
+    return {**CELL_TERMS, **{term.name: term for term in connector.cell_terms}}
 
 
 def cell_channels_of(facts: MeasuredCell, grade: Grade | None) -> dict[str, float]:

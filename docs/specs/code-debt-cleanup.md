@@ -127,13 +127,16 @@ row it closes.
   `measurement_log.py::cycle_hard_samples`, `bench.py` (`_line`, `line_passes`, `line_outlay`,
   `declare_line_bench`) and `earned_blocks`' `list_campaigns` load it 16 times in a one-round
   resume (20 in all). **Re-test:** whole-run loads 20 → ≤ 5.
-- **`ServedPipeline` carries its connector's name, not its owner** (owner-1's report):
-  `pipeline_resolve.py::ServedPipeline.connector` is a `str` built from the `Connector`
-  `served_pipeline` holds, so `_response`, `compiler.py::campaign_terms`, `laid_config` and
-  `datasets/draft_patch.py` look it up again, and `origin.py` hands `campaign_terms` the `.name` of
-  a `Connector` it holds. Action: `ServedPipeline` and `campaign_terms` take the `Connector`.
-  **Re-test:** `git grep -n "CONNECTORS.get(" -- promptpotter/application/pipeline_resolve.py promptpotter/application/scoring`
-  leaves only the campaign-name sites.
+- **A connector's name is looked up again where its `Connector` is held** (served-1's report):
+  `free_tier.py::free_fence`, `pipeline_resolve.py::laid_config` and
+  `jobs/launcher/admission.py::refuse_unreachable` take a `str`, so callers in
+  `pipeline_resolve.py`, `datasets/draft_patch.py` and `jobs/launcher/` (`checkin.py`,
+  `head_to_head.py`, `mint_and_start.py`) pass `.name` and `free_fence` looks it up again;
+  `UploadBasis.connector` (`pipeline_resolve.py`) is a name every read resolves. Action: they take
+  the `Connector`, and the campaign-name sites (`_campaign_merge`, `jobs/mint.py`, `mask/load.py`,
+  `hierarchy.py`'s `is_self_optimization` call) look it up once. **Rides with:** after load-2 (it shares
+  `admission.py` and `pipeline_resolve.py`). **Re-test:** `git grep -n "connector\.name" --
+  promptpotter/application/pipeline_resolve.py promptpotter/application/datasets promptpotter/application/jobs` → 0.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 

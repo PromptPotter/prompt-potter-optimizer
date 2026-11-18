@@ -297,7 +297,7 @@ def draft_wire(stores: Stores, draft: DraftFile, served: ServedPipeline) -> Draf
         ],
         readiness=origin_readiness(draft, pipeline),
         launch_refusal=refusal,
-        recap=_recap(draft, served.connector, pipeline.criterion),
+        recap=_recap(draft, served.connector.name, pipeline.criterion),
         setup_schema=setup_schema(draft, launch=launch, declared=declared),
     )
 

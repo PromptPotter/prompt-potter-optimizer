@@ -214,8 +214,8 @@ from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.config import paths
 from promptpotter.config.paths import block_packs_root, install_datasets_root
+from promptpotter.connectors import CONNECTORS, upload_connector
 from promptpotter.connectors import harbor as harbor_connector
-from promptpotter.connectors import upload_connector
 from promptpotter.connectors.dbllmbench import DbllmbenchPanel
 from promptpotter.domain.arms import PointContext, Proposal
 from promptpotter.domain.bench import (
@@ -1818,7 +1818,7 @@ def test_an_upload_searches_the_model_axis_its_connectors_menu_bounds() -> None:
     uploads = upload_connector().uploads
     assert uploads is not None
     served_termnorm = ServedPipeline(
-        "termnorm",
+        CONNECTORS.get("termnorm"),
         None,
         {"nodes": {"llm_only": LLM_ONLY_NODE}, "pipelines": {"llm_only": ["llm_only"]}},
     )
@@ -1844,11 +1844,9 @@ def test_a_check_in_picks_the_criterion_as_the_server_reads_it(
     # Sent back, a pinned formula's own dials move nothing, and a matcher pick keeps the composite.
     pinned, draft = _PINNED, ds_draft
     chosen = draft_config(built_stores, draft)
-    assert draft_criterion(
-        chosen.scoring, campaign_terms(upload_connector().name)
-    ) == DraftCriterion(matcher="label_match", dials="tokens=0.08"), (
-        "the served criterion is not the pinned formula's"
-    )
+    assert draft_criterion(chosen.scoring, campaign_terms(upload_connector())) == DraftCriterion(
+        matcher="label_match", dials="tokens=0.08"
+    ), "the served criterion is not the pinned formula's"
     assert planned(draft, config={"scoring": {"dials": "tokens=0.08"}}).scoring == pinned, (
         "a pinned formula's anchors did not survive a round trip"
     )
@@ -1857,7 +1855,7 @@ def test_a_check_in_picks_the_criterion_as_the_server_reads_it(
         **{k: v for k, v in pinned.items() if k != "per_sample"},
         "matcher": "em_match",
     }
-    assert draft_criterion(picked, campaign_terms(upload_connector().name)).matcher == "em_match", (
+    assert draft_criterion(picked, campaign_terms(upload_connector())).matcher == "em_match", (
         "a matcher pick dropped the composite"
     )
     dials = {"per_sample": pinned["per_sample"], "dials": "cost=0.1"}
@@ -3508,7 +3506,9 @@ def test_answering_in_text_sends_no_contract_to_answer_into() -> None:
     assert d234 is not None
     # TermNorm serves its prompt's fields and no slot: its node template declares the slot.
     served_llm = {"type": "llm", "prompt_info": {"fields": list(PROMPT_INFO.fields)}}
-    text_pipeline = ServedPipeline("termnorm", None, {"nodes": {"llm_only": served_llm}}).over(d234)
+    text_pipeline = ServedPipeline(
+        CONNECTORS.get("termnorm"), None, {"nodes": {"llm_only": served_llm}}
+    ).over(d234)
     text_schema = parse_pipeline_response(text_pipeline)
     base = {n.name: dict(n.current_config) for n in text_schema.declared_nodes}
     assert {"output_schema", "answer_fields"} <= base["llm_only"].keys(), (

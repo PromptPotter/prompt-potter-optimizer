@@ -76,7 +76,7 @@ class CheckinStart:
         return CampaignLaunch(self.dataset_name, draft_id=self.claim.draft_id)
 
     def connector(self, _stores: Stores) -> str:
-        return self.served.connector
+        return self.served.connector.name
 
     def endpoint(self, _stores: Stores) -> str | None:
         return self.served.endpoint

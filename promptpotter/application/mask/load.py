@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING
 
+from promptpotter import connectors
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.mask.record import (
     MaskCandidate,
@@ -206,7 +207,7 @@ def load_mask_record(
         origin_rows = [
             cell for sheet in (origin_file.cells if origin_file else {}).values() for cell in sheet
         ]
-        terms = campaign_terms(campaign.connector)
+        terms = campaign_terms(connectors.CONNECTORS.get(campaign.connector))
         formula = realize_dials(
             parse_dials(lens.body, terms),
             _dial_anchors(cycle_config(stores, campaign, None).config, origin_rows, terms),

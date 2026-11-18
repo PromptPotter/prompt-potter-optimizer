@@ -49,7 +49,6 @@ from promptpotter.application.pipeline_responses import (
     SteerVerdict,
     optimizer_setup,
 )
-from promptpotter.application.runner.inner.tasks import is_self_optimization
 from promptpotter.application.scoring.formula.compiler import (
     campaign_terms,
     split_scoring_block,
@@ -328,7 +327,7 @@ def overlay_dataset_pipeline(served: Mapping[str, Any], local: Mapping[str, Any]
 class ServedPipeline:
     """What a connector serves of its pipeline; each reader lays its own local definition on it."""
 
-    connector: str
+    connector: Connector
     # The connector endpoint it was read at (`DatasetDefinition.endpoint`).
     endpoint: str | None
     # `None`: the connector serves none, so the local definition is the whole of it.
@@ -355,7 +354,7 @@ async def served_pipeline(
             served = await client.fetch_pipeline()
     elif connector.pipeline_declaration is not None:
         served = connector.pipeline_declaration(stores, experiment)
-    return ServedPipeline(connector.name, endpoint, served)
+    return ServedPipeline(connector, endpoint, served)
 
 
 def _draft_dataset(stores: Stores, draft: DraftFile) -> ResolvedDataset | None:
@@ -727,9 +726,9 @@ def merge_outside_run(
     """*config_layers* over *local* as a mint would lay them, opening no session."""
     templated = with_node_templates(local)
     declared = parse_pipeline_response(served.over(templated))
-    laid = laid_config(stores, config_layers, connector=served.connector, schema=declared)
+    laid = laid_config(stores, config_layers, connector=served.connector.name, schema=declared)
     cfg = laid.config
-    fence = free_fence(stores, served.connector)
+    fence = free_fence(stores, served.connector.name)
     filtered = _resolve_active_schema(
         declared, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
     )
@@ -878,7 +877,7 @@ def _response(
     campaign_id: str,
     cycle_id: str,
     dataset_name: str,
-    connector: str,
+    connector: Connector,
     mint: MintFacts | None,
 ) -> CampaignPipelineResponse:
     ran = schema_as_run(m.filtered, folded.params, workspace)
@@ -887,9 +886,9 @@ def _response(
         campaign_id=campaign_id,
         cycle_id=cycle_id,
         dataset_name=dataset_name,
-        connector=connector,
-        self_optimization=is_self_optimization(connector),
-        cell_terms=list(connectors.CONNECTORS.get(connector).cell_terms),
+        connector=connector.name,
+        self_optimization=connector.self_optimization,
+        cell_terms=list(connector.cell_terms),
         optimizer=m.cfg.optimization.optimizer,
         optimizer_setup=optimizer_setup(m.optimizer, mint, m.filtered, workspace, m.knob_layers),
         params=folded.params.dump(),
@@ -935,7 +934,7 @@ class DraftPipeline:
     config: CampaignConfig
     layers: ConfigLayers
     local: dict[str, Any]
-    connector: str
+    connector: Connector
 
     @functools.cached_property
     def optimizer(self) -> SelectedOptimizer:
@@ -995,7 +994,7 @@ def resolve_pipeline_for_campaign(
         campaign_id=campaign.campaign_id,
         cycle_id=m.hop.cycle_id,
         dataset_name=campaign.dataset_name,
-        connector=campaign.connector,
+        connector=connector,
         mint=_cycle_mint(stores, m),
     )
 

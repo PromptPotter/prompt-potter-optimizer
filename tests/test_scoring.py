@@ -955,7 +955,7 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(
 @pytest.mark.usefixtures("offline")
 def test_a_connectors_declared_dial_parses_and_anchors_as_a_core_one_does() -> None:
     core = CELL_TERMS
-    l4 = compiler.campaign_terms("promptpotter")
+    l4 = compiler.campaign_terms(connectors.CONNECTORS.get("promptpotter"))
     with pytest.raises(PayloadInvalidError):
         parse_dials("rounds=0.1", core)
 
