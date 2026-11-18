@@ -76,6 +76,9 @@ class Verb:
     unspelled: Mapping[str, str] = dataclasses.field(default_factory=dict)
     # A written verb dispatching no kind: why no other door carries it.
     terminal_only: str = ""
+    # False for a verb a deploy runs beside the landing, under code the root may not be landed for:
+    # `land-data` is the landing, and its dry run writes nothing; the others read the root as it stands.
+    lands_at_entry: bool = True
 
 
 GLOBAL_ARGS = (
@@ -844,6 +847,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "close-admission",
         "cli.commands.reads:cmd_close_admission",
         terminal_only="a landing's act on this box, before its checkout moves",
+        lands_at_entry=False,
         help="A landing's first act, before its checkout moves: close this box's admission to every "
         "process not running TARGET, until the restarted server runs it. Prints `closed …`, or one "
         "`held …` line per live run on other code and closes nothing. Zero spend.",
@@ -853,6 +857,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "land-data",
         "cli.commands.writes:cmd_land_data",
         terminal_only="a landing's one write to the data root, under the code it lands",
+        lands_at_entry=False,
         help="A landing's one write to the data root, under THIS code: stage each survivor "
         "migration (`application/maintenance/migrate.py::MIGRATIONS`), load every file under the "
         "data root as its row of `infrastructure/store/data_root.py` shapes it would then stand, and "
@@ -887,6 +892,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
         "offer-extras",
         "cli.commands.writes:cmd_offer_extras",
         terminal_only="what the deploy script installs, read before any server runs",
+        lands_at_entry=False,
         help="The pyproject extras the datasets this deployment offers (DATASET_OFFER) need to "
         "fetch their samples, one per line — what `deploy-linux/update.sh` installs. Writes nothing but a missing data root.",
     ),
@@ -1054,6 +1060,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 # A verb's handler and renderer are named under it: `mcp`'s lives with its server.
 VERB_PACKAGE = "promptpotter.presentation"
 COMMANDS: dict[str, str] = {verb.name: verb.handler for verb in VERBS}
+_LANDS_AT_ENTRY = frozenset(verb.name for verb in VERBS if verb.lands_at_entry)
 _PARSER = build_parser(VERBS)
 
 
@@ -1091,11 +1098,12 @@ def main() -> None:
 
     runner = asyncio.Runner()
     try:
-        # Every verb lands, its registries completed as the landing imports; its refusal is this
-        # one catch's to say, as a verb's is. Named as a string like the handlers: `--help` loads
-        # no use case.
+        # Every verb's registries complete as the landing imports, and every verb but one a deploy
+        # runs beside the landing lands; its refusal is this one catch's to say, as a verb's is.
+        # Named as a string like the handlers: `--help` loads no use case.
         landing = importlib.import_module("promptpotter.application.maintenance.landing")
-        landing.land_at_entry(every_treatment=False)
+        if args.command in _LANDS_AT_ENTRY:
+            landing.land_at_entry(every_treatment=False)
         # A launch verb's handler runs its preamble and THEN answers the coroutine: a preamble's
         # refusal is this one catch's to say, as the run's is.
         result = runner.run(_handler(args.command)(args))

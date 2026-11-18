@@ -2901,6 +2901,30 @@ def test_older_code_refuses_to_land_a_root_newer_code_landed_and_drops_nothing(
     assert fold.exists(), "older code dropped a file the newer code landed"
 
 
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_dry_run_landing_at_a_root_older_code_landed_writes_nothing(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The deploy's no-write check (`deploy-linux/update.sh`): the old API still serves the root and
+    # a roll-back puts the old code back on it, so the new code's dry run may not land it at entry.
+    projects_root = built_stores.projects_root
+    apply_landing(projects_root, plan_landing(projects_root, reset=False))
+    landed = last_landing(projects_root)
+    assert landed is not None
+    older = {**landed.model_dump(mode="json"), "key": "older", "version": "0.0.1"}
+    write_text(landing_module._stamp(projects_root), json.dumps(older))
+    fold = built_stores.archive.path(ArchiveFile.SAMPLE_FOLD, "0" * ADDRESS_HEX)
+    write_jsonl(fold, [{"config_key": "c", "sp": "s", "sig": [], "graded": []}])
+    with monkeypatch.context() as cli:
+        cli.setenv("PROMPTPOTTER_HOME", str(projects_root.parent))
+        cli.setattr(sys, "argv", ["promptpotter", "land-data", "--dry-run"])
+        with contextlib.suppress(SystemExit):
+            cli_main.main()
+    after = last_landing(projects_root)
+    assert after is not None and after.key == "older", "a dry run landed the root at its entry"
+    assert fold.exists(), "a dry run dropped a cache this build cannot read"
+
+
 def test_an_entry_finding_a_landing_in_flight_says_so_and_waits_it_out(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
