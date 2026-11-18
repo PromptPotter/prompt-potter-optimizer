@@ -459,8 +459,65 @@ class _Body(io.BytesIO):
         self.close()
 
 
+UNROUTED = "unrouted: this fact asks for no network world (the `offline` fixture answers one)"
+
+
 def _refuse_resolve(*_: object, **__: object) -> Any:
     raise OSError("offline run: no name resolution, so no request leaves this process")
+
+
+def _swap_sends(
+    handle_async_request: Callable[[Any, httpx.Request], Awaitable[httpx.Response]],
+    handle_request: Callable[[Any, httpx.Request], httpx.Response],
+    urlopen: Callable[..., Any],
+    getaddrinfo: Callable[..., Any],
+) -> Callable[[], None]:
+    """Puts the doors a send leaves this process by (each `httpx` transport, `urlopen`, name
+    resolution) behind the handlers given; the callable returned restores them."""
+    real = (
+        httpx.AsyncHTTPTransport.handle_async_request,
+        httpx.HTTPTransport.handle_request,
+        urllib.request.urlopen,
+        socket.getaddrinfo,
+    )
+    httpx.AsyncHTTPTransport.handle_async_request = handle_async_request  # type: ignore[method-assign,assignment]
+    httpx.HTTPTransport.handle_request = handle_request  # type: ignore[method-assign,assignment]
+    urllib.request.urlopen = urlopen
+    socket.getaddrinfo = getaddrinfo
+
+    def restore() -> None:
+        (
+            httpx.AsyncHTTPTransport.handle_async_request,  # type: ignore[method-assign]
+            httpx.HTTPTransport.handle_request,  # type: ignore[method-assign]
+            urllib.request.urlopen,
+            socket.getaddrinfo,
+        ) = real
+
+    return restore
+
+
+def refuse_network(refused: set[str]) -> Callable[[], None]:
+    """Refuses every send in this process, naming each in *refused*: the world of a fact that asks
+    for none. The callable returned restores the doors."""
+
+    def named(target: str) -> str:
+        refused.add(target)
+        return f"{UNROUTED}: {target}"
+
+    async def handle_async_request(_: Any, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(named(f"{request.method} {request.url}"), request=request)
+
+    def handle_request(_: Any, request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(named(f"{request.method} {request.url}"), request=request)
+
+    def urlopen(url: Any, *_: Any, **__: Any) -> Any:
+        target = url if isinstance(url, str) else url.full_url
+        raise urllib.error.URLError(named(f"urlopen {target}"))
+
+    def getaddrinfo(host: Any, *_: Any, **__: Any) -> Any:
+        raise OSError(named(f"resolve {host}"))
+
+    return _swap_sends(handle_async_request, handle_request, urlopen, getaddrinfo)
 
 
 def install_network(router: Router) -> Callable[[], None]:
@@ -514,32 +571,16 @@ def install_network(router: Router) -> Callable[[], None]:
 
     # The backend's own binding of `send_pacing.py::held_wait`, which it resends after.
     wire = vars(backend_wire)
-    real = (
-        httpx.AsyncHTTPTransport.handle_async_request,
-        httpx.HTTPTransport.handle_request,
-        urllib.request.urlopen,
-        socket.getaddrinfo,
-        wire["held_wait"],
-        settings.TERMNORM_ENDPOINTS,
-    )
+    real = (wire["held_wait"], settings.TERMNORM_ENDPOINTS)
     # The operator's TermNorm is this world's backend, its one endpoint.
     settings.TERMNORM_ENDPOINTS = {"offline": FakeBackend.URL}
-    httpx.AsyncHTTPTransport.handle_async_request = handle_async_request  # type: ignore[method-assign,assignment]
-    httpx.HTTPTransport.handle_request = handle_request  # type: ignore[method-assign,assignment]
-    urllib.request.urlopen = urlopen
-    # Every client above is answered before it resolves a name; one that is not fails here.
-    socket.getaddrinfo = _refuse_resolve
+    # Every client above is answered before it resolves a name; one that is not fails there.
+    doors = _swap_sends(handle_async_request, handle_request, urlopen, _refuse_resolve)
     # A refusal answered in-process costs no wall clock: the resend's wait is decided, not slept.
     wire["held_wait"] = unslept
 
     def restore() -> None:
-        (
-            httpx.AsyncHTTPTransport.handle_async_request,  # type: ignore[method-assign]
-            httpx.HTTPTransport.handle_request,  # type: ignore[method-assign]
-            urllib.request.urlopen,
-            socket.getaddrinfo,
-            wire["held_wait"],
-            settings.TERMNORM_ENDPOINTS,
-        ) = real
+        doors()
+        wire["held_wait"], settings.TERMNORM_ENDPOINTS = real
 
     return restore

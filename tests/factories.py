@@ -84,6 +84,7 @@ from promptpotter.domain.arms import (
     Refused,
     Skipped,
     arm_end,
+    degradation_reading,
 )
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
@@ -378,7 +379,14 @@ def arm_state(
                 changes_description="",
                 owner=NurseOwner.L1,
             )
-            return Cut(reason=Broken(failure=failure, degradation={}), **fields)
+            degradation = degradation_reading(
+                source=failure.source,
+                degraded_count=total,
+                total_scored=total,
+                warning_types={failure.dominant_warning: total},
+                dominant_warning=failure.dominant_warning,
+            )
+            return Cut(reason=Broken(failure=failure, degradation=degradation), **fields)
         case "refused":
             return Cut(reason=Refused(parameter="reasoning_effort"), **fields)
         case "invalid":

@@ -14,7 +14,15 @@ from pathlib import Path
 
 import pytest
 from factories import workspace
-from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
+from offline_world import (
+    NOT_A_KEY,
+    PROVIDER_KEYS,
+    FakeBackend,
+    FakeLLM,
+    Router,
+    install_network,
+    refuse_network,
+)
 from pydantic import SecretStr
 
 from promptpotter.application.maintenance.landing import complete_registries
@@ -28,6 +36,17 @@ from promptpotter.infrastructure.store.stores import Stores
 @pytest.fixture(autouse=True, scope="session")
 def completed_registries() -> None:
     complete_registries()
+
+
+@pytest.fixture(autouse=True)
+def refused_network() -> Iterator[None]:
+    """No fact sends for real: every send is refused and named, so a fact needing a network edge
+    asks for `offline`, whose world answers over this one for its span."""
+    refused: set[str] = set()
+    restore = refuse_network(refused)
+    yield
+    restore()
+    assert not refused, f"a fact sent without asking for `offline`: {sorted(refused)}"
 
 
 @pytest.fixture(autouse=True)

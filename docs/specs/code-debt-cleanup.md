@@ -821,10 +821,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   (small-6's report): `domain/results_health.py::classify_result` keeps it on the fast path, against
   its own law (a fatal code is deterministic for the whole config). **Held:** a measured case.
   **Re-test:** an arm filtered on 1 of 18 rows is graded, never cut.
-- **`tests/factories.py::arm_state(cut="broken")` builds a reason no render reads**:
-  `Broken(degradation={})` raises `KeyError: 'fatal'` in `render/candidate.py::individual_summary`
-  (small-6's report). Action: the factory builds a reading `degradation_reading` makes.
-  **Re-test:** `individual_summary` renders a factory-cut arm.
 - **A campaign's cap count joins every cycle's bills to one cycle's other parts** (spend-served-fix's
   report): `served_dashboard.py::campaign_count` sets `metered_spend` (every cycle) beside this
   cycle's book's unreported, set-aside and calls out, so a sibling cycle's lapsed cells drop out of
@@ -836,10 +832,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `campaign_count` folds every cycle's unreported, and `SpendCount.beside` goes. **Rides with:** a
   chain owning `domain/spend.py`, `run_observers.py`, `served_dashboard.py`. **Re-test:** a lapsed
   cell on a sibling cycle reads in the campaign cap line and not in this cycle's.
-- **A test that omits `offline` sends for real** (spend-4's report): nothing refuses a real
-  `urlopen` / `httpx` send outside the `offline` fixture, so a fact missing it spends a real fetch;
-  three did until spend-4. Action: the conftest world refuses unrouted network by default.
-  **Re-test:** a fact resolving an OpenRouter plan without `offline` raises.
 - **`l1_critique` on minimax runs its first cluster to `max_tokens`** (three sightings 2026-11-18:
   two dyck inner cells, `bbh-multistep-arithmetic-8b__908474` round 0, 26.7k chars, `finish=length`):
   the reply fails inside `failure_highlights.0` (`mechanism`, `claim` and `priority_fix` missing), so
