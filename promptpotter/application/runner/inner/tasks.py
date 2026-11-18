@@ -6,11 +6,11 @@ from __future__ import annotations
 
 import itertools
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import Field, ValidationError, model_validator
+from pydantic import Field, PrivateAttr, ValidationError, model_validator
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import dataset_campaign_block
@@ -212,14 +212,35 @@ class InnerTasks(FrozenModel):
 
 
 class ResolvedInnerPanel(FrozenModel):
-    """The panel with each cell's instrument (`spawn.py::_resolve_inner_panel`): the ONE document run
-    init, the samples and the fingerprint read."""
+    """The panel with each cell's instrument (`read`): the ONE document run init, the samples and
+    the fingerprint read."""
 
     inner_panel: InnerTasks
     # By cell id.
     instruments: dict[str, str]
     # By cell id: the dataset each cell's inner campaign measures, its δ scale's.
     datasets: dict[str, str]
+    _cells: InnerCells | None = PrivateAttr(None)
+
+    @classmethod
+    def read(cls, stores: Stores, panel: Mapping[str, Any]) -> ResolvedInnerPanel:
+        """Each cell's instrument beside the panel; only what was declared survives the pin's dump,
+        so a field that gains a default re-keys no banked cell."""
+        parsed = InnerTasks.model_validate(panel)
+        cells = parsed.resolve_cells(stores)
+        read = cls(
+            inner_panel=parsed,
+            instruments={t.id: cells.spec(t).key() for t in parsed.tasks},
+            datasets={t.id: parsed.dataset_for(t) for t in parsed.tasks},
+        )
+        read._cells = cells
+        return read
+
+    def cells(self, stores: Stores) -> InnerCells:
+        """Resolved once per read; a pinned panel (`Connector.pinned`) resolves on its first ask."""
+        if self._cells is None:
+            self._cells = self.inner_panel.resolve_cells(stores)
+        return self._cells
 
     @model_validator(mode="after")
     def _every_cell_measured(self) -> ResolvedInnerPanel:
@@ -246,7 +267,7 @@ class ResolvedInnerPanel(FrozenModel):
 
 
 def is_self_optimization(connector: str) -> bool:
-    return (c := connectors.CONNECTORS.table.get(connector)) is not None and c.self_optimization
+    return connectors.CONNECTORS.get(connector).self_optimization
 
 
 INNER_ARM_GATE: ArmGateMode = "off"
@@ -339,15 +360,6 @@ def inner_instrument_config(
     )
 
 
-def _outer_cells(session: Session) -> InnerCells | None:
-    """``None`` off the recursion. The workload's panel, never a second read of the file the
-    samples and fingerprint came from."""
-    if not session.backend_client.connector.self_optimization:
-        return None
-    panel: ResolvedInnerPanel = session.backend_client.workload.experiment
-    return panel.inner_panel.resolve_cells(session.store)
-
-
 def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
     """``None`` is a run with no cycle to spawn under; the run scope carries it (`run_scope.py`)."""
     cycle_id = session.cycle_id
@@ -360,7 +372,7 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
         session.store.tenant_id,
         CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
     )
-    cells = _outer_cells(session)
+    client = session.backend_client
     return InnerSpawnContext(
         inner_sandbox_root=inner_root,
         identity=session.store.identity,
@@ -372,7 +384,9 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
         acting=session.state.control.acting,
         purpose=session.purpose,
         ruler=_round_zero_ruler(session),
-        cells=cells,
+        cells=client.workload.experiment.cells(session.store)
+        if client.connector.self_optimization
+        else None,
     )
 
 
@@ -392,13 +406,6 @@ def inner_spawn_context() -> InnerSpawnContext | None:
             "the entry driving it scopes `inner_spawn_of` first"
         )
     return spawn
-
-
-def inner_cells() -> InnerCells | None:
-    """The cells an L4 outer's arms are measured on, each running its own manifest, never the
-    outer's own; ``None`` off the recursion."""
-    ctx = inner_spawn_context()
-    return None if ctx is None else ctx.cells
 
 
 def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_id: str) -> ArmOf:

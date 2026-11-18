@@ -171,7 +171,7 @@ async def init_services(
     if stores is None:
         stores = build_stores(identity, projects_root=default_projects_root())
     dataset = resolve_dataset(stores, dataset_name)
-    connector = connectors.CONNECTORS.get(runnable_definition(dataset).connector)
+    connector = runnable_definition(dataset).owner
     async with _session(
         stores, dataset, connector, identity=identity, program=program, served=served
     ) as session:

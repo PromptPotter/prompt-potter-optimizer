@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from typing import Any, NamedTuple
@@ -416,7 +416,7 @@ def _inner_cells(stores: Stores, experiment: ResolvedInnerPanel | None) -> Inner
             "which this box does not hold.",
             code="pipeline_config_invalid",
         )
-    return experiment.inner_panel.resolve_cells(stores)
+    return experiment.cells(stores)
 
 
 def _pipeline_declaration(stores: Stores, experiment: ResolvedInnerPanel | None) -> dict[str, Any]:
@@ -447,18 +447,6 @@ def promptpotter_wire_adapter(
         payload["optimizer_prompt_overrides"] = optimizer_prompt_overrides
 
     return payload
-
-
-def _resolve_inner_panel(stores: Stores, panel: Mapping[str, Any]) -> ResolvedInnerPanel:
-    """Each cell's instrument beside the panel; only what was declared survives the pin's dump,
-    so a field that gains a default re-keys no banked cell."""
-    parsed = InnerTasks.model_validate(panel)
-    cells = parsed.resolve_cells(stores)
-    return ResolvedInnerPanel(
-        inner_panel=parsed,
-        instruments={t.id: cells.spec(t).key() for t in parsed.tasks},
-        datasets={t.id: parsed.dataset_for(t) for t in parsed.tasks},
-    )
 
 
 def _extract_experiment(panel: ResolvedInnerPanel) -> list[dict[str, Any]]:
@@ -503,7 +491,7 @@ CONNECTOR = Connector(
     required_observation_keys=(INNER_RESULT_KEY,),
     cell_terms=INNER_CELL_TERMS,
     reported_keys=INNER_REPORTED_KEYS,
-    resolve_experiment=_resolve_inner_panel,
+    resolve_experiment=ResolvedInnerPanel.read,
     # The outer's graph IS the inner optimizer's, so it is served here, never mirrored in a file.
     pipeline_declaration=_pipeline_declaration,
     identity_config=_identity_config,

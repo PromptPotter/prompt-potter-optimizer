@@ -107,9 +107,33 @@ row it closes.
   `Campaign` past admission: `admit_slotless` and `admit_and_share` take a hop, and neither
   `Session` (its `purpose` only) nor `CycleConfig` holds the campaign it was laid over. Action: the
   door's `Campaign` rides the launch (the session, or `CycleConfig` beside its `config`), and the
-  store's ceiling reads take it. **Rides with:** a chain owning `store.py`, `quota.py` and
-  `initialization/session.py`. **Re-test:** one `load_campaign` per inline resume, counted with a
-  patched loader around `embedded_run.py::run_campaign`.
+  store's ceiling reads take it. load-1's census (launch-path loads at `e3393717e`): embedded resume
+  4, CLI and REST resume 8, CLI `new` 3, embedded `new` 1; the carrier (`Session.bound`,
+  `CycleConfig.laid`, `armed_budget` / `ceiling_meter_of` / `admit_and_share`) is called from
+  `initialization/wiring.py`, `pipeline_resolve.py::cycle_config`, `jobs/mint.py`,
+  `served_dashboard.py`, `tests/test_spend.py`, `tests/factories.py` and `tests/test_identity.py`,
+  so a half inside a narrower Owns is a second mechanism. Suggested shape: `Session.bound(hop, *,
+  campaign)` with `purpose` derived, `open_launch` reads `session.campaign`, and admission and the
+  ceiling reads take the `Campaign`. **Rides with:** one chain owning all of the above beside
+  `store.py`, `quota.py`, `admission.py`, `session.py`, `runner/mint.py`. **Re-test:** one
+  `load_campaign` per inline resume (a patched loader around `embedded_run.py::run_campaign`) and
+  CLI resume's launch path 8 → 1.
+- **A terminal or REST resume reloads its campaign at every hop of the dispatch** (load-1's
+  report): `cycle_addressing.py::load_session`, `dispatcher.py::_on_cycle`,
+  `admission.py::request_jobs`, `admission.py::campaign_sends` and `store.py::run_limits` →
+  `read_campaign_ceiling` each load it; `ExistingCycle.campaign` already holds it. Action: they read
+  it. **Rides with:** the row above. **Re-test:** the row above's CLI count.
+- **A run's projections re-read the manifest per round** (load-1's report): `output.py::_render_*`,
+  `measurement_log.py::cycle_hard_samples`, `bench.py` (`_line`, `line_passes`, `line_outlay`,
+  `declare_line_bench`) and `earned_blocks`' `list_campaigns` load it 16 times in a one-round
+  resume (20 in all). **Re-test:** whole-run loads 20 → ≤ 5.
+- **`ServedPipeline` carries its connector's name, not its owner** (owner-1's report):
+  `pipeline_resolve.py::ServedPipeline.connector` is a `str` built from the `Connector`
+  `served_pipeline` holds, so `_response`, `compiler.py::campaign_terms`, `laid_config` and
+  `datasets/draft_patch.py` look it up again, and `origin.py` hands `campaign_terms` the `.name` of
+  a `Connector` it holds. Action: `ServedPipeline` and `campaign_terms` take the `Connector`.
+  **Re-test:** `git grep -n "CONNECTORS.get(" -- promptpotter/application/pipeline_resolve.py promptpotter/application/scoring`
+  leaves only the campaign-name sites.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
@@ -136,12 +160,6 @@ row it closes.
   17 files) stays; or (b) the reading and its cells are one origin-panel record the round and its
   restatement carry, so `.overlap` goes whole. Both reshape `RoundStatement` (a wipe). **Re-test:**
   `git grep -n "\.overlap\b" -- promptpotter` is empty.
-- **`resolve_cells` runs twice per run init**: `runner/inner/spawn.py::_inner_cells` (through
-  `_identity_config`, `:53`, `:98`) and `runner/inner/tasks.py::_outer_cells` (`:59`) each parse the
-  experiment and resolve the panel's cells. Action: the cells are resolved once, off the panel the
-  workload holds, and both read them; `identity_config` takes `(stores, experiment)`, so the connector
-  protocol moves with it. **Rides with:** rk-opt's next chain. **Re-test:** `git grep -n "resolve_cells(" -- promptpotter`
-  lists one call per init.
 
 ### batch/26 · stream-rk
 

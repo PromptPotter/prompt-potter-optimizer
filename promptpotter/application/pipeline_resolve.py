@@ -382,15 +382,15 @@ def _draft_local(stores: Stores, draft: DraftFile) -> dict[str, Any]:
             assert_never(draft.basis)
 
 
-def draft_backend(stores: Stores, draft: DraftFile) -> tuple[str, str | None]:
+def draft_backend(stores: Stores, draft: DraftFile) -> tuple[Connector, str | None]:
     """The connector and endpoint the draft's Start runs: an upload's pick and its connector's one
     endpoint, else the pair its definition names."""
     match draft.basis:
         case UploadBasis(connector=connector):
-            return connector, None
+            return connectors.CONNECTORS.get(connector), None
         case DatasetBasis(dataset=name):
             definition = runnable_definition(resolve_dataset(stores, name))
-            return definition.connector, definition.endpoint
+            return definition.owner, definition.endpoint
         case _:
             assert_never(draft.basis)
 
@@ -399,7 +399,7 @@ async def draft_served(stores: Stores, draft: DraftFile) -> ServedPipeline:
     connector, endpoint = draft_backend(stores, draft)
     return await served_pipeline(
         stores,
-        connectors.CONNECTORS.get(connector),
+        connector,
         endpoint=endpoint,
         experiment=experiment_outside_run(stores, _draft_dataset(stores, draft)),
     )
@@ -410,9 +410,8 @@ async def dataset_pipeline(
 ) -> dict[str, Any]:
     """A dataset's pipeline outside a run, over the experiment its panel holds today."""
     definition = runnable_definition(dataset)
-    connector = connectors.CONNECTORS.get(definition.connector)
     served = await served_pipeline(
-        stores, connector, endpoint=definition.endpoint, experiment=experiment
+        stores, definition.owner, endpoint=definition.endpoint, experiment=experiment
     )
     return served.over(definition.pipeline)
 
@@ -637,7 +636,7 @@ def draft_config(stores: Stores, draft: DraftFile) -> CampaignConfig:
     return laid_config(
         stores,
         draft_layers(stores, draft),
-        connector=draft_backend(stores, draft)[0],
+        connector=draft_backend(stores, draft)[0].name,
         schema=None,
     ).config
 
@@ -648,7 +647,7 @@ def draft_budget(stores: Stores, draft: DraftFile) -> Budget:
 
 def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
     """What a Start sends, and who pays each."""
-    return sends_on(stores, draft_config(stores, draft), draft_backend(stores, draft)[0])
+    return sends_on(stores, draft_config(stores, draft), draft_backend(stores, draft)[0].name)
 
 
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:

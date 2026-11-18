@@ -9,7 +9,6 @@ from collections.abc import Iterable, Mapping, Sequence
 
 from pydantic import Field
 
-from promptpotter import connectors
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.datasets.startability import offered_dataset
 from promptpotter.application.initialization.wiring import session_bank
@@ -144,7 +143,7 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     heads = plan.heads()
     dataset = offered_dataset(stores, plan.dataset_name)
     definition = runnable_definition(dataset)
-    connector = connectors.CONNECTORS.get(definition.connector)
+    connector = definition.owner
     panel = dataset_experiment(stores, dataset, connector)
     experiment = None if panel is None else panel.experiment
     served = await served_pipeline(

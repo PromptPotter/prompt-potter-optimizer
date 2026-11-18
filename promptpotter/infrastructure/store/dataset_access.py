@@ -168,11 +168,13 @@ class DatasetDefinition:
     # The deepest layer declaring a panel key: a local path the panel names resolves against it.
     panel_dir: Path | None
     card: DatasetCard | None
+    # What ``pipeline.connector`` names (`connector_of`), read once where the definition is.
+    owner: Connector | None
 
     @property
     def connector(self) -> str:
-        """``pipeline.connector``, ``""`` where none is declared; `Registry.get` refuses the rest."""
-        return named if isinstance(named := self.pipeline.get("connector"), str) else ""
+        """The owner's name, ``""`` where none is declared."""
+        return "" if self.owner is None else self.owner.name
 
     @property
     def endpoint(self) -> str | None:
@@ -251,6 +253,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
         panel or None,
         panel_dir,
         _card(card),
+        owner,
     )
 
 
@@ -400,17 +403,22 @@ def definition_version(stores: Stores, name: str) -> tuple[object, ...]:
     return (name, str(dataset.directory), *(file_sig(path) for path in definition_files(dataset)))
 
 
-def runnable_definition(dataset: ResolvedDataset) -> DatasetDefinition:
+@dataclass(frozen=True)
+class RunnableDefinition(DatasetDefinition):
+    owner: Connector
+
+
+def runnable_definition(dataset: ResolvedDataset) -> RunnableDefinition:
     """One naming its backend; raises typed: a bare ``ValueError`` becomes a 500 the webapp retries forever."""
     path = dataset.directory / DEFINITION_FILE
     definition = read_dataset_definition(dataset)
-    if definition is None or not definition.connector:
+    if definition is None or definition.owner is None:
         raise PayloadInvalidError(
             f"pipeline.connector missing or empty in {path}",
             code="pipeline_config_invalid",
             details={"dataset_dir": str(dataset.directory)},
         )
-    return definition
+    return RunnableDefinition(**vars(definition))
 
 
 # What resolving a name to its `runnable_definition` raises: each reader that answers it unread.
@@ -472,7 +480,7 @@ def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
         definition = read_dataset_definition(dataset)
     except FileUnreadableError:
         return None
-    return None if definition is None else connector_of(definition.pipeline)
+    return None if definition is None else definition.owner
 
 
 def dataset_panel_rows(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]] | None:

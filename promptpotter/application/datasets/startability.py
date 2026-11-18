@@ -15,7 +15,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any, assert_never
 
-from promptpotter import connectors
 from promptpotter.application.datasets.loaders import (
     cut_bank,
     fetch_bank,
@@ -91,7 +90,7 @@ def rows_block(samples: Sequence[Sample]) -> StartBlock | None:
 def _connector_extra(dataset: ResolvedDataset) -> Extra | None:
     """What every cell of the dataset imports beyond core."""
     try:
-        return connectors.CONNECTORS.get(runnable_definition(dataset).connector).extra
+        return runnable_definition(dataset).owner.extra
     except DEFINITION_READ_ERRORS:
         return None
 
