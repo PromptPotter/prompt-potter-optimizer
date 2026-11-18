@@ -1,0 +1,41 @@
+pipeline:
+  description: >-
+    `multistep`'s seats with a 100-row inner bench: measures whether the per-cell held-out SD that
+    the family's 20-row bench gives (10.8 pts over `multistep`'s round 0) is the bench's binomial
+    noise (predicted ≈ 5 here) or the search's own between-run spread (unchanged here).
+
+panel:
+  # Laid key by key over the family's `inner_campaign` (`CAMPAIGN_RULE`): only the bench moves.
+  inner_campaign:
+    dataset_split: {bench: 100}
+  # Seeds from 1: three bench-100 campaigns on this dataset ran at seed 0 (the dead-seed-0 setup).
+  tasks:
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-1
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 1
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-2
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 2
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-3
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 3
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-4
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 4
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-5
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 5
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-6
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 6
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-7
+      held_out: true
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 7

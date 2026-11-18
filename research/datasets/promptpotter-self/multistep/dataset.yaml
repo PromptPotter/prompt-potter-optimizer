@@ -1,0 +1,40 @@
+pipeline:
+  description: >-
+    Mid-band candidate: the family geometry on `bbh-multistep-arithmetic-8b` (tenant tier,
+    llama-3.1-8b), where a procedure arm reaches about +10 held-out and potter delivers 0 on a
+    20-row race and +13 on a 100-row one (benchmarks § What the roster decided). Round 0 reads
+    whether the family's 40-row race sits between them before any arm is paid.
+
+panel:
+  # Seeds from 1: three bench-100 campaigns on this dataset ran at seed 0, whose bench would hold
+  # seed-0's search rows out of every ruler (the dyck dead-seed-0 setup).
+  tasks:
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-1
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 1
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-2
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 2
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-3
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 3
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-4
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 4
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-5
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 5
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-6
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 6
+    - kind: seat
+      id: bbh-multistep-arithmetic-8b/seed-7
+      held_out: true
+      inner_dataset: bbh-multistep-arithmetic-8b
+      run_seed: 7

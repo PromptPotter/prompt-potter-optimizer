@@ -825,9 +825,18 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **A campaign's cap count joins every cycle's bills to one cycle's other parts** (spend-served-fix's
   report): `served_dashboard.py::campaign_count` sets `metered_spend` (every cycle) beside this
   cycle's book's unreported, set-aside and calls out, so a sibling cycle's lapsed cells drop out of
-  the campaign line the cap is said against. Action: the campaign's unreported folds every cycle's
-  holds (`Money.unreported_holds` by the campaign's ledgers). **Re-test:** a lapsed cell on a
-  sibling cycle reads in this cycle's campaign cap line.
+  the campaign line the cap is said against. It cannot close in `campaign_count` alone (spend-4
+  built it, then cut it): "this cycle" is that same count relabelled, `campaign.beside(cycle bills)`
+  in `domain/spend.py::StopSpend.meter_lines` and `served_dashboard.py`'s metered line, so folding
+  the siblings' holds there moves them into the cycle line. Action: `StopSpend` carries `cycle:
+  SpendCount` beside `campaign` (a run-data wipe: the `RunPhaseRecord` stop shape),
+  `campaign_count` folds every cycle's unreported, and `SpendCount.beside` goes. **Rides with:** a
+  chain owning `domain/spend.py`, `run_observers.py`, `served_dashboard.py`. **Re-test:** a lapsed
+  cell on a sibling cycle reads in the campaign cap line and not in this cycle's.
+- **A test that omits `offline` sends for real** (spend-4's report): nothing refuses a real
+  `urlopen` / `httpx` send outside the `offline` fixture, so a fact missing it spends a real fetch;
+  three did until spend-4. Action: the conftest world refuses unrouted network by default.
+  **Re-test:** a fact resolving an OpenRouter plan without `offline` raises.
 - **The door test reads `campaign_count`, not a door** (spend-served-fix's report):
   `tests/test_spend.py::test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it` calls
   the helper, since `current_caps` serves parts only while a producer appends. Action: drive it
@@ -842,6 +851,14 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   and find the send that escapes `offline`. **Re-test:**
   `test_an_inner_runs_stop_reaches_its_outer_cell_off_the_cycle_it_ended_on` passes without its
   `_ROUTE_OUTAGE` monkeypatch, run after that fact.
+- **`l1_critique` on minimax runs its first cluster to `max_tokens`** (three sightings 2026-11-18:
+  two dyck inner cells, `bbh-multistep-arithmetic-8b__908474` round 0, 26.7k chars, `finish=length`):
+  the reply fails inside `failure_highlights.0` (`mechanism`, `claim` and `priority_fix` missing), so
+  the run-on is one cluster's body, not the count `schemas.py::L1CritiqueOutput` caps at 3; the
+  prompt's "put each id in the ONE cluster" (`pipeline.yaml`'s `l1_critique/1`) likely enumerates
+  ids without end. `clean_reask` heals it at a full call's price. Action: attribute one banked
+  payload by block, then a tighter prompt bounds the cluster body (CLAUDE.md: the prompt, not a cap).
+  **Re-test:** the three banked inputs re-asked under the new prompt finish `stop`.
 
 ## Held — no wave-4 chain yet
 

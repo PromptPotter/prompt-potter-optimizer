@@ -9,7 +9,10 @@ the instrument, six search seats and one held-out seat per benchmark, its outer 
 three; `wide/` searches twelve seats, `run`'s six and two more seeds per benchmark, graded on `run`'s
 held-out three; `dev/` is the same six search seats with nothing held out, for code and pilots;
 `dyck/` is the positive control, seven seats on `bbh-dyck`, where one known procedure lifts the
-solver ~50 pts, so an optimizer prompt that cannot find it must read below one that can. Each
+solver ~50 pts, so an optimizer prompt that cannot find it must read below one that can;
+`multistep/` is a mid-band candidate, seven seats on `bbh-multistep-arithmetic-8b`, where a
+procedure arm reaches ~+10 held-out but potter delivers only on a wide race, and
+`multistep-bench100/` the same seats with a 100-row inner bench, its noise check. Each
 cell of `dev` and `wide` on a seat `run` holds is the one `run` reads. Each outer "sample" is one seat of a member's panel (`run/dataset.yaml::panel`):
 it mints and runs a full inner campaign on the seat's benchmark under the family's `inner_campaign`. Each inner run reports a vector of
 measurements (`domain/l4/proxies.py::OuterSampleProxies` is the scored one) and its held-out

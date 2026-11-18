@@ -10,5 +10,5 @@ campaign shows only because it exists. The install's `defaults.yaml` lays under 
 
 ## L4 — `promptpotter-self`
 
-Its `pipeline` declares no nodes: the connector serves the graph from the manifest the panel's cells run, so any preset can be an inner. The inner instruments are the members' seats over `research/datasets/promptpotter-self/family.yaml::panel`'s one geometry, each dataset its own δ scale, so a new cut is a new definition (`justlogic/dNNN/`). `run/` is the instrument (six search seats, three held out), `dyck/` the positive control on `bbh-dyck`, `wide/` twelve search seats on `run`'s
+Its `pipeline` declares no nodes: the connector serves the graph from the manifest the panel's cells run, so any preset can be an inner. The inner instruments are the members' seats over `research/datasets/promptpotter-self/family.yaml::panel`'s one geometry, each dataset its own δ scale, so a new cut is a new definition (`justlogic/dNNN/`). `run/` is the instrument (six search seats, three held out), `dyck/` the positive control on `bbh-dyck`, `multistep/` the mid-band candidate (`multistep-bench100/` its 100-row-bench noise check), `wide/` twelve search seats on `run`'s
 held-out three, `dev/` its six search seats alone, `e2e/` the browser walk's degenerate fixture (`webapp/e2e/spend/l4.spec.ts`).

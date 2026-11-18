@@ -129,10 +129,11 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   ± 0.609 vs the origin). The instrument reads a broken optimizer prompt's sign on a one-key smoke
   seat; the positive arm does not beat the origin. Read again by early rounds (free, the same 20
   banked inner ledgers): a cell's level after inner rounds 0–4 is its last adoption's 20-row bench
-  fitness, its area Σ(level − origin). Over s1–s5 the origin's area averages 1.00 and 5 of 5 cells
-  reach 0.5 (in rounds 1, 4, 3, 3, 2), the positive arm 1.18 and 3 of 5, the crippled 0.36 and 0 of
-  5; positive − crippled +0.82, 4 of 5 above 0. The early-round reading carries the same sign as the
-  held-out lift and, like it, does not separate the positive arm from the origin.
+  fitness, its area Σ(level − origin). Over s1–s4 (s5 out, by the same ruler rule) the origin's
+  area averages 1.03 and 4 of 4 cells reach 0.5 (in rounds 1, 4, 3, 3), the positive arm 1.08 and
+  2 of 4, the crippled 0.34 and 0 of 4; positive − crippled +0.74, 3 of 4 above 0 (with s5: +0.82,
+  4 of 5). The early-round reading carries the same sign as the held-out lift and, like it, does
+  not separate the positive arm from the origin.
 - Inner headroom probes (2026-11-18, one hand-written target arm per dataset, written before any row
   was read, inside potter's 800-char `length_budget`, `arm_gate: author`, 100 paired rows):
   `hotpotqa-distractor__3b0221` (shortest-span arm) **40% vs 40%** on search, θ +0.075 ± 0.339; 55 of
@@ -196,12 +197,29 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   and the 250 BBH rows are all spent (150 search, 100 held out). The bar cannot resolve this call: a
   100-row held-out lift has SE ≈ 6, so a true +10 passes half the time; a bar is a CI lower bound or
   a power figure, never a point. One hand-written arm bounds a seat's reach from below, so "not a
-  seat" on these rows reads "not on this arm and solver"; 3 min and cents a round. `bbh-word-sorting-8b__423a03` (`word_sorting` on the 8B; arm:
-  `bbh-word-sorting-cot`'s group-by-letter procedure with a count check): origin 42% on 40, arm **30%
-  vs parent 40%** on 88 paired rows (cut, θ lift −0.49 ± 0.32); 28% of the arm's replies hit the
-  1,536-token cap (parent 0%), and inside the procedure the 8B still mis-orders (`herpes him
-  correspond seashore`): not a seat on this solver, $0.007. None of the evening's seats offers the ≥ +10 held-out points a 20-row inner bench
-  can read; only bbh-dyck does.
+  seat" on these rows reads "not on this arm and solver"; 3 min and cents a round. The delivered
+  leg on the same seat (default potter, 3 rounds): on its default 20-row race
+  (`__908474`, $0.023) no arm cleared the parent (best θ lift +0.43 ± 0.67; round 3's best two at
+  65% vs 55% on 20 rows), every candidate an `instruction` sign patch, two restating one hypothesis;
+  on a 100-row race (`__9b0316`, `sp_budget_round=100`, $0.028) round 1 adopted (θ lift +1.11 ±
+  0.60; 68% vs parent 54% on 100; the runner-up at 74% wrote the innermost-group procedure into
+  `instruction`) and round 3 again (+0.98 ± 0.34; 80% vs 63%), its pick **74% vs 61% held out,
+  +13.0 [+1.1, +24.9], p 0.03** — above the authored arm, on the third read of those 100 rows.
+  Resampling the authored arm's 200 paired rows (+0.56 logits ± 0.21, independent-binomial SE)
+  under the adoption bar: a 20-row race clears z ≥ 1.5 21% of draws, 40 rows 33%, 100 rows 70%. On
+  one run per width, the race's width decided whether the search delivered on this +10–15-pt seat;
+  L4's inner race is 40 rows (`family.yaml`). At that geometry (L4 round 0, origin prompts, seeds
+  1–6; `promptpotter-self/multistep`), potter delivers raw held-out **+1.9 ± 4.4** on the family's
+  20-row bench (SD 10.8, 5 of 6 adopting) and **+5.2 ± 1.9** on a 100-row one (`multistep-bench100`,
+  SD 4.6, $0.02 a cell): the 20-row bench's noise was most of the spread. Its 40-row inner races
+  adopt a candidate about +12 to +23 above the parent and pass over some up to +17 above it. On this seat
+  L4 is read on the 100-row bench. `bbh-word-sorting-8b__423a03`
+  (`word_sorting` on the 8B; arm: `bbh-word-sorting-cot`'s group-by-letter procedure with a count
+  check): origin 42% on 40, arm **30% vs parent 40%** on 88 paired rows (cut, θ lift −0.49 ± 0.32);
+  28% of the arm's replies hit the 1,536-token cap (parent 0%), and inside the procedure the 8B
+  still mis-orders (`herpes him correspond seashore`): not a seat on this arm and solver, $0.007.
+  None of the evening's seats offers the ≥ +10 held-out points a 20-row inner bench can read; only
+  bbh-dyck does.
 
 ## Protocol
 
