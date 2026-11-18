@@ -126,7 +126,12 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   Without s5: +17.2, n=4, 3 of 4. Across rounds, on different rulers, the s1–s5 mean lift reads
   origin 0.30 (round 0, v1052), positive 0.29, crippled 0.09; the election HELD (positive θ −0.078
   ± 0.609 vs the origin). The instrument reads a broken optimizer prompt's sign on a one-key smoke
-  seat; the positive arm does not beat the origin.
+  seat; the positive arm does not beat the origin. Read again by early rounds (free, the same 20
+  banked inner ledgers): a cell's level after inner rounds 0–4 is its last adoption's 20-row bench
+  fitness, its area Σ(level − origin). Over s1–s5 the origin's area averages 1.00 and 5 of 5 cells
+  reach 0.5 (in rounds 1, 4, 3, 3, 2), the positive arm 1.18 and 3 of 5, the crippled 0.36 and 0 of
+  5; positive − crippled +0.82, 4 of 5 above 0. The early-round reading carries the same sign as the
+  held-out lift and, like it, does not separate the positive arm from the origin.
 - Inner headroom probes (2026-11-18, one hand-written target arm per dataset, written before any row
   was read, inside potter's 800-char `length_budget`, `arm_gate: author`, 100 paired rows):
   `hotpotqa-distractor__3b0221` (shortest-span arm) **40% vs 40%** on search, θ +0.075 ± 0.339; 55 of
@@ -170,6 +175,18 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   on two 100-row draws. Not a seat on this solver; $0.024. A
   seat where a reasoning edit runs into the cap punishes potter's own variants too, so a screen
   reads the label-shaped share per candidate before the seat is crowned.
+  The same seat on a reasoner (`logic-proverqa-oss__4e1652`, `gpt-oss-20b@low`, 8,000 tokens; the
+  round-1 arm) lands every label (cut ≤ 1%): origin 40% on 40, arm **54% vs parent 44%** on 100
+  paired search rows (+10.0 [+1.3, +18.7], θ +0.964 ± 0.624, selected), but **51% vs 49%** on 100
+  held-out rows (`held-out`), $0.050 with the bench pass. The arm gains false and uncertain on both
+  splits (search 11 → 14 and 25 → 30, held-out 13 → 15 and 28 → 31) and loses true on held-out
+  (8 → 5 of 26); the reasoner's weak class is true (~31% hit), not uncertain. Pooled over 200 rows
+  ≈ +6: the same ~5-pt reach as legalbench-fods. `last-letters-8b__7c5213` (`last-letters` on
+  `llama-3.1-8b-instruct`, a letter-by-letter spelling arm): origin 42% on 40, the arm cut at row 24
+  with 1 hit in two rounds, its answer line copying the hyphenated spelling (`Y-H-E-H` for `yheh`);
+  pinning the answer line to joined lowercase left the hyphens and lost letters too (~3 of 10 right
+  by content). The 8B carries neither the procedure nor the format: not a seat, $0.01. None of the
+  evening's seats offers the ≥ +10 held-out points a 20-row inner bench can read; only bbh-dyck does.
 
 ## Protocol
 

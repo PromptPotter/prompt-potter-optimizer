@@ -849,6 +849,37 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `spawn.py`'s `CONNECTOR` names `InnerTasks`, whose `inner_campaign` lays by `CAMPAIGN_RULE`.
   **Re-test:** a member changing `l1_generate`'s `model` under a family that sets `route_order`
   resolves without that `route_order`.
+- **A campaign's cap count joins every cycle's bills to one cycle's other parts** (spend-served-fix's
+  report): `served_dashboard.py::campaign_count` sets `metered_spend` (every cycle) beside this
+  cycle's book's unreported, set-aside and calls out, so a sibling cycle's lapsed cells drop out of
+  the campaign line the cap is said against. Action: the campaign's unreported folds every cycle's
+  holds (`Money.unreported_holds` by the campaign's ledgers). **Re-test:** a lapsed cell on a
+  sibling cycle reads in this cycle's campaign cap line.
+- **The door test reads `campaign_count`, not a door** (spend-served-fix's report):
+  `tests/test_spend.py::test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it` calls
+  the helper, since `current_caps` serves parts only while a producer appends. Action: drive it
+  through `current_caps` under a held, appending cycle (`test_security.py`'s `held_cycle`, moved
+  into `factories.py`). **Re-test:** the test fails when `armed_caps` drops `count=`.
+- **A process-global outage memo leaks across tests** (l4-words-fix's report):
+  `infrastructure/llm/pricing.py::_ROUTE_OUTAGE` is a module dict; in the full suite
+  `test_security.py::test_a_provider_error_on_a_live_flow_files_one_refusal_in_fixed_words` leaves it
+  holding a real-proxy fetch failure, so a later fact pricing an OpenRouter route refuses "Price list
+  unreachable". Suspected: a background route refresh (`pricing.py::refresh_route_answers`, the reaper's) outlives
+  the `offline` fixture of an app-lifespan test. Action: key the memo where a test's world resets it
+  and find the send that escapes `offline`. **Re-test:**
+  `test_an_inner_runs_stop_reaches_its_outer_cell_off_the_cycle_it_ended_on` passes without its
+  `_ROUTE_OUTAGE` monkeypatch, run after that fact.
+- **The round-result factory keys arms by position** (small-7's and small-8's reports):
+  `tests/factories.py::round_result` keys arms `c{i}` and `PARENT = ArmKey("parent")`, but
+  `Parent.own_rows` reads `ArmKey(individual.id)`, so a seated round's cells reach the parent's rows
+  only where a test re-keys them (`test_security.py`'s fence test). `test_identity.py:3693,3813` key
+  `PARENT` to another individual the same way. Action: the factory keys each arm, and `PARENT`, by
+  its individual's id; delete every re-key it makes redundant; three `test_scoring.py` tests read
+  literal `ArmKey("c0")`/`"c1"` and move with it. **Re-test:** the fence test passes without its re-key.
+- **`surface-ledger` measures whatever `origin/main` the clone last fetched** (spend-served-fix's
+  report): `complexity_ledger.py::_counted_at` reads the merge-base off a stale ref and reads red
+  for growth main itself made, naming no ref. Action: the check names the main it measures and
+  refuses on a stale one. **Re-test:** on a clone behind origin, the check names the stale ref.
 
 ## Held — no wave-4 chain yet
 
