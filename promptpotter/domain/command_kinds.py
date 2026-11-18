@@ -1354,6 +1354,7 @@ class ReadKind(StrEnum):
     CONFIG_MAP = "config-map"
     CAMPAIGN_STORAGE = "campaign-storage"
     WORKSPACE_STORAGE = "workspace-storage"
+    ARCHIVE_DATASETS = "archive-datasets"
     DATASETS = "datasets"
     DATASET_PIPELINE = "dataset-pipeline"
     DATASET_CELLS = "dataset-cells"

@@ -127,7 +127,9 @@ BASELINE = {
     # small-5 (+13): `RepairAttempt`, each re-asked attempt's finish, token split and length.
     # entry-land (+8): `Verb.lands_at_entry`, so a deploy's dry run and its pre-landing verbs write
     # nothing the old code still serves or a roll-back would run on.
-    "package_lines": 111738,
+    # small-7 (+3): a line-file rewrite left empty deletes the file, so a reclaim leaves no 0-byte cells.
+    # small-7 (+27): `archive-datasets`, the served scopes the archive control picks from.
+    "package_lines": 111768,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

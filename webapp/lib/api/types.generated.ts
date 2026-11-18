@@ -4447,6 +4447,12 @@ export interface WorkspaceStorageEntry {
   on_disk: LeafBytes;
 }
 
+/** The labels a scoped pass may name: each the account's, with an answer in its
+ * archive. */
+export interface ArchiveDatasets {
+  labels: string[];
+}
+
 export interface DatasetIndexResponse {
   datasets: DatasetIndexEntry[];
 }
@@ -5627,6 +5633,7 @@ export interface CommandResponses {
 export const READ_ROUTES = {
   "active-session": "/sessions/active",
   "activity": "/auth/activity",
+  "archive-datasets": "/workspace/archive/datasets",
   "backend-health": "/backends/{backend_id}/health",
   "backends": "/backends",
   "campaign-pipeline": "/campaigns/{campaign_id}/pipeline",
@@ -5669,7 +5676,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "b46d6ff5d8a2f7d7";
+export const SERVED_CONTRACT = "1b1f890e05c18d85";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

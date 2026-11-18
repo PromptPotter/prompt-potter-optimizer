@@ -15,6 +15,7 @@ A module lives by what it IS: `api/` the wire, `state/` one provider or store pe
 | `…/rounds/{n}/audit` | `lib/hooks/useRoundNodes.ts` | per-node LLM I/O |
 | `/datasets/{name}/cells` | `lib/hooks/useCells.ts::useCells` | every list of measured cells |
 | `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts::useConnector` | every config row, model chip, lock glyph, provenance badge (I9) |
+| `/workspace/archive/datasets` | `lib/api/reads.ts::archiveDatasetsRead` | every dataset an archive pass may be scoped to |
 
 - **No stitch**: never merge in-flight with historical or fall back to a round file; where two are one series the SERVER merges.
 - **A prop names WHICH campaign/round, never WHERE to read**; provenance is the served `source`, never a client diff.

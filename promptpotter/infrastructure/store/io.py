@@ -782,14 +782,17 @@ def _swap(path: Path, mark: FileMark, lines: Iterable[str], companion: _Companio
             if mark.inode is not None:
                 return False
             tail = b""
-        if companion is None:
-            write_bytes(path, data + tail)
-            return True
-        if read_bytes_optional(companion.path) != companion.held:
-            return False
-        _put(companion.path, companion.write.bridge, held=companion.held)
-        write_bytes(path, data + tail)
-        _put(companion.path, companion.write.companion, held=companion.write.bridge)
+        if companion is not None:
+            if read_bytes_optional(companion.path) != companion.held:
+                return False
+            _put(companion.path, companion.write.bridge, held=companion.held)
+        # Rewritten to nothing is no file, as an absent line file reads empty.
+        if body := data + tail:
+            write_bytes(path, body)
+        else:
+            unlink_robust(path)
+        if companion is not None:
+            _put(companion.path, companion.write.companion, held=companion.write.bridge)
     return True
 
 

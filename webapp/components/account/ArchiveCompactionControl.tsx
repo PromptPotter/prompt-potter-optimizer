@@ -1,22 +1,30 @@
 import { useState } from "react";
-import { commands } from "@/lib/api";
-import { type ArchiveReport, ARCHIVE_MODE_INFO, type ArchiveMode as Mode } from "@/lib/api/types";
+import { archiveDatasetsRead, commands } from "@/lib/api";
+import {
+  type ArchiveReport,
+  ARCHIVE_MODE_INFO,
+  type ArchiveMode as Mode,
+} from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useRead } from "@/lib/hooks/useRead";
 import { fmtBytes } from "@/lib/format";
 import {
   Button,
-  CommitInput,
   FailureLine,
+  ReadState,
   Said,
   SegmentedControl,
+  Select,
   type Segment,
 } from "@/components/ui";
 
-const MODES: readonly Segment<Mode>[] = wordRows(ARCHIVE_MODE_INFO).map(([value, info]) => ({
-  value,
-  label: info.label,
-}));
+const MODES: readonly Segment<Mode>[] = wordRows(ARCHIVE_MODE_INFO).map(
+  ([value, info]) => ({
+    value,
+    label: info.label,
+  }),
+);
 
 // The modes whose apply deletes for good.
 const DELETES: ReadonlySet<Mode> = new Set<Mode>(["purge-cold", "reclaim"]);
@@ -28,6 +36,7 @@ export function ArchiveCompactionControl() {
   const [done, setDone] = useState<ArchiveReport | null>(null);
   const dry = useCommand<Mode>("archive-preview");
   const commit = useCommand<Mode>("archive-apply");
+  const held = useRead(archiveDatasetsRead());
   const busy = dry.pending !== null || commit.pending !== null;
 
   // A preview must not stand as consent for another mode or another dataset.
@@ -42,8 +51,10 @@ export function ArchiveCompactionControl() {
 
   async function run(apply: boolean) {
     const slot = apply ? commit : dry;
-    const scope = dataset.trim() === "" ? {} : { dataset: dataset.trim() };
-    const r = await slot.run(mode, () => commands["compact-archive"]({ mode, apply, ...scope }));
+    const scope = dataset === "" ? {} : { dataset };
+    const r = await slot.run(mode, () =>
+      commands["compact-archive"]({ mode, apply, ...scope }),
+    );
     if (!r.ok) {
       // Each run swaps atomically but the batch does not, so a failed apply voids its preview.
       if (apply) setPreview(null);
@@ -68,13 +79,22 @@ export function ArchiveCompactionControl() {
         onChange={pick}
         ariaLabel="Archive maintenance mode"
       />
-      <p className="account-muted wsmaint-blurb">{ARCHIVE_MODE_INFO[mode].sentence}</p>
-      <CommitInput
-        value={dataset}
-        onCommit={(scope) => pick(mode, scope)}
-        placeholder="Dataset (blank: every dataset)"
-        aria-label="Dataset to scope the pass to"
-      />
+      <p className="account-muted wsmaint-blurb">
+        {ARCHIVE_MODE_INFO[mode].sentence}
+      </p>
+      <ReadState read={held} subject="the archive's datasets">
+        {({ labels }) => (
+          <Select
+            value={dataset}
+            options={[
+              { value: "", label: "Every dataset" },
+              ...labels.map((l) => ({ value: l, label: l })),
+            ]}
+            onChange={(scope) => pick(mode, scope)}
+            aria-label="Dataset to scope the pass to"
+          />
+        )}
+      </ReadState>
 
       <div className="wsmaint-actions">
         <Button onClick={() => void run(false)} disabled={busy}>
@@ -83,7 +103,9 @@ export function ArchiveCompactionControl() {
         <Button
           variant={DELETES.has(mode) ? "danger" : "primary"}
           onClick={() => void run(true)}
-          disabled={busy || preview === null || blocked || preview.files_touched === 0}
+          disabled={
+            busy || preview === null || blocked || preview.files_touched === 0
+          }
         >
           {DELETES.has(mode) ? "Delete permanently" : "Apply"}
         </Button>

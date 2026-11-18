@@ -519,6 +519,24 @@
         "title": "ArchiveCampaignPayload",
         "type": "object"
       },
+      "ArchiveDatasets": {
+        "additionalProperties": false,
+        "description": "The labels a scoped pass may name: each the account's, with an answer in its archive.",
+        "properties": {
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Labels",
+            "type": "array"
+          }
+        },
+        "required": [
+          "labels"
+        ],
+        "title": "ArchiveDatasets",
+        "type": "object"
+      },
       "ArchiveMode": {
         "enum": [
           "compact",
@@ -24377,6 +24395,38 @@
           }
         },
         "summary": "Active-Session",
+        "tags": [
+          "Reads"
+        ]
+      }
+    },
+    "/api/v1/workspace/archive/datasets": {
+      "get": {
+        "description": "The datasets the account's measurement archive holds answers of, by label: the only scopes\na compaction pass or a reclaim can name.",
+        "operationId": "archive_datasets_api_v1_workspace_archive_datasets_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchiveDatasets"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Default Response"
+          }
+        },
+        "summary": "Archive-Datasets",
         "tags": [
           "Reads"
         ]

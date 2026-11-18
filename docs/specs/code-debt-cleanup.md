@@ -659,14 +659,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
   harness names the release it runs against, and a fix to it targets that release. **Rides with:** the
   next chain touching `paper/bbeh-comparison/`.
-- **A reclaim that empties a cell file leaves it** (small-4's report): `measurement_archive.py::rewrite_cell_file`
-  writes a 0-byte file, which `keys(ArchiveFile.CELLS)` still lists. Root: `rewrite_pair` has no
-  "delete when empty" outcome. **Rides with:** the next archive chain. **Re-test:** after a reclaim
-  of a dataset's every row, `keys(CELLS)` names none of its files.
-- **The reclaim control takes its dataset as free text** (small-4's report):
-  `webapp/components/account/ArchiveCompactionControl.tsx` has no served list of the account's
-  datasets to pick from. Root: no `ReadKind` lists an account's datasets. **Rides with:** the next
-  chain in `application/read_params.py`. **Re-test:** the control offers only datasets the archive holds.
 
 ### batch/31 · box
 
@@ -815,9 +807,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   spawner's kind on `InstrumentMode` and clears `filed_as`; `arm_spend_book` reads `enclosed_as` off
   the mode. **Rides with:** the outer chain (`runner/inner/**`). **Re-test:** the `--l4 --straight
   --bench-trigger every_adoption` leg's inner ledger files no call as `bench`.
-- **The noise-floor pass may bank a refusal beside cells**: `scoring/passes.py:538` sets `refusal`
-  before it knows the pass read nothing, which `PassGradedRecord._refused_reads_nothing` rejects.
-  Unverified. **Re-test:** a noise-floor pass that scored a cell and then refused raises nothing.
 - **A send a pause cuts is never filed, so a paused inner run reads $0.000**: the operator paused
   `promptpotter-self.run__54ccef` (2026-11-18 ~11:35) while seat #001's inner run
   `justlogic.d234__edf685/cycle_2cca0ea37091` was live; its sidebar spend dropped from a live figure
@@ -835,10 +824,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   "cells.constrained-int: … cells.literal['max']: …" (`presentation/cli/main.py`'s payload arm prints
   the `ValidationError` raw). Action: the CLI renders a payload refusal by field and expected form,
   once, for every verb. **Re-test:** `set-sample-lookahead bogus` reads "cells: a count ≥ 1 or max".
-- **The fence test never sends a row's query to `l1_generate`**: its fixture's query is fenced on
-  `diagnostics`, a panel `l1_generate` does not place, and the composed request holds no query.
-  Action: seat a row a placed panel quotes, and assert it sits fenced in the request. **Re-test:**
-  `tests/test_security.py::test_dataset_content_reaches_the_optimizer_only_inside_the_fence`.
 - **The cap halts on money its served reading omits**: C0 `promptpotter-self.run__265c4d` (2026-11-18)
   halted `spend_budget` inside round 1 while `dashboard` and `set-limits` served "$1.09 spent" of
   $2.50. The book counted $1.09 billed + $1.11 unreported (52 lapsed cells, folded by

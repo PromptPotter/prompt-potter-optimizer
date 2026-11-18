@@ -260,6 +260,18 @@ class ArchiveInventory(StrictModel):
     numbers are wanted most while a campaign is still filling the store."""
 
 
+class ArchiveDatasets(StrictModel):
+    """The labels a scoped pass may name: each the account's, with an answer in its archive."""
+
+    labels: list[str]
+
+
+def archive_datasets(stores: Stores) -> ArchiveDatasets:
+    held = {entry.dataset_hash for entry in stores.archive.list_all()}
+    labels = stores.tenant_datasets.labels().items()
+    return ArchiveDatasets(labels=sorted(label for label, digest in labels if digest in held))
+
+
 def _by_bytes(tallies: Mapping[str, _Tally]) -> list[InventoryRow]:
     rows = [tally.row(key) for key, tally in tallies.items()]
     rows.sort(key=lambda r: r.hot_bytes + r.cold_bytes, reverse=True)

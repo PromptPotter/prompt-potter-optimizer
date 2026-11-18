@@ -19,6 +19,7 @@ import {
   type NodeReach,
   type PipelineView,
   type ActiveSessionResponse,
+  type ArchiveDatasets,
   type ActivityResponse,
   type ActivityGroupBy,
   type ActivityWindow,
@@ -433,6 +434,11 @@ export function campaignStorageRead(campaignId: string): ReadDescriptor<LeafByte
 
 export function workspaceStorageRead(): ReadDescriptor<WorkspaceStorageResponse> {
   return once("workspace-storage", readUrl("workspace-storage", {}));
+}
+
+// A reclaim or a scoped pass files on the account, which re-asks it.
+export function archiveDatasetsRead(): ReadDescriptor<ArchiveDatasets> {
+  return { ...once<ArchiveDatasets>("archive-datasets", readUrl("archive-datasets", {})), subject: ACCOUNT };
 }
 
 export function libraryRead(): ReadDescriptor<LibraryResponse> {

@@ -2624,6 +2624,30 @@ def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_re
 
 
 @pytest.mark.usefixtures("optimizing_memory")
+def test_a_noise_floor_that_scored_cells_and_read_no_band_files_them_unread(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
+        _, session, origin_sp = _closed_origin(bench)
+        replicates: list[int] = []
+
+        async def _second_stops(*args: Any, **kwargs: Any) -> Any:
+            walk = await score_search_point(*args, **kwargs)
+            replicates.append(len(replicates))
+            return (
+                walk
+                if len(replicates) == 1
+                else dataclasses.replace(walk, stopped=WalkEnd.CLIENT_ERROR)
+            )
+
+        with monkeypatch.context() as patched, scoped(ledger=bench.ledger):
+            patched.setattr(held_out, "score_search_point", _second_stops)
+            band = asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
+    assert band.verification.cells and band.reading is None, "the scored cells were not kept"
+    assert band.state is ReadingState.MEMBER_UNSCOREABLE, "a band read from one replicate"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorded_rows(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:

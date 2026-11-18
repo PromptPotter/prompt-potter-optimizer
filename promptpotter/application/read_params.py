@@ -65,6 +65,10 @@ from promptpotter.application.jobs.quota import (
     quota_status,
 )
 from promptpotter.application.library import LibraryResponse, library
+from promptpotter.application.maintenance.archive_maintenance import (
+    ArchiveDatasets,
+    archive_datasets,
+)
 from promptpotter.application.maintenance.storage_report import (
     LeafBytes,
     WorkspaceStorageResponse,
@@ -767,6 +771,16 @@ class WorkspaceStorageParams(
 
     def answer(self, caller: Caller) -> WorkspaceStorageResponse:
         return workspace_storage(caller.stores)
+
+
+class ArchiveDatasetsParams(
+    ReadParams, read=ReadKind.ARCHIVE_DATASETS, route="/workspace/archive/datasets"
+):
+    """The datasets the account's measurement archive holds answers of, by label: the only scopes
+    a compaction pass or a reclaim can name."""
+
+    def answer(self, caller: Caller) -> ArchiveDatasets:
+        return archive_datasets(caller.stores)
 
 
 class DatasetsParams(ReadParams, read=ReadKind.DATASETS, route="/datasets"):

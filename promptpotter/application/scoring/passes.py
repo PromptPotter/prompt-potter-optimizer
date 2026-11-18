@@ -455,7 +455,7 @@ async def measure_noise_floor(
     session: Session, origin_sp: JobSearchPoint, k: int
 ) -> PassGradedRecord:
     """Round 0's origin re-scored *k* times fresh on the rows it recorded, one pass on the run's
-    ledger; a band it cannot read banks its refusal on the pass, never stopping the run."""
+    ledger; a band it cannot read files the pass unread, never stopping the run."""
     stores = session.store
     round_file = stores.campaigns.standing_rounds(session.hop, moment=None).rounds[0].close
     assert round_file.election is not None, "round 0 elects the origin it adopted"
@@ -540,7 +540,7 @@ async def measure_noise_floor(
                 f"{'no' if recorded.composite is None else 'a'} recorded composite read on its "
                 "rows: a band would describe the outage, not the backend."
             )
-            if unread
+            if unread and not cells
             else None,
         )
         append_record(graded)

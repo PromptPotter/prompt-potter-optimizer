@@ -85,6 +85,7 @@ from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Admitted, Inline
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import (
+    archive_datasets,
     compact_measurement_archive,
     reclaim_dataset,
     reindex_measurement_archive,
@@ -485,6 +486,7 @@ def test_a_reclaim_deletes_nothing_while_a_run_appends_and_only_what_its_plan_na
             refused = reclaim_dataset(built_stores, dataset="compacted", apply=apply)
             assert (refused.archive_writers, refused.files_touched) == (1, 0)
             assert archive.population(whole) == before, "a reclaim deleted beside a live producer"
+    assert archive_datasets(built_stores).labels == ["compacted"], "the control offers no scope"
     plan = reclaim_dataset(built_stores, dataset="compacted")
     assert plan.breaks == ("filer/filer",), "the plan named no run its delete breaks"
     assert (plan.rows_moved, archive.population(whole)) == (2, before), "a dry run deleted"
@@ -493,6 +495,8 @@ def test_a_reclaim_deletes_nothing_while_a_run_appends_and_only_what_its_plan_na
     assert (
         archive.population(whole) == [] and archive.list_all(dataset_hash=whole.dataset_hash) == []
     )
+    assert archive.keys(ArchiveFile.CELLS) == [], "a reclaim left the cell file it emptied"
+    assert archive_datasets(built_stores).labels == [], "the control offers a dataset it emptied"
 
 
 # Each step reads on from where the feed's last advance left it.
