@@ -25,6 +25,14 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
   `domain/search_point.py`, `domain/pipeline_schema.py`. A holder there is a cut. You own
   `domain/cycle_paths.py`'s subject, `application/evidence/`, `application/mask/tree_lens.py`, the
   compare and candidates webapp surfaces and their CSS, and the tests over these.
+- **Added 2026-11-18 ~11:30 (the operator, on the Candidates header: "the overall thingy here looks
+  strangely"):** the toolbar reads as bare glyphs `ƒ θ ∑ ∩` (`CandidatesToolbar.tsx`; names live
+  only in aria/title). Each chip says its name in words beside the glyph on the served
+  `DISPLAY_METRIC_INFO.label` (fitness, ability θ, composite, overlap), mobile first, one row
+  (`components/CLAUDE.md`). Also seen: the chat export prints `no cell measured yet` beside
+  `measuring 35 of 40` on one candidate (inner legalbench-fods C4.3): name which reading each phrase
+  is, or file it. If this reaches you after your links are pushed, the orchestrator builds it in the
+  landing's fix pass.
 - **Proof (beyond common.md):** the walk world's compare of a same-key round-1 arm reads round 1;
   comparing an inner candidate fires no 404 (the walk's problem check green); walk shots at
   1920×1080 (five cards in a row) and 1280×800 (freed tree, no overlap) plus 390 px, on your
