@@ -26,4 +26,3 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
 - **Proof (beyond common.md):** the full gate under an artificial CPU load you start beside it
   (e.g. `stress`-free: N busy python loops, N = cores), Playwright and Vitest green, twice; the same
   run on the base trips (or say it does not reproduce on your box, with its numbers).
-</content>

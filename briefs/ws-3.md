@@ -29,4 +29,3 @@ Read `briefs/common.md` on `origin/brief/wave-5` whole first; it binds you. Chai
   comparing an inner candidate fires no 404 (the walk's problem check green); walk shots at
   1920×1080 (five cards in a row) and 1280×800 (freed tree, no overlap) plus 390 px, on your
   `out/ws-3-report` branch beside `report.md`.
-</content>
