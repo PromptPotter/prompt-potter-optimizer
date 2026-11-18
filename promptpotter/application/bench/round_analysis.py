@@ -143,10 +143,10 @@ def _rank_analysis(
     return buckets, top_k, near_misses, n_valid
 
 
-def _pipeline_health(results: Sequence[GradedCell]) -> tuple[float, float]:
+def _pipeline_health(results: Sequence[GradedCell]) -> tuple[float | None, float | None]:
     total = len(results)
     if not total:
-        return 0.0, 0.0
+        return None, None
     warning_count = 0
     error_count = 0
     for r in results:

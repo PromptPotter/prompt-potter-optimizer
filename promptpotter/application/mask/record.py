@@ -28,7 +28,7 @@ class MaskCandidate(FrozenModel):
     reading: MaskReading | None = None
     is_selected: bool = False
     is_eligible: bool = True
-    # An ``EliminationGate`` value; ``None`` ran to completion.
+    # The ``Elimination.context["gate"]`` that stopped it; ``None`` ran to completion.
     abort: str | None = None
 
 

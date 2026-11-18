@@ -11,7 +11,7 @@ The **record** is the realized lineage — a tree. A mask splits it: **invariant
 | Ask | How | Names an alternative? |
 |---|---|---|
 | **A different scoring formula** | `?lens=score:<formula>` on `GET /hierarchy/{address}` (a `per_cell` composite; each candidate gets a `lens_value`). `?lens=dials:<term=weight,…>` realizes weights on the campaign's own anchors and serves the formula as `lens_criterion` | Yes — the candidate that formula ranks first |
-| **A PoBB gate switched off** | `?lens=abort:<gate>_off` for any `EliminationGate` member, or `all_off` | No — the continuation was never measured |
+| **Early abort switched off** | `?lens=abort:all_off` (an `Eliminator`'s `abort_lenses`) | No — the continuation was never measured |
 | **A changed engine or scorer** | `python -m promptpotter ab [--campaign <id>]` | Where a `round_winner` flips, yes |
 
 **A lens is scored the way the run is.** `score:F` is the cycle's own scoring block with `per_cell = F` (the overrides a fork applying it carries), run over each arm's rows — a `lens_value` is what a fresh run under `F` reports, never `F` over a round's means ([`persistence-and-state.md`](persistence-and-state.md) § Changing the composite formula); a parent carried across a fork edge is re-graded under the child's scorer.

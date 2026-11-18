@@ -204,7 +204,9 @@ def _r_diagnostics(b: PotterView) -> list[Item]:
             sections.append(Item(rank_line))
 
     # Never a `terminal_node` tally: it counts the node each sample REACHED, a healthy round included.
-    if d.error_rate > 0 or d.warning_rate > 0:
+    if d.error_rate is None or d.warning_rate is None:
+        sections.append(Item("PIPELINE HEALTH: no cell ran"))
+    elif d.error_rate > 0 or d.warning_rate > 0:
         sections.append(
             Item(
                 "PIPELINE HEALTH:\n"

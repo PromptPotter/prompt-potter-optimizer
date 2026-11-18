@@ -42,6 +42,7 @@ from promptpotter.application.bench.difficulty import (
     session_ruler_scope,
 )
 from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.round_analysis import compute_round_diagnostics
 from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     covered_prefix,
     stratum_shares,
@@ -715,6 +716,16 @@ def test_cells_of_two_datasets_folded_under_one_scope_read_one_scale(traced: _Tr
     assert mixed.caveat is None and mixed.plateau() == pytest.approx(series.plateau()), (
         "a δ scale the fold wrote once read as several"
     )
+
+
+def test_a_round_no_cell_ran_serves_no_error_rate() -> None:
+    for scored, rate in ((0, None), (2, 0.0)):
+        rr = round_result(1, candidates_scored=scored)
+        rr = rr.model_copy(update={"diagnostics": compute_round_diagnostics(rr, None)})
+        served = rr.model_dump(mode="json")["diagnostics"]
+        assert served["error_rate"] == rate and served["warning_rate"] == rate, (
+            f"{scored} arms scored served error_rate {served['error_rate']}, not {rate}"
+        )
 
 
 # 3. The L4 outer proxy — what one finished inner cycle says

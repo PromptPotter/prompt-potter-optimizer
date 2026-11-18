@@ -38,7 +38,7 @@ class RoundDiagnostics:
     n_valid: int
 
     # No `terminal_node` tally: the deepest node REACHED reads as that node failing en masse.
-    error_rate: float
-    warning_rate: float
+    error_rate: float | None
+    warning_rate: float | None
 
     samples: list[SampleDiag]

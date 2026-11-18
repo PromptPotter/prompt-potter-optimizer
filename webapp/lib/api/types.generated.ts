@@ -5676,7 +5676,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "c2bf0b70135301ed";
+export const SERVED_CONTRACT = "927e463cc77c3045";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -6024,7 +6024,6 @@ export const SCORE_LENS_LABELS: Record<string, string> = {
 
 // Mirror of application/optimizers/potter/pobb.py::ABORT_LENS_LABELS, in display order.
 export const ABORT_LENS_LABELS: Record<string, string> = {
-  "abort:epsilon_off": "No ε-elimination",
   "abort:all_off": "No early abort",
 };
 
@@ -6525,7 +6524,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [SLOT_BOUND_WORDS, ["throttle", "machine"]],
   [LAUNCH_REFUSAL_LABELS, ["used_up", "held", "over_declared", "no_key", "unpriced"]],
   [SCORE_LENS_LABELS, ["score:fitness"]],
-  [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:all_off"]],
+  [ABORT_LENS_LABELS, ["abort:all_off"]],
   [STEER_OUTSIDE_INFO, ["babysat", "refused"]],
   [CELL_TERM_META, ["fitness", "ground_truth_rank", "latency", "unworked", "cost", "tokens", "target_prompt_chars", "errored", "degraded", "cached", "retrieval_shortfall"]],
   [LOOKAHEAD_WORDS, ["one_at_a_time", "settled", "followed", "no_run", "past_money", "past_most", "flight", "scope_every_round", "scope_this_round", "no_further_cell", "more_affordable", "holds_every_round", "holds_this_round", "depth_one", "depth_many", "depth_max", "depth_max_hint", "abreast_one", "abreast_one_hint", "abreast_many", "abreast_all", "abreast_all_hint", "axes", "axes_one", "axes_all", "max_speed", "max_speed_hint"]],

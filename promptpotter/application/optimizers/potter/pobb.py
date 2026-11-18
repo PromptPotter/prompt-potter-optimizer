@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Collection, Iterable, Mapping
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import TypedDict
 
 import numpy as np
@@ -27,21 +26,14 @@ from promptpotter.shared.worded import Worded
 _DRAWS = 4000
 
 
-class EliminationGate(StrEnum):
-    """Named by the producer, never re-derived from which keys a context carries."""
+# The one stop PoBB files, so the one its abort lens switches off: measurement stopped, NOT a verdict.
+_GATE = "epsilon"
 
-    EPSILON = "epsilon"  # measurement stopped, NOT a verdict
-
-
-ABORT_LENS_SUPPRESS: dict[str, frozenset[str]] = {
-    **{f"{g.value}_off": frozenset({g.value}) for g in EliminationGate},
-    "all_off": frozenset(g.value for g in EliminationGate),
-}
+ABORT_LENS_SUPPRESS: dict[str, frozenset[str]] = {"all_off": frozenset({_GATE})}
 
 # The browser's picklist, keyed as the `lens=` it sends; exactly what `mask/tree_lens.py` accepts.
 ABORT_LENS_LABELS: Worded[str, str] = Worded(
     {
-        Lens("abort", f"{EliminationGate.EPSILON.value}_off").spelling: "No ε-elimination",
         Lens("abort", "all_off").spelling: "No early abort",
     }
 )
@@ -51,9 +43,9 @@ assert set(ABORT_LENS_LABELS) == {Lens("abort", body).spelling for body in ABORT
 
 
 class EliminationContext(TypedDict, total=False):
-    """``gate`` says which keys EXIST: ε adds the ε(n) that fired."""
+    """``epsilon`` is the ε(n) that fired."""
 
-    gate: EliminationGate
+    gate: str
     p_best: float
     epsilon: float
     leader: ArmKey
@@ -192,7 +184,7 @@ class PoBBCheck:
                     "queries_scored": n,
                     "total_queries": self.n_samples,
                     "n_priors": len(rivals),
-                    "gate": EliminationGate.EPSILON,
+                    "gate": _GATE,
                     "epsilon": float(bar),
                 },
                 cells=cells,

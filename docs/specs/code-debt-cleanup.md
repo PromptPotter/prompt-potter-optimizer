@@ -416,9 +416,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   the recorded level carries no band. Root: the record keeps the level's `Estimate`, and the verify
   reads both bands. **Re-test:** a verify whose recorded level has a wide band is never "held" on a
   point comparison.
-- **`EliminationGate` is a one-member enum** (`potter/pobb.py:30`). It is wired through the lens and
-  `mask/record.py:31` and stands in for a concept with one value. Action: delete it and its wiring.
-  **Re-test:** `git grep -c EliminationGate -- promptpotter` is 0.
 - **The warm gate counts no se_δ**: θ now reads each δ under its SE (`DeltaRuler.entries`), but the
   young-ruler joint MAP still shrinks δ̂ inward (slope 0.30 at 3 individuals per cell) and the warm
   gate warms on row counts alone.
@@ -455,10 +452,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   landing): `store/read_model.py::last_fold` builds a class at runtime and registers it with
   `globals()[made.__name__] = made`. Action: the last-wins records become declared classes, and the
   registration goes. **Re-test:** `git grep -c "globals()\[" -- promptpotter/infrastructure/store/read_model.py` is 0.
-- **An empty round's error rate reads 0.0** (rec's landing, reported):
-  `domain/round_diagnostics.py::RoundDiagnostics.error_rate` stays a `float` where no cell ran, the
-  absent-as-zero shape rec closed for a round's fitness. Action: `None` where no cells ran.
-  **Re-test:** a round with no scored cell serves `error_rate: null`.
 
 ### webd (the edge tail, after lw)
 

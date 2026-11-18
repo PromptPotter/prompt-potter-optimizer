@@ -7293,8 +7293,15 @@
         "description": "One round's post-scoring diagnostics, computed once and read by every renderer.",
         "properties": {
           "error_rate": {
-            "title": "Error Rate",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Rate"
           },
           "n_valid": {
             "title": "N Valid",
@@ -7329,8 +7336,15 @@
             "type": "object"
           },
           "warning_rate": {
-            "title": "Warning Rate",
-            "type": "number"
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warning Rate"
           }
         },
         "required": [

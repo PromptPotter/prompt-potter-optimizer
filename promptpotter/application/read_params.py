@@ -397,8 +397,8 @@ class HierarchySubtreeParams(
 
     ``at`` is a line of the ledger of ``at_cycle``: a cycle minted later is not in the subtree,
     and run-state stays live. ``lens`` re-grades rows under another ``per_cell`` composite
-    (``score:``), the same as weights (``dials:``), or with a gate off (``abort:<gate>_off`` or
-    ``abort:all_off``); ``samples`` masks to those sample ids. With neither, the subtree is the
+    (``score:``), the same as weights (``dials:``), or with early abort off
+    (``abort:all_off``); ``samples`` masks to those sample ids. With neither, the subtree is the
     raw read. Not found where no entry stands at ``address``.
     """
 

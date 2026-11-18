@@ -101,7 +101,6 @@ from promptpotter.application.optimizers.capo.members import (
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, RoundSamples
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
-from promptpotter.application.optimizers.potter.pobb import EliminationGate
 from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
 from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
@@ -894,7 +893,7 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     race = race_of()
     stop = race.close({ArmKey("c1"): walked.cells}).get(ArmKey("c1"))
     reading = race.judge(stop, ArmKey("c1"), {ArmKey("c1"): "C3.1"})
-    assert reading is not None and reading.context["gate"] == EliminationGate.EPSILON
+    assert reading is not None and reading.context["gate"] == "epsilon"
     [cut] = racing.cycle.pending_decisions
     assert isinstance(cut.inputs_ref, EliminationCut)
     assert cut.inputs_ref.candidate_cells == [str(i) for i in range(8) if i != 2]

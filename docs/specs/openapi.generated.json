@@ -24029,7 +24029,7 @@
     },
     "/api/v1/hierarchy/{address}": {
       "get": {
-        "description": "The entry at ``address`` with every level under it: cycles, rounds, candidates, inner\ncampaigns.\n\n``at`` is a line of the ledger of ``at_cycle``: a cycle minted later is not in the subtree,\nand run-state stays live. ``lens`` re-grades rows under another ``per_cell`` composite\n(``score:``), the same as weights (``dials:``), or with a gate off (``abort:<gate>_off`` or\n``abort:all_off``); ``samples`` masks to those sample ids. With neither, the subtree is the\nraw read. Not found where no entry stands at ``address``.",
+        "description": "The entry at ``address`` with every level under it: cycles, rounds, candidates, inner\ncampaigns.\n\n``at`` is a line of the ledger of ``at_cycle``: a cycle minted later is not in the subtree,\nand run-state stays live. ``lens`` re-grades rows under another ``per_cell`` composite\n(``score:``), the same as weights (``dials:``), or with early abort off\n(``abort:all_off``); ``samples`` masks to those sample ids. With neither, the subtree is the\nraw read. Not found where no entry stands at ``address``.",
         "operationId": "hierarchy_subtree_api_v1_hierarchy__address__get",
         "parameters": [
           {
