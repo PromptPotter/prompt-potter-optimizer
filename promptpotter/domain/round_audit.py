@@ -42,6 +42,18 @@ class NodeOutput(FrozenModel):
     error: str | None = Field(description="Why the call failed; null on an answered call.")
 
 
+class RepairAttempt(FrozenModel):
+    """One attempt a call's repair ladder re-asked past: why it stopped, what it spent, never its text."""
+
+    finish_reason: str | None = Field(description="``length`` is a ``max_tokens`` hit.")
+    usage: TokenAccount | None = Field(
+        description="Its own account: ``reasoning`` beside ``output`` tells reasoning that spent "
+        "the budget from a runaway answer. Null where the provider reported none."
+    )
+    chars: int = Field(description="The length of its visible content.")
+    broke: str = Field(description="The schema rules it broke, and the head of what it emitted.")
+
+
 class NodeBlock(FrozenModel):
     """One optimizer node's call in one round: what it was asked, what it answered and what that cost."""
 
@@ -63,9 +75,8 @@ class NodeBlock(FrozenModel):
     )
     duration_s: float | None
     finish_reason: str | None
-    schema_repair_errors: list[str] = Field(
-        description="The schema rules each retried attempt broke; non-empty means a second "
-        "round-trip was paid."
+    schema_repair_errors: list[RepairAttempt] = Field(
+        description="Each attempt re-asked past; non-empty means a second round-trip was paid."
     )
 
 

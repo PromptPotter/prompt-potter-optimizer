@@ -11603,9 +11603,9 @@
             "description": "The provider's prefix-cache reading of `usage` — `replayed` where our own reuse cache answered and the counts are the banked call's."
           },
           "schema_repair_errors": {
-            "description": "The schema rules each retried attempt broke; non-empty means a second round-trip was paid.",
+            "description": "Each attempt re-asked past; non-empty means a second round-trip was paid.",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/RepairAttempt"
             },
             "title": "Schema Repair Errors",
             "type": "array"
@@ -14910,6 +14910,53 @@
           "provider"
         ],
         "title": "RemoveApiKeyPayload",
+        "type": "object"
+      },
+      "RepairAttempt": {
+        "additionalProperties": false,
+        "description": "One attempt a call's repair ladder re-asked past: why it stopped, what it spent, never its text.",
+        "properties": {
+          "broke": {
+            "description": "The schema rules it broke, and the head of what it emitted.",
+            "title": "Broke",
+            "type": "string"
+          },
+          "chars": {
+            "description": "The length of its visible content.",
+            "title": "Chars",
+            "type": "integer"
+          },
+          "finish_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "``length`` is a ``max_tokens`` hit.",
+            "title": "Finish Reason"
+          },
+          "usage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenAccount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Its own account: ``reasoning`` beside ``output`` tells reasoning that spent the budget from a runaway answer. Null where the provider reported none."
+          }
+        },
+        "required": [
+          "finish_reason",
+          "usage",
+          "chars",
+          "broke"
+        ],
+        "title": "RepairAttempt",
         "type": "object"
       },
       "ResolveOriginPayload": {

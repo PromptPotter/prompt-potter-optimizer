@@ -303,7 +303,7 @@ def _answered_record(
         "model": response.model,
         "duration_s": answered.duration_s,
         "finish_reason": response.finish_reason,
-        "schema_repair_errors": response.schema_repair_errors,
+        "schema_repair_errors": [a.model_dump(mode="json") for a in response.schema_repair_errors],
     }
     # EVIDENCE FOR A HUMAN: nothing downstream reads this key and nothing may start.
     if response.reasoning:

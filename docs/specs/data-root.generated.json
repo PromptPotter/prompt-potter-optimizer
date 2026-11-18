@@ -3005,6 +3005,53 @@
       ],
       "shape": {
         "$defs": {
+          "RepairAttempt": {
+            "additionalProperties": false,
+            "description": "One attempt a call's repair ladder re-asked past: why it stopped, what it spent, never its text.",
+            "properties": {
+              "broke": {
+                "description": "The schema rules it broke, and the head of what it emitted.",
+                "title": "Broke",
+                "type": "string"
+              },
+              "chars": {
+                "description": "The length of its visible content.",
+                "title": "Chars",
+                "type": "integer"
+              },
+              "finish_reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "``length`` is a ``max_tokens`` hit.",
+                "title": "Finish Reason"
+              },
+              "usage": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/TokenAccount"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its own account: ``reasoning`` beside ``output`` tells reasoning that spent the budget from a runaway answer. Null where the provider reported none."
+              }
+            },
+            "required": [
+              "finish_reason",
+              "usage",
+              "chars",
+              "broke"
+            ],
+            "title": "RepairAttempt",
+            "type": "object"
+          },
           "TokenAccount": {
             "additionalProperties": false,
             "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.",
@@ -3102,7 +3149,7 @@
               }
             ],
             "default": null,
-            "description": "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason leads its ``schema_repair_errors`` entry. ``None`` where the provider reported none.",
+            "description": "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason is its ``schema_repair_errors`` entry's. ``None`` where the provider reported none.",
             "title": "Finish Reason"
           },
           "model": {
@@ -3128,9 +3175,9 @@
             "type": "string"
           },
           "schema_repair_errors": {
-            "description": "The schema rules each retried attempt broke, one entry per paid retry before the parsed response landed — empty on a clean first parse. Its length is the retry count: bad templates produce schema-noncompliant JSON and silently double-up the LLM spend, and the entries say which rule the prompt fails to teach.",
+            "description": "Each attempt retried past, one entry per paid retry before the parsed response landed — empty on a clean first parse. Its length is the retry count: bad templates produce schema-noncompliant JSON and silently double-up the LLM spend; an entry says which rule the prompt fails to teach, or that the budget ran out and on what.",
             "items": {
-              "type": "string"
+              "$ref": "#/$defs/RepairAttempt"
             },
             "title": "Schema Repair Errors",
             "type": "array"
@@ -3588,6 +3635,53 @@
       ],
       "shape": {
         "$defs": {
+          "RepairAttempt": {
+            "additionalProperties": false,
+            "description": "One attempt a call's repair ladder re-asked past: why it stopped, what it spent, never its text.",
+            "properties": {
+              "broke": {
+                "description": "The schema rules it broke, and the head of what it emitted.",
+                "title": "Broke",
+                "type": "string"
+              },
+              "chars": {
+                "description": "The length of its visible content.",
+                "title": "Chars",
+                "type": "integer"
+              },
+              "finish_reason": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "``length`` is a ``max_tokens`` hit.",
+                "title": "Finish Reason"
+              },
+              "usage": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/TokenAccount"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its own account: ``reasoning`` beside ``output`` tells reasoning that spent the budget from a runaway answer. Null where the provider reported none."
+              }
+            },
+            "required": [
+              "finish_reason",
+              "usage",
+              "chars",
+              "broke"
+            ],
+            "title": "RepairAttempt",
+            "type": "object"
+          },
           "TokenAccount": {
             "additionalProperties": false,
             "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.",
@@ -3685,7 +3779,7 @@
               }
             ],
             "default": null,
-            "description": "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason leads its ``schema_repair_errors`` entry. ``None`` where the provider reported none.",
+            "description": "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason is its ``schema_repair_errors`` entry's. ``None`` where the provider reported none.",
             "title": "Finish Reason"
           },
           "model": {
@@ -3711,9 +3805,9 @@
             "type": "string"
           },
           "schema_repair_errors": {
-            "description": "The schema rules each retried attempt broke, one entry per paid retry before the parsed response landed — empty on a clean first parse. Its length is the retry count: bad templates produce schema-noncompliant JSON and silently double-up the LLM spend, and the entries say which rule the prompt fails to teach.",
+            "description": "Each attempt retried past, one entry per paid retry before the parsed response landed — empty on a clean first parse. Its length is the retry count: bad templates produce schema-noncompliant JSON and silently double-up the LLM spend; an entry says which rule the prompt fails to teach, or that the budget ran out and on what.",
             "items": {
-              "type": "string"
+              "$ref": "#/$defs/RepairAttempt"
             },
             "title": "Schema Repair Errors",
             "type": "array"

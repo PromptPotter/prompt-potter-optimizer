@@ -2190,9 +2190,8 @@ export interface NodeBlock {
   prefix: PrefixReading | null;
   duration_s: number | null;
   finish_reason: string | null;
-  /** The schema rules each retried attempt broke; non-empty means a second round-
-   * trip was paid. */
-  schema_repair_errors: string[];
+  /** Each attempt re-asked past; non-empty means a second round-trip was paid. */
+  schema_repair_errors: RepairAttempt[];
 }
 
 /** What a node's call was asked: the template it rendered, or its bare messages
@@ -2212,6 +2211,20 @@ export interface NodeOutput {
   reasoning: string | null;
   /** Why the call failed; null on an answered call. */
   error: string | null;
+}
+
+/** One attempt a call's repair ladder re-asked past: why it stopped, what it
+ * spent, never its text. */
+export interface RepairAttempt {
+  /** ``length`` is a ``max_tokens`` hit. */
+  finish_reason: string | null;
+  /** Its own account: ``reasoning`` beside ``output`` tells reasoning that spent
+   * the budget from a runaway answer. Null where the provider reported none. */
+  usage: TokenAccount | null;
+  /** The length of its visible content. */
+  chars: number;
+  /** The schema rules it broke, and the head of what it emitted. */
+  broke: string;
 }
 
 /** The round's standing in its eliminator ``member``'s race. */
@@ -5656,7 +5669,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "f2a69e5d59f06fc5";
+export const SERVED_CONTRACT = "b46d6ff5d8a2f7d7";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

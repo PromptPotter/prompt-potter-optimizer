@@ -11,6 +11,7 @@ from pydantic import AliasPath, BaseModel, Field, TypeAdapter, ValidationError
 
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.pipeline_params import PARAM_SCOPE_KEYS
+from promptpotter.domain.round_audit import RepairAttempt
 from promptpotter.domain.spend import TokenAccount
 from promptpotter.infrastructure.llm.base import (
     WIRE_TIMEOUT_S,
@@ -292,9 +293,11 @@ def cell_gateway_body(
     )
 
 
-def _validation_summary(err: ValidationError, content: str, finish_reason: str | None) -> str:
-    broke = validation_reason(err, shown=5)
-    return f"finish={finish_reason} || {broke} || emitted: {truncate(content, 1500)}"
+def _retried(err: ValidationError, content: str, reply: ChatReply) -> RepairAttempt:
+    broke = f"{validation_reason(err, shown=5)} || emitted: {truncate(content, 1500)}"
+    return RepairAttempt(
+        finish_reason=reply.finish_reason, usage=reply.tokens, chars=len(content), broke=broke
+    )
 
 
 @dataclass(frozen=True)
@@ -306,7 +309,7 @@ class _ParsedReply:
     booked_usd: float | None
     # What the rungs before *response* billed.
     earlier: TokenAccount | None = field(default_factory=TokenAccount)
-    repair_errors: list[str] = field(default_factory=list)
+    repair_errors: list[RepairAttempt] = field(default_factory=list)
 
 
 def _wire_messages(messages: list[ChatMessage]) -> list[dict[str, Any]]:
@@ -574,7 +577,7 @@ class OpenAICompatibleClient:
     ) -> _ParsedReply:
         validation_err: ValidationError | None
         validation_err = rejected
-        repair_errors: list[str] = []
+        repair_errors: list[RepairAttempt] = []
         # Captured before `response` is rebound to a retry's: the FAILING attempt's own account.
         first = response.tokens
         earlier = first
@@ -621,9 +624,7 @@ class OpenAICompatibleClient:
             ]
         )
         for attempt_no, (retry_kind, retry_params) in enumerate(ladder, start=1):
-            repair_errors.append(
-                _validation_summary(validation_err, content, response.finish_reason)
-            )
+            repair_errors.append(_retried(validation_err, content, response))
             logger.warning(
                 "%s: %s parse failed (%d errors, %d content chars, finish=%s) on %s — %s. "
                 "Retrying via %s (rung %d of %d; each is a full call). Errors: %s",
@@ -637,7 +638,7 @@ class OpenAICompatibleClient:
                 retry_kind,
                 attempt_no,
                 len(ladder),
-                truncate(repair_errors[-1], 900),
+                truncate(repair_errors[-1].broke, 900),
             )
             response, content, validation_err, parsed, rung = await self._one_attempt(
                 retry_params, response_model, response_schema, label, ceiling

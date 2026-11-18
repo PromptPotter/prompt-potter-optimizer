@@ -124,7 +124,8 @@ BASELINE = {
     # backend's unfilled cell ends on in its words, and the outer's one re-ask of such a cell.
     # gate-hold (+4): only a launch's ask refuses a busy admission gate, and the sweep asks each
     # orphan alone under it, again, after a scan off it.
-    "package_lines": 111718,
+    # small-5 (+13): `RepairAttempt`, each re-asked attempt's finish, token split and length.
+    "package_lines": 111730,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -175,7 +176,8 @@ BASELINE = {
     # flight-ux (+1): a launch payload's `lookahead`, which the terminal sends and no surface yet.
     # strata-flight (-1): the count once limits-ux and flight-ux stand in one tree.
     # flight-share B (+3): `CapReading.count`'s parts, which the browser reads in `cap_lines`' words.
-    "p_served": 202,
+    # small-5 (+3): `RepairAttempt`'s fields on a round's audit block, which no page draws yet.
+    "p_served": 205,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

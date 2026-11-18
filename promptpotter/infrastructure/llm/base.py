@@ -11,6 +11,7 @@ import httpx
 from pydantic import BaseModel, Field, SecretStr
 
 from promptpotter.domain.pipeline_schema import token_bound_of_bytes
+from promptpotter.domain.round_audit import RepairAttempt
 from promptpotter.domain.spend import KeySource, TokenAccount
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.llm.pricing import (
@@ -151,7 +152,7 @@ class LLMResponse(StrictModel):
         description=(
             "Why the provider stopped the FINAL attempt, in the OpenAI spelling every client "
             "normalizes to — ``length`` is a ``max_tokens`` hit. An earlier attempt's own reason "
-            "leads its ``schema_repair_errors`` entry. ``None`` where the provider reported none."
+            "is its ``schema_repair_errors`` entry's. ``None`` where the provider reported none."
         ),
     )
     parsed: Any | None = Field(
@@ -169,13 +170,13 @@ class LLMResponse(StrictModel):
             "offered no tools. A tool call's ``content`` may be empty: the calls are the answer."
         ),
     )
-    schema_repair_errors: list[str] = Field(
+    schema_repair_errors: list[RepairAttempt] = Field(
         default_factory=list,
         description=(
-            "The schema rules each retried attempt broke, one entry per paid retry before the "
-            "parsed response landed — empty on a clean first parse. Its length is the retry "
-            "count: bad templates produce schema-noncompliant JSON and silently double-up the "
-            "LLM spend, and the entries say which rule the prompt fails to teach."
+            "Each attempt retried past, one entry per paid retry before the parsed response "
+            "landed — empty on a clean first parse. Its length is the retry count: bad templates "
+            "produce schema-noncompliant JSON and silently double-up the LLM spend; an entry "
+            "says which rule the prompt fails to teach, or that the budget ran out and on what."
         ),
     )
 

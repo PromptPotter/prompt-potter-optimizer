@@ -13,8 +13,10 @@ import shlex
 import signal
 import sys
 from collections.abc import Callable, Coroutine, Iterator, Sequence
+from enum import StrEnum
 from pathlib import Path
-from typing import Any, get_args, get_origin
+from types import UnionType
+from typing import Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -264,19 +266,24 @@ def _checkin_line(step: str, detail: str) -> None:
     logger.info("✓ %-13s — %s", step, detail)
 
 
-def _members(annotation: object) -> tuple[Any, ...]:
-    return tuple(m for m in (get_args(annotation) or (annotation,)) if m is not type(None))
+def _words(member: object) -> tuple[object, ...]:
+    if isinstance(member, type) and issubclass(member, StrEnum):
+        return tuple(member)
+    return get_args(member) if get_origin(member) is Literal else ()
 
 
 def _laid(into: object, annotation: object, rest: list[str], raw: str, path: str) -> Any:
     """*raw* laid at *rest* under a field typed *annotation*: a model by its fields, a mapping by
-    any key, ``Any`` as it comes; at the leaf a field that takes a string keeps the word."""
-    members = _members(annotation) if get_origin(annotation) is not dict else (annotation,)
+    any key, ``Any`` as it comes; at the leaf text, or a closed set naming the word, keeps it."""
+    split = get_origin(annotation) in (Union, UnionType)
+    members = [m for m in get_args(annotation) if m is not type(None)] if split else [annotation]
     if not rest:
+        words = [w for m in members for w in _words(m)]
         try:
-            return wire_value(raw, text=str in members)
+            return raw if raw in words else wire_value(raw, text=str in members)
         except ValueError as exc:
-            raise PayloadInvalidError(f"--set {path}: {exc}") from None
+            said = f"{raw!r} is none of {', '.join(map(str, words))}" if words else exc
+            raise PayloadInvalidError(f"--set {path}: {said}") from None
     for member in members:
         if isinstance(member, type) and issubclass(member, BaseModel):
             return _lay(into if isinstance(into, dict) else {}, member, rest, raw, path)
@@ -325,10 +332,8 @@ def _set_knobs(sets: list[str]) -> dict[str, Any]:
             f"--set {', '.join(stray)} confirms a check-in field, which a dataset name "
             f"does not have. On a name: {_KNOBS}.<knob>."
         )
-    patch = _sets_to_patch(sets)
-    if patch.config is None:
-        return {}
-    return dict(patch.config.model_dump(mode="json", exclude_unset=True)["optimization"])
+    dumped = _sets_to_patch(sets).model_dump(mode="json", exclude_unset=True)
+    return dict(dumped.get("config", {}).get("optimization", {}))
 
 
 def _gap_path(field: str) -> tuple[str, ...]:
@@ -549,19 +554,14 @@ def _spelled(value: object) -> str:
 
 
 def _arm_spec(arm: ArmRequest) -> str:
-    knobs = arm.optimization
-    sets = [
-        *(
-            f"{field}={getattr(knobs, field)}"
-            for field in sorted(knobs.model_fields_set - {"optimizer", "nodes"})
-        ),
-        *(
-            f"nodes.{node}.config.{knob}={_spelled(value)}"
-            for node, overlay in (knobs.nodes or {}).items()
-            for knob, value in overlay.config.items()
-        ),
+    knobs = arm.optimization.model_dump(mode="json", exclude_unset=True)
+    head = f"{arm.arm_key}={knobs.pop('optimizer')}"
+    nodes = (knobs.pop("nodes", None) or {}).items()
+    sets = [f"{field}={_spelled(value)}" for field, value in sorted(knobs.items())]
+    sets += [
+        f"nodes.{n}.config.{k}={_spelled(v)}" for n, o in nodes for k, v in o["config"].items()
     ]
-    return ",".join([f"{arm.arm_key}={knobs.optimizer}", *sets])
+    return ",".join([head, *sets])
 
 
 def head_to_head_command(mint: MintHeadToHeadPayload) -> str:

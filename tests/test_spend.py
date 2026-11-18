@@ -654,6 +654,28 @@ async def test_a_send_carries_only_what_its_client_sends_under_the_gateways_pric
             )
 
 
+@pytest.mark.usefixtures("run_bound")
+async def test_a_truncated_attempt_keeps_its_token_split_past_the_reask_that_heals_it(
+    offline: Router,
+) -> None:
+    # The healed answer is all the call returns: only the attempt's entry tells reasoning that
+    # spent `max_tokens` from a runaway answer, and that evidence was paid for.
+    spent = {"prompt_tokens": 9, "completion_tokens": 16000, "total_tokens": 16009}
+    cut = completion('{"plan": "so the', model="m", usage=spent)
+    cut["usage"]["completion_tokens_details"] = {"reasoning_tokens": 15000}
+    cut["choices"][0]["finish_reason"] = "length"
+    replies: Iterator[Said] = iter([cut, '{"answer": "a"}'])
+    offline.llm.says = lambda _body: next(replies)
+    with scoped(book=spend_book(), send_budget=SendBudget(None, attempts=2)):
+        response = await keyed_client("groq").chat(
+            ChatRequest(_MESSAGES, "m", response_model=_Reply), label=CallLabel("l1", "optimizer")
+        )
+    assert [
+        (a.finish_reason, a.usage and (a.usage.output, a.usage.reasoning), a.chars)
+        for a in response.schema_repair_errors
+    ] == [("length", (16000, 15000), 16)], "a truncated attempt's split was lost to its re-ask"
+
+
 @pytest.mark.usefixtures("run_bound", "offline")
 async def test_an_ungraded_cell_bills_what_it_spent_and_a_replay_states_its_rows_price(
     tmp_path: Path,
