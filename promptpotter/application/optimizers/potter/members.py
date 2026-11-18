@@ -10,9 +10,9 @@ from promptpotter.application.bench.node_context import (
     Bounds,
     Calls,
     Children,
-    Frontier,
     Lineage,
     NodeContext,
+    Parent,
     Progress,
     Replay,
     Ruler,
@@ -150,9 +150,7 @@ class AdaptiveQueue(nodes.Sampler):
     name: ClassVar[str] = "adaptive_queue"
     kind: ClassVar[NodeKind] = NodeKind.SAMPLER
     knobs: ClassVar[type[StrictModel]] = AdaptiveQueueKnobs
-    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
-        {Lineage, Frontier, Ruler, Bounds, Replay}
-    )
+    sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Parent, Ruler, Bounds, Replay})
     size_knob: ClassVar[str | None] = "sp_budget_round"
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = ADAPTIVE_QUEUE
 
@@ -187,7 +185,7 @@ class AdaptiveQueue(nodes.Sampler):
         cells = [cell for s, n in zip(strata, shares, strict=True) if n for cell in pick(s, n)]
         by_id = {int(s.id): s for s in cells}
         order = build_round_order(
-            parent_grades(ctx.read(Frontier).parent_own_rows), view.ruler, by_id, n_min=n_min
+            parent_grades(ctx.read(Parent).own_rows), view.ruler, by_id, n_min=n_min
         )
         # Every cell closes a block: PoBB decides after each one.
         return nodes.RoundSamples(cells=cells, order=[by_id[sid] for sid in order], block_size=1)
@@ -299,7 +297,7 @@ class PoBB(nodes.Eliminator):
     kind: ClassVar[NodeKind] = NodeKind.ELIMINATOR
     knobs: ClassVar[type[StrictModel]] = PoBBKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
-        {Lineage, Frontier, Ruler, Bounds, Progress, Replay}
+        {Lineage, Parent, Ruler, Bounds, Progress, Replay}
     )
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
     # A PoBB stop ends the buying of an arm; θ still reads what it measured.
@@ -460,7 +458,7 @@ class L2Context(LayoutNode):
                 "fire": CountFact(value=ctx.slice(Ladder).l2.fires + 1),
                 "rule": TextFact(value=fire.cause),
                 "L1 stalled rounds": CountFact(value=stalled),
-                "parent fitness": ctx.read(Frontier).parent_fitness,
+                "parent fitness": ctx.read(Parent).fitness,
                 "peak fitness": None if peak is None else FitnessFact(value=peak),
                 "l1_overrides": SettingsFact(value=steered) if steered else None,
             },

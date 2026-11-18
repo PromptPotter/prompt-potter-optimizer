@@ -55,8 +55,6 @@ class NodeLayoutSpec(FrozenModel):
     floor: L1Layout
     # The regions an edit may place into, in render order.
     regions: tuple[str, ...] = L1_LAYOUT_REGIONS
-    # Only the DISCRETIONARY panels: the mandatory floor is the dataset's, so no whole-prompt ceiling.
-    discretionary_chars: int
     # `compile_prompt` extras that are not signals; any other unknown token in a template body raises.
     caller_extras: frozenset[str] = frozenset()
 
@@ -69,8 +67,6 @@ class NodeLayoutSpec(FrozenModel):
 NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     # Floor order is load-bearing: the composition places in order and `sample_transcripts` takes the rest.
     "l1_generate": NodeLayoutSpec(
-        # Room for two whole transcripts behind the frame.
-        discretionary_chars=11_000,
         # An edit places evidence, never a position: the region names read as the target's fields.
         regions=(VOLATILE_REGION,),
         caller_extras=frozenset({"n_variants"}),
@@ -102,7 +98,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     ),
     # The rows and their transcripts sit on the floor; an L4 row's transcript is its inner run.
     "l1_critique": NodeLayoutSpec(
-        discretionary_chars=7_500,
         extras=frozenset({"measurand", "axis_memory"}),
         # The rows a cluster may span and their runs, as many as its `TranscriptKnobs` declare.
         # `mutation_memory` is the one carrier of the tried mechanisms a cluster must not restate.
@@ -126,7 +121,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
     ),
     # `task_context` is off the floor (L2 cannot write the framing); the directives are mandatory so no L4 edit severs the channel.
     "l2_context": NodeLayoutSpec(
-        discretionary_chars=5_500,
         extras=frozenset({"task_context"}),
         mandatory=frozenset(
             {
@@ -163,7 +157,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         ),
     ),
     "l3_plan": NodeLayoutSpec(
-        discretionary_chars=6_400,
         extras=frozenset({"task_context"}),
         mandatory=frozenset(
             {

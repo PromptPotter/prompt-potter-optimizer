@@ -105,6 +105,29 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   on hotpotqa-distractor (mean +0.017); θ +0.052. The sixth cell (legalbench-fods seed 1) elected in
   two rounds and was excluded (roadmap § Optimizer tuning — the standing board, item 4), so this
   reading covers a different cell set from the two above and is not comparable.
+- L4 `run` C0 (`promptpotter-self.run__265c4d`, e8d97499f, 2026-11-18, rounds 0–2, $2.06 billed):
+  **the inner search delivers no held-out lift, so no optimizer prompt can be ranked on it.** Of 45
+  inner runs (sandbox `inner_978bb669adfac9d8`, a fork counted once), 25 adopted; an adoption's
+  20-row bench delta is **+0.004** (SD 0.107, SE 0.021; 10 above the origin, 11 below, 4 equal),
+  and the SD is the 20-row bench's own sampling noise at ~23% discordant rows. Every arm's per-run
+  mean sits in [−0.050, +0.050]; round 1's best, +0.200 ± 0.443 logits, cleared nothing. The inner
+  gate adopts at 1.1–2.0 SE (`won on θ lift +0.343 logits, se 0.250`), the best of up to 12 looks
+  (3 variants × 4 rounds), so on these seats a winner is a draw. A no-adoption seat scores 0.50 and the
+  origin panel reads 0.49: on this measurand the optimizer equals one that never adopts.
+- Inner headroom probes (2026-11-18, one hand-written target arm per dataset, written before any row
+  was read, inside potter's 800-char `length_budget`, `arm_gate: author`, 100 paired rows):
+  `hotpotqa-distractor__3b0221` (shortest-span arm) **40% vs 40%** on search, θ +0.075 ± 0.339; 55 of
+  its 130 distinct misses are sentence or cut-off replies, which `answer_format` (never L1's) governs.
+  `legalbench-fods__985e9c` (label-definition arm) **40% vs 30%** on search (θ +1.376 ± 0.458,
+  selected) but **49% vs 49%** on 100 held-out rows (`held-out`): 10 rows won exactly where aimed
+  (Decree/Conclusion 5, Facts/Procedural History 3), 10 lost elsewhere. The draw was blind
+  (`selection.py::crowning_cells` is empty under an origin parent); the search split read harder
+  (origin 39% on 164 rows, 30% on the arm's 100) than the bench (49%). The edit won ~20% of the
+  parent's misses on both splits and lost 10% of its hits on search, 20% on the bench: pooled over
+  200 paired rows 23 wins / 13 losses, ≈ +5 ± 3 pts. Each probe is one arm (a lower bound on
+  headroom); hotpotqa was not graded held-out; justlogic is unprobed. A well-aimed edit's ~5 pts sits
+  under the 20-row inner bench's ~10-pt SD: these seats offer too little reachable headroom for
+  the bench to read, before any optimizer prompt is compared.
 
 ## Protocol
 

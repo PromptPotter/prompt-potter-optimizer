@@ -8,9 +8,9 @@ from typing import Any, Literal, cast
 from promptpotter.application.bench.node_context import (
     Calls,
     Children,
-    Frontier,
     Lineage,
     NodeContext,
+    Parent,
     Ruler,
     Target,
 )
@@ -121,7 +121,7 @@ async def l1_generate(
 
     view = PotterView(ctx, ctx.slice(Ladder))
     pipeline_schema = view.pipeline_schema
-    filled = DispatchHub.fill(calls.prompt(), view, node=ctx.node)
+    filled = DispatchHub.fill(calls.prompt(), view)
     budget = view.exploration_budget
     citable = citable_fields(
         node_layout("l1_generate", view.l2, calls.levers()),
@@ -290,7 +290,7 @@ async def distil_critique(ctx: NodeContext) -> Critique:
     """Of the round *ctx* stands on, whether the round adapts or a later walk re-runs it; the readout a dict so persistence does not drag Pydantic into the domain serialization path."""
     view = PotterView(ctx, ctx.slice(Ladder))
     calls = ctx.read(Calls)
-    filled = DispatchHub.fill(calls.prompt(), view, node=ctx.node)
+    filled = DispatchHub.fill(calls.prompt(), view)
     # A cluster an edit could fix whole and still not separate from its parent is noise to target.
     least = max(CLUSTER_ROWS_MIN, detectable_rows(view) or 0)
     result = await calls.answer(
@@ -372,7 +372,7 @@ def l1_readout(ctx: NodeContext, generation: L1Generation) -> L1Readout:
 
 
 async def propose_l1_population(ctx: NodeContext) -> Proposals:
-    parent_point = ctx.read(Frontier).parent_point
+    parent_point = ctx.read(Parent).point
     lineage, target = ctx.read(Lineage), ctx.read(Target)
     # Outside L1's generation: no invariant reads them and its yield never counts them.
     kept = rejoining(lineage)

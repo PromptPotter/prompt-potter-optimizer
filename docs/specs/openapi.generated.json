@@ -3253,6 +3253,17 @@
             ],
             "title": "Clamped By"
           },
+          "count": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpendCount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A money axis's book by part, the count its stop reads (`used` is its `counted`); null on rounds, the clock, and a replay."
+          },
           "fill": {
             "anyOf": [
               {
@@ -3300,6 +3311,7 @@
           "armed",
           "used",
           "meter",
+          "count",
           "fill",
           "clamped_by"
         ],
@@ -15803,7 +15815,7 @@
             "type": "string"
           },
           "in_flight": {
-            "description": "Calls out now; 0 once no producer is appending.",
+            "description": "Calls out now on the backend, every run's in this process; 0 once no producer is appending.",
             "title": "In Flight",
             "type": "integer"
           },
@@ -16151,7 +16163,7 @@
             "type": "string"
           },
           "cap_lines": {
-            "description": "Beside `metered_line`: what the campaign's ceiling has counted in its meter, every cycle of it once and deleted ones included, against each cap it bounds — `domain/spend.py::campaign_cap_lines`; empty where nothing is capped and on a replay.",
+            "description": "Beside `metered_line`: the rows of `caps` a money cap bounds, its book's count by part; empty where nothing is capped and on a replay.",
             "items": {
               "type": "string"
             },
@@ -16934,6 +16946,36 @@
           }
         },
         "title": "SpendBucket",
+        "type": "object"
+      },
+      "SpendCount": {
+        "additionalProperties": false,
+        "description": "A spend book's count, by part, each an amount: the ceiling's stop reads `counted`; a send's\nroom reads `out` beside it.",
+        "properties": {
+          "billed": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Sent and billed, or priced off the rate table."
+          },
+          "out": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "What the calls and cells still out hold."
+          },
+          "set_aside": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Held back for the bench's passes."
+          },
+          "unreported": {
+            "$ref": "#/components/schemas/Budget",
+            "description": "Sends that ended with no bill, each counted at the bound it was held at."
+          }
+        },
+        "required": [
+          "billed",
+          "unreported",
+          "set_aside",
+          "out"
+        ],
+        "title": "SpendCount",
         "type": "object"
       },
       "SpendRollup": {

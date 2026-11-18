@@ -263,6 +263,7 @@ export function armedCaps(caps: CapReading[] = []): ArmedCaps {
     armed: null,
     used: null,
     meter: axis === "usd" || axis === "tokens" ? "bill" : null,
+    count: null,
     fill: null,
     clamped_by: null,
   });

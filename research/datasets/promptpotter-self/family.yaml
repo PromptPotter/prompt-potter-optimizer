@@ -79,15 +79,24 @@ campaign:
           # The start renders 7,485 chars, so 4 rounds at this leave a subject of at most 15,485.
           # Outer round 1's rewrites moved +730 and +765.
           length_budget: 2000
-          # A seat's whole inner run, every round and arm: 4.8–6.3k chars on the `run` C0. Placed
-          # last in the generator's 11,000-char discretionary share, one or two fit whole.
+          # A seat's whole inner run, every round and arm: 4.8–6.3k chars on the `run` C0.
           transcripts: 2
           transcript_chars: null
-      # The critique reads every search seat's whole inner run.
+          # `run__265c4d`'s round-2 generate dropped a 5,518-char seat from the manifest's 11,000,
+          # so both fit at 16,518; the rest is room for a 6.3k seat.
+          discretionary_chars: 18000
+      # The critique reads every search seat's whole inner run. Its transcripts are mandatory, so
+      # they sit outside its share: 33,191 of its 38,524 chars on `run__265c4d`.
       l1_critique:
         config:
           transcripts: null
           transcript_chars: null
+      l2_context:
+        config:
+          # `rendered_prompt` is placed whole or dropped: the subject renders 7,485 chars at the
+          # start and at most 15,485 after four rounds of `length_budget`, beside the 5,500 the
+          # manifest gives the rest.
+          discretionary_chars: 21000
       escalation:
         config:
           # No `optimization.lives`, and its absence is deliberate rather than an omission. It read

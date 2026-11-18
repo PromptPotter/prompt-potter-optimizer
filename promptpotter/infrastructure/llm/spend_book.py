@@ -33,10 +33,12 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     KeySource,
     Remainder,
+    SpendCount,
     TokenAccount,
     TokenUsageKind,
     UserSpend,
     draws_coupon,
+    money_text,
     usd_text,
 )
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -217,6 +219,23 @@ class LiveCycle(NamedTuple):
 _ENCLOSED: TokenUsageKind = "backend"
 
 
+def cycle_count(
+    charges: ChargeBook, *, hold_id: str | None, metered_on: Path, meters: CeilingMeter
+) -> SpendCount:
+    """A cycle's count as a door reads it, its live run's job holding *hold_id*: the book's own
+    fold, short only the set-aside, which the run's book holds alone."""
+    return SpendBook(
+        declared=Budget(),
+        share=Budget(),
+        charges=charges,
+        hold_id=hold_id or "",
+        headroom=Budget(),
+        metered_on=metered_on,
+        meters=meters,
+        opened=0.0,
+    ).count()
+
+
 class SpendBook:
     """A run's admission, read at each send off the one fold of money (`read_model.Money`): its
     share off the ledger it meters, its reserve off its job's hold on the account."""
@@ -346,33 +365,40 @@ class SpendBook:
                 usd, tokens = usd + held_usd, tokens + held_tokens
         return usd, tokens
 
+    def _count(self, money: Money, *, host: bool, beside: TokenUsageKind | None) -> SpendCount:
+        spent = self._spent(money, host=host)
+        out_usd, out_tokens = self._out(money, host=host, beside=beside)
+        return SpendCount(
+            billed=Budget(usd=spent.sent_usd, tokens=spent.used_tokens),
+            unreported=Budget(usd=spent.unreported_usd, tokens=spent.unreported_tokens),
+            set_aside=Budget(usd=self.set_aside_usd, tokens=self.set_aside_tokens),
+            out=Budget(usd=out_usd, tokens=out_tokens),
+        )
+
+    def count(self) -> SpendCount:
+        """THE share's count, by part: what its stop reads, and what every door serves."""
+        return self._count(self._money(), host=False, beside=None)
+
     def _left(self, money: Money, *, host: bool, beside: TokenUsageKind | None) -> Remainder:
         """What the share (*host*: the reserve) still admits."""
         limit = self.reserve if host else self.allotment
         if limit.usd is None and limit.tokens is None:
             return Remainder()
-        spent = self._spent(money, host=host)
-        out_usd, out_tokens = self._out(money, host=host, beside=beside)
-        return Remainder(
-            None
-            if limit.usd is None
-            else limit.usd - spent.at_most_usd - self.set_aside_usd - out_usd,
-            None
-            if limit.tokens is None
-            else limit.tokens - spent.at_most_tokens - self.set_aside_tokens - out_tokens,
-        )
+        count = self._count(money, host=host, beside=beside)
+        return limit.less(count.counted, count.out)
+
+    def counted_words(self) -> str:
+        """A ceiling stop's detail: the share and the count it read, by part."""
+        said = self.count().words(CEILING_METER_LABELS[self.meters])
+        return f"the cycle's {money_text(self.allotment)} share counted {said}"
 
     def exhausted(self) -> ErrorCategory | None:
         allotment = self.allotment
         if allotment.usd is not None or allotment.tokens is not None:
-            spent = self.spent
-            if (
-                allotment.usd is not None
-                and spent.at_most_usd + self.set_aside_usd >= allotment.usd
-            ):
+            counted = self.count().counted
+            if allotment.usd is not None and counted.usd_amount >= allotment.usd:
                 return ErrorCategory.SPEND_CEILING
-            tokens = spent.at_most_tokens + self.set_aside_tokens
-            if allotment.tokens is not None and tokens >= allotment.tokens:
+            if allotment.tokens is not None and counted.token_amount >= allotment.tokens:
                 return ErrorCategory.TOKEN_CEILING
         # The reserve is not asked: a run on the account's own keys outlives its coupon, and a
         # send on the box's key past it is refused where it is held (`refuse_unless_room`).
@@ -521,20 +547,12 @@ class SpendBook:
             else "cycle's share of the campaign ceiling"
         )
         bounds = self.reserve if reserve else self.allotment
-        money = self._money()
-        spent = self._spent(money, host=reserve)
-        out_usd, out_tokens = self._out(money, host=reserve, beside=None)
+        count = self._count(self._money(), host=reserve, beside=None)
         if category is ErrorCategory.SPEND_CEILING:
             # Only a bounded axis refuses, so the cap it names is set.
             cap = bounds.usd_amount
-            owed = [
-                (spent.sent_usd, CEILING_METER_LABELS["bill" if reserve else self.meters]),
-                (spent.unreported_usd, "unreported"),
-                (out_usd, "in calls still out"),
-                (self.set_aside_usd, "set aside for the bench"),
-            ]
-            left = cap - sum(usd for usd, _ in owed)
-            said = ", ".join(f"{usd_text(usd)} {name}" for usd, name in owed if usd)
+            left = cap - count.counted.usd_amount - count.out.usd_amount
+            said = count.words(CEILING_METER_LABELS["bill" if reserve else self.meters])
             if left <= 0 or each.usd is None:
                 return f"{what} was not sent: the {usd_text(cap)} {limit} is used up ({said})"
             return (
@@ -545,9 +563,9 @@ class SpendBook:
             return f"{what}: nothing caps its reply, so it cannot run under a token ceiling"
         return (
             f"{what} holds {each.tokens:,} tokens while it is out, and the "
-            f"{bounds.token_amount:,}-token {limit} holds {spent.used_tokens:,} spent, "
-            f"{spent.unreported_tokens:,} unreported, {out_tokens:,} for calls out and "
-            f"{self.set_aside_tokens:,} set aside for the bench"
+            f"{bounds.token_amount:,}-token {limit} holds {count.billed.token_amount:,} spent, "
+            f"{count.unreported.token_amount:,} unreported, {count.out.token_amount:,} for calls "
+            f"out and {count.set_aside.token_amount:,} set aside for the bench"
         )
 
     def set_aside(self, usd: float, tokens: int) -> None:

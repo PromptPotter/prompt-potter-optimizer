@@ -345,6 +345,36 @@ class Remainder(NamedTuple):
 NOTHING_METERED = Budget.amount(0.0, 0)
 
 
+class SpendCount(FrozenModel):
+    """A spend book's count, by part, each an amount: the ceiling's stop reads `counted`; a send's
+    room reads `out` beside it."""
+
+    billed: Budget = Field(description="Sent and billed, or priced off the rate table.")
+    unreported: Budget = Field(
+        description="Sends that ended with no bill, each counted at the bound it was held at."
+    )
+    set_aside: Budget = Field(description="Held back for the bench's passes.")
+    out: Budget = Field(description="What the calls and cells still out hold.")
+
+    @property
+    def counted(self) -> Budget:
+        # Unrounded, unlike `Budget.plus`: a send's room is compared against it to the cent's edge.
+        parts = (self.billed, self.unreported, self.set_aside)
+        return Budget(
+            usd=sum(p.usd_amount for p in parts), tokens=sum(p.token_amount for p in parts)
+        )
+
+    def words(self, billed: str) -> str:
+        """The parts that hold money, *billed* naming what the first counts."""
+        parts = (
+            (self.billed, billed),
+            (self.unreported, "unreported"),
+            (self.out, "in calls still out"),
+            (self.set_aside, "set aside for the bench"),
+        )
+        return ", ".join(f"{usd_text(part.usd_amount)} {name}" for part, name in parts if part.usd)
+
+
 #: The book a cap reads its used figure off: the campaign's ceiling its live cycles share, this
 #: cycle's closed rounds, or this launch's clock, afresh at every launch.
 CapBook = Literal["campaign", "cycle", "launch"]

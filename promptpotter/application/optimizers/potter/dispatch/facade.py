@@ -9,9 +9,9 @@ from promptpotter.application.bench.llm_call import FilledPrompt, InjectionBreak
 from promptpotter.application.bench.node_context import (
     Bounds,
     Calls,
-    Frontier,
     Lineage,
     NodeContext,
+    Parent,
     Ruler,
     Target,
     Transcript,
@@ -40,6 +40,7 @@ from promptpotter.application.optimizers.potter.dispatch.prompts import node_lay
 from promptpotter.application.optimizers.potter.knobs import (
     EscalationKnobs,
     L1GenerateKnobs,
+    PanelShareKnobs,
     TranscriptKnobs,
 )
 from promptpotter.application.optimizers.potter.records import (
@@ -153,18 +154,14 @@ class DispatchHub:
         return text[name]
 
     @staticmethod
-    def fill(
-        template: OptimizerPromptTemplate,
-        view: PotterView,
-        *,
-        node: str,
-    ) -> FilledPrompt:
-        """The layout is RESOLVED here, never passed in, so no caller can hand a node another node's panel set."""
+    def fill(template: OptimizerPromptTemplate, view: PotterView) -> FilledPrompt:
+        """The layout and its share are the view's node's, RESOLVED here, so no caller can hand a node another node's panel set."""
         table = injection_table()
+        node = view.ctx.node
         layout = node_layout(node, view.l2, view.ctx.read(Calls).levers(node))
         order = layout.all_placeholders()
         items = {name: DispatchHub.render_items(name, view) for name in order}
-        budget = NODE_LAYOUTS[node].discretionary_chars if node in NODE_LAYOUTS else _NO_CEILING
+        budget = view.ctx.knobs(PanelShareKnobs).discretionary_chars
         whole = frozenset(n for n in order if (sig := table.get(n)) and not sig.kind.divisible)
         mandatory = NODE_LAYOUTS[node].mandatory
         rendered, coverage = select(items, order, budget, exempt=whole, mandatory=mandatory)
@@ -203,7 +200,7 @@ def _sample_keys(round_result: RoundResult) -> frozenset[str]:
 VIEW_READS: frozenset[type[StatePart]] = frozenset(
     {L2Memory, L3Memory, Ladder, L1Readout, Critique}
 )
-VIEW_SEES: frozenset[type[CycleRead]] = frozenset({Lineage, Frontier, Ruler, Bounds, Target})
+VIEW_SEES: frozenset[type[CycleRead]] = frozenset({Lineage, Parent, Ruler, Bounds, Target})
 
 
 def _by_field(entries: tuple[PoolEntry, ...]) -> dict[str, tuple[PoolEntry, ...]]:
@@ -356,7 +353,7 @@ class PotterView:
     @functools.cached_property
     def parent_rows(self) -> tuple[GradedCell, ...]:
         """The rows an edit of the parent must win back: its own cells, never another's."""
-        return tuple(self.ctx.read(Frontier).parent_own_rows)
+        return tuple(self.ctx.read(Parent).own_rows)
 
     @property
     def transcript_knobs(self) -> TranscriptKnobs:
@@ -364,7 +361,7 @@ class PotterView:
 
     @functools.cached_property
     def pipeline_params(self) -> PipelineParams:
-        return self.ctx.read(Frontier).parent_point.pipeline_params
+        return self.ctx.read(Parent).point.pipeline_params
 
     @functools.cached_property
     def ruler(self) -> DeltaRuler | None:

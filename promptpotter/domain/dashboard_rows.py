@@ -28,6 +28,7 @@ from promptpotter.domain.spend import (
     CapAxis,
     CapClamp,
     CeilingMeter,
+    SpendCount,
     usd_text,
 )
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -228,6 +229,10 @@ class CapReading(FrozenModel):
     meter: CeilingMeter | None = Field(
         description="What a money axis's book counts; null on rounds and the clock."
     )
+    count: SpendCount | None = Field(
+        description="A money axis's book by part, the count its stop reads (`used` is its "
+        "`counted`); null on rounds, the clock, and a replay."
+    )
     fill: float | None = Field(
         description="`used` over `armed`, where both stand (a cap of 0 is full): the one meter a "
         "surface draws."
@@ -243,7 +248,10 @@ class CapReading(FrozenModel):
         armed: float | None,
         used: float | None,
         meter: CeilingMeter | None,
+        count: SpendCount | None,
     ) -> CapReading:
+        if count is not None:
+            used = getattr(count.counted, axis)
         fill = None if armed is None or used is None else used / armed if armed else 1.0
         return cls(
             axis=axis,
@@ -251,6 +259,7 @@ class CapReading(FrozenModel):
             armed=armed,
             used=used,
             meter=meter,
+            count=count,
             fill=fill,
             clamped_by=None if asked is None or asked == armed else "allowance",
         )
@@ -267,9 +276,11 @@ class CapReading(FrozenModel):
                 f"{CAP_CLAMP_WORDS[self.clamped_by]})"
             )
         book = [CAP_BOOK_WORDS[info.book]]
-        if self.meter is not None:
-            book.append(CEILING_METER_LABELS[self.meter])
         used = [] if self.used is None else [f"{_cap_words(self.axis, self.used)} {info.used}"]
+        if self.meter is not None:
+            label = CEILING_METER_LABELS[self.meter]
+            parts = None if self.count is None or self.axis != "usd" else self.count.words(label)
+            book.append(parts or label)
         if self.clamped_by is None:
             return [head + " · ".join([cap, *used, *book])]
         return [head + cap, " " * len(head) + " · ".join([*used, *book])]

@@ -78,6 +78,8 @@ nodes:
       schema_field_rename: false
       transcripts: 3
       transcript_chars: 2200
+      # Room for two whole transcripts behind the frame.
+      discretionary_chars: 11000
     description: >-
       L1 Generate: produces N candidate prompts from current framing + critique.
   # Crossover, off at 0: after L1's variants, each a main (higher θ of two from the population)
@@ -126,6 +128,7 @@ nodes:
       max_tokens: 16000
       transcripts: 3
       transcript_chars: 2200
+      discretionary_chars: 7500
     description: >-
       L1 Critique: reads round results, writes the critique L1 Generate reads next round.
   l2_context:
@@ -137,6 +140,7 @@ nodes:
       prompt_version: 1
       reasoning_effort: low
       max_tokens: 8000
+      discretionary_chars: 5500
     description: >-
       L2 Context: moves which panels L1 generation reads and how widely it explores. Fires on L1
       stall.
@@ -149,6 +153,7 @@ nodes:
       prompt_version: 1
       reasoning_effort: low
       max_tokens: 8000
+      discretionary_chars: 6400
     description: >-
       L3 Plan: rewrites the strategy. Fires on L2 stall.
   # The stall ladder: fires `l2_context` / `l3_plan` at the boundary after a round, and decides

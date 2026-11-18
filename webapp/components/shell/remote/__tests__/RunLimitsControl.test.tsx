@@ -22,10 +22,20 @@ describe("the finishing criteria read each cap against its own book", () => {
         armed: 10,
         used: 0.45,
         meter: "bill",
+        count: null,
         fill: 0.045,
         clamped_by: "allowance",
       },
-      { axis: "tokens", asked: null, armed: null, used: 4500, meter: "bill", fill: null, clamped_by: null },
+      {
+        axis: "tokens",
+        asked: null,
+        armed: null,
+        used: 4500,
+        meter: "bill",
+        count: null,
+        fill: null,
+        clamped_by: null,
+      },
     ]);
     render(
       <AuthProvider>

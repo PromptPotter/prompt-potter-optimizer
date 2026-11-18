@@ -545,26 +545,27 @@ async def run_walks[K: Hashable](
     )
     if phase.gauge is not None:
         phase.gauge.open(phase.reading)
-    try:
-        walking_on = phase.first_turn()
-        while walking_on:
-            walking_on = await phase.step()
-        if not phase.cancels:
-            await phase.land()
-        return None
-    except BaseException as stop:
-        budget = _budget_stop(stop)
-        # A pause or a spent ceiling first waits out the calls already sent, which bill anyway.
-        if not phase.cancels and (isinstance(stop, KeyboardInterrupt) or budget is not None):
-            await phase.land()
-        phase.bank()
-        if budget is None or not keep_cut:
-            raise
-        phase.keep_cut()
-        return budget
-    finally:
-        # Not awaited: an `await` here can swallow a CancelledError aimed at this coroutine.
-        phase.discard()
+    with session.backend_client.sending(phase):
+        try:
+            walking_on = phase.first_turn()
+            while walking_on:
+                walking_on = await phase.step()
+            if not phase.cancels:
+                await phase.land()
+            return None
+        except BaseException as stop:
+            budget = _budget_stop(stop)
+            # A pause or a spent ceiling first waits out the calls already sent, which bill anyway.
+            if not phase.cancels and (isinstance(stop, KeyboardInterrupt) or budget is not None):
+                await phase.land()
+            phase.bank()
+            if budget is None or not keep_cut:
+                raise
+            phase.keep_cut()
+            return budget
+        finally:
+            # Not awaited: an `await` here can swallow a CancelledError aimed at this coroutine.
+            phase.discard()
 
 
 @dataclass(frozen=True)
@@ -583,7 +584,8 @@ class _TurnState:
         return self.skip or self.pause or self.tripped is not None
 
 
-@dataclass
+# By identity: the backend counts each phase sending on its machine once.
+@dataclass(eq=False)
 class _ScoringPhase[K: Hashable]:
     # By turn: the walk at index ``i`` is the one keyed ``keys[i]``.
     keys: list[K]
@@ -602,9 +604,10 @@ class _ScoringPhase[K: Hashable]:
 
     def __post_init__(self) -> None:
         self.gauge = self.session.state.flight
-        self.cancels = self.session.backend_client.connector.cancel_stops_billing
-        self.payer = self.session.backend_client.connector.cell_payer
-        self.ceiling = self.session.backend_client.connector.max_cells_in_flight
+        self.client = self.session.backend_client
+        self.cancels = self.client.connector.cancel_stops_billing
+        self.payer = self.client.connector.cell_payer
+        self.ceiling = self.client.connector.max_cells_in_flight
         self.book = run_scope().book
         self.label = filed(CELL)
         # A pass the book's ceilings do not meter is neither admitted against them nor stopped by them.
@@ -761,7 +764,9 @@ class _ScoringPhase[K: Hashable]:
             return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         if now.pause or now.tripped is None:
             raise KeyboardInterrupt("graceful")
-        raise StopLoop(now.tripped)
+        assert self.book is not None, "only a book trips"
+        money = now.tripped is not StopReason.WALL_CLOCK
+        raise StopLoop(now.tripped, detail=self.book.counted_words() if money else "")
 
     def take_head(self, walk: Walk, head: asyncio.Task[_Acquired]) -> bool:
         backfills = self.backfills
@@ -795,8 +800,12 @@ class _ScoringPhase[K: Hashable]:
                 out += sum(not call.done() for call in self.backfills.backfills_for(sample))
         return out
 
+    def others(self) -> int:
+        """Calls out on this machine that every other run's phase holds."""
+        return self.client.cells_out() - self.out()
+
     def room(self, walk: Walk, armed: LookaheadWindow, ceiling: int) -> int:
-        return min(armed.cells - self.held(walk), ceiling - self.out())
+        return min(armed.cells - self.held(walk), self.client.room(self) - (self.ceiling - ceiling))
 
     def abreast(self, armed: LookaheadWindow) -> list[Walk]:
         """The live walks that send ahead, counted from the turn's in walk order."""
@@ -845,10 +854,16 @@ class _ScoringPhase[K: Hashable]:
         while _armed(self.session, kind) == armed:  # noqa: ASYNC110 — a cross-process ledger wait
             await asyncio.sleep(HELD_POLL_S)
 
+    async def freed(self) -> None:
+        """Polled: another run's cell lands on its own task, which this phase does not wait on."""
+        while self.client.room(self) <= 0:  # noqa: ASYNC110 — another run's calls
+            await asyncio.sleep(HELD_POLL_S)
+
     async def wait(self, walk: Walk, armed: LookaheadWindow) -> None:
         book, cell = self.book, self.cell
         calls = self.outstanding()
-        if not calls:
+        full = self.client.room(self) <= 0
+        if not calls and not full:
             if book is not None and cell is not None and self.affordable() == 0:
                 # Raises the refusal `hold` would, naming the ceiling that binds, and holds nothing.
                 book.refuse_unless_room((cell, cell), self.label.kind, NEXT_CELL, self.payer)
@@ -857,15 +872,17 @@ class _ScoringPhase[K: Hashable]:
                 f"{len(walk.results)}/{walk.n}"
             )
         watched = set[asyncio.Future[Any]](calls)
-        raised: asyncio.Future[None] | None = None
+        polls: list[asyncio.Future[None]] = []
         if armed != effective_lookahead(MAX_SPEED, self.ceiling):
-            raised = asyncio.ensure_future(self.pressed(armed, walk.ctx.kind))
-            watched.add(raised)
+            polls.append(asyncio.ensure_future(self.pressed(armed, walk.ctx.kind)))
+        if full and self.others():
+            polls.append(asyncio.ensure_future(self.freed()))
+        watched.update(polls)
         try:
             await asyncio.wait(watched, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            if raised is not None:
-                raised.cancel()
+            for poll in polls:
+                poll.cancel()
         for walking in self.live():
             walking.collect()
         self.draining.difference_update([call for call in self.draining if call.done()])
@@ -979,9 +996,11 @@ class _ScoringPhase[K: Hashable]:
                 since = holder.launched_at[head if settling is None else head - 1]
                 who = recorded.individual_id
                 waiting = FlightWaiting(individual_id=who, position=held.id, since=since)
+        # The machine's calls out, every run's on it: what its ceiling bounds.
+        others = self.others()
         return Flight(
-            out_now,
-            allowed,
+            out_now + others,
+            allowed + others,
             most,
             waiting,
             affordable=(

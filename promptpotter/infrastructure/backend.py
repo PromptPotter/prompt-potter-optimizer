@@ -4,11 +4,11 @@ import asyncio
 import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 
@@ -58,6 +58,9 @@ _OUTAGE_POLL_S = 5.0
 # How long a cell waits for a backend that stopped answering; the cell's own clock may end it sooner.
 _OUTAGE_WAIT_S = 600.0
 _HTTP_TIMEOUT_S = 30.0
+# Under uvicorn's 5 s `timeout_keep_alive`: at httpx's own 5 s a pooled socket the server is closing
+# is reused, and the send breaks with `ReadError` 0-1 s after it went out.
+_KEEPALIVE_EXPIRY_S = 2.0
 
 # reply data -> (what it billed, `None` = reports nothing; caller's read).
 type CellBilling[S] = Callable[[dict[str, Any]], tuple[ReportedSpend | None, S]]
@@ -151,6 +154,15 @@ class MachineSlots:
             slot.release()
 
 
+class CellsOut(Protocol):
+    def out(self) -> int: ...
+
+
+# Every scoring phase this process holds, by the machine it sends to: the ceiling is the machine's,
+# so the inner runs an outer holds at once share one count of it.
+_SENDING: dict[tuple[str, str], set[CellsOut]] = {}
+
+
 class BackendClient:
     def __init__(
         self,
@@ -165,6 +177,7 @@ class BackendClient:
         self._connector = connector
         self._endpoint = endpoint
         self.base_url = connector.base_url(endpoint)
+        self._machine = (connector.name, self.base_url)
         self.workload = workload
         self.backpressure = Backpressure("cells")
         self._guard = connector.session_factory()
@@ -184,6 +197,29 @@ class BackendClient:
     def connector(self) -> Connector:
         return self._connector
 
+    @contextlib.contextmanager
+    def sending(self, phase: CellsOut) -> Iterator[None]:
+        """*phase*'s calls out count against ``max_cells_in_flight`` beside every other phase on
+        this machine while it sends."""
+        held = _SENDING.setdefault(self._machine, set())
+        held.add(phase)
+        try:
+            yield
+        finally:
+            held.discard(phase)
+
+    def cells_out(self) -> int:
+        return sum(phase.out() for phase in _SENDING.get(self._machine, ()))
+
+    def room(self, phase: CellsOut) -> int:
+        """The cells *phase* may still send: the ceiling past every phase's calls out, less one for
+        each other phase holding none while *phase* holds some, or the first to send starves it."""
+        held = _SENDING.get(self._machine, set())
+        waiting = sum(1 for other in held if other is not phase and not other.out())
+        return (
+            self._connector.max_cells_in_flight - self.cells_out() - (waiting if phase.out() else 0)
+        )
+
     def node_spend_bound(self, node: PipelineNode, cfg: NodeCall) -> NodeSpendBound | None:
         if (sent := self._connector.sent_spend_bound) is not None:
             return sent(node.name, cfg, self.priced_as(cfg), self.workload)
@@ -201,7 +237,9 @@ class BackendClient:
                 timeout=_HTTP_TIMEOUT_S,
                 headers=self._connector.credential_header() or None,
                 transport=httpx.AsyncHTTPTransport(
-                    verify=tls_context(), socket_options=KEEPALIVE_OPTIONS
+                    verify=tls_context(),
+                    socket_options=KEEPALIVE_OPTIONS,
+                    limits=httpx.Limits(keepalive_expiry=_KEEPALIVE_EXPIRY_S),
                 ),
             )
         return self._http

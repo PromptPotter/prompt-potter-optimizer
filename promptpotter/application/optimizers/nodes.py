@@ -523,7 +523,7 @@ class Proposer(NodeMember, Protocol):
         return 0
 
     def parent_read(self, _panel: DrawSize) -> int:
-        """The cells of *panel* it reads the parent on (``Frontier.measure_parent``)."""
+        """The cells of *panel* it reads the parent on (``Parent.measure``)."""
         return 0
 
     def opening(self, _ctx: NodeContext, bench: RoundOpening) -> RoundOpening:

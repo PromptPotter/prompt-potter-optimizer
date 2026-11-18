@@ -1,0 +1,39 @@
+pipeline:
+  description: >-
+    Positive control: the family geometry on bbh-dyck, where one stack procedure lifts the solver
+    from about 0.2 to 0.7 and potter finds it in round 1, so the outer must read an optimizer prompt
+    that cannot find it below one that can. A check of the outer instrument, never the instrument.
+
+panel:
+  # Unscreened seeds on purpose: round 0 reads each seat's origin before any arm is paid, and a seat
+  # whose origin sits under the constant-answer floor (13%) is the finding, not a seat to swap.
+  tasks:
+    - kind: seat
+      id: bbh-dyck/seed-0
+      inner_dataset: bbh-dyck
+      run_seed: 0
+    - kind: seat
+      id: bbh-dyck/seed-1
+      inner_dataset: bbh-dyck
+      run_seed: 1
+    - kind: seat
+      id: bbh-dyck/seed-2
+      inner_dataset: bbh-dyck
+      run_seed: 2
+    - kind: seat
+      id: bbh-dyck/seed-3
+      inner_dataset: bbh-dyck
+      run_seed: 3
+    - kind: seat
+      id: bbh-dyck/seed-4
+      inner_dataset: bbh-dyck
+      run_seed: 4
+    - kind: seat
+      id: bbh-dyck/seed-5
+      inner_dataset: bbh-dyck
+      run_seed: 5
+    - kind: seat
+      id: bbh-dyck/seed-6
+      held_out: true
+      inner_dataset: bbh-dyck
+      run_seed: 6

@@ -1190,6 +1190,59 @@ async def test_a_verify_pass_sends_at_the_backends_ceiling_under_a_one_cell_pres
 
 @pytest.mark.usefixtures("run_bound", "offline")
 @on_jumping_clock
+async def test_runs_on_one_backend_never_hold_more_cells_out_than_its_ceiling_together(
+    built_stores: Stores,
+) -> None:
+    # Two runs at Max speed on one machine, as an outer's inner runs: each alone fills the ceiling.
+    dataset, ceiling = _dataset(), 4
+    backend = _OrderedFakeBackend(len(dataset))
+    sending: dict[str, int] = {}
+    together = {"seen": False}
+
+    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
+        run = cast("MeasuredPass", run_scope().measured).individual_id
+        sending[run] = sending.get(run, 0) + 1
+        together["seen"] |= all(sending.get(r) for r in ("a", "b"))
+        try:
+            # Seconds a cell, as a real box's: the other run's wait polls at `HELD_POLL_S`.
+            return await backend.hold(sample, pace=1.0)
+        finally:
+            sending[run] -= 1
+
+    async def _run(run: str) -> CycleEventLog:
+        ledger = CycleEventLog.open(CycleDir(built_stores.projects_root / "machine" / run))
+        session = loop_session(
+            built_stores,
+            pipeline_schema([]),
+            dataset,
+            scorer=_HIT,
+            control=_control_pausing(lambda: False, lookahead=MAX_SPEED),
+            client=backend_client(
+                built_stores.jobs_dir, max_cells_in_flight=ceiling, holds_own_sends=True
+            ),
+        )
+        session.state.flight = FlightGauge(every=0.0)
+        walk = open_walk(
+            JobSearchPoint(), dataset, session, kind=MeasurementRole.PANEL, measured=run
+        )
+        with scoped(ledger=ledger):
+            await query_loop.run_walks({run: walk}, session, keep_cut=False)
+        return ledger
+
+    with mock.patch.object(query_loop, "measure_sample", _measure):
+        ledgers = await asyncio.gather(_run("a"), _run("b"))
+    assert together["seen"], "vacuous — the two runs never sent at once"
+    assert max(backend.entries) == ceiling, "the runs together held past, or short of, the ceiling"
+    served = [
+        r.out for ledger in ledgers for r in ledger_records(ledger) if isinstance(r, FlightRecord)
+    ]
+    assert max(served) == ceiling, (
+        "a run's served flight line read its own cells, not the machine's"
+    )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
 async def test_a_rounds_walks_each_send_to_their_own_depth_as_many_at_once_as_pressed(
     built_stores: Stores,
 ) -> None:
@@ -4418,6 +4471,59 @@ def test_a_clamped_spend_cap_reads_asked_armed_and_the_campaigns_own_spend(
     )
     assert spend.used == pytest.approx(0.5) and spend.fill == pytest.approx(0.5), (
         "the campaign's cap was read against one cycle's spend, not the campaign's $0.50"
+    )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_the_served_spend_cap_reads_the_count_its_books_stop_reads(tmp_path: Path) -> None:
+    # A cap served short of its book's count halts a run on money no door showed.
+    stores = _web_account(tmp_path, "sub-9")
+    hop = CycleHop(campaign_id="camp-9", cycle_id="cycle_budget0009")
+    stores.campaigns.create_campaign(minted_campaign(hop))
+    stores.campaigns.mint_cycle(hop)
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    with scoped(account=stores):
+        _pay(ledger, 0.2, input_tokens=1_000, output_tokens=0)
+    # A cell that broke mid-send under its run's job: no bill, so it lapsed at its bound.
+    job, cell, bound = uuid.uuid4().hex, uuid.uuid4().hex, Budget(usd=0.3, tokens=0)
+    for record in (
+        Hold(
+            hold_id=job,
+            parent=None,
+            key_source="host",
+            bound=Budget(usd=1.0, tokens=0),
+            resource=None,
+            node=None,
+            ledger=None,
+        ),
+        Hold(
+            hold_id=cell,
+            parent=job,
+            key_source="host",
+            bound=bound,
+            resource="backend",
+            node="cell",
+            ledger=stores.charges.held_on(ledger.path),
+        ),
+        Lapse(hold_id=cell, bound=bound),
+        Release(hold_id=job),
+    ):
+        stores.charges.append(record)
+    book = SpendBook(
+        declared=Budget(),
+        share=Budget(usd=0.5),
+        charges=stores.charges,
+        hold_id=job,
+        headroom=Budget(),
+        metered_on=ledger.path,
+        meters=stores.campaigns.ceiling_meter_of(hop.campaign_id),
+        opened=0.0,
+    )
+    assert book.exhausted() is ErrorCategory.SPEND_CEILING, "vacuous — the lapse never tipped it"
+    spend = next(cap for cap in current_caps(stores, hop).caps if cap.axis == "usd")
+    counted = book.count().counted.usd_amount
+    assert counted > 0.2 and spend.used == pytest.approx(counted), (
+        "the served cap read the bills alone, short of the lapsed cell its book's stop counts"
     )
 
 

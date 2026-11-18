@@ -1764,10 +1764,8 @@ export interface ServedDashboard {
   /** This cycle's spend in the campaign's meter, capped or not, a replay included —
    * `domain/spend.py::metered_line`, the CLI's stop line. */
   metered_line: string;
-  /** Beside `metered_line`: what the campaign's ceiling has counted in its meter,
-   * every cycle of it once and deleted ones included, against each cap it
-   * bounds — `domain/spend.py::campaign_cap_lines`; empty where nothing is
-   * capped and on a replay. */
+  /** Beside `metered_line`: the rows of `caps` a money cap bounds, its book's count
+   * by part; empty where nothing is capped and on a replay. */
   cap_lines: string[];
   /** Every cap of `run_limits.budget` read against its own book (`armed_caps`); on
    * a replay, the caps it stood under and no book read. */
@@ -2301,7 +2299,8 @@ export interface SampleLookahead {
   auto: boolean;
   /** The backend's `max_cells_in_flight`; 1 says the control does not apply. */
   ceiling: number;
-  /** Calls out now; 0 once no producer is appending. */
+  /** Calls out now on the backend, every run's in this process; 0 once no producer
+   * is appending. */
   in_flight: number;
   /** Calls the gauge admits out now; 0 with `in_flight`. */
   allowed: number;
@@ -2381,10 +2380,26 @@ export interface CapReading {
   used: number | null;
   /** What a money axis's book counts; null on rounds and the clock. */
   meter: 'bill' | 'search_incurred' | null;
+  /** A money axis's book by part, the count its stop reads (`used` is its
+   * `counted`); null on rounds, the clock, and a replay. */
+  count: SpendCount | null;
   /** `used` over `armed`, where both stand (a cap of 0 is full): the one meter a
    * surface draws. */
   fill: number | null;
   clamped_by: 'allowance' | null;
+}
+
+/** A spend book's count, by part, each an amount: the ceiling's stop reads
+ * `counted`; a send's room reads `out` beside it. */
+export interface SpendCount {
+  /** Sent and billed, or priced off the rate table. */
+  billed: Budget;
+  /** Sends that ended with no bill, each counted at the bound it was held at. */
+  unreported: Budget;
+  /** Held back for the bench's passes. */
+  set_aside: Budget;
+  /** What the calls and cells still out hold. */
+  out: Budget;
 }
 
 /** The calls whose bills passed what their hold held, each drawn on every hold
@@ -5629,7 +5644,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "18d47fa2e0b34a26";
+export const SERVED_CONTRACT = "9d1fdcd8ee9ace46";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

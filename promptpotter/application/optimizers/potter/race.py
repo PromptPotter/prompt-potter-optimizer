@@ -5,9 +5,9 @@ from typing import Any
 
 from promptpotter.application.bench.node_context import (
     Bounds,
-    Frontier,
     Lineage,
     NodeContext,
+    Parent,
     Progress,
     Replay,
     Ruler,
@@ -92,7 +92,7 @@ class PoBBRace:
             on_snapshot=self._progress.race_standing,
         )
         self._block_size = panel.block_size
-        if parent_results := ctx.read(Frontier).parent_own_rows:
+        if parent_results := ctx.read(Parent).own_rows:
             self._check.register_completed(parent_results, key=parent)
 
     @property

@@ -4436,7 +4436,7 @@ def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_o
     potter = select_optimizer(bench_choice("potter"))
     critique = running_prompt("l1_critique", potter.node_config("l1_critique"), potter.manifest)
     with scoped(book=spend_book()):
-        filled = DispatchHub.fill(critique, view, node="l1_critique")
+        filled = DispatchHub.fill(critique, view)
     assert filled.rendered["sample_transcripts"].count(trace) == len(grades), (
         "the critique was not handed every run its knobs declare, whole, past its budget"
     )
@@ -4544,7 +4544,7 @@ def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
     )
     generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
     with scoped(book=spend_book()):
-        filled = DispatchHub.fill(generator, inner, node="l1_generate")
+        filled = DispatchHub.fill(generator, inner)
     assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
         "the generator was handed no subject — it is rewriting text it cannot see"
     )

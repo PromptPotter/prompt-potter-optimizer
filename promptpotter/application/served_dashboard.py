@@ -51,10 +51,11 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     MeteredSpend,
     Overshoot,
-    campaign_cap_lines,
+    SpendCount,
     metered_line,
 )
 from promptpotter.domain.strict_model import StrictModel
+from promptpotter.infrastructure.llm.spend_book import cycle_count
 from promptpotter.infrastructure.projections.live_dashboard import (
     DashboardFacts,
     LiveDashboardState,
@@ -230,7 +231,10 @@ class SampleLookahead(StrictModel):
     ceiling: int = Field(
         description="The backend's `max_cells_in_flight`; 1 says the control does not apply."
     )
-    in_flight: int = Field(description="Calls out now; 0 once no producer is appending.")
+    in_flight: int = Field(
+        description="Calls out now on the backend, every run's in this process; 0 once no "
+        "producer is appending."
+    )
     allowed: int = Field(description="Calls the gauge admits out now; 0 with `in_flight`.")
     most: int = Field(
         description="The most calls the stop rules allow out; between phases, the next round's."
@@ -405,9 +409,8 @@ class ServedDashboard(DashboardFacts):
         "— `domain/spend.py::metered_line`, the CLI's stop line."
     )
     cap_lines: list[str] = Field(
-        description="Beside `metered_line`: what the campaign's ceiling has counted in its meter, "
-        "every cycle of it once and deleted ones included, against each cap it bounds — "
-        "`domain/spend.py::campaign_cap_lines`; empty where nothing is capped and on a replay."
+        description="Beside `metered_line`: the rows of `caps` a money cap bounds, its book's "
+        "count by part; empty where nothing is capped and on a replay."
     )
     caps: ArmedCaps = Field(
         description="Every cap of `run_limits.budget` read against its own book "
@@ -506,7 +509,6 @@ class _Present(NamedTuple):
     # A pass still running on the ledger that no attached run and no paid pass's job scores.
     orphaned: bool
     fork_remainder: ForkRemainder
-    campaign_metered: Budget
     caps: ArmedCaps
     overshot: Overshoot
     at: float
@@ -545,6 +547,7 @@ def _caps(
     *,
     asked: Budget,
     used: Mapping[CapAxis, float | None],
+    count: SpendCount | None,
 ) -> ArmedCaps:
     return ArmedCaps.of(
         [
@@ -554,6 +557,7 @@ def _caps(
                 armed=getattr(limits.budget, axis),
                 used=used.get(axis),
                 meter=meter if axis in MONEY_AXES else None,
+                count=count if axis in MONEY_AXES else None,
             )
             for axis in CAP_AXIS_INFO
         ]
@@ -570,21 +574,31 @@ def armed_caps(
     campaign_metered: Budget,
     rounds_closed: int,
 ) -> ArmedCaps:
-    """THE caps as they bind now, each against its own book: the campaign's metered spend, this
-    cycle's rounds closed after the origin, the clock of the launch in flight."""
+    """THE caps as they bind now, each against its own book: the spend book's count, this cycle's
+    rounds closed after the origin, the clock of the launch in flight."""
     held = stores.campaigns.holder(hop) if run.producer.appending else None
     job = None if held is None else held.run
     started = None if job is None else epoch_seconds(job.started_at)
+    count = cycle_count(
+        stores.charges,
+        hold_id=None if job is None else job.job_id,
+        metered_on=stores.campaigns.ledger(hop),
+        meters=meter,
+    )
     return _caps(
         limits,
         meter,
         asked=stores.campaigns.read_campaign_ceiling(hop).asked,
         used={
-            "usd": campaign_metered.usd_amount,
-            "tokens": campaign_metered.token_amount,
             "rounds": rounds_closed,
             "wall_clock_s": None if started is None else max(0.0, time.time() - started),
         },
+        count=SpendCount(
+            billed=campaign_metered,
+            unreported=count.unreported,
+            set_aside=count.set_aside,
+            out=count.out,
+        ),
     )
 
 
@@ -773,8 +787,13 @@ def _serve(
         ),
         cap_lines=[]
         if standing is None
-        else campaign_cap_lines(meter, campaign=standing.campaign_metered, cap=run_limits.budget),
-        caps=_caps(run_limits, meter, asked=Budget(), used={})
+        else [
+            line
+            for cap in standing.caps.caps
+            if cap.count is not None and cap.armed is not None
+            for line in cap.lines()
+        ],
+        caps=_caps(run_limits, meter, asked=Budget(), used={}, count=None)
         if standing is None
         else standing.caps,
         overshot=None if standing is None else standing.overshot,
@@ -843,7 +862,6 @@ def served_dashboard(
             orphaned=any(mark.state == "running" for mark in state.verification)
             and stores.campaigns.holder(hop) is None,
             fork_remainder=remainder,
-            campaign_metered=campaign_metered,
             caps=armed_caps(
                 stores,
                 hop,

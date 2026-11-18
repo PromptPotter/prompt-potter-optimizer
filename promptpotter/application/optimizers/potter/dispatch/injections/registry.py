@@ -19,8 +19,10 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     layout_levers,
     resolve_layout_override,
 )
+from promptpotter.application.optimizers.potter.knobs import PanelShareKnobs
 from promptpotter.application.optimizers.potter.records import ExplorationBudget, L1Layout
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
+from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.named_rows import walked
 
 # The one citable name that is NOT a panel: an empty citation's, which a measured stall licenses.
@@ -65,6 +67,7 @@ def injection_table() -> Mapping[str, _Injection]:
 
 class LayoutNode(LlmNode):
     name: ClassVar[str]
+    knobs: ClassVar[type[StrictModel]] = PanelShareKnobs
     outer_levers: ClassVar[Mapping[str, str]] = {"layout": "object"}
 
     def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:

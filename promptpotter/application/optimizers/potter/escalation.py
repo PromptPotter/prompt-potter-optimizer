@@ -400,7 +400,7 @@ async def _run_transition(
     # The prompt reports the verdict that asked for it, which lands only if this fire does.
     view = PotterView(ctx, ladder if fire.ask is None else as_read_by(ladder, fire.ask))
     calls = ctx.read(Calls)
-    filled = DispatchHub.fill(calls.prompt(), view, node=ctx.node)
+    filled = DispatchHub.fill(calls.prompt(), view)
     try:
         result = layer.parse(ctx, await calls.answer(layer.reply_model(view), filled))
     except OptimizerPromptParseError as parse_err:

@@ -66,7 +66,20 @@ class AdaptiveQueueKnobs(StrictModel):
     )
 
 
-class TranscriptKnobs(StrictModel):
+class PanelShareKnobs(StrictModel):
+    """How much evidence a node's prompt carries beyond the panels its layout makes mandatory."""
+
+    discretionary_chars: Annotated[int, Knob(Estimand.SEARCH)] = Field(
+        ge=1,
+        description=(
+            "The most characters the node's discretionary panels fill, placed in layout order: a "
+            "whole panel that does not fit is dropped, a divisible one thinned by rows. Its "
+            "mandatory panels are placed whatever they cost, outside it."
+        ),
+    )
+
+
+class TranscriptKnobs(PanelShareKnobs):
     """How much of the parent's failing rows' runs a node reads in ``sample_transcripts``."""
 
     transcripts: Annotated[int | None, Knob(Estimand.SEARCH)] = Field(

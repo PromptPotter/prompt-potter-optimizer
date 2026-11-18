@@ -111,7 +111,12 @@ BASELINE = {
     # candidate and candidates at once on the one press, an inner run following Max speed, words.
     # l4-outer link 4 + its fold (+138): the critique's own-row panel, the length budget, and the
     # webapp:bundle probe that says a page older than its checkout.
-    "package_lines": 111538,
+    # flight-share A (+55): a backend's ceiling is one count of every phase sending on its machine,
+    # a run holding cells leaves one to a run holding none, and a wait polls another run's landing.
+    # flight-share B (+76): the spend book's count by part (`SpendCount`), read by its stop, its
+    # room and its refusal, served as every money cap's `used` and `cap_lines`, and a walk's halt.
+    # l4-outer-6 (+4): `PanelShareKnobs`, each layout node's discretionary share as a knob.
+    "package_lines": 111673,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -123,7 +128,9 @@ BASELINE = {
     # l4-outer-4 (+4): `TranscriptKnobs` on `l1_generate` and `l1_critique`, the transcript caps
     # a family declares (the L4 critique reads every seat's whole inner run); +1 `length_budget`,
     # the one bound on a proposal's length, replacing a 3,200-char cap and a 35% rewrite floor.
-    "config_leaf_fields": 94,
+    # l4-outer-6 (+4): `discretionary_chars` on the four layout nodes, the panel share a family
+    # sizes, replacing a `NODE_LAYOUTS` constant per node.
+    "config_leaf_fields": 98,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     "settings_env": 39,
@@ -158,7 +165,8 @@ BASELINE = {
     # limits-ux (+1): `ArmedCaps.said`, the terminal's rendering of the rows the browser draws.
     # flight-ux (+1): a launch payload's `lookahead`, which the terminal sends and no surface yet.
     # strata-flight (-1): the count once limits-ux and flight-ux stand in one tree.
-    "p_served": 199,
+    # flight-share B (+3): `CapReading.count`'s parts, which the browser reads in `cap_lines`' words.
+    "p_served": 202,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.
@@ -171,7 +179,7 @@ BASELINE = {
     # and the public members of each object one of its properties exposes.
     "p_member": 12,
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
-    # narr-3 (+3): `Frontier.parent_fitness`, the parent's fitness as the `FitnessFact` L2's box banks.
+    # narr-3 (+3): `Parent.fitness`, the parent's fitness as the `FitnessFact` L2's box banks.
     # small-3 (+2): `RoundPanel`, the round's draw as a declared read, for `propose`'s parameter.
     # l4-outer (+1): `Target.transcript`, a row's one transcript source, its inner run on L4.
     "p_reads": 323,

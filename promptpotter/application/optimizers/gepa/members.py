@@ -12,9 +12,9 @@ from pydantic import Field
 from promptpotter.application.bench.node_context import (
     Calls,
     Children,
-    Frontier,
     Lineage,
     NodeContext,
+    Parent,
     Replay,
     RoundPanel,
     Target,
@@ -196,7 +196,7 @@ class GepaReflect(nodes.Proposer):
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores, ReflectionModules})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ReflectionModules, MinibatchBars})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset(
-        {Calls, Children, Frontier, Lineage, RoundPanel, Target}
+        {Calls, Children, Parent, Lineage, RoundPanel, Target}
     )
 
     def arms(self, _selected: SelectedOptimizer) -> int:
@@ -223,7 +223,7 @@ class GepaReflect(nodes.Proposer):
         modules = ctx.read(Target).schema.prompt_nodes()
         at = held.get(parent.id, 0) % len(modules)
         node = modules[at]
-        rows = await ctx.read(Frontier).measure_parent(parent.id, ctx.read(RoundPanel).block())
+        rows = await ctx.read(Parent).measure(parent.id, ctx.read(RoundPanel).block())
         prompt = reflection_prompt(ctx, instruction=shown(ctx, parent, node), rows=rows)
         proposal = child(
             ctx,

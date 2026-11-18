@@ -344,13 +344,13 @@ class Lineage(CycleRead):
         )
 
 
-class Frontier(CycleRead):
+class Parent(CycleRead):
     @property
-    def parent_point(self) -> JobSearchPoint:
+    def point(self) -> JobSearchPoint:
         return self._cycle.parent_point
 
     @property
-    def parent_own_rows(self) -> list[GradedCell]:
+    def own_rows(self) -> list[GradedCell]:
         """Each sample's latest cell of the parent ITSELF, its origin-panel top-ups included, never
         one another individual answered."""
         key = ArmKey(self._cycle.parent.id)
@@ -360,12 +360,12 @@ class Frontier(CycleRead):
         return rows
 
     @property
-    def parent_fitness(self) -> FitnessFact | None:
-        """What the parent SCORED the round it last ended on, in its scorer's unit, never a reading
-        of the frontier; ``None`` is unmeasured."""
+    def fitness(self) -> FitnessFact | None:
+        """What the parent SCORED the round it last ended on, in its scorer's unit, never a θ
+        reading; ``None`` is unmeasured."""
         return fold_fitness(self._cycle.elected[0].fold)
 
-    async def measure_parent(self, individual_id: str, cells: list[Sample]) -> CellSheet:
+    async def measure(self, individual_id: str, cells: list[Sample]) -> CellSheet:
         arm = self._cycle.measured(individual_id)
         read = await measure_as_parent(
             self._round,

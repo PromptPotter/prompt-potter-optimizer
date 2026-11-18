@@ -784,7 +784,7 @@ def test_dataset_content_reaches_the_optimizer_only_inside_the_fence(poisoned: _
     potter = select_optimizer(bench_choice("potter"))
     generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
     with scoped(book=spend_book()):
-        filled = DispatchHub.fill(generator, view, node="l1_generate")
+        filled = DispatchHub.fill(generator, view)
     # `n_variants` as `l1.py` adds it: a slot token inside injected content is never filled.
     assert set(filled.prompt_vars) <= generator.slots(), "a panel's token was read as a slot"
     sent = dataclasses.replace(filled, prompt_vars={"n_variants": "3", **filled.prompt_vars})

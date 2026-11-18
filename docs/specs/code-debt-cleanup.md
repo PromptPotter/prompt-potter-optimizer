@@ -858,20 +858,15 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   $2.50. The book counted $1.09 billed + $1.11 unreported (52 lapsed cells, folded by
   `read_model.py::Money.unreported_holds`: ~37 broken sends, 15 cut by the halt itself) + $0.18 set
   aside for the bench, $2.38, so the cells still out (each held at its $0.02 bound) tipped it.
-  Unverified: which check fired (`SpendBook.exhausted()` or a send's room). The `run_phase` record's
-  `detail` is `""`. Action: the cap's one served reading is the book's own count, by part
-  (billed, unreported, set aside), and a budget halt names it. **Rides with:** none yet (spend book +
-  `served_dashboard.py`). **Re-test:** a fold of that ledger serves the figure `exhausted()` reads.
-- **A backend's cell ceiling binds per run, so the outer's inner runs sum past it on one box**: at Max
-  speed the outer's 4 seats in flight (`spawn.py::MAX_CELLS_IN_FLIGHT`) each run an inner campaign at
-  termnorm's 16, so up to 64 cells reach the TermNorm box at once. ~37 of the C0's 8,065 inner cells
-  broke with `ReadError` mid-send; each lapsed at termnorm's declared cell bound (99,144 tokens,
-  ~$0.021, about 180× a real cell's $0.000115) and was resent (`infrastructure/backend.py::_post_until_answered`),
-  so the counted spend doubled. The breaks came 0–1 s after the send (~12, stale keep-alive reuse:
-  `backend.py`'s client keeps httpx's 5 s default expiry) and 2–19 s after it (the rest, the box
-  dropping mid-request). The 180× bound is termnorm's declaration, so a tighter one is its repo's. Action: a backend's ceiling is one shared
-  machine fact across every run the process holds on it. **Rides with:** none yet. **Re-test:** an
-  offline L4 leg at Max speed never holds more cells on one backend than its connector declares.
+  A send's room fired (`SpendBook.refuse_unless_room`, which counts calls out; `exhausted()` does
+  not, and read under $2.50 even after the halt's own lapses), and the halt's `detail` is `""`
+  because a kept cut returns a bare `StopReason`. Left open: the cap is served by part off the
+  book's count (`spend_book.py::cycle_count`) except the set-aside, which only the run's book holds
+  (`SpendBook.set_aside`, from `runner/bench.py` and `runner/loop.py`); and only a walk's own stop
+  names the parts, while a kept cut (`run_walks`' return, `runner/round.py`) and a round boundary
+  (`runner/loop.py::LoopEnd`) carry no words. Action: the set-aside lands where every door reads it,
+  and a budget stop travels as its `StopLoop`. **Rides with:** none yet. **Re-test:** a halt at a
+  round boundary names the book's parts in its `run_phase` `detail`.
 
 ## Held — no wave-4 chain yet
 
@@ -920,14 +915,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   leave the `per_sample` of `research/datasets/promptpotter-self/family.yaml` unscored; no reader reads both
   shapes. Action: none past the landing that ships it, which re-measures C0. **Held:** that landing.
   **Re-test:** after it, `promptpotter-self` scores every outer cell it reads.
-- **Panel shares are code, not declared knobs, so L2 under L4 never sees the subject**: Shape:
-  `potter/dispatch/layout.py::NODE_LAYOUTS["l2_context"]`'s 5,500 discretionary chars drop
-  `rendered_prompt` (7,485 under the family) whole; the generator's 11,000 share holds one or two whole
-  seat transcripts, and the critique's whole seats (`TranscriptKnobs` null/null) run 33,191 chars of
-  its 38,524 (C0 `run__265c4d` rounds 1–2; the round-2 generate, 26,681, dropped a transcript).
-  Action: each node's share a declared knob beside `TranscriptKnobs`, sized on that round.
-  **Held:** the next l4-outer link (decided 2026-11-18). **Re-test:** an offline L4 leg's
-  `l2_context` request holds CURRENT PROMPTS.
 - **`locus_crossover` re-crosses a measured or hosted child**: it edits every two-parent proposal, so
   a hosted recombination and a rejoined crossover child are crossed again (one call: the re-crossed
   id differs; l4-outer-5's report). Action: a crossover applies to a proposal it drew, never one it
@@ -936,6 +923,29 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   one length check cannot tell which mutation minted the child. Action: the verdict names the
   mutation kind. **Rides with:** the row above. **Re-test:** a crossover child's OVER_CEILING names
   crossover.
-- **`Frontier` no longer holds a frontier**: after l4-outer-5 it carries the parent's own rows and
-  their top-ups (`Frontier.parent_own_rows`). Action: rename it for its contents, with its doc row.
-  **Rides with:** the next l4-outer link. **Re-test:** `git grep -c "class Frontier\b" -- promptpotter` is 0.
+- **`l2_context`'s subject is discretionary, so its share is sized against a growing prompt**: L1's
+  subject is mandatory, L2's `rendered_prompt` rides the share (`family.yaml` sizes it at 21,000 for
+  a subject that grows `length_budget` a round). Action: decide whether the subject joins L2's
+  mandatory set. **Rides with:** the next l4-outer link. **Re-test:** L2's subject survives any share.
+- **A member's treatment digest re-keys on a rename**: it hashes the member's source files, so a
+  refactor that moves no decision (l4-outer-6's `Frontier` → `Parent`) re-keys every banked L4 cell
+  for potter, capo-pobb and gepa. Action: the digest hashes what the member decides, not its text.
+  **Re-test:** a pure rename in `potter/members.py` leaves `--digests` unmoved.
+- **The bench's set-aside lives only on the run's book, so no door serves it**: `runner/loop.py`,
+  `runner/bench.py::reserve_selection_pass` and `runner/entry.py` set `SpendBook.set_aside_usd` in
+  memory; `exhausted()` counts it while `spend_book.py::cycle_count` serves 0. Action: the set-aside
+  lands where the book reads it back (a ledger fact or a hold on the charge book). **Rides with:**
+  the rows below. **Re-test:** a fold during a run holding a bench reserve serves the figure
+  `exhausted()` reads.
+- **A kept cut and a round boundary halt with no words**: `run_walks(keep_cut=True)` returns a bare
+  `StopReason`, `runner/round.py` raises `StopLoop(cut)` and `runner/loop.py::LoopEnd` carries a
+  reason only, so only a walk's own stop names the book's parts (the C0 `run__265c4d` halt: a send's
+  room fired, `SpendBook.refuse_unless_room`). Action: a budget stop travels as its `StopLoop`, its
+  detail from the book's count. **Re-test:** a round-boundary halt names the parts in its `run_phase` detail.
+- **The stop record's campaign spend reads the bills alone**: `run_observers.py::declare_run_stop`
+  fills `StopSpend.campaign` from `metered_spend`, so its cap lines omit unreported money. Action:
+  `StopSpend` carries the book's `SpendCount`. **Re-test:** a halted run's stop record names its lapsed cells.
+- **A machine's cell ceiling is counted twice**: `infrastructure/backend.py::MachineSlots` (a
+  file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
+  in-process count per backend. Action: one count of one machine fact, reaching both. **Rides
+  with:** the rows above. **Re-test:** `git grep -c "class MachineSlots" -- promptpotter` is 0.
