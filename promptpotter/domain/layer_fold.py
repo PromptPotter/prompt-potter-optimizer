@@ -47,6 +47,11 @@ class Laid:
 type Rule = Callable[[tuple[str, ...]], Laid]
 
 
+def untyped_rule(_at: tuple[str, ...]) -> Laid:
+    """A document no schema declares: every mapping laid key by key, every other value whole."""
+    return Laid(Lay.KEYS)
+
+
 class _Clear:
     def __repr__(self) -> str:
         return "CLEAR"

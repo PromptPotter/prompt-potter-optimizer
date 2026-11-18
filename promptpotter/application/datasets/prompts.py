@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping, Sequence
 from typing import Any, Literal, NamedTuple
 
-from promptpotter.domain.layer_fold import Laid, Lay, Layer, fold_layers
+from promptpotter.domain.layer_fold import Layer, fold_layers, untyped_rule
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import PipelineNode
@@ -85,7 +85,7 @@ def starting_prompts(
         Layer("served", served),
         Layer("dataset", {node: dict(p.fields) for node, p in authored.items()}),
     )
-    folded = fold_layers(lambda _at: Laid(Lay.KEYS), layers)
+    folded = fold_layers(untyped_rule, layers)
     stamped = set(folded.stamps.values())
     return StartingPrompts(
         {node: NodePrompt(fields=fields) for node, fields in folded.document.items()},

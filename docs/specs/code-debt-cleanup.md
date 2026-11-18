@@ -879,14 +879,15 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   (small-6's report). Action: the factory builds a reading `degradation_reading` makes.
   **Re-test:** `individual_summary` renders a factory-cut arm.
 - **A panel's `inner_campaign` folds family→member by key, not by `CAMPAIGN_RULE`** (cite-fold's
-  report): `store/dataset_access.py::read_dataset_definition` lays the panel by an untyped
-  every-mapping-by-key rule, so a member that changes a node's `model` or names another `optimizer`
-  keeps the family's `route_order` or `nodes`, which a campaign block's fold drops or clears. The
-  same untyped rule is spelled twice (`datasets/prompts.py:88`, `dataset_access.py`), and
-  `source |= …` (`dataset_access.py:230`) is the one-level merge the panel had. Action: `InnerTasks`
-  types `inner_campaign` so the connector declares its panel's rule, `layer_fold.py` names it once,
-  and `source` folds by it. **Re-test:** a member changing `l1_generate`'s `model` under a family
-  that sets `route_order` resolves without that `route_order`.
+  report): `store/dataset_access.py::read_dataset_definition` lays the panel by
+  `layer_fold.py::untyped_rule`, so a member that changes a node's `model` or names another
+  `optimizer` keeps the family's `route_order` or `nodes`, which a campaign block's fold drops or
+  clears. The connector declares only the model its panel *resolves* to (`experiment_model`), which
+  for `promptpotter` (`ResolvedInnerPanel`) is not the declared panel's shape (`InnerTasks`).
+  Action: `connectors/protocol.py::Connector` declares the model its declared panel folds by,
+  `spawn.py`'s `CONNECTOR` names `InnerTasks`, whose `inner_campaign` lays by `CAMPAIGN_RULE`.
+  **Re-test:** a member changing `l1_generate`'s `model` under a family that sets `route_order`
+  resolves without that `route_order`.
 
 ## Held — no wave-4 chain yet
 

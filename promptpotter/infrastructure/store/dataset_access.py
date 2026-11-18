@@ -17,7 +17,7 @@ from promptpotter.config.paths import install_datasets_root
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import CampaignLayer
-from promptpotter.domain.layer_fold import Laid, Lay, Layer, fold_layers
+from promptpotter.domain.layer_fold import Layer, fold_layers, untyped_rule
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
@@ -240,7 +240,7 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
         with_node_templates(top),
         tuple(campaign),
         source,
-        fold_layers(lambda _at: Laid(Lay.KEYS), panels).document or None,
+        fold_layers(untyped_rule, panels).document or None,
         panel_dir,
         _card(card),
     )
@@ -259,18 +259,6 @@ def declared_pipelines(declaration: Mapping[str, Any]) -> dict[str, list[str]]:
         for name, steps in (declaration.get("pipelines") or {}).items()
     }
     return ({DEFAULT_PIPELINE: [str(node) for node in nodes]} if nodes else {}) | declared
-
-
-def nearest_file(dataset: ResolvedDataset, filename: str) -> Path | None:
-    """The dataset's own file, else its nearest family's: one framing or origin per kind."""
-    return next(
-        (
-            path
-            for directory in reversed(definition_chain(dataset))
-            if (path := directory / filename).is_file()
-        ),
-        None,
-    )
 
 
 _FRONT_MATTER = re.compile(r"\A---\r?\n(.*?)^---\r?\n?", re.DOTALL | re.MULTILINE)
@@ -309,7 +297,9 @@ def read_framing_file(path: Path | None) -> DatasetFraming:
 
 
 def read_dataset_framing(dataset: ResolvedDataset) -> DatasetFraming:
-    return read_framing_file(nearest_file(dataset, FRAMING_FILE))
+    """The dataset's own ``task.md``, else its nearest family's."""
+    held = (d / FRAMING_FILE for d in reversed(definition_chain(dataset)))
+    return read_framing_file(next((path for path in held if path.is_file()), None))
 
 
 def render_framing_file(description: str, framing: TaskDecomposition) -> str:
