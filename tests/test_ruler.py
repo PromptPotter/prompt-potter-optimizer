@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 import yaml
 from factories import (
+    INNER_RUN,
     arm_state,
     cycle_result,
     election,
@@ -681,7 +682,8 @@ def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     withheld = inner_cell_facts(
         cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)]).model_copy(
             update={"level_series": cold}
-        )
+        ),
+        INNER_RUN,
     )
     assert withheld.mean_round_delta is None, (
         "a reader asked the stamp, not the series' caveat, and differenced a cold series"
@@ -717,7 +719,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         return cycle_result(levels, origin, ran, **kw)
 
     def delta(levels: list[float | None], **kw: Any) -> float | None:
-        return inner_cell_facts(cyc(levels, **kw)).mean_round_delta
+        return inner_cell_facts(cyc(levels, **kw), INNER_RUN).mean_round_delta
 
     def lift(levels: list[float | None], bench: list[float | None], **kw: Any) -> float | None:
         px = compute_outer_proxies(cyc(levels, bench_origin=0.40, bench_levels=bench, **kw))
@@ -748,7 +750,10 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     # The scored term is the held-out curve's area (`runner/bench.py::read_curve`): churn on the
     # search split's θ scores ZERO.
     churned = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40])
-    churn = (inner_cell_facts(churned).mean_round_delta, compute_outer_proxies(churned))
+    churn = (
+        inner_cell_facts(churned, INNER_RUN).mean_round_delta,
+        compute_outer_proxies(churned),
+    )
     assert (churn[0], churn[1].held_out_lift) == pytest.approx((0.25, 0.0))
     assert lift([0.55, 0.55], [0.50, 0.50]) == pytest.approx(0.10)
 
@@ -769,7 +774,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         cyc([0.40, None]),
         cyc([0.40, 0.55], origin=None),
     ):
-        facts = inner_cell_facts(unread)
+        facts = inner_cell_facts(unread, INNER_RUN)
         assert compute_outer_proxies(unread).held_out_lift == pytest.approx(0.0), (
             "a cold or holed search series excluded a cell its held-out lift scores"
         )
@@ -794,11 +799,12 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         for sid, report in enumerate(
             [
                 inner_cell_report(
-                    inner_cell_facts(cyc([0.40])), OuterSampleProxies(floored=0, held_out_lift=held)
+                    inner_cell_facts(cyc([0.40]), INNER_RUN),
+                    OuterSampleProxies(floored=0, held_out_lift=held),
                 )
                 for held in (0.0, 0.0, 0.0, 0.05, 0.0, 0.0375)
             ]
-            + [inner_cell_report(inner_cell_facts(owned), compute_outer_proxies(owned))]
+            + [inner_cell_report(inner_cell_facts(owned, INNER_RUN), compute_outer_proxies(owned))]
         )
     ]
     family = yaml.safe_load(

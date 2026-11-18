@@ -153,7 +153,8 @@ BASELINE = {
     # What a member may declare beyond it: each `CycleRead` kind counted as `p_member` is.
     # narr-3 (+3): `Frontier.parent_fitness`, the parent's fitness as the `FitnessFact` L2's box banks.
     # small-3 (+2): `RoundPanel`, the round's draw as a declared read, for `propose`'s parameter.
-    "p_reads": 322,
+    # l4-outer (+1): `Target.transcript`, a row's one transcript source, its inner run on L4.
+    "p_reads": 323,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     "test_files": 7,
     # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).

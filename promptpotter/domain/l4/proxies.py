@@ -8,7 +8,7 @@ from pydantic import Field, model_validator
 from promptpotter.domain.arms import Cut
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.cycle_result import CycleResult
-from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
+from promptpotter.domain.l4.inner_facts import InnerCellFacts, InnerRunAddress, SeriesGap
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.results import RoundResult
@@ -39,7 +39,7 @@ OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
 # Here because the `promptpotter` connector declares it too and may not import `application/runner`.
 INNER_RESULT_KEY = "final_ranking"
-# The facts no term names (the series' reason, its SE, the stop): what the narration and tape read.
+# The facts no term names (the series' reason, its SE, the stop, the run): what the tape reads.
 INNER_FACTS_KEY = "inner"
 
 
@@ -171,7 +171,7 @@ def parent_levels(result: CycleResult) -> tuple[float, list[float]] | None:
     return trajectory[0].theta, [level.theta for level in trajectory[1]]
 
 
-def inner_cell_facts(result: CycleResult) -> InnerCellFacts:
+def inner_cell_facts(result: CycleResult, run: InnerRunAddress) -> InnerCellFacts:
     held = parent_levels(result)
     origin = None if held is None else held[0]
     levels = [] if held is None else held[1]
@@ -197,6 +197,7 @@ def inner_cell_facts(result: CycleResult) -> InnerCellFacts:
         ),
         sent_usd=result.spend.sent_usd if result.spend else None,
         tokens=result.spend.total_tokens_used if result.spend else None,
+        run=run,
     )
 
 

@@ -119,10 +119,21 @@ _NO_INJECTIONS = InjectionBreakdown()
 class FilledPrompt:
     """``rendered`` is what the node was SHOWN, after selection, so the ledger's breakdown and the prompt agree."""
 
-    fields: dict[str, str]
+    # Each region's placed panel text, joined behind the region's own text once its slots fill.
+    panels: dict[str, str]
     prompt_vars: dict[str, str]
     rendered: dict[str, str] = field(default_factory=dict)
     injections: InjectionBreakdown = _NO_INJECTIONS
+
+    def compose(self, template: OptimizerPromptTemplate) -> OptimizerPromptTemplate:
+        """Injected text is data: no slot inside a panel or a slot's value is ever filled."""
+        own = template.filled(self.prompt_vars)
+        return own.model_copy(
+            update={
+                region: "\n\n".join(t for t in (getattr(own, region), text) if t)
+                for region, text in self.panels.items()
+            }
+        )
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -382,8 +393,8 @@ async def answer[M: BaseModel](
     user_content: str | None = None,
 ) -> tuple[M, int]:
     """With its schema repairs; every fault is one `OptimizerPromptParseError`, an unbound reply included."""
-    template = context.template.model_copy(update=filled.fields)
-    prompt = template.compile_prompt(**filled.prompt_vars)
+    template = filled.compose(context.template)
+    prompt = template.render()
     if user_content is not None:
         messages: list[ChatMessage] = [
             {"role": "system", "content": prompt},

@@ -341,7 +341,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   banks), which `runner/entry.py` fills from the other field by field. Banking `CycleResult` whole
   would put every round's cells on the ledger beside `RoundClosedRecord`, against the chronology rule
   (`infrastructure/CLAUDE.md`). Action: one type, the rounds read back off the ledger by its
-  readers (`l4/proxies.py`, the narrative). **Rides with:** hubs.
+  readers (`l4/proxies.py`). **Rides with:** hubs.
   **Re-test:** `git grep -c "class CycleFinal(" -- promptpotter` is 0.
 - **A moved panel is warned into a log**: `campaign_store/store.py::write_resolved_run` logs it as a
   `logger.warning` and appends anyway, a state the run enters and reports nowhere. Action: the moved
@@ -935,9 +935,9 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `origin_panel.py::origin_panel(scope_of=…)` / `BenchScope` partition by benchmark under the word
   `RulerScope` owns. Action: one `Sample` reader of its benchmark; `scope_of` → `benchmark_of`.
   **Held:** the rename's digest. **Re-test:** `git grep -n "measured_dataset or\|scope_of=" -- promptpotter`.
-- **Nothing keeps an L4 edit L4-only**: Shape: nothing refuses a mark in `runner/inner/narrative.py` or
-  an optimizer import of it, and potter's `panels.py` reaches `OuterSampleProxies`, `outer_proxies_of`,
-  `inner_facts_of` and `InnerCellFacts`, so an edit to the scored term re-keys every potter campaign.
+- **Nothing keeps an L4 edit L4-only**: Shape: potter's `inner_cells` gates (`bundle.py`,
+  `validators.py`, `catalogues.py`, `l1_wire_schema.py`, `layer_state.py`, `l1.py`, `prompts.py`)
+  read `InnerCells`, so an edit to the L4 cells re-keys every potter campaign.
   Action: the injection reads L4 cells through the connector's served terms (D6). **Held:** the
   re-key. **Re-test:** `git grep -n "domain.l4" -- promptpotter/application/optimizers`.
 - **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`

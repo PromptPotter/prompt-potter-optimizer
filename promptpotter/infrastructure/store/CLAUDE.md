@@ -18,7 +18,7 @@
 
 **`measurements/` is ONE content-addressed tree per archive home, and it outlives the campaigns that filled it.** A row is filed under the dataset hash it measured, never a label or the paying campaign; the join is `CandidateFacts.reading.sp_hash` → `prompt_fields_id`. **`MeasurementArchive` is the archive's only gateway**; programmatic reads go through `archive_queries.py`. **Every archive path is built from `measurement_archive.py::ArchiveFile`** <!-- probe: git grep -cE "MEASUREMENTS_DIR\s*/" -- promptpotter == 0 -->; a dataset name in any other tenant path is one segment, `layout.py::dataset_id_prefix`.
 
-**An answer names the runs it serves where it is filed**, never by its filing key: the run that filed it (`FiledAnswer.filed_by`) and an L4 outer cell's inner campaign (`InnerCellFacts.campaign_id`), read back by `archive_maintenance.py::_runs_of` for `inventory` and a reclaim's plan.
+**An answer names the runs it serves where it is filed**, never by its filing key: the run that filed it (`FiledAnswer.filed_by`) and an L4 outer cell's inner campaign (`InnerCellFacts.run`, with the sandbox it ran in), read back by `archive_maintenance.py::_runs_of` for `inventory` and a reclaim's plan.
 
 ## Dataset content has three tiers, and only one is writable
 

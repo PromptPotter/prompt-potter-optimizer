@@ -103,6 +103,7 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import EmbeddedRun, InnerRun
 from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
+from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
@@ -492,6 +493,10 @@ def archive_row(query: str, *, truth: str = "g", **wire: Any) -> MeasuredCell:
 
 #: The run `filed` stamps on what it files, where a fact names no filer of its own.
 FILER = CycleHop(campaign_id="filer", cycle_id="filer")
+#: The inner campaign an L4 cell's facts name, where a fact reads no sandbox.
+INNER_RUN = InnerRunAddress(
+    sandbox=CycleHop(campaign_id="outer", cycle_id="cycle-0"), campaign_id="inner"
+)
 
 
 def filed(

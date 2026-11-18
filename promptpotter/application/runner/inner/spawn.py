@@ -30,7 +30,6 @@ from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
-from promptpotter.application.runner.inner.narrative import inner_narrative, narrative_head
 from promptpotter.application.runner.inner.tasks import (
     ResolvedInnerPanel,
     enter_inner_cell,
@@ -47,6 +46,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import InnerRun
 from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
+from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
     BENCH_ROWS_KEY,
@@ -373,14 +373,14 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
         )
     # Raises `CellUnscoreableError` on every other no-evidence shape, which `measure_sample` resolves.
     scored = compute_outer_proxies(result)
-    facts = inner_cell_facts(result).model_copy(update={"campaign_id": cell.campaign_id})
+    run = InnerRunAddress(sandbox=cell.ctx.inside[-1], campaign_id=cell.campaign_id)
+    facts = inner_cell_facts(result, run)
     delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"
     held = "floored" if scored.held_out_lift is None else f"B{scored.held_out_lift:+.3f}"
 
     data: dict[str, Any] = {
         # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.
         INNER_RESULT_KEY: [f"inner:{query} {held} D{delta}"],
-        "reasoning_trace": inner_narrative(result, facts, scored, narrative_head(cell.spec)),
         **inner_cell_report(facts, scored),
         **({} if result.curve is None else {BENCH_ROWS_KEY: result.curve.rows}),
         # An inner campaign consumes its optimizer's ENTIRE outer config, so the stamp is its terminal.

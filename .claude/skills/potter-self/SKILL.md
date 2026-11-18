@@ -25,7 +25,7 @@ banked, name the result that would change the next decision, and check the instr
 `{cycle_dir}` is `.promptpotter/projects/{tenant}/campaigns/{campaign_id}/cycles/{cycle_id}/`; an L4 inner
 cell lives under the flat `.promptpotter/.inner/{key}/…`. `{cycle_dir}/rounds/round_NNNN.json` holds
 candidates, scores and critique; `{cycle_dir}/.runtime/ledger.jsonl` is **the only place the rendered
-optimizer prompt survives** (`llm_call` records' `template_fields` + `variables`; `llm_call_start` carries
+optimizer prompt survives** (`llm_call` records' `template_fields`, as sent; `llm_call_start` carries
 `injection_dropped`; `race_standing` shows stratification or collapse). Node I/O per round:
 `GET …/rounds/{n}/audit`. A replayed round runs no proposer: its walk is `round_proposed`'s `walked`.
 
@@ -40,7 +40,7 @@ Each self-firing wake reads the newest outer round's audit plus the ledger's ren
 not supervision):
 
 1. **`l1_generate`**: panels populated (a dropped `L1_MANDATORY` panel is stop-and-diagnose)? Outer:
-   `inner_narratives` per seed? Variants: each citation quotes ONE panel line verbatim (the validator
+   each search seat's inner run in `sample_transcripts`, none `UNREADABLE`? Variants: each citation quotes ONE panel line verbatim (the validator
    finds the panel); hypotheses distinct; no hallucinated node/param.
 2. **`l1_critique`**: `priority_fix` / `failure_highlights` quote CONCRETE evidence and name a steer the
    generator may make, never the benchmark's vocabulary or labels.

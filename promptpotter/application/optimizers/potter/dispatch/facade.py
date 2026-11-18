@@ -14,6 +14,7 @@ from promptpotter.application.bench.node_context import (
     NodeContext,
     Ruler,
     Target,
+    Transcript,
 )
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.optimizers.nodes import CycleRead
@@ -173,25 +174,20 @@ class DispatchHub:
         ):
             raise MandatoryPanelStarvedError(node, starved)
 
-        update: dict[str, str] = {}
-        for region in L1_LAYOUT_REGIONS:
-            static = getattr(template, region)
-            non_empty = [text for p in layout.region(region) if (text := rendered[p])]
-            if non_empty:
-                joined = "\n\n".join(non_empty)
-                update[region] = (static + "\n\n" + joined) if static else joined
-            else:
-                update[region] = static
-        remaining = template.model_copy(update=update).slots()
+        panels = {
+            region: "\n\n".join(non_empty)
+            for region in L1_LAYOUT_REGIONS
+            if (non_empty := [text for p in layout.region(region) if (text := rendered[p])])
+        }
         injection_vars = {
-            name: DispatchHub.render(name, view) for name in remaining if name in table
+            name: DispatchHub.render(name, view) for name in template.slots() if name in table
         }
         shown = {**rendered, **injection_vars}
         injections = InjectionBreakdown(
             chars={name: len(text) for name, text in shown.items() if text},
             dropped={name: c.dropped for name, c in coverage.items() if c.dropped > 0},
         )
-        return FilledPrompt(update, injection_vars, rendered, injections)
+        return FilledPrompt(panels, injection_vars, rendered, injections)
 
 
 def _no_round_warnings() -> contextlib.AbstractContextManager[RunScope]:
@@ -260,6 +256,14 @@ class PotterView:
         self.ctx = ctx
         # The controller's ladder as this fire reads it (`escalation.py::as_read_by`).
         self.ladder = ladder
+
+    @functools.cached_property
+    def _target(self) -> Target:
+        """One reader for the view, so a run every panel quotes is read once."""
+        return self.ctx.read(Target)
+
+    def transcript(self, cell: GradedCell) -> Transcript | None:
+        return self._target.transcript(cell)
 
     # -- the line
     @functools.cached_property

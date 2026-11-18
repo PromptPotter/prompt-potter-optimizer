@@ -92,7 +92,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "answer_distribution",
                 "critique",
                 "failing_samples",
-                "inner_narratives",
                 "mutation_memory",
                 "l1_wounds",
                 "escalation_panel",
@@ -101,16 +100,14 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
             ],
         ),
     ),
-    # Both raw sources sit on the floor: each renders only at the recursion level it means something.
+    # The rows and their transcripts sit on the floor; an L4 row's transcript is its inner run.
     "l1_critique": NodeLayoutSpec(
         # Every miss is admitted ahead of this, so it decides only how many transcripts fit beside them.
         discretionary_chars=7_500,
         extras=frozenset({"measurand", "axis_memory"}),
-        # The matched pair a cluster's rows come from, one silent where the other fires: a marked row always renders.
+        # The rows a cluster may span: a marked row always renders.
         # `mutation_memory` is the one carrier of the tried mechanisms a cluster must not restate.
-        mandatory=frozenset(
-            {"diagnostics", "failing_samples", "inner_narratives", "mutation_memory"}
-        ),
+        mandatory=frozenset({"diagnostics", "failing_samples", "mutation_memory"}),
         floor=L1Layout(
             problem_description=[
                 # The rows a cluster must span, or `schemas.py::critique_response_model` drops it.
@@ -122,7 +119,6 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
                 "mutation_memory",
                 "sample_transcripts",
                 "failing_samples",
-                "inner_narratives",
                 "l1_wounds",
             ],
         ),

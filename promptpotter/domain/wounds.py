@@ -65,8 +65,8 @@ class ValidationReason(enum.StrEnum):
     REPEAT_VARIANT = "repeat_variant"
 
 
-# The collapses and the word for each, on every surface: the inner narrative renders it into the
-# outer's prompt. In `domain/`: `RoundResult` counts them and may not import their validator.
+# The collapses and the word for each, on every surface. In `domain/`: `RoundResult` counts them
+# and may not import their validator.
 COLLAPSE_WORDS: dict[ValidationReason, str] = {
     ValidationReason.NO_OP_VARIANT: "no-op",
     ValidationReason.DUPLICATE_VARIANT: "duplicate",

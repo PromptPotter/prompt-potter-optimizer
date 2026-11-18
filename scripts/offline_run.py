@@ -422,6 +422,8 @@ class ByCallIdentity:
         self.sends: Counter[str] = Counter()
         # A structured node's call a heal left open, by asker: its next send retries it.
         self.healing: dict[tuple[str, str], tuple[str, int]] = {}
+        # The captured requests an L4 cell's inner campaign sent, by file name.
+        self.inner: set[str] = set()
 
     def _text_node(self, prompt: str) -> str:
         opened = [node for node, prefix in self.prefixes.items() if prompt.startswith(prefix)]
@@ -467,7 +469,10 @@ class ByCallIdentity:
             retried = key in self.heals or attempt + 1 < len(script)
             if schema and script[attempt] is not Heal.REFUSED and retried:
                 self.healing[asker, node] = (call, turn)
-        (self.capture / f"{key}{f'~{attempt}' if attempt else ''}.json").write_text(
+        sent = f"{key}{f'~{attempt}' if attempt else ''}.json"
+        if asker:
+            self.inner.add(sent)
+        (self.capture / sent).write_text(
             json.dumps(
                 {"request": body, "response": shown}, indent=1, sort_keys=True, ensure_ascii=False
             ),
@@ -959,11 +964,17 @@ async def banked(
         "backend_cells": searched_cells,
         "bench_cells_asked_for": backend.cells - searched_cells,
     }
-    requests = {
+    captured = {
         p.name: hashlib.sha256(p.read_bytes()).hexdigest()[:16]
         for p in sorted(harness.llm.capture.iterdir())
     }
-    BehaviourTrace(world=WORLD, decisions=decisions, requests=requests).write(out)
+    asked = harness.llm.inner
+    BehaviourTrace(
+        world=WORLD,
+        decisions=decisions,
+        requests={n: h for n, h in captured.items() if n not in asked},
+        inner_requests={n: h for n, h in captured.items() if n in asked},
+    ).write(out)
     return cycle
 
 
@@ -989,11 +1000,13 @@ def _moved(now: Any, then: Any, path: str, depth: int) -> list[str]:
 @dataclass(frozen=True)
 class BehaviourTrace:
     """What one optimizer's run decided, canonical (`extract`), the race standings among them, and
-    the hash of each optimizer request it sent, in the world `offline_world.py::WORLD` names."""
+    the hash of each optimizer request it sent, in the world `offline_world.py::WORLD` names; an
+    L4 outer's inner campaigns' requests apart from its own, as their decisions are."""
 
     world: str
     decisions: dict[str, Any]
     requests: dict[str, str]
+    inner_requests: dict[str, str] = dataclasses.field(default_factory=dict)
 
     @classmethod
     def read(cls, workspace: Path) -> BehaviourTrace:
@@ -1005,16 +1018,20 @@ class BehaviourTrace:
         (out / TRACE).write_text(dumped + "\n", encoding="utf-8")
 
     def moved(self, earlier: BehaviourTrace) -> list[str]:
-        sent = [
-            n
-            for n in self.requests.keys() | earlier.requests.keys()
-            if self.requests.get(n) != earlier.requests.get(n)
-        ]
+        def sent(name: str, now: dict[str, str], then: dict[str, str]) -> list[str]:
+            moved = [n for n in now.keys() | then.keys() if now.get(n) != then.get(n)]
+            return [f"{name} ({len(moved)} of {len(now)})"] if moved else []
+
         return [
             *(["world"] * (self.world != earlier.world)),
             *_moved(self.decisions, earlier.decisions, "decisions", 2),
-            *([f"requests ({len(sent)} of {len(self.requests)})"] if sent else []),
+            *sent("requests", self.requests, earlier.requests),
+            *sent("inner_requests", self.inner_requests, earlier.inner_requests),
         ]
+
+    def inner_half(self) -> list[Any]:
+        """What an L4 cell's number reads: its inner campaigns alone, never the outer that asked."""
+        return [self.decisions["inner"], self.inner_requests]
 
 
 async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
@@ -1699,8 +1716,7 @@ def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
         fingerprints[name] = stable_hash([trace.decisions, trace.requests])
     fingerprint = held.estimator
     if "potter" in names and (nested := home / "potter" / L4 / TRACE).is_file():
-        trace = BehaviourTrace.read(nested.parent)
-        fingerprint = stable_hash([trace.decisions, trace.requests])
+        fingerprint = stable_hash(BehaviourTrace.read(nested.parent).inner_half())
     kept = BehaviourKeys(
         world=WORLD, fingerprints=dict(sorted(fingerprints.items())), estimator=fingerprint
     )

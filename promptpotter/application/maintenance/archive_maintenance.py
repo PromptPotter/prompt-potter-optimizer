@@ -74,15 +74,6 @@ ones every later campaign replays. An answer under any other role is SKIPPED and
 never compacted on a guess."""
 
 
-# `panels.py::_inner_narrated` reads an L4 row's trace.
-_READ_ON_L4_ROWS = frozenset({"reasoning_trace"})
-assert _READ_ON_L4_ROWS <= UNREAD_PIPELINE_KEYS
-
-
-def _protected_pipeline_fields(pipeline: PipelineData) -> frozenset[str]:
-    return _READ_ON_L4_ROWS if inner_facts_of(pipeline) is not None else frozenset()
-
-
 def _parsed(lines: Iterable[str]) -> list[tuple[str, FiledAnswer]]:
     return [(line, answer_of(line)) for line in lines]
 
@@ -201,8 +192,8 @@ def _runs_of(answer: FiledAnswer) -> set[str]:
     """The runs *answer* serves: the one that filed it, and an L4 outer cell's inner campaign."""
     hop = answer.filed_by
     runs = {_UNSTAMPED if hop is None else f"{hop.campaign_id}/{hop.cycle_id}"}
-    if (inner := inner_facts_of(answer.cell.pipeline)) is not None and inner.campaign_id:
-        runs.add(f"inner {inner.campaign_id}")
+    if (inner := inner_facts_of(answer.cell.pipeline)) is not None:
+        runs.add(f"inner {inner.run.campaign_id}")
     return runs
 
 
@@ -462,7 +453,7 @@ def _compacted(
         pipeline = answer.cell.pipeline
         moved: dict[str, Any] = {
             f: value
-            for f in sorted(UNREAD_PIPELINE_KEYS - _protected_pipeline_fields(pipeline))
+            for f in sorted(UNREAD_PIPELINE_KEYS)
             if (value := getattr(pipeline, f)) is not None
         }
         if not moved:

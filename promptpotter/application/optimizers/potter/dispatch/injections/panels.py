@@ -17,7 +17,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     ANSWER_LABEL_STEM,
     ANSWER_TALLY_ROWS,
     DEGENERATE_TRACE_CAP,
-    INNER_NARRATIVE_CAP,
     LOOP_NOVELTY,
     LOST_CELL_MIN,
     MEMORY_FIELD_CAP,
@@ -56,8 +55,6 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.connector import unit_count, unit_plural
-from promptpotter.domain.l4.inner_facts import InnerCellFacts
-from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
 from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading, level_text
@@ -382,8 +379,6 @@ class _TranscriptPlan(NamedTuple):
 
 
 def _transcript_plan(b: PotterView) -> _TranscriptPlan | None:
-    if _inner_narrated(b):
-        return None
     lost = _repeatedly_lost(_edits(b))
     lost_keys = {key for key, _ in lost}
     rows = [r for r in _misses(b) if r.key not in lost_keys]
@@ -446,8 +441,8 @@ def _r_sample_transcripts(b: PotterView) -> list[Item]:
                 f"THE PARENT'S RUN HIT THIS — {loss.lost} of {loss.tried} edits missed it; "
                 f"this is {loss.by}'s run."
             )
-        if trace := r.facts.pipeline.reasoning_trace:
-            parts.append(f"MODEL REASONING:\n{_trace_excerpt(trace)}")
+        if (said := b.transcript(r)) is not None:
+            parts.append(f"{said.heading}:\n{_trace_excerpt(said.text)}")
         if r.facts.verifier_graded:
             parts.append(f"VERIFIER SCORE: {r.grade.fitness}")
         else:
@@ -482,78 +477,8 @@ def _judge_verdict(cell: GradedCell) -> str:
     return f"JUDGE ({name}): {label} — {why[:200]}"
 
 
-# Normal two-sided ~95% over one cell's two level SEs, which carry no n to take a t from.
-_CELL_SEPARATION_SIGMAS = 2.0
-
-
-def _inner_narrated(b: PotterView) -> list[tuple[GradedCell, InnerCellFacts]]:
-    """A series caveat withholds a seed's θ, never its narrative."""
-    return [
-        (r, inner)
-        for r in b.trajectory_results
-        if (inner := inner_facts_of(r.facts.pipeline)) is not None
-        and r.facts.pipeline.reasoning_trace
-    ]
-
-
-def _paired_cell(
-    inner: InnerCellFacts, origin: InnerCellFacts | None
-) -> tuple[float | None, float | None]:
-    lift = inner.mean_round_delta
-    base = None if origin is None else origin.mean_round_delta
-    if lift is None or origin is None or base is None:
-        return (lift, None)
-    se, base_se = inner.mean_parent_level_se, origin.mean_parent_level_se
-    # No bar where an arm went unpriced: a floored cell adopts no levels to have an SE over.
-    bar = (se**2 + base_se**2) ** 0.5 if se is not None and base_se is not None else None
-    return (lift - base, bar)
-
-
-def _paired_bench(r: GradedCell, origin: GradedCell | None) -> float | None:
-    """The scored term, paired the same way; it carries no SE, so the θ pair keeps the ranking."""
-    own = outer_proxies_of(r.facts.pipeline)
-    base = outer_proxies_of(origin.facts.pipeline) if origin is not None else None
-    lift = None if own is None else own.held_out_lift
-    base_lift = None if base is None else base.held_out_lift
-    return None if lift is None or base_lift is None else lift - base_lift
-
-
-class _NarratedCell(NamedTuple):
-    upper: float | None
-    theta: float | None
-    bar: float | None
-    bench: float | None
-    paired: bool
-    cell: GradedCell
-
-
-def _narrated_cells(b: PotterView) -> list[_NarratedCell]:
-    """Ranked on the upper bound, since a point-estimate rank leads with noise; a seed with no θ follows."""
-    origin = {r.key: r for r in b.origin_per_sample}
-    cells = []
-    for r, inner in _inner_narrated(b):
-        o = origin.get(r.key)
-        # The origin's own measurement pairs with nothing: differenced with itself it reads `+0.000`, no null.
-        paired = o is not None and o is not r and o.facts.answer != r.facts.answer
-        base = None if o is None else inner_facts_of(o.facts.pipeline)
-        d, bar = (
-            _paired_cell(inner, base)
-            if paired
-            else (inner.mean_round_delta, inner.mean_parent_level_se)
-        )
-        scored = outer_proxies_of(r.facts.pipeline)
-        own = None if scored is None else scored.held_out_lift
-        bench = _paired_bench(r, o) if paired else own
-        upper = None if d is None else d + _CELL_SEPARATION_SIGMAS * (bar or 0.0)
-        cells.append(_NarratedCell(upper, d, bar, bench, paired, r))
-    cells.sort(key=lambda c: (c.upper is None, 0.0 if c.upper is None else c.upper))
-    return cells
-
-
 def clustered_sample_ids(b: PotterView) -> list[int]:
-    """The rows a critique cluster may span, and the only ones a panel marks ``[#id]``: the misses shown and the cells edits keep losing, or one level up the narrated cells."""
-    if narrated := _narrated_cells(b):
-        return [b.position_of[c.cell.key] for c in narrated]
+    """The rows a critique cluster may span, and the only ones a panel marks ``[#id]``: the misses shown and the cells edits keep losing."""
     return [
         b.position_of[key]
         for key in (
@@ -561,57 +486,6 @@ def clustered_sample_ids(b: PotterView) -> list[int]:
             *(key for key, _ in _repeatedly_lost(_edits(b))),
         )
     ]
-
-
-@signal(
-    "inner_narratives",
-    kind=InjectionKind.MEASUREMENT,
-    char_cap=None,
-    citable=True,
-)
-def _r_inner_narratives(b: PotterView) -> list[Item]:
-    cells = _narrated_cells(b)
-    if not cells:
-        return []
-    unit = b.measured_unit
-    edited = [c for c in cells if c.paired and c.upper is not None]
-    n_worse = sum(1 for c in edited if c.upper is not None and c.upper < 0.0)
-    header = (
-        f"INNER RUN NARRATIVES ({len(cells)} inner campaigns, one per outer {unit}, weakest first "
-        "— those are the ones with something to learn from, so ground every candidate in a "
-        "specific observation from one of them. `bench` is that seed's held-out lift under the "
-        "optimizer prompts that ran it (the scored term), `th` the search pool's with ± its error "
-        "bar (— where its series differences nothing). A line marked `vs origin` ran under an "
-        "EDITED optimizer prompt and reads as the "
-        "DIFFERENCE from the same seed under the unedited prompts, so the seed's own difficulty "
-        "is already subtracted"
-    )
-    if edited and n_worse:
-        header += f"; {n_worse} of those {len(edited)} are worse than the origin beyond their own error bar"
-    elif edited:
-        header += (
-            f"; none of those {len(edited)} separates from the origin beyond its own error bar, "
-            "so their ORDER carries no information"
-        )
-    sections = [Item(header + ":")]
-    for c in cells:
-        r = c.cell
-        label = str(r.facts.query or "inner")[:80]
-        bench = f"bench {c.bench:+.3f} · " if c.bench is not None else ""
-        theta = (
-            "th —"
-            if c.theta is None
-            else f"th {c.theta:+.3f}" + (f" ±{c.bar:.3f}" if c.bar is not None else " (unpriced)")
-        )
-        mark = f"{bench}{theta}" + (" vs origin" if c.paired else "")
-        trace = r.facts.pipeline.reasoning_trace or ""
-        sections.append(
-            Item(
-                f"[{sample_tag(b.position_of[r.key])}] {label} {mark}\n{_head_at_line(trace, INNER_NARRATIVE_CAP)}",
-                trusted=False,
-            )
-        )
-    return sections
 
 
 def _misses(b: PotterView) -> list[GradedCell]:
@@ -782,10 +656,10 @@ def _miss_row(
         + (_verifier_outcome(r) if verifier else _miss_outcome(r))
         + (" | RAN TO THE OUTPUT CEILING" if ran_to_output_ceiling(r.facts) else "")
     )
-    if not (trace := r.facts.pipeline.reasoning_trace):
+    if (said := b.transcript(r)) is None:
         return Item(row, trusted=False)
     # A row whose transcript is PLACED is not stepped twice; one the budget dropped keeps its step.
-    stepped = f"{row} | last step: {tail(trace, MISS_STEP_CAP)}"
+    stepped = f"{row} | last step: {tail(said.text, MISS_STEP_CAP)}"
     return Item(stepped, trusted=False, if_quoted=(r.key, row))
 
 
@@ -796,8 +670,6 @@ def _miss_row(
     citable=True,
 )
 def _r_failing_samples(b: PotterView) -> list[Item]:
-    if _inner_narrated(b):
-        return []
     verifier = _no_labels(b)
     rows = _misses(b)
     errored = _errored(b)
@@ -999,20 +871,30 @@ def _r_mutation_memory(b: PotterView) -> list[Item]:
     for edit in edits:
         echoes = [r for r, prev in seen if same_idea(edit.idea, prev, threshold=IDEA_MATCH_MARK)]
         seen.append((edit.round.round, edit.idea))
-        # An edit inside the noise says nothing of its idea; the ↺ count still holds it.
-        if not edit.verdict:
+        whole = None if edit.reading is None else edit.reading.on_whole_set
+        if edit.verdict:
+            row = _edit_row(edit, b.position_of, charged=charged)
+        elif whole is not None:
+            # Inside the noise says nothing of the idea, so no cell it gained or lost is shown.
+            row = f"{edit.candidate.label} inside the noise · {_mutation_text(edit)}"
+        elif isinstance(edit.candidate, Cut) and edit.candidate.kind == "eliminated":
+            row = f"{edit.candidate.label} eliminated short of its set · {_mutation_text(edit)}"
+        elif isinstance(edit.candidate, Measured):
+            row = f"{edit.candidate.label} unread against its parent · {_mutation_text(edit)}"
+        else:
             continue
         mark = f"  ↺ same idea as r{echoes[0]} (x{len(echoes) + 1})" if echoes else ""
-        row = _edit_row(edit, b.position_of, charged=charged)
         lines.append(f"  r{edit.round.round} {row}{mark}")
     lines.reverse()
     items = (
         [
             Item(
-                "ALREADY TRIED (this cycle, newest round first — each edit that separated from its "
-                "parent: its score, and the parent's cells it gained and lost; one that lost here "
-                "does not improve by being proposed again; ↺ marks an idea already tried in an "
-                "earlier round, in whatever field it was written into):"
+                "ALREADY TRIED (this cycle, newest round first — every measured edit: one that "
+                "separated from its parent with its score and the parent's cells it gained and "
+                "lost, one inside the noise, eliminated or unread as that alone; one that "
+                "lost here does not improve by "
+                "being proposed again; ↺ marks an idea already tried in an earlier round, in "
+                "whatever field it was written into):"
             ),
             *(Item(ln, trusted=False) for ln in lines),
         ]
@@ -1027,9 +909,13 @@ def _r_mutation_memory(b: PotterView) -> list[Item]:
     return items
 
 
+def _mutation_text(edit: _Edit) -> str:
+    return "; ".join(f"{field}: {value[:MEMORY_VALUE_CAP]}" for field, value in edit.changed)
+
+
 def _edit_row(edit: _Edit, position_of: Mapping[str, int], *, charged: bool) -> str:
     cand = edit.candidate
-    mutation = "; ".join(f"{field}: {value[:MEMORY_VALUE_CAP]}" for field, value in edit.changed)
+    mutation = _mutation_text(edit)
     fold = edit.round.folds.get(edit.key)
     # A verdict's reading covers the parent's whole set, so its two levels share their cells.
     reading = edit.reading

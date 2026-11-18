@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import random
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, Literal, cast, overload
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, cast, overload
 
 from pydantic import BaseModel
 
@@ -33,6 +33,7 @@ from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
 from promptpotter.application.runner.inner.tasks import inner_cells
+from promptpotter.application.runner.inner.transcript import inner_transcript
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -42,6 +43,8 @@ from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import BarRead, CrowningBar
 from promptpotter.domain.l4.cells import InnerCells
+from promptpotter.domain.l4.inner_facts import InnerRunAddress
+from promptpotter.domain.l4.proxies import inner_facts_of
 from promptpotter.domain.opt_search_point import (
     OPERATOR_SOURCE,
     EvidenceGrounding,
@@ -433,8 +436,27 @@ class Bounds(CycleRead):
         return require_spend_book("the run's spend").spent.sent_usd
 
 
+class Transcript(NamedTuple):
+    heading: str
+    text: str
+
+
 class Target(CycleRead):
     """The pipeline the run measures, as the bench resolved it."""
+
+    def __init__(self, round_: RoundContext, member: NodeMember) -> None:
+        super().__init__(round_, member)
+        self._inner_runs: dict[InnerRunAddress, str] = {}
+
+    def transcript(self, cell: GradedCell) -> Transcript | None:
+        """What a row's run said: an L4 cell's inner campaign, read where it ran and once per
+        reader, else the model's reasoning."""
+        if (inner := inner_facts_of(cell.facts.pipeline)) is None:
+            trace = cell.facts.pipeline.reasoning_trace
+            return Transcript("MODEL REASONING", trace) if trace else None
+        if inner.run not in self._inner_runs:
+            self._inner_runs[inner.run] = inner_transcript(self._cycle.session.store, inner)
+        return Transcript("INNER RUN", self._inner_runs[inner.run])
 
     @property
     def schema(self) -> PipelineSchema:

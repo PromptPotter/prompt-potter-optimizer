@@ -28,6 +28,7 @@ from unittest import mock
 import httpx
 import pytest
 from factories import (
+    INNER_RUN,
     PROMPT_INFO,
     SANDBOX_CAMPAIGN,
     archive_row,
@@ -2820,7 +2821,9 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
 def test_an_inner_campaign_whose_provider_reports_no_bill_is_not_a_free_cell() -> None:
     silent = SpendRollup()
     silent.bank(billed_call(node="n", input_tokens=10, output_tokens=5, rate_priced_usd=0.02))
-    facts = inner_cell_facts(cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}))
+    facts = inner_cell_facts(
+        cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}), INNER_RUN
+    )
     assert silent.total_used_usd == 0.0, "an unbilled inner cell vanished"
     inner_row = MeasuredCell(
         sample_key="k0",

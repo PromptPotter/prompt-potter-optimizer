@@ -41,7 +41,6 @@ flowchart LR
     DM[detectable_move]:::det
     FS[failing_samples]:::det
     ST[sample_transcripts]:::det
-    NAR["inner_narratives<br/>(L4)"]:::det
     MM[mutation_memory]:::det
   end
   subgraph MENUS[" "]
@@ -139,7 +138,7 @@ flowchart LR
 
 ## Reference
 
-The registered signals are every `@signal(…)` under `dispatch/injections/` — each renderer is its slot's SoT — plus the caller extra `n_variants` (substituted by `compile_prompt`, capped in `l1.py`). `[fenced]` = wrapped in `<UNTRUSTED_DATASET_CONTENT>`.
+The registered signals are every `@signal(…)` under `dispatch/injections/` — each renderer is its slot's SoT — plus the caller extra `n_variants` (capped in `l1.py`). Slots fill in the template's own text in one pass and panels join after (`llm_call.py::FilledPrompt.compose`), so a `{{…}}` inside injected text is data. `[fenced]` = wrapped in `<UNTRUSTED_DATASET_CONTENT>`.
 
 ### Every item that reaches an LLM carries an upper limit — bounded where it is PRODUCED
 
@@ -173,7 +172,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 **Cross-round derived:**
 
 - **`axis_memory`** ← `Cycle.axes()` → `AxisIndex.digest` — per-locus effect size over the closed rounds' arms (`OptSearchPoint.loci()` against each round fold's fitness); a semantic critique ranks prompt-field loci alone (`AxisImpact.kind`).
-- **Panels** (`injections/panels.py`): `escalation_panel` (stall depth + `exploration_budget`; gates the empty citation, `stall_exploration`) · `evidence_health` (per-node failure rates — an upstream fault no param mutation fixes) · `answer_distribution` (the collapse detector; `domain/scoring.py::enumerable_truth_labels` owns the rule, shared with the election's collapse refusal, and `constant_answer` the floor, which the origin round's health serves paired) · `failing_samples` (one row per miss, easiest-first on the locked δ ruler; once clustered, only rows the clusters span; never a tally by label) · `sample_transcripts` (the whole trace; a looping one, `dispatch/bundle.py::LOOP_NOVELTY`, head and tail; `panels.py::_query_excerpt` keeps the line naming the gold answer) · `inner_narratives` (each row as its PAIRED difference from the origin on the same seed) · `mutation_memory` (each edit that separated from its parent or collapsed to one label, `panels.py::_Edit.verdict`, with the cells it gained and lost, `application/scoring/paired.py::flipped_keys`; an edit inside the noise is left out, never shown as a loss) · the **decision frame**: `measurand` (what ELECTS, θ ± se), `detectable_move` (in rows), `confounds` (silent when none), `budget_state` (the one non-citable member).
+- **Panels** (`injections/panels.py`): `escalation_panel` (stall depth + `exploration_budget`; gates the empty citation, `stall_exploration`) · `evidence_health` (per-node failure rates — an upstream fault no param mutation fixes) · `answer_distribution` (the collapse detector; `domain/scoring.py::enumerable_truth_labels` owns the rule, shared with the election's collapse refusal, and `constant_answer` the floor, which the origin round's health serves paired) · `failing_samples` (one row per miss, easiest-first on the locked δ ruler; once clustered, only rows the clusters span; never a tally by label) · `sample_transcripts` (the whole trace; a looping one, `dispatch/bundle.py::LOOP_NOVELTY`, head and tail; `panels.py::_query_excerpt` keeps the line naming the gold answer; what a row's run said is `node_context.py::Target.transcript`, an L4 cell's inner campaign read where it ran) · `mutation_memory` (every measured edit: one that separated from its parent or collapsed to one label, `panels.py::_Edit.verdict`, with the cells it gained and lost, `application/scoring/paired.py::flipped_keys`; one inside the noise as one line, never shown as a loss) · the **decision frame**: `measurand` (what ELECTS, θ ± se), `detectable_move` (in rows), `confounds` (silent when none), `budget_state` (the one non-citable member).
 - **Capability directives** (`injections/layer_state.py`: `rebase_capability`, `terminate_capability`) ride the layout channel — on the `l2_context`/`l3_plan` floors AND mandatory sets, so no prose rewrite can drop them; the config bit is the one way to silence one. `reelect_capability` rides `rebase_capability`'s directive: it adds `fork_proposal.stand_on` and the ELECTIONS table (each round's pick and how it won, its later reads as parent, the arms it beat), the one carrier of the labels `stand_on` names, so it renders only beside the field. `l1_generate`'s prose token `{{n_variants}}` is guarded by `potter/validators.py::l1_inner_placeholders_intact` on the MERGED params.
 - **Directives a layer cannot cite**: `critique_axes` (the axes a critique may name, the running nodes' param keys, `layer_state.py::critique_axes`; the same list `critique` filters `suggested_axes` by) · `skill_tiers` (the SKILL.md tier ladder, rendered only where the target is delivered on demand, on the `l2_context` and `l3_plan` floors) · `l3_to_l2_note` (L3's note to L2, `L3Memory.note`, on `l2_context`'s floor).
 
@@ -204,9 +203,8 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 | `escalation_panel` | `exploration_budget`🧩 `l1_stall_depth`🧩 |
 | `evidence_health` | `node_failure_rates`🧩 `evidence_starved_node`🧩 |
 | `answer_distribution` | the `graded_answer`🧩 tally · the `enumerable_truth_labels`🧩 tally · `constant_answer`🧩 against the round's fitness |
-| `failing_samples` | `sample_tag`🧩 `delta`🧩 `query`🧩 `span`🧩 `ground_truth`🧩 `predicted`🧩 `reasoning_trace`🧩 · verifier-graded `fitness`🧩 `outcome_note`🧩 `turns`🧩 `step_tokens`🧩 |
-| `sample_transcripts` | `sample_tag`🧩 `query`🧩 `reasoning_trace`🧩 `span`🧩 `ground_truth`🧩 `predicted`🧩 · verifier-graded `fitness`🧩 · `judge_readings`🧩 · a lost cell's `lost`🧩 `tried`🧩 `by`🧩 |
-| `inner_narratives` | `sample_tag`🧩 `query`🧩 `held_out_lift`🧩 `mean_round_delta`🧩 `mean_parent_level_se`🧩 `paired`🧩 `reasoning_trace`🧩 |
+| `failing_samples` | `sample_tag`🧩 `delta`🧩 `query`🧩 `span`🧩 `ground_truth`🧩 `predicted`🧩 the transcript's last step · verifier-graded `fitness`🧩 `outcome_note`🧩 `turns`🧩 `step_tokens`🧩 |
+| `sample_transcripts` | `sample_tag`🧩 `query`🧩 the transcript (`reasoning_trace`🧩, or an L4 cell's inner run: per round its calls, the critique it acted on, each arm's outcome, `fitness`🧩 and lift) `span`🧩 `ground_truth`🧩 `predicted`🧩 · verifier-graded `fitness`🧩 · `judge_readings`🧩 · a lost cell's `lost`🧩 `tried`🧩 `by`🧩 |
 | `mutation_memory` | per edit `label`🧩 `fitness`🧩 against the parent's, `composite_fitness`🧩, `changed`🧩 (a param's value, a field's `changed_words`🧩, `shots`🧩), `gained`🧩 `lost`🧩, `same_idea`🧩 · the cells edits keep missing, `lost`🧩 of `tried`🧩 |
 | `measurand` | `composite_fitness`🧩 · frontier `theta`🧩 `se`🧩 · `evaluators`🧩 under a charged formula |
 | `detectable_move` | `detectable_rows`🧩: the expected information of `latest_sample_keys`🧩 at `parent_ability`🧩, both arms, at `admission`🧩 |

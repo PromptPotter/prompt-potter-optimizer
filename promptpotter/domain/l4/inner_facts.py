@@ -4,6 +4,7 @@ from enum import StrEnum
 
 from pydantic import Field
 
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
 from promptpotter.domain.strict_model import FrozenModel
@@ -29,6 +30,13 @@ def series_reason_head(reason: ThetaCaveat | SeriesGap) -> str:
     if isinstance(reason, ThetaCaveat):
         return THETA_CAVEAT_INFO[reason].label
     return SERIES_GAP_HEAD[reason]
+
+
+class InnerRunAddress(FrozenModel):
+    """A replayed cell reads its run in the sandbox of the cycle that measured it, never the reader's."""
+
+    sandbox: CycleHop = Field(description="The outer cycle whose sandbox holds the inner campaign")
+    campaign_id: str = Field(description="The inner campaign, in that sandbox")
 
 
 class InnerCellFacts(FrozenModel):
@@ -79,8 +87,4 @@ class InnerCellFacts(FrozenModel):
     tokens: int | None = Field(
         description="Tokens used, cumulative across attempts; reporting only, as `sent_usd`"
     )
-    campaign_id: str | None = Field(
-        default=None,
-        description="The inner campaign that measured the cell, in the outer cycle's sandbox; null "
-        "on a row filed before the stamp",
-    )
+    run: InnerRunAddress = Field(description="The inner campaign that measured the cell")

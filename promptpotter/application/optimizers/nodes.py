@@ -334,7 +334,7 @@ class BehaviourKeys(FrozenModel):
     world: str
     # By built-in optimizer: the hash of its straight run's trace in `world`.
     fingerprints: dict[str, str]
-    # The hash of the L4 leg's trace in `world`.
+    # The hash of the L4 leg's inner campaigns in `world`, never its outer's own half.
     estimator: str
 
     @classmethod
@@ -343,7 +343,7 @@ class BehaviourKeys(FrozenModel):
 
     @property
     def cell_estimator(self) -> str:
-        """What reads an L4 cell's number (`InnerCells.estimator`): the L4 leg's behaviour in its world."""
+        """What reads an L4 cell's number (`InnerCells.estimator`): the L4 leg's inner behaviour in its world."""
         return stable_hash([self.estimator, self.world])
 
 
