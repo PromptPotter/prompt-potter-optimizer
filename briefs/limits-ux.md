@@ -76,4 +76,3 @@ and `.claude/skills/design/SKILL.md` (mobile first: design for phone width now).
 - A clamp shows: on the offline world or a fixture, ask a spend cap above the allowance; the panel and
   the CLI reply both name asked → armed and the reason.
 - One link is expected; split only if the served reading and the surfaces cannot land green apart.
-</content>
