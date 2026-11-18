@@ -100,7 +100,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
-from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.cycle_result import CycleResult, WallClock
 from promptpotter.domain.job import EmbeddedRun, InnerRun
 from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.l4.inner_facts import InnerRunAddress
@@ -1467,7 +1467,6 @@ def cycle_result(
         scopes=[],
     )
     return CycleResult(
-        rounds=rounds,
         n_rounds_after_origin=len(rounds),
         result_fitness=0.5,
         fitness_unit="rate",
@@ -1491,6 +1490,13 @@ def cycle_result(
         stop_reason=stop_reason,
         started_at="2026-01-01T00:00:00Z",
         finished_at="2026-01-01T01:00:00Z",
+        wall_clock=WallClock(elapsed_s=None),
+        rounds_to_separable=None,
+        rounds_to_improved=None,
+        rounds_to_ceiling=None,
+        fitness_ceiling=None,
+        prompt_hashes={},
+        scorer_id="",
         spend=SpendRollup(
             total_used_usd=cost if billed is None else billed,
             total_incurred_usd=cost,

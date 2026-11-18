@@ -58,7 +58,6 @@ from promptpotter.shared.errors import (
     SendRefusedError,
     is_provider_credit_refusal,
 )
-from promptpotter.shared.measurement_context import instrument_mode
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -570,7 +569,7 @@ class SpendBook:
         """The root ledger's copy of a nested run's call, filed as *kind*, which its meter counts."""
         if self.ledger is None:
             return
-        mode = instrument_mode()
+        mode = run_scope().instrument
         copy = record.filed_as(kind).model_copy(
             update={
                 "node": f"{NESTED_NODE_PREFIX}{record.node}",

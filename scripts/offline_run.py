@@ -144,7 +144,6 @@ from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import default_identity
-from promptpotter.shared.measurement_context import instrument_depth
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
@@ -378,7 +377,7 @@ def _recombine(obj: dict[str, Any], props: dict[str, Any], filler: SchemaFiller,
 def _asker() -> str:
     """Empty for the run's own call; an L4 cell's inner campaign by its seat's seed and the arm
     laid into its overlay, never by its id, which hashes the code."""
-    if not instrument_depth():
+    if not run_scope().depth:
         return ""
     scope = run_scope()
     spawn, stores = scope.spawn, scope.account
@@ -1368,7 +1367,7 @@ async def run_controlled(
     )
     launched = forked.result
     assert isinstance(launched, Launched) and launched.held is not None
-    await launched.held.run_inline(readout_sink=print)
+    await (await launched.held).run_inline(readout_sink=print)
     after = subject_evidence(stores, [Subject(c) for c in subjects]).head_to_head
     assert after is not None
     row = next(r for r in after.rows if r.campaign_id == cid)

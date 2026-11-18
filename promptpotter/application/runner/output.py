@@ -28,16 +28,15 @@ from promptpotter.domain.bench import BenchColumn, BenchReading, BenchScore
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cells import HardSampleOrder, HardSamples
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_result import CycleResult, WallClock
 from promptpotter.domain.export import build_prompt_export
 from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
 from promptpotter.domain.paired_reading import READING_STATE_INFO, ArmKey, Estimate, lift_versus
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.records.run_records import (
-    CycleFinal,
     RaceStandingRecord,
     RoundClosedRecord,
-    WallClock,
 )
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.results_health import health_reading
@@ -51,7 +50,6 @@ from promptpotter.domain.run_standing import (
     round_clocks,
 )
 from promptpotter.domain.spend import RATE_PRICED_LABEL, SpendBucket, SpendRollup
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
@@ -157,7 +155,7 @@ def _halt_info(index: CycleIndex, rounds: list[RoundResult]) -> dict[str, str] |
 
 def _render_header(
     index: CycleIndex,
-    final: CycleFinal | None,
+    final: CycleResult | None,
     verdict: ReviewStat | None,
     halt: dict[str, str] | None,
 ) -> list[str]:
@@ -207,7 +205,7 @@ def _bench_columns(
     return " · ".join(cell(c) for c in sorted(get_args(BenchColumn), key=lambda c: c != headline))
 
 
-def _render_bench(final: CycleFinal | None, bench: BenchScore | None) -> list[str]:
+def _render_bench(final: CycleResult | None, bench: BenchScore | None) -> list[str]:
     if final is None or bench is None:
         return []
     graded = bench.graded
@@ -657,10 +655,6 @@ class RunArtifacts(Projection):
         _render_review_md(self._session, self._config)
 
 
-def _spend_by_round(layout: CycleLayout) -> dict[int, SpendRollup]:
-    return scan_ledger_spend_by_round(ledger_chain(CycleDir(layout.cycle_dir), moment=None))
-
-
 def _p_best(layout: CycleLayout) -> dict[int, dict[str, list[float]]]:
     """The cycle's own standings: a fork's prefix is its parent's to report."""
     return LedgerIndex.of(layout.ledger).view(_PBestTrajectories)
@@ -681,8 +675,8 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
             hard_samples=cycle_hard_samples(session.store, hop) if rounds else None,
             p_best=_p_best(layout),
             hard_sample_order=config.hard_sample_order,
-            spend_by_round=_spend_by_round(layout),
-            spent=scan_ledger_spend(ledger_chain(CycleDir(layout.cycle_dir), moment=None)),
+            spend_by_round=scan_ledger_spend_by_round(store.chain(hop)),
+            spent=scan_ledger_spend(store.chain(hop)),
             level_series=store.standing_rounds(hop, moment=None).level_series,
         )
     )
@@ -706,8 +700,8 @@ def _render_campaign_log_md(session: Session) -> None:
             hop=root,
             p_best=_p_best(root_layout),
             fork_indices=_load_sibling_indices(store, campaign_id, exclude=root.cycle_id),
-            spend_by_round=_spend_by_round(root_layout),
-            spent=scan_ledger_spend(ledger_chain(CycleDir(root_layout.cycle_dir), moment=None)),
+            spend_by_round=scan_ledger_spend_by_round(store.chain(root)),
+            spent=scan_ledger_spend(store.chain(root)),
             level_series=store.standing_rounds(root, moment=None).level_series,
         )
     )
@@ -765,7 +759,7 @@ def _render_export(session: Session, config: CampaignConfig) -> None:
         framing=campaign_framing(session.store, config, session.dataset),
         demo=session.state.scoring.partition.demo,
         bench=bench,
-        spend=scan_ledger_spend(ledger_chain(CycleDir(store.cycle_dir(hop)), moment=None)).spend,
+        spend=scan_ledger_spend(store.chain(hop)).spend,
     )
     store.write_export(hop, export)
 
@@ -794,6 +788,6 @@ def _render_review_md(session: Session, config: CampaignConfig) -> None:
         bench=read_cycle_bench(session.store, campaign, session.hop)
         if index.final is not None and campaign is not None
         else None,
-        spend=scan_ledger_spend(ledger_chain(CycleDir(cycle_dir), moment=None)).spend,
+        spend=scan_ledger_spend(store.chain(session.hop)).spend,
     )
     write_text(CycleLayout(cycle_dir).review_md, content)

@@ -147,9 +147,9 @@ BASELINE = {
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.
     "p_record": 21,
     # The arms each file naming most of them leaves out: a mirror rotting raises it.
-    # la-2 (+1): `Hold`'s one fold moved to its one reader (`holders.py`), so `ledger_scan` names
-    # it no longer.
-    "p_record_drift": 36,
+    # hubs-2 (-36): its 36 were `ledger_scan.py`'s folds and `live_dashboard.py`'s `_handle_*`
+    # table, each reading its own subset (`_DISPATCHES`); no file mirrors the roster.
+    "p_record_drift": 0,
     # Served properties no surface reads by name; a payload field only the terminal sends is one.
     # webb-5b (+1): `NodeOutputSchema.json_schema`, the backend's own document, served beside the
     # `contract` rows the browser now draws.
@@ -160,7 +160,9 @@ BASELINE = {
     # strata-flight (-1): the count once limits-ux and flight-ux stand in one tree.
     "p_served": 199,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
-    "p_unread_fields": 26,
+    # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
+    # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.
+    "p_unread_fields": 27,
     # Files naming three or more `CommandKind` rows, each a site the next row must reach.
     "p_command": 10,
     # The rows each file naming most of them leaves out.
@@ -251,18 +253,24 @@ def _spelled(literal: str, *identifiers: str) -> _Spelling:
 _ENUMERATES = 3
 
 
+# A projection's `_handle_*` table and a fold's declared kinds (`records: ClassVar[RecordClasses]`)
+# each read their own subset, which `read_model.py::LedgerIndex.check_every_arm_read` holds whole:
+# a file dispatching by kind enumerates the roster, never mirrors it.
+_DISPATCHES = re.compile(r"def _handle_\w+\(|^\s+records: ClassVar\[RecordClasses\]", re.MULTILINE)
+
+
 def _enumerations(sites: dict[Path, str], roster: list[_Spelling]) -> tuple[int, int]:
     """The files enumerating *roster*, and the entries each mirror leaves out. A file naming more
-    than half the roster mirrors it; one naming fewer reads its subset, so leaves out nothing. A
-    quoted value is often a common word, so it counts only inside a file that already enumerates by
-    name."""
+    than half the roster mirrors it; one naming fewer, or dispatching by kind (`_DISPATCHES`), reads
+    its subset, so leaves out nothing. A quoted value is often a common word, so it counts only
+    inside a file that already enumerates by name."""
     enumerating = left_out = 0
     for text in sites.values():
         named = [bool(name.search(text)) for name, _ in roster]
         if sum(named) < _ENUMERATES:
             continue
         enumerating += 1
-        if 2 * sum(named) <= len(roster):
+        if 2 * sum(named) <= len(roster) or _DISPATCHES.search(text):
             continue
         left_out += sum(
             not (hit or quoted.search(text)) for hit, (_, quoted) in zip(named, roster, strict=True)

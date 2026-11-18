@@ -37,7 +37,6 @@ from promptpotter.infrastructure.run_scope import rescope, run_scope
 from promptpotter.infrastructure.store.read_model import LedgerIndex, Projecting
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
 from promptpotter.infrastructure.store.stores import Stores
-from promptpotter.shared.measurement_context import instrument_depth
 
 
 def declare_run_stop(
@@ -114,7 +113,7 @@ class RunObservers:
     def arm_spend_book(self, book: SpendBook) -> None:
         book.ledger = billing_ledger("the run's book")
         # A nested run (an L4 inner cell) admits each send against its own book AND its root's.
-        if instrument_depth() > 0:
+        if run_scope().depth > 0:
             # Still the spawner's scope: its book, and the kind its pass files a cell as.
             enclosing = run_scope()
             if enclosing.book is None:
@@ -207,7 +206,7 @@ def _bind_observers(
             f"build_run_observers: the ledger of {session.hop} holds no RunWiringRecord"
         )
     dashboard.drain()
-    readout.open_readout(cycle_dir)
+    readout.open_readout(session.hop)
     # Each joins at the line the index stands at, past what the checkout folded.
     dashboard = projecting.add(dashboard)
     readout = projecting.add(readout)

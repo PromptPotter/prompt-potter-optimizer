@@ -37,6 +37,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.launcher.mint_and_start import OriginIncompleteError
 from promptpotter.application.jobs.launcher.run_job import HeldRun
+from promptpotter.application.jobs.machine_status import served_machine_status
 from promptpotter.application.jobs.mint import ConfigDriftError
 from promptpotter.application.origin_listing import no_dataset_hint
 from promptpotter.application.pipeline_resolve import fork_preview
@@ -81,6 +82,7 @@ from promptpotter.presentation.cli.main import (
     budget_from_args,
     build_parser,
     lookahead_from_args,
+    said_text,
 )
 from promptpotter.shared.errors import (
     ConflictError,
@@ -134,10 +136,19 @@ def inline_launch(args: argparse.Namespace) -> Inline:
     return Inline(no_wait=args.no_wait)
 
 
-def held_run(launched: object) -> HeldRun:
+async def held_run(
+    launched: object, dispatcher: CommandDispatcher, args: argparse.Namespace
+) -> HeldRun:
+    """A launch queued on a full machine says its place in line, as `machine-status` words it."""
     assert isinstance(launched, Launched), "a launching command answers its launch"
     assert launched.held is not None, "an inline launch is held, never detached"
-    return launched.held
+    if not launched.held.done() and not args.json_output:
+        status = await asyncio.to_thread(
+            served_machine_status, dispatcher.stores, dispatcher.job_registry
+        )
+        if status.notice is not None:
+            print(said_text(status.notice), flush=True)
+    return await launched.held
 
 
 def ctrl_c_pauses(
@@ -431,7 +442,7 @@ async def _hold_checkin(
     except OriginIncompleteError as refused:
         raise _said_incomplete(refused, last_turn, draft_id) from None
     _checkin_line("origin", f"complete — check-in {draft_id} started")
-    held = held_run(launched)
+    held = await held_run(launched, dispatcher, args)
     _checkin_line("campaign", f"minted {held.session.campaign_id} from check-in {draft_id}")
     return held
 
@@ -474,7 +485,7 @@ async def _new(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     if not (args.dataset and await asyncio.to_thread(Path(args.dataset).is_file)):
         dispatcher = CommandDispatcher(local_stores(tenant=args.tenant), inline=inline_launch(args))
-        return await mint_and_run(dispatcher, _named_mint(args, dispatcher))
+        return await mint_and_run(args, dispatcher, _named_mint(args, dispatcher))
     sets = args.sets
     patch = _sets_to_patch(sets) if sets else None
     dispatcher = CommandDispatcher(local_stores(tenant=args.tenant))
@@ -497,10 +508,12 @@ def _named_dataset(dispatcher: CommandDispatcher) -> Iterator[None]:
         raise
 
 
-async def mint_and_run(dispatcher: CommandDispatcher, mint: MintCampaignPayload) -> CommandResult:
+async def mint_and_run(
+    args: argparse.Namespace, dispatcher: CommandDispatcher, mint: MintCampaignPayload
+) -> CommandResult:
     with _named_dataset(dispatcher):
         launched = (await dispatcher.dispatch(CommandCall(mint, door=Door.TERMINAL))).result
-    held = held_run(launched)
+    held = await held_run(launched, dispatcher, args)
     _checkin_line("campaign", f"minted {held.session.campaign_id}")
     return await _run_origin(held)
 
@@ -680,10 +693,9 @@ async def _dispatch_held(
     args: argparse.Namespace, ctx: SessionCtx, payload: StartRunPayload | ForkCyclePayload
 ) -> HeldRun:
     """*ctx* follows the cycle the command answers (a fork) and stays put when the hold is refused."""
-    outcome = await CommandDispatcher(ctx.store, inline=inline_launch(args)).dispatch(
-        CommandCall(payload, door=Door.TERMINAL)
-    )
-    held = held_run(outcome.result)
+    dispatcher = CommandDispatcher(ctx.store, inline=inline_launch(args))
+    outcome = await dispatcher.dispatch(CommandCall(payload, door=Door.TERMINAL))
+    held = await held_run(outcome.result, dispatcher, args)
     ctx.cycle_id = held.session.hop.cycle_id
     return held
 
@@ -737,6 +749,7 @@ async def _pivot_to_fresh(
         "lookahead": lookahead_from_args(args),
     }
     return await mint_and_run(
+        args,
         CommandDispatcher(ctx.store, inline=inline_launch(args)),
         MintCampaignPayload.model_validate(fresh),
     )

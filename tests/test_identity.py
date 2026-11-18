@@ -215,6 +215,7 @@ from promptpotter.config import paths
 from promptpotter.config.paths import block_packs_root, install_datasets_root
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors import upload_connector
+from promptpotter.connectors.dbllmbench import DbllmbenchPanel
 from promptpotter.domain.arms import PointContext, Proposal
 from promptpotter.domain.bench import (
     BankPartition,
@@ -332,6 +333,7 @@ from promptpotter.infrastructure.projections.live_dashboard import (
 )
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
 from promptpotter.infrastructure.store.archive_queries import SampleFoldRow
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_resolved_run
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_FILE,
     FRAMING_FILE,
@@ -3029,6 +3031,25 @@ def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
     assert refused.value.details["capabilities_moved"] == ["/m"], (
         "a resume past a moved capability snapshot blamed only the dataset"
     )
+
+
+def test_a_moved_panel_is_banked_as_moved_while_the_measured_roster_stands(
+    built_stores: Stores, held: _Held
+) -> None:
+    opened, campaign = held
+    hop, campaigns = campaign.root_hop, built_stores.campaigns
+    measured, moved = (DbllmbenchPanel(questions=[{"id": q}]) for q in ("q1", "q2"))
+    for panel in (measured, moved, measured):
+        campaigns.write_resolved_run(
+            hop, opened.pipeline_read, experiment=panel, model_capabilities={}
+        )
+        resolved = scan_resolved_run(campaigns.chain(hop))
+        assert resolved.experiment == measured.model_dump(mode="json"), (
+            "a later launch's roster displaced the one every round measured"
+        )
+        assert resolved.moved_panel == (
+            None if panel is measured else moved.model_dump(mode="json")
+        ), "a launch on another panel than the measured one stood unreported, or never cleared"
 
 
 def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(

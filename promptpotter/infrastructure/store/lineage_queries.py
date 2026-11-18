@@ -7,11 +7,10 @@ from promptpotter.domain.arm_reading import ArmElection, ArmReading, panel_count
 from promptpotter.domain.arms import ArmState, arm_name
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.origin_panel import line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.results import Election
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_bench_readings,
     scan_ledger_verify,
@@ -147,7 +146,7 @@ def _cycle_spans(
     ANOTHER tree has no parent cycle here, and its prefix is its own record."""
     layout = stores.campaigns.layout(hop)
     if index.parent is not None and index.parent_cycle_id is None:
-        return ledger_chain(CycleDir(layout.cycle_dir), moment=moment)
+        return stores.campaigns.chain(hop, moment=moment)
     return [LedgerSpan(layout.ledger) if moment is None else moment.span(layout.ledger)]
 
 

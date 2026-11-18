@@ -2771,6 +2771,8 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
             finished_at="",
             spend=None,
             bench=bench,
+            selected=select_optimizer(cycle.config.optimization),
+            fitness_ceiling=None,
         )
         assert result.result_round == bench.selected.round == 1, "the result names the round graded"
 
@@ -5269,9 +5271,7 @@ def test_a_cell_is_its_samples_content_whatever_query_it_shares_or_slot_it_holds
                 strict=True,
             ),
         )
-        return scan_ledger_walks(
-            ledger_chain(CycleDir(built_stores.campaigns.cycle_dir(cycle_hop)), moment=None)
-        )
+        return scan_ledger_walks(built_stores.campaigns.chain(cycle_hop))
 
     first = filed_cycle("cycle_a", dict(enumerate(asks_one_thing)))
     assert len(individual_cells(first, "c0", RoleScope.REPORT)) == 2, "one query, two cells"

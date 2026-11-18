@@ -69,7 +69,6 @@ from promptpotter.domain.verification import (
     VerifyReading,
     VerifyStrategy,
 )
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.projections.live_dashboard import DashboardCheckout
@@ -209,7 +208,7 @@ def verify_reading(
 
 
 def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Scorer) -> VerifyReading:
-    chain = ledger_chain(CycleDir(stores.campaigns.cycle_dir(hop)), moment=None)
+    chain = stores.campaigns.chain(hop)
     # A pass is read before it is banked, so it joins the walks whether or not the ledger holds it.
     walks = [*scan_ledger_walks(chain), banked.walk()]
 
@@ -599,7 +598,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
             LedgerIndex.of(ledger.path).projecting() as projecting,
         ):
             dashboard = projecting.add(dashboard)
-            readout.open_readout(cycle_dir)
+            readout.open_readout(hop)
             projecting.add(readout)
             projecting.add(RunArtifacts(session, config))
             try:

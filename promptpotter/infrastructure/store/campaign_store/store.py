@@ -297,8 +297,8 @@ class CampaignStore:
     def campaign_walk_spans(self, campaign_id: str) -> list[LedgerSpan]:
         """Each cycle's whole chain, so a cycle lifted from another tree remembers its prefix."""
         widest: dict[Path, int | None] = {}
-        for cycle_dir in self.campaign_cycle_dirs(campaign_id):
-            for path, until in ledger_chain(CycleDir(cycle_dir), moment=None):
+        for hop in self.campaign_cycle_hops(campaign_id):
+            for path, until in self.chain(hop):
                 if not path.is_file():
                     continue
                 held = widest.get(path, 0)
@@ -531,7 +531,7 @@ class CampaignStore:
         )
 
     def standing_rounds(self, hop: CycleHop, *, moment: Moment | None) -> StandingRounds:
-        return scan_standing_rounds(ledger_chain(CycleDir(self.cycle_dir(hop)), moment=moment))
+        return scan_standing_rounds(self.chain(hop, moment=moment))
 
     def rewind_enters(self, hop: CycleHop, after_round: int) -> int:
         if not self.ledger(hop).exists():
@@ -698,8 +698,9 @@ class CampaignStore:
             update={"budget": folded.budget.over(self.read_campaign_ceiling(hop).budget)}
         )
 
-    def chain(self, hop: CycleHop) -> list[LedgerSpan]:
-        return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=None)
+    def chain(self, hop: CycleHop, *, moment: Moment | None = None) -> list[LedgerSpan]:
+        """THE read of a hop's chain: its fork prefix, then its own ledger, cut at *moment*."""
+        return ledger_chain(CycleDir(self.cycle_dir(hop)), moment=moment)
 
     def write_resolved_run(
         self,
@@ -709,24 +710,19 @@ class CampaignStore:
         experiment: BaseModel | None,
         model_capabilities: CapabilityMenu,
     ) -> None:
-        """Appended whenever this launch resolves other than the chain holds, a moved panel included."""
+        """Appended whenever this launch resolves other than the chain holds: a moved panel is
+        banked as such, the landed roster standing (the readout says it at INIT's exit)."""
         doc = None if experiment is None else experiment.model_dump(mode="json", exclude_unset=True)
         held = scan_resolved_run(self.chain(hop))
-        panel_moved = doc is not None and held.experiment is not None and held.experiment != doc
-        if panel_moved:
-            logger.warning(
-                "%s resolves a DIFFERENT panel than the one cycle %s measured — the landed roster "
-                "stands and this run's rows are not comparable to the earlier ones. Pin the "
-                "backend's roster, or run this as a new campaign.",
-                hop.campaign_id,
-                held.experiment_cycle_id,
-            )
-        landed = held.then(ResolvedRun(read, doc, model_capabilities=model_capabilities))
-        if panel_moved or landed != held:
-            self.append(
-                hop,
-                ResolvedRunRecord(read=read, experiment=doc, model_capabilities=model_capabilities),
-            )
+        moved = doc if held.experiment is not None and doc not in (None, held.experiment) else None
+        record = ResolvedRunRecord(
+            read=read,
+            experiment=None if moved is not None else doc,
+            model_capabilities=model_capabilities,
+            moved_panel=moved,
+        )
+        if held.then(ResolvedRun.of(record)) != held:
+            self.append(hop, record)
 
     def write_optimized_surface(self, hop: CycleHop, leaves: Sequence[ValueLeaf]) -> None:
         by_delivery: dict[str, list[ValueLeaf]] = {}

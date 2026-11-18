@@ -1,13 +1,14 @@
 """The run's scope: ONE frozen value on ONE ``ContextVar``, bound where a run opens
 (`runner/entry.py::run_optimization`) and where a verb outside one opens its own; a reader takes a
-field, never a variable of its own."""
+field, never a variable of its own. A field holds what a send or a record reads and no argument
+reaches; a value its caller holds (a node's `NodeContext.round_num`) rides the caller."""
 
 from __future__ import annotations
 
+import contextvars
 import enum
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -19,6 +20,7 @@ from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.spend import TokenUsageKind
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.shared.identity import IdentityContext
+from promptpotter.shared.measurement_context import InstrumentMode, MeasuredPass
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.send_pacing import SendBudget
@@ -90,10 +92,20 @@ class RunScope:
     stall_sink: Callable[[float], None] | None = None
     # The open cell's hold on the account, which its sends draw on.
     reservation: str | None = None
+    # An L4 inner cell's depth and its root's round, laid at the cell's entry inside its own task
+    # and never undone there, so it covers FINALIZE: a late bill lands on the root's ledger.
+    instrument: InstrumentMode | None = None
+    # The scoring pass a walk's cells measure, laid at its INGRESS (`scope_context`), or a
+    # re-entering asker inherits it stale; ``None`` is an origin pass.
+    measured: MeasuredPass | None = None
+
+    @property
+    def depth(self) -> int:
+        return 0 if self.instrument is None else self.instrument.depth
 
 
 _EMPTY = RunScope()
-_SCOPE: ContextVar[RunScope] = ContextVar("run_scope")
+_SCOPE: contextvars.ContextVar[RunScope] = contextvars.ContextVar("run_scope")
 
 
 def run_scope() -> RunScope:
@@ -121,3 +133,11 @@ def rescope(**fields: Any) -> None:
             "would outlive its run in this task"
         )
     _SCOPE.set(replace(scope, **fields))
+
+
+def scope_context(**fields: Any) -> contextvars.Context:
+    """A copy of this context with *fields* laid over its scope, for a task to run in: one loop
+    launches every walk's cells, so a block's binding would cover them all."""
+    context = contextvars.copy_context()
+    context.run(_SCOPE.set, replace(run_scope(), **fields))
+    return context

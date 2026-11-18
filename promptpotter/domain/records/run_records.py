@@ -29,6 +29,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import lift_prior
 from promptpotter.domain.cycle_paths import CycleHop, Subject
+from promptpotter.domain.cycle_result import CycleResult, WallClock
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
     OptimizerLimit,
@@ -52,7 +53,6 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.pipeline_params import (
     NodeCall,
-    PipelineParams,
     laid_calls,
     lay_nodes,
 )
@@ -1022,42 +1022,6 @@ class CycleStart(FrozenModel):
         return lay_nodes(self.origin_params or {}, laid_calls(self.pipeline_overlay))
 
 
-class WallClock(FrozenModel):
-    """CLOCK legs sum to ``elapsed_s``; ``worked_s`` is CALL time, so concurrency pushes it past."""
-
-    # ``None`` where either endpoint is unparseable; every share below is then unanswerable too.
-    elapsed_s: float | None
-    # By ``CampaignPhase`` value; a bracket that never fired or never closed is ABSENT, never 0.0.
-    phase_s: dict[str, float] = Field(default_factory=dict)
-    # ``TokenUsageKind`` → node → summed call seconds; cached calls excluded.
-    worked_s: dict[str, dict[str, float]] = Field(default_factory=dict)
-    # Same keys, in CLOCK: seconds held while no bracket and no gate was open.
-    unbracketed_call_s: dict[str, dict[str, float]] = Field(default_factory=dict)
-    # Round (JSON key) → seconds to its FIRST close: the last is a ruler restamp or a rewind's re-run.
-    round_ended_s: dict[str, float] = Field(default_factory=dict)
-    # HUMAN time at a gate, never folded into a machine leg.
-    gate_s: float = 0.0
-    # ``elapsed_s`` minus every CLOCK leg.
-    unattributed_s: float | None = None
-    # ``None`` = no fresh cell was measured; 0.0 = the measured cells waited for nothing.
-    unworked_s: float | None = None
-
-
-class CycleFinal(FrozenModel):
-    started_at: str
-    wall_clock: WallClock
-    rounds_to_separable: int | None
-    rounds_to_improved: int | None
-    rounds_to_ceiling: int | None
-    fitness_ceiling: float | None
-    prompt_hashes: dict[str, str]
-    scorer_id: str
-    # The round the optimizer's DECLARED pick was selected in.
-    result_round: int
-    result_prompt_fields: dict[str, dict[str, str]]
-    result_pipeline_params: PipelineParams | None
-
-
 class ElectionRecord(Election, CycleRecord):
     """A round's election, the moment it is held: the close carries the same one."""
 
@@ -1236,6 +1200,9 @@ class ResolvedRunRecord(CycleRecord):
     experiment: dict[str, Any] | None
     # The menu the run's schema answered with, its reasoning floors included; empty is UNKNOWN.
     model_capabilities: CapabilityMenu
+    # The roster this launch resolved where it differs from the one standing, which still stands:
+    # its rows are not comparable to the earlier ones. ``None``: the launch resolved the standing one.
+    moved_panel: dict[str, Any] | None = None
     timestamp: str = Field(default_factory=utcnow_iso)
 
 
@@ -1348,7 +1315,7 @@ class CycleFinalRecord(CycleRecord):
     """Banked only where the cycle's own runner stops it; a later ``running`` retires it."""
 
     record_type: Literal["cycle_final"] = "cycle_final"
-    final: CycleFinal
+    final: CycleResult
     # The round the stop left unclosed; ``None`` for a stop at a boundary.
     interrupted_round: int | None = None
     timestamp: str = Field(default_factory=utcnow_iso)

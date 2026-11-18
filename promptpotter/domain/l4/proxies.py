@@ -11,7 +11,7 @@ from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, InnerRunAddress, SeriesGap
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
-from promptpotter.domain.results import RoundResult
+from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import GradedCell, PipelineData
 from promptpotter.domain.strict_model import FrozenModel
@@ -171,7 +171,9 @@ def parent_levels(result: CycleResult) -> tuple[float, list[float]] | None:
     return trajectory[0].theta, [level.theta for level in trajectory[1]]
 
 
-def inner_cell_facts(result: CycleResult, run: InnerRunAddress) -> InnerCellFacts:
+def inner_cell_facts(
+    result: CycleResult, rounds: Sequence[RoundOutcome], run: InnerRunAddress
+) -> InnerCellFacts:
     held = parent_levels(result)
     origin = None if held is None else held[0]
     levels = [] if held is None else held[1]
@@ -189,7 +191,7 @@ def inner_cell_facts(result: CycleResult, run: InnerRunAddress) -> InnerCellFact
         rounds_ran=result.n_rounds_after_origin,
         round_budget=result.round_budget,
         stop_reason=result.stop_reason,
-        floor_reason=floor_reason(result),
+        floor_reason=floor_reason(result, rounds),
         origin_headroom=_origin_headroom(result),
         bench_origin_level=bench_origin,
         bench_final_lift=(
@@ -225,7 +227,7 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
     return float(sum(ses) / len(ses))
 
 
-def _spoiled(rnd: RoundResult) -> bool:
+def _spoiled(rnd: RoundOutcome) -> bool:
     """No proposal reached a cell, whatever the reply's failure: an empty panel is spoiled too."""
     return all(isinstance(arm, Cut) and arm.kind == "invalid" for arm in rnd.proposed.values())
 
@@ -241,13 +243,14 @@ def no_evidence_reason(result: CycleResult) -> str | None:
     return None
 
 
-def floor_reason(result: CycleResult) -> str | None:
-    """Optimizer-prompt-OWNED, so FLOORED rather than excluded: it is reproducible, hence evidence."""
+def floor_reason(result: CycleResult, rounds: Sequence[RoundOutcome]) -> str | None:
+    """Optimizer-prompt-OWNED, so FLOORED rather than excluded: it is reproducible, hence evidence.
+    *rounds* are the cycle's standing closes, read off its ledger."""
     if result.stop_reason is StopReason.OPTIMIZER_ABORT:
         return "its optimizer prompt terminated the inner campaign (optimizer_abort)"
     if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
         return None
-    spent = [r for r in result.rounds if r.round > 0]
+    spent = [r for r in rounds if r.round > 0]
     if spent and all(_spoiled(r) for r in spent):
         return (
             f"no proposal of its {len(spent)} L1 round(s) reached a cell: a reply that yielded "
@@ -256,9 +259,11 @@ def floor_reason(result: CycleResult) -> str | None:
     return None
 
 
-def compute_outer_proxies(result: CycleResult) -> OuterSampleProxies:
+def compute_outer_proxies(
+    result: CycleResult, rounds: Sequence[RoundOutcome]
+) -> OuterSampleProxies:
     """A floor is scored by the formula reading `floored`, never by a lift nobody measured."""
-    if floor_reason(result) is not None:
+    if floor_reason(result, rounds) is not None:
         return OuterSampleProxies(floored=1, held_out_lift=None)
     if (reason := no_evidence_reason(result)) is not None:
         # The inner cycle forwarded its own spend onto the outer ledger as it ran.

@@ -42,7 +42,6 @@ from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.run_scope import UNBOUND, InnerSpawnContext, rescope, run_scope
 from promptpotter.infrastructure.store.archive_queries import CampaignWalks, CellOf
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -50,7 +49,7 @@ from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeli
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, DatasetAccessError, PayloadInvalidError
-from promptpotter.shared.measurement_context import enter_instrument_mode
+from promptpotter.shared.measurement_context import InstrumentMode
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -408,8 +407,10 @@ def pin_inner_ruler(reach: RulerReach) -> None:
 
 def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_id: str) -> CellOf:
     """The archive stays the cell's CACHE, and MEMORY only for its campaign's walks: the scope it returns."""
-    # Before the cell's run binds its own round, so this still reads the spawner's.
-    enter_instrument_mode(spawned_in=current_round())
+    # INSIDE the cell's own task, or the mode leaks to the spawner; before the cell's run binds its
+    # own round, so this still reads the spawner's: the root's, as the spawner is the root.
+    spawner = run_scope()
+    rescope(instrument=InstrumentMode(depth=spawner.depth + 1, root_round=spawner.round))
     return CellOf(CampaignWalks(campaigns, campaign_id), ctx.ruler)
 
 

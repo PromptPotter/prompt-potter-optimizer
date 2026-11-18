@@ -46,7 +46,7 @@ from promptpotter.domain.cells import (
     HeatmapScope,
     hit_spread,
 )
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pass_kinds import individual_cells
@@ -65,7 +65,6 @@ from promptpotter.domain.scoring import (
     is_verifier_graded,
 )
 from promptpotter.domain.search_point import split_rendered_prompt
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import (
     OpenAt,
@@ -286,7 +285,7 @@ class CellsScope:
         cycle_dir = cycle_dir_for(art.base_dir, self.hop)
         campaign_id = self.hop.campaign_id
         # Its campaign's ledgers name the line; a fork's chain may reach past them.
-        chain = ledger_chain(CycleDir(cycle_dir), moment=None) if cycle_dir.is_dir() else []
+        chain = art.campaigns.chain(self.hop) if cycle_dir.is_dir() else []
         ledgers = {*art.campaigns.campaign_cycle_ledgers(campaign_id), *(p for p, _ in chain)}
         return (
             *read,
@@ -336,8 +335,7 @@ def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
     if not cycle_dir_for(stores.base_dir, hop).exists():
         raise NotFoundError(f"Cycle '{hop.campaign_id}/{hop.cycle_id}' not found")
     campaign = stores.campaigns.campaign(hop.campaign_id)
-    scorer = campaign_scorer(stores, hop.campaign_id)
-    assert scorer is not None, "its campaign stands"
+    scorer = campaign_scorer(stores, campaign)
     knobs = cycle_config(stores, campaign, hop).config.optimization
     rounds = closed_rounds(stores, hop, scorer, moment=None)
     bank = cycle_bank(stores, hop) if rounds else Bank.of(())
@@ -461,10 +459,7 @@ def _leaderboard_page(
         selected = _selected(view, members, max_unmeasured, limit)
         shown = _drawn_rows(cells, drawn, selected)
         wanted = {shown[sid].key: sid for sid in selected}
-        filed_under = campaign_scorer(art_store, hop.campaign_id)
-        if filed_under is None:
-            raise NotFoundError(f"Campaign '{hop.campaign_id}' not found")
-        graded_under = filed_under
+        graded_under = campaign_scorer(art_store, art_store.campaigns.campaign(hop.campaign_id))
         candidates, rows = _cycle_cells(art_store, hop, graded_under, wanted, cells.at)
 
     resolved, ranked = rank_hard_samples(
@@ -494,7 +489,7 @@ def _cycle_cells(
     """A column is an INDIVIDUAL, named by the arm it first was, so one a later round carried is served once."""
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     moment = None if at is None else Moment(CycleLayout(cycle_dir).ledger, at)
-    chain = ledger_chain(CycleDir(cycle_dir), moment=moment)
+    chain = stores.campaigns.chain(hop, moment=moment)
     walks = scan_ledger_walks(chain)
     candidates: dict[str, CellCandidate] = {}
     cells: list[CellRow] = []

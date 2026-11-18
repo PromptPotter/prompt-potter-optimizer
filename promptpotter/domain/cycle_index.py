@@ -6,6 +6,7 @@ from pydantic import Field
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.campaign import LIFECYCLE_STATUS_LABELS, LifecycleStatus
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -16,7 +17,6 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
-    CycleFinal,
     ForkSpec,
     SpawnedBy,
     sibling_cycle_id,
@@ -60,7 +60,7 @@ class CycleIndex(FrozenModel):
     interrupted_round: int | None = None
     # The failed stop's, where the run stands on one.
     error: ErrorRecord | None = None
-    final: CycleFinal | None = None
+    final: CycleResult | None = None
     superseded_by: str | None = None
     rounds: list[IndexRound] = Field(default_factory=list)
     # Rounds an arm walked in that no close stands for yet.

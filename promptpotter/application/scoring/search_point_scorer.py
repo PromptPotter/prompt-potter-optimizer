@@ -25,16 +25,12 @@ from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 from promptpotter.infrastructure.llm.heartbeat import CellBeat, heartbeat
 from promptpotter.infrastructure.llm.telemetry import current_round
-from promptpotter.infrastructure.run_scope import run_scope, scoped
+from promptpotter.infrastructure.run_scope import run_scope, scope_context, scoped
 from promptpotter.infrastructure.store.io import HeldLock
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import SendRefusedError
-from promptpotter.shared.measurement_context import (
-    MeasuredPass,
-    MeasurementRole,
-    measured_pass_context,
-)
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -338,7 +334,7 @@ def open_walk(
         dataset=dataset,
         ctx=ctx,
         checks=[*session.state.scoring.degradation_checks, *checks] if row.checks else checks,
-        context=measured_pass_context(measuring),
+        context=scope_context(measured=measuring),
         skip_at=skip_at,
     )
 

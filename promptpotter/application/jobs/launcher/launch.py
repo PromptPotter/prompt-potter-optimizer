@@ -47,11 +47,11 @@ class LaunchOutcome:
 
 @dataclass(frozen=True, slots=True)
 class Launched(LaunchOutcome):
-    """What the launch answers, as its ack records it; ``held`` is ``None`` where the run goes to
-    its own process."""
+    """What the launch answers, as its ack records it; ``held`` is the inline run's hold, answered
+    before its queue wait, and ``None`` where the run goes to its own process."""
 
     launch: LaunchedJob
-    held: HeldRun | None
+    held: asyncio.Future[HeldRun] | None
 
     def as_launches(self) -> list[LaunchedJob]:
         return [self.launch]
@@ -105,8 +105,11 @@ class Admitted(LaunchOutcome):
         parent) — awaited where the run goes: inline, detached, or in the queue's own task."""
         job = self.start.job
         if self.inline is not None:
-            held = await holding
-            return Launched(LaunchedJob.of(job, held.session.hop), held)
+            # A queued one answers its place first, as a detached one does; its door awaits the rest.
+            hold = asyncio.ensure_future(holding)
+            if job.queued:
+                return Launched(LaunchedJob.of(job), hold)
+            return Launched(LaunchedJob.of(job, (await hold).session.hop), hold)
 
         async def hold_and_detach() -> CycleHop:
             held = await holding

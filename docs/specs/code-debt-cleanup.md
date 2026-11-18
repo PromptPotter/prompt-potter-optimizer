@@ -133,18 +133,15 @@ row it closes.
 
 ### batch/26 · money
 
-- **A run's ambient state rides three carriers** (money-2's report): `infrastructure/run_scope.py::RunScope`
-  names no plan or sender and carries `round`, which the node context carries too, and
-  `shared/measurement_context.py` holds two more ContextVars (`_MODE`, `_MEASURED`) against
-  application `CLAUDE.md`'s "never a second ContextVar". Root: they ride `RunScope`, and the
-  carriers' doc says what each holds. **Rides with:** a run-scope chain. **Re-test:**
-  `git grep -c "ContextVar(" -- promptpotter` is 1.
-- **A campaign's absence is still refused beside `CampaignStore.campaign`**: `cycle_reads.py:127`
-  loads and raises its own `_not_found`; `scoring/measurement_log.py:464` refuses
-  `campaign_scorer`'s `None` with its own `NotFoundError` (`campaign_scorer` should take a
-  `Campaign`); a resume loads its campaign 4× (the door, `ceiling_meter_of`, `armed_budget`,
-  `runner/mint.py::open_launch`). Action: those reads take the door's `Campaign`. **Rides with:**
-  the next chain in `cycle_reads.py`. **Re-test:** one load per resume, by money-2's load counter.
+- **A resume loads its campaign 4×**: the door, `CampaignStore.ceiling_meter_of` (from
+  `launcher/admission.py::admit_and_share`), `CampaignStore.armed_budget` (from
+  `quota.py::declare_run_budget`) and `runner/mint.py::open_launch`. No launch carries the door's
+  `Campaign` past admission: `admit_slotless` and `admit_and_share` take a hop, and neither
+  `Session` (its `purpose` only) nor `CycleConfig` holds the campaign it was laid over. Action: the
+  door's `Campaign` rides the launch (the session, or `CycleConfig` beside its `config`), and the
+  store's ceiling reads take it. **Rides with:** a chain owning `store.py`, `quota.py` and
+  `initialization/session.py`. **Re-test:** one `load_campaign` per inline resume, counted with a
+  patched loader around `embedded_run.py::run_campaign`.
 
 ### batch/26 · rk-opt (links 1-4 landed; the rows its cap left)
 
@@ -336,24 +333,11 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### hubs (after valid, before layers)
 
-- **A cycle's outcome is two types**: `domain/cycle_result.py::CycleResult` (what `run_cycle` returns,
-  its rounds with their cells) and `domain/records/run_records.py::CycleFinal` (what `CycleFinalRecord`
-  banks), which `runner/entry.py` fills from the other field by field. Banking `CycleResult` whole
-  would put every round's cells on the ledger beside `RoundClosedRecord`, against the chronology rule
-  (`infrastructure/CLAUDE.md`). Action: one type, the rounds read back off the ledger by its
-  readers (`l4/proxies.py`). **Rides with:** hubs.
-  **Re-test:** `git grep -c "class CycleFinal(" -- promptpotter` is 0.
-- **A moved panel is warned into a log**: `campaign_store/store.py::write_resolved_run` logs it as a
-  `logger.warning` and appends anyway, a state the run enters and reports nowhere. Action: the moved
-  panel lands as a field of `ResolvedRunRecord`, read by the readout. **Rides with:** hubs.
-  **Re-test:** no `logger.warning` in `write_resolved_run`.
-- **A hop's chain is spelled 16 times**: `ledger_chain(CycleDir(...), moment=None)` across the
-  package. Action: one store read of a hop's chain (`CampaignStore.chain`). **Rides with:** hubs.
+- **The cycle index reads its chain beside the store's**: `projections/cycle_index.py::read_cycle_index`
+  takes a bare cycle dir and spells `ledger_chain(CycleDir(...))` itself, since the store imports it
+  (`CampaignStore.load`) and so it cannot read `CampaignStore.chain`. Action: the index fold is
+  handed its hop's chain, `CycleIndexProjection` keyed by hop. **Rides with:** hubs.
   **Re-test:** `git grep -c "ledger_chain(CycleDir(" -- promptpotter` sums to at most 1.
-- **`p_record_drift` counts handler tables as mirrors**: its 33 is `ledger_scan.py` (12) and
-  `live_dashboard.py` (21), folds and `_handle_*` tables that each read their own subset.
-  Action: the count skips a `_handle_*` table and a fold's declared kinds (the row above's
-  declaration). **Rides with:** hubs. **Re-test:** drift is 0 and its `BASELINE` row says so.
 
 ### layers (alone, after valid, before the behaviour keys)
 
@@ -559,17 +543,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (`scoring/closed_rounds.py` → `pipeline_resolve.py` → `jobs/quota.py` → `jobs/registry.py`). Action:
   the stop vocabulary moves to `domain/phases`. **Held:** no chain reaches `domain/phases` yet.
   **Re-test:** `git ls-files promptpotter/application/runner/termination.py` is non-empty.
-
-### batch/28 · faults
-
-- **An inline launch queued on a full machine prints nothing** (faults-2b's report; its `unloadable`
-  half closed at faults 3): `launcher/launch.py::Admitted.hand_over` awaits the hold, whose
-  `admit_and_hold` waits in `JobRegistry.await_claim`, before the inline door holds any answer.
-  Action: the inline `Launched` answers before its wait, carrying the queued `LaunchedJob` as the
-  detached one does, and the terminal words it with `machine_notice`'s words (nothing on stdout
-  under `--json`), then awaits the hold; no sink on `Inline`. **Rides with:** the next chain in
-  `application/commands/launching.py`. **Re-test:** `new` inline with `MACHINE_RUN_CAPACITY=0`
-  prints its queue place.
 
 ### batch/29 · xconn
 
@@ -934,10 +907,10 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `_strata` keys on the field raw; `BenchScope` takes a benchmark name. **Held:** l4-outer owns
   `potter/`, l4-runs `runner/bench.py`. **Re-test:** `git grep -n "measured_dataset or\|BenchScope" -- promptpotter`.
 - **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`
-  reads `result.rounds`, the last cycle only, while the bench and `n_rounds_after_origin` read the line
-  (`runner/entry.py`), so after a fork "no proposal reached a cell" is judged without the rounds
-  the rebase discarded. Action: `CycleResult` carries the line's spent rounds (`LineSpan.own`).
-  **Held:** a `CycleResult` reshape. **Re-test:** a forked inner line whose pre-fork rounds all spoiled.
+  reads the ended cycle's standing closes (`runner/inner/spawn.py::_run_inner_campaign`), while the
+  bench and `n_rounds_after_origin` read the line (`runner/entry.py`), so after a fork "no proposal
+  reached a cell" is judged without the rounds the rebase discarded. Action: the spawn reads the
+  line's spent rounds (`LineSpan.own`). **Re-test:** a forked inner line whose pre-fork rounds all spoiled.
 - **The abort knob and the floor disagree**: Shape: `potter/knobs.py`'s `terminate_capability` names
   an unrecoverable upstream fault as an abort's intended use, while `domain/l4/proxies.py::floor_reason`
   floors every `OPTIMIZER_ABORT` as prompt-owned, one after a real held-out gain included. Action: an

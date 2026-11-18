@@ -52,7 +52,6 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import (
     ConfigOverrides,
-    CycleFinal,
     CycleFinalRecord,
     CycleStart,
     RebaseRequest,
@@ -78,6 +77,8 @@ def build_cycle_result(
     finished_at: str,
     spend: SpendRollup | None,
     bench: BenchScore,
+    selected: SelectedOptimizer,
+    fitness_ceiling: float | None,
 ) -> CycleResult:
     picked = cycle.selection if cycle is not None else None
     picked_sp = cycle.selected_sp if cycle is not None else None
@@ -91,8 +92,8 @@ def build_cycle_result(
         spent = sum(len(span.own) for span in spans)
         round_budget = line_round_budget(spans, cycle.config.optimization.budget.rounds)
         curve = read_curve(session.store, cycle.bench_passes, scorer, spans, budget=round_budget)
+    started_at = session.state.launch_clock().started_at
     return CycleResult(
-        rounds=cycle_rounds,
         n_rounds_after_origin=spent,
         result_fitness=None if picked is None or picked.fold is None else picked.fold.fitness,
         fitness_unit=session.state.scoring.scorer.fitness_unit,
@@ -110,8 +111,17 @@ def build_cycle_result(
         result_pipeline_params=picked_sp.pipeline_params if picked_sp else None,
         stop_reason=stop_reason,
         stepped=stepped,
-        started_at=session.state.launch_clock().started_at,
+        started_at=started_at,
         finished_at=finished_at,
+        wall_clock=scan_ledger_wall_clock(
+            [session.store.campaigns.ledger(session.hop)],
+            started_at=started_at,
+            finished_at=finished_at,
+            optimizer_phases=selected.phases,
+        ),
+        **round_clocks(cycle_rounds, fitness_ceiling=fitness_ceiling)._asdict(),
+        prompt_hashes=selected.prompt_hashes(),
+        scorer_id=session.state.scoring.scorer.id,
         cycle_id=session.cycle_id,
         resumed_from_round=session.state.resumed_from_round,
         spend=spend,
@@ -156,12 +166,13 @@ def close_cycle(
             # In-memory, never the debounced ``dashboard.json``.
             spend=observers.dashboard.spend,
             bench=bench,
+            selected=selected,
+            fitness_ceiling=config.fitness_ceiling,
         )
         _finalize_run(
             session,
             observers,
             cycle_result,
-            config=config,
             selected=selected,
             open_round=open_round,
             pause_cause=pause_cause,
@@ -178,7 +189,6 @@ def _finalize_run(
     observers: RunObservers,
     cycle_result: CycleResult,
     *,
-    config: CampaignConfig,
     selected: SelectedOptimizer,
     open_round: int | None,
     pause_cause: PauseCause,
@@ -211,26 +221,7 @@ def _finalize_run(
         # A pause leaves the cycle ACTIVE: the PAUSED just declared must stay the last declaration read.
         session.store.campaigns.append(
             session.hop,
-            CycleFinalRecord(
-                interrupted_round=interrupted_round,
-                final=CycleFinal(
-                    started_at=cycle_result.started_at,
-                    wall_clock=scan_ledger_wall_clock(
-                        [session.store.campaigns.ledger(session.hop)],
-                        started_at=cycle_result.started_at,
-                        finished_at=cycle_result.finished_at,
-                        optimizer_phases=selected.phases,
-                    ),
-                    **round_clocks(
-                        cycle_result.rounds, fitness_ceiling=config.fitness_ceiling
-                    )._asdict(),
-                    prompt_hashes=selected.prompt_hashes(),
-                    scorer_id=session.state.scoring.scorer.id,
-                    result_round=cycle_result.result_round,
-                    result_prompt_fields=cycle_result.result_prompt_fields,
-                    result_pipeline_params=cycle_result.result_pipeline_params,
-                ),
-            ),
+            CycleFinalRecord(interrupted_round=interrupted_round, final=cycle_result),
         )
         # After what it banked, and before the drain renders the artifacts that name the stop.
         declare_run_stop(session, observers, stop_reason, interrupted_by=pause_cause, detail=detail)

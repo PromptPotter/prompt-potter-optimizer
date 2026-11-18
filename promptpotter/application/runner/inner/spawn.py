@@ -1,4 +1,4 @@
-"""Instrument mode is declared in ``shared/measurement_context.py`` alone; read it before changing what it binds.
+"""Instrument mode rides `run_scope.py::RunScope.instrument` alone, laid by `tasks.py::enter_inner_cell`.
 
 The recursion's connector; the connector table loads it by name, so no backend package imports the application."""
 
@@ -60,12 +60,17 @@ from promptpotter.domain.l4.proxies import (
 from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.records.run_records import SpawnedBy, SpawnedRecord
+from promptpotter.domain.records.run_records import RoundStatement, SpawnedBy, SpawnedRecord
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.infrastructure.llm.telemetry import bound_round
-from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
+from promptpotter.infrastructure.run_scope import (
+    InnerSpawnContext,
+    run_scope,
+    scope_context,
+    scoped,
+)
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.io import write_text
 from promptpotter.infrastructure.store.layout import (
@@ -81,12 +86,7 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
 )
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.measurement_context import (
-    MAX_INSTRUMENT_DEPTH,
-    instrument_depth,
-    measured_pass,
-    measured_pass_context,
-)
+from promptpotter.shared.measurement_context import MAX_INSTRUMENT_DEPTH
 
 # An inner cycle's budget is ROUNDS, never a spend or token cap: those trip on token counts, which jitter.
 
@@ -101,7 +101,7 @@ Overrides = dict[str, dict[str, Any]]
 
 
 def _spawn_provenance(ctx: InnerSpawnContext, round_num: int, query: str) -> dict[str, Any]:
-    cand = measured_pass()
+    cand = run_scope().measured
     return {
         "round": round_num,
         "individual_id": cand.individual_id if cand else None,
@@ -287,8 +287,9 @@ async def _run_inner_campaign(
     cell: _InnerCell,
     minted: list[CycleHop],
     spawned_by: dict[str, Any],
-) -> CycleResult:
-    """Runs in a FRESH task, so every ContextVar bound below is this cell's alone."""
+) -> tuple[CycleResult, list[RoundStatement]]:
+    """Runs in a FRESH task, so every ContextVar bound below is this cell's alone. The rounds are
+    the ended cycle's standing closes, off its ledger."""
     store = claim_sandbox(cell.ctx)
     # Over the seat too: its init reads what this cell remembers.
     with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
@@ -302,7 +303,7 @@ async def _run_inner_campaign(
                 build_run_observers, session=session, campaign_config=config
             )
             # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
-            _, result = await slotless_share(
+            ended, result = await slotless_share(
                 config,
                 stores=session.store,
                 holder=InnerRun(cell.spec.inner_dataset),
@@ -318,7 +319,8 @@ async def _run_inner_campaign(
                     optimizer=opened.optimizer,
                 ),
             )
-    return result
+            standing = ended.store.campaigns.standing_rounds(ended.hop, moment=None)
+    return result, [held.close for held in standing.rounds.values()]
 
 
 def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
@@ -335,7 +337,7 @@ def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
 async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, Any]:
     """One cell: an inner hop in the asker's sandbox, read by one law."""
     query = sample.query
-    depth = instrument_depth()
+    depth = run_scope().depth
     if depth >= MAX_INSTRUMENT_DEPTH:
         raise CellUnscoreableError(
             f"promptpotter connector: an inner run {depth} level(s) deep spawns no inner campaign "
@@ -353,10 +355,10 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     # The context binds no OUTER candidate, or inner optimizer calls bill under the outer cell's role.
     inner_task = asyncio.create_task(
         _run_inner_campaign(cell, minted, spawned_by),
-        context=measured_pass_context(None),
+        context=scope_context(measured=None),
     )
     try:
-        result = await inner_task
+        result, rounds = await inner_task
     except asyncio.CancelledError:
         if not inner_task.done():
             inner_task.cancel()
@@ -373,9 +375,9 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
             spent={},
         )
     # Raises `CellUnscoreableError` on every other no-evidence shape, which `measure_sample` resolves.
-    scored = compute_outer_proxies(result)
+    scored = compute_outer_proxies(result, rounds)
     run = InnerRunAddress(sandbox=cell.ctx.inside[-1], campaign_id=cell.campaign_id)
-    facts = inner_cell_facts(result, run)
+    facts = inner_cell_facts(result, rounds, run)
     delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"
     held = "floored" if scored.held_out_lift is None else f"B{scored.held_out_lift:+.3f}"
 

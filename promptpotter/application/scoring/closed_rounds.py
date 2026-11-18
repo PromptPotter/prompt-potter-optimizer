@@ -6,6 +6,7 @@ from dataclasses import replace
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import LaunchState
 from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.records.partition import PartitionRecord
@@ -30,10 +31,7 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import MINT_FRESH, NextAct, NotFoundError
 
 
-def campaign_scorer(stores: Stores, campaign_id: str) -> Scorer | None:
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
-        return None
+def campaign_scorer(stores: Stores, campaign: Campaign) -> Scorer:
     return scorer_of(
         cycle_config(stores, campaign, campaign.root_hop).config, verifier_graded=False
     )

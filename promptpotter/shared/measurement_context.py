@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextvars
 import enum
 from dataclasses import dataclass
 
@@ -14,29 +13,6 @@ class InstrumentMode:
 
     depth: int
     root_round: int | None
-
-
-# Never reset: `_MODE` must cover FINALIZE, or a late bill lands on the cell's own ledger.
-_MODE: contextvars.ContextVar[InstrumentMode | None] = contextvars.ContextVar(
-    "instrument_mode", default=None
-)
-
-
-def enter_instrument_mode(*, spawned_in: int | None) -> InstrumentMode:
-    """Call INSIDE the inner cycle's own ``asyncio.Task``, or the mode leaks to the spawner.
-    *spawned_in* is the spawner's round: the root's, as the spawner is the root."""
-    mode = InstrumentMode(depth=instrument_depth() + 1, root_round=spawned_in)
-    _MODE.set(mode)
-    return mode
-
-
-def instrument_mode() -> InstrumentMode | None:
-    return _MODE.get()
-
-
-def instrument_depth() -> int:
-    mode = _MODE.get()
-    return mode.depth if mode is not None else 0
 
 
 class MeasurementRole(enum.StrEnum):
@@ -64,23 +40,5 @@ class RoleScope(enum.StrEnum):
 
 @dataclass(frozen=True)
 class MeasuredPass:
-    """Bound at the INGRESS, or a re-entering asker inherits it stale."""
-
     individual_id: str
     role: MeasurementRole
-
-
-_MEASURED: contextvars.ContextVar[MeasuredPass | None] = contextvars.ContextVar(
-    "measured_pass", default=None
-)
-
-
-def measured_pass_context(measured: MeasuredPass | None) -> contextvars.Context:
-    """``None`` is an origin pass. A context, not a set: one loop launches every walk's cells."""
-    context = contextvars.copy_context()
-    context.run(_MEASURED.set, measured)
-    return context
-
-
-def measured_pass() -> MeasuredPass | None:
-    return _MEASURED.get()

@@ -58,7 +58,7 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.narration import NarratedRecord, Narration
 from promptpotter.domain.paired_reading import level_text, lift_text
 from promptpotter.domain.pass_kinds import PASSES
@@ -104,9 +104,11 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.said import GLYPH
 from promptpotter.domain.sample import sample_tag
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_standing_rounds
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_resolved_run,
+    scan_standing_rounds,
+)
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.composite import render_composite_fitness_block
@@ -152,18 +154,19 @@ class ReadoutProjection(Projection):
         self._block_size = 1
         self._headed: set[int] = set()
         self._readout: Path | None = None
-        self._cycle_dir: Path | None = None
+        self._campaigns = session.store.campaigns
+        self._hop: CycleHop | None = None
         # The election and a race speak in keys; the narration names each arm as announced.
         self._narration = Narration()
         self._order_shown: list[int] = []
 
-    def open_readout(self, cycle_dir: Path) -> None:
+    def open_readout(self, hop: CycleHop) -> None:
         """A fork rebinds here; the file it leaves ends on the line naming the next one."""
-        path = CycleLayout(cycle_dir.absolute()).readout
+        path = CycleLayout(self._campaigns.cycle_dir(hop).absolute()).readout
         line = f"Readout: {path} · {time.strftime('%Y-%m-%d %H:%M:%S')}"
         self._write(line)
         self._readout = path
-        self._cycle_dir = cycle_dir
+        self._hop = hop
         self._mirror(line)
 
     def _write(self, line: str) -> None:
@@ -222,11 +225,16 @@ class ReadoutProjection(Projection):
         if record.round is not None:
             self._round_num = record.round
         # A `--from` retracted its rounds before INIT exits, so what stands is exactly the prior line.
-        if isinstance(act, InitClosed) and self._cycle_dir is not None:
-            standing = scan_standing_rounds(
-                ledger_chain(CycleDir(self._cycle_dir), moment=None)
-            ).rounds
+        if isinstance(act, InitClosed) and self._hop is not None:
+            chain = self._campaigns.chain(self._hop)
+            standing = scan_standing_rounds(chain).rounds
             self._closed = {n: held.close for n, held in standing.items()}
+            if (resolved := scan_resolved_run(chain)).moved_panel is not None:
+                self._write(
+                    f"  {YELLOW}{GLYPH['warn']} a DIFFERENT panel than cycle "
+                    f"{resolved.experiment_cycle_id} measured: its roster stands, and this run's "
+                    f"rows compare to none before · pin the backend's roster or start anew{RESET}"
+                )
 
     def _closed_round(self, round_num: int) -> RoundStatement:
         """A propose act reads the rounds standing at INIT's exit, and each close since."""

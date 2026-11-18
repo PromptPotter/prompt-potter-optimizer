@@ -697,10 +697,10 @@ def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     assert cold.stamp.cold and cold.caveat is ThetaCaveat.COLD_RULER and cold.plateau() is None, (
         "a series on no δ scale read as one that differences"
     )
+    ran = [round_result(1), round_result(2)]
     withheld = inner_cell_facts(
-        cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)]).model_copy(
-            update={"level_series": cold}
-        ),
+        cycle_result([0.40, 0.55], 0.30, ran).model_copy(update={"level_series": cold}),
+        ran,
         INNER_RUN,
     )
     assert withheld.mean_round_delta is None, (
@@ -732,15 +732,16 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         origin: float | None = 0.30,
         rounds: list[RoundResult] | None = None,
         **kw: Any,
-    ) -> CycleResult:
+    ) -> tuple[CycleResult, list[RoundResult]]:
+        """A finished cycle and the rounds its ledger closed, as `spawn.py` reads them."""
         ran = [round_result(i + 1) for i in range(len(levels))] if rounds is None else rounds
-        return cycle_result(levels, origin, ran, **kw)
+        return cycle_result(levels, origin, ran, **kw), ran
 
     def delta(levels: list[float | None], **kw: Any) -> float | None:
-        return inner_cell_facts(cyc(levels, **kw), INNER_RUN).mean_round_delta
+        return inner_cell_facts(*cyc(levels, **kw), INNER_RUN).mean_round_delta
 
     def lift(levels: list[float | None], bench: list[float | None], **kw: Any) -> float | None:
-        px = compute_outer_proxies(cyc(levels, bench_origin=0.40, bench_levels=bench, **kw))
+        px = compute_outer_proxies(*cyc(levels, bench_origin=0.40, bench_levels=bench, **kw))
         return px.held_out_lift
 
     # The parent levels held forward to the round budget, averaged, less the origin's 0.30.
@@ -758,8 +759,10 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         assert delta(levels, **kw) == pytest.approx(mean), why
     # `parent_level_series` pads a short series with its last value; padding carries no precision.
     se_kw: dict[str, Any] = {"origin_se": 0.90, "ses": [0.30, 0.40]}
-    padded = mean_parent_level_se(cyc([0.30, 0.60], round_budget=4, **se_kw))
-    assert padded == pytest.approx(mean_parent_level_se(cyc([0.30, 0.60], round_budget=2, **se_kw)))
+    padded = mean_parent_level_se(cyc([0.30, 0.60], round_budget=4, **se_kw)[0])
+    assert padded == pytest.approx(
+        mean_parent_level_se(cyc([0.30, 0.60], round_budget=2, **se_kw)[0])
+    )
     assert padded == pytest.approx(0.35), (
         "nested frontier fits are correlated: never sigma/sqrt(n); and the origin's SE cancels "
         "inside `variant - origin` and stays out"
@@ -769,8 +772,8 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     # search split's θ scores ZERO.
     churned = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40])
     churn = (
-        inner_cell_facts(churned, INNER_RUN).mean_round_delta,
-        compute_outer_proxies(churned),
+        inner_cell_facts(*churned, INNER_RUN).mean_round_delta,
+        compute_outer_proxies(*churned),
     )
     assert (churn[0], churn[1].held_out_lift) == pytest.approx((0.25, 0.0))
     assert lift([0.55, 0.55], [0.50, 0.50]) == pytest.approx(0.10)
@@ -782,25 +785,25 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         cyc([0.40], rounds=tooling, stop_reason=StopReason.TOKEN_BUDGET),
         cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.50, None]),
         cyc([0.55], bench_origin=None),
-        cyc([0.55]).model_copy(update={"curve": None}),
+        (cyc([0.55])[0].model_copy(update={"curve": None}), []),
     ):
         with pytest.raises(CellUnscoreableError):
-            compute_outer_proxies(unscoreable)
+            compute_outer_proxies(*unscoreable)
     # A series that differences nothing is a SERVED fact beside the scored term, never an exclusion.
     for unread in (
         cyc([0.40, 0.55], caveat=ThetaCaveat.COLD_RULER),
         cyc([0.40, None]),
         cyc([0.40, 0.55], origin=None),
     ):
-        facts = inner_cell_facts(unread, INNER_RUN)
-        assert compute_outer_proxies(unread).held_out_lift == pytest.approx(0.0), (
+        facts = inner_cell_facts(*unread, INNER_RUN)
+        assert compute_outer_proxies(*unread).held_out_lift == pytest.approx(0.0), (
             "a cold or holed search series excluded a cell its held-out lift scores"
         )
         assert facts.mean_round_delta is None and facts.series_reason, (
             "a θ lift read off a series that differences nothing, or withheld without its reason"
         )
         # The tape reads the row the ledger kept, live and on replay alike.
-        report = inner_cell_report(facts, compute_outer_proxies(unread))
+        report = inner_cell_report(facts, compute_outer_proxies(*unread))
         row = measurement(0, None, pipeline_data={"cell_report": report})
         kept = TypeAdapter(LedgerCell).validate_python(row)
         line = fmt_query_result(0, kept.facts, kept.grade, display_tags={})
@@ -817,12 +820,16 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         for sid, report in enumerate(
             [
                 inner_cell_report(
-                    inner_cell_facts(cyc([0.40]), INNER_RUN),
+                    inner_cell_facts(*cyc([0.40]), INNER_RUN),
                     OuterSampleProxies(floored=0, held_out_lift=held),
                 )
                 for held in (0.0, 0.0, 0.0, 0.05, 0.0, 0.0375)
             ]
-            + [inner_cell_report(inner_cell_facts(owned, INNER_RUN), compute_outer_proxies(owned))]
+            + [
+                inner_cell_report(
+                    inner_cell_facts(*owned, INNER_RUN), compute_outer_proxies(*owned)
+                )
+            ]
         )
     ]
     family = yaml.safe_load(
@@ -854,14 +861,14 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         [round_result(1, candidates_scored=0, no_op=1, dup=1)],
         [round_result(1, candidates_scored=0, no_op=2), failed(PARSE_FAILURE_MALFORMED, 2)],
     ):
-        assert compute_outer_proxies(cyc([0.40, 0.40], rounds=spoiled)) == floor, (
+        assert compute_outer_proxies(*cyc([0.40, 0.40], rounds=spoiled)) == floor, (
             f"no proposal of {[r.round for r in spoiled]} reached a cell, yet the cell scored"
         )
-    assert compute_outer_proxies(owned) == floor, (
+    assert compute_outer_proxies(*owned) == floor, (
         "its optimizer's own abort was excluded or scored as a held lift"
     )
     reached = [failed(PARSE_FAILURE_MALFORMED, 1), round_result(2, no_op=1)]
-    assert compute_outer_proxies(cyc([0.40, 0.55], rounds=reached)) == OuterSampleProxies(
+    assert compute_outer_proxies(*cyc([0.40, 0.55], rounds=reached)) == OuterSampleProxies(
         floored=0, held_out_lift=0.0
     ), "a cycle one proposal of which reached a cell floored"
     assert delta([0.40, 0.55], rounds=reached) == pytest.approx(0.175), (

@@ -28,7 +28,7 @@ from promptpotter.domain.campaign_config import CampaignConfig, start_layer
 from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Lens
+from promptpotter.domain.cycle_paths import CycleHop, Lens
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.records.run_records import ConfigOverrides
 from promptpotter.domain.results import RoundResult
@@ -39,12 +39,10 @@ from promptpotter.domain.scoring import (
     Scorer,
     anchored_criterion_dials,
 )
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     StandingRounds,
     scan_standing_rounds,
 )
-from promptpotter.infrastructure.store.layout import cycle_dir_for
 from promptpotter.infrastructure.store.read_model import LedgerSpan
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -195,9 +193,7 @@ def load_mask_record(
     for hop, index in stores.campaigns.campaign_cycles(campaign_id):
         cid = hop.cycle_id
         indexes[cid] = index
-        lines[cid] = scan_standing_rounds(
-            ledger_chain(CycleDir(cycle_dir_for(stores.base_dir, hop)), moment=None)
-        )
+        lines[cid] = stores.campaigns.standing_rounds(hop, moment=None)
         own = scorer_of(cycle_config(stores, campaign, hop).config, verifier_graded=False)
         files[cid] = {
             closed.round: closed for closed in closed_rounds(stores, hop, own, moment=None)

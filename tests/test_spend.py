@@ -299,7 +299,7 @@ from promptpotter.infrastructure.projections.live_dashboard import (
     LiveDashboardProjection,
     WaitingOn,
 )
-from promptpotter.infrastructure.run_scope import InnerSpawnContext, rescope, scoped
+from promptpotter.infrastructure.run_scope import InnerSpawnContext, rescope, run_scope, scoped
 from promptpotter.infrastructure.store.account_spend import (
     account_bill,
     bank_spend,
@@ -365,12 +365,7 @@ from promptpotter.shared.identity import (
     UserId,
     default_identity,
 )
-from promptpotter.shared.measurement_context import (
-    MeasuredPass,
-    MeasurementRole,
-    enter_instrument_mode,
-    measured_pass,
-)
+from promptpotter.shared.measurement_context import InstrumentMode, MeasuredPass, MeasurementRole
 
 
 @pytest.fixture
@@ -973,7 +968,7 @@ async def _round(
 
     async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
         call = len(backend.calls) + 1
-        walk = int(cast("MeasuredPass", measured_pass()).individual_id[1:])
+        walk = int(cast("MeasuredPass", run_scope().measured).individual_id[1:])
         asked.append((walk, sample.id, len(absorbed())))
         out[walk] = out.get(walk, 0) + 1
         peaks[walk] = max(peaks.get(walk, 0), out[walk])
@@ -1506,8 +1501,8 @@ async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
 
 async def test_an_inner_run_spawns_no_inner_campaign() -> None:
     async def _from_inside() -> None:
-        enter_instrument_mode(spawned_in=0)
-        await spawn.run_inner_cycle(Sample(id=0, query="q", ground_truth=None), {})
+        with scoped(instrument=InstrumentMode(depth=1, root_round=0)):
+            await spawn.run_inner_cycle(Sample(id=0, query="q", ground_truth=None), {})
 
     with pytest.raises(CellUnscoreableError) as refused:
         await asyncio.create_task(_from_inside())
@@ -2965,7 +2960,7 @@ def test_an_inner_campaign_whose_provider_reports_no_bill_is_not_a_free_cell() -
     silent = SpendRollup()
     silent.bank(billed_call(node="n", input_tokens=10, output_tokens=5, rate_priced_usd=0.02))
     facts = inner_cell_facts(
-        cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}), INNER_RUN
+        cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}), [], INNER_RUN
     )
     assert silent.total_used_usd == 0.0, "an unbilled inner cell vanished"
     inner_row = MeasuredCell(

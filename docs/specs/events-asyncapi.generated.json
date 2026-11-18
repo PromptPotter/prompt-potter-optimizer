@@ -734,6 +734,81 @@
         "title": "BarRead",
         "type": "object"
       },
+      "BenchCurve": {
+        "additionalProperties": false,
+        "description": "A line's held-out curve: per round of its budget, the standing selection's headline on the\nbench rows, and its area, paired row by row with the origin's.",
+        "properties": {
+          "area": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredLift"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per bench row, the standing selection's grade averaged over the budget's rounds less the origin's, one paired t over the rows every pass scored. Null exactly where `state` is not `read`; a line that never adopted reads 0."
+          },
+          "levels": {
+            "description": "Per round of the line's round budget, the standing selection's headline, the last held forward; null where its pass read nothing or was never sent.",
+            "items": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Levels",
+            "type": "array"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The origin's headline on its pass; null where it read nothing.",
+            "title": "Origin"
+          },
+          "rows": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "description": "By `Sample.key`: the origin's headline grade, then the standing selection's per round; null where unscored.",
+            "title": "Rows",
+            "type": "object"
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReadingState",
+            "description": "`read`, or why the area reads nothing: the first unread pass of the origin and each standing selection, in the order they stood."
+          }
+        },
+        "required": [
+          "state",
+          "origin",
+          "levels",
+          "area",
+          "rows"
+        ],
+        "title": "BenchCurve",
+        "type": "object"
+      },
       "BenchPass": {
         "additionalProperties": false,
         "properties": {
@@ -1904,118 +1979,12 @@
         "title": "Cut",
         "type": "object"
       },
-      "CycleFinal": {
-        "additionalProperties": false,
-        "properties": {
-          "fitness_ceiling": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Fitness Ceiling"
-          },
-          "prompt_hashes": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Prompt Hashes",
-            "type": "object"
-          },
-          "result_pipeline_params": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PipelineParams"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "result_prompt_fields": {
-            "additionalProperties": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "type": "object"
-            },
-            "title": "Result Prompt Fields",
-            "type": "object"
-          },
-          "result_round": {
-            "title": "Result Round",
-            "type": "integer"
-          },
-          "rounds_to_ceiling": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rounds To Ceiling"
-          },
-          "rounds_to_improved": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rounds To Improved"
-          },
-          "rounds_to_separable": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rounds To Separable"
-          },
-          "scorer_id": {
-            "title": "Scorer Id",
-            "type": "string"
-          },
-          "started_at": {
-            "title": "Started At",
-            "type": "string"
-          },
-          "wall_clock": {
-            "$ref": "#/components/schemas/WallClock"
-          }
-        },
-        "required": [
-          "started_at",
-          "wall_clock",
-          "rounds_to_separable",
-          "rounds_to_improved",
-          "rounds_to_ceiling",
-          "fitness_ceiling",
-          "prompt_hashes",
-          "scorer_id",
-          "result_round",
-          "result_prompt_fields",
-          "result_pipeline_params"
-        ],
-        "title": "CycleFinal",
-        "type": "object"
-      },
       "CycleFinalRecord": {
         "additionalProperties": false,
         "description": "Banked only where the cycle's own runner stops it; a later ``running`` retires it.",
         "properties": {
           "final": {
-            "$ref": "#/components/schemas/CycleFinal"
+            "$ref": "#/components/schemas/CycleResult"
           },
           "interrupted_round": {
             "anyOf": [
@@ -2339,6 +2308,229 @@
             "$ref": "#/components/schemas/TrailTombstoneRecord"
           }
         ]
+      },
+      "CycleResult": {
+        "additionalProperties": false,
+        "description": "What `run_cycle` returns and `CycleFinalRecord` banks whole. Its rounds are the ledger's\ncloses, read back by their reader (`l4/proxies.py::floor_reason`), never banked twice.",
+        "properties": {
+          "bench": {
+            "$ref": "#/components/schemas/BenchScore"
+          },
+          "curve": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BenchCurve"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cycle_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cycle Id"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ErrorRecord"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "finished_at": {
+            "title": "Finished At",
+            "type": "string"
+          },
+          "fitness_ceiling": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fitness Ceiling"
+          },
+          "fitness_unit": {
+            "$ref": "#/components/schemas/MeasurandUnit"
+          },
+          "level_series": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LevelSeries"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "n_rounds_after_origin": {
+            "title": "N Rounds After Origin",
+            "type": "integer"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OwnLevel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "prompt_hashes": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Prompt Hashes",
+            "type": "object"
+          },
+          "result_fitness": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result Fitness"
+          },
+          "result_pipeline_params": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PipelineParams"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "result_prompt_fields": {
+            "additionalProperties": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Result Prompt Fields",
+            "type": "object"
+          },
+          "result_round": {
+            "title": "Result Round",
+            "type": "integer"
+          },
+          "resumed_from_round": {
+            "default": 1,
+            "title": "Resumed From Round",
+            "type": "integer"
+          },
+          "round_budget": {
+            "title": "Round Budget",
+            "type": "integer"
+          },
+          "rounds_to_ceiling": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounds To Ceiling"
+          },
+          "rounds_to_improved": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounds To Improved"
+          },
+          "rounds_to_separable": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounds To Separable"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "spend": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SpendRollup"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "started_at": {
+            "title": "Started At",
+            "type": "string"
+          },
+          "stepped": {
+            "default": false,
+            "title": "Stepped",
+            "type": "boolean"
+          },
+          "stop_reason": {
+            "$ref": "#/components/schemas/StopReason"
+          },
+          "wall_clock": {
+            "$ref": "#/components/schemas/WallClock"
+          }
+        },
+        "required": [
+          "n_rounds_after_origin",
+          "result_fitness",
+          "fitness_unit",
+          "result_round",
+          "origin",
+          "level_series",
+          "round_budget",
+          "result_prompt_fields",
+          "stop_reason",
+          "started_at",
+          "finished_at",
+          "wall_clock",
+          "rounds_to_separable",
+          "rounds_to_improved",
+          "rounds_to_ceiling",
+          "fitness_ceiling",
+          "prompt_hashes",
+          "scorer_id",
+          "bench",
+          "curve"
+        ],
+        "title": "CycleResult",
+        "type": "object"
       },
       "CycleShareRecord": {
         "additionalProperties": false,
@@ -6764,6 +6956,19 @@
             "title": "Model Capabilities",
             "type": "object"
           },
+          "moved_panel": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Moved Panel"
+          },
           "read": {
             "$ref": "#/components/schemas/PipelineRead"
           },
@@ -8490,6 +8695,112 @@
           "spawned_by"
         ],
         "title": "SpawnedRecord",
+        "type": "object"
+      },
+      "SpendBucket": {
+        "additionalProperties": false,
+        "description": "One spend sub-bucket: a spend kind's, or one node's.\n\n``used_usd`` is the BILL providers reported, ``rate_priced_usd`` our rate table's price of the\ncalls none billed, and ``incurred_usd`` counts both and prices cache hits too.",
+        "properties": {
+          "cache_read_tokens": {
+            "default": 0,
+            "title": "Cache Read Tokens",
+            "type": "integer"
+          },
+          "cache_write_tokens": {
+            "default": 0,
+            "title": "Cache Write Tokens",
+            "type": "integer"
+          },
+          "incurred_unpriced_tokens": {
+            "default": 0,
+            "title": "Incurred Unpriced Tokens",
+            "type": "integer"
+          },
+          "incurred_usd": {
+            "default": 0.0,
+            "title": "Incurred Usd",
+            "type": "number"
+          },
+          "input_tokens": {
+            "default": 0,
+            "title": "Input Tokens",
+            "type": "integer"
+          },
+          "output_tokens": {
+            "default": 0,
+            "title": "Output Tokens",
+            "type": "integer"
+          },
+          "rate_known": {
+            "default": false,
+            "title": "Rate Known",
+            "type": "boolean"
+          },
+          "rate_priced_usd": {
+            "default": 0.0,
+            "title": "Rate Priced Usd",
+            "type": "number"
+          },
+          "reasoning_tokens": {
+            "default": 0,
+            "title": "Reasoning Tokens",
+            "type": "integer"
+          },
+          "unpriced_tokens": {
+            "default": 0,
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          },
+          "used_usd": {
+            "default": 0.0,
+            "title": "Used Usd",
+            "type": "number"
+          }
+        },
+        "title": "SpendBucket",
+        "type": "object"
+      },
+      "SpendRollup": {
+        "additionalProperties": false,
+        "description": "A cycle's spend: a bucket per spend kind, and the totals every consumer reads off them.\n\nA budget caps ``total_used_usd`` and ``total_rate_priced_usd`` together; ``total_incurred_usd``\nprices cache hits too.",
+        "properties": {
+          "by_kind": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SpendBucket"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/TokenUsageKind"
+            },
+            "title": "By Kind",
+            "type": "object"
+          },
+          "total_incurred_usd": {
+            "default": 0.0,
+            "title": "Total Incurred Usd",
+            "type": "number"
+          },
+          "total_rate_priced_usd": {
+            "default": 0.0,
+            "title": "Total Rate Priced Usd",
+            "type": "number"
+          },
+          "total_tokens_used": {
+            "default": 0,
+            "title": "Total Tokens Used",
+            "type": "integer"
+          },
+          "total_used_usd": {
+            "default": 0.0,
+            "title": "Total Used Usd",
+            "type": "number"
+          },
+          "unpriced_tokens": {
+            "default": 0,
+            "title": "Unpriced Tokens",
+            "type": "integer"
+          }
+        },
+        "title": "SpendRollup",
         "type": "object"
       },
       "SpendTombstoneRecord": {

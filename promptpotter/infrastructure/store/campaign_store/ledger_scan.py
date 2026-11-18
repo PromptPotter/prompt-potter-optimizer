@@ -9,6 +9,7 @@ from promptpotter.domain.arms import ArmState, Cut, Measured, Skipped
 from promptpotter.domain.bench import BenchReading, BenchScore
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cycle_index import Intervention
+from promptpotter.domain.cycle_result import WallClock
 from promptpotter.domain.narration import Narration
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pass_kinds import IndividualWalk
@@ -56,7 +57,6 @@ from promptpotter.domain.records.run_records import (
     SpawnedRecord,
     StandingBudgetRecord,
     TokenUsageRecord,
-    WallClock,
 )
 from promptpotter.domain.results import RoundCells
 from promptpotter.domain.ruler import LevelSeries
@@ -96,14 +96,27 @@ class ResolvedRun:
     # The cycle whose ledger landed the roster that stands.
     experiment_cycle_id: str | None = None
     model_capabilities: CapabilityMenu = field(default_factory=dict)
+    # The LATEST resolve's moved roster (`ResolvedRunRecord.moved_panel`); a span resolving nothing keeps it.
+    moved_panel: dict[str, Any] | None = None
+
+    @classmethod
+    def of(cls, record: ResolvedRunRecord) -> ResolvedRun:
+        return cls(
+            record.read,
+            record.experiment,
+            model_capabilities=record.model_capabilities,
+            moved_panel=record.moved_panel,
+        )
 
     def then(self, later: ResolvedRun) -> ResolvedRun:
         first = self if self.experiment else later
+        latest = self if later.read is None else later
         return ResolvedRun(
-            read=self.read if later.read is None else later.read,
+            read=latest.read,
             experiment=first.experiment,
             experiment_cycle_id=first.experiment_cycle_id,
             model_capabilities=later.model_capabilities or self.model_capabilities,
+            moved_panel=latest.moved_panel,
         )
 
 
@@ -114,11 +127,7 @@ class _ResolvedRun:
         self._found = ResolvedRun()
 
     def feed(self, record: ResolvedRunRecord) -> None:
-        self._found = self._found.then(
-            ResolvedRun(
-                record.read, record.experiment, model_capabilities=record.model_capabilities
-            )
-        )
+        self._found = self._found.then(ResolvedRun.of(record))
 
     def value(self) -> ResolvedRun:
         return self._found

@@ -18,6 +18,7 @@ from promptpotter.application.served_dashboard import WarmingDashboard, served_d
 from promptpotter.application.views.render.export import ExportFiles, ExportProvenance, export_files
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.arm_reading import ArmReading
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
 from promptpotter.domain.dashboard_rows import ServedArm
@@ -98,16 +99,16 @@ class RoundView(StrictModel):
 
 
 def _closed(
-    stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
+    stores: Stores, campaign: Campaign, hop: CycleHop, round_num: int, *, moment: Moment | None
 ) -> RoundResult | None:
-    scorer = campaign_scorer(stores, hop.campaign_id)
-    return None if scorer is None else closed_round(stores, hop, round_num, scorer, moment=moment)
+    return closed_round(stores, hop, round_num, campaign_scorer(stores, campaign), moment=moment)
 
 
 def served_round(
     stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
 ) -> RoundView | None:
-    closed = _closed(stores, hop, round_num, moment=moment)
+    campaign = stores.campaigns.campaign(hop.campaign_id)
+    closed = _closed(stores, campaign, hop, round_num, moment=moment)
     if closed is None:
         return None
     return RoundView(
@@ -124,9 +125,7 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     """Every surface's export: the served tree, the served dashboard and ``export.json``, read once."""
     cycle = view_cycle(stores, path)
     hop = cycle.hop
-    campaign = cycle.stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        raise _not_found(hop)
+    campaign = cycle.stores.campaigns.campaign(hop.campaign_id)
     dash = served_dashboard(cycle.stores, hop)
     # A cycle that declared no wiring yet has no arm, so no count needs its unit.
     unit: MeasuredUnit = "sample"
@@ -136,7 +135,11 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     entry = subtree_cycle(stores, path)
     standing = entry.facts.standing
     selection = None if standing is None else standing.selection
-    closed = None if selection is None else _closed(cycle.stores, hop, selection.round, moment=None)
+    closed = (
+        None
+        if selection is None
+        else _closed(cycle.stores, campaign, hop, selection.round, moment=None)
+    )
     arm = None if closed is None or selection is None else closed.arms.get(selection.key)
     models = (
         {}

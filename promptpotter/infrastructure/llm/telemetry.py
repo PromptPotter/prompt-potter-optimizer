@@ -14,7 +14,6 @@ from promptpotter.infrastructure.run_scope import UNBOUND, run_scope
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_priced_keys
 from promptpotter.infrastructure.store.io import write_lock
 from promptpotter.infrastructure.store.layout import CampaignLayout, cycle_ledgers
-from promptpotter.shared.measurement_context import measured_pass
 
 
 def bound_ledger(what: str) -> CycleEventLog | None:
@@ -151,7 +150,7 @@ def token_usage_record(
         money=money,
         mirrored=mirrored,
         round=current_round(),
-        role=cand.role if (cand := measured_pass()) else None,
+        role=cand.role if (cand := run_scope().measured) else None,
     )
 
 

@@ -14,7 +14,6 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.shared.clock import SUSPEND_GRACE_S, sleep_measuring_suspend
 from promptpotter.shared.errors import FileUnreadableError
-from promptpotter.shared.measurement_context import measured_pass
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
@@ -79,7 +78,7 @@ async def heartbeat(
                             )
                         )
                     case CellBeat(position):
-                        walked = measured_pass()
+                        walked = run_scope().measured
                         arm = (
                             None
                             if walked is None or not PASSES[walked.role].arm

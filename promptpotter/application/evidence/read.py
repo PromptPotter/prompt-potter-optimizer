@@ -80,7 +80,7 @@ from promptpotter.domain.candidate_diff import (
     flatten_sp_summary,
 )
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleDir, CycleHop, CyclePath, Subject, parse_pool
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject, parse_pool
 from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
@@ -100,7 +100,6 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.domain.strict_model import StrictModel
-from promptpotter.infrastructure.ledger import ledger_chain
 from promptpotter.infrastructure.projections.cycle_index import read_cycle_index
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     StandingArm,
@@ -341,11 +340,11 @@ class _Cycle(NamedTuple):
 
 
 def _graded_cycle(stores: Stores, campaign_id: str, cycle_dir: Path) -> _Cycle | None:
-    graded_under = campaign_scorer(stores, campaign_id)
-    if graded_under is None:
+    if (campaign := stores.campaigns.load_campaign(campaign_id)) is None:
         return None
-    chain = ledger_chain(CycleDir(cycle_dir), moment=None)
+    graded_under = campaign_scorer(stores, campaign)
     hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle_dir.name)
+    chain = stores.campaigns.chain(hop)
     return _Cycle(stores, hop, scan_standing_rounds(chain), scan_ledger_walks(chain), graded_under)
 
 
@@ -584,7 +583,6 @@ def _read_subject(at: _Located, spec: Subject) -> _SubjectRead | None:
             at.stores,
             at.campaign,
             CycleHop(campaign_id=spec.campaign_id, cycle_id=head.cycle_dir.name),
-            head.cycle_dir,
         ),
     )
 
@@ -809,8 +807,8 @@ def _spend_to_round(by_round: Mapping[int, SpendRollup]) -> dict[str, float]:
     return out
 
 
-def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop, cycle_dir: Path) -> _CycleFacts:
-    chain = ledger_chain(CycleDir(cycle_dir), moment=None)
+def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop) -> _CycleFacts:
+    chain = stores.campaigns.chain(hop)
     scanned = scan_standing_rounds(chain)
     standing, series = scanned.rounds, scanned.level_series
     spend_by_round = scan_ledger_spend_by_round(chain)
