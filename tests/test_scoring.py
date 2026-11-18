@@ -32,6 +32,7 @@ from factories import (
     BENCH_TARGET,
     PARENT,
     PROMPT_INFO,
+    arm_key,
     arm_state,
     arm_walk,
     bench_line,
@@ -1556,17 +1557,15 @@ def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
     # The bar is what the parent can do, not the luck that crowned it: no later race reads those cells.
     crowned_on = sheet(measurements([1.0] * 4 + [0.0], range(30, 35)))
     bar_rows = sheet(measurements([0.0, 0.0, 1.0, 1.0, 0.0], range(30, 35)))
-    won = round_result(
-        1,
-        selected="c0",
-        voted={"electable": 1},
-        cells={ArmKey("c0"): crowned_on, PARENT: bar_rows},
-    )
-    assert crowning_cells([won, round_result(2, improved=False)], "c0") == {
+    c0 = arm_key("c0")
+    won = round_result(1, voted={"electable": 1}, cells={c0: crowned_on, PARENT: bar_rows})
+    assert crowning_cells([won, round_result(2, improved=False)], c0) == {
         crowned_on.cells[0].key,
         crowned_on.cells[1].key,
     }, "a crowned pick's discordant wins stay out of every race it judges, a lone arm's included"
-    assert not crowning_cells([won], "c1"), "an ancestor's are its child's own measurements"
+    assert not crowning_cells([won], arm_key("c1")), (
+        "an ancestor's are its child's own measurements"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -1886,7 +1885,7 @@ def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_survey_rounds_starts_and_reference_are_arms_and_its_matrix_their_cells() -> None:
-    starts = {ArmKey(f"c{i}"): sheet(measurements([1.0, 0.0, float(i % 2)])) for i in range(3)} | {
+    starts = {arm_key(f"c{i}"): sheet(measurements([1.0, 0.0, float(i % 2)])) for i in range(3)} | {
         PARENT: sheet(measurements([0.0] * 3))
     }
     survey = round_result(1, candidates_scored=3, improved=False, cells=starts)
@@ -1894,8 +1893,9 @@ def test_a_survey_rounds_starts_and_reference_are_arms_and_its_matrix_their_cell
         "a survey arm's rows are its cells, the reference's among them"
     )
     assert survey.results == starts[PARENT], "a held survey headlines its reference's cells"
-    assert [c.key for c in InRunCells([survey]).sheet("c1", RoleScope.DECISION)] == [
-        c.key for c in starts[ArmKey("c1")]
+    c1 = arm_key("c1")
+    assert [c.key for c in InRunCells([survey]).sheet(c1, RoleScope.DECISION)] == [
+        c.key for c in starts[c1]
     ], "a decision reads a survey start off the same cells"
 
 
@@ -2927,7 +2927,7 @@ def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing(
         assert (None if headline is None else headline.estimate.value) == lift, case
         assert line_bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
         pick_arm = arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1), individual=pick)
-        on_line = round_result(1, arms={ArmKey(pick.id): pick_arm}, selected=pick.id, cells={})
+        on_line = round_result(1, arms=[pick_arm], cells={})
         curve = read_curve(
             line_stores, line_passes, line_scorer, [LineSpan([on_line], None)], budget=1
         )
@@ -2941,7 +2941,7 @@ def _adopting(rnd: int, individual: OptSearchPoint | None) -> RoundResult:
     arm = arm_state(
         f"C{rnd}.1", position=ArmPosition(round=rnd, idx=0, total=1), individual=individual
     )
-    return round_result(rnd, arms={ArmKey(individual.id): arm}, selected=individual.id, cells={})
+    return round_result(rnd, arms=[arm], cells={})
 
 
 def _area_passes(stores: Stores, first: str, second: str) -> tuple[BenchPass, ...]:
@@ -3649,7 +3649,7 @@ def test_a_cell_a_declared_bound_cut_is_settled_and_never_re_measured() -> None:
             measurement(0, 1.0),
             measurement(1, None, error="no verdict", error_category=category),
         ]
-        return round_result(1, candidates_scored=1, cells={ArmKey("c0"): sheet(rows)})
+        return round_result(1, candidates_scored=1, cells={arm_key("c0"): sheet(rows)})
 
     assert repair_cut([bounded(ErrorCategory.HALTED)]).rounds == [], (
         "a cell a declared bound CUT is settled: the same bound cuts the next attempt"
@@ -4114,11 +4114,10 @@ def test_the_bench_stops_a_peer_on_spent_lives(
     with _lived_peer(tmp_path, monkeypatch) as (cycle, _):
         lives = cycle.config.optimization.lives
         assert lives is not None
-        origin_key = ArmKey(cycle.parent.id)
         origin_arm = arm_state(
             "C0", position=ArmPosition(round=0, idx=0, total=1), individual=cycle.parent
         )
-        origin = round_result(0, arms={origin_key: origin_arm}, selected=origin_key, cells={})
+        origin = round_result(0, arms=[origin_arm], cells={})
 
         def stop_after(*closes: tuple[bool, int]) -> tuple[int | None, StopReason | None]:
             line = [
@@ -4398,14 +4397,14 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         {},
         lambda _p, _s: True,
     ) as (cycle, ledger):
-        origin_key = ArmKey(cycle.parent.id)
         origin_arm = arm_state(
             "C0", position=ArmPosition(round=0, idx=0, total=1), individual=cycle.parent
         )
         # Walked on no cell this cycle's bank draws, so no panel renders a row the bank lacks.
-        unwalked = {ArmKey(f"c{i}"): sheet(()) for i in range(3)}
+        c0, c1, c2 = keys = [arm_key(f"c{i}") for i in range(3)]
+        unwalked = dict.fromkeys(keys, sheet(()))
         line = [
-            round_result(0, arms={origin_key: origin_arm}, selected=origin_key, cells={}),
+            round_result(0, arms=[origin_arm], cells={}),
             round_result(1, candidates_scored=3, optimizer_state=optimizer_state(), cells=unwalked),
         ]
         forking = NodeContext(
@@ -4448,9 +4447,9 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         offer = stalled.reelect_offer
         # c0 sits on both rounds' panels: one entry, its first listing.
         assert offer == {
-            "C1.1": RoundArm(round=1, arm=ArmKey("c0")),
-            "C1.2": RoundArm(round=1, arm=ArmKey("c1")),
-            "C1.3": RoundArm(round=1, arm=ArmKey("c2")),
+            "C1.1": RoundArm(round=1, arm=c0),
+            "C1.2": RoundArm(round=1, arm=c1),
+            "C1.3": RoundArm(round=1, arm=c2),
         }, "a stalled layer may stand a fork on another arm than the picks and those they outranked"
         assert "ELECTIONS" in DispatchHub.render("rebase_capability", stalled), (
             "an arm two rounds list kept the layer's prompt from composing"
@@ -4465,10 +4464,10 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         hangs_from = refork.hangs_from
         assert hangs_from is not None and hangs_from.election is not None
         assert (hangs_from.election.selected, hangs_from.optimizer_state.population) == (
-            ArmKey("c1"),
-            [line[1].arms[ArmKey("c1")].individual],
+            c1,
+            [line[1].arms[c1].individual],
         ), "the restated round elects another arm than the one the layer stood the fork on"
-        assert line[1].election is not None and line[1].election.selected == ArmKey("c0"), "guard"
+        assert line[1].election is not None and line[1].election.selected == c0, "guard"
         assert (
             hangs_from.election.reelection
             == Reelection(by=Principal("l2_context/round_3", "l2_context"), reason="r")
@@ -4851,18 +4850,15 @@ def _evidence_campaign(
     if rebased:
         stores.mark_superseded(root, hop.cycle_id)
     if graded:
-        key, pick = (
-            ArmKey(f"{cid}:selected"),
-            arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1)),
-        )
+        key = arm_key(f"{cid}:selected")
+        pick = arm_state(f"{cid}:selected", position=ArmPosition(round=1, idx=0, total=1))
         answered = sheet(
             cell.filed(dataclasses.replace(cell.facts, answer=answer))
             for cell, (_, answer, _) in zip(panel, walked, strict=True)
         )
         closed = round_result(
             1,
-            arms={key: pick},
-            selected=key,
+            arms=[pick],
             cells={key: answered},
             voted={"elects_on": elects_on, "fit": {} if fit is None else {key: fit}},
         )
@@ -4876,7 +4872,7 @@ def _evidence_campaign(
     passes: dict[str, BenchPass] = {}
     for role, level in (("origin", origin), ("selected", selected))[: 1 + graded]:
         # The origin is ONE individual every campaign sends; each pick is its own.
-        individual = role if role == "origin" else f"{cid}:{role}"
+        individual = role if role == "origin" else arm_key(f"{cid}:{role}")
         rows = [
             measurement(
                 s.id,
@@ -5447,16 +5443,17 @@ def standing_run() -> _StandingRun:
 
     def closed(rnd: int, on: OptSearchPoint, *arms: str, selected: str = "", **reading: Any) -> Any:
         """A held round ends on its parent *on*, re-read as the reference arm."""
-        proposed = {
-            ArmKey(sp.id): arm_state(
-                label, position=ArmPosition(round=rnd, idx=idx, total=len(arms)), individual=sp
+        proposed = [
+            arm_state(
+                label,
+                position=ArmPosition(round=rnd, idx=idx, total=len(arms)),
+                individual=named.get(label) or prompted(instruction=label),
             )
             for idx, label in enumerate(arms)
-            for sp in [named.get(label) or prompted(instruction=label)]
-        }
+        ]
         return round_result(
             rnd,
-            arms={ArmKey(on.id): arm_state("parent", individual=on)} | proposed,
+            arms=[arm_state("parent", individual=on), *proposed],
             improved=bool(selected),
             selected=ids[selected] if selected else None,
             voted={} if selected else {"ended_on": on.id},

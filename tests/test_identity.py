@@ -3757,7 +3757,10 @@ def _gepa_seat(stores: Stores, population: list[OptSearchPoint]) -> RoundContext
         reflected_on.cycle,
         line=[
             round_result(
-                0, arms={PARENT: arm_state("parent", individual=population[0])}, improved=False
+                0,
+                arms=[arm_state("parent", individual=population[0])],
+                improved=False,
+                voted={"ended_on": ArmKey(population[0].id)},
             )
         ],
         population=population,
@@ -3868,17 +3871,16 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
     # Round 0 measured each parent a reflection re-reads; the bench resolves it by id.
     def measured(*held: OptSearchPoint) -> list[RoundResult]:
         points, schema = reflected_on.cycle.points, reflected_on.cycle.session.pipeline_schema
-        arms = {
-            ArmKey(ind.id): arm_state(
+        arms = [
+            arm_state(
                 "parent",
                 individual=ind,
                 resolved_params=points.job(ind).config_params.dump(),
                 sp_hash=points.job(ind).sp_hash(schema),
             )
-            for ind in held
-        }
-        arms[PARENT] = arm_state("parent", individual=origin)
-        return [round_result(0, arms=arms, improved=False)]
+            for ind in (origin, *held)
+        ]
+        return [round_result(0, arms=arms, improved=False, voted={"ended_on": ArmKey(origin.id)})]
 
     offline.llm.says = lambda _body: f"```\nRewritten in round {len(population)}.\n```"
     set_cycle(reflected_on.cycle, line=measured(reflected_on.cycle.parent))
@@ -4448,13 +4450,8 @@ def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
     hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(80)]
     seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
     run_init(RoundContext(seated.cycle, 0))
-    parent = ArmKey(prompted(instruction="parent").id)
     latest = round_result(
-        1,
-        improved=False,
-        arms={parent: arm_state("parent")},
-        cells={parent: sheet(hits[:20])},
-        voted={"ended_on": parent},
+        1, improved=False, arms=[arm_state("parent")], cells={PARENT: sheet(hits[:20])}
     )
     set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
     view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
@@ -4498,17 +4495,15 @@ def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_o
         },
     )
     run_init(RoundContext(seated.cycle, 0))
-    parent = ArmKey(prompted(instruction="parent").id)
     latest = round_result(
         1,
-        arms={parent: arm_state("parent")},
-        cells={parent: sheet(own)},
-        overlap_results={parent: sheet([ran(4, grades[4])])},
-        voted={"ended_on": parent},
+        arms=[arm_state("parent")],
+        cells={PARENT: sheet(own)},
+        overlap_results={PARENT: sheet([ran(4, grades[4])])},
     )
     set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
     view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_critique")), Ladder())
-    assert view.parent.id == parent, "vacuous — the subject is still the origin"
+    assert view.parent.id == PARENT, "vacuous — the subject is still the origin"
     spans = sorted(clustered_sample_ids(view))
     assert spans == sorted(view.position_of[bank[sid].key] for sid in grades), (
         f"the critique may cluster rows {spans}, not every one the parent itself ran"
@@ -4543,16 +4538,10 @@ def test_the_answer_tally_and_the_theta_l1_reads_are_the_parents_rows_never_the_
     own = [said(sid, answer) for sid, answer in enumerate(("yes", "no", "yes", "yes"))]
     seated = seat(built_stores, bank=bank, origin=(OptSearchPoint(), lambda _s: sheet(origin)))
     run_init(RoundContext(seated.cycle, 0))
-    parent = ArmKey(prompted(instruction="parent").id)
-    latest = round_result(
-        1,
-        arms={parent: arm_state("parent")},
-        cells={parent: sheet(own)},
-        voted={"ended_on": parent},
-    )
+    latest = round_result(1, arms=[arm_state("parent")], cells={PARENT: sheet(own)})
     set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
     view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
-    assert view.parent.id == parent, "vacuous — the subject is still the origin"
+    assert view.parent.id == PARENT, "vacuous — the subject is still the origin"
     tally = DispatchHub.render("answer_distribution", view)
     assert "yes 3 (75%)" in tally and "yes 7" not in tally, (
         f"the answer tally counts rows the parent never answered: {tally}"

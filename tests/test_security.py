@@ -742,19 +742,15 @@ def poisoned(tmp_path: Path) -> _Poisoned:
     elected = arm_state(
         "c0", position=ArmPosition(round=1, idx=0, total=2), validation_failures=[rejected]
     )
-    # Keyed by its individual, as a round keys its arms, so the parent's rows are its cells.
-    parent = ArmKey(elected.individual.id)
     measured = round_result(
         1,
-        arms={
-            parent: elected,
-            ArmKey("c1"): broken.model_copy(
-                update={"reason": Broken(failure=runtime_failure, degradation={})}
-            ),
-        },
+        arms=[
+            elected,
+            broken.model_copy(update={"reason": Broken(failure=runtime_failure, degradation={})}),
+        ],
         # The elected arm's own failing row: the parent's rows `failing_samples` quotes to L1.
         cells={
-            parent: sheet(
+            ArmKey(elected.individual.id): sheet(
                 [
                     measurement(
                         0,

@@ -17,6 +17,7 @@ import pytest
 import yaml
 from factories import (
     INNER_RUN,
+    arm_key,
     arm_state,
     cycle_result,
     election,
@@ -73,7 +74,7 @@ from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
 )
-from promptpotter.domain.paired_reading import ArmKey, lift_text
+from promptpotter.domain.paired_reading import lift_text
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
@@ -592,9 +593,9 @@ def traced(tmp_path: Path) -> _Traced:
         stamp = RulerStamp(id=f"v{n}", version=n, own=None, scope=scope, excluded=())
         return round_result(
             n,
-            arms={ArmKey(k): arm_state(k) for k in walked},
-            cells={ArmKey(k): graded(h) for k, h in walked.items()},
-            election=election(pick, ended_on=ended_on, ruler=stamp),
+            arms=[arm_state(k) for k in walked],
+            cells={arm_key(k): graded(h) for k, h in walked.items()},
+            election=election(pick and arm_key(pick), ended_on=arm_key(ended_on), ruler=stamp),
         )
 
     hits = {
@@ -620,13 +621,17 @@ def traced(tmp_path: Path) -> _Traced:
         # After its election, as `DifficultyView.fold` banks a round.
         tenant.fold(
             scope,
-            [(k, c.key, c.grade.objective) for k, sh in rr.cells.items() for c in sh],
+            [
+                (rr.arms[k].sp_hash, c.key, c.grade.objective)
+                for k, sh in rr.cells.items()
+                for c in sh
+            ],
             campaign="run",
             own=None,
         )
     run += [
         closed(2, {"b": hits["b"], "a": hits["a"]}, None, "a"),
-        round_result(3, election=None, arms={}, cells={}),
+        round_result(3, election=None, arms=[], cells={}),
     ]
     return _Traced(series_of, closed, hits, bank, scope, warmed, tenant, frozen, run)
 

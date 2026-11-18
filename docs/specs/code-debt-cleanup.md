@@ -852,13 +852,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   and find the send that escapes `offline`. **Re-test:**
   `test_an_inner_runs_stop_reaches_its_outer_cell_off_the_cycle_it_ended_on` passes without its
   `_ROUTE_OUTAGE` monkeypatch, run after that fact.
-- **The round-result factory keys arms by position** (small-7's and small-8's reports):
-  `tests/factories.py::round_result` keys arms `c{i}` and `PARENT = ArmKey("parent")`, but
-  `Parent.own_rows` reads `ArmKey(individual.id)`, so a seated round's cells reach the parent's rows
-  only where a test re-keys them (`test_security.py`'s fence test). `test_identity.py:3693,3813` key
-  `PARENT` to another individual the same way. Action: the factory keys each arm, and `PARENT`, by
-  its individual's id; delete every re-key it makes redundant; three `test_scoring.py` tests read
-  literal `ArmKey("c0")`/`"c1"` and move with it. **Re-test:** the fence test passes without its re-key.
 - **`surface-ledger` measures whatever `origin/main` the clone last fetched** (spend-served-fix's
   report): `complexity_ledger.py::_counted_at` reads the merge-base off a stale ref and reads red
   for growth main itself made, naming no ref. Action: the check names the main it measures and

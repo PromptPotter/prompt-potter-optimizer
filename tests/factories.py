@@ -1099,8 +1099,13 @@ def optimizer_state(*, parse_failure: ValidationReason | None = None) -> Optimiz
     return OptimizerState(manifest="potter", prompt_hashes={}, slices={}, outputs={}).holding(*held)
 
 
+def arm_key(name: str) -> ArmKey:
+    """The key a round files `arm_state(name)` under: its individual's id."""
+    return ArmKey(prompted(instruction=name).id)
+
+
 #: The reference arm every built round carries: a held round ends on it.
-PARENT = ArmKey("parent")
+PARENT = arm_key("parent")
 
 
 def election(
@@ -1139,12 +1144,12 @@ def round_result(
     collapsed: int = 0,
     cut: int = 0,
     selected: str | None = None,
-    arms: Mapping[ArmKey, ArmState] | None = None,
+    arms: Sequence[ArmState] | None = None,
     voted: dict[str, Any] | None = None,
     **overrides: Any,
 ) -> RoundResult:
-    """*improved* selects the first measured arm unless *selected* names the pick; *voted* bends
-    the election's other fields."""
+    """Each arm keyed by its individual, as `Parent.own_rows` reads it; *improved* selects the first
+    measured arm unless *selected* names the pick; *voted* bends the election's other fields."""
     if parse_failure:
         candidates_scored = 0
     panel = candidates_scored + no_op + dup
@@ -1156,39 +1161,40 @@ def round_result(
         )
         for _ in range(n)
     ]
-    built: dict[ArmKey, ArmState] = {
-        **{
-            ArmKey(f"c{i}"): arm_state(
-                f"c{i}",
-                position=ArmPosition(round=rnd, idx=i, total=panel),
-                total=2 if i < cut else len(_TRUTH),
-            )
-            for i in range(candidates_scored)
-        },
-        **{
-            ArmKey(f"x{i}"): arm_state(
-                f"x{i}",
-                position=ArmPosition(round=rnd, idx=candidates_scored + i, total=panel),
-                invalid_reason=reason,
-            )
-            for i, reason in enumerate(reasons)
-        },
+    scored = [
+        arm_state(
+            f"c{i}",
+            position=ArmPosition(round=rnd, idx=i, total=panel),
+            total=2 if i < cut else len(_TRUTH),
+        )
+        for i in range(candidates_scored)
+    ]
+    rejected = [
+        arm_state(
+            f"x{i}",
+            position=ArmPosition(round=rnd, idx=candidates_scored + i, total=panel),
+            invalid_reason=reason,
+        )
+        for i, reason in enumerate(reasons)
+    ]
+    keyed = {
+        ArmKey(a.individual.id): a
+        for a in ([*scored, *rejected, arm_state("parent")] if arms is None else arms)
     }
-    arms = (built | {PARENT: arm_state("parent")}) if arms is None else arms
     if selected is None and improved:
         measured = (
-            k for k, a in arms.items() if isinstance(a, Measured) and a.position is not None
+            k for k, a in keyed.items() if isinstance(a, Measured) and a.position is not None
         )
         selected = next(measured, None)
     vote = election(selected, **{"electable": candidates_scored} | (voted or {}))
     # Merged rather than splatted after the literals, so ``overrides`` reaches EVERY field.
     base: dict[str, Any] = {
         "round": rnd,
-        "arms": arms,
+        "arms": keyed,
         "reference": RoundArm(round=rnd - 1, arm=PARENT) if rnd else None,
         "folds": {
             key: score_summary(total=arm.expected_samples)
-            for key, arm in arms.items()
+            for key, arm in keyed.items()
             if isinstance(arm, Cut | Measured) and arm_end(arm) != "invalid"
         },
         "election": vote,
@@ -1199,7 +1205,7 @@ def round_result(
             rnd > 0 and vote.selected is not None,
         ),
         "cells": {
-            ArmKey(f"c{i}"): sheet(
+            ArmKey(arm.individual.id): sheet(
                 measurement(
                     sid,
                     None,
@@ -1208,7 +1214,7 @@ def round_result(
                 )
                 for sid, t in enumerate(_TRUTH[:2] if i < cut else _TRUTH)
             )
-            for i in range(candidates_scored)
+            for i, arm in enumerate(scored)
         },
         "health": degradation_health(
             samples=samples, degraded_rate=degraded_rate, no_result=no_result
