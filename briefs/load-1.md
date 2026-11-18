@@ -15,7 +15,8 @@ reported, not built.
 ## Owns
 `infrastructure/store/store.py`, `application/jobs/quota.py`, `application/jobs/launcher/admission.py`,
 `application/initialization/session.py`, `application/runner/mint.py`, `application/embedded_run.py`,
-the CLI and REST resume doors that hand the campaign in, tests in modules of your choosing OTHER
+the CLI and REST resume doors that hand the campaign in (`presentation/cli/commands/launch.py`
+and the REST resume handler), tests in modules of your choosing OTHER
 than `tests/test_spend.py`, `tests/test_security.py`, `tests/test_identity.py`, `tests/factories.py`,
 `tests/conftest.py` (the `spend-4` chain), generated specs/types. NOT `application/jobs/mint.py`,
 `infrastructure/backend.py`, `infrastructure/llm/pricing.py`, `served_dashboard.py` (spend-4), nor

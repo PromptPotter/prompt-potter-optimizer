@@ -28,13 +28,15 @@ line is reported, not built.
 `connectors/*.py` (an `identity_config` signature only), `infrastructure/store/dataset_access.py`,
 `application/initialization/wiring.py`, `application/datasets/startability.py`,
 `application/head_to_head_price.py`, `application/pipeline_resolve.py`,
-`application/scoring/formula/compiler.py`, `presentation/cli/commands/launch.py`, tests in modules
+`application/scoring/formula/compiler.py`, tests in modules
 of your choosing OTHER than `tests/test_spend.py`, `tests/test_security.py`, `tests/test_identity.py`,
 `tests/factories.py`, `tests/conftest.py` (the `spend-4` chain), generated specs/types. NOT
 `application/jobs/` (quota.py, admission.py, mint.py: other chains), `infrastructure/backend.py`,
 `infrastructure/llm/pricing.py`, `served_dashboard.py`, `application/embedded_run.py`,
-`application/initialization/session.py`, `infrastructure/store/store.py`. A file outside Owns the
-root needs: report it.
+`application/initialization/session.py`, `infrastructure/store/store.py`,
+`presentation/cli/commands/launch.py` (load-1; its `CONNECTORS.get` at `:132` is reported, not
+moved). A file outside Owns the root needs: report it. Link 1 moves `identity_config`: it lands
+after the open L4 comparison closes, so name every L4 key or digest it moves.
 
 ## Target
 Net ≤ 0 `promptpotter/` lines. Run the `--against` legs and `--digests`; name every leg and digest
