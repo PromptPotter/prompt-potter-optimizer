@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from promptpotter.application.bench.children import (
     admission_failures,
     carried_writes,
+    length_failures,
     overlay_failures,
     placeholder_failures,
 )
@@ -349,10 +350,6 @@ class Frontier(CycleRead):
         return self._cycle.parent_point
 
     @property
-    def frontier_rows(self) -> list[GradedCell]:
-        return self._cycle.frontier
-
-    @property
     def parent_own_rows(self) -> list[GradedCell]:
         """Each sample's latest cell of the parent ITSELF, its origin-panel top-ups included, never
         one another individual answered."""
@@ -625,10 +622,11 @@ class Children(CycleRead):
             evidence_grounding=evidence_grounding,
         )
         admitted = admission_failures(individual, config, schema, carried=carried)
+        bounded = length_failures(individual, parents[0], self._cycle.optimizer.length_budget)
         return Proposal(
             individual=individual,
             overlay=config,
-            validation_failures=[*failures, *admitted],
+            validation_failures=[*bounded, *failures, *admitted],
         )
 
     def edit(
@@ -678,6 +676,12 @@ class Children(CycleRead):
                 ),
                 *placeholder_failures(individual, schema),
             ]
+            if (budget := self._cycle.optimizer.length_budget) is not None:
+                # The verdict its mint booked is replaced, never stacked.
+                main = _parents(self._cycle, proposal.individual)[0]
+                stale = length_failures(proposal.individual, main, budget)
+                fresh = length_failures(individual, main, budget)
+                failures = [*(f for f in failures if f not in stale), *fresh]
         held = proposal.overlay
         merged = {n: {**held.get(n, {}), **config.get(n, {})} for n in (*held, *config)}
         return proposal.model_copy(

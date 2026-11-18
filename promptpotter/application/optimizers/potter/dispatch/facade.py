@@ -66,7 +66,7 @@ from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.ruler import AbilityReading, DeltaRuler
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.value_tree import Delivery
 from promptpotter.domain.wounds import RuntimeFailure, ValidationReason
@@ -348,10 +348,6 @@ class PotterView:
         return {} if fold is None else dict(fold.evaluators)
 
     @functools.cached_property
-    def ability(self) -> AbilityReading | None:
-        return self.ctx.read(Ruler).difficulty.judging.frontier(self.trajectory_results)
-
-    @functools.cached_property
     def parent_ability(self) -> AbilityReading | None:
         """θ on the parent's own rows: the side of every contrast an edit is judged against."""
         return self.ctx.read(Ruler).difficulty.judging.frontier(self.parent_rows)
@@ -365,15 +361,6 @@ class PotterView:
     @property
     def transcript_knobs(self) -> TranscriptKnobs:
         return self.ctx.knobs(TranscriptKnobs)
-
-    @functools.cached_property
-    def origin_per_sample(self) -> CellSheet:
-        return self.measured_rounds[0].results
-
-    @functools.cached_property
-    def trajectory_results(self) -> tuple[GradedCell, ...]:
-        """Hits included: a pipeline collapsed onto one label shows only against the labels it is NOT emitting."""
-        return tuple(self.ctx.read(Frontier).frontier_rows)
 
     @functools.cached_property
     def pipeline_params(self) -> PipelineParams:

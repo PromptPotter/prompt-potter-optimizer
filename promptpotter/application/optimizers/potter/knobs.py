@@ -7,6 +7,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
+from promptpotter.application.optimizers.nodes import LengthKnobs
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.pool import Access
 from promptpotter.domain.scoring import MAX_PASS_ROWS
@@ -84,17 +85,9 @@ class TranscriptKnobs(StrictModel):
     )
 
 
-class L1GenerateKnobs(TranscriptKnobs):
+class L1GenerateKnobs(TranscriptKnobs, LengthKnobs):
     n_variants: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=1, description="Candidates per round"
-    )
-    length_budget: Annotated[int, Knob(Estimand.SEARCH)] = Field(
-        ge=1,
-        description=(
-            "The most characters a variant's edits may lengthen or shorten its parent's prompt by, "
-            "summed over every field; past it, either way, the variant is refused. A parent is one "
-            "generation from its own, so it also bounds the prompt every later call is shown."
-        ),
     )
     k_max: Annotated[int, Knob(Estimand.SEARCH)] = Field(
         ge=0,

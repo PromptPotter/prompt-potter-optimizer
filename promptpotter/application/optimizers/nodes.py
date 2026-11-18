@@ -103,6 +103,18 @@ class ShotKnobs(StrictModel):
     )
 
 
+class LengthKnobs(StrictModel):
+    length_budget: Annotated[int, Knob(Estimand.SEARCH)] = Field(
+        ge=1,
+        description=(
+            "The most characters a child may lengthen or shorten its main parent's prompt by, "
+            "summed over every field: a variant's edits and a crossover's donated loci alike, any "
+            "child of the run; past it, either way, the child is refused. A parent is one "
+            "generation from its own, so it also bounds the prompt every later call is shown."
+        ),
+    )
+
+
 @dataclass(frozen=True)
 class AccessKnob:
     """A reader's access to a pool is the value of one ``Access`` knob, its own or a consulted member's."""

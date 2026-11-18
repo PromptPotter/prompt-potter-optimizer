@@ -166,10 +166,8 @@ from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYO
 from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.l1 import parse_population
 from promptpotter.application.optimizers.potter.records import Ladder
-from promptpotter.application.optimizers.potter.validators import (
-    l1_length_within_budget,
-    l1_shots_in_demo_pool,
-)
+from promptpotter.application.optimizers.potter.validators import l1_shots_in_demo_pool
+from promptpotter.application.optimizers.variation.members import Cross, LocusCrossover
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
@@ -217,7 +215,7 @@ from promptpotter.config import paths
 from promptpotter.config.paths import block_packs_root, install_datasets_root
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors import upload_connector
-from promptpotter.domain.arms import PointContext
+from promptpotter.domain.arms import PointContext, Proposal
 from promptpotter.domain.bench import (
     BankPartition,
     CampaignRefusal,
@@ -316,7 +314,11 @@ from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, ScoringFormulaError
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
 from promptpotter.domain.spend import Budget, HeldBudget
-from promptpotter.domain.wounds import ValidationReason
+from promptpotter.domain.wounds import (
+    ValidationFailure,
+    ValidationReason,
+    fatal_validation_failures,
+)
 from promptpotter.infrastructure.identity import grants
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
@@ -4419,6 +4421,45 @@ def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_o
     )
 
 
+def test_the_answer_tally_and_the_theta_l1_reads_are_the_parents_rows_never_the_frontiers(
+    built_stores: Stores,
+) -> None:
+    # The origin answers "yes" to all 8 rows; the elected parent ran 0-3, so the frontier keeps
+    # the origin's 4-7.
+    bank = [Sample(id=i, query=f"q{i}", ground_truth=("yes", "no")[i % 2]) for i in range(8)]
+
+    def said(sid: int, answer: str) -> GradedCell:
+        hit = float(answer == bank[sid].ground_truth)
+        truth = bank[sid].ground_truth
+        return measurement(
+            sid, hit, objective=hit, sample_key=bank[sid].key, predicted=answer, ground_truth=truth
+        )
+
+    origin = [said(sid, "yes") for sid in range(8)]
+    own = [said(sid, answer) for sid, answer in enumerate(("yes", "no", "yes", "yes"))]
+    seated = seat(built_stores, bank=bank, origin=(OptSearchPoint(), lambda _s: sheet(origin)))
+    run_init(RoundContext(seated.cycle, 0))
+    parent = ArmKey(prompted(instruction="parent").id)
+    latest = round_result(
+        1,
+        arms={parent: arm_state("parent")},
+        cells={parent: sheet(own)},
+        voted={"ended_on": parent},
+    )
+    set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
+    view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
+    assert view.parent.id == parent, "vacuous — the subject is still the origin"
+    tally = DispatchHub.render("answer_distribution", view)
+    assert "yes 3 (75%)" in tally and "yes 7" not in tally, (
+        f"the answer tally counts rows the parent never answered: {tally}"
+    )
+    judging = seated.cycle.difficulty.judging
+    theta, frontier = judging.frontier(own), judging.frontier([*own, *origin[4:]])
+    assert theta is not None and frontier is not None and theta.theta != frontier.theta, "vacuous"
+    measurand = DispatchHub.render("measurand", view)
+    assert f"θ {theta.theta:+.3f}" in measurand, f"L1 is told another arm's θ: {measurand}"
+
+
 def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
     built_stores: Stores,
 ) -> None:
@@ -4490,22 +4531,53 @@ def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
     assert not refused_panels, f"mandatory panel(s) refused by the budget: {sorted(refused_panels)}"
 
 
-def test_a_variant_moving_its_prompt_past_the_length_budget_is_refused_grown_or_trimmed() -> None:
-    budget = select_optimizer(bench_choice("potter")).knobs_of("l1_generate", L1GenerateKnobs)
-    n = budget.length_budget
-    parent = prompted(instruction="x" * (2 * n), rubric="r" * n)
-    at, rubric = Locus("solve", "instruction"), Locus("solve", "rubric")
+def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refused_at_its_mint(
+    built_stores: Stores,
+) -> None:
+    # A drawn crossover, an LLM host's recombination and a variant's edits alike, grown or trimmed.
+    potter = select_optimizer(bench_choice("potter"))
+    n = potter.knobs_of("l1_generate", L1GenerateKnobs).length_budget
+    at, persona = Locus("solve", "instruction"), Locus("solve", "persona")
+    main = prompted(instruction="x" * (2 * n), persona="r" * n)
+    donor = prompted(instruction="d" * (3 * n + 1), persona="d" * (2 * n + 1))
+    seated = seat(built_stores)
+    set_cycle(seated.cycle, population=[main, donor])
+    over = [ValidationReason.OVER_CEILING]
+
+    def booked(proposal: Proposal) -> list[ValidationReason]:
+        return [f.reason for f in fatal_validation_failures(proposal.validation_failures)]
+
+    cross = Cross(main, donor)
+    copy = Children(seated, NODE_MEMBERS.get("mating")).child(cross)
+    assert booked(copy) == [], "vacuous — the main's own copy is refused"
+    crossover = LocusCrossover()
+    walked = asyncio.run(crossover.propose(NodeContext(seated, crossover), Proposals([copy])))
+    (drawn,) = walked.proposals
+    assert drawn.individual.id != copy.individual.id, "vacuous — the donor gave nothing"
+    assert booked(drawn) == over, f"a crossover past the budget books {booked(drawn)}"
+    variants = Children(seated, NODE_MEMBERS.get("l1_generate"))
+    hosted = variants.child(cross, take={persona: 1})
+    assert booked(hosted) == over, f"a hosted recombination past the budget books {booked(hosted)}"
     for moved, refused in (
         ({at: "x" * (3 * n)}, False),
-        ({at: "x" * n, rubric: ""}, True),
+        ({at: "x" * n, persona: ""}, True),
         ({at: "x" * (3 * n + 1)}, True),
         ({at: "x" * (n - 1)}, True),
-        ({at: "x" * (3 * n), rubric: "r" * (n // 2)}, False),
+        ({at: "x" * (3 * n), persona: "r" * (n // 2)}, False),
     ):
-        failures = l1_length_within_budget(moved, parent, budget=n)
-        assert [f.reason for f in failures] == (
-            [ValidationReason.OVER_CEILING] if refused else []
-        ), f"a variant moving its parent by {[len(t) for t in moved.values()]} was judged wrong"
+        child = variants.child([main], prompt_loci=moved)
+        assert booked(child) == (over if refused else []), (
+            f"a variant moving its parent by {[len(t) for t in moved.values()]} was judged wrong"
+        )
+    # The L1 readout tallies a refused variant by its first reason.
+    miscited = ValidationFailure(
+        axis="evidence_grounding",
+        value="",
+        allowed=[],
+        reason=ValidationReason.CITATION_NOT_IN_PANEL,
+    )
+    both = variants.child([main], prompt_loci={at: "x" * (n - 1)}, failures=[miscited])
+    assert booked(both)[0] == ValidationReason.OVER_CEILING, f"tallied as {booked(both)[0]}"
 
 
 def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifests(

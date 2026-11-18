@@ -178,7 +178,7 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 
 **Current state:**
 
-- **`rendered_prompt`** ← `parent.prompts` — the artifact under edit. One LABELLED section per locus, `[node.field]`, in declared order (an edit's `at` names it, its `anchor` copies from it), each carrying the field's OWN value, never a spliced one, and never cut: `knobs.py::L1GenerateKnobs.length_budget` bounds how far one generation moves it, grown or trimmed, stated on the `edits` slot and refused past it as `OVER_CEILING` (`potter/validators.py::l1_length_within_budget`). Under L4 the inner optimizer prompts ARE the outer target's prompt fields, served as each inner node's start (`domain/l4/cells.py::InnerCells.pipeline`).
+- **`rendered_prompt`** ← `parent.prompts` — the artifact under edit. One LABELLED section per locus, `[node.field]`, in declared order (an edit's `at` names it, its `anchor` copies from it), each carrying the field's OWN value, never a spliced one, and never cut: `nodes.py::LengthKnobs.length_budget` bounds how far one generation moves it, grown or trimmed, stated on the `edits` slot and refused past it as `OVER_CEILING` where any child is minted (`bench/children.py::length_failures`), a crossover's included. Under L4 the inner optimizer prompts ARE the outer target's prompt fields, served as each inner node's start (`domain/l4/cells.py::InnerCells.pipeline`).
 - **`pipeline_param_catalogue`** ← the axes L1 may move and each value space, a one-value axis dropped; seated under `rendered_prompt` with the matcher's extraction contract.
 - **`block_pool`** ← the `BlockPool` slice through `PotterView.block_window()`, gated by the node's `block_access`: the value space of a prompt FIELD. `closed` narrows each field's edit on the wire to a whole-field replace by a window id (`potter/l1.py::applied_edits` rejects any other); `off` renders empty.
 - **`demo_pool`** ← `PotterView.demo_pool` + the node's `k_max`: the value space of the `shots` slot — the parent's shots first (the one place L1 sees them), then a `pool_window` rotating by round. `L1_MANDATORY`; silent with no pool or `k_max: 0`. `potter/validators.py::l1_shots_in_demo_pool` rejects an id outside the pool, a repeat, or a list past `k_max`.
@@ -202,13 +202,13 @@ Ordering and caps live at each `@signal`; here only the role and the rule a read
 | `axis_memory` | `axis_rankings`🧩 `top_values`🧩 `exhausted_axes`🧩 `persistent_failures`🧩 `failure_clusters`🧩 |
 | `escalation_panel` | `exploration_budget`🧩 `l1_stall_depth`🧩 |
 | `evidence_health` | `node_failure_rates`🧩 `evidence_starved_node`🧩 |
-| `answer_distribution` | the `graded_answer`🧩 tally · the `enumerable_truth_labels`🧩 tally · `constant_answer`🧩 against the round's fitness |
+| `answer_distribution` | the `graded_answer`🧩 tally · the `enumerable_truth_labels`🧩 tally · `constant_answer`🧩 against the parent's fitness, all on the parent's own rows |
 | `failing_samples` | `sample_tag`🧩 `delta`🧩 `query`🧩 `span`🧩 `ground_truth`🧩 `predicted`🧩 the transcript's last step · verifier-graded `fitness`🧩 `outcome_note`🧩 `turns`🧩 `step_tokens`🧩 |
 | `sample_transcripts` | `sample_tag`🧩 `query`🧩 the transcript (`reasoning_trace`🧩, or an L4 cell's inner run: per round its calls, the critique it acted on, each arm's outcome, `fitness`🧩 and lift) `span`🧩 `ground_truth`🧩 `predicted`🧩 · verifier-graded `fitness`🧩 · `judge_readings`🧩 · a lost cell's `lost`🧩 `tried`🧩 `by`🧩 |
 | `mutation_memory` | per edit `label`🧩 `fitness`🧩 against the parent's, `composite_fitness`🧩, `changed`🧩 (a param's value, a field's `changed_words`🧩, `shots`🧩), `gained`🧩 `lost`🧩, `same_idea`🧩 · the cells edits keep missing, `lost`🧩 of `tried`🧩 |
-| `measurand` | `composite_fitness`🧩 · frontier `theta`🧩 `se`🧩 · `evaluators`🧩 under a charged formula |
+| `measurand` | `composite_fitness`🧩 · `parent_ability`🧩's `theta`🧩 `se`🧩 · `evaluators`🧩 under a charged formula |
 | `detectable_move` | `detectable_rows`🧩: the expected information of `latest_sample_keys`🧩 at `parent_ability`🧩, both arms, at `admission`🧩 |
-| `confounds` | the frontier's `caveat`🧩 in `THETA_CAVEAT_INFO`'s `label`🧩 `detail`🧩, with its number (`round_span`🧩 `ruler_span`🧩, `unlinked`🧩, `pinned_share`🧩) · a subset moved whole (`latest_sample_keys`🧩, `prev_sample_keys`🧩) |
+| `confounds` | `parent_ability`🧩's `caveat`🧩 in `THETA_CAVEAT_INFO`'s `label`🧩 `detail`🧩, with its number (`round_span`🧩 `ruler_span`🧩, `unlinked`🧩, `pinned_share`🧩) · a subset moved whole (`latest_sample_keys`🧩, `prev_sample_keys`🧩) |
 | `budget_state` | `round_num`🧩 `budget_rounds`🧩 `spend_used_usd`🧩 `spend_budget_usd`🧩 |
 | `rebase_capability` | `fork_proposal`🧩 (`reason`🧩 `unlock_schema_field_rename`🧩 `stand_on`🧩) · ELECTIONS `picked`🧩 `locked_in`🧩 `unelected`🧩 |
 | `terminate_capability` | `terminate_proposal`🧩 (`reason`🧩) · `terminate_offer`🧩 |

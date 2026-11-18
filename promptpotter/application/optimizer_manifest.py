@@ -13,6 +13,7 @@ from promptpotter.application.optimizers.nodes import (
     CountKnob,
     DrawSize,
     Initializer,
+    LengthKnobs,
     Reviewer,
     RoundWalk,
     behaviour_key,
@@ -443,6 +444,14 @@ class SelectedOptimizer:
             ),
             default=0,
         )
+
+    @property
+    def length_budget(self) -> int | None:
+        """How far any child's prompt may move from its main parent's: the one member's whose knobs are `LengthKnobs`; ``None`` where none bounds it."""
+        held = [k.length_budget for k in self.node_knobs.values() if isinstance(k, LengthKnobs)]
+        if len(held) > 1:
+            raise TypeError(f"optimizer {self.name!r} declares {len(held)} length budgets, not one")
+        return held[0] if held else None
 
     def pool_refusals(self, *, mint: MintFacts | None) -> list[str]:
         """Why a pool seeds nothing its readers may draw: at load with no *mint*, before a mint with its facts."""

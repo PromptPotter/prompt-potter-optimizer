@@ -406,6 +406,7 @@ class SampleScoredRecord(_Pass):
 
 
 class FlightWaiting(FrozenModel):
+    individual_id: str
     position: int
     since: float
 

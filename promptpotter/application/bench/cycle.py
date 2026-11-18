@@ -375,14 +375,6 @@ class Cycle:
     def parent_point(self) -> JobSearchPoint:
         return self.points.job(self.parent)
 
-    @property
-    def frontier(self) -> list[GradedCell]:
-        """Each sample's latest cell, of whichever individual measured it last: never scored."""
-        cells: list[GradedCell] = []
-        for rr in self.rounds:
-            cells = merge_known_outcomes(cells, rr.results)
-        return cells
-
     def banked_walk(self, round_num: int) -> RoundProposedRecord | None:
         session = self.session
         held = session.store.campaigns.standing_rounds(session.hop, moment=None).proposals

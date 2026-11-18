@@ -50,6 +50,7 @@ from promptpotter.domain.records.run_records import (
     ElectionRecord,
     Ended,
     FlightRecord,
+    FlightWaiting,
     LLMCallProgressRecord,
     LLMCallRecord,
     LLMCallStartRecord,
@@ -435,8 +436,8 @@ class LiveDashboardProjection(Projection):
         self._election: Election | None = None
         self._race: RaceStandingRecord | None = None
         self._race_standings: dict[str, float] = {}
-        # Each open cell's query, arm, and whether it went out into an armed window.
-        self._open_samples: dict[int, tuple[str, ArmKey | None, bool]] = {}
+        # By (individual, position): each open cell's query, arm, and whether it went out armed.
+        self._open_samples: dict[tuple[str, int], tuple[str, ArmKey | None, bool]] = {}
         self._bench_readings: dict[int, BenchReading] = {}
         self._around_bench: tuple[DashboardState, str | None, ArmName | None] | None = None
         # Between a bench or verify bracket: its cells move no run state.
@@ -444,7 +445,7 @@ class LiveDashboardProjection(Projection):
         self._flight: tuple[int, int, int] = (0, 0, 0)
         self._affordable: int | None = None
         self._cell_reserve_usd: float | None = None
-        self._waiting: tuple[int, float] | None = None
+        self._waiting: FlightWaiting | None = None
         self._in_flight: tuple[str, str] | None = None
         self._inner: CycleHop | None = None
         self._proposer_node: str | None = None
@@ -635,9 +636,9 @@ class LiveDashboardProjection(Projection):
         # A walk ending: its sample launched INTO an armed window is a discard; one left open
         # unarmed failed on its own. Another walk's open cells are still its own to take.
         if isinstance(record.state, Concluded):
-            ended = [p for p, (_, arm, _) in self._open_samples.items() if arm == record.arm]
+            ended = [k for k, (_, arm, _) in self._open_samples.items() if arm == record.arm]
             self.state.sample_lookahead_discards += sum(
-                1 for p in ended if self._open_samples.pop(p)[2]
+                1 for k in ended if self._open_samples.pop(k)[2]
             )
         if isinstance(record.state, Measuring) and record.state.sample_order:
             self.state.declared_sample_order = record.state.sample_order
@@ -671,7 +672,7 @@ class LiveDashboardProjection(Projection):
         )
 
     def _handle_sample_started(self, record: SampleStartedRecord) -> None:
-        self._open_samples[record.position] = (
+        self._open_samples[record.individual_id, record.position] = (
             record.query_preview,
             record.arm,
             record.sample_lookahead > 1 or record.sample_abreast != 1,
@@ -682,7 +683,7 @@ class LiveDashboardProjection(Projection):
 
     def _handle_sample_scored(self, record: SampleScoredRecord) -> None:
         qi, qt = record.sample_idx or 0, record.sample_total or 0
-        self._open_samples.pop(record.position, None)
+        self._open_samples.pop((record.individual_id, record.position), None)
         # A beat names no cell: an inner run still open names itself again on its next beat.
         self._inner = None
         self._absorb_sample_scored(record.result.facts, last_in_candidate=(qi + 1 >= qt))
@@ -713,8 +714,7 @@ class LiveDashboardProjection(Projection):
         self._flight = (record.out, record.allowed, record.most)
         self._affordable = record.affordable
         self._cell_reserve_usd = record.cell_usd
-        waiting = record.waiting
-        self._waiting = None if waiting is None else (waiting.position, waiting.since)
+        self._waiting = record.waiting
 
     def _handle_race_catch_up(self, record: RaceCatchUpRecord) -> None:
         self._append_catch_up(
@@ -734,7 +734,7 @@ class LiveDashboardProjection(Projection):
             s.current_query_payload = None
             s.current_position = None
             return
-        sid, (query_text, arm, _ahead) = next(iter(self._open_samples.items()))
+        (_, sid), (query_text, arm, _ahead) = next(iter(self._open_samples.items()))
         s.current_query_payload = query_text
         s.current_position = sid
         s.measuring_arm = None if arm is None else self._name(arm)
@@ -837,16 +837,14 @@ class LiveDashboardProjection(Projection):
         else:
             in_flight = allowed = 0
             most = s.round_cells_ceiling
-        opened = self._open_samples.get(self._waiting[0]) if self._waiting else None
         waiting_on: WaitingOn | None = None
         waiting_since: float | None = None
-        if self._waiting is not None and opened is not None:
-            arm = opened[1]
-            waiting_on = WaitingOn(
-                label=None if arm is None else self._label(arm),
-                position=self._waiting[0],
-            )
-            waiting_since = self._waiting[1]
+        w = self._waiting
+        opened = None if w is None else self._open_samples.get((w.individual_id, w.position))
+        if w is not None and opened is not None:
+            label = None if (arm := opened[1]) is None else self._label(arm)
+            waiting_on = WaitingOn(label=label, position=w.position)
+            waiting_since = w.since
         active = self._active_node()
         measuring = active == self._measurement_node
         current = CurrentRound(

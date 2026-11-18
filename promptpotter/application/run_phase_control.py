@@ -32,12 +32,12 @@ from promptpotter.infrastructure.store.stores import Stores
 
 @dataclass(frozen=True)
 class Flight:
-    """``waiting`` is the ``(position, launched_at)`` call a DECISION is held on under in-order absorption."""
+    """``waiting`` is the call a DECISION is held on under in-order absorption."""
 
     out: int = 0
     allowed: int = 0
     most: int = 0
-    waiting: tuple[int, float] | None = None
+    waiting: FlightWaiting | None = None
     # ``None`` where no book bounds them; against a reserve it is the WORST case.
     affordable: int | None = None
     cell_usd: float | None = None
@@ -81,11 +81,7 @@ class FlightGauge:
                     most=int(reading.most),
                     affordable=None if reading.affordable is None else int(reading.affordable),
                     cell_usd=None if reading.cell_usd is None else float(reading.cell_usd),
-                    waiting=None
-                    if reading.waiting is None
-                    else FlightWaiting(
-                        position=int(reading.waiting[0]), since=float(reading.waiting[1])
-                    ),
+                    waiting=reading.waiting,
                 )
             )
 

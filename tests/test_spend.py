@@ -113,7 +113,7 @@ from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
 from promptpotter.application.optimizers.nodes import Race
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config
-from promptpotter.application.run_phase_control import RunControl, budget_stop
+from promptpotter.application.run_phase_control import FlightGauge, RunControl, budget_stop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.loop import round_bounds
@@ -145,7 +145,7 @@ from promptpotter.application.served_dashboard import (
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
-from promptpotter.domain.arms import CutKind
+from promptpotter.domain.arms import ArmPosition, CutKind
 from promptpotter.domain.bench import PassRefusal
 from promptpotter.domain.campaign import Optimize, RunDeclaration
 from promptpotter.domain.campaign_config import (
@@ -212,6 +212,8 @@ from promptpotter.domain.records.run_records import (
     CycleMintedRecord,
     CycleShareRecord,
     CycleStart,
+    FlightRecord,
+    FlightWaiting,
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
@@ -293,6 +295,10 @@ from promptpotter.infrastructure.llm.wallet import (
 )
 from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.base import Projection
+from promptpotter.infrastructure.projections.live_dashboard import (
+    LiveDashboardProjection,
+    WaitingOn,
+)
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, rescope, scoped
 from promptpotter.infrastructure.store.account_spend import (
     account_bill,
@@ -1233,6 +1239,75 @@ async def test_a_rounds_walks_each_send_to_their_own_depth_as_many_at_once_as_pr
     for w in (0, 1):
         calls = sorted(sid for who, sid, _ in ahead["asked"] if who == w)
         assert calls == [s.id for s in dataset], f"walk {w}'s calls ran under another identity"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_two_walks_out_at_one_position_are_served_and_discarded_as_the_ledger_says(
+    built_stores: Stores,
+) -> None:
+    # All candidates at once: the first walk cuts at 2 with a cell out, at a position the second
+    # walk then sends and takes.
+    dataset = _dataset()
+    backend = _OrderedFakeBackend(len(dataset))
+    ledger = CycleEventLog.open(CycleDir(built_stores.projects_root / "abreast"))
+    session = loop_session(
+        built_stores,
+        pipeline_schema([]),
+        dataset,
+        scorer=_HIT,
+        control=_control_pausing(lambda: False, lookahead=LookaheadPress(cells=2, abreast="all")),
+        client=backend_client(built_stores.jobs_dir, max_cells_in_flight=8, holds_own_sends=True),
+    )
+    session.state.flight = FlightGauge(every=0.0)
+    arms = {
+        f"c{w}": arm_state(f"c{w}", position=ArmPosition(round=1, idx=w, total=2)) for w in (0, 1)
+    }
+    walks = {
+        w: open_walk(
+            JobSearchPoint(),
+            dataset,
+            session,
+            kind=MeasurementRole.PANEL,
+            checks=[_CutAfter(2)] if w == 0 else [],
+            measured=f"c{w}",
+        )
+        for w in (0, 1)
+    }
+
+    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
+        return await backend.measure(sample)
+
+    with scoped(ledger=ledger), mock.patch.object(query_loop, "measure_sample", _measure):
+        for key, state in arms.items():
+            ledger.append(ArmRecord(round=1, arm=ArmKey(key), state=state))
+        await query_loop.run_walks(walks, session, keep_cut=False)
+        for key, state in arms.items():
+            ledger.append(ArmRecord(round=1, arm=ArmKey(key), state=state))
+    records = ledger_records(ledger)
+    started = {(r.individual_id, r.position) for r in records if isinstance(r, SampleStartedRecord)}
+    scored = {(r.individual_id, r.position) for r in records if isinstance(r, SampleScoredRecord)}
+    discarded = started - scored
+    assert any((other, p) in scored for who, p in discarded for other in arms if other != who), (
+        "vacuous — no walk took a position another walk discarded"
+    )
+    dashboard = LiveDashboardProjection()
+    dashboard.feed(run_wiring())
+    dashboard.feed(RoundEnteredRecord(round=1))
+    served: list[tuple[FlightWaiting, WaitingOn | None]] = []
+    for record in records:
+        dashboard.feed(record)
+        if isinstance(record, FlightRecord) and record.waiting is not None:
+            served.append((record.waiting, dashboard.composed().waiting_on))
+    assert dashboard.composed().sample_lookahead_discards == len(discarded), (
+        f"the cut counted {dashboard.composed().sample_lookahead_discards} discards, "
+        f"the ledger {len(discarded)}"
+    )
+    labels = {key: state.position.label for key, state in arms.items() if state.position}
+    said = [(WaitingOn(label=labels[w.individual_id], position=w.position), on) for w, on in served]
+    assert said and all(held == on for held, on in said), (
+        f"`waiting on` named another cell than the call held: {said}"
+    )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")

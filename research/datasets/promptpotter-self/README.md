@@ -4,10 +4,11 @@ A self-referential dataset: outer PromptPotter optimizes the **optimizer prompts
 inner PromptPotter cycle. Connector boundary: `promptpotter/application/runner/inner/spawn.py`. What is true of L4:
 [`docs/concepts/l4.md`](../../../docs/concepts/l4.md).
 
-Two members share one geometry, `family.yaml::panel`, and differ in their seats alone: `run/` is the
-instrument, six search seats and one held-out seat per benchmark, its outer crown graded on those
-three; `dev/` is the same six search seats with nothing held out, for code and pilots, and each of its
-cells is the one `run` reads. Each outer "sample" is one seat of a member's panel (`run/dataset.yaml::panel`):
+Three members share one geometry, `family.yaml::panel`, and differ in their seats alone: `run/` is
+the instrument, six search seats and one held-out seat per benchmark, its outer crown graded on those
+three; `wide/` searches twelve seats, `run`'s six and two more seeds per benchmark, graded on `run`'s
+held-out three; `dev/` is the same six search seats with nothing held out, for code and pilots. Each
+cell of `dev` and `wide` on a seat `run` holds is the one `run` reads. Each outer "sample" is one seat of a member's panel (`run/dataset.yaml::panel`):
 it mints and runs a full inner campaign on the seat's benchmark under the family's `inner_campaign`. Each inner run reports a vector of
 measurements (`domain/l4/proxies.py::OuterSampleProxies` is the scored one) and its held-out
 `bench_rows`; the family formula

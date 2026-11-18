@@ -880,6 +880,25 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `diagnostics`, a panel `l1_generate` does not place, and the composed request holds no query.
   Action: seat a row a placed panel quotes, and assert it sits fenced in the request. **Re-test:**
   `tests/test_security.py::test_dataset_content_reaches_the_optimizer_only_inside_the_fence`.
+- **The cap halts on money its served reading omits**: C0 `promptpotter-self.run__265c4d` (2026-11-18)
+  halted `spend_budget` inside round 1 while `dashboard` and `set-limits` served "$1.09 spent" of
+  $2.50. The book counted $1.09 billed + $1.11 unreported (52 lapsed cells, folded by
+  `read_model.py::Money.unreported_holds`: ~37 broken sends, 15 cut by the halt itself) + $0.18 set
+  aside for the bench, $2.38, so the cells still out (each held at its $0.02 bound) tipped it.
+  Unverified: which check fired (`SpendBook.exhausted()` or a send's room). The `run_phase` record's
+  `detail` is `""`. Action: the cap's one served reading is the book's own count, by part
+  (billed, unreported, set aside), and a budget halt names it. **Rides with:** none yet (spend book +
+  `served_dashboard.py`). **Re-test:** a fold of that ledger serves the figure `exhausted()` reads.
+- **A backend's cell ceiling binds per run, so the outer's inner runs sum past it on one box**: at Max
+  speed the outer's 4 seats in flight (`spawn.py::MAX_CELLS_IN_FLIGHT`) each run an inner campaign at
+  termnorm's 16, so up to 64 cells reach the TermNorm box at once. ~37 of the C0's 8,065 inner cells
+  broke with `ReadError` mid-send; each lapsed at termnorm's declared cell bound (99,144 tokens,
+  ~$0.021, about 180× a real cell's $0.000115) and was resent (`infrastructure/backend.py::_post_until_answered`),
+  so the counted spend doubled. The breaks came 0–1 s after the send (~12, stale keep-alive reuse:
+  `backend.py`'s client keeps httpx's 5 s default expiry) and 2–19 s after it (the rest, the box
+  dropping mid-request). The 180× bound is termnorm's declaration, so a tighter one is its repo's. Action: a backend's ceiling is one shared
+  machine fact across every run the process holds on it. **Rides with:** none yet. **Re-test:** an
+  offline L4 leg at Max speed never holds more cells on one backend than its connector declares.
 
 ## Held — no wave-4 chain yet
 
@@ -931,22 +950,19 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **Panel shares are code, not declared knobs, so L2 under L4 never sees the subject**: Shape:
   `potter/dispatch/layout.py::NODE_LAYOUTS["l2_context"]`'s 5,500 discretionary chars drop
   `rendered_prompt` (7,485 under the family) whole; the generator's 11,000 share holds one or two whole
-  seat transcripts, and the critique's whole seats (`TranscriptKnobs` null/null) run near 30k unmeasured.
-  Action: each node's share a declared knob beside `TranscriptKnobs`, sized on a real outer round.
-  **Held:** a decision, after round 1. **Re-test:** an offline L4 leg's `l2_context` request holds CURRENT PROMPTS.
-- **The length budget binds the `l1_generate` loop, not where a child is minted**: Shape:
-  `potter/validators.py::l1_length_within_budget` runs on proposals; `_recombined` and
-  `locus_crossover` children go unchecked (each crossed field was measured, so the bound holds per field,
-  not per child). Action: the check moves to `Children.child`. **Held:** l4-outer-5. **Re-test:** a
-  crossover child past the budget is refused.
-- **`answer_distribution` and `ability` read the frontier's rows, not the subject's**: link 4 moved
-  `failing_samples` and `sample_transcripts` onto `PotterView.parent_rows`; these two still read
-  `trajectory_results`. Action: the subject arm owns every row panel. **Held:** l4-outer-5.
-  **Re-test:** `git grep -n "trajectory_results" -- promptpotter/application/optimizers/potter/dispatch/injections`.
-- **Open cells are keyed by position, not by candidate**: Shape:
-  `infrastructure/projections/live_dashboard.py::_open_samples` is keyed by position alone and
-  `domain/records/run_records.py::FlightWaiting` carries only `position`, so two walks with a cell out
-  at one position (`--abreast` past 1) overwrite each other: a cut can undercount discards, and
-  "waiting on" can name the wrong arm. Action: key by (arm, position); `FlightWaiting` names its arm.
-  **Held:** l4-outer-5. **Re-test:** an offline world at `--abreast all` with two walks out at one
-  position; the served discards and `waiting on` match the ledger.
+  seat transcripts, and the critique's whole seats (`TranscriptKnobs` null/null) run 33,191 chars of
+  its 38,524 (C0 `run__265c4d` rounds 1–2; the round-2 generate, 26,681, dropped a transcript).
+  Action: each node's share a declared knob beside `TranscriptKnobs`, sized on that round.
+  **Held:** the next l4-outer link (decided 2026-11-18). **Re-test:** an offline L4 leg's
+  `l2_context` request holds CURRENT PROMPTS.
+- **`locus_crossover` re-crosses a measured or hosted child**: it edits every two-parent proposal, so
+  a hosted recombination and a rejoined crossover child are crossed again (one call: the re-crossed
+  id differs; l4-outer-5's report). Action: a crossover applies to a proposal it drew, never one it
+  receives. **Rides with:** the next variation chain. **Re-test:** a hosted recombination keeps its id.
+- **An over-budget crossover child books its verdict under axis `variant`**: `bench/children.py`'s
+  one length check cannot tell which mutation minted the child. Action: the verdict names the
+  mutation kind. **Rides with:** the row above. **Re-test:** a crossover child's OVER_CEILING names
+  crossover.
+- **`Frontier` no longer holds a frontier**: after l4-outer-5 it carries the parent's own rows and
+  their top-ups (`Frontier.parent_own_rows`). Action: rename it for its contents, with its doc row.
+  **Rides with:** the next l4-outer link. **Re-test:** `git grep -c "class Frontier\b" -- promptpotter` is 0.

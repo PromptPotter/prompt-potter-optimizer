@@ -190,7 +190,7 @@ def build_l1_response_schema(
     }
     # STRICTER than the parse twin on purpose: tolerated missing at the parse boundary, never OFFERED as `null`.
     if loci:
-        # Stated, never a `maxLength`: `validators.py::l1_length_within_budget` refuses past it.
+        # Stated, never a `maxLength`: `children.py::length_failures` refuses past it at the mint.
         stated = LENGTH_BUDGET_TEXT.format(length_budget)
         edits = variant_props["edits"] = {
             **_said(variant_props["edits"]),

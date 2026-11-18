@@ -30,6 +30,7 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.records.run_records import (
     ArmAct,
+    FlightWaiting,
     RaceCatchUpRecord,
     RoundWarningRecord,
     SampleScoredRecord,
@@ -971,11 +972,13 @@ class _ScoringPhase[K: Hashable]:
             most += catching + sum(owed.values())
         waiting = None
         if 0 <= self.turn < len(self.walks) and (holder := self.walks[self.turn]) is not None:
-            if holder.settling is not None:
-                taken = len(holder.results) - 1
-                waiting = (holder.settling.id, holder.launched_at[taken])
-            elif (head := len(holder.results)) in holder.running:
-                waiting = (holder.dataset[head].id, holder.launched_at[head])
+            head, settling = len(holder.results), holder.settling
+            held = settling or (holder.dataset[head] if head in holder.running else None)
+            # A walk writing no sample record holds no cell a reader can name.
+            if held is not None and (recorded := holder.ctx.recorded) is not None:
+                since = holder.launched_at[head if settling is None else head - 1]
+                who = recorded.individual_id
+                waiting = FlightWaiting(individual_id=who, position=held.id, since=since)
         return Flight(
             out_now,
             allowed,

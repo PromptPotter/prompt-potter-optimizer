@@ -187,25 +187,6 @@ def l1_prose_within_ceiling(
     return failures
 
 
-def l1_length_within_budget(
-    texts: Mapping[Locus, str], parent: OptSearchPoint, *, budget: int
-) -> list[ValidationFailure]:
-    """Growth and trims alike, the edited fields summed: the wire states the budget as prose."""
-    moved = sum(
-        len(text) - len(parent.prompt(at.node).fields.get(at.key, "")) for at, text in texts.items()
-    )
-    if abs(moved) <= budget:
-        return []
-    return [
-        ValidationFailure(
-            axis="variant",
-            value=f"{moved:+d} chars",
-            allowed=[str(budget)],
-            reason=ValidationReason.OVER_CEILING,
-        )
-    ]
-
-
 def l1_inner_layout_applies(overlay: Mapping[str, Any]) -> list[ValidationFailure]:
     """Convicted on the PROPOSAL: the apply site sits inside the inner task, below every wound channel."""
     failures: list[ValidationFailure] = []

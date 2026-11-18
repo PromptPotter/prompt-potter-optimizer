@@ -65,7 +65,6 @@ from promptpotter.application.optimizers.potter.validators import (
     l1_config_not_in_runtime_failures,
     l1_evidence_grounding,
     l1_inner_layout_applies,
-    l1_length_within_budget,
     l1_prompt_fields_open,
     l1_prose_within_ceiling,
     l1_shots_in_demo_pool,
@@ -170,7 +169,6 @@ async def l1_generate(
     for v in variants_list[:n_variants]:
         # Unfiltered: `bench/children.py::carried_writes` fails the child on an undeclared node or field.
         texts, failures = applied_edits(v.edits, opt_sp, pooled=pooled)
-        failures += l1_length_within_budget(texts, opt_sp, budget=knobs.length_budget)
         prompt_loci: dict[Locus, Any] = dict(texts)
         prompt_loci.update(
             {

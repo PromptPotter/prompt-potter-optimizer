@@ -3329,6 +3329,10 @@
       "FlightWaiting": {
         "additionalProperties": false,
         "properties": {
+          "individual_id": {
+            "title": "Individual Id",
+            "type": "string"
+          },
           "position": {
             "title": "Position",
             "type": "integer"
@@ -3339,6 +3343,7 @@
           }
         },
         "required": [
+          "individual_id",
           "position",
           "since"
         ],

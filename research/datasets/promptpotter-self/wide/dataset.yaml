@@ -1,0 +1,68 @@
+pipeline:
+  description: >-
+    Self-optimization, wide panel: twelve search seats, four per benchmark, its crown graded on
+    `run`'s three held-out seats.
+
+panel:
+  # `run`'s six search seats first, so each of their cells is the one `run` reads, then two more
+  # seeds per benchmark: an origin seat's lift moves ~6 pts between seeds, and six seats leave a
+  # +0.2-logit lead at z ~0.45 (C0 run__265c4d, 2026-11-18).
+  tasks:
+    - kind: seat
+      id: justlogic-d234/seed-20
+      run_seed: 20
+    - kind: seat
+      id: justlogic-d234/seed-3
+      run_seed: 3
+    - kind: seat
+      id: hotpotqa-distractor/seed-1
+      inner_dataset: hotpotqa-distractor
+      run_seed: 1
+    - kind: seat
+      id: hotpotqa-distractor/seed-0
+      inner_dataset: hotpotqa-distractor
+      run_seed: 0
+    - kind: seat
+      id: legalbench-fods/seed-0
+      inner_dataset: legalbench-fods
+      run_seed: 0
+    - kind: seat
+      id: legalbench-fods/seed-1
+      inner_dataset: legalbench-fods
+      run_seed: 1
+    - kind: seat
+      id: justlogic-d234/seed-4
+      run_seed: 4
+    - kind: seat
+      id: justlogic-d234/seed-5
+      run_seed: 5
+    - kind: seat
+      id: hotpotqa-distractor/seed-3
+      inner_dataset: hotpotqa-distractor
+      run_seed: 3
+    - kind: seat
+      id: hotpotqa-distractor/seed-4
+      inner_dataset: hotpotqa-distractor
+      run_seed: 4
+    - kind: seat
+      id: legalbench-fods/seed-3
+      inner_dataset: legalbench-fods
+      run_seed: 3
+    - kind: seat
+      id: legalbench-fods/seed-4
+      inner_dataset: legalbench-fods
+      run_seed: 4
+    - kind: seat
+      id: justlogic-d234/seed-2
+      held_out: true
+      run_seed: 2
+    - kind: seat
+      id: hotpotqa-distractor/seed-2
+      held_out: true
+      inner_dataset: hotpotqa-distractor
+      run_seed: 2
+    - kind: seat
+      id: legalbench-fods/seed-2
+      held_out: true
+      inner_dataset: legalbench-fods
+      run_seed: 2

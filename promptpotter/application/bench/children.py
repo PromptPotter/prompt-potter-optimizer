@@ -219,6 +219,29 @@ def placeholder_failures(
     return failures
 
 
+def _prompt_chars(individual: OptSearchPoint) -> int:
+    return sum(
+        len(text) for prompt in individual.prompts.values() for text in prompt.fields.values()
+    )
+
+
+def length_failures(
+    child: OptSearchPoint, main: OptSearchPoint, budget: int | None
+) -> list[ValidationFailure]:
+    """Grown or trimmed alike, every field summed against the main parent's; ``None`` bounds nothing."""
+    moved = _prompt_chars(child) - _prompt_chars(main)
+    if budget is None or abs(moved) <= budget:
+        return []
+    return [
+        ValidationFailure(
+            axis="variant",
+            value=f"{moved:+d} chars",
+            allowed=[str(budget)],
+            reason=ValidationReason.OVER_CEILING,
+        )
+    ]
+
+
 def admission_failures(
     child: OptSearchPoint,
     config: Mapping[str, Mapping[str, Any]],

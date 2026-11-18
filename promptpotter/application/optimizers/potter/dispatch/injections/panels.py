@@ -527,7 +527,7 @@ def _labelled(cells: Iterable[GradedCell]) -> list[GradedCell]:
     citable=True,
 )
 def _r_answer_distribution(b: PotterView) -> list[Item]:
-    rows = _labelled(b.trajectory_results)
+    rows = _labelled(b.parent_rows)
     # `None`: no repeated label to be constant about (free text, or identity-keyed answers).
     truth = enumerable_truth_labels(rows)
     if truth is None:
@@ -548,7 +548,7 @@ def _r_answer_distribution(b: PotterView) -> list[Item]:
         + f"  the truth  : {_tally(truth, n)}"
     )
     return [
-        Item(f"ANSWER DISTRIBUTION (over the {unit_count(n, b.measured_unit)} scored so far):"),
+        Item(f"ANSWER DISTRIBUTION (over the parent's {unit_count(n, b.measured_unit)}):"),
         Item(tally, trusted=False),
         Item(
             f'  Answering "{top_label}" to EVERY {b.measured_unit} would score {constant:.2f}. '
@@ -945,10 +945,10 @@ def _r_measurand(b: PotterView) -> list[Item]:
     if fitness is None:
         return []
     theta = ""
-    if (a := b.ability) is not None:
+    if (a := b.parent_ability) is not None:
         theta = (
-            f"; frontier θ {a.theta:+.3f} ±{a.se:.3f} ({a.scale(named=False)} — each "
-            f"{b.measured_unit}'s latest cell, whoever measured it)"
+            f"; the parent's θ {a.theta:+.3f} ±{a.se:.3f} ({a.scale(named=False)} — each "
+            f"{b.measured_unit}'s latest cell of the parent itself)"
         )
     if not _theta_fit_on_formula(b):
         # The cell formula IS the grade, so a fitness block would restate the θ line's input.
@@ -1020,7 +1020,7 @@ def _caveat_measure(a: AbilityReading, units: str) -> str:
 @signal("confounds", kind=InjectionKind.DERIVED, char_cap=None, citable=True)
 def _r_confounds(b: PotterView) -> list[Item]:
     rows: list[str] = []
-    if (a := b.ability) is not None and a.caveat is not None:
+    if (a := b.parent_ability) is not None and a.caveat is not None:
         info = THETA_CAVEAT_INFO[a.caveat]
         measure = _caveat_measure(a, unit_plural(b.measured_unit))
         rows.append(f"{info.label} — {info.detail}{measure}")
