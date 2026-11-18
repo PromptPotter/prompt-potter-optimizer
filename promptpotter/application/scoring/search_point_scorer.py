@@ -256,7 +256,7 @@ async def score_search_points[K: Hashable](
                 raise
             return {key: _halted(walk, halt) for key, walk in walks.items()}
     if cut is not None:
-        return {key: replace(close_walk(walk), halt=StopLoop(cut)) for key, walk in walks.items()}
+        return {key: replace(close_walk(walk), halt=cut) for key, walk in walks.items()}
     return {key: close_walk(walk) for key, walk in walks.items()}
 
 

@@ -49,6 +49,8 @@ class StopReason(enum.StrEnum):
     ORIGIN_GATE = "origin_gate"
     # Raised at the first cell the backend could not reach once its own retries were spent.
     BACKEND_UNREACHABLE = "backend_unreachable"
+    # The panel gate's, on a cell the backend reached and left unanswered (a 5xx, its timeout).
+    BACKEND_HOLE = "backend_hole"
     PROVIDER_CREDIT = "provider_credit_exhausted"
     PROVIDER_THROTTLED = "provider_throttled"
     PRICE_LIST_UNREACHABLE = "price_list_unreachable"
@@ -598,9 +600,8 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             StopCategory.LIMIT,
             False,
             False,
-            "Cells were cut at their time bound. Give them room (the connector's cell envelope, or "
-            "the backend deadline their rows name) before resuming, or turn the panel gate off to "
-            "elect on the holed panel.",
+            "Cells were cut at their time bound. Give them room (the connector's cell envelope) "
+            "before resuming, or turn the panel gate off to elect on the holed panel.",
             False,
             (
                 NextAct(field="Connector.cell_envelope_s"),
@@ -709,6 +710,18 @@ STOP_REASON_INFO: Worded[StopReason, StopReasonInfo] = Worded(
             False,
             "The unreached cell is a hole, not a score: restore the backend or the network it "
             "needs, then resuming re-measures it.",
+            True,
+            (NextAct(kind="start-run"),),
+        ),
+        # Not PANEL_CUT: no bound of ours cut the cell; the round is discarded, as a cut one is.
+        StopReason.BACKEND_HOLE: StopReasonInfo(
+            "Backend left a cell unanswered",
+            StopOutcome.HALTED,
+            StopCategory.EXTERNAL,
+            False,
+            False,
+            "The backend answered a cell with a server error it did not recover from, in the words "
+            "it gave: resuming re-measures the round's holes.",
             True,
             (NextAct(kind="start-run"),),
         ),

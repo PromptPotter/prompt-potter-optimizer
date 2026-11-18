@@ -7677,7 +7677,7 @@
       },
       "RulerOwn": {
         "additionalProperties": false,
-        "description": "A compare arm's reach past its head-to-head's freeze: its own campaign's lines alone, which\nis what a fresh run of itself would read.",
+        "description": "A compare arm's or an L4 cell's reach past its pin: its own campaign's lines alone, which\nis what a fresh run of itself would read.",
         "properties": {
           "campaign": {
             "title": "Campaign",
@@ -9036,6 +9036,7 @@
           "wall_clock",
           "origin_gate",
           "backend_unreachable",
+          "backend_hole",
           "provider_credit_exhausted",
           "provider_throttled",
           "price_list_unreachable",

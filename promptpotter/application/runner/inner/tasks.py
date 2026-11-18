@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 from pydantic import Field, ValidationError, model_validator
 
 from promptpotter import connectors
-from promptpotter.application.bench.difficulty import ruler_clock
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -38,12 +37,11 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
 )
 from promptpotter.domain.prompt_block import Presumption
-from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.run_scope import UNBOUND, InnerSpawnContext, rescope, run_scope
-from promptpotter.infrastructure.store.archive_queries import CampaignWalks, CellOf
+from promptpotter.infrastructure.store.archive_queries import ArmOf, CampaignWalks
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeline, resolve_dataset
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
@@ -377,9 +375,18 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
         enclosing=(*session.state.control.enclosing, session.store.subject(session.hop)),
         acting=session.state.control.acting,
         purpose=session.purpose,
-        ruler=ruler_clock(session),
+        ruler=_round_zero_ruler(session),
         cells=cells,
     )
+
+
+def _round_zero_ruler(session: Session) -> int:
+    """The version the cycle's round 0 was read on, off its close, so a resume and a replay pin
+    the one the first launch did; until round 0 closes, the clock the origin opens on."""
+    held = session.store.campaigns.standing_rounds(session.hop, moment=None).rounds.get(0)
+    if held is None or held.close.election is None:
+        return session.store.ruler.version()
+    return held.close.election.ruler.version
 
 
 def inner_spawn_context() -> InnerSpawnContext | None:
@@ -398,20 +405,13 @@ def inner_cells() -> InnerCells | None:
     return None if ctx is None else ctx.cells
 
 
-def pin_inner_ruler(reach: RulerReach) -> None:
-    """At each outer round's open, so every cell the round spawns reads the lines it reads."""
-    ctx = inner_spawn_context()
-    if ctx is not None and ctx.ruler != reach:
-        rescope(spawn=replace(ctx, ruler=reach))
-
-
-def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_id: str) -> CellOf:
+def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_id: str) -> ArmOf:
     """The archive stays the cell's CACHE, and MEMORY only for its campaign's walks: the scope it returns."""
     # INSIDE the cell's own task, or the mode leaks to the spawner; before the cell's run binds its
     # own round, so this still reads the spawner's: the root's, as the spawner is the root.
     spawner = run_scope()
     rescope(instrument=InstrumentMode(depth=spawner.depth + 1, root_round=spawner.round))
-    return CellOf(CampaignWalks(campaigns, campaign_id), ctx.ruler)
+    return ArmOf(CampaignWalks(campaigns, campaign_id), ctx.ruler)
 
 
 def retarget_inner_spawn(session: Session) -> None:

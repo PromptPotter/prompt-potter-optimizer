@@ -43,7 +43,7 @@ class RulerFold(FrozenModel):
 
 
 class RulerOwn(FrozenModel):
-    """A compare arm's reach past its head-to-head's freeze: its own campaign's lines alone, which
+    """A compare arm's or an L4 cell's reach past its pin: its own campaign's lines alone, which
     is what a fresh run of itself would read."""
 
     campaign: str

@@ -94,7 +94,6 @@ from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
-    CellOf,
     OpenAt,
 )
 from promptpotter.infrastructure.store.ruler_store import RulerStore
@@ -669,12 +668,8 @@ def test_a_fork_and_its_parent_line_read_their_levels_on_one_fit_less_both_lines
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_series_reads_no_row_past_the_reach_its_reader_holds(traced: _Traced) -> None:
+    # An L4 cell takes the arm's scope: its outer cycle's round-0 version plus its own lines.
     series_of, _, _, _, _, warmed, _, frozen, run = traced
-    pin = RulerReach(version=frozen, own=None)
-    [pinned] = series_of(CellOf(walks=None, ruler=pin), warmed, [run])  # type: ignore[arg-type]
-    assert pinned.stamp.version == frozen and pinned.stamp.excluded == (), (
-        "an inner cell's series read past the version its outer round opened on"
-    )
     [own, other] = (
         series_of(ArmOf(CampaignWalks(None, c), frozen), warmed, [run])[0]  # type: ignore[arg-type]
         for c in ("run", "x")

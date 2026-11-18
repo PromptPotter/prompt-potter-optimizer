@@ -351,22 +351,27 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     # Captured in the OUTER task: the inner task's context copy rebinds the round.
     spawned_by = _spawn_provenance(cell.ctx, bound_round(), query)
 
-    # Awaited DIRECTLY, never under `asyncio.shield`/`wait`, which orphan it to keep billing.
-    # The context binds no OUTER candidate, or inner optimizer calls bill under the outer cell's role.
-    inner_task = asyncio.create_task(
-        _run_inner_campaign(cell, minted, spawned_by),
-        context=scope_context(measured=None),
-    )
-    try:
-        result, rounds = await inner_task
-    except asyncio.CancelledError:
-        if not inner_task.done():
-            inner_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await inner_task
-        if fresh and minted:
-            _reclaim_forks_partial(cell, minted[0])
-        raise
+    # The backend's hole is not the optimizer prompt's: asked once more, the cell resumes and
+    # re-measures it, and only a second hole grades it.
+    for _ in range(2):
+        # Awaited DIRECTLY, never under `asyncio.shield`/`wait`, which orphan it to keep billing.
+        # The context binds no OUTER candidate, or inner optimizer calls bill under the outer cell's role.
+        inner_task = asyncio.create_task(
+            _run_inner_campaign(cell, minted, spawned_by),
+            context=scope_context(measured=None),
+        )
+        try:
+            result, rounds = await inner_task
+        except asyncio.CancelledError:
+            if not inner_task.done():
+                inner_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await inner_task
+            if fresh and minted:
+                _reclaim_forks_partial(cell, minted[0])
+            raise
+        if result.stop_reason is not StopReason.BACKEND_HOLE:
+            break
     if (refused := _REFUSALS.get(result.stop_reason)) is not None:
         # The inner run spends the outer's key and ceiling, so the refusal halts the walk for every later cell.
         raise CellSendRefusedError(

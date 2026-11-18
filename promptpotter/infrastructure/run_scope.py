@@ -16,7 +16,6 @@ from typing import TYPE_CHECKING, Any, Literal
 from promptpotter.domain.campaign import DeterminismClamp, Purpose
 from promptpotter.domain.cycle_paths import CyclePath, Subject
 from promptpotter.domain.l4.cells import InnerCells
-from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.spend import TokenUsageKind
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.shared.identity import IdentityContext
@@ -57,8 +56,9 @@ class InnerSpawnContext:
     acting: tuple[str, ...]
     # What the spawner is FOR: each cell declares it, so withholds what the spawner would.
     purpose: Purpose
-    # The tenant ruler lines the spawner's open round reads, which every cell it spawns reads too.
-    ruler: RulerReach
+    # The ruler version every cell of the spawner's cycle reads, plus its own lines since: the
+    # scale the cycle's round 0 was read on (`runner/inner/tasks.py::inner_spawn_of`).
+    ruler: int
     # Resolved ONCE at publish: a per-cell read lets an edit split one run's cells.
     cells: InnerCells | None = None
 

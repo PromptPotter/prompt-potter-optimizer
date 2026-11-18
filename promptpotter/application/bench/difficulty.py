@@ -30,7 +30,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
-from promptpotter.infrastructure.store.archive_queries import ArmOf, CellOf, OpenAt, memory_scope
+from promptpotter.infrastructure.store.archive_queries import ArmOf, OpenAt, memory_scope
 from promptpotter.infrastructure.store.read_model import derived
 from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.infrastructure.store.stores import Stores
@@ -307,8 +307,6 @@ def ruler_clock(session: Session) -> RulerReach:
         case ArmOf(walks=walks, ruler_version=frozen):
             own = RulerOwn(campaign=walks.campaign_id, since=frozen)
             return RulerReach(version=session.store.ruler.version(), own=own)
-        case CellOf(ruler=reach):
-            return reach
         case _:
             assert_never(scope)
 

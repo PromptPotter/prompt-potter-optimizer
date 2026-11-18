@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
 
 from pydantic import Field
 
-from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer
 from promptpotter.domain.scoring import MeasuredCell, WalkedCell
 from promptpotter.domain.strict_model import FrozenModel
@@ -39,21 +38,14 @@ class OpenAt(NamedTuple):
 
 
 class ArmOf(NamedTuple):
-    """Compare: its campaign's walks alone, and the ruler its head-to-head froze at open plus its
-    own campaign's lines since."""
+    """A compare arm or an L4 cell: its campaign's walks alone, and the ruler at ``ruler_version``
+    (its head-to-head's open, its outer cycle's round 0) plus its own campaign's lines since."""
 
     walks: CampaignWalks
     ruler_version: int
 
 
-class CellOf(NamedTuple):
-    """An L4 cell remembers its campaign's walks alone and reads its spawner's round reach."""
-
-    walks: CampaignWalks
-    ruler: RulerReach
-
-
-type MemoryScope = OpenAt | ArmOf | CellOf
+type MemoryScope = OpenAt | ArmOf
 
 
 def memory_scope() -> MemoryScope:
@@ -71,7 +63,7 @@ def _remembered() -> Callable[[FiledAnswer], bool] | None:
     match scope := memory_scope():
         case OpenAt():
             return None
-        case ArmOf(walks=walks) | CellOf(walks=walks):
+        case ArmOf(walks=walks):
             own = scan_ledger_answers(walks.spans())
             return lambda answer: answer.answer in own
         case _:
@@ -83,7 +75,7 @@ def every_campaign_now() -> bool:
     match scope := memory_scope():
         case OpenAt():
             return True
-        case ArmOf() | CellOf():
+        case ArmOf():
             return False
         case _:
             assert_never(scope)

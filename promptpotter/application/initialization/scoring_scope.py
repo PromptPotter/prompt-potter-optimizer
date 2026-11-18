@@ -37,7 +37,6 @@ from promptpotter.infrastructure.run_scope import UNBOUND, RunScope, run_scope, 
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
-    CellOf,
     MemoryScope,
     OpenAt,
 )
@@ -74,7 +73,7 @@ def scorer_setup(
 def run_memory(session: Session) -> MemoryScope:
     """What a run on *session* remembers, by its purpose; an L4 cell keeps the scope its spawner
     opened (`runner/inner/spawn.py::_run_inner_campaign`)."""
-    if isinstance(cell := run_scope().memory, CellOf):
+    if isinstance(cell := run_scope().memory, ArmOf):
         return cell
     match purpose := session.purpose:
         case Optimize():

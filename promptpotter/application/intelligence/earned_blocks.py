@@ -14,7 +14,6 @@ from promptpotter.domain.records.run_records import RoundStatement
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
 from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
-    CellOf,
     OpenAt,
     memory_scope,
     walked_answers,
@@ -130,7 +129,7 @@ def mine_earned_blocks(stores: Stores, survey: CampaignSurvey) -> dict[str, list
     match scope := memory_scope():
         case OpenAt():
             pass
-        case ArmOf() | CellOf():
+        case ArmOf():
             return {}
         case _:
             assert_never(scope)

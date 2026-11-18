@@ -1789,7 +1789,10 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
                 )
                 return
             _, closed, cut, _ = asyncio.run(cut_walk)
-            assert cut is StopReason.SPEND_BUDGET, f"{case}: the round names its cut"
+            assert cut is not None and cut.reason is StopReason.SPEND_BUDGET, (
+                f"{case}: the round names its cut"
+            )
+            assert cut.detail, f"{case}: a kept cut halts the loop with no words"
             rows = {key: closed.rows(key) for key in closed.proposed}
             assert sum(len(closed.rows(key)) for key in closed.arms) == (
                 replayed + len(paid) + parent_cells

@@ -17,6 +17,7 @@ from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol,
     measure_sample,
 )
+from promptpotter.domain.account_words import refusal_words
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.command_kinds import MAX_SPEED
 from promptpotter.domain.paired_reading import ArmKey
@@ -84,11 +85,12 @@ def _budget_refusal(category: ErrorCategory | None) -> StopReason | None:
     return stop if stop in _BUDGET_STOPS else None
 
 
-def _budget_stop(stop: BaseException) -> StopReason | None:
+def _budget_stop(stop: BaseException) -> StopLoop | None:
+    """A budget stop as it travels on: a walk's own, or a refused send's, in its sentence."""
     if isinstance(stop, StopLoop) and stop.reason in _BUDGET_STOPS:
-        return stop.reason
-    if isinstance(stop, SendRefusedError):
-        return _budget_refusal(stop.category)
+        return stop
+    if isinstance(stop, SendRefusedError) and (reason := _budget_refusal(stop.category)):
+        return StopLoop(reason, detail=refusal_words(stop))
     return None
 
 
@@ -403,7 +405,9 @@ class Walk:
         # Asked of every row, replays included: the stale-data protocol re-measures a replayed cell.
         category = taken.facts.error_category
         if category is not None and (stop := ERROR_CATEGORY_INFO[category].stops) is not None:
-            raise StopLoop(stop, unmeasured=n - len(self.results) + 1)
+            raise StopLoop(
+                stop, unmeasured=n - len(self.results) + 1, detail=taken.facts.error or ""
+            )
 
         if acq.fresh:
             if taken.facts.errored:
@@ -524,9 +528,9 @@ async def run_walks[K: Hashable](
     blocks: BlockRace[K] | None = None,
     on_turn: Callable[[K, int | None], None] | None = None,
     on_decided: Callable[[K], None] | None = None,
-) -> StopReason | None:
+) -> StopLoop | None:
     """Rows, cuts and events land where a SERIAL phase lands them, in *walks*' order; ``keep_cut``
-    returns a budget stop, not raises."""
+    returns a budget stop, its words whole, not raises."""
     if over := [w.n for w in walks.values() if w is not None and w.n > MAX_PASS_ROWS]:
         raise PayloadInvalidError(
             f"A pass scores at most {MAX_PASS_ROWS} rows, and this one asks for {max(over)}. "
@@ -576,7 +580,7 @@ class _TurnState:
     cut: bool
     skip: bool
     pause: bool
-    tripped: StopReason | None
+    tripped: StopLoop | None
     keeping: bool
 
     @property
@@ -764,9 +768,7 @@ class _ScoringPhase[K: Hashable]:
             return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         if now.pause or now.tripped is None:
             raise KeyboardInterrupt("graceful")
-        assert self.book is not None, "only a book trips"
-        money = now.tripped is not StopReason.WALL_CLOCK
-        raise StopLoop(now.tripped, detail=self.book.counted_words() if money else "")
+        raise now.tripped
 
     def take_head(self, walk: Walk, head: asyncio.Task[_Acquired]) -> bool:
         backfills = self.backfills

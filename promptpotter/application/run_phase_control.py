@@ -12,7 +12,12 @@ from promptpotter.domain.phases import (
     PauseCause,
     StopReason,
 )
-from promptpotter.domain.records.run_records import FlightRecord, FlightWaiting, PhaseRecord
+from promptpotter.domain.records.run_records import (
+    FlightRecord,
+    FlightWaiting,
+    PhaseRecord,
+    StopLoop,
+)
 from promptpotter.infrastructure.llm.spend_book import SpendBook
 from promptpotter.infrastructure.llm.telemetry import append_record, bound_round
 from promptpotter.infrastructure.producer_lock import (
@@ -220,7 +225,9 @@ class ProducerHold:
             (release_pass if self._pass else release_cycle)(self._dir)
 
 
-def budget_stop(book: SpendBook) -> StopReason | None:
-    """Read between samples and at a round boundary; whether a call may be SENT is the book's."""
+def budget_stop(book: SpendBook) -> StopLoop | None:
+    """Read between samples and at a round boundary, in the book's count; a SEND is the book's."""
     refused = book.exhausted()
-    return None if refused is None else ERROR_CATEGORY_INFO[refused].stops
+    if refused is None or (reason := ERROR_CATEGORY_INFO[refused].stops) is None:
+        return None
+    return StopLoop(reason, detail="" if reason is StopReason.WALL_CLOCK else book.counted_words())

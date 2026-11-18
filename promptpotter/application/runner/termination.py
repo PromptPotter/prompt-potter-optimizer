@@ -93,18 +93,23 @@ def origin_gate_tripped(health: DegradationHealth, mode: GateMode) -> StopReason
 
 
 def panel_gate_tripped(
-    holed_rows: Sequence[GradedCell], cut: StopReason | None, mode: GateMode
-) -> StopReason | None:
-    """The stop names the bound that made the hole: a budget's own, or ``PANEL_CUT``; a resume re-cuts both, unlike ``PAUSED``."""
+    holed_rows: Sequence[GradedCell], cut: StopLoop | None, mode: GateMode
+) -> StopLoop | None:
+    """The stop names what made the hole, in its rows' words: a budget's own, the backend's
+    (``BACKEND_HOLE``), our bound's (``PANEL_CUT``); a resume re-measures each, unlike ``PAUSED``."""
     if mode == "off":
         return None
     if cut is not None:
         return cut
-    if not holed_rows:
-        return None
-    if any(cell.facts.error_category is ErrorCategory.HALTED for cell in holed_rows):
-        return StopReason.PANEL_CUT
-    return StopReason.PAUSED
+    for category, reason in (
+        (ErrorCategory.SERVER, StopReason.BACKEND_HOLE),
+        (ErrorCategory.HALTED, StopReason.PANEL_CUT),
+    ):
+        if said := sorted(
+            {c.facts.error or "" for c in holed_rows if c.facts.error_category is category}
+        ):
+            return StopLoop(reason, detail="; ".join(filter(None, said)))
+    return StopLoop(StopReason.PAUSED) if holed_rows else None
 
 
 def standing_tripped(standing: RunStanding, optimization: OptimizationConfig) -> StopReason | None:

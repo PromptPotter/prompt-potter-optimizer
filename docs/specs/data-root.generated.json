@@ -2798,6 +2798,7 @@
               "wall_clock",
               "origin_gate",
               "backend_unreachable",
+              "backend_hole",
               "provider_credit_exhausted",
               "provider_throttled",
               "price_list_unreachable",

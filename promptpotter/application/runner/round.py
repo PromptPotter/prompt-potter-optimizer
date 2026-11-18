@@ -41,7 +41,6 @@ from promptpotter.application.runner.bench import (
     line_outlay,
     reserve_selection_pass,
 )
-from promptpotter.application.runner.inner.tasks import pin_inner_ruler
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
 from promptpotter.application.scoring.arm_states import conclude, cut_past_draw, measuring, refuse
 from promptpotter.application.scoring.catch_up import CatchUpPool
@@ -582,7 +581,7 @@ async def measure_population(
         cells = [sample for sample in cells if sample.key in on_disk]
         # Nothing the cut left can be elected, so the round is unwound as an unkept cut is.
         if not cells or not any(readable(key, held) for key in rows):
-            raise StopLoop(cut)
+            raise cut
     parent = await measure_as_parent(
         ctx, cycle.parent, cycle.parent_point, cells, role=MeasurementRole.PARENT
     )
@@ -823,7 +822,7 @@ async def _walk_population(
     eliminator: Eliminator | None,
     *,
     keep_cut: bool,
-) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopReason | None, Race | None]:
+) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopLoop | None, Race | None]:
     cycle = ctx.cycle
     round_num = ctx.round_num
     panel = ctx.panel
@@ -1057,14 +1056,14 @@ def _round_result(
     )
 
 
-def _unbought_cells(arm: ArmState, rows: CellSheet, cut: StopReason | None) -> int:
+def _unbought_cells(arm: ArmState, rows: CellSheet, cut: StopLoop | None) -> int:
     # Under a cut, a MEASURED arm short of its panel was stopped by no rule and no operator.
     if cut is None or not isinstance(arm, Measured) or arm.locked_in is not None:
         return 0
     return max(0, arm.expected_samples - len(rows))
 
 
-def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | None) -> None:
+def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopLoop | None) -> None:
     round_num = ctx.round_num
     proposed = round_result.proposed
     unbought = {
@@ -1078,13 +1077,13 @@ def _panel_gate(ctx: RoundContext, round_result: RoundResult, cut: StopReason | 
     holed_rows = [
         (key, cell) for key in holed for cell in round_result.rows(key) if cell.facts.errored
     ]
-    reason = panel_gate_tripped(
+    tripped = panel_gate_tripped(
         [cell for _, cell in holed_rows],
         cut if any(unbought[cid] for cid in holed) else None,
         ctx.cycle.config.optimization.panel_gate,
     )
-    if reason is not None:
-        raise StopLoop(reason)
+    if tripped is not None:
+        raise tripped
 
 
 def announce_opening(ctx: RoundContext, walk: RoundWalk) -> RoundOpening:
@@ -1224,7 +1223,7 @@ class ControllerAct(NamedTuple):
 class RoundWalked(NamedTuple):
     ctx: RoundContext
     result: RoundResult
-    cut: StopReason | None
+    cut: StopLoop | None
     act: ControllerAct | None
 
 
@@ -1313,11 +1312,10 @@ async def walk_round(cycle: Cycle, round_num: int) -> tuple[RoundContext, list[S
     pool = list(cycle.session.state.scoring.partition.search)
     ctx = RoundContext(cycle=cycle, round_num=round_num)
     await settle_owed_outputs(ctx)
-    # Before the draw, which reads the scale the election will, and before an arm spawns a cell.
+    # Before the draw, which reads the scale the election will.
     banked = cycle.banked_walk(round_num)
     reach = ruler_clock(cycle.session) if banked is None else banked.opened_on
     cycle.difficulty.open_round(cycle.rounds, reach)
-    pin_inner_ruler(cycle.difficulty.stamp.reach)
     sampler = cycle.optimizer.plan.sampler
     ctx.drew = sampler.draw(NodeContext(ctx, sampler), pool)
     return ctx, pool, await _proposed(ctx)

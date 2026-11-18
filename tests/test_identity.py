@@ -309,7 +309,6 @@ from promptpotter.domain.records.run_records import (
     ScoringLockedRecord,
 )
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import GradedCell, ScoringFormulaError
@@ -2857,7 +2856,7 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
             enclosing=(),
             acting=(),
             purpose=Optimize(),
-            ruler=RulerReach(version=0, own=None),
+            ruler=0,
         )
     )
     assert resolve_dataset(sandboxed, "decl") == resolve_dataset(stores, "decl"), (
@@ -3107,7 +3106,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         acting=(),
         cells=seats,
         purpose=Optimize(),
-        ruler=RulerReach(version=0, own=None),
+        ruler=0,
     )
     inner_hop = CycleHop(
         campaign_id=inner_campaign_id(seats.spec(inner_seat), seats.own(inner_seat, {})),

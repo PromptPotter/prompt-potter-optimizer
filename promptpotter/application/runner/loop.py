@@ -117,7 +117,7 @@ async def run_round_loop(
                 # A hold refusal cuts a round while the ceiling still reads clear, so the cut speaks first.
                 tripped = cut or budget_stop(require_spend_book("a round boundary"))
                 if tripped is not None:
-                    return LoopEnd(tripped)
+                    return LoopEnd(tripped.reason, detail=tripped.detail)
             round_num += 1
 
     except RUN_ENDS as exc:

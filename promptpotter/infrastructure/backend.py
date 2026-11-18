@@ -46,11 +46,11 @@ from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.store.io import HeldLock, take_lock
 from promptpotter.shared.errors import (
-    CellHaltedError,
     CellThrottledError,
     CellUnscoreableError,
     ErrorCategory,
     PayloadInvalidError,
+    cell_failure,
 )
 from promptpotter.shared.tls import tls_context
 
@@ -426,7 +426,8 @@ class BackendClient:
     ) -> float | None:
         code = resp.status_code
         if outcome.resendable and (refused := self._guard.resend_refused(resp)) is not None:
-            raise CellHaltedError(f"HTTP {code} {refused}", spent={})
+            # The backend's own hole, never a bound of ours: a resume re-measures it.
+            raise cell_failure(f"HTTP {code} {refused}", ErrorCategory.SERVER, spent={})
         if (wait := sends.wait_after(outcome)) is not None:
             logger.warning(
                 "Backend %d (attempt %d/%d); waiting %.1fs",

@@ -234,7 +234,6 @@ from promptpotter.domain.records.run_records import (
     StopLoop,
     TokenUsageRecord,
 )
-from promptpotter.domain.ruler import RulerReach
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, PipelineData, Scorer
@@ -1533,7 +1532,7 @@ async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
         acting=(),
         cells=seats,
         purpose=Optimize(),
-        ruler=RulerReach(version=0, own=None),
+        ruler=0,
     )
     (seat,) = seats.cells
     query = seat.id
@@ -1911,6 +1910,10 @@ def _unreported_sends(ledger: CycleEventLog) -> int:
     return sum(hold.ledger == on for hold in (*whole, *unpriced))
 
 
+def _stopped_on(book: SpendBook) -> StopReason | None:
+    return None if (stop := budget_stop(book)) is None else stop.reason
+
+
 @pytest.mark.usefixtures("offline")
 def test_a_mid_run_ceiling_reaches_the_running_book_and_the_loop(
     tmp_path: Path, built_stores: Stores
@@ -1934,11 +1937,11 @@ def test_a_mid_run_ceiling_reaches_the_running_book_and_the_loop(
         "a run that declared NOTHING still holds a book, which stays silent until a ceiling exists"
     )
     declare(Budget(usd=0.50))
-    assert budget_stop(book) == StopReason.SPEND_BUDGET, "a mid-run ceiling reached no book"
+    assert _stopped_on(book) is StopReason.SPEND_BUDGET, "a mid-run ceiling reached no book"
     CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(state=Running()))
-    assert budget_stop(book) == StopReason.SPEND_BUDGET, "a launch swept the ceiling"
+    assert _stopped_on(book) is StopReason.SPEND_BUDGET, "a launch swept the ceiling"
     declare(Budget(tokens=5_000))
-    assert budget_stop(book) == StopReason.TOKEN_BUDGET, "a token ceiling bound nothing"
+    assert _stopped_on(book) is StopReason.TOKEN_BUDGET, "a token ceiling bound nothing"
     session = loop_session(built_stores, pipeline_schema([]), [], hop=hop)
     config = _budgeted(Budget(usd=0.025, rounds=50))
     declare(Budget(rounds=3))
@@ -1949,7 +1952,7 @@ def test_a_mid_run_ceiling_reaches_the_running_book_and_the_loop(
     assert budget_stop(book) is None, "a lifted ceiling still governed the run"
     # Another PROCESS's reshare lands on the cycle's ledger, behind this process's own write of it.
     CycleEventLog.open(CycleDir(cycle_dir)).append(CycleShareRecord(allotment=Budget(usd=0.50)))
-    assert budget_stop(book) == StopReason.SPEND_BUDGET, (
+    assert _stopped_on(book) is StopReason.SPEND_BUDGET, (
         "a share another process moved was hidden from the running book"
     )
     declare(Budget(rounds=None))
@@ -1986,13 +1989,13 @@ def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
         step_rounds=None,
     )
     moved_book = _armed(built_stores, moved, caps)
-    assert budget_stop(moved_book) == StopReason.TOKEN_BUDGET, "the token ceiling bound nothing"
+    assert _stopped_on(moved_book) is StopReason.TOKEN_BUDGET, "the token ceiling bound nothing"
     dispatcher = CommandDispatcher(built_stores, registry)
     armed = _change_run_limits(dispatcher, moved, Budget(usd=0.50))
     assert armed.usd == pytest.approx(0.50), (
         "the change armed no ceiling a replay could stop the run at"
     )
-    assert budget_stop(moved_book) == StopReason.TOKEN_BUDGET, (
+    assert _stopped_on(moved_book) is StopReason.TOKEN_BUDGET, (
         "a USD raise lifted the token ceiling"
     )
     assert moved_book.allotment.usd == pytest.approx(0.50), (
@@ -2519,7 +2522,7 @@ def test_a_remote_cell_open_at_the_runs_wall_clock_is_cut_on_it(
         f"the cell ran {waited:.0f}s: its envelope, not the run's clock, bounded it"
     )
     clock.opened -= 31.0
-    assert budget_stop(clock) == StopReason.WALL_CLOCK, (
+    assert _stopped_on(clock) is StopReason.WALL_CLOCK, (
         "a run past its wall clock was not stopped on it"
     )
 
@@ -3195,7 +3198,7 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
                 billed=cell_billing(pipeline_schema([]), {}, {"n": attempt}),
             )
 
-    for ends in (httpx.ReadTimeout, CellHaltedError):
+    for ends in (httpx.ReadTimeout, CellSendRefusedError):
         with _billing_on(cell_ledger, wallet), pytest.raises(ends):
             jumping_clock(remote_cell())
     posts = offline.backend.asked.count("/matches")

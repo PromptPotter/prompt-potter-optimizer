@@ -150,7 +150,6 @@ from promptpotter.domain.ruler import (
     AbilityReading,
     DeltaRuler,
     LevelSeries,
-    RulerReach,
     RulerScope,
     RulerStamp,
     ThetaCaveat,
@@ -1008,7 +1007,7 @@ async def inner_seat(
         acting=(),
         cells=seats,
         purpose=Optimize(),
-        ruler=RulerReach(version=0, own=None),
+        ruler=0,
     )
     pin = PinnedCell(cell=cell_seat, instrument="i").pin()
     asked = Sample(id=0, query=cell_seat.id, ground_truth=None, source_pin=pin)

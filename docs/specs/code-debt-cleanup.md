@@ -862,6 +862,19 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   (`runner/loop.py::LoopEnd`) carry no words. Action: the set-aside lands where every door reads it,
   and a budget stop travels as its `StopLoop`. **Rides with:** none yet. **Re-test:** a halt at a
   round boundary names the book's parts in its `run_phase` `detail`.
+- **A holed panel pauses "by interrupt", with no words, unless the hole is the backend's or our
+  bound's** (l4-valid's report; seen live: dyck cycle_4ec5c80c24a4 round 1, 2026-11-18, holes
+  {positive 1, crippled 1} read "Paused by interrupt"): `runner/termination.py::panel_gate_tripped`
+  ends on a bare `StopLoop(PAUSED)` for any other hole (an UNSCOREABLE inner cell, a 503 raised
+  into a cell), and `phases.py::SELF_PAUSE_CAUSE` has no row for it, so no signal is named as its
+  cause. Root: the gate has no stop for a hole no bound of ours made. Action: one stop the panel
+  gate raises on its own holes, worded by its rows, which a resume re-measures. **Re-test:** the
+  dyck shape (one UNSCOREABLE row per arm) reads its rows' error, never "interrupt".
+- **An L4 outer's errored cell carries no backend words** (l4-valid's report): `CycleResult` holds
+  no stop detail, so `runner/inner/spawn.py::run_inner_cycle` grades a second `backend_hole` as
+  "stopped on backend_hole" and the backend's status and message stay on the inner ledger. Action:
+  the outer cell's error reads the inner stop's detail. **Re-test:** two injected 504s in one inner
+  cell put the backend's words in the outer cell's error.
 
 ## Held — no wave-4 chain yet
 
@@ -932,11 +945,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   lands where the book reads it back (a ledger fact or a hold on the charge book). **Rides with:**
   the rows below. **Re-test:** a fold during a run holding a bench reserve serves the figure
   `exhausted()` reads.
-- **A kept cut and a round boundary halt with no words**: `run_walks(keep_cut=True)` returns a bare
-  `StopReason`, `runner/round.py` raises `StopLoop(cut)` and `runner/loop.py::LoopEnd` carries a
-  reason only, so only a walk's own stop names the book's parts (the C0 `run__265c4d` halt: a send's
-  room fired, `SpendBook.refuse_unless_room`). Action: a budget stop travels as its `StopLoop`, its
-  detail from the book's count. **Re-test:** a round-boundary halt names the parts in its `run_phase` detail.
 - **The stop record's campaign spend reads the bills alone**: `run_observers.py::declare_run_stop`
   fills `StopSpend.campaign` from `metered_spend`, so its cap lines omit unreported money. Action:
   `StopSpend` carries the book's `SpendCount`. **Re-test:** a halted run's stop record names its lapsed cells.
@@ -944,21 +952,3 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
   in-process count per backend. Action: one count of one machine fact, reaching both. **Rides
   with:** the rows above. **Re-test:** `git grep -c "class MachineSlots" -- promptpotter` is 0.
-- **An L4 inner cell elects on a ruler that may carry none of its panel**: a cell reads its outer
-  round's open reach (`runner/inner/tasks.py`, `InnerSpawnContext.ruler` → `CellOf`), never its own
-  folds, and `rasch.py::theta_cells` counts only the cells a warm ruler carries. In
-  `promptpotter-self.dyck__2bd880` (outer round 0, v1052) seat seed-0's 40 panel cells hit 0 of the
-  bbh-dyck ruler's 150 (the other seats 19–25), so every round served `electable: 0`; arms at
-  65/48/68% over an 18% parent went unread and only L2's rebase moved the line, with no word of why.
-  The next outer round reads the origin cells' folds (seed-0 40/40 at v1086), so an arm's cell and
-  the origin's are read on different rulers. Action: a cell's reach takes its own folds since the pin
-  (as `ArmOf` does), or a ruler short of the coverage floor on a panel links the round's cells before
-  its election; decide beside the estimator re-key. **Re-test:** a seat the pinned ruler misses
-  elects a clear winner by round 2.
-- **A provider hole stops an inner cell as a bound, and halts the outer at its origin gate**: one
-  `HTTP 504 llm_timeout` left one hole in one arm (`panel_coverage` named it), the seed-0 cell paused
-  `panel_cut` with cause `bound` and an empty detail at 160 of its 200 cells, the outer graded the cell
-  errored and the strict origin gate halted `promptpotter-self.dyck__2bd880` at round 0; `resume`
-  re-measured it in 46 s. Action: a hole the backend owes is its own stop with its words, and the
-  outer re-asks a paused cell before grading its origin. **Rides with:** the kept-cut row above.
-  **Re-test:** one injected 504 in an inner arm leaves the outer run going.

@@ -37,7 +37,6 @@ from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phase_acts import StepFact
-from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import (
     INITIAL_POPULATION,
     MEMBER_KINDS,
@@ -46,6 +45,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import Access, DemoPool, Pool, PoolEntry
 from promptpotter.domain.prompt_block import Presumption
+from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.sample import Sample
@@ -463,7 +463,7 @@ class MeasuredRound:
     fit: dict[ArmKey, ArmFit]
     electable: list[ArmKey]
     coverage_floor: int
-    cut: StopReason | None
+    cut: StopLoop | None
     # The origin panel by sample slot; `on_panel` holds each member's rows there beside its draw.
     origin_panel_slots: list[int]
     on_panel: dict[str, CellSheet]
