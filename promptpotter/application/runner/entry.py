@@ -257,10 +257,7 @@ async def open_line(
             session, observers, StopReason.REBASED, interrupted_by=PauseCause.INTERRUPT
         )
         observers.drain_all()
-        parent = observers
-        cycle.session, observers = await onto_fork(session, cut, parent, prep=prep)
-        # Held through the fork's mint, which moves the campaign's holds off it.
-        parent.release()
+        cycle.session, observers = await onto_fork(session, cut, observers, prep=prep)
     close_init(cycle)
     return cycle, observers
 

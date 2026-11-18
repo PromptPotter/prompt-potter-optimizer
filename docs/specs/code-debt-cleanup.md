@@ -949,3 +949,21 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
   in-process count per backend. Action: one count of one machine fact, reaching both. **Rides
   with:** the rows above. **Re-test:** `git grep -c "class MachineSlots" -- promptpotter` is 0.
+- **An L4 inner cell elects on a ruler that may carry none of its panel**: a cell reads its outer
+  round's open reach (`runner/inner/tasks.py`, `InnerSpawnContext.ruler` → `CellOf`), never its own
+  folds, and `rasch.py::theta_cells` counts only the cells a warm ruler carries. In
+  `promptpotter-self.dyck__2bd880` (outer round 0, v1052) seat seed-0's 40 panel cells hit 0 of the
+  bbh-dyck ruler's 150 (the other seats 19–25), so every round served `electable: 0`; arms at
+  65/48/68% over an 18% parent went unread and only L2's rebase moved the line, with no word of why.
+  The next outer round reads the origin cells' folds (seed-0 40/40 at v1086), so an arm's cell and
+  the origin's are read on different rulers. Action: a cell's reach takes its own folds since the pin
+  (as `ArmOf` does), or a ruler short of the coverage floor on a panel links the round's cells before
+  its election; decide beside the estimator re-key. **Re-test:** a seat the pinned ruler misses
+  elects a clear winner by round 2.
+- **A provider hole stops an inner cell as a bound, and halts the outer at its origin gate**: one
+  `HTTP 504 llm_timeout` left one hole in one arm (`panel_coverage` named it), the seed-0 cell paused
+  `panel_cut` with cause `bound` and an empty detail at 160 of its 200 cells, the outer graded the cell
+  errored and the strict origin gate halted `promptpotter-self.dyck__2bd880` at round 0; `resume`
+  re-measured it in 46 s. Action: a hole the backend owes is its own stop with its words, and the
+  outer re-asks a paused cell before grading its origin. **Rides with:** the kept-cut row above.
+  **Re-test:** one injected 504 in an inner arm leaves the outer run going.

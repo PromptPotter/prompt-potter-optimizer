@@ -230,12 +230,13 @@ def _rebase_held(session: Session, parent: CycleHop) -> None:
 
 
 async def onto_fork(
-    session: Session, cut: ForkCut, observers: RunObservers, *, prep: PreparedRun
+    session: Session, cut: ForkCut, parent: RunObservers, *, prep: PreparedRun
 ) -> tuple[Session, RunObservers]:
     """THE in-process move onto a fork, a rebase's and a divergence's: the take, the bind, the
-    held share and the wiring. Taken and rebased off the loop: both wait on a gate."""
+    held share, the wiring and *parent*'s release. Taken and rebased off the loop: both wait
+    on a gate."""
     session = session.bound(cut.child, purpose=session.purpose)
-    observers = await asyncio.to_thread(_rebased_observers, session, cut, observers, prep)
+    observers = await asyncio.to_thread(_rebased_observers, session, cut, parent, prep)
     # A fork's config is already admitted, so it is wired as its observers open.
     declare_run_wiring(
         session,
@@ -246,6 +247,8 @@ async def onto_fork(
     # The line's every emit lands on the cycle it moved onto, under the launch's one scope.
     rescope(ledger=CycleEventLog.open(observers.cycle_dir))
     arm_run_controls(session, observers)
+    # Held through the fork's mint, which moves the campaign's holds off it.
+    parent.release()
     return session, observers
 
 
