@@ -60,7 +60,6 @@ from offline_world import LLM_ONLY_NODE, Router
 from pydantic import ValidationError
 
 from promptpotter.application.bench import llm_call as call_mod
-from promptpotter.application.bench import node_context
 from promptpotter.application.bench.children import (
     admission_failures,
     carried_writes,
@@ -164,6 +163,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYO
 from promptpotter.application.optimizers.potter.l1 import parse_population
 from promptpotter.application.optimizers.potter.records import Ladder
 from promptpotter.application.optimizers.potter.validators import l1_shots_in_demo_pool
+from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
     DraftPipeline,
@@ -253,9 +253,9 @@ from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBloc
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
-from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
+from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells, InnerTaskSpec
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
-from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_overlay import (
@@ -3581,7 +3581,16 @@ def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrot
         tunes_llm=True,
     )
     graded = pipeline_schema([*outer_schema.declared_nodes, grade])
-    parent = prompted("grade", persona="You grade.", instruction="Answer {{combined_text}}.")
+    # On the outer's origin: each inner node's served start, where its slots stand.
+    parent = OptSearchPoint.derive(
+        [resolve_origin_opt_search_point(pipeline_params=PipelineParams(), schema=graded)],
+        schema=graded,
+        variation=_L1,
+        changes={
+            Locus("grade", "persona"): "You grade.",
+            Locus("grade", "instruction"): "Answer {{combined_text}}.",
+        },
+    )
     wiped = OptSearchPoint.derive(
         [parent], schema=graded, variation=_L1, changes={Locus("grade", "persona"): ""}
     )
@@ -3662,7 +3671,7 @@ def _gepa_seat(stores: Stores, population: list[OptSearchPoint]) -> RoundContext
 def test_l1s_wire_offers_the_roster_the_second_prompt_node_declares() -> None:
     # A SECOND prompt node, on a roster of its own, is written as the first is.
     two = _two_prompt_nodes()
-    wire = build_l1_response_schema(two, inner_cells=None, field_names={})
+    wire = build_l1_response_schema(two, field_names={})
     edits = wire["properties"]["variants"]["items"]["properties"]["edits"]
     offered = {at for at in edits["items"]["properties"]["at"]["enum"] if at.startswith("review.")}
     assert offered == {"review.instruction", "review.rubric"}, (
@@ -4304,43 +4313,25 @@ def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
 
 
 def _view(
-    stores: Stores,
-    monkeypatch: pytest.MonkeyPatch,
-    parent: OptSearchPoint,
-    framing: TaskDecomposition,
-    schema: PipelineSchema,
-    cells: InnerCells | None = None,
+    stores: Stores, parent: OptSearchPoint, framing: TaskDecomposition, schema: PipelineSchema
 ) -> PotterView:
-    """What L1's prompt renders from, read off a node context over a cycle started from *parent*;
-    an L4 outer's under *cells*, which run each inner campaign's manifest."""
-    monkeypatch.setattr(node_context, "inner_cells", lambda: cells)
+    """What L1's prompt renders from, read off a node context over a cycle started from *parent*."""
     seated = seat(stores, schema=schema, framing=framing, origin=(parent, lambda _s: sheet([])))
     run_init(RoundContext(seated.cycle, 0))
     return PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
 
 
-def _outer_schema(nodes: tuple[str, ...]) -> PipelineSchema:
-    fields = list(OptimizerPromptTemplate.model_fields)
-    return pipeline_schema(
-        nodes=[
-            PipelineNode(
-                name=name,
-                kind=NodeKind.LLM,
-                param_keys=set(fields),
-                param_types=dict.fromkeys(fields, "string"),
-                tunes_llm=False,
-            )
-            for name in nodes
-        ],
-    )
+def _outer(cells: InnerCells) -> tuple[PipelineSchema, OptSearchPoint]:
+    """An L4 outer as its run init reads it: the graph the cells serve, and the origin it starts on."""
+    schema = parse_pipeline_response(cells.pipeline())
+    return schema, resolve_origin_opt_search_point(pipeline_params=PipelineParams(), schema=schema)
 
 
 def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores,
 ) -> None:
     # The parent hits half of 80 origin rows; the latest round reads 20 of them.
     hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(80)]
-    monkeypatch.setattr(node_context, "inner_cells", lambda: None)
     seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
     run_init(RoundContext(seated.cycle, 0))
     parent = ArmKey(prompted(instruction="parent").id)
@@ -4363,7 +4354,7 @@ def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
 
 
 def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores,
 ) -> None:
     upstream = "Raw invoice text is provided directly as the input column."
     framing = TaskDecomposition(
@@ -4379,7 +4370,7 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
         [PipelineNode(name="classify", kind=NodeKind.LLM, prompt_info=PROMPT_INFO, tunes_llm=True)]
     )
     classify = booking.prompt_nodes()[0]
-    view = _view(built_stores, monkeypatch, opt_sp, framing, booking)
+    view = _view(built_stores, opt_sp, framing, booking)
     rendered = "\n\n".join(i.text for i in DispatchHub.render_items("rendered_prompt", view))
     shown = {
         label.removeprefix("[").removesuffix("]"): body
@@ -4404,22 +4395,15 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
 
 
 def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores,
 ) -> None:
-    # The INNER campaign's manifest's, never the outer's own, and no mandatory panel is refused.
-    inner = _view(
-        built_stores,
-        monkeypatch,
-        OptSearchPoint(),
-        TaskDecomposition(),
-        _outer_schema(tuple(NODE_LAYOUTS)),
-        inner_cells("potter"),
-    )
+    # The INNER campaign's manifest's, as the outer's origin, and no mandatory panel is refused.
+    schema, origin = _outer(inner_cells("potter"))
+    inner = _view(built_stores, origin, TaskDecomposition(), schema)
     subject_chars = sum(len(i.text) for i in DispatchHub.render_items("rendered_prompt", inner))
-    allowance = NODE_LAYOUTS["l1_generate"].discretionary_chars
-    assert subject_chars > allowance, (
-        f"vacuous — the inner optimizer prompts ({subject_chars}c) fit inside the "
-        f"discretionary allowance ({allowance}c), so nothing is being kept against a budget"
+    start_chars = sum(len(t) for p in origin.prompts.values() for t in p.fields.values())
+    assert start_chars and subject_chars >= start_chars, (
+        f"the outer's origin carries {start_chars}c of inner prompts, its panel shows {subject_chars}c"
     )
     potter = select_optimizer(bench_choice("potter"))
     generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
@@ -4433,17 +4417,14 @@ def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
 
 
 def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifests(
-    tmp_path: Path, built_stores: Stores, offline: Router, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, built_stores: Stores, offline: Router
 ) -> None:
     # A panel mixing two manifests; the edit it admits reaches the inner cell's request.
-    fields = list(OptimizerPromptTemplate.model_fields)
     potter = select_optimizer(bench_choice("potter"))
     capo = select_optimizer(bench_choice("capo"))
     mixed = inner_cells("potter", "capo")
-    mixed_schema = _outer_schema((*NODE_LAYOUTS, *capo.llm_nodes))
-    mixed_view = _view(
-        built_stores, monkeypatch, OptSearchPoint(), TaskDecomposition(), mixed_schema, mixed
-    )
+    mixed_schema, parent = _outer(mixed)
+    mixed_view = _view(built_stores, parent, TaskDecomposition(), mixed_schema)
     mixed_shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", mixed_view))
     base_text = base_optimizer_template(capo, "capo_mutate").instruction
     assert f"[capo_mutate.instruction]\n{base_text}" in mixed_shown, (
@@ -4453,20 +4434,17 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
     assert f"[l1_generate.instruction]\n{potter_base.instruction}" in mixed_shown, (
         "the potter cell's prompt was never shown beside the CAPO cell's"
     )
-    parent = OptSearchPoint()
-    edit = {"capo_mutate": {"instruction": base_text + " Keep the rewrite under 80 words."}}
-    severed = {"capo_mutate": {"instruction": "Rewrite the prompt."}}
+    edit = {Locus("capo_mutate", "instruction"): base_text + " Keep the rewrite under 80 words."}
+    severed = {Locus("capo_mutate", "instruction"): "Rewrite the prompt."}
     severed_potter = {
-        "l1_generate": {
-            f: "Propose variants."
-            for f in fields
-            if TEMPLATE_TOKEN_RE.findall(str(getattr(potter_base, f) or ""))
-        }
+        Locus("l1_generate", f): "Propose variants."
+        for f in OUTER_PROMPT_FIELDS
+        if TEMPLATE_TOKEN_RE.findall(str(getattr(potter_base, f) or ""))
     }
-    assert severed_potter["l1_generate"], "vacuous — no potter field carries a placeholder"
+    assert severed_potter, "vacuous — no potter field the outer edits carries a placeholder"
 
-    def proposed(overlay: dict[str, Any]) -> Any:
-        node = next(iter(overlay))
+    def proposed(loci: dict[Locus, str]) -> Any:
+        (node,) = {locus.node for locus in loci}
         proposing = seat(
             built_stores,
             schema=mixed_schema,
@@ -4475,16 +4453,15 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
         return (
             NodeContext(proposing, NODE_MEMBERS.get(node))
             .read(Children)
-            .child([parent], overlay=overlay)
+            .child([parent], prompt_loci=loci)
         )
 
     proposals = parse_population(
-        [proposed(overlay) for overlay in (edit, severed, severed_potter)],
+        [proposed(loci) for loci in (edit, severed, severed_potter)],
         parent,
         PipelineParams(),
         mixed_schema,
         runtime_failures=[],
-        inner_cells=mixed,
     )
     assert proposals[0].validation_failures == [], "a valid edit of CAPO's prompt was refused"
     for severing in proposals[1:]:
@@ -4492,11 +4469,14 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
             "an edit severing a mixed panel cell's port was measured"
         )
     assert proposals[0].individual.lineage.variations[0].loci == ["capo_mutate.instruction"], (
-        "the overlay's locus is missing from the variation that proposed it"
+        "the edit's locus is missing from the variation that proposed it"
+    )
+    sent_point = proposals[0].individual.to_job_search_point(
+        schema=mixed_schema, framing=TaskDecomposition(), demo=()
     )
     payload = promptpotter_wire_adapter(
         Sample(id=0, query="justlogic-d234/seed-0", ground_truth=None),
-        proposals[0].individual.pipeline_params,
+        sent_point.pipeline_params,
     )
     capo_seat = jumping_clock(
         inner_seat(

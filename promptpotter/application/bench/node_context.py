@@ -32,7 +32,6 @@ from promptpotter.application.mask.backprop import select_branch_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
-from promptpotter.application.runner.inner.tasks import inner_cells
 from promptpotter.application.runner.inner.transcript import inner_transcript
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.formula.matchers import admits
@@ -42,7 +41,6 @@ from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import BarRead, CrowningBar
-from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.l4.proxies import inner_facts_of
 from promptpotter.domain.opt_search_point import (
@@ -493,11 +491,6 @@ class Target(CycleRead):
     @property
     def matcher(self) -> str | None:
         return self._cycle.session.state.scoring.scorer.matcher
-
-    @property
-    def inner_cells(self) -> InnerCells | None:
-        """The cells an L4 outer's arms are measured on; ``None`` off the recursion."""
-        return inner_cells()
 
     def pack_entries(self, names: Sequence[str]) -> dict[str, PoolEntry]:
         """The entries of packs *names* in the run's account that the run admits, by content id."""

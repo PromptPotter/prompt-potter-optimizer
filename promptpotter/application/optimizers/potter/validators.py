@@ -10,7 +10,7 @@ from typing import Any
 from promptpotter.application.optimizers.nodes import llm_nodes
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     L1_HELD_PROMPT_FIELDS,
-    prose_ceiling,
+    SCHEMA_DESCRIPTION_MAX_CHARS,
 )
 from promptpotter.application.optimizers.potter.dispatch.injections.registry import (
     STALL_EXPLORATION,
@@ -26,13 +26,11 @@ from promptpotter.domain.candidate_diff import (
     candidate_idea,
     same_idea,
 )
-from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import EvidenceGrounding, Locus, OptSearchPoint
-from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_params import WHO_ANSWERS_KEYS, PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.search_point import SHOTS_KEY, missing_template_vars
+from promptpotter.domain.search_point import SHOTS_KEY
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import (
     COLLAPSE_WORDS,
@@ -163,161 +161,8 @@ def l1_config_not_in_runtime_failures(
     return out_failures
 
 
-def l1_inner_placeholders_intact(
-    pipeline_params: PipelineParams, *, inner_cells: InnerCells | None
-) -> list[ValidationFailure]:
-    """Checks the MERGED params: a child inherits token-less prose without re-proposing it."""
-    if inner_cells is None:
-        return []
-    failures: list[ValidationFailure] = []
-    for node_name, cfg in pipeline_params.laid_nodes.items():
-        prose = {
-            k: v
-            for k, v in cfg.items()
-            if k in OptimizerPromptTemplate.model_fields and isinstance(v, str)
-        }
-        base = inner_cells.template(node_name) if prose else None
-        if base is None:
-            continue
-        declared = sorted(base.slots())
-        if not declared:
-            continue
-        merged = base.model_copy(update=prose)
-        missing = missing_template_vars(
-            merged.render(), declared, fields=OptimizerPromptTemplate.model_fields
-        )
-        if missing:
-            failures.append(
-                ValidationFailure(
-                    axis=f"{node_name}.prompt",
-                    value="dropped:" + ",".join(missing),
-                    allowed=declared,
-                    reason=ValidationReason.DROPPED_MANDATORY_PLACEHOLDER,
-                )
-            )
-    return failures
-
-
-# PHRASES, never tokens: "stop proposing the same axis in consecutive rounds" is a legal steer.
-_FORBIDDEN_INNER_STEERS: tuple[tuple[ValidationReason, tuple[str, ...]], ...] = (
-    (
-        ValidationReason.STEERS_INNER_STOPPING,
-        (
-            "early stop",
-            "stop early",
-            "stops early",
-            "stopping early",
-            "terminate early",
-            "stop the loop",
-            "stop the run",
-            "stop the search",
-            "stop the campaign",
-            "halt the loop",
-            "halt the run",
-            "exit the loop",
-            "end the run",
-            "end the search",
-            "abort the run",
-            "no further rounds",
-            "skip the remaining rounds",
-            "stop optimizing",
-            "stop iterating",
-        ),
-    ),
-    # Quantified forms only: a seed IS one whole inner run, and bare "seed" is legal ("seed prompt").
-    (
-        ValidationReason.STEERS_ACROSS_SEEDS,
-        (
-            "each seed",
-            "every seed",
-            "per seed",
-            "per-seed",
-            "all seeds",
-            "across seeds",
-            "seed-level",
-            "each inner run",
-            "every inner run",
-        ),
-    ),
-)
-
-
-def l1_inner_steer_is_legal(
-    overlay: Mapping[str, Any], *, inner_nodes: Collection[str]
-) -> list[ValidationFailure]:
-    """A prompt that stops the loop early edits the frame the measurand averages over, not the search
-    it measures. Judged on the inner optimizer's nodes alone: elsewhere the phrase is target prose."""
-    failures: list[ValidationFailure] = []
-    for node_name, node_params in overlay.items():
-        if node_name not in inner_nodes or not isinstance(node_params, dict):
-            continue
-        for field, value in node_params.items():
-            if field not in OptimizerPromptTemplate.model_fields or not isinstance(value, str):
-                continue
-            prose = " ".join(value.lower().split())
-            for reason, phrases in _FORBIDDEN_INNER_STEERS:
-                hit = next((p for p in phrases if p in prose), None)
-                if hit is not None:
-                    failures.append(
-                        ValidationFailure(
-                            axis=f"{node_name}.{field}",
-                            value=hit,
-                            allowed=[],
-                            reason=reason,
-                        )
-                    )
-    return failures
-
-
-_GUTTABLE_MIN_CHARS = 1000
-_GUT_RATIO = 0.35
-
-
-def _parent_field_text(
-    cells: InnerCells, node: str, field: str, pipeline_params: PipelineParams
-) -> str:
-    inherited = pipeline_params.node(node).laid_keys().get(field)
-    if isinstance(inherited, str) and inherited:
-        return inherited
-    template = cells.template(node)
-    current = getattr(template, field, "") if template is not None else ""
-    return current if isinstance(current, str) else ""
-
-
-def l1_prompt_field_not_gutted(
-    overlay: Mapping[str, Any],
-    *,
-    inner_cells: InnerCells | None,
-    pipeline_params: PipelineParams,
-) -> list[ValidationFailure]:
-    """An override REPLACES its field whole, so a short one deletes the contracts the parent's prose carried."""
-    if inner_cells is None:
-        return []
-    failures: list[ValidationFailure] = []
-    for node_name, node_params in overlay.items():
-        if not isinstance(node_params, dict):
-            continue
-        for field, value in node_params.items():
-            if field not in OptimizerPromptTemplate.model_fields or not isinstance(value, str):
-                continue
-            parent = _parent_field_text(inner_cells, node_name, field, pipeline_params)
-            if len(parent) < _GUTTABLE_MIN_CHARS:
-                continue
-            if len(value) >= _GUT_RATIO * len(parent):
-                continue
-            failures.append(
-                ValidationFailure(
-                    axis=f"{node_name}.{field}",
-                    value=f"{len(value)}B replaces {len(parent)}B",
-                    allowed=[],
-                    reason=ValidationReason.GUTS_INHERITED_CONTRACT,
-                )
-            )
-    return failures
-
-
 def l1_prose_within_ceiling(
-    overlay: Mapping[str, Any], *, schema: PipelineSchema, inner_cells: InnerCells | None
+    overlay: Mapping[str, Any], *, schema: PipelineSchema
 ) -> list[ValidationFailure]:
     """The wire states each ceiling as prose: a host enforcing a ``maxLength`` cuts mid-sentence, unmarked."""
     failures: list[ValidationFailure] = []
@@ -326,13 +171,16 @@ def l1_prose_within_ceiling(
         if node is None or not isinstance(node_params, dict):
             continue
         for param, value in node_params.items():
-            ceiling = prose_ceiling(node, param, inner_cells=inner_cells)
-            if ceiling is not None and isinstance(value, str) and len(value) > ceiling:
+            if (
+                param in node.description_keys
+                and isinstance(value, str)
+                and len(value) > SCHEMA_DESCRIPTION_MAX_CHARS
+            ):
                 failures.append(
                     ValidationFailure(
                         axis=f"{node_name}.{param}",
                         value=f"{len(value)} chars",
-                        allowed=[str(ceiling)],
+                        allowed=[str(SCHEMA_DESCRIPTION_MAX_CHARS)],
                         reason=ValidationReason.OVER_CEILING,
                     )
                 )

@@ -63,6 +63,7 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.run_records import SpawnedBy, SpawnedRecord
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.search_point import split_rendered_prompt
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.run_scope import InnerSpawnContext, scoped
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
@@ -421,8 +422,13 @@ def promptpotter_wire_adapter(
     pipeline_params: PipelineParams,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {"query": sample.query}
-
-    optimizer_prompt_overrides = {k: v for k, v in pipeline_params.laid_nodes.items() if v}
+    # Each inner node's prompt arrives as its field map (`NodePromptInfo.field_wise`), laid flat.
+    optimizer_prompt_overrides = {}
+    for node, cfg in pipeline_params.laid_nodes.items():
+        prompt, config = split_rendered_prompt(cfg)
+        assert prompt is None or isinstance(prompt, dict), "the recursion serves field-wise nodes"
+        if laid := {**config, **(prompt or {})}:
+            optimizer_prompt_overrides[node] = laid
     if optimizer_prompt_overrides:
         payload["optimizer_prompt_overrides"] = optimizer_prompt_overrides
 
@@ -485,7 +491,6 @@ CONNECTOR = Connector(
     resolve_experiment=_resolve_inner_panel,
     # The outer's graph IS the inner optimizer's, so it is served here, never mirrored in a file.
     pipeline_declaration=_pipeline_declaration,
-    prompt_fields_as_node_params=True,
     identity_config=_identity_config,
     self_optimization=True,
 )

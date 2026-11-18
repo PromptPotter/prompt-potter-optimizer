@@ -10,6 +10,7 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     InjectionKind,
     Item,
     election_table_rows,
+    offers_param,
     signal,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
@@ -19,15 +20,12 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
     VOLATILE_REGION,
     resolve_node_layout,
 )
-from promptpotter.application.optimizers.potter.dispatch.prompts import (
-    effective_optimizer_prompts,
-)
 from promptpotter.domain.arms import Measured, arm_name
 from promptpotter.domain.connector import unit_plural
 from promptpotter.domain.opt_search_point import Locus
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.paired_reading import ArmKey, level_text
-from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM, PipelineSchema
+from promptpotter.domain.pipeline_schema import SCHEMA_RENAME_PARAM
 from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.sample import sample_tag
 from promptpotter.domain.search_point import SHOTS_KEY
@@ -69,13 +67,6 @@ _TARGET_PROMPT_HEADER = (
 HELD_PROMPT_FIELD_MARK = " — held, not yours to replace"
 
 
-_OPTIMIZER_PROMPT_HEADER = (
-    "CURRENT INNER OPTIMIZER PROMPTS — the text an override REPLACES, field by field.\n"
-    "Text in doubled curly braces is an injection slot the inner loop fills; a replacement "
-    "that drops one severs that channel and is rejected."
-)
-
-
 @signal(
     "rendered_prompt",
     kind=InjectionKind.TRACE,
@@ -100,15 +91,6 @@ def _r_rendered_prompt(b: PotterView) -> list[Item]:
         sections.extend(
             f"[{locus}{HELD_PROMPT_FIELD_MARK if held else ''}]\n{text}"
             for locus, text, held in fields
-        )
-    inner = effective_optimizer_prompts(b.pipeline_schema, b.pipeline_params, b.inner_cells)
-    if inner:
-        sections.append(_OPTIMIZER_PROMPT_HEADER)
-        # One section per node·field, so the cap drops whole fields, never one mid-contract.
-        sections.extend(
-            f"[{node}.{field}]\n{text or '(empty — nothing to carry forward)'}"
-            for node, fields in inner.items()
-            for field, text in fields.items()
         )
     return [Item("\n\n".join(sections))]
 
@@ -167,26 +149,33 @@ def _r_task_context(b: PotterView) -> list[Item]:
     tc = b.framing
     if not tc:
         return []
-    skip = {"raw_description"}
-    pairs = [(k, v) for k, v in tc.to_dict().items() if v and k not in skip]
-    if not pairs:
+    # The decomposed fields, then the description they were decomposed from (`task.md`'s body).
+    pairs = [(k, v) for k, v in tc.to_dict().items() if v and k != "raw_description"]
+    body = tc.raw_description.strip()
+    if not pairs and not body:
         return []
-    return [Item("TASK CONTEXT:\n" + "\n".join(f"  {k}: {v}" for k, v in pairs))]
+    lines = ["TASK CONTEXT:", *(f"  {k}: {v}" for k, v in pairs)]
+    return [Item("\n".join(lines) + (f"\n\n{body}" if body else ""))]
 
 
 # What bounds the critique panel: a cluster's size is its count, and a target needs only two of its rows.
 CLUSTER_IDS_SHOWN = 12
 
 
-def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> tuple[str, ...]:
+def critique_axes(b: PotterView) -> tuple[str, ...]:
     """The one axis vocabulary: the critique names from it, and its panel keeps only what it names."""
+    schema = b.pipeline_schema
     out: list[str] = []
     for node in schema.prompt_nodes():
         out.extend(Locus(node.name, f).name for f in node.open_prompt_fields)
-        if offers_shots:
+        if b.offers_shots:
             out.append(Locus(node.name, SHOTS_KEY).name)
     for node in schema.running_nodes:
-        out.extend(f"{node.name}.{pk}" if node.name else pk for pk in sorted(node.param_keys))
+        out.extend(
+            f"{node.name}.{pk}" if node.name else pk
+            for pk in sorted(node.param_keys)
+            if offers_param(schema, node, pk, schema_field_rename=b.schema_field_rename)
+        )
     return tuple(dict.fromkeys(out))
 
 
@@ -197,7 +186,7 @@ def critique_axes(schema: PipelineSchema, *, offers_shots: bool) -> tuple[str, .
     citable=False,
 )
 def _r_critique_axes(b: PotterView) -> list[Item]:
-    return [Item(", ".join(critique_axes(b.pipeline_schema, offers_shots=b.offers_shots)))]
+    return [Item(", ".join(critique_axes(b)))]
 
 
 def format_l1_critique_for_prompt(
@@ -243,8 +232,7 @@ def format_l1_critique_for_prompt(
     citable=True,
 )
 def _r_critique(b: PotterView) -> list[Item]:
-    axes = critique_axes(b.pipeline_schema, offers_shots=b.offers_shots)
-    return [Item(format_l1_critique_for_prompt(b.critique, axes))]
+    return [Item(format_l1_critique_for_prompt(b.critique, critique_axes(b)))]
 
 
 _SKILL_TIERS_TEXT = (

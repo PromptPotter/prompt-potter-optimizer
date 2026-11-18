@@ -47,11 +47,6 @@ class ValidationReason(enum.StrEnum):
     # The generator's own reply.
     OPTIMIZER_PROMPT_PARSE_FAILURE = "optimizer_prompt_parse_failure"
     L1_PROVIDER_EMPTY_RESPONSE = "l1_provider_empty_response"
-    # An L4 override: stopping the inner loop, reasoning over the seed panel one level up, or
-    # replacing a long prompt field with a fraction of it.
-    STEERS_INNER_STOPPING = "steers_inner_stopping"
-    STEERS_ACROSS_SEEDS = "steers_across_seeds"
-    GUTS_INHERITED_CONTRACT = "guts_inherited_contract"
     # An L4 layout edit: on a node no layout is offered for, or one `resolve_layout_override` refuses.
     LAYOUT_NODE_NOT_L4_EDITABLE = "layout_node_not_l4_editable"
     L1_LAYOUT_UNPARSEABLE = "l1_layout_unparseable"

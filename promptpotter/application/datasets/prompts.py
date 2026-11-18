@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
-from typing import Any
+from typing import Any, Literal, NamedTuple
 
+from promptpotter.domain.layer_fold import Laid, Lay, Layer, fold_layers
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import PipelineNode
@@ -62,3 +63,31 @@ def declared_origin_prompts(
                 code="pipeline_config_invalid",
             )
     return authored
+
+
+StartLayer = Literal["served", "dataset"]
+
+
+class StartingPrompts(NamedTuple):
+    prompts: dict[str, NodePrompt]
+    # The layers that laid any field, in fold order.
+    laid_by: tuple[StartLayer, ...]
+
+
+def starting_prompts(
+    dataset: ResolvedDataset | None, nodes: Sequence[PipelineNode]
+) -> StartingPrompts:
+    """Each node's served start (`NodePromptInfo.start`) with the dataset's ``origin.yaml`` laid
+    over it, field by field."""
+    served = {n.name: n.prompt_info.start for n in nodes if n.prompt_info and n.prompt_info.start}
+    authored = {} if dataset is None else declared_origin_prompts(dataset, nodes)
+    layers: tuple[Layer[StartLayer], ...] = (
+        Layer("served", served),
+        Layer("dataset", {node: dict(p.fields) for node, p in authored.items()}),
+    )
+    folded = fold_layers(lambda _at: Laid(Lay.KEYS), layers)
+    stamped = set(folded.stamps.values())
+    return StartingPrompts(
+        {node: NodePrompt(fields=fields) for node, fields in folded.document.items()},
+        tuple(layer.name for layer in layers if layer.name in stamped),
+    )

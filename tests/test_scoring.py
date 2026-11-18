@@ -4537,10 +4537,9 @@ def test_a_round_start_reads_its_parents_fitness_in_its_scorers_unit() -> None:
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_l2s_box_banks_its_parents_fitness_in_its_scorers_unit(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores,
 ) -> None:
     # The parent takes half its origin cells; the run's peak stands elsewhere.
-    monkeypatch.setattr(node_context, "inner_cells", lambda: None)
     hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(40)]
     seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
     run_init(RoundContext(seated.cycle, 0))

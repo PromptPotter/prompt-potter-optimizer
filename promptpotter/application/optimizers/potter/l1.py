@@ -65,9 +65,6 @@ from promptpotter.application.optimizers.potter.validators import (
     l1_config_not_in_runtime_failures,
     l1_evidence_grounding,
     l1_inner_layout_applies,
-    l1_inner_placeholders_intact,
-    l1_inner_steer_is_legal,
-    l1_prompt_field_not_gutted,
     l1_prompt_fields_open,
     l1_prose_within_ceiling,
     l1_shots_in_demo_pool,
@@ -79,7 +76,6 @@ from promptpotter.application.optimizers.variation.members import (
 )
 from promptpotter.domain.arms import Proposal
 from promptpotter.domain.candidate_diff import candidate_delta
-from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
@@ -142,7 +138,6 @@ async def l1_generate(
     )
     output_schema = build_l1_response_schema(
         pipeline_schema,
-        inner_cells=view.inner_cells,
         silent_panels=view.silent_l1_panels,
         schema_field_rename=schema_field_rename,
         n_variants=n_variants,
@@ -310,7 +305,6 @@ def parse_population(
     schema: PipelineSchema,
     *,
     runtime_failures: Sequence[RuntimeFailure],
-    inner_cells: InnerCells | None,
 ) -> list[Proposal]:
     """L1's rejections only: search space, route keys and backend placeholders are the bench's (``Children.child``); shots are judged on the wire (``l1.py``), where demo ids still exist."""
     parsed: list[Proposal] = []
@@ -329,20 +323,9 @@ def parse_population(
                     runtime_failures=runtime_failures,
                     pipeline_params=merged_pp,
                 ),
-                *l1_inner_steer_is_legal(
-                    pipeline_overlay,
-                    inner_nodes=() if inner_cells is None else inner_cells.owners,
-                ),
                 *l1_inner_layout_applies(pipeline_overlay),
-                *l1_prose_within_ceiling(pipeline_overlay, schema=schema, inner_cells=inner_cells),
-                *l1_prompt_field_not_gutted(
-                    pipeline_overlay,
-                    inner_cells=inner_cells,
-                    pipeline_params=pipeline_params,
-                ),
+                *l1_prose_within_ceiling(pipeline_overlay, schema=schema),
             ]
-        # The MERGED params: a child of a broken parent inherits a severed port without proposing it.
-        failures += l1_inner_placeholders_intact(merged_pp, inner_cells=inner_cells)
         # A replayed proposal already carries them: the bench banks the walk's arms validated.
         failures = [vf for vf in failures if vf not in cp.validation_failures]
         if failures:
@@ -402,7 +385,6 @@ async def propose_l1_population(ctx: NodeContext) -> Proposals:
         parent_point.pipeline_params,
         l1_target_schema(target.schema),
         runtime_failures=target.runtime_failures(),
-        inner_cells=target.inner_cells,
     )
     generation = replace(generation, proposals=parsed)
     ctx.emit(l1_readout(ctx, generation))

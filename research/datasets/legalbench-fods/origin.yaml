@@ -1,0 +1,7 @@
+llm_only:
+  persona: ''
+  task_intent: 'Classify the function of a paragraph from a judicial decision.'
+  problem_description: ''
+  instruction: 'Classify the paragraph as one of: Facts, Procedural History, Issue, Rule, Analysis, Conclusion, Decree.'
+  thinking_style: ''
+  answer_format: 'Give the label exactly as listed, on its own last line wrapped in double asterisks, e.g. **Rule**.'

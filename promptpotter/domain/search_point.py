@@ -49,7 +49,8 @@ def missing_template_vars(
 
 
 def split_rendered_prompt(cfg: Mapping[str, object]) -> tuple[object, dict[str, object]]:
-    """A node's ``prompt``, its prompt loci's RENDER (persisted, it goes stale), off its config."""
+    """A node's ``prompt``, its prompt loci's RENDER, or their field map where its node takes them
+    field-wise (persisted, it goes stale), off its config."""
     config = dict(cfg)
     return config.pop("prompt", None), config
 

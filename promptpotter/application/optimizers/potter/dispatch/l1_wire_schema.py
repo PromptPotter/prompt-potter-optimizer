@@ -9,11 +9,11 @@ from promptpotter.application.bench.llm_call import wire_closed
 from promptpotter.application.optimizers.potter.dispatch.bundle import (
     BLOCK_ID_INSTRUCTION,
     LAYOUT_SCHEMA_INSTRUCTION,
-    OPTIMIZER_PROMPT_FIELD_MAX_CHARS,
+    SCHEMA_DESCRIPTION_MAX_CHARS,
     SCHEMA_DESCRIPTIONS_INSTRUCTION,
     SCHEMA_RENAME_INSTRUCTION,
     RecombinationOffer,
-    prose_ceiling,
+    offers_param,
 )
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -24,20 +24,12 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L1Variant,
     recombinations_schema,
 )
-from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import Locus
-from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     NESTED_PARAM_TYPES,
     SCHEMA_RENAME_PARAM,
     PipelineNode,
     PipelineSchema,
-)
-
-# A ceiling on a non-prompt field reads as a live cap while binding nothing.
-assert set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) <= set(OptimizerPromptTemplate.model_fields), (
-    "OPTIMIZER_PROMPT_FIELD_MAX_CHARS declares a ceiling on a non-prompt field: "
-    f"{sorted(set(OPTIMIZER_PROMPT_FIELD_MAX_CHARS) - set(OptimizerPromptTemplate.model_fields))}"
 )
 
 
@@ -116,7 +108,6 @@ _SLOT_PANEL: dict[str, str] = {
 def build_l1_response_schema(
     pipeline_schema: PipelineSchema,
     *,
-    inner_cells: InnerCells | None,
     silent_panels: Collection[str] = (),
     schema_field_rename: bool = False,
     n_variants: int | None = None,
@@ -151,35 +142,29 @@ def build_l1_response_schema(
         node = pipeline_schema.get_node(node_name)
         if node is None or (reachable is not None and node_name not in reachable):
             continue
+        keys = {
+            p
+            for p in keys
+            if offers_param(pipeline_schema, node, p, schema_field_rename=schema_field_rename)
+        }
         # Field ORDER is what this schema teaches, so the groups emit in a fixed sequence, never one sort.
         nested = {p for p in keys if node.param_types.get(p) in NESTED_PARAM_TYPES}
         described = [k for k in node.description_keys if k in keys]
         param_props: dict[str, dict[str, Any]] = {}
         for param in sorted(keys - nested - set(described)):
-            allowed = pipeline_schema.param_options(node, param)
-            # `[]` (declared, nothing legal) is not `None` (no space declared): the first emits no property.
-            if allowed is not None and not allowed:
-                continue
-            if allowed:
+            if allowed := pipeline_schema.param_options(node, param):
                 param_props[param] = {"type": "string", "enum": list(allowed)}
             else:
                 param_props[param] = {"type": node.param_types[param]}
-            # Stated, never a `maxLength`: `validators.py::l1_prose_within_ceiling` rejects past it.
-            ceiling = prose_ceiling(node, param, inner_cells=inner_cells)
-            if ceiling is not None:
-                param_props[param]["description"] = f"At most {ceiling} characters."
-        # The one lever that can break a parser: locked, it is absent from the schema, never policed per round.
-        if not schema_field_rename:
-            nested.discard(SCHEMA_RENAME_PARAM)
         for param in sorted(nested):
             prop = _nested_param_property(node, param)
             if prop is not None:
                 param_props[param] = prop
-        # Bounded: the winner's descriptions become the next round's parent, so an unbounded one compounds.
+        # Stated, never a `maxLength`: `validators.py::l1_prose_within_ceiling` rejects past it.
         for key in described:
             param_props[key] = {
                 "type": "string",
-                "description": f"At most {prose_ceiling(node, key, inner_cells=inner_cells)} characters.",
+                "description": f"At most {SCHEMA_DESCRIPTION_MAX_CHARS} characters.",
             }
         assert param_props.keys() <= keys, (
             f"{node_name}: the schema offers a key the node declares no param for"

@@ -362,6 +362,10 @@ class NodePromptInfo(FrozenModel):
     fields: tuple[str, ...]
     # The field a whole-prompt rewrite lands in; `None` declares none, and such a rewrite is refused.
     rewrite_field: str | None = None
+    # The node takes its fields one by one (`prompt` laid as the field map), never their render.
+    field_wise: bool = False
+    # What the node runs where nothing is laid: an origin's start, under the dataset's `origin.yaml`.
+    start: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("fields")
     @classmethod
@@ -376,6 +380,8 @@ class NodePromptInfo(FrozenModel):
     def _slot_is_a_field(self) -> "NodePromptInfo":
         if self.rewrite_field is not None and self.rewrite_field not in self.fields:
             raise ValueError(f"rewrite_field {self.rewrite_field!r} is none of {self.fields}")
+        if undeclared := sorted(set(self.start) - set(self.fields)):
+            raise ValueError(f"start sets {undeclared}, none of {self.fields}")
         return self
 
 

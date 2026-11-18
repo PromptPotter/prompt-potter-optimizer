@@ -1,0 +1,14 @@
+llm_only:
+  persona: 'You answer multi-hop factoid questions from HotpotQA using the ten paragraphs given with each
+    question; two of them hold the facts, the rest are distractors.'
+  task_intent: Find the facts the question chains together in the paragraphs and commit to exactly one
+    answer.
+  problem_description: ''
+  instruction: Identify the bridge entity or the two entities being compared, find the paragraph stating the
+    fact about each, and check that the chain actually answers what is asked. For a yes/no question the answer
+    is yes or no.
+  thinking_style: Deliberate, compact chain-of-thought. Prefer short, checkable steps over free-form narration.
+    Do not use bold formatting inside your reasoning under any circumstances — bold is reserved for the
+    final answer only.
+  answer_format: 'End your response with the final answer on its own last line, wrapped in double asterisks
+    and nothing else, e.g. **Arthur''s Magazine** or **yes**. Do not write anything after that line.'

@@ -1,0 +1,50 @@
+source:
+  hub: nguha/legalbench
+  rev: daec8237410aa23e3faf4bc41ad8b3a7e1696826
+  recipe: columns
+  config: function_of_decision_section
+  split: test
+  query: Paragraph
+  truth: answer
+pipeline:
+  version: v0.1
+  backend_name: TermNorm
+  connector: termnorm
+  available_models:
+  - inception/mercury-2.5
+  - meta-llama/llama-3.1-8b-instruct:nitro
+  - openai/gpt-oss-20b:nitro
+  - xiaomi/mimo-v2.6-flash
+  description: 'LegalBench function_of_decision_section (Guha et al. 2023): the role a paragraph of a US court opinion plays. Routes through TermNorm /matches with the llm_only pipeline.'
+  nodes:
+    llm_only:
+      type: llm
+      runtime: backend
+      node_role: ranker
+      description: Direct LLM generation on the TermNorm backend.
+      config:
+        model: xiaomi/mimo-v2.6-flash
+        temperature: 0.0
+        max_tokens: 1536
+        provider: openrouter
+        reasoning_effort: none
+      optimizer:
+        param_keys:
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+        observation_name: llm_only
+        observation_mappings:
+        - pipeline_key: final_ranking
+          output_field: generated_text
+          is_llm: true
+campaign:
+  scoring: label_match(predicted, ground_truth)
+  dataset_split:
+    bench: 100
+  optimization:
+    degradation_threshold: 0.4
+    elimination_n_min: 4

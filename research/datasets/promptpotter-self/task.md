@@ -57,24 +57,10 @@ discipline; do not hard-code task answers into it.
 
 ## Fitness
 
-ONE number, in ``family.yaml::campaign.scoring``:
-
-- ``held_out_lift`` — the mean, over the inner rounds, of the accuracy of the
-  prompt the search had ADOPTED by that round on HELD-OUT rows no inner node ever
-  read, minus the origin prompt's accuracy on the same rows. Accuracy points,
-  linearly re-anchored into [0,1]. The search split's own θ lift
-  (``mean_round_delta``) is reported beside it wherever the inner series
-  differences, and scores nothing; so do an inner run's seconds and dollars.
-
-Better = the inner optimizer adopted a GENERALLY stronger prompt EARLY and kept it.
-The mean is the area under the inner curve, so a search that flatlines for three
-rounds then jumps scores below one that climbed steadily to the same place; a
-promotion that fits the rows it was selected on and fails fresh ones scores zero.
-There is no quality modulator and no efficiency modulator: a campaign whose
-optimizer aborted it or spoiled every proposal it made is floored, and a collapsed
-arm is eliminated — both structurally, before scoring. So do not optimize for
-looking tidy or cheap; optimize for the inner search climbing sooner on rows it has
-not seen.
+``held_out_lift`` (``optimization_goals`` above) is the one scored number. The search
+split's own θ lift (``mean_round_delta``), an inner run's seconds and its dollars are
+reported and score nothing; a collapsed arm is eliminated before scoring. So do not
+optimize for looking tidy or cheap.
 
 ## Mutation surface
 
@@ -96,10 +82,3 @@ not seen.
 - Corollary: L2 / L3 shouldn't read early variance on a high-dim slot
   as "axis unstable, avoid" — that's the slot doing what high-dim
   slots do
-
-## Proxy realism
-
-The committed inner config (``family.yaml::panel`` — the source of truth for the
-inner geometry; don't restate its numbers here) keeps each outer "sample" at
-order-of-minutes. Trade-off is signal quality — bump sample count + rounds before
-publication runs.

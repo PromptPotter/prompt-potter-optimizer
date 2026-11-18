@@ -15,10 +15,6 @@ measurements (`domain/l4/proxies.py::OuterSampleProxies` is the scored one) and 
 under the inner run's held-out curve — into [0,1] and nothing else. The rationale lives in
 [`docs/concepts/l4.md`](../../../docs/concepts/l4.md) § The measurand.
 
-**Prerequisite: the account holds `hotpotqa-distractor` and `legalbench-fods`.** Four seats of `dev`
-and six of `run` measure those two account definitions (tenant tier), which no committed tier carries, so on any other account
-— the box included — the panel refuses at init and names the seat.
-
 **What remains** — owned by
 [`docs/specs/roadmap.md`](../../../docs/specs/roadmap.md) § L4 closure.
 

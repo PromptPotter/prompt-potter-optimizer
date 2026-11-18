@@ -51,7 +51,6 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.variation.members import Cross, crossable
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, CritiqueReadout, StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -426,11 +425,6 @@ class PotterView:
     def demo_split(self) -> tuple[Sample, ...]:
         """Resolves the shots an individual already holds."""
         return self.ctx.read(Target).demo_split
-
-    @functools.cached_property
-    def inner_cells(self) -> InnerCells | None:
-        """`None` off the L4 recursion; each outer node's manifest is `InnerCells.owners`'."""
-        return self.ctx.read(Target).inner_cells
 
     # -- the bounds
     @property

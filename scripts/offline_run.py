@@ -577,43 +577,26 @@ class ByCallIdentity:
         start = prompt.index(self.cites) + len(self.cites) + draw("cite", generation, i) % 20
         v["evidence_grounding"] = {"citation": prompt[start : start + 40]}
         # Every prompt node the wire offers an `instruction` on: a model sees no "first" node.
-        # An L4 outer edits the inner optimizer's fields as its pipeline params; there a short
-        # instruction guts its contracts (`validators.py::l1_prompt_field_not_gutted`).
-        props = item["properties"]
         second = ("thinking_style",) if self.crossing else ()
 
         def text(node: str, tag: str) -> str:
             rng = random.Random(f"l1:{generation}:{i}:{node}{tag and f':{tag}'}")
             return _variant(f"g{generation}v{i}{node}{tag}", rng)
 
-        if "edits" in props:
-            at = filler.resolve(filler.said(props["edits"])["items"])["properties"]["at"]["enum"]
-            nodes = [locus.split(".")[0] for locus in at if locus.endswith(".instruction")]
-            v["edits"] = [
-                {
-                    "at": f"{node}.{field}",
-                    "op": "replace",
-                    "anchor": shown_text(prompt, f"{node}.{field}"),
-                    "text": text(node, tag),
-                }
-                for node in nodes
-                for field, tag in (("instruction", ""), *((f, f) for f in second))
-                if f"{node}.{field}" in at
-            ]
-        else:
-            offered = {
-                node: filler.said(fields)["properties"]
-                for node, fields in filler.said(props["pipeline_overlay"])["properties"].items()
+        edits = filler.said(item["properties"]["edits"])
+        at = filler.resolve(edits["items"])["properties"]["at"]["enum"]
+        nodes = [locus.split(".")[0] for locus in at if locus.endswith(".instruction")]
+        v["edits"] = [
+            {
+                "at": f"{node}.{field}",
+                "op": "replace",
+                "anchor": shown_text(prompt, f"{node}.{field}"),
+                "text": text(node, tag),
             }
-            v["pipeline_overlay"] = {
-                node: {
-                    field: text(node, tag)
-                    for field, tag in (("thinking_style", ""), *((f, f) for f in second))
-                    if field in fields
-                }
-                for node, fields in offered.items()
-                if "thinking_style" in fields
-            }
+            for node in nodes
+            for field, tag in (("instruction", ""), *((f, f) for f in second))
+            if f"{node}.{field}" in at
+        ]
         # As a model would: one cluster line of the CRITIQUE panel, else the first rows any panel marks.
         clusters = [
             ids for line in prompt.splitlines() if " rows: " in line and (ids := _marks(line))

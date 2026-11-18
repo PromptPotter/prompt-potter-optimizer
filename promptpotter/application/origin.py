@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, NamedTuple
 from promptpotter.application.bench.cycle import ReadArm
 from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.loaders import sample_dataset
-from promptpotter.application.datasets.prompts import declared_origin_prompts
+from promptpotter.application.datasets.prompts import StartLayer, starting_prompts
 from promptpotter.application.initialization.scoring_scope import scorer_setup
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.scoring.arm_states import (
@@ -160,6 +160,11 @@ _START_ORIGIN_LINEAGE = {
 }
 assert set(_START_ORIGIN_LINEAGE) == OPERATOR_ORIGIN_SOURCES
 
+_START_LAYER_LINEAGE: dict[StartLayer, str] = {
+    "served": "the backend's served start",
+    "dataset": f"the dataset's {ORIGIN_FILE}",
+}
+
 
 def resolve_origin_opt_search_point(
     dataset: ResolvedDataset | None = None,
@@ -168,7 +173,7 @@ def resolve_origin_opt_search_point(
     pipeline_params: PipelineParams,
     schema: PipelineSchema,
 ) -> OptSearchPoint:
-    """Start → every prompt node's starting prompt in ``origin.yaml`` → empty."""
+    """Start → each prompt node's served start under its ``origin.yaml`` → empty."""
     origin: OptSearchPoint | None = None
     if start is not None and start.origin_prompts:
         # A step bearing no prompt reads none: a check-in seeds every active step alike.
@@ -177,11 +182,10 @@ def resolve_origin_opt_search_point(
         origin = OptSearchPoint(prompts=prompts).as_origin(
             changes_description=_START_ORIGIN_LINEAGE[start.origin_source]
         )
-    elif dataset is not None and (
-        authored := declared_origin_prompts(dataset, schema.prompt_nodes())
-    ):
-        origin = OptSearchPoint(prompts=authored).as_origin(
-            changes_description=f"Origin from the dataset's {ORIGIN_FILE} ({', '.join(authored)})"
+    elif (starting := starting_prompts(dataset, schema.prompt_nodes())).prompts:
+        laid = " over ".join(_START_LAYER_LINEAGE[layer] for layer in reversed(starting.laid_by))
+        origin = OptSearchPoint(prompts=starting.prompts).as_origin(
+            changes_description=f"Origin from {laid} ({', '.join(starting.prompts)})"
         )
     if origin is None:
         origin = OptSearchPoint().as_origin(

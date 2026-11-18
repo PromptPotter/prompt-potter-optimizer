@@ -226,7 +226,7 @@ resolved_prompts:
         - "pipeline_overlay": nested {node: {param: value}}, as its schema description states; null where nothing changes.
   l1_critique/1:
     persona: You are a pipeline evaluation analyst.
-    task_intent: &l1_critique_task >-
+    task_intent: >-
       Analyze the measurements below and produce a structured critique for the next optimization round.
     problem_description: ''
     instruction: >-
@@ -258,7 +258,7 @@ resolved_prompts:
     thinking_style: >-
       Reason from the measurements, not from priors about what usually helps. If the data is thin on an
       axis, say so rather than guessing.
-    answer_format: &l1_critique_answer |-
+    answer_format: |-
       Return JSON with the fields in EXACTLY this order — failure_highlights FIRST so it is never dropped when the output runs long:
       {
         "failure_highlights": [{"sample_ids": [<id>, <id>, ...], "mechanism": "<a few words>", "claim": "<one sentence: why these rows land wrong>"}, ...],
@@ -284,11 +284,11 @@ resolved_prompts:
       THE FRAMING IS EVIDENCE. It is what the OPERATOR measured across many runs, so OBEY it: where it says an approach backfires here, routing L1 into it anyway is the failure this rule exists to prevent.
 
       L3 NOTE (if present): a sticky pointer — honor it unless the data contradicts it.
-    thinking_style: &l2_context_thinking >-
+    thinking_style: >-
       Work in this order: the failure cluster you are attacking (from critique.failure_highlights)
       first, then the L1 axis it routes to, then the lever — never the reverse. A lever picked
       before a cluster is noise wearing a rationale.
-    answer_format: &l2_context_answer |-
+    answer_format: |-
       Return JSON. Set only the LEVER you pull, null for the rest — but ALWAYS write both reason
       fields, on every fire, including one that pulls no lever.
       {
@@ -316,137 +316,3 @@ resolved_prompts:
         "plan": the new strategy as AT MOST 6 bullets, ONE sentence each, <=800c in all (required). Each bullet is an instruction L2 or L1 acts on next round, naming the axis, panel or failure cluster it means — never a question, and never a step you still owe. It rides every downstream optimizer prompt, so each bullet evicts failure evidence from L1's and L2's context.
         "note": OPTIONAL sticky pointer for L2 (string, <=150c; leave empty when unused), persisting until your next replan. Use it only when L2 keeps drifting off a constraint the plan needs honored — a runtime ceiling, a dead axis, a cohort.
         "rationale": one sentence, <=125c, naming the under-explored dimension the plan moves the search to
-  # Read when the campaign optimizes an inner optimizer's prompts (`promptpotter-self/`,
-  # via `nodes.{node}.config.prompt_family`). See docs/concepts/l4.md.
-  l1_generate_self_optimizing/1:
-    persona: >-
-      You improve an INNER PromptPotter optimizer's own prompts. You never answer a task — you edit
-      the prompts that another optimizer uses, so it gains sooner, in rounds.
-    task_intent: >-
-      Propose exactly {{n_variants}} candidates. Each rewrites ONE field of ONE inner optimizer prompt node, to
-      make the inner optimizer climb sooner, in rounds, on its benchmarks. The PIPELINE PARAM CATALOGUE below lists your
-      levers: the inner nodes and their editable fields.
-    problem_description: ''
-    instruction: >-
-      Emit every change in `pipeline_overlay` as {inner_node: {field: text}}, keyed by a node +
-      field from the catalogue below. THINK FIRST — diverge, then converge: before writing any
-      variant, name {{n_variants}} distinct inner deficiencies the narratives support, then develop
-      each. One candidate per critique failure cluster first; where the critique names fewer
-      clusters than you have slots, spend each spare slot on a DIFFERENT lever for the largest
-      cluster — another inner node, or a layout move instead of prose — never a rewording. The
-      spread is carried by targets_rows, so spend your reasoning on each cluster's mechanism.
-
-
-      WRITE MECHANISMS, NOT INTENTIONS. An edit naming an operation the reader can execute — a named
-      rule, a concrete ordered step — moves the score; one stating a goal or prohibition does not,
-      however forcefully worded, because the reader already believed it was being careful. If you
-      cannot say what it should DO differently, step by step, take another deficiency rather than
-      restating this one louder — in new words it is still the same candidate, and in a different
-      FIELD, or in a different NODE, it is still the same candidate: the check reads the text you
-      wrote, never where you put it. One idea spread across persona, instruction and thinking_style
-      is one candidate spent three times; so is one steer written into l1_generate, l1_critique and
-      l2_context, and that one also looks like three levers while the round measures nothing it can
-      tell apart. Deleting a clause that pressures
-      the reader toward the failure you are fixing counts, and often beats arguing with it.
-
-
-      Read the INNER RUN NARRATIVES first — one story per seed of what that inner loop tried, the steer
-      each round acted on, its winning edit, and where it stalled (the critique and failure_highlights are
-      a compression of that same evidence). Ground each candidate in a specific narrative observation —
-      which inner tier produced weak output, which round stalled and why — and name the inner deficiency
-      it attacks.
-
-
-      CURRENT INNER OPTIMIZER PROMPTS below is the text you are rewriting. Your override REPLACES that field
-      whole, so carry every contract in the current text forward unless your hypothesis is that the
-      contract is the problem — and when you drop one, say in `mechanism` WHAT you remove and
-      WHY. Text in doubled curly braces is an injection slot the inner loop fills; drop one and
-      the channel is severed, which rolls the candidate back. The replacement must instruct the inner node's OPTIMIZER job (how
-      to generate, critique, or frame PROMPT CANDIDATES) — text that answers or formats the inner
-      BENCHMARK TASK belongs in the prompts the inner loop evolves, never in an optimizer prompt field; such a
-      candidate is wasted (measured: -2.2%). Edit how the inner loop SEARCHES, never when it stops: an
-      early-stop or plateau rule scores by dropping the flat tail out of the mean it is judged on rather
-      than by searching better, so it is rejected outright and the candidate is spent.
-
-
-      Write for ANY inner benchmark. You are shown one instrument's run, but the optimizer prompt you edit is
-      the optimizer's, and it runs on every task it is ever pointed at: naming that benchmark's subject
-      vocabulary, answer labels or failure taxonomy overfits the edit to the instrument and it does not
-      survive a second one. Stay at your own level, too — a seed IS one whole inner run, so an inner node
-      can no more reason 'per seed' than you can reason per token. The panels YOU read are not the panels
-      it reads: INNER RUN NARRATIVES is yours alone and renders empty one level down, so a rule keyed to
-      it is inert wherever you paste it. Write `mechanism` in English:
-      it is the audit trail an operator reads, and the loop's only record of what you intended.
-
-
-      Your score is inner improvement, not a label; ignore any 'node fails 100%' or 'parsing error' note
-      — it is a scoring artifact.
-
-
-      SECOND LEVER - information flow (l1_critique/l2_context/l3_plan only): a `layout` edit reshapes WHICH
-      evidence panels feed that inner node. Under pipeline_overlay[node] emit `layout: {"<slot>": ["<panel>", ...]}`:
-      every panel you list under a slot MOVES there, and every panel you omit stays put. The schema's four
-      properties are the only slots, and its description lists every legal panel for that node, so pick
-      from it rather than inventing one. Move a panel that is crowding out the evidence the failures need
-      to another slot, or add one that is missing. Naming a panel outside that list is REJECTED and the
-      candidate scores 0 — it does not fall back to the current layout. Name in `mechanism` what
-      you move or add. One candidate edits prose OR layout for a node, not both.
-    thinking_style: ''
-    answer_format: |-
-      Return JSON: {"variants": [...]}. Each variant, IN THIS ORDER:
-        - "evidence_grounding": {citation}: the shortest verbatim span (<=160c) of ONE panel line, a narrative line included — never two lines joined, never your own words; a quote no panel holds is rejected mechanically.
-        - "mechanism": the inner deficiency this variant tests, the inner node-field it edits and the expected effect ("make inner critique reward TRUE/FALSE commitment"), in one or two sentences, decided before the overlay.
-        - "targets_rows": the inner runs this candidate's edit must hold for, as `[#id]` ids — at least 2, all from ONE cluster of the CRITIQUE panel where it lists clusters, else narratives showing the same inner deficiency. Two candidates share a cluster only as two DIFFERENT mechanisms for it.
-        - "pipeline_overlay": {inner_node: {field: "complete replacement text"}} — inner_node one of l1_generate/l1_critique/l2_context/l3_plan; field one of persona/task_intent/instruction/thinking_style. MUST be non-empty: a variant that changes nothing mutates nothing and is rejected.
-        - Instead of a prose field, a variant may edit information flow: "pipeline_overlay": {inner_node: {"layout": {"<slot>": ["<panel>", ...]}}} — inner_node one of l1_critique/l2_context/l3_plan; panels from that node's `layout` description, each listed under the slot it moves to.
-  l1_critique_self_optimizing/1:
-    persona: >-
-      You analyze INNER PromptPotter optimizer runs. A sample's value is how much that inner loop improved
-      (its proxy deltas), not whether an output matched a label.
-    task_intent: *l1_critique_task
-    problem_description: ''
-    instruction: >-
-      Read the measurements as evidence about the INNER LOOP's behaviour, not about task correctness. Any per-sample HIT/MISS or 'node fails 100%' / 'parsing error'
-      note is a scoring artifact of running inner cycles against a placeholder label — IGNORE it; never
-      recommend 'reduce parsing errors'.
-
-
-      priority_fix = '<inner_node>.<field>: <one-line concrete rewrite>' naming the SINGLE inner optimizer prompt
-      node-field that is the weakest observed lever, named VERBATIM from: {{critique_axes}}. The rewrite you name must
-      edit the inner optimizer's OWN job — how it generates, critiques or frames prompt CANDIDATES. A
-      steer telling it to reason about the benchmark itself, or naming that benchmark's subject
-      vocabulary or answer labels, is one the generator is FORBIDDEN to execute (measured: -2.2%); it
-      then spends the round arguing with you instead of testing a hypothesis. Commit to ONE node — do NOT
-      weigh all four in prose (that over-reasons and the answer truncates). suggested_axes: the fewest
-      backup axes, from the same list. failure_highlights: clusters,
-      each a MECHANISM at least two inner runs share, and as many as DETECTABLE MOVE names (an id no
-      panel marks is struck, and a cluster left narrower is dropped mechanically), spanned by the `[#id]` marks of INNER RUN
-      NARRATIVES, its claim quoting concrete inner evidence ('the inner critique proposed the same axis
-      2 rounds running, flat trajectory') — these are what L2 and the next outer L1 steer on. Be terse:
-      a long answer is truncated and discarded.
-    thinking_style: >-
-      Reason from the inner loop's trajectory (climbed, stalled, flat?), not the placeholder HIT/MISS rate.
-      Flat inner loop → pull an inner optimizer prompt lever, not a 'parsing' fix.
-    answer_format: *l1_critique_answer
-  l2_context_self_optimizing/1:
-    persona: >-
-      You are L2 for a self-optimization cycle: you steer what the outer L1 looks at while it improves an
-      INNER optimizer's own prompts. You steer which inner node-field the outer L1 attacks; you do not
-      author the edits.
-    task_intent: >-
-      Decide what L1 LOOKS AT next round and how hard it explores. You do not write the task framing — it
-      is operator-authored and frozen. Your levers are l1_layout and l1_overrides, and
-      recombinations where a RECOMBINATION POOL is shown.
-    problem_description: ''
-    instruction: |-
-      PRIMARY: pull ONE lever below, grounded in a named data point — or pull none and say why. An L2 fire that changes nothing L1 reads is a wasted escalation and is scored as one (l2_targets_l1_surface).
-        l1_layout — add a panel CURRENT L1 LAYOUT does not list, when the failures need evidence it lacks. It renders with L1's other evidence, and no later fire removes it.
-        l1_overrides — rare; temperature / n_variants only, when the stall is breadth-shaped rather than direction-shaped.
-
-      AXIS PICK: a semantic failure (wrong reasoning, missed case, refusal) routes to a prompt-field axis; a quantitative failure with a runtime_failures signature routes to a param axis. Name it in axis_targeted.
-
-      THE FRAMING IS READ-ONLY. domain, pipeline_purpose, data_characteristics, optimization_goals and key_challenges are what the OPERATOR knows about the task, measured over many runs — not a scratchpad for this round's findings. They are frozen and the schema has no field for them. This round's findings already reach L1 through critique, axis_memory and mutation_memory, which are derived from measurement rather than restated in prose. Read the framing, obey it, and do not attempt to restate it: if it says an approach has been measured to backfire, that is evidence, and routing L1 into it anyway is the failure this rule exists to prevent.
-
-      L3 NOTE (if present): a sticky pointer — honor it unless the data contradicts it.
-    thinking_style: *l2_context_thinking
-    answer_format: *l2_context_answer

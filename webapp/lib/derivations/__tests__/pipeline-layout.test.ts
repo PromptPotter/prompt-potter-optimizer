@@ -120,7 +120,7 @@ describe("wrapAt", () => {
   it("breaks after a separator only where the line would not fit, and rejoins into the name", () => {
     expect(wrapAt("theta_election", "_", 20)).toEqual(["theta_election"]);
     expect(wrapAt("theta_election", "_", 10)).toEqual(["theta_", "election"]);
-    expect(wrapAt("l1_critique_self_optimizing", "_", 16)).toEqual(["l1_critique_", "self_optimizing"]);
+    expect(wrapAt("mean_round_delta_held_out", "_", 16)).toEqual(["mean_round_", "delta_held_out"]);
     expect(wrapAt(MODEL, "/", 20).join("")).toBe(MODEL);
     expect(wrapAt("", "/", 20)).toEqual([]);
   });

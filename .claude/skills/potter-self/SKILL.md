@@ -7,8 +7,8 @@ description: PromptPotter L4 self-optimization — Claude and the operator read 
 
 **Read → classify → edit → predict → re-run one round → compare, one edit per pass.** This file is
 procedure; what is TRUE of L4 is [`l4.md`](../../../docs/concepts/l4.md). L4 edits
-`promptpotter/assets/optimizers/potter/pipeline.yaml → resolved_prompts["l1_generate/1"]` (inner) and the
-`*_self_optimizing/1` families (outer): never L2/L3's surfaces, `pipeline_params`, `task.md`, a dataset's
+`promptpotter/assets/optimizers/potter/pipeline.yaml → resolved_prompts["l1_generate/1"]`, which the outer
+runs too, the inner prompts being its target: never L2/L3's surfaces, `pipeline_params`, `task.md`, a dataset's
 config, `task_context` (no layer writes it: a framing diagnosis stops at "→ operator should revise
 task_context to X"), or past rounds' scores (swap `{dataset}/dataset.yaml::campaign.scoring` instead).
 

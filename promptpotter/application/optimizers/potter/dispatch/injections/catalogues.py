@@ -7,15 +7,15 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     AXES_ENUM_PREVIEW,
     DEMO_QUERY_STEM,
     RECOMBINATION_VALUE_STEM,
+    SCHEMA_DESCRIPTION_MAX_CHARS,
     InjectionKind,
     Item,
-    prose_ceiling,
+    offers_param,
     signal,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import NODE_LAYOUTS
 from promptpotter.application.scoring.formula.matchers import MATCHERS
-from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
@@ -30,16 +30,15 @@ from promptpotter.domain.sample import sample_tag
 
 
 def _schema_description_block(
-    node: PipelineNode, keys: list[str], current: dict[str, Any], *, inner_cells: InnerCells | None
+    node: PipelineNode, keys: list[str], current: dict[str, Any]
 ) -> list[str]:
     """Read off the point being improved, never the declaration, which shows the prose earlier winners replaced."""
     schema = current.get(OUTPUT_SCHEMA_KEY) or (
         node.output_schema.json_schema if node.output_schema else None
     )
-    (ceiling,) = {prose_ceiling(node, key, inner_cells=inner_cells) for key in keys}
     lines = [
         f"    {SCHEMA_DESCRIPTION_PREFIX}<path> — sent with the node's prompt, at most "
-        f"{ceiling} characters each; rewrite any your edit contradicts:"
+        f"{SCHEMA_DESCRIPTION_MAX_CHARS} characters each; rewrite any your edit contradicts:"
     ]
     for key in keys:
         path = key.removeprefix(SCHEMA_DESCRIPTION_PREFIX)
@@ -78,14 +77,16 @@ def _r_pipeline_param_catalogue(b: PotterView) -> list[Item]:
         if not node or not params:
             continue
         descs = node.param_descriptions
-        described = [k for k in node.description_keys if k in params]
+        # What the wire withholds, listed, would advertise a mutation L1 cannot make.
+        offered = {
+            p
+            for p in params
+            if offers_param(schema, node, p, schema_field_rename=b.schema_field_rename)
+        }
+        described = [k for k in node.description_keys if k in offered]
         bits: list[str] = []
-        for p in sorted(params - set(described)):
-            allowed = schema.param_options(node, p)
-            # `[]` emits no wire property, so listing it would advertise a mutation L1 cannot make.
-            if allowed is not None and not allowed:
-                continue
-            if allowed:
+        for p in sorted(offered - set(described)):
+            if allowed := schema.param_options(node, p):
                 shown = list(allowed)[:AXES_ENUM_PREVIEW]
                 preview = ", ".join(str(x) for x in shown)
                 if len(allowed) > AXES_ENUM_PREVIEW:
@@ -98,17 +99,14 @@ def _r_pipeline_param_catalogue(b: PotterView) -> list[Item]:
                 bit = f"{p} ({desc[:40]})"
             else:
                 bit = p
-            ceiling = prose_ceiling(node, p, inner_cells=b.inner_cells)
-            bits.append(bit if ceiling is None else f"{bit} (at most {ceiling} characters)")
+            bits.append(bit)
         # A bare `name:` reads as an axis whose values went missing.
         if not bits and not described:
             continue
         lines.append(f"  {node_name}: {', '.join(bits)}".rstrip())
         if described:
             current = b.pipeline_params.node(node_name).laid_keys()
-            lines.extend(
-                _schema_description_block(node, described, current, inner_cells=b.inner_cells)
-            )
+            lines.extend(_schema_description_block(node, described, current))
         # Only where the other arm is reachable: the cost of a move nobody can make is prompt mass.
         if ANSWER_AS_JSON in (schema.param_options(node, SCHEMA_TOGGLE_PARAM) or ()):
             lines.extend(_schema_toggle_block(b.matcher))

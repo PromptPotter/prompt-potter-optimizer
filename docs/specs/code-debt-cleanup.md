@@ -848,7 +848,10 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The outer's edit menu offers fields of inner nodes that never fire**: inner `l3_plan` made 0
   calls and `l2_context` 1 across six inner runs (L4 audit C, 2026-11-15), yet both stay editable.
   Action: a field is offered only where its node ran on the measured samples, for every campaign.
-  **Rides with:** the outer chain (D7). **Re-test:** a C0 on `promptpotter-self/run` offers no
+  **Held:** who clocks an inner node. A node ran where it holds a `step_timings` key
+  (`scoring/evaluators.py`), which core stamps with the terminal alone for an in-process run
+  (`infrastructure/backend.py`); an inner node's calls sit on its run's ledger only
+  (`runner/inner/transcript.py`). **Re-test:** a C0 on `promptpotter-self/run` offers no
   `l3_plan` field until one inner run calls it.
 - **An inner run a bench pass spawns files all its own calls as `bench`**: the spawner's
   `run_scope().filed_as` survives into the inner scope (`runner/inner/tasks.py:412`), so inner
@@ -880,6 +883,10 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   repeats `served_dashboard.py::SampleLookahead.lines()`'s pick of scope and held word. Action: serve
   the composed line on `SampleLookahead` and render it. **Re-test:** the panel's flight line and
   `dashboard`'s `parallel calls:` line are one string.
+- **The fence test never sends a row's query to `l1_generate`**: its fixture's query is fenced on
+  `diagnostics`, a panel `l1_generate` does not place, and the composed request holds no query.
+  Action: seat a row a placed panel quotes, and assert it sits fenced in the request. **Re-test:**
+  `tests/test_security.py::test_dataset_content_reaches_the_optimizer_only_inside_the_fence`.
 
 ## Held — no wave-4 chain yet
 
@@ -888,11 +895,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
-- **The committed L4 panels resolve only on this account**: `research/datasets/promptpotter-self/run/dataset.yaml`
-  (and `dev/`) seats `hotpotqa-distractor` and `legalbench-fods`, account definitions no committed tier holds, so
-  the box refuses the panel at init. Action: commit both to the research tier, or keep the README's
-  prerequisite. **Held:** the operator's call (a research-tier definition gets `defaults.yaml` laid
-  under it, a tenant one does not). **Re-test:** `promptpotter-self/run` inits on a fresh account.
 - **The inner measurand differs by benchmark**: justlogic seats inherit `justlogic/family.yaml`'s
   `per_cell` token discount while hotpotqa and legalbench score raw `em_match` / `label_match`, and
   hotpotqa's `escalation.l1_patience: 5` differs from the others; `runner/inner/tasks.py::_lever`
@@ -919,11 +921,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   filed one), and `BenchScope` partitions by benchmark under the word `RulerScope` owns. Action:
   `_strata` keys on the field raw; `BenchScope` takes a benchmark name. **Held:** l4-outer owns
   `potter/`, l4-runs `runner/bench.py`. **Re-test:** `git grep -n "measured_dataset or\|BenchScope" -- promptpotter`.
-- **Nothing keeps an L4 edit L4-only**: Shape: potter's `inner_cells` gates (`bundle.py`,
-  `validators.py`, `catalogues.py`, `l1_wire_schema.py`, `layer_state.py`, `l1.py`, `prompts.py`)
-  read `InnerCells`, so an edit to the L4 cells re-keys every potter campaign.
-  Action: the injection reads L4 cells through the connector's served terms (D6). **Held:** the
-  re-key. **Re-test:** `git grep -n "domain.l4" -- promptpotter/application/optimizers`.
 - **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`
   reads `result.rounds`, the last cycle only, while the bench and `n_rounds_after_origin` read the line
   (`runner/entry.py`), so after a fork "no proposal reached a cell" is judged without the rounds

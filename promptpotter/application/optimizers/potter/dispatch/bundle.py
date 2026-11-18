@@ -8,29 +8,32 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.arms import arm_name, is_leader_eligible
-from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
-from promptpotter.domain.pipeline_schema import NodeSearchNarrowing, PipelineNode, PipelineSchema
+from promptpotter.domain.pipeline_schema import (
+    SCHEMA_RENAME_PARAM,
+    NodeSearchNarrowing,
+    PipelineNode,
+    PipelineSchema,
+)
 from promptpotter.domain.results import RoundOutcome
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
 
 
-# A field with no entry is emitted unbounded.
-OPTIMIZER_PROMPT_FIELD_MAX_CHARS: dict[str, int] = {
-    "instruction": 3_200,
-}
-
+# What bounds an `output_schema_descriptions.<path>` value: a winner's description compounds.
 SCHEMA_DESCRIPTION_MAX_CHARS = 400
 
 
-def prose_ceiling(node: PipelineNode, param: str, *, inner_cells: InnerCells | None) -> int | None:
-    # An optimizer-prompt field's ceiling binds only the inner optimizer's prose, under L4.
-    if param in node.description_keys:
-        return SCHEMA_DESCRIPTION_MAX_CHARS
-    return None if inner_cells is None else OPTIMIZER_PROMPT_FIELD_MAX_CHARS.get(param)
+def offers_param(
+    schema: PipelineSchema, node: PipelineNode, param: str, *, schema_field_rename: bool
+) -> bool:
+    """Whether a proposal may set *param*: an empty menu offers nothing, and the rename lever
+    only where it is unlocked; the wire, the catalogue and the critique's axes ask it alike."""
+    if param == SCHEMA_RENAME_PARAM:
+        return schema_field_rename
+    return schema.param_options(node, param) != []
 
 
 L3_PLAN_MAX_CHARS = 800

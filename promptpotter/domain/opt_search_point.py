@@ -271,8 +271,12 @@ class OptSearchPoint(FrozenModel):
         pp = _resolved_config(self.pipeline_params, schema)
         scored = self.scored_prompts(schema, framing, demo=demo)
         nodes = pp.laid_nodes
+        field_wise = {
+            n.name for n in schema.prompt_nodes() if n.prompt_info and n.prompt_info.field_wise
+        }
         for node, fields in scored.items():
-            nodes[node] = {**pp.node(node).laid_keys(), "prompt": "\n\n".join(fields.values())}
+            prompt = dict(fields) if node in field_wise else "\n\n".join(fields.values())
+            nodes[node] = {**pp.node(node).laid_keys(), "prompt": prompt}
         return JobSearchPoint(pipeline_params=pp.with_nodes(nodes), prompt_fields=scored)
 
     def as_origin(self, *, changes_description: str) -> OptSearchPoint:

@@ -503,7 +503,6 @@ def _validate_prompt_reach(
     *,
     filtered: PipelineSchema,
     has_starting_prompts: bool,
-    prompt_fields_as_node_params: bool,
     dataset_name: str,
 ) -> None:
     if filtered.prompt_nodes():
@@ -517,14 +516,13 @@ def _validate_prompt_reach(
             f"GET /pipeline or in the dataset's `dataset.yaml::pipeline`.",
             code="pipeline_config_invalid",
         )
-    if not prompt_fields_as_node_params:
-        raise PayloadInvalidError(
-            f"dataset {dataset_name!r}: no running node in {running} declares `prompt_info`, and "
-            f"this backend sends a node only the rendered prompt, so every candidate scores as "
-            f"the same no-skill call and the round reports a tie it never measured. Declare "
-            f"`prompt_info` with its `fields` on the node the prompt is meant for.",
-            code="pipeline_config_invalid",
-        )
+    raise PayloadInvalidError(
+        f"dataset {dataset_name!r}: no running node in {running} declares `prompt_info`, and "
+        f"this backend sends a node only its prompt, so every candidate scores as the same "
+        f"no-skill call and the round reports a tie it never measured. Declare `prompt_info` "
+        f"with its `fields` on the node the prompt is meant for.",
+        code="pipeline_config_invalid",
+    )
 
 
 def _validate_model_ownership(
@@ -1258,7 +1256,6 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
     _validate_prompt_reach(
         filtered=filtered,
         has_starting_prompts=ships_prompts,
-        prompt_fields_as_node_params=session.backend_client.connector.prompt_fields_as_node_params,
         dataset_name=dataset_name,
     )
 

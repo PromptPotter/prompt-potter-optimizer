@@ -391,7 +391,8 @@ def _estimated_usage(
     wire_params: PipelineParams,
     priced_as: PricedPair,
 ) -> StepUsage:
-    in_text = wire_params.node(node.name).laid_keys().get("prompt") or ""
+    prompt = wire_params.node(node.name).laid_keys().get("prompt")
+    in_text = prompt if isinstance(prompt, str) else ""
     out_text = " ".join(_observed_texts(node, resp_data))
     model, provider = priced_as
     return StepUsage(

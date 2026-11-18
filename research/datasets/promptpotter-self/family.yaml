@@ -72,17 +72,10 @@ campaign:
           sp_budget_round: 6
       l1_generate:
         config:
-          prompt_family: l1_generate_self_optimizing
           block_access: 'off'
           # No outer round is banked to set it from: 3 variants send at most 3 x 6 = 18 inner
           # campaigns a round, 3 x 4 = 12 once PoBB cuts each loser at `elimination_n_min`.
           n_variants: 3
-      l1_critique:
-        config:
-          prompt_family: l1_critique_self_optimizing
-      l2_context:
-        config:
-          prompt_family: l2_context_self_optimizing
       escalation:
         config:
           # No `optimization.lives`, and its absence is deliberate rather than an omission. It read

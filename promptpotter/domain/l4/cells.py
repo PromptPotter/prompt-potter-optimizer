@@ -11,7 +11,7 @@ from typing import Any
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.l4.proxies import INNER_RESULT_KEY
-from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
+from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE, OptimizerPromptTemplate
 from promptpotter.domain.pipeline_schema import (
     DEFAULT_PIPELINE,
     NodeKind,
@@ -42,7 +42,8 @@ class InnerTaskSpec(FrozenModel):
         return stable_hash(self.model_dump(mode="json"))
 
 
-# `problem_description` and `answer_format` are absent: they carry the injection slots and the output contract.
+# Each inner llm node's prompt fields to the outer; `problem_description` and `answer_format` are
+# absent: they carry the injection slots and the output contract.
 OUTER_PROMPT_FIELDS: tuple[str, ...] = ("persona", "task_intent", "instruction", "thinking_style")
 assert set(OUTER_PROMPT_FIELDS) <= set(OptimizerPromptTemplate.RENDER_ORDER)
 
@@ -147,9 +148,20 @@ class InnerCells:
         return self.held(cell).optimizer.terminal
 
     def own(self, cell: Seat, arm: Mapping[str, Any]) -> dict[str, Any]:
-        """The arm's edit on the nodes this cell's optimizer runs: another manifest's node is not its lever."""
-        nodes = {node.name for node in self.held(cell).optimizer.declared}
-        return {node: config for node, config in arm.items() if node in nodes}
+        """The arm's edit on the nodes this cell's optimizer runs (another manifest's node is not its
+        lever), less each field its template already holds: the origin's start is no edit."""
+        inner = self.held(cell).optimizer
+        nodes = {node.name for node in inner.declared}
+        edits = {
+            node: {
+                key: value
+                for key, value in config.items()
+                if node not in inner.templates or value != getattr(inner.templates[node], key, None)
+            }
+            for node, config in arm.items()
+            if node in nodes
+        }
+        return {node: config for node, config in edits.items() if config}
 
     def pipeline(self) -> dict[str, Any]:
         """RAISES where two manifests declare one node differently (``owners``)."""
@@ -176,12 +188,29 @@ class InnerCells:
                 elif node.kind is NodeKind.LLM:
                     levers = dict(inner.outer_levers.get(node.name, {}))
                     terminal = node.name in terminals
+                    start = {
+                        f: text
+                        for f, text in inner.templates[node.name].prompt_fields().items()
+                        if f in OUTER_PROMPT_FIELDS
+                    }
                     declared = {
                         "type": node.kind.value,
                         "node_role": NodeRole.RANKER.value if terminal else "",
                         "config": {},
+                        "prompt_info": {
+                            "fields": list(OUTER_PROMPT_FIELDS),
+                            "template_variables": sorted(
+                                {
+                                    v
+                                    for text in start.values()
+                                    for v in TEMPLATE_TOKEN_RE.findall(text)
+                                }
+                            ),
+                            "field_wise": True,
+                            "start": start,
+                        },
                         "optimizer": {
-                            "param_keys": [*OUTER_PROMPT_FIELDS, *levers],
+                            "param_keys": list(levers),
                             "param_types": levers,
                             "observation_name": node.name,
                             "observation_mappings": observed if terminal else [],

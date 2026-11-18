@@ -1,0 +1,62 @@
+source:
+  hub: hotpotqa/hotpot_qa
+  rev: 1908d6afbbead072334abe2965f91bd2709910ab
+  recipe: columns
+  config: distractor
+  split: validation
+  cap: 750
+  query: "Question: {question}\n\nContext:\n\n{context}"
+  truth: answer
+  paragraphs:
+    column: context
+    title: title
+    text: sentences
+pipeline:
+  version: v0.1
+  backend_name: TermNorm
+  connector: termnorm
+  available_models:
+  - inception/mercury-2.5
+  - meta-llama/llama-3.1-8b-instruct:nitro
+  - openai/gpt-oss-20b:nitro
+  - xiaomi/mimo-v2.6-flash
+  description: HotpotQA distractor — the multi-hop question with its ten paragraphs (two gold, eight
+    distractors), the reading setting the peers' retrieval programs reduce to; exact-match scored after SQuAD
+    normalization. Routes through TermNorm /matches with the llm_only pipeline.
+  nodes:
+    llm_only:
+      type: llm
+      runtime: backend
+      node_role: ranker
+      description: Direct LLM generation on the TermNorm backend. max_tokens 1536 cuts the runaway replies
+        (11% of 8B rows ran to 8192 and missed; p99 of the rest is 812).
+      config:
+        model: meta-llama/llama-3.1-8b-instruct:nitro
+        temperature: 0.0
+        max_tokens: 1536
+        provider: openrouter
+        reasoning_effort: low
+      optimizer:
+        param_keys:
+        - persona
+        - task_intent
+        - problem_description
+        - instruction
+        - thinking_style
+        - answer_format
+        observation_name: llm_only
+        observation_mappings:
+        - pipeline_key: final_ranking
+          output_field: generated_text
+          is_llm: true
+campaign:
+  scoring: em_match(predicted, ground_truth)
+  dataset_split:
+    bench: 100
+  optimization:
+    degradation_threshold: 0.4
+    elimination_n_min: 4
+    nodes:
+      escalation:
+        config:
+          l1_patience: 5

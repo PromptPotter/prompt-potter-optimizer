@@ -219,9 +219,6 @@ class Connector:
     prompt_delivery: PromptDelivery = _in_the_request
     """Per run, off the params it hashes; ``artifact_body`` may never ARRIVE and owes an observation."""
 
-    prompt_fields_as_node_params: bool = False
-    """``True`` on the recursion alone; elsewhere a prompt node with no ``prompt_info`` is refused."""
-
     required_observation_keys: tuple[str, ...] = ()
     """Keys the backend ALWAYS emits: run init raises unless the schema maps each."""
 
