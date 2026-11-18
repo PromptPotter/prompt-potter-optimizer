@@ -133,6 +133,7 @@ from promptpotter.application.jobs.mint import (
     arm_plans,
     declare,
     mint_arms,
+    mint_framed_cycle,
     resolve_cycle_plan,
     resolve_resume,
 )
@@ -1046,6 +1047,20 @@ def test_the_unframed_ablation_renders_no_framing_resumed_or_not(built_stores: S
     assert not campaign_framing(built_stores, declared, gsm8k), (
         "the campaign manifest lost the declaration, so a resume of the ablation runs framed"
     )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_task_text_on_the_unframed_ablation_pays_no_framing_and_writes_none(
+    built_stores: Stores, decl: _Declared
+) -> None:
+    # A check-in here bills and overwrites the dataset's committed framing for every later campaign.
+    opened, rows_30, _, _, _ = decl
+    built_stores.tenant_datasets.save_task_context("decl", TaskDecomposition(domain="claims"))
+    unframed = declare(opened, _connector_config(task_framing="off"), purpose=Optimize())
+    asyncio.run(mint_framed_cycle(opened, unframed, rows_30, task_text="Sort these claims."))
+    assert committed_task_context(built_stores, opened.dataset) == TaskDecomposition(
+        domain="claims"
+    ), "a task text on the unframed ablation paid a check-in and overwrote the committed framing"
 
 
 def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: Stores) -> None:

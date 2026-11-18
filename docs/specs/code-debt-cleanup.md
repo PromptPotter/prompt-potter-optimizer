@@ -79,20 +79,13 @@ row it closes.
   equals-main, so it lands with a paid L4 re-measure. **Rides with:** admit-2, whose Owns hold
   `spawn.py::_open_seat`. **Re-test:** `git grep -n "mint(\|slotless_share(" -- promptpotter/application/runner/inner/spawn.py`
   lists the admission before the mint.
-- **No test pins that a raising `run_campaign` leaves no open client**: `embedded_run.py::run_campaign`
-  closes its own client on every exit (a `resolve_resume` refusal included), and nothing fails if it
-  stops. Action: a test where the resume refuses and one where the run raises each read the client closed.
-  **Rides with:** admit-2. **Re-test:** `git grep -n "aclose\|is_closed" -- tests` names both.
 - **A closed `BackendClient` reopens its pool on next use**: `infrastructure/backend.py::BackendClient.http`
   (`:187`) builds a new `httpx.AsyncClient` when `_http.is_closed`, so a send after the run's close
-  leaks a pool nobody closes. Action: a closed client refuses a send. **Rides with:** admit-2, whose Owns
-  gain `infrastructure/backend.py::BackendClient.http`. **Re-test:** `git grep -n "is_closed" -- promptpotter/infrastructure/backend.py`
-  is empty.
-- **A non-launch command filed through `host_dispatcher` sweeps nowhere**: `embedded_run.py::host_dispatcher`
-  (`:84`) enters without a sweep now, and `run_campaign` alone sweeps (`:192`), so a pause or stop filed
-  by an embedding host reaps no dead job. Action: the sweep is the dispatcher's, for every kind.
-  **Rides with:** admit-2. **Re-test:** `git grep -n "sweep(" -- promptpotter/application/embedded_run.py`
-  names the dispatcher.
+  leaks a pool nobody closes. Action: a closed client refuses a send (`http` built in `__init__`,
+  `aclose` closes it; httpx refuses the rest). **Rides with:** the next chain owning `tests/test_spend.py`
+  (admit-3 cut it there): `test_a_backend_cell_is_never_sent_again_while_it_may_still_bill` builds one
+  client per `aclosing`, `test_security.py:4264-4267` asserts `client.http.is_closed`. **Re-test:**
+  `git grep -n "is_closed" -- promptpotter/infrastructure/backend.py` is empty.
 
 - **`acompile` lands twice per compile**: `presentation/teleprompter.py::acompile` calls `enter()` for its
   stores, then `run_campaign(…, stores=stores)` enters again (`embedded_run.py:130`); every
@@ -109,14 +102,13 @@ row it closes.
   launches broken on a random `job_id` can refuse two head-to-head arms with one stamp each other
   `launch_contended`. Action: one mint door owns the client and the stamp.
   **Rides with:** admit-2.
-- **Framing precedence is decided twice** (✓): `--task-text` beats `task_framing: off`
-  (`jobs/mint.py:670`) while `campaign_framing` lets off beat everything (`task_context.py:197`), so a
-  paid check-in runs and overwrites the dataset's committed framing (`task_context.py:287`) for every
-  later campaign. Action: `_description_to_decompose` asks off first. **Rides with:** admit-2.
 - **A head-to-head on a bank with no `dataset_split` runs blind** (✓): `jobs/mint.py:484-524`'s
   `arm_plans` ("every refusal it owes") never checks `partition.bench`, so the forced `at_end`
   (`:207`) is skipped (`loop.py:229`) and every arm spends its full budget reading "no rows held out".
-  Action: `arm_plans` refuses it. **Rides with:** admit-2.
+  Action: `arm_plans` refuses it, after the spend refusals. **Rides with:** the next chain owning
+  `tests/test_spend.py` (admit-3 cut it there): its duel bank at `:4914` declares `dataset_split.bench`,
+  as do `test_security.py`'s withdrawn head-to-head and `test_identity.py`'s two arm tests (the
+  replicate one on 35 rows: capo needs a 30-row search).
 - **A draft opened from the CLI dead-ends** (reported): `open-dataset-draft` and `open-origin-draft`
   have no verb that edits, resolves or starts them; and the upload bound is spelled twice
   (`cli/commands/launch.py::_ingest_checkin` vs `deps.py:149-152`). Action: `new --draft ID`, and one bound. **Rides with:** admit-2.

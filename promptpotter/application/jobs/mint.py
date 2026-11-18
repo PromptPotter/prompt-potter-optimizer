@@ -649,11 +649,11 @@ async def _mint_framed(
 def _description_to_decompose(
     session: Session, campaign_config: CampaignConfig, task_text: str | None
 ) -> str | None:
+    if campaign_config.task_framing == "off":
+        return None
     if task_text:
         return task_text
-    if campaign_config.task_framing == "off" or session.dataset is None:
-        return None
-    if committed_task_context(session.store, session.dataset):
+    if session.dataset is None or committed_task_context(session.store, session.dataset):
         return None
     return read_dataset_framing(session.dataset).description or None
 

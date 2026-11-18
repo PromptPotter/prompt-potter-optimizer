@@ -70,11 +70,13 @@ __all__ = [
 
 
 async def enter(stores: Stores | None = None) -> Stores:
-    """The embedded door, first wherever a host enters it: the data root landed off the loop, then
-    *stores* (the local account's where none). A sync host awaits it through `asyncio.run`."""
+    """The embedded door, first wherever a host enters it: *stores* (the local account's where none),
+    landed and swept off the loop, as no server ticks for a host. A sync host awaits `asyncio.run`."""
     setup_logging()
     await asyncio.to_thread(land_at_entry, every_treatment=False)
-    return local_stores(tenant=None) if stores is None else stores
+    stores = local_stores(tenant=None) if stores is None else stores
+    await asyncio.to_thread(sweep, stores.projects_root)
+    return stores
 
 
 async def host_dispatcher(stores: Stores | None = None) -> CommandDispatcher:
@@ -152,9 +154,7 @@ async def run_campaign(
             config = effective_config(declaration)
             connector, measured = declaration.environment.connector, session.measured_dataset
 
-        # Admitted BEFORE the mint, whose framing call is paid, and before a resume binds its
-        # cycle: a refusal leaves nothing written. Offloaded: the sweep scans every cycle ledger.
-        await asyncio.to_thread(sweep, stores.projects_root)
+        # Admitted BEFORE the mint's paid framing and a resume's bind: a refusal writes nothing.
         start, held = await asyncio.to_thread(
             admit_slotless,
             config,
