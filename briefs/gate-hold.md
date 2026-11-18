@@ -8,7 +8,7 @@ An L4 outer (`promptpotter-self.dyck__2bd880`) was running inner cells abreast. 
 promptpotter new <dataset>` launches started at once beside it. Within a minute:
 - two of the four launches refused with `admission_gate_stuck` ("The machine's admission gate is
   held by another process that has not released it. Nothing was started; retry shortly."), from
-  `application/jobs/interlock.py::AdmissionInterlock.held` after `LOCK_TIMEOUT` (5 s,
+  `application/jobs/interlock.py::AdmissionGate.held` after `LOCK_TIMEOUT` (5 s,
   `config/settings.py`);
 - an inner cell already 11 minutes into its run died on the same `ServiceUnavailableError`. The outer
   banked it as an errored sample of its arm (`ERR "ServiceUnavailableError: The machine's a…"`), so a
