@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import inspect
 import math
 import sys
 from collections import Counter
@@ -13,7 +14,7 @@ from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from pydantic import ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter import connectors
 from promptpotter.application import health, optimizers
@@ -39,6 +40,7 @@ from promptpotter.application.scoring.evaluators import connector_name_refusals
 from promptpotter.application.scoring.judges import registry as judge_registry
 from promptpotter.config.paths import default_projects_root, jobs_dir, user_data_root
 from promptpotter.config.prompt_blocks import PackShelf
+from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import JOB_ADAPTER
 from promptpotter.domain.optimizer_state import STATE_KINDS
@@ -53,7 +55,9 @@ from promptpotter.infrastructure.store.data_root import (
     LOAD_ERRORS,
     OPTIMIZER_SHADOW,
     Fate,
+    FoldedLines,
     Found,
+    Parsed,
     Staged,
     classify,
     row_schema,
@@ -164,9 +168,13 @@ class Landing(NamedTuple):
     kept: tuple[Unloadable, ...]
     # A definition swap committed and not yet laid (`stores.py::complete_definition_swap`).
     swaps: tuple[Path, ...]
+    # The package version that last landed the root, where it is newer than this code's.
+    newer: str | None
 
     @property
     def refused(self) -> LandingRefusal | None:
+        if self.newer is not None:
+            return LandingRefusal(f"v{self.newer} landed it, and this code is v{APP_VERSION}", ())
         survivors = [one for one in self.unloadable if one.found.kind.fate is Fate.SURVIVOR]
         if migrated := tuple(
             one.path for one in survivors if one.found.kind.shape is not JOB_ADAPTER
@@ -358,7 +366,30 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
         tuple(unloadable),
         kept=(),
         swaps=tuple(sorted({p.parent for p in found_at if p.parent.name == DEFINITION_SWAP_DIR})),
+        newer=_newer(projects_root),
     )
+
+
+def _release(version: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in version.split("."))
+
+
+def _newer(projects_root: Path) -> str | None:
+    """The version that landed the root, where this code's is older: its landing would drop what
+    the newer code wrote. Read off the raw stamp, never `LandedStamp`, whose shape that newer
+    release may have moved."""
+    try:
+        landed = _LandedVersion.model_validate_json(read_text_optional(_stamp(projects_root)))
+    except ValidationError:
+        return None
+    return landed.version if _release(landed.version) > _release(APP_VERSION) else None
+
+
+class _LandedVersion(FrozenModel):
+    """Lax on purpose (``extra="ignore"``): the version alone, whatever else a newer stamp grew."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+    version: str = Field(pattern=r"^\d+(\.\d+)*$")
 
 
 def _shadow_why(path: Path, found: Found) -> str | None:
@@ -405,10 +436,12 @@ def _refusal(data_root: Path, refused: LandingRefusal) -> ConflictError:
 
 class LandedStamp(FrozenModel):
     """The root's last landing: the record schema it landed under (``None`` where it kept what
-    moved since its plan, so the next entry lands it again), when, and what it wrote, dropped and
-    kept (`Landing.said`)."""
+    moved since its plan, so the next entry lands it again), the package version that landed it
+    (older code refuses to land the root again), when, and what it wrote, dropped and kept
+    (`Landing.said`)."""
 
     key: str | None
+    version: str
     at: str
     said: tuple[str, ...]
 
@@ -460,18 +493,27 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
                 stores.campaigns.delete_campaign(mint.path.name, keep_results=False)
             torn.append(mint)
     applied = landing._replace(runs=tuple(runs), torn=tuple(torn), kept=tuple(kept))
-    stamp = LandedStamp(key=None if kept else landing_key(), at=utcnow_iso(), said=applied.said)
+    stamp = LandedStamp(
+        key=None if kept else landing_key(), version=APP_VERSION, at=utcnow_iso(), said=applied.said
+    )
     write_text(_stamp(projects_root), stamp.model_dump_json())
     return applied
 
 
 @functools.cache
 def landing_key() -> str:
-    """Every row's patterns, fate and shape (a ledger row's the record kinds it parses by), every
-    state kind a record nests, and every migration: a reshape of any lands again."""
+    """Every row's patterns, fate, shape (a ledger row's the record kinds it parses by) and reader's
+    body, every state kind a record nests, and every migration's body: a change to any lands again."""
     rows = {kind.name: row_schema(kind) for kind in KINDS}
+    source = inspect.getsource
+    # A parsed or a folded row's reader is its shape's first field.
+    readers = {
+        k.name: source(k.shape[0]) for k in KINDS if isinstance(k.shape, Parsed | FoldedLines)
+    }
+    migrations = {name: source(migration) for name, migration in MIGRATIONS.items()}
+    state = STATE_KINDS.schemas()
     return stable_hash(
-        {"rows": rows, "state": STATE_KINDS.schemas(), "migrations": sorted(MIGRATIONS)}, length=16
+        {"rows": rows, "readers": readers, "state": state, "migrations": migrations}, length=16
     )
 
 

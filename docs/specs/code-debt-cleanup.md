@@ -780,13 +780,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `cycle_files.list_cycle_files` walks all of `.runtime/` and filters after; `FileTree` mounts a 2 s
   `useActivePointer()` poll for one failure line; a `/hierarchy` 200 replaces every entry object
   `lib/hooks/useRegistry.ts::useRegistry` indexes. The anti-rot pass re-finds them. **Rides with:** rel 3.
-- **The landing stamp is unordered**: `maintenance/landing.py::LandedStamp` holds a schema hash, so a
-  process on older code (an earlier desk checkout, or two checkouts on one `PROMPTPOTTER_HOME`) lands
-  again and drops what newer code wrote, the paid archive's caches included, against the module's own
-  "nothing may roll the code back". Action (the operator, 2026-11-11: the package version is the
-  ordering signal): the stamp carries the package version that landed, and an entry from an older
-  version refuses instead of dropping. **Rides with:** rel. **Re-test:** an entry from an older version
-  on a root a newer one landed refuses.
 - **A landing waits on every live producer on another commit, whether or not the ledger shape moved**,
   and on nothing else (`jobs/registry.py::JobRegistry.close_for_landing` reads the jobs holding spend):
   a server or read verb on other code holds no job, so `jobs/interlock.py` guards nothing against it,
@@ -795,14 +788,15 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   code refuses every launch with `landing`. Action: key the wait on a digest of the `CycleRecord`
   schema the code writes, held by every live process, in place of `config/settings.py::CODE_REVISION`
   through `jobs/interlock.py` and `deploy-linux/update.sh`, and back the marker by the deployer's OS
-  lock. **Rides with:** rel, beside the stamp row above (one landing order); its Owns gain
+  lock. **Rides with:** rel (the landing stamp now orders by version, `landing.py::LandedStamp`); its Owns gain
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-- **`landing_key` misses a body change**: `store/data_root.py::_schema` keys a reader by `module::qualname`
-  and `landing.py::landing_key` keys migrations by name (`sorted(MIGRATIONS)`), so a reader's or a
-  migration's body change never lands again. **Rides with:** rel. **Re-test:** edit a migration's body;
-  `landing_key()` moves.
+- **A reader's helper body is not keyed** (land-order's report): `landing.py::landing_key` hashes
+  each reader's and migration's own source, so a helper a reader calls (the record validators behind
+  `ledger_line`) or a pydantic validator on a row's model can change what loads without moving the
+  key. Root: a shape's loading behaviour has no digest beyond its JSON schema. **Rides with:** rel.
+  **Re-test:** edit a validator a survivor's model runs; `landing_key()` moves.
 
 ### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
 

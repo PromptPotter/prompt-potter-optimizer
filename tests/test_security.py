@@ -311,6 +311,7 @@ from promptpotter.infrastructure.store.io import (
     write_bytes,
     write_json,
     write_jsonl,
+    write_text,
     write_yaml,
 )
 from promptpotter.infrastructure.store.layout import (
@@ -2879,6 +2880,25 @@ def test_a_landing_drops_a_cache_this_build_cannot_read_unasked_and_a_file_no_ro
     assert [str(fold) in line for line in dropped] == [True], f"a cache dropped unsaid: {dropped}"
     assert stamp is not None and stamp.said == dropped, "the stamp lost what the landing dropped"
     assert UserStore(campaigns.workspace).load() == user, "a landing dropped a survivor"
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_older_code_refuses_to_land_a_root_newer_code_landed_and_drops_nothing(
+    built_stores: Stores,
+) -> None:
+    projects_root = built_stores.projects_root
+    apply_landing(projects_root, plan_landing(projects_root, reset=False))
+    landed = last_landing(projects_root)
+    assert landed is not None
+    # Its stamp reshaped too (a field this code's model refuses): the version is still read.
+    newer = {**landed.model_dump(mode="json"), "key": "other", "version": "999.0.0", "added": 1}
+    write_text(landing_module._stamp(projects_root), json.dumps(newer))
+    # A cache this code cannot read: a landing it ran would drop what the newer code wrote.
+    fold = built_stores.archive.path(ArchiveFile.SAMPLE_FOLD, "0" * ADDRESS_HEX)
+    write_jsonl(fold, [{"config_key": "c", "sp": "s", "sig": [], "graded": []}])
+    with pytest.raises(ConflictError, match=r"v999\.0\.0 landed it"):
+        apply_landing(projects_root, plan_landing(projects_root, reset=False))
+    assert fold.exists(), "older code dropped a file the newer code landed"
 
 
 def test_an_entry_finding_a_landing_in_flight_says_so_and_waits_it_out(

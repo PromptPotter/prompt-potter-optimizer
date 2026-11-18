@@ -116,7 +116,11 @@ BASELINE = {
     # flight-share B (+76): the spend book's count by part (`SpendCount`), read by its stop, its
     # room and its refusal, served as every money cap's `used` and `cap_lines`, and a walk's halt.
     # l4-outer-6 (+4): `PanelShareKnobs`, each layout node's discretionary share as a knob.
-    "package_lines": 111673,
+    # land-order 1 (+22): the landing stamp's package version, and older code's refusal to land.
+    # land-order 2 (+10): `landing_key` hashes each reader's and each migration's body.
+    # land-order fix (+10): older code reads the landed version alone (`_LandedVersion`, lax),
+    # never the strict stamp a newer release may have reshaped.
+    "package_lines": 111695,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -140,7 +144,8 @@ BASELINE = {
     "domain_any_maps": 48,
     # Models that opt out of `StrictModel`'s `extra="forbid"`.
     # rk-rest (+2): `HarborPanel` and `DbllmbenchPanel`, a backend's panel keys the bench never reads.
-    "models_lax": 11,
+    # land-order (+1): `landing.py::_LandedVersion`, a newer release's stamp read for its version.
+    "models_lax": 12,
     # Injections the optimizers' members price — each a block an optimizer prompt can carry.
     "injections": 32,
     # Escalation rules, priced the same way: the round, climb and heal tables together, since a

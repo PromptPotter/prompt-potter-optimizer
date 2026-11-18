@@ -249,6 +249,9 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/maintenance/landing.py::last_landing::ValidationError": (
         "a stamp this build cannot read lands the root again"
     ),
+    "application/maintenance/landing.py::_newer::ValidationError": (
+        "a stamp naming no ordered version lands by key alone"
+    ),
     "application/maintenance/migrations/live_jobs_index.py::staged::FileUnreadableError": (
         "a job file that does not load refuses the landing on its own"
     ),
