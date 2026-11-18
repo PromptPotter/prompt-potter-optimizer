@@ -500,7 +500,7 @@ def refuse_on_event_loop(what: str) -> None:
 
 def take_lock(path: Path, *, wait_s: float) -> HeldLock | None:
     """Polls for up to *wait_s*, so ``0`` is one try; ``None`` is another holder's. A wait refuses
-    on the event loop: a gate is held across a scan, so its waiter stalls every request."""
+    on the event loop: its waiter stalls every request the loop serves."""
     if wait_s > 0:
         refuse_on_event_loop(f"waiting on {path.name}")
     return _poll_lock(path, wait_s)

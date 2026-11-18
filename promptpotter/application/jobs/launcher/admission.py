@@ -258,7 +258,7 @@ def request_jobs(
     another machine. A rate token is debited per job returned, past every refusal but the queue's."""
     assert count == 1 or hop == UNRESOLVED_HOP, "jobs asked together mint their cycles"
     # ONE gate: the quota count and the slot count come off the same on-disk jobs.
-    with job_registry.admission_gate(), slot_rate(stores, holder, hop, asked=count):
+    with job_registry.admission_gate(launching=True), slot_rate(stores, holder, hop, asked=count):
         # First, under the gate an archive or a delete takes too: a refused campaign's act is
         # queued, claimed and debited nothing.
         if hop != UNRESOLVED_HOP:
@@ -485,7 +485,7 @@ def admit_arms(
 ) -> list[tuple[Job, HeldBudget]]:
     """Every arm's job and share, each at its budget and sends, or none, under one gate. An
     embedded host holds no slot (`slotless_share`)."""
-    with job_registry.admission_gate():
+    with job_registry.admission_gate(launching=True):
         jobs: list[Job] = []
         try:
             jobs = _arm_jobs(stores, job_registry, holder, count=len(declared))
@@ -657,7 +657,10 @@ async def slotless_share[S](
 
 def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[RunStart, SpendBook]:
     job_registry = JobRegistry.attach(stores.jobs_dir)
-    with job_registry.admission_gate(), slot_rate(stores, holder, UNRESOLVED_HOP, asked=1):
+    with (
+        job_registry.admission_gate(launching=True),
+        slot_rate(stores, holder, UNRESOLVED_HOP, asked=1),
+    ):
         start = RunStart(
             stores,
             job_registry,

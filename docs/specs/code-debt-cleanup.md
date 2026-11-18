@@ -875,6 +875,10 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   "stopped on backend_hole" and the backend's status and message stay on the inner ledger. Action:
   the outer cell's error reads the inner stop's detail. **Re-test:** two injected 504s in one inner
   cell put the backend's words in the outer cell's error.
+- **The wallet read under the admission gate grows with the account's charges** (gate-hold's
+  report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
+  `campaign_spend` under the gate, admission's last scan that grows with history. Unmeasured.
+  **Re-test:** hold time of `admit_and_share` at 10× today's charges file stays within 2× today's.
 
 ## Held — no wave-4 chain yet
 

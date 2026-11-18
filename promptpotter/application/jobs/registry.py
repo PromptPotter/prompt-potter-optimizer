@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import secrets
-import threading
 import time
 from collections import Counter
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
@@ -56,6 +55,11 @@ _QUEUE_POLL_S = 2.0
 _ENDED_KEPT = timedelta(days=7)
 
 
+def _counted_on(job: Job, day: str) -> bool:
+    """What the daily quota counts: a campaign launch of *day*; a scoring pass is load, never one."""
+    return job.launched_on(day) and isinstance(job.holder, CampaignLaunch)
+
+
 def launch_interrupted(exc: BaseException) -> bool:
     """Someone ASKED the launch to stop; neither type is visible to ``except Exception``."""
     return isinstance(exc, KeyboardInterrupt | asyncio.CancelledError)
@@ -83,9 +87,7 @@ class JobRegistry:
         self._dir = jobs_dir
         self._staged = staged or {}
         # Made by its first write (a job, a lock), never here: a landing's plan reads it and writes nothing.
-        # Reentrant: under `admission_gate`, `release` retakes it.
-        self._lock = threading.RLock()
-        # Its cross-process peer, nesting the same way.
+        # Every thread's and process's, reentrant: under `admission_gate`, `release` retakes it.
         self._gate = AdmissionGate(jobs_dir)
         self._capacity = capacity
 
@@ -127,9 +129,9 @@ class JobRegistry:
         return job
 
     @contextmanager
-    def admission_gate(self) -> Iterator[None]:
+    def admission_gate(self, *, launching: bool = False) -> Iterator[None]:
         """Every ceiling read belongs inside: outside, two admissions read one free slot and take it."""
-        with self._lock, self._gate.held():
+        with self._gate.held(launching=launching):
             yield
 
     def request_slot(
@@ -143,8 +145,7 @@ class JobRegistry:
     ) -> Job:
         """Count, capacity and write stay under the gate with no ``await`` between them."""
         with self.admission_gate():
-            running = self.list_running()
-            live = len(running)
+            live = len(self.list_running())
             stage: LaunchStage = (
                 RunPhase.STARTING if live < self._capacity(live) else RunPhase.QUEUED
             )
@@ -190,8 +191,7 @@ class JobRegistry:
     def claim_next(self, job_id: str) -> bool:
         """Only the head of :meth:`queue_order`: a waiter that skipped past it would starve it."""
         with self.admission_gate():
-            running = self.list_running()
-            live = len(running)
+            live = len(self.list_running())
             # A landing holds the queue: what an older process promotes, it starts on older code.
             if live >= self._capacity(live) or self._gate.landing() is not None:
                 return False
@@ -419,13 +419,8 @@ class JobRegistry:
         ]
 
     def list_launched_today(self, *, user_id: str | None = None) -> list[Job]:
-        """Campaign launches only: a scoring pass is load, never a campaign the daily quota counts."""
         today = utcnow_iso()[:10]
-        return [
-            j
-            for j in self.list_all(user_id=user_id)
-            if j.launched_on(today) and isinstance(j.holder, CampaignLaunch)
-        ]
+        return [j for j in self.list_all(user_id=user_id) if _counted_on(j, today)]
 
     def draft_starts(self, *, user_id: str) -> dict[str, LaunchStage]:
         """Each check-in a live Start holds, at its stage."""
@@ -441,40 +436,43 @@ class JobRegistry:
     def reap_orphans(self) -> list[Job]:
         """`quota.reap_dead_runs`'s alone: releases each job whose producer is gone, reclaims that
         producer's file, moves a release launched before today among the ended, and deletes an
-        ended record released over `_ENDED_KEPT` ago. The jobs it released, as they stood."""
+        ended record released over `_ENDED_KEPT` ago. The jobs it released, as they stood. Its scans
+        are off the gate, which takes each orphan alone, asked again: an adoption made it live."""
         today = utcnow_iso()[:10]
         kept_from = iso_z(datetime.now(UTC) - _ENDED_KEPT)
         reaped: list[Job] = []
-        with self.admission_gate():
-            for path in self._dir.joinpath(ENDED_JOBS_DIR).glob("*.json"):
-                if (ended := self._read(path)) is not None and (
-                    ended.released_at or ""
-                ) < kept_from:
-                    unlink_robust(path)
-            for job in self.list_all():
-                if job.released:
-                    if not job.launched_on(today):
-                        self._persist(job, at=self._ended_path(job.job_id))
-                        unlink_robust(self._path(job.job_id))
-                elif not self.in_flight(job):
-                    self.move(job.job_id, LaunchMove.END, ended=JobEnding(lapse="orphaned"))
-                    # An unstamped or unspellable id names no file.
-                    with contextlib.suppress(ValueError):
-                        producer_lock.reclaim_producer(
-                            producer_lock.producer_path(self._dir, job.producer_id)
-                        )
-                    reaped.append(job)
+        for path in self._dir.joinpath(ENDED_JOBS_DIR).glob("*.json"):
+            if (ended := self._read(path)) is not None and (ended.released_at or "") < kept_from:
+                unlink_robust(path)
+        for job in self.list_all():
+            if job.released and not _counted_on(job, today):
+                self._persist(job)
+            if job.released or self.in_flight(job):
+                continue
+            with self.admission_gate():
+                if self.in_flight(self.get(job.job_id) or job):
+                    continue
+                if self.move(job.job_id, LaunchMove.END, ended=JobEnding(lapse="orphaned")) is None:
+                    continue
+            # An unstamped or unspellable id names no file.
+            with contextlib.suppress(ValueError):
+                producer_lock.reclaim_producer(
+                    producer_lock.producer_path(self._dir, job.producer_id)
+                )
+            reaped.append(job)
         return reaped
 
-    def _persist(self, job: Job, *, at: Path | None = None) -> None:
-        """A live job file is a survivor (`data_root.py::Kind.durable`); an ended one is run data."""
-        write_json(
-            at or self._path(job.job_id),
-            JOB_ADAPTER.dump_python(job, mode="json"),
-            durable=at is None,
-        )
+    def _persist(self, job: Job) -> None:
+        """A live job file is a survivor (`data_root.py::Kind.durable`); an ended one is run data,
+        filed among the ended once no count reads it: every release but today's campaign launches,
+        which the daily quota counts off the jobs dir under the gate."""
+        ended = job.released and not _counted_on(job, utcnow_iso()[:10])
+        path = self._ended_path(job.job_id) if ended else self._path(job.job_id)
+        write_json(path, JOB_ADAPTER.dump_python(job, mode="json"), durable=not ended)
+        if ended:
+            unlink_robust(self._path(job.job_id))
         indexed = set(self._indexed())
-        if at is None and (job.job_id in indexed) == job.released:
+        if (job.job_id in indexed) == job.released:
             self._index(indexed ^ {job.job_id})
 
     def _path(self, job_id: str) -> Path:

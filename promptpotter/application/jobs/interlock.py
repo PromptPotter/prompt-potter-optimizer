@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import math
 import threading
 from collections.abc import Iterator
 from pathlib import Path
@@ -37,11 +38,13 @@ class AdmissionGate:
         write_text(self._landing, target)
 
     @contextlib.contextmanager
-    def held(self) -> Iterator[None]:
+    def held(self, *, launching: bool) -> Iterator[None]:
+        """A *launching* ask refuses past `LOCK_TIMEOUT`; work already admitted waits its turn."""
         refuse_on_event_loop("the admission gate")
         with self._nest:
             lock = None
-            if self._depth == 0 and (lock := take_lock(self._path, wait_s=LOCK_TIMEOUT)) is None:
+            wait_s = LOCK_TIMEOUT if launching else math.inf
+            if self._depth == 0 and (lock := take_lock(self._path, wait_s=wait_s)) is None:
                 raise ServiceUnavailableError(
                     "The machine's admission gate is held by another process that has not "
                     "released it. Nothing was started; retry shortly.",

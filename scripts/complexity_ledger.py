@@ -122,7 +122,9 @@ BASELINE = {
     # never the strict stamp a newer release may have reshaped.
     # l4-valid (+19 net, -14 of it `CellOf` and the per-round pin): `BACKEND_HOLE`, the stop a
     # backend's unfilled cell ends on in its words, and the outer's one re-ask of such a cell.
-    "package_lines": 111714,
+    # gate-hold (+4): only a launch's ask refuses a busy admission gate, and the sweep asks each
+    # orphan alone under it, again, after a scan off it.
+    "package_lines": 111718,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

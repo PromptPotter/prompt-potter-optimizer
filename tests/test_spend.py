@@ -92,6 +92,7 @@ from promptpotter.application.jobs.launcher.admission import (
     open_spend_book,
     paid_call,
     paid_pass,
+    request_jobs,
 )
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
@@ -316,7 +317,13 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
-from promptpotter.infrastructure.store.io import read_lines, rmtree_robust, write_jsonl, write_yaml
+from promptpotter.infrastructure.store.io import (
+    read_lines,
+    rmtree_robust,
+    take_lock,
+    write_jsonl,
+    write_yaml,
+)
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -2306,28 +2313,77 @@ def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
     )
     shared.move(stamped.job_id, LaunchMove.ADMIT)
     api = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
-    interleaved = [False]
     read_job = shared.get
+    retarget = threading.Thread(
+        target=api.move, args=(stamped.job_id, LaunchMove.LAND), kwargs={"hop": race[0]}
+    )
 
     def read_then_moved(job_id: str) -> Any:
         job = read_job(job_id)
-        with contextlib.suppress(ServiceUnavailableError):
-            api.move(job_id, LaunchMove.LAND, hop=race[0])
-            interleaved[0] = True
+        # Another process's stamp, asked mid-stamp: it waits on the gate, never refused.
+        retarget.start()
         return job
 
     with monkeypatch.context() as patched:
-        patched.setattr(interlock, "LOCK_TIMEOUT", 0.0)
         patched.setattr(shared, "get", read_then_moved)
         shared.move(stamped.job_id, LaunchMove.START)
-        if not interleaved[0]:
-            api.move(stamped.job_id, LaunchMove.LAND, hop=race[0])
+    retarget.join()
     after = shared.get(stamped.job_id)
     assert after is not None and after.hop == race[0], (
         "a job retargeted mid-stamp was overwritten by the run's stale job file"
     )
     assert after.started_at is not None
     shared.release(stamped.job_id, StopReason.TARGET_HIT)
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_busy_admission_gate_refuses_a_launch_and_never_a_running_jobs_stamp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
+) -> None:
+    # A paid cell 11 minutes in died on a gate four launches had made busy (gate-hold).
+    jobs = tmp_path / "jobs"
+    payer = account_of(built_stores)
+    running = JobRegistry(jobs, capacity=lambda _live: 4).create(
+        user_id=payer.user_id,
+        principal_id=payer.user_id,
+        workspace=built_stores.campaigns.workspace,
+        hop=UNRESOLVED_HOP,
+        holder=EmbeddedRun("ds1"),
+    )
+    JobRegistry(jobs, capacity=lambda _live: 4).move(running.job_id, LaunchMove.ADMIT)
+    waiting = threading.Event()
+    raised: list[BaseException] = []
+
+    def asked_then_taken(path: Path, *, wait_s: float) -> Any:
+        # The holder lets go only once the stamp has asked the held gate: refused, or waiting.
+        lock = take_lock(path, wait_s=0.0)
+        waiting.set()
+        return take_lock(path, wait_s=wait_s) if lock is None and wait_s > 0.0 else lock
+
+    def started() -> None:
+        try:
+            JobRegistry(jobs, capacity=lambda _live: 4).move(running.job_id, LaunchMove.START)
+        except BaseException as exc:  # noqa: BLE001
+            raised.append(exc)
+
+    monkeypatch.setattr(interlock, "LOCK_TIMEOUT", 0.0)
+    with JobRegistry(jobs, capacity=lambda _live: 4).admission_gate():
+        with pytest.raises(ServiceUnavailableError) as refused:
+            request_jobs(
+                stores=built_stores,
+                job_registry=JobRegistry(jobs, capacity=lambda _live: 4),
+                holder=CampaignLaunch("ds1"),
+            )
+        assert refused.value.code == "admission_gate_stuck"
+        monkeypatch.setattr(interlock, "take_lock", asked_then_taken)
+        stamp = threading.Thread(target=started)
+        stamp.start()
+        waiting.wait()
+    stamp.join()
+    after = JobRegistry(jobs, capacity=lambda _live: 4).get(running.job_id)
+    assert not raised and after is not None and after.started_at is not None, (
+        f"a running job's stamp was refused by a busy gate: {raised}"
+    )
 
 
 @pytest.mark.usefixtures("offline")
