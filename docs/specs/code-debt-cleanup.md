@@ -90,7 +90,8 @@ row it closes.
 - **`acompile` lands twice per compile**: `presentation/teleprompter.py::acompile` calls `enter()` for its
   stores, then `run_campaign(…, stores=stores)` enters again (`embedded_run.py:130`); every
   `embedded_run.py::enter` re-runs `land_at_entry`, and a landing that applies completes the registries
-  twice (`landing.py::land_at_entry`, then `plan_landing`). Action: one landing per process, its
+  twice (`landing.py::land_at_entry`, then `plan_landing`), and sweeps twice (admit-3 moved the sweep
+  into `enter`). Action: one landing per process, its
   registries completed once by the entry; `plan_landing` takes them complete. **Rides with:** admit-2,
   whose Owns gain `presentation/teleprompter.py::acompile` and `landing.py::plan_landing`.
   **Re-test:** `git grep -cE "\benter\(" -- promptpotter/presentation/teleprompter.py` is 0 (any spelling:
@@ -862,6 +863,13 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   report): `complexity_ledger.py::_counted_at` reads the merge-base off a stale ref and reads red
   for growth main itself made, naming no ref. Action: the check names the main it measures and
   refuses on a stale one. **Re-test:** on a clone behind origin, the check names the stale ref.
+- **A panel's owner is looked up beside `dataset_connector`** (panel-rule-2's report + its landing
+  review): `dataset_access.py::read_dataset_definition` takes `CONNECTORS.table.get` (an unknown
+  name reads as no panel) where `dataset_connector` raises on it; `tasks.py::parse_inner_panel` is a
+  second name for `InnerTasks.model_validate`; `connectors/__init__.py::_validate` accepts a
+  `declared_panel_model` on a connector owning no panel. Action: one owner lookup, the panel model
+  checked with it. **Re-test:** `git grep -n "table.get" -- promptpotter/infrastructure/store/dataset_access.py`
+  is empty.
 
 ## Held — no wave-4 chain yet
 

@@ -485,8 +485,8 @@ round.
      solver band, and its held-out seats are families the search never draws (§ L4 closure, item 8).
    - *A validated fast proxy.* Each arm's generator on frozen inner decision points, with its
      candidates scored held out. It is valid once it ranks dyck's known-sign pair as the full cells
-     do (+19.5 pts, n=5: benchmarks § What the roster decided), at the arm level, and it doubles as
-     authored mode's "the edit changes what the node emits" check.
+     do (+17.2 pts, 3 of 4 on the matched ruler: benchmarks § What the roster decided), at the arm
+     level, and it doubles as authored mode's "the edit changes what the node emits" check.
    - *Wall clock binds before dollars.* `--abreast` trades money for clock and is the operator's ask.
    - *Noise knobs: one `inner_campaign` edit, re-measured once.* Bench 20→100, the inner adoption
      bar (scored offline first), rounds × variants. The outer clip (±0.5) ties dyck's best arms at

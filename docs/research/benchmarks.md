@@ -118,13 +118,14 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   `arm_gate: author`, $0.768 billed): two hand-written `l1_generate` arms on the `bbh-dyck` seats, a
   positive arm (stack procedures) and a crippled control (L1 may only reword). Bar fixed with only
   s2 read: mean(positive − crippled) raw held-out lift (the inner 20-row bench; a clip at fit 1.00
-  counts +50) ≥ +10 pts AND ≥ 4 seats > 0. **PASS, n=5: +19.5, 4 of 5** (s1 +12.5, s2 +23.8,
-  s3 +32.5, s4 0.0, s5 +28.8; s0, dead on the per-round ruler, apart). Two cells were re-asked after
-  infra losses (the gate collision; a 504 that cut the inner run) under a rule fixed before the last
-  cell landed; the re-asked positive s5 elected its inner rounds 2–4 on ruler v1125, every other
-  round-1 cell on v1087 (the resume re-opened the round on the live ruler; cloud `l4-valid`).
-  Without s5: +17.2, n=4, 3 of 4. Across rounds, on different rulers, the s1–s5 mean lift reads
-  origin 0.30 (round 0, v1052), positive 0.29, crippled 0.09; the election HELD (positive θ −0.078
+  counts +50) ≥ +10 pts AND ≥ 4 seats > 0. **Mean leg met, count leg NOT: +17.2, 3 of 4, n=4**
+  (s1 +12.5, s2 +23.8, s3 +32.5, s4 0.0; s0, dead on the per-round ruler, apart). Two cells were
+  re-asked after infra losses (the gate collision; a 504 that cut the inner run) under a rule fixed
+  before the last cell landed, whose ruler had to match the round's: the re-asked positive s5 elected
+  its inner rounds 2–4 on ruler v1125, every other round-1 cell on v1087 (the resume re-opened the
+  round on the live ruler; cloud `l4-valid`), a warmer ruler that favours it, so it is out by that
+  rule. Counted anyway it reads +19.5, 4 of 5 (s5 +28.8). Across rounds, on different rulers, the
+  s1–s5 mean lift reads origin 0.30 (round 0, v1052), positive 0.29, crippled 0.09; the election HELD (positive θ −0.078
   ± 0.609 vs the origin). The instrument reads a broken optimizer prompt's sign on a one-key smoke
   seat; the positive arm does not beat the origin. Read again by early rounds (free, the same 20
   banked inner ledgers): a cell's level after inner rounds 0–4 is its last adoption's 20-row bench
@@ -185,8 +186,22 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   `llama-3.1-8b-instruct`, a letter-by-letter spelling arm): origin 42% on 40, the arm cut at row 24
   with 1 hit in two rounds, its answer line copying the hyphenated spelling (`Y-H-E-H` for `yheh`);
   pinning the answer line to joined lowercase left the hyphens and lost letters too (~3 of 10 right
-  by content). The 8B carries neither the procedure nor the format: not a seat, $0.01. None of the
-  evening's seats offers the ≥ +10 held-out points a 20-row inner bench can read; only bbh-dyck does.
+  by content). The 8B carries neither the procedure nor the format: not a seat, $0.01.
+  `bbh-multistep-arithmetic-8b__4f77c9` (`multistep_arithmetic_two` on `llama-3.1-8b-instruct`; the
+  8B already writes PEMDAS steps unprompted and loses a sign or an operator when it splits the
+  expression into sub-results; arm: innermost group first, the whole expression rewritten each step):
+  origin 60% on 40, arm **78%** on the same 40 (+17.5), **75% vs parent 59%** on 100 paired search
+  rows (+16, selected), **70% vs 61%** on 100 held-out rows (+9.0 [−2.7, +20.7], p 0.13), $0.006 for
+  the search. Every split agrees in sign; held-out is under the +10 bar fixed before the arm ran,
+  and the 250 BBH rows are all spent (150 search, 100 held out). The bar cannot resolve this call: a
+  100-row held-out lift has SE ≈ 6, so a true +10 passes half the time; a bar is a CI lower bound or
+  a power figure, never a point. One hand-written arm bounds a seat's reach from below, so "not a
+  seat" on these rows reads "not on this arm and solver"; 3 min and cents a round. `bbh-word-sorting-8b__423a03` (`word_sorting` on the 8B; arm:
+  `bbh-word-sorting-cot`'s group-by-letter procedure with a count check): origin 42% on 40, arm **30%
+  vs parent 40%** on 88 paired rows (cut, θ lift −0.49 ± 0.32); 28% of the arm's replies hit the
+  1,536-token cap (parent 0%), and inside the procedure the 8B still mis-orders (`herpes him
+  correspond seashore`): not a seat on this solver, $0.007. None of the evening's seats offers the ≥ +10 held-out points a 20-row inner bench
+  can read; only bbh-dyck does.
 
 ## Protocol
 
