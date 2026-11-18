@@ -4199,7 +4199,7 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
         _PEER_HOP,
         monkeypatch,
         "potter",
-        {"l1_generate": {"config": {"n_variants": 7}}},
+        {"l1_generate": {"config": {"n_variants": 8}}},
         lambda _p, _s: True,
     ) as (cycle, _):
         parent = cycle.parent.prompts["solve"].fields["instruction"]
@@ -4218,13 +4218,15 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
             [edit("insert_after", parent, " Zq9.")],
             # Past the length budget, the edits summed.
             [edit("insert_after", parent, " Zq7."), edit("insert_after", "Zq7.", " Zq8." * 200)],
+            # A hard-wrapped span quoted with its line break reflowed still names its one place.
+            [edit("insert_after", parent, " Zq7\n  Zq8."), edit("replace", "Zq7 Zq8.", "Check.")],
         ]
 
         def says(body: dict[str, Any]) -> str:
             # A line of one panel, cited under no name; two lines joined are held by none.
             prompt = body["messages"][0]["content"]
             line = prompt[prompt.index("ESCALATION: ") :].splitlines()[0]
-            cites = [None, None, line, None, None, "SCORED: 1 | true: 2", None]
+            cites = [None, None, line, None, None, "SCORED: 1 | true: 2", None, None]
             return json.dumps(
                 {
                     "variants": [
@@ -4250,7 +4252,7 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
         for cp in proposed.proposals
     ]
     missed, unheld, long = "edit_anchor_not_one_span", "citation_not_in_panel", "over_ceiling"
-    assert fatal == [["no_op_variant"], [missed], [], [missed], [], [unheld], [long]], (
+    assert fatal == [["no_op_variant"], [missed], [], [missed], [], [unheld], [long], []], (
         "a restating, mis-anchored, unheld-citing or overlong variant was not refused as its own arm"
     )
     assert "at most 800 characters" in json.dumps(offline.llm.sent[0]), (
@@ -4259,13 +4261,14 @@ def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_st
     written = [cp.individual.prompts["solve"].fields["instruction"] for cp in proposed.proposals]
     assert written[2] == f"{parent} Check twice.", "two edits on one field did not apply in order"
     assert written[4] == "Rewritten whole.", "an empty anchor did not rewrite the whole field"
+    assert written[7] == f"{parent} Check.", "an anchor reflowing a line break missed its span"
     grounding = proposed.proposals[2].individual.lineage.evidence_grounding
     assert grounding is not None and grounding.field == "escalation_panel", (
         "a quote of a panel line was not filed under the panel holding it"
     )
     assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
         None,
-        7,
+        8,
         {"no_op_variant": 1, missed: 2, unheld: 1, long: 1},
     ), "a round's per-arm refusals were not booked against what L1 generated"
 

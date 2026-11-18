@@ -1,0 +1,25 @@
+pipeline:
+  description: >-
+    `multistep-bench100`'s instrument on thirteen search seats: at a cell's measured SD (4.6 pts of
+    raw held-out lift) a ±5-pt contrast between two arms needs about thirteen seats an arm. Seed 7
+    stays the held-out seat, so seeds 1–7 replay `multistep-bench100`'s cells.
+
+panel:
+  inner_campaign:
+    dataset_split: {bench: 100}
+  # Seeds from 1: three bench-100 campaigns on this dataset ran at seed 0 (the dead-seed-0 setup).
+  tasks:
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-1, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 1}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-2, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 2}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-3, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 3}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-4, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 4}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-5, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 5}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-6, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 6}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-7, held_out: true, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 7}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-8, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 8}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-9, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 9}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-10, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 10}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-11, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 11}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-12, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 12}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-13, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 13}
+    - {kind: seat, id: bbh-multistep-arithmetic-8b/seed-14, inner_dataset: bbh-multistep-arithmetic-8b, run_seed: 14}

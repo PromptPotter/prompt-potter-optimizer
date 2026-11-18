@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -233,9 +234,10 @@ def applied_edits(
                 )
             )
             continue
-        # An empty anchor is the whole field; a span held twice names no place.
-        anchor = edit.anchor or current
-        if current.count(anchor) != 1:
+        # No anchor is the whole field; an anchor is its words (a quote reflows a field's wraps).
+        words = r"\s+".join(map(re.escape, edit.anchor.split()))
+        spans = [m.span() for m in re.finditer(words, current)] if words else [(0, len(current))]
+        if len(spans) != 1:
             failures.append(
                 ValidationFailure(
                     axis=locus.name,
@@ -245,8 +247,7 @@ def applied_edits(
                 )
             )
             continue
-        start = current.index(anchor)
-        cut = start + len(anchor)
+        ((start, cut),) = spans
         kept = current[:cut] if edit.op == "insert_after" else current[:start]
         texts[locus] = kept + ("" if edit.op == "delete" else edit.text) + current[cut:]
     return texts, failures
