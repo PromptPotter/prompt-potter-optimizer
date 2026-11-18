@@ -162,6 +162,7 @@ from promptpotter.domain.command_kinds import (
     Door,
     EditDraftCampaignPayload,
     HeadToHeadRequest,
+    LookaheadCells,
     MintHeadToHeadPayload,
     StartCheckinPayload,
 )
@@ -782,12 +783,12 @@ def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
     return ReplayFeed(stores.archive, entry.node_configs)
 
 
-def _control_pausing(pressed: Callable[[], bool], *, lookahead: int) -> RunControl:
+def _control_pausing(pressed: Callable[[], bool], *, lookahead: LookaheadCells) -> RunControl:
     class _Pressed(RunControl):
         def pause_requested(self) -> bool:
             return pressed()
 
-        def sample_lookahead(self) -> int:
+        def sample_lookahead(self) -> LookaheadCells:
             return lookahead
 
     return _Pressed()
@@ -814,7 +815,7 @@ async def _walk(
     stores: Stores,
     dataset: list[Sample],
     *,
-    armed: int,
+    armed: LookaheadCells,
     cut_at: int | None,
     max_cells: int = 2,
     parent_lacks_cells: bool = False,
@@ -1102,9 +1103,11 @@ async def test_a_lookahead_window_changes_the_bill_and_never_the_record(
     assert len(c1["calls"]) == 4, "an unarmed walk launched before the cell ahead was decided"
     # AT MOST one extra call: equality would pin a scheduling accident, two an overgrown window.
     assert 0 <= len(c2["calls"]) - len(c1["calls"]) <= 1, "a window bought more than one call"
-    for cells in (1, 2):
+    for cells in (1, 2, 3):
         wide = await _walk(built_stores, dataset, armed=4, cut_at=None, max_cells=cells)
         assert wide["max_depth"] == cells, "the window outgrew the cells its backend holds"
+        maxed = await _walk(built_stores, dataset, armed="max", cut_at=None, max_cells=cells)
+        assert maxed["max_depth"] == cells, "a press of `max` missed the ceiling it names"
     deep = await _walk(built_stores, dataset, armed=8, cut_at=4, max_cells=8)
     assert deep["stop_reason"] == "stop_rule" and deep["rows"] == c1["rows"], (
         "a deep window moved the cut walk's record"

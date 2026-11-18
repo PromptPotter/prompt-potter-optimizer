@@ -43,9 +43,8 @@
 .lineage-node.channel .lineage-stub{stroke-width:2.25}
 .family-cladogram-node.channel .family-cladogram-dot{stroke-width:1.5}
 .family-cladogram-node.selected .family-cladogram-dot{stroke:var(--color-accent);stroke-width:2}
-.family-cladogram-node.selected .family-cladogram-cyclelabel{fill:var(--color-accent);font-weight:600}
+.family-cladogram-cyclelabel.selected{fill:var(--color-accent);font-weight:600}
 .family-cladogram-node:hover .family-cladogram-dot{r:5}
-.family-cladogram-node:hover .family-cladogram-cyclelabel{fill:var(--color-text-primary)}
 .family-cladogram-lane-hit{fill:transparent}
 .family-cladogram-lane-hit:hover{fill:var(--color-background-hover);opacity:0.5}
 .family-cladogram-lane-hit:focus{outline:none}

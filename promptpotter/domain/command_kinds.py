@@ -144,11 +144,6 @@ class CommandKind(StrEnum):
         """The webapp presses it."""
         return self.press is None or not self.press.no_browser
 
-    @property
-    def browser_only(self) -> bool:
-        """Reached through the webapp alone: no terminal verb and no host tool."""
-        return self.press is None
-
     def pressed_at(self, door: Door) -> bool:
         match door:
             case Door.API:
@@ -178,12 +173,11 @@ class CommandKind(StrEnum):
         anyone("skip-searchpoint"),
         True,
     )
-    # Browser-only ON PURPOSE: `presentation/CLAUDE.md` § Sample look-ahead.
     SET_SAMPLE_LOOKAHEAD = (
         "set-sample-lookahead",
         "loop_commands:set_sample_lookahead",
         CAMPAIGN_LOOKAHEAD_CAP,
-        BROWSER,
+        anyone("set-sample-lookahead"),
         True,
     )
     START_RUN = (
@@ -542,16 +536,46 @@ class PauseCyclePayload(ReasonedPayload, LoopPayload, kind=CommandKind.PAUSE):
     follow_up: ClassVar[str] = "The loop exits at its next checkpoint; `resume` picks it up."
 
 
-class SetSampleLookaheadPayload(LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHEAD):
+# `max` names the backend's ceiling, resolved at each cell, so it moves with the ceiling.
+type LookaheadCells = Annotated[WireInt, Field(ge=1)] | Literal["max"]
+
+
+class LookaheadPress(StrictModel):
+    """How many cells ahead the walk sends, and whether that depth stands every round."""
+
+    cells: LookaheadCells = Field(
+        description="1 disarms; `max` holds as many as the backend admits, wherever its ceiling "
+        "moves."
+    )
+    auto: bool = Field(
+        default=False,
+        description="This depth stands every round, until pressed off.",
+    )
+
+
+class SetSampleLookaheadPayload(LookaheadPress, LoopPayload, kind=CommandKind.SET_SAMPLE_LOOKAHEAD):
     """Arm how many cells ahead the walk sends."""
 
     # Throughput is what an inner run answers for itself: the outer's depth is never inherited.
     inner_refusal: ClassVar[str | None] = None
+    follow_up: ClassVar[str] = (
+        "The walk takes it at its next cell; `dashboard` reads the depth in force."
+    )
+    cli_spellings: ClassVar[Mapping[str, str]] = {"auto": "--every-round"}
 
-    cells: WireInt = Field(ge=1, description="1 disarms.")
-    auto: bool = Field(
-        default=False,
-        description="This depth stands every round, until pressed off.",
+
+class LaunchPayload(CommandPayload):
+    """A launch kind: its run may start at a look-ahead depth, filed as `set-sample-lookahead` on
+    its cycle once the run holds it, before the walk's first cell."""
+
+    cli_spellings: ClassVar[Mapping[str, str]] = {
+        "lookahead.cells": "--lookahead",
+        "lookahead.auto": "--every-round",
+    }
+
+    lookahead: LookaheadPress | None = Field(
+        default=None,
+        description="The depth this launch's walk starts at, pressed as `set-sample-lookahead`.",
     )
 
 
@@ -660,7 +684,7 @@ class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.SET_LIMITS):
         return self
 
 
-class StartRunPayload(CyclePayload, kind=CommandKind.START_RUN):
+class StartRunPayload(LaunchPayload, CyclePayload, kind=CommandKind.START_RUN):
     """A run of an existing cycle: what bounds it (``budget``, ``step_rounds``) and the shape it
     takes (``mode``)."""
 
@@ -715,7 +739,7 @@ class ForkStart(StrictModel):
         }
 
 
-class ForkCyclePayload(ReasonedPayload, CyclePayload, kind=CommandKind.FORK_CYCLE):
+class ForkCyclePayload(ReasonedPayload, LaunchPayload, CyclePayload, kind=CommandKind.FORK_CYCLE):
     """The cut, and the shape of the fork's first run (``mode``) — one act, so one command.
     A parent a producer still holds is paused by the applier once the fork's run is admitted."""
 
@@ -1016,7 +1040,7 @@ class HeadToHeadRequest(StrictModel):
         )
 
 
-class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):
+class StartCheckinPayload(LaunchPayload, DraftPayload, kind=CommandKind.START_CHECKIN):
     """The draft says what the campaign IS; ``budget`` bounds what THIS launch spends, and no
     draft field holds it. Acked at admission, so it lands with the draft on the root cycle."""
 
@@ -1032,6 +1056,8 @@ class StartCheckinPayload(DraftPayload, kind=CommandKind.START_CHECKIN):
     def _arms_run_their_own_budget(self) -> StartCheckinPayload:
         if self.head_to_head is not None and self.budget.named:
             raise ValueError("a head-to-head's arms run its budget")
+        if self.head_to_head is not None and self.lookahead is not None:
+            raise ValueError("a head-to-head's arms start one at a time; press each arm's own")
         return self
 
 
@@ -1053,7 +1079,7 @@ class MintHeadToHeadPayload(CommandPayload, kind=CommandKind.HEAD_TO_HEAD):
         return self
 
 
-class MintCampaignPayload(CommandPayload, kind=CommandKind.MINT_CAMPAIGN):
+class MintCampaignPayload(LaunchPayload, kind=CommandKind.MINT_CAMPAIGN):
     """Mint a campaign on an authored dataset and launch its root cycle."""
 
     cli_spellings: ClassVar[Mapping[str, str]] = {"dataset_name": "dataset"}

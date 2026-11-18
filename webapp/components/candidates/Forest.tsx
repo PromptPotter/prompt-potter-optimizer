@@ -4,11 +4,10 @@ import { useWidth } from "@/lib/hooks/useWidth";
 import { cx } from "@/lib/cx";
 import { pressable } from "@/components/ui";
 import { pathLeaf, pathOfAddress } from "@/lib/ids";
-import { figureOf, tagValue } from "@/lib/derivations";
+import { figureOf } from "@/lib/derivations";
 import {
   type CycleMint,
   type CycleSpawn,
-  type HierarchyCycle,
   type SubtreeCampaign,
   DISPLAY_METRIC_INFO,
   type DisplayMetric,
@@ -22,7 +21,7 @@ import {
   NODE_R,
   TOP_PAD,
   extentKeys,
-  forestWidth,
+  laneName,
   layout,
   type CladogramAnchor,
   type Density,
@@ -42,11 +41,6 @@ export interface CladogramCtx {
   channels: readonly CladogramChannel[];
   clip: CladogramAnchor | null;
   invalidated?: ReadonlySet<string>;
-}
-
-// A root by its dataset, any other cycle by its served card label.
-function cycleName(cycle: HierarchyCycle): string {
-  return cycle.facts.mint === "root" ? (tagValue(cycle, "dataset") ?? cycle.label) : cycle.label;
 }
 
 function SpawnGlyph({ kind, spawn }: { kind: CycleMint; spawn: CycleSpawn | null }) {
@@ -196,7 +190,7 @@ export function Forest({
     valueByKey.get(n.candKey) ?? null;
   const thetaOf = (n: RoundNodePos): number | null =>
     thetaByKey.get(n.candKey) ?? null;
-  const { laneByKey, totalLaneRows, maxCol, d, nodes, segs } = useMemo(
+  const { laneByKey, ends, width, totalLaneRows, maxCol, d, nodes, segs } = useMemo(
     () => layout({ freed: tree, expanded, keep: clip && extentKeys(tree, clip), boxW }),
     [tree, expanded, clip, boxW],
   );
@@ -221,7 +215,6 @@ export function Forest({
     [nodes],
   );
   const height = TOP_PAD + totalLaneRows * LANE_H + 8;
-  const width = forestWidth(d, maxCol);
 
   const headerCols = Array.from({ length: maxCol }, (_, i) => i + 1);
 
@@ -307,7 +300,7 @@ export function Forest({
                 height={bandH(l)}
                 className="family-cladogram-lane-hit"
                 {...pressable(() => onLaneActivate(cycle.address))}
-                aria-label={`${verb} ${cycleName(cycle)}`}
+                aria-label={`${verb} ${laneName(cycle)}`}
                 style={{ cursor: "pointer" }}
               >
                 <title>
@@ -339,10 +332,7 @@ export function Forest({
               const cycleSelected = n.cyclePathKey === viewedKey;
               const layoutEntry = laneByKey.get(n.cycleKey);
               const nodeCycleId = pathLeaf(n.cyclePath).cycleId;
-              const cycName = layoutEntry ? cycleName(layoutEntry.cycle) : nodeCycleId;
-              const rowLabelText = n.isLastInLane && layoutEntry ? cycName : null;
-              // Inside an <svg>, so `<Hearts>` can't mount; the served figure is the same pips as text.
-              const laneHearts = figureOf(layoutEntry?.cycle ?? null, "lives")?.value;
+              const cycName = layoutEntry ? laneName(layoutEntry.cycle) : nodeCycleId;
               const isDivergence = n.divergence !== null;
               const isDivergent = n.divergent;
               const ink = inkOf(n);
@@ -385,19 +375,6 @@ export function Forest({
                       R{n.round} {fmtUnit(DISPLAY_METRIC_INFO[metric].unit,valOf(n))}
                     </text>
                   )}
-                  {d.labels && rowLabelText && (
-                    <text x={n.x + 8} y={n.y + 3} className="family-cladogram-cyclelabel">
-                      <tspan className="family-cladogram-glyph">
-                        <SpawnGlyph kind={n.cycleKind} spawn={n.spawn} />
-                      </tspan>
-                      <tspan dx="4">{rowLabelText}</tspan>
-                      {laneHearts && (
-                        <tspan dx="6" className="family-cladogram-hearts">
-                          {laneHearts}
-                        </tspan>
-                      )}
-                    </text>
-                  )}
                   <title>
                     {nodeCycleId} · R{n.round} · {fmtUnit(DISPLAY_METRIC_INFO[metric].unit,valOf(n))}
                     {metric !== "ability" && typeof thetaOf(n) === "number"
@@ -432,25 +409,27 @@ export function Forest({
               />
             ))}
 
-          {(d.labels ? nodes : [])
-            .filter((n) => n.isExpanded && n.isLastInLane)
-            .map((n) => {
-              const cycle = laneByKey.get(n.cycleKey)?.cycle;
-              if (!cycle) return null;
-              return (
-                <text
-                  key={`elabel-${n.cycleKey}`}
-                  x={n.x + d.candStub + 84}
-                  y={n.y + 3}
-                  className="family-cladogram-cyclelabel"
-                >
-                  <tspan className="family-cladogram-glyph">
-                    <SpawnGlyph kind={cycle.facts.mint} spawn={cycle.facts.spawn} />
+          {ends.map(({ lane: { cycle, cyclePathKey }, x, y, name, hearts }) => {
+            // Inside an <svg>, so `<Hearts>` can't mount; the served figure is the same pips as text.
+            return (
+              <text
+                key={`elabel-${cyclePathKey}`}
+                x={x}
+                y={y + 3}
+                className={cx("family-cladogram-cyclelabel", cyclePathKey === viewedKey && "selected")}
+              >
+                <tspan className="family-cladogram-glyph">
+                  <SpawnGlyph kind={cycle.facts.mint} spawn={cycle.facts.spawn} />
+                </tspan>
+                <tspan dx="4">{name}</tspan>
+                {hearts && (
+                  <tspan dx="6" className="family-cladogram-hearts">
+                    {hearts}
                   </tspan>
-                  <tspan dx="4">{cycleName(cycle)}</tspan>
-                </text>
-              );
-            })}
+                )}
+              </text>
+            );
+          })}
 
         </svg>
     </div>

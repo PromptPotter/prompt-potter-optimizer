@@ -342,7 +342,7 @@ class ReadoutProjection(Projection):
             tail = " (a bench pass holds the backend's ceiling; no press reaches it)"
         elif opening and depth <= 1:
             tail = (
-                f" — {qt} samples run one at a time; arm it from the browser to overlap them"
+                f" — {qt} samples run one at a time; `set-sample-lookahead N|max` overlaps them"
                 if qt > 1
                 else ""
             )

@@ -3,7 +3,8 @@ import type { Evidence, HierarchyCandidate, SubjectReading } from "@/lib/api/typ
 import { CardFrame, DataTable, Empty, ReadState, type Column } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { mainLineOf, readingAddress, type LineageIndex } from "@/lib/derivations";
-import { cycleAddressOf } from "@/lib/ids";
+import { cycleAddressOf, pathRoot } from "@/lib/ids";
+import { readingPath } from "@/lib/api/reads";
 import { shownData } from "@/lib/hooks/useRead";
 import { lineageIndexOf, useLineageTree } from "@/lib/state/lineage";
 import { seriesVar } from "@/lib/theme";
@@ -140,11 +141,13 @@ interface Spine {
   marked: Map<string, string[]>;
 }
 
+// By the campaign whose tree holds the subject: an L4 inner run's is its outer's, by its chain.
 function AncestryPanels({ evidence }: { evidence: Evidence }) {
   const byCampaign = useMemo(() => {
     const out = new Map<string, SubjectReading[]>();
     for (const s of evidence.subjects) {
-      out.set(s.campaign_id, [...(out.get(s.campaign_id) ?? []), s]);
+      const root = pathRoot(readingPath(s)).campaignId;
+      out.set(root, [...(out.get(root) ?? []), s]);
     }
     return [...out.entries()];
   }, [evidence.subjects]);
@@ -190,7 +193,7 @@ function CampaignSpines({
     return (
       <p className="note-info">
         {root.facts.short_label}: no ancestry to draw — its channels read at points the tree does not
-        place, which is the case for an L4 inner run in its own sandbox.
+        place.
       </p>
     );
   }

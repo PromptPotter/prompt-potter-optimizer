@@ -23,7 +23,9 @@ export function useSearchpointCopy({ path, round, arm, label, datasetName }: Sea
 } {
   const { cfg: cfgOf, reading: readingOf } = useRound(path, round);
   const cellsRead = useCells(
-    path && arm ? { path, candidateId: arm, scope: "cycle", ...(datasetName ? { datasetName } : {}) } : null,
+    path && arm && round !== null
+      ? { path, candidateId: arm, round, scope: "cycle", ...(datasetName ? { datasetName } : {}) }
+      : null,
   ).read;
   const cells = shownData(cellsRead)?.cells;
   return useMemo(() => {

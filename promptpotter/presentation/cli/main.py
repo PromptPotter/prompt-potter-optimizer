@@ -27,6 +27,9 @@ from promptpotter.domain.command_kinds import (
     CommandPayload,
     CyclePayload,
     ForkCyclePayload,
+    LaunchPayload,
+    LookaheadCells,
+    LookaheadPress,
     ReadKind,
     StartRunPayload,
 )
@@ -152,6 +155,44 @@ BUDGET_AXES = (
         "is cut. Omit to leave it as it stands.",
     ),
 )
+
+
+def _cells_arg(raw: str) -> int | str:
+    """A count, or the word `LookaheadCells` names; the payload refuses any other."""
+    return int(raw) if raw.isdigit() else raw
+
+
+LOOKAHEAD_ARGS = (
+    Arg(
+        LaunchPayload.cli_spelling("lookahead.cells"),
+        dest="lookahead",
+        type=_cells_arg,
+        default=None,
+        metavar="N|max",
+        help="Start the walk with N calls in flight (`set-sample-lookahead`), this round only "
+        "unless `--every-round`; the backend's ceiling bounds it, and `max` holds it.",
+    ),
+    Arg(
+        LaunchPayload.cli_spelling("lookahead.auto"),
+        dest="every_round",
+        action="store_true",
+        help="Keep the `--lookahead` depth every round, until pressed off.",
+    ),
+)
+
+
+def lookahead_from_args(args: argparse.Namespace) -> LookaheadPress | None:
+    """The launch's depth as its payload carries it, refused as every door refuses one."""
+    if args.lookahead is None:
+        if args.every_round:
+            raise PayloadInvalidError(
+                "--every-round keeps a depth: name it with --lookahead N|max."
+            )
+        return None
+    return PayloadInvalidError.validating(
+        LookaheadPress, {"cells": args.lookahead, "auto": args.every_round}
+    )
+
 
 ACTIVE_CAMPAIGN = Arg(
     CyclePayload.cli_spelling("campaign_id"),
@@ -309,6 +350,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             ),
             NO_WAIT,
             *BUDGET_AXES,
+            *LOOKAHEAD_ARGS,
         ),
     ),
     Verb(
@@ -428,6 +470,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             ),
             NO_WAIT,
             *BUDGET_AXES,
+            *LOOKAHEAD_ARGS,
         ),
     ),
     Verb(
@@ -497,7 +540,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
             Arg(
                 "subject",
                 help="The searchpoint, as `evidence` addresses one: "
-                "'candidate:<campaign>/<cycle>/<candidate_id>', with ';in=<c::y~…>' for an L4 inner "
+                "'candidate:<campaign>/<cycle>/r<round>/<candidate_id>', with ';in=<c::y~…>' for an L4 inner "
                 "cycle. The id is the key of its row in the round file's `arms`.",
             ),
             Arg(
@@ -599,7 +642,7 @@ _WRITTEN_VERBS: tuple[Verb, ...] = (
                 default=[],
                 help="What to pool, repeated for a set: 'campaign:<id>' (its root origin), "
                 "'cycle:<campaign>/<cycle>' (one branch, at its last elected winner) or "
-                "'candidate:<campaign>/<cycle>/<candidate>' (one searchpoint). The campaign id accepts "
+                "'candidate:<campaign>/<cycle>/r<round>/<candidate>' (one searchpoint). The campaign id accepts "
                 "the same short prefix every other verb does. May span datasets, which the comparability "
                 "line then reports on. An L4 inner run names the sandbox "
                 "chain it lives in, same codec as the API's '?descend=': "
@@ -880,7 +923,9 @@ def _field_args(model: type[CommandPayload], name: str, field: FieldInfo) -> tup
     # Never `is bool`: past a final class, mypy narrows `type[Any]` away and drops every later arm.
     if isinstance(annotation, type) and issubclass(annotation, bool):
         return (Arg(spelled, dest=name, action="store_true", **spec),)
-    if get_origin(annotation) is Literal:
+    if annotation == LookaheadCells.__value__:
+        spec |= {"type": _cells_arg, "metavar": "N|max"}
+    elif get_origin(annotation) is Literal:
         spec["choices"] = get_args(annotation)
     elif annotation is int:
         spec["type"] = int

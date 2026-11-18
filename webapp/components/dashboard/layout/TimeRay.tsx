@@ -38,8 +38,8 @@ export const TimeRay = memo(function TimeRay() {
     const elsewhere = step.pathKey !== rootKey;
     // Another cycle's ledger offset means nothing here: that step opens the other cycle at its head.
     if (!elsewhere) setAt(step.offset);
-    if (step.arm) {
-      const node = armAt(index, step.path, step.arm);
+    if (step.arm && step.round != null) {
+      const node = armAt(index, step.path, { round: step.round, arm: step.arm });
       if (node) {
         pickNode(node);
         return;

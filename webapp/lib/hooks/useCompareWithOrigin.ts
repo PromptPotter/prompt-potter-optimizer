@@ -1,7 +1,8 @@
 import { useCallback, useMemo } from "react";
 import { candidateSubject } from "@/lib/api/reads";
-import { useCompareSelection, type CompareChannel } from "@/lib/state/compare-selection";
+import { useCompareSelection } from "@/lib/state/compare-selection";
 import { armAt, originAt, originOf } from "@/lib/derivations";
+import type { CandidatePick } from "@/lib/address";
 import type { CyclePath } from "@/lib/ids";
 import { useViewedLineage } from "@/lib/state/lineage";
 import { useWorkspace } from "@/lib/state/workspace";
@@ -17,34 +18,33 @@ const NO_SUBJECTS: readonly string[] = [];
 
 export function useCompareWithOrigin(
   path: CyclePath | null,
-  // The served `reading.arm.key` at `path`; `null` names no point and reads the origin alone.
-  arm: string | null,
+  // A candidate at `path`; `null` names no point and reads the origin alone.
+  pick: CandidatePick | null,
 ): CompareWithOrigin {
   const { show } = useCompareSelection();
   const { open } = useWorkspace();
   const { index } = useViewedLineage();
+  // Primitives, so a pick rebuilt each render re-keys nothing.
+  const round = pick?.round ?? null;
+  const arm = pick?.arm ?? null;
 
   const pair = useMemo(() => {
-    const top = path?.[0];
-    if (!top) return null;
-    const placed = arm === null ? null : armAt(index, path, arm);
+    if (!path) return null;
+    const placed = round === null || arm === null ? null : armAt(index, path, { round, arm });
     // A refused proposal measured no individual: there is no point to compare.
     const point = placed?.facts.reading.end === "invalid" ? null : placed;
     if (arm !== null && !point) return null;
     const origin = point ? originOf(index, point) : originAt(index, path);
     if (!origin) return null;
     const originKey = candidateSubject(origin.address);
-    const channels: CompareChannel[] = [{ rootCampaignId: top.campaignId, subject: originKey }];
     const pointKey = point ? candidateSubject(point.address) : "";
-    if (pointKey && pointKey !== originKey) {
-      channels.push({ rootCampaignId: top.campaignId, subject: pointKey });
-    }
-    return { channels, subjects: channels.map((c) => c.subject), originLabel: origin.label };
-  }, [index, path, arm]);
+    const subjects = pointKey && pointKey !== originKey ? [originKey, pointKey] : [originKey];
+    return { subjects, originLabel: origin.label };
+  }, [index, path, round, arm]);
 
   const run = useCallback(() => {
     if (!pair) return;
-    show(pair.channels);
+    show(pair.subjects);
     open("compare");
   }, [pair, show, open]);
 

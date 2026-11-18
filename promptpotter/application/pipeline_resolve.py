@@ -545,14 +545,13 @@ def _validate_model_ownership(
 
 def _evolved_overlay(stores: Stores, at: Subject) -> tuple[dict[str, Any], dict[str, Any]]:
     """(sparse delta, complete config): the complete one read as a delta stamps every param ``evolved``."""
-    if at.kind != "candidate" or not at.cycle_id:
+    if at.kind != "candidate" or at.round is None:
         return {}, {}
     hop = CycleHop(campaign_id=at.campaign_id, cycle_id=at.cycle_id)
-    # Newest round first: a re-measured point answers from the round that measured it last.
-    for held in reversed(stores.campaigns.standing_rounds(hop, moment=None).rounds.values()):
-        arm = held.close.arms.get(ArmKey(at.candidate_id))
-        if isinstance(arm, Concluded):
-            return dict(arm.overlay), dict(arm.resolved_params)
+    held = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(at.round)
+    arm = None if held is None else held.close.arms.get(ArmKey(at.candidate_id))
+    if isinstance(arm, Concluded):
+        return dict(arm.overlay), dict(arm.resolved_params)
     return {}, {}
 
 

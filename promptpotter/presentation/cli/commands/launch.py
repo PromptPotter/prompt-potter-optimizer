@@ -80,6 +80,7 @@ from promptpotter.presentation.cli.main import (
     CommandResult,
     budget_from_args,
     build_parser,
+    lookahead_from_args,
 )
 from promptpotter.shared.errors import (
     ConflictError,
@@ -418,7 +419,11 @@ async def _hold_checkin(
         launched = await dispatch_start_checkin(
             dispatcher.stores,
             CommandCall(
-                StartCheckinPayload(draft_id=draft_id, budget=budget_from_args(args)),
+                StartCheckinPayload(
+                    draft_id=draft_id,
+                    budget=budget_from_args(args),
+                    lookahead=lookahead_from_args(args),
+                ),
                 door=Door.TERMINAL,
             ),
             inline=inline_launch(args),
@@ -455,6 +460,7 @@ def _named_mint(args: argparse.Namespace, dispatcher: CommandDispatcher) -> Mint
             "campaign_config": declared,
             "task_text": task_text,
             "budget": budget,
+            "lookahead": lookahead_from_args(args),
         },
     )
 
@@ -642,7 +648,7 @@ def _run_mode(args: argparse.Namespace) -> RunMode:
 def _payload(args: argparse.Namespace, hop: CycleHop) -> StartRunPayload | ForkCyclePayload:
     """The whole payload the flags spell: a `--rewind` or a `--steer` cuts a fork, refused as
     every door refuses one."""
-    budget, mode = budget_from_args(args), _run_mode(args)
+    budget, mode, lookahead = budget_from_args(args), _run_mode(args), lookahead_from_args(args)
     if args.rewind_to_round is None and not args.steer:
         return StartRunPayload(
             campaign_id=hop.campaign_id,
@@ -650,6 +656,7 @@ def _payload(args: argparse.Namespace, hop: CycleHop) -> StartRunPayload | ForkC
             budget=budget,
             step_rounds=args.step_rounds,
             mode=mode,
+            lookahead=lookahead,
         )
     if args.step_rounds is not None:
         raise PayloadInvalidError("--step-rounds steps a cycle's own run; a fork's run takes none.")
@@ -664,6 +671,7 @@ def _payload(args: argparse.Namespace, hop: CycleHop) -> StartRunPayload | ForkC
             "start": ForkStart(pipeline_overlay=_steer_overlay(args.steer or [])),
             "budget": budget,
             "mode": mode,
+            "lookahead": lookahead,
         },
     )
 
@@ -723,7 +731,11 @@ async def _pivot_to_fresh(
         raise drift
     if not answer:
         raise SystemExit("Cancelled. Revert the config edits and retry `resume`.")
-    fresh = {act.field: act.value, "budget": budget_from_args(args)}
+    fresh = {
+        act.field: act.value,
+        "budget": budget_from_args(args),
+        "lookahead": lookahead_from_args(args),
+    }
     return await mint_and_run(
         CommandDispatcher(ctx.store, inline=inline_launch(args)),
         MintCampaignPayload.model_validate(fresh),

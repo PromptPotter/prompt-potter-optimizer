@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import type { Evidence, SubjectReading, HierarchyEntry } from "@/lib/api/types";
 import type { CladogramChannel } from "@/components/candidates/Forest";
 import { useCompareSelection } from "@/lib/state/compare-selection";
+import { subjectRoot } from "@/lib/api/reads";
 import { campaignAt, compareItems, readingAddress } from "@/lib/derivations";
 import { seriesVar } from "@/lib/theme";
 import { ChannelCard } from "./ChannelCard";
@@ -23,8 +24,8 @@ export function ChannelCards({
   byAddress: ReadonlyMap<string, HierarchyEntry>;
 }) {
   // Read off the request, not the response, so a channel that answered nothing still gets a card.
-  const { channels } = useCompareSelection();
-  const items = useMemo(() => compareItems(evidence, channels), [evidence, channels]);
+  const { subjects } = useCompareSelection();
+  const items = useMemo(() => compareItems(evidence, subjects), [evidence, subjects]);
   const listNote = evidence.comparability.roster_note;
   const points = useMemo(() => channelPoints(evidence.subjects), [evidence.subjects]);
   const h2h = evidence.head_to_head;
@@ -39,12 +40,12 @@ export function ChannelCards({
       <ol className="cmp-channels">
         {items.map((item) => (
           <ChannelCard
-            key={item.channel.subject}
+            key={item.subject}
             item={item}
             ownNote={listNote === null}
             points={points}
             spec={evidence.metric.spec}
-            run={campaignAt(byAddress, item.channel.rootCampaignId)}
+            run={campaignAt(byAddress, subjectRoot(item.subject))}
           />
         ))}
       </ol>

@@ -13,6 +13,7 @@ from promptpotter.application.commands.dispatcher import (
     Applier,
     CommandCall,
     CommandDispatcher,
+    CommandOutcome,
     Dispatched,
     DispatchedToCycle,
     DispatchedToDraft,
@@ -38,7 +39,6 @@ from promptpotter.application.jobs.launcher.launch import (
     Launched,
     LaunchOutcome,
     admit,
-    launch,
 )
 from promptpotter.application.jobs.launcher.mint_and_start import (
     ExistingCycle,
@@ -70,9 +70,12 @@ from promptpotter.domain.command_kinds import (
     ForkCyclePayload,
     ForkStart,
     HeadToHeadRequest,
+    LaunchPayload,
+    LookaheadPress,
     MintCampaignPayload,
     MintHeadToHeadPayload,
     PauseCyclePayload,
+    SetSampleLookaheadPayload,
     StartCheckinPayload,
     StartRunPayload,
 )
@@ -97,7 +100,7 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
     TaskUncancellableError,
 )
-from promptpotter.shared.identity import acting_principal
+from promptpotter.shared.identity import acting_principal, require_capability
 
 
 def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, NodeCall]:
@@ -191,6 +194,37 @@ def _launch_applier(
     return Applier(_run, effect_fn=_launched_effect)
 
 
+def _press_admitted(dispatcher: CommandDispatcher, payload: LaunchPayload) -> None:
+    """A launch at depth needs the press's own rung, refused before anything is admitted."""
+    if payload.lookahead is not None:
+        kind = CommandKind.SET_SAMPLE_LOOKAHEAD
+        require_capability(dispatcher.stores.identity, kind.capability, subject=f"command {kind}")
+
+
+async def _held_at_depth(
+    dispatcher: CommandDispatcher,
+    door: Door,
+    press: LookaheadPress | None,
+    holding: Awaitable[HeldRun],
+) -> HeldRun:
+    """The launch's depth, filed as `set-sample-lookahead` on the cycle its run now holds: before
+    the walk's first cell, so an origin's cells are held ahead too."""
+    held = await holding
+    if press is None:
+        return held
+    hop = held.session.hop
+    pressed = SetSampleLookaheadPayload.model_validate(
+        {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id, **press.model_dump()}
+    )
+    try:
+        await dispatcher.dispatch(CommandCall(pressed, door=door))
+    except BaseException as exc:
+        await asyncio.to_thread(held.start.release, exc)
+        await held.closing.aclose()
+        raise
+    return held
+
+
 def _launched_effect(ran: LaunchOutcome) -> CommandEffect:
     """Every launch kind's ack: each job its act launched or admitted."""
     return LaunchedEffect(launches=ran.as_launches())
@@ -265,6 +299,7 @@ def launch_cancels(
 async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[Launched]:
     dispatcher, payload, hop = dispatched.dispatcher, dispatched.payload, dispatched.hop
     stores = dispatcher.stores
+    _press_admitted(dispatcher, payload)
 
     async def _apply_start() -> Launched:
         # Refused before a slot is taken: a rewind past the last close is the operator's to fix.
@@ -280,7 +315,8 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
         )
-        return await admitted.launched()
+        held = _held_at_depth(dispatcher, dispatched.door, payload.lookahead, admitted.held())
+        return await admitted.hand_over(held)
 
     return _launch_applier(dispatcher, _apply_start, refused_on=hop)
 
@@ -293,6 +329,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
         dispatched.hop,
     )
     stores = dispatcher.stores
+    _press_admitted(dispatcher, payload)
     start = parse_cycle_start(payload.start, stores, campaign, hop)
 
     async def _apply_fork() -> Launched:
@@ -335,7 +372,10 @@ async def _launch_fork(
             raise
         return held
 
-    return await admitted.hand_over(_held_fork())
+    press = dispatched.payload.lookahead
+    return await admitted.hand_over(
+        _held_at_depth(dispatcher, dispatched.door, press, _held_fork())
+    )
 
 
 def _unfork(
@@ -371,6 +411,7 @@ async def _leave_parent(dispatcher: CommandDispatcher, cut: ForkCut, door: Door)
 
 async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[Launched]:
     dispatcher, payload = dispatched.dispatcher, dispatched.payload
+    _press_admitted(dispatcher, payload)
 
     async def _apply_mint() -> Launched:
         dataset = offered_dataset(dispatcher.stores, payload.dataset_name)
@@ -384,13 +425,16 @@ async def mint_campaign(dispatched: Dispatched[MintCampaignPayload]) -> Applier[
         )
         # Refused here, before a slot is asked for: a queued mint would refuse it only later.
         request.campaign_config(dispatcher.stores)
-        return await launch(
+        admitted = await asyncio.to_thread(
+            admit,
             request,
             RunMode(),
             stores=dispatcher.stores,
             job_registry=dispatcher.job_registry,
             inline=dispatcher.inline,
         )
+        held = _held_at_depth(dispatcher, dispatched.door, payload.lookahead, admitted.held())
+        return await admitted.hand_over(held)
 
     return _launch_applier(dispatcher, _apply_mint)
 
@@ -422,6 +466,7 @@ type StartAnswer = Admitted | AdmittedHeadToHead | Launched | HeadToHeadLaunched
 async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> Applier[StartAnswer]:
     dispatcher, start, claim = dispatched.dispatcher, dispatched.payload, dispatched.claim
     stores = dispatcher.stores
+    _press_admitted(dispatcher, start)
 
     async def _ready() -> tuple[DraftFile, ServedPipeline]:
         # Refused before the ack, on the Start's one backend read, which its open lands on.
@@ -465,10 +510,16 @@ async def start_checkin(dispatched: DispatchedToDraft[StartCheckinPayload]) -> A
     return Applier(_run, effect_fn=_launched_effect, ack="accepted", rides=_withdraw)
 
 
-async def launched(result: object) -> Launched | HeadToHeadLaunched:
-    """A launch kind's act carried past its ack: a Start's admission, minted and launched, as
-    every door that waits on the launch takes it."""
-    if isinstance(result, Admitted | AdmittedHeadToHead):
+async def launched(
+    outcome: CommandOutcome[Any, Any], dispatcher: CommandDispatcher, door: Door
+) -> Launched | HeadToHeadLaunched:
+    """A launch kind's act carried past its ack: a Start's admission, minted and launched at the
+    depth it asked, as every door that waits on the launch takes it."""
+    result, payload = outcome.result, outcome.payload
+    if isinstance(result, Admitted):
+        press = payload.lookahead if isinstance(payload, LaunchPayload) else None
+        return await result.hand_over(_held_at_depth(dispatcher, door, press, result.held()))
+    if isinstance(result, AdmittedHeadToHead):
         return await result.launched()
     assert isinstance(result, Launched | HeadToHeadLaunched), "a launch kind answers its launch"
     return result
@@ -483,4 +534,4 @@ async def dispatch_start_checkin(
 ) -> Launched | HeadToHeadLaunched:
     """Acked at admission, before the mint moves the draft's ledger into the root cycle."""
     dispatcher = CommandDispatcher(stores, job_registry=job_registry, inline=inline)
-    return await launched((await dispatcher.answer(start_checkin, call)).result)
+    return await launched(await dispatcher.answer(start_checkin, call), dispatcher, call.door)

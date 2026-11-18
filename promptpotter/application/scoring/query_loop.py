@@ -211,7 +211,7 @@ class QueryLoopState:
 def _armed_cells(session: Session, kind: MeasurementRole) -> int:
     """Sample look-ahead is LIVE though it defaults off: any dataset, the moment the operator arms it."""
     ceiling = session.backend_client.connector.max_cells_in_flight
-    asked = ceiling if PASSES[kind].depth == "ceiling" else session.state.control.sample_lookahead()
+    asked = "max" if PASSES[kind].depth == "max" else session.state.control.sample_lookahead()
     return effective_lookahead(asked, ceiling)
 
 

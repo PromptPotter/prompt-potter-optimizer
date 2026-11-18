@@ -106,7 +106,7 @@ class _Dispatching:
             call = replace(call, command_id=command_id)
         outcome = await dispatcher.dispatch(call)
         if self.answers is LaunchAnswer:
-            outcome = replace(outcome, result=await launched(outcome.result))
+            outcome = replace(outcome, result=await launched(outcome, dispatcher, call.door))
         return outcome.answer
 
 

@@ -1,4 +1,3 @@
-.box-grid > .forest-card{grid-column:1 / -1}
 .cand-card > .card-title{display:block;margin-bottom:10px}
 .cand-title{font-size:var(--text-md);font-weight:500;color:var(--color-text-primary);white-space:nowrap;flex:0 0 auto}
 .cand-crumb{background:none;border:0;font:inherit;cursor:pointer;padding:0;

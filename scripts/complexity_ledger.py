@@ -102,8 +102,13 @@ BASELINE = {
     # its pass refused and the fold reads it so, and a nested run is filed as its spawner's kind;
     # (+28) an entry finding a landing in flight says so and waits, off the CLI's loop.
     # limits-ux (+268): one served reading per cap (`ArmedCaps`), its clamp on the ceiling record,
-    # its wording table, and `set-limits` answering it at every door.
-    "package_lines": 111302,
+    # its wording table, and `set-limits` answering it at every door. draw-strata (+8): a round's
+    # order interleaves the benchmarks its rows measure, so a cut arm has read every one.
+    # flight-ux (+140): the sample look-ahead at every door: a launch's depth filed as its press,
+    # the CLI verb, and the served reason a deeper press is not admitted, with its readout.
+    # strata-flight (-39): limits-ux's look-ahead refusal is flight-ux's `shallow`, and the Max
+    # press rides the one payload by name (`LookaheadCells`).
+    "package_lines": 111411,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -145,6 +150,8 @@ BASELINE = {
     # model-lines (+2): `call_target` on a served campaign config, which no surface edits yet.
     # l4-measure (+3): `CycleEntryFacts.curve`, the held-out curve beside `BenchScore`, unrendered.
     # limits-ux (+1): `ArmedCaps.said`, the terminal's rendering of the rows the browser draws.
+    # flight-ux (+1): a launch payload's `lookahead`, which the terminal sends and no surface yet.
+    # strata-flight (-1): the count once limits-ux and flight-ux stand in one tree.
     "p_served": 199,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     "p_unread_fields": 26,

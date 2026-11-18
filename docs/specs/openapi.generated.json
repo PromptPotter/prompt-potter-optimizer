@@ -7707,6 +7707,17 @@
             "title": "Keep Rounds",
             "type": "boolean"
           },
+          "lookahead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LookaheadPress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The depth this launch's walk starts at, pressed as `set-sample-lookahead`."
+          },
           "mode": {
             "$ref": "#/components/schemas/RunMode",
             "default": {
@@ -10068,13 +10079,24 @@
         "title": "LivesReading",
         "type": "object"
       },
+      "LookaheadCells": {
+        "anyOf": [
+          {
+            "minimum": 1.0,
+            "type": "integer"
+          },
+          {
+            "const": "max",
+            "type": "string"
+          }
+        ]
+      },
       "LookaheadDepth": {
         "additionalProperties": false,
         "description": "One depth the look-ahead control offers: that many calls held in flight.",
         "properties": {
           "cells": {
-            "title": "Cells",
-            "type": "integer"
+            "$ref": "#/components/schemas/LookaheadCells"
           },
           "fill": {
             "anyOf": [
@@ -10104,6 +10126,27 @@
           "pickable"
         ],
         "title": "LookaheadDepth",
+        "type": "object"
+      },
+      "LookaheadPress": {
+        "additionalProperties": false,
+        "description": "How many cells ahead the walk sends, and whether that depth stands every round.",
+        "properties": {
+          "auto": {
+            "default": false,
+            "description": "This depth stands every round, until pressed off.",
+            "title": "Auto",
+            "type": "boolean"
+          },
+          "cells": {
+            "$ref": "#/components/schemas/LookaheadCells",
+            "description": "1 disarms; `max` holds as many as the backend admits, wherever its ceiling moves."
+          }
+        },
+        "required": [
+          "cells"
+        ],
+        "title": "LookaheadPress",
         "type": "object"
       },
       "LoopWarning": {
@@ -11050,6 +11093,17 @@
             "minLength": 1,
             "title": "Dataset Name",
             "type": "string"
+          },
+          "lookahead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LookaheadPress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The depth this launch's walk starts at, pressed as `set-sample-lookahead`."
           },
           "optimization": {
             "anyOf": [
@@ -15675,7 +15729,7 @@
             "type": "integer"
           },
           "depths": {
-            "description": "Each depth the control draws, 1 to `ceiling`.",
+            "description": "Each depth the control draws, 1 to `ceiling`, then `max` where `ceiling` exceeds 1.",
             "items": {
               "$ref": "#/components/schemas/LookaheadDepth"
             },
@@ -15702,19 +15756,38 @@
             "title": "Pick Max",
             "type": "integer"
           },
-          "refusal": {
-            "description": "Why no depth is pressable now (`RunState.lookahead_refusal`); empty where the run admits a press.",
-            "title": "Refusal",
-            "type": "string"
+          "pressed": {
+            "$ref": "#/components/schemas/LookaheadCells",
+            "description": "The depth the control shows pressed: `max` where the ceiling is armed by name, else `depth`."
           },
           "scoring_now": {
             "description": "Whether a walk holds or admits any call now; otherwise `most` speaks for the next round alone.",
             "title": "Scoring Now",
             "type": "boolean"
+          },
+          "shallow": {
+            "anyOf": [
+              {
+                "enum": [
+                  "one_at_a_time",
+                  "settled",
+                  "no_run",
+                  "past_money",
+                  "past_most"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the backend's ceiling, the cycle settled, no run to hold calls for, money, or the stop rules; null where a deeper one is.",
+            "title": "Shallow"
           }
         },
         "required": [
           "depth",
+          "pressed",
           "auto",
           "ceiling",
           "in_flight",
@@ -15727,7 +15800,7 @@
           "discards",
           "auto_refusal",
           "depths",
-          "refusal"
+          "shallow"
         ],
         "title": "SampleLookahead",
         "type": "object"
@@ -16621,10 +16694,8 @@
             "type": "string"
           },
           "cells": {
-            "description": "1 disarms.",
-            "minimum": 1.0,
-            "title": "Cells",
-            "type": "integer"
+            "$ref": "#/components/schemas/LookaheadCells",
+            "description": "1 disarms; `max` holds as many as the backend admits, wherever its ceiling moves."
           },
           "cycle_id": {
             "maxLength": 128,
@@ -16870,6 +16941,17 @@
               }
             ],
             "description": "Start the draft as these arms of one head-to-head, its origin every arm's, in place of one campaign. Its own `budget` binds each arm, so `budget` is refused beside it."
+          },
+          "lookahead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LookaheadPress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The depth this launch's walk starts at, pressed as `set-sample-lookahead`."
           }
         },
         "required": [
@@ -16910,6 +16992,17 @@
               }
             ],
             "title": "Descend"
+          },
+          "lookahead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LookaheadPress"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The depth this launch's walk starts at, pressed as `set-sample-lookahead`."
           },
           "mode": {
             "$ref": "#/components/schemas/RunMode",
@@ -23386,13 +23479,13 @@
         "operationId": "evidence_api_v1_evidence_get",
         "parameters": [
           {
-            "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `cycle:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (cycles only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded once as `scenario.said`, its caveat the said's detail.",
+            "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `cycle:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/r<round>/<candidate_id>` (one searchpoint, at its round). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (cycles only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded once as `scenario.said`, its caveat the said's detail.",
             "in": "query",
             "name": "subject",
             "required": false,
             "schema": {
               "default": [],
-              "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `cycle:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (cycles only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded once as `scenario.said`, its caveat the said's detail.",
+              "description": "Subjects to pool, one per repetition of the parameter: `campaign:<campaign_id>` (its root origin), `cycle:<campaign_id>/<cycle_id>` (one branch, read at its last elected winner) or `candidate:<campaign_id>/<cycle_id>/r<round>/<candidate_id>` (one searchpoint, at its round). May span campaigns and datasets, which the comparability verdict then reports on.\n\nAn L4 inner run is addressed like any other, plus the sandbox chain it lives in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as `?descend=` because it is the same question. A sandbox is structurally an ordinary projects tree, so every kind above resolves inside one unchanged.\n\nA MASK rides the address, `;`-separated, so the record and the counterfactual can be two channels of one read: `;samples=3,7,11` restricts every value to those samples, and `;lens=score:<formula>` (cycles only) re-decides the branch's elections under another criterion and reads it at the winner that would have stood. The response carries what that changed in `subjects[].scenario`, worded once as `scenario.said`, its caveat the said's detail.",
               "items": {
                 "type": "string"
               },

@@ -79,8 +79,8 @@ export function SubjectBox() {
             ? { scored: evidence.shown.n_cells, expected: evidence.shown.expected_samples }
             : null
         }
-        before={origin?.key ?? null}
-        after={point?.key ?? null}
+        before={origin}
+        after={point}
       />
     </div>
   );

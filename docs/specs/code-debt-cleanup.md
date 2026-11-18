@@ -648,28 +648,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   Action: the stream re-reads `exhibit_stores` per frame batch. **Re-test:** switch off mid-stream;
   the stream ends.
 
-### batch/30 · ws
-
-- **Compare cards are laid out for few wide columns**, not five thin stripes on a 16:9 display (the
-  column rule is `webapp/app/styles/domains/compare.css:40-42`). **Rides with:** ws 3. **Re-test:** five
-  candidates at 1920×1080 sit in a row, each card at its full content (a wrapped second row fails).
-- **A `candidate:` subject names no round** (ws-2's report): `cycle_paths.py::Subject.key` spells
-  `candidate:<campaign>/<cycle>/<arm>` and `evidence/read.py::_candidate_point` resolves the newest
-  scored round, so in the walk world "Compare C1.1 with C0" reads C2.1 · round 2 (one arm key,
-  `4fe6d83270e5bef5`, at both). The cells filter (`candidate_id`), `ScenarioEdits` and
-  `mask/tree_lens.py::_Overlay.readings` (cycle, arm) share the gap. Action: the subject carries the
-  round, keyed as the hierarchy address. **Rides with:** a chain after tests-w (`tests/` spells the
-  grammar). **Re-test:** comparing a same-key round-1 arm, its channel reads round 1.
-- **Compare resolves an inner campaign by its bare id** (ws-2's report): a channel on an inner
-  campaign asks `GET /hierarchy/<inner>` and `/campaigns/<inner>/pipeline` with no chain, a 404 the
-  walk's problem check reads red. Suspected root: `ChannelCards.tsx:47` and `ComparePane.tsx:70`
-  resolve a channel's run by `lib/derivations::campaignAt` over a bare `rootCampaignId`. **Rides with:** the candidate-subject chain. **Re-test:** comparing an inner
-  candidate, no request 404s.
-- **The freed tree crowds itself** (ws-2's report): its labels collide around an inner lane
-  (`R2 justlogic/d234` over `C2.1`, the `θ` labels overlapping), and once it is freed the Candidates
-  card sits at half width beside empty space (`dashboard-layout.css:8`'s auto-fit tracks). **Rides
-  with:** ws 3. **Re-test:** the freed tree's walk shot at 1280×800, no overlap, the card full width.
-
 ### batch/30 · forks
 
 - **Money text has no sub-cent rule**: a cell's price at six places (`phase_acts.py::CapUnderRound.costing`,
@@ -881,11 +859,27 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The noise-floor pass may bank a refusal beside cells**: `scoring/passes.py:538` sets `refusal`
   before it knows the pass read nothing, which `PassGradedRecord._refused_reads_nothing` rejects.
   Unverified. **Re-test:** a noise-floor pass that scored a cell and then refused raises nothing.
-- **A copy fetched at the click may lose the clipboard**: `ui/CopyButton.tsx::copy` awaits the served
-  export, then calls `navigator.clipboard.writeText`, past the press in browsers that bind the write
-  to it (the operator's Candidates copy failed on 2026-11-18 while the export served HTTP 200 in
-  1.4 s). Action: hand the clipboard the pending text inside the press (`ClipboardItem` over the
-  promise). **Re-test:** the Candidates `Chat` copy in Firefox and Safari.
+- **A send a pause cuts is never filed, so a paused inner run reads $0.000**: the operator paused
+  `promptpotter-self.run__54ccef` (2026-11-18 ~11:35) while seat #001's inner run
+  `justlogic.d234__edf685/cycle_2cca0ea37091` was live; its sidebar spend dropped from a live figure
+  to `$0.000`. Its ledger holds 0 `token_usage` and 1 `bill`; the outer's ledger mirrors 0 calls of
+  it (its last mirrored call is 10:19:15Z, 3 s before the inner launched); the sidebar reads
+  `hierarchy.py:302-308`'s `scan_ledger_spend` of the cycle's own ledger. So the live figure was
+  sends in flight, and the pause cancelled them unfiled: a call the provider may have billed reads
+  as nothing (root `<one-budget>`: spend = the provider's bill). Action: a send a stop cuts is filed
+  at the cut as sent-unreported (`MeteredSpend.sends_unreported`, which the row already renders as
+  "up to $X more unreported"), and its late usage files when it returns; never dropped. Unverified:
+  whether the provider charged the cut calls. **Rides with:** none yet (spend book +
+  `runner/inner/**`). **Re-test:** pause an outer mid inner-round; the inner row reads
+  "≥$0 · up to $X more unreported", never `$0.000`, and the outer's mirror matches.
+- **A CLI payload refusal reads pydantic's union text**: `set-sample-lookahead bogus` answers
+  "cells.constrained-int: … cells.literal['max']: …" (`presentation/cli/main.py`'s payload arm prints
+  the `ValidationError` raw). Action: the CLI renders a payload refusal by field and expected form,
+  once, for every verb. **Re-test:** `set-sample-lookahead bogus` reads "cells: a count ≥ 1 or max".
+- **The look-ahead flight line is composed twice**: `webapp/lib/derivations/run-phase.ts::lookaheadFlight`
+  repeats `served_dashboard.py::SampleLookahead.lines()`'s pick of scope and held word. Action: serve
+  the composed line on `SampleLookahead` and render it. **Re-test:** the panel's flight line and
+  `dashboard`'s `parallel calls:` line are one string.
 
 ## Held — no wave-4 chain yet
 
@@ -899,10 +893,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   the box refuses the panel at init. Action: commit both to the research tier, or keep the README's
   prerequisite. **Held:** the operator's call (a research-tier definition gets `defaults.yaml` laid
   under it, a tenant one does not). **Re-test:** `promptpotter-self/run` inits on a fresh account.
-- **An outer early cut can skip a benchmark**: `intelligence/rasch.py::build_round_order` orders a round's cells by
-  δ, not by benchmark, so an arm PoBB cuts at 4 of 6 cells may read none of one benchmark's seats.
-  Action: draw the outer round stratified by `Sample.measured_dataset` (potter's `_strata` exists).
-  **Held:** a decision on the outer draw. **Re-test:** a cut arm's cells span every benchmark.
 - **The inner measurand differs by benchmark**: justlogic seats inherit `justlogic/family.yaml`'s
   `per_cell` token discount while hotpotqa and legalbench score raw `em_match` / `label_match`, and
   hotpotqa's `escalation.l1_patience: 5` differs from the others; `runner/inner/tasks.py::_lever`
@@ -924,11 +914,11 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   is in-sample and scores nothing, because `held_out_lift` carries no SE. Action: serve the held-out
   lift's SE (a binomial 20-row bench a pass) and rank and separate on it; θ stays a column.
   **Held:** a served SE. **Re-test:** `git grep -n "mean_round_delta" -- promptpotter/application/optimizers/potter/dispatch/injections/panels.py`.
-- **"Which benchmark a row measures" is spelled three ways**: Shape: `runner/round.py` (`or filed`),
-  `potter/members.py::_strata` (`or ""`), `domain/verification.py` (`.get`, None = filed); and
-  `origin_panel.py::origin_panel(scope_of=…)` / `BenchScope` partition by benchmark under the word
-  `RulerScope` owns. Action: one `Sample` reader of its benchmark; `scope_of` → `benchmark_of`.
-  **Held:** the rename's digest. **Re-test:** `git grep -n "measured_dataset or\|scope_of=" -- promptpotter`.
+- **"Which benchmark a row measures" is spelled twice**: Shape: `potter/members.py::_strata` reads
+  `measured_dataset or ""` where every other reader takes `Sample.measured_dataset` raw (None = the
+  filed one), and `BenchScope` partitions by benchmark under the word `RulerScope` owns. Action:
+  `_strata` keys on the field raw; `BenchScope` takes a benchmark name. **Held:** l4-outer owns
+  `potter/`, l4-runs `runner/bench.py`. **Re-test:** `git grep -n "measured_dataset or\|BenchScope" -- promptpotter`.
 - **Nothing keeps an L4 edit L4-only**: Shape: potter's `inner_cells` gates (`bundle.py`,
   `validators.py`, `catalogues.py`, `l1_wire_schema.py`, `layer_state.py`, `l1.py`, `prompts.py`)
   read `InnerCells`, so an edit to the L4 cells re-keys every potter campaign.

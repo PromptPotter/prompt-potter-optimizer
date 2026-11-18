@@ -576,7 +576,7 @@ class EvidenceParams(ReadParams, read=ReadKind.EVIDENCE, route="/evidence"):
             "Subjects to pool, one per repetition of the parameter: "
             "`campaign:<campaign_id>` (its root origin), `cycle:<campaign_id>/<cycle_id>` "
             "(one branch, read at its last elected winner) or "
-            "`candidate:<campaign_id>/<cycle_id>/<candidate_id>` (one searchpoint). May span "
+            "`candidate:<campaign_id>/<cycle_id>/r<round>/<candidate_id>` (one searchpoint, at its round). May span "
             "campaigns and datasets, which the comparability verdict then reports on.\n\n"
             "An L4 inner run is addressed like any other, plus the sandbox chain it lives "
             "in: `;in=<campaign>::<cycle>`, root-first and `~`-joined, the same codec as "

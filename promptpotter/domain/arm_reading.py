@@ -311,7 +311,8 @@ def arm_verdict(reading: ArmReading, *, retired: bool) -> ArmVerdict:
         return "selected"
     if election.held:
         return "not_elected"
-    return "unmeasured" if reading.state in ("proposed", "measuring") else "awaiting"
+    # A walked arm has cells (its state says how many of how many), so only a proposal has none.
+    return "unmeasured" if reading.state == "proposed" else "awaiting"
 
 
 def _own_level(fold: ScoreSummary) -> OwnLevel | None:

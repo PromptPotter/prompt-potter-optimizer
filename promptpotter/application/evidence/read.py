@@ -325,12 +325,12 @@ class _Cycle(NamedTuple):
         measured = individual_cells(self.walks, individual_id, scope)
         return walked_rows(self.stores, measured, self.scorer).standing()
 
-    def point(self, round_num: int, *, candidate_id: str = "") -> _ChainPoint | None:
+    def point(self, round_num: int | None, *, candidate_id: str = "") -> _ChainPoint | None:
         for (rnd, found), arm in self.walked.arms.items():
             if rnd != round_num or (candidate_id and found != candidate_id):
                 continue
             return _ChainPoint(
-                round=round_num,
+                round=rnd,
                 candidate_id=found,
                 label=arm_name(found, arm.state, rnd).label,
                 sheet=self.sheet(found),
@@ -655,7 +655,7 @@ def _resolve_head(at: _Located, spec: Subject) -> _Head | None:
             cycle.point(0) if picked is None else cycle.point(picked.round, candidate_id=picked.key)
         )
     else:
-        point = _candidate_point(cycle, spec.candidate_id)
+        point = cycle.point(spec.round, candidate_id=spec.candidate_id)
     if point is None:
         return None
     masked = _masked(point, cycle.mask(spec.samples))
@@ -715,14 +715,6 @@ def _scenario(
         ),
         [_masked(p, keys) for p in points],
     )
-
-
-def _candidate_point(cycle: _Cycle, candidate_id: str) -> _ChainPoint | None:
-    for round_num in sorted({rnd for rnd, _ in cycle.walked.arms}, reverse=True):
-        point = cycle.point(round_num, candidate_id=candidate_id)
-        if point is not None and point.sheet:
-            return point
-    return None
 
 
 def _winner_chain(

@@ -26,7 +26,7 @@ export function ForestCard() {
   const { dash } = useViewedDashboard();
   if (!dash) {
     return (
-      <CardFrame className="forest-card" title={<span className="cand-title">Lineage</span>}>
+      <CardFrame className="forest-card" span="full" title={<span className="cand-title">Lineage</span>}>
         <Loading className="lineage-empty">{DASHBOARD_PENDING}</Loading>
       </CardFrame>
     );
@@ -79,6 +79,7 @@ function ReadForestCard({ dash }: { dash: ServedDashboard }) {
   return (
     <CardFrame
       className="forest-card"
+      span="full"
       title={
         <Toolbar>
           <span className="cand-title">Lineage</span>

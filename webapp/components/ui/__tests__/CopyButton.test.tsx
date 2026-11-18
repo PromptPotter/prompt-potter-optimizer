@@ -3,15 +3,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CopyButton } from "../CopyButton";
 
 describe("CopyButton", () => {
-  const writeText = vi.fn().mockResolvedValue(undefined);
+  // The text the clipboard was handed, read out of the item's pending blob.
+  const writeText = vi.fn();
+  const write = vi.fn(async ([item]: { parts: Record<string, Promise<Blob>> }[]) => {
+    writeText(await (await item!.parts["text/plain"]!).text());
+  });
+  class FakeClipboardItem {
+    constructor(readonly parts: Record<string, Promise<Blob>>) {}
+  }
 
   // jsdom ships no clipboard; the one planted here is taken back, since the next file shares it.
   beforeEach(() => {
     writeText.mockClear();
-    Object.assign(navigator, { clipboard: { writeText } });
+    Object.assign(navigator, { clipboard: { write } });
+    vi.stubGlobal("ClipboardItem", FakeClipboardItem);
   });
   afterEach(() => {
     Reflect.deleteProperty(navigator, "clipboard");
+    vi.unstubAllGlobals();
   });
 
   it("stringifies object data as pretty JSON", async () => {

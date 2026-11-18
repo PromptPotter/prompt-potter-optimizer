@@ -1,4 +1,5 @@
 import { commands, cycleAddress } from "@/lib/api";
+import type { LookaheadDepth } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { encodeCyclePath } from "@/lib/ids";
@@ -21,16 +22,16 @@ export function useRemoteModel() {
   if (!dash) return null;
   const { lookahead } = dash;
   const innerHop = isLive ? dash.current_round.inner : null;
-  const arm = (cells: number, auto: boolean) =>
+  const arm = (cells: LookaheadDepth["cells"], auto: boolean) =>
     void cmd.run("sample-lookahead", () =>
       // `cells: 1` disarms; sent unclamped, the walk clamps it to `lookahead.ceiling`.
       commands["set-sample-lookahead"]({ ...cycleAddress(viewedPath), cells, auto }),
     );
   // A depth press keeps the every-round switch where it stands; only the switch moves it.
   const armCells = (raw: string) => {
-    const cells = Number(raw);
-    if (cells === lookahead.depth) return;
-    arm(cells, lookahead.auto);
+    const pressed = lookahead.depths.find((d) => String(d.cells) === raw);
+    if (pressed === undefined || pressed.cells === lookahead.pressed) return;
+    arm(pressed.cells, lookahead.auto);
   };
 
   return {

@@ -31,23 +31,31 @@ export function CopyButton({ data, title = "Copy as JSON", choices, children, di
     window.setTimeout(() => setFailure(null), COPY_FAILURE_NOTICE_MS);
   };
   const copy = async (payload: unknown) => {
-    let text: string;
-    try {
-      // A thunk resolves at click, not render: a payload stamping "captured: …" must mean the ask.
-      // It may be async — a served serialization is fetched at the click that asks for it.
+    // A thunk resolves at click, not render: a payload stamping "captured: …" must mean the ask.
+    // It may be async (a served serialization is fetched at the click that asks for it), so the
+    // clipboard takes the pending text at the click itself: a write after the fetch has outlived
+    // the click's activation, and Safari and Firefox refuse it.
+    const text = (async () => {
       const value = typeof payload === "function" ? await (payload as () => unknown)() : payload;
-      text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-    } catch (e) {
-      reportIncident(e, { surface: "copy" });
-      fail(operatorMessage(e, failureKind(e)));
-      return;
-    }
+      return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+    })();
     try {
-      await navigator.clipboard.writeText(text);
+      const blob = text.then((t) => new Blob([t], { type: "text/plain" }));
+      await navigator.clipboard.write([new ClipboardItem({ "text/plain": blob })]);
       setCopied(true);
       window.setTimeout(() => setCopied(false), COPIED_FLASH_MS);
     } catch {
-      fail("The clipboard refused the copy.");
+      // The payload's own failure says why; else the clipboard refused.
+      const why = await text.then(
+        () => null,
+        (e: unknown) => e ?? new Error("The copy's payload failed."),
+      );
+      if (why === null) {
+        fail("The clipboard refused the copy.");
+      } else {
+        reportIncident(why, { surface: "copy" });
+        fail(operatorMessage(why, failureKind(why)));
+      }
     }
   };
 

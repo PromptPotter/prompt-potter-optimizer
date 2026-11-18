@@ -24,7 +24,7 @@ import {
   fmtUnit,
   PLACEHOLDER,
 } from "@/lib/format";
-import { maskedSubject } from "@/lib/api/reads";
+import { maskedSubject, subjectRoot } from "@/lib/api/reads";
 import { ChannelCards } from "./ChannelCards";
 import { liftColumns, pairedCells, withReadRank, type PairedCells } from "./lift-columns";
 import { Coverage, EvidenceCharts, SeriesLegend, type CompareView } from "./EvidenceCharts";
@@ -53,7 +53,7 @@ function channelNames(subjects: readonly SubjectReading[]): ReadonlyMap<string, 
 }
 
 export function ComparePane() {
-  const { channels, subjects: selected, replace } = useCompareSelection();
+  const { subjects: selected, replace } = useCompareSelection();
   const [view, setView] = useState<CompareView>("grouped");
   // The bare address, not the key: applying a mask changes the key, which would close the form.
   const [masking, setMasking] = useState<string | null>(null);
@@ -66,8 +66,8 @@ export function ComparePane() {
   const [metric, setMetric] = useState("");
   const [grid, setGrid] = useState("");
   const { byAddress } = useRegistry();
-  const compared = channels.flatMap((c): HierarchyCycle[] => {
-    const line = byAddress.get(campaignAt(byAddress, c.rootCampaignId)?.facts.live_cycle ?? "");
+  const compared = selected.flatMap((s): HierarchyCycle[] => {
+    const line = byAddress.get(campaignAt(byAddress, subjectRoot(s))?.facts.live_cycle ?? "");
     return line?.entry_kind === "cycle" ? [line] : [];
   });
   const read = useEvidence(selected, compared.some((a) => a.state.attached), {
@@ -84,8 +84,8 @@ export function ComparePane() {
 
   // Keyed on campaigns, so re-pointing a channel keeps the metric; a stale metric pick 400s.
   const campaignsKey = useMemo(
-    () => [...new Set(channels.map((c) => c.rootCampaignId))].sort().join("~"),
-    [channels],
+    () => [...new Set(selected.map(subjectRoot))].sort().join("~"),
+    [selected],
   );
   const [seenCampaigns, setSeenCampaigns] = useState(campaignsKey);
   if (campaignsKey !== seenCampaigns) {

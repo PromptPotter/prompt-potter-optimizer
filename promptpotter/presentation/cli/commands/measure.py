@@ -108,7 +108,7 @@ async def cmd_verify(args: argparse.Namespace) -> CommandResult:
     if spec.kind != "candidate" or spec.lens or spec.samples:
         raise BadRequestError(
             "verify takes one searchpoint and no mask: "
-            "`candidate:<campaign>/<cycle>/<candidate_id>[;in=<c::y~…>]`."
+            "`candidate:<campaign>/<cycle>/r<round>/<candidate_id>[;in=<c::y~…>]`."
         )
     stores = local_stores(tenant=args.tenant)
     fields = {

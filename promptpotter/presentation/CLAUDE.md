@@ -12,10 +12,6 @@
 
 **Every write touching campaign / cycle state goes through `CommandDispatcher.dispatch`** ([decisions](../../docs/decisions.md) § 0001), even behind a typed route; identity administration is an operator-admin channel (§ 0004). **Every route on a session mount is named by a `CommandKind` or a `ReadKind`** (refused at import).
 
-## Sample look-ahead — the one entry point that is deliberately NOT at parity
-
-**`/commands/set-sample-lookahead` is browser-only, and the ABSENCE is the boundary** (its `BROWSER` press, which `CommandDispatcher.open` holds at the door a `CommandCall` names: `CommandKind.pressed_at`), so a missing CLI verb, host tool, config key or dataset knob is never an oversight. `set-api-key` and `remove-api-key` are browser-only too, each for the reason beside its row. Who may press it: [`access-model.md`](../../docs/operations/access-model.md) § host-admin ↔ user.
-
 ## Everything on stdout is also on disk
 
 Every readout line lands in the cycle's `readout.log`; stdout is one optional sink. `logs/latest-readout-path.txt` only NAMES the newest terminal launch's file. <!-- probe: git grep -cE "latest-readout-path" -- promptpotter/*.py <= 1 --> **A value already on disk is ADDRESSED in the readout, never reprinted.**

@@ -4,7 +4,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from promptpotter.domain.command_kinds import SubmitArmsPayload
+from promptpotter.domain.command_kinds import LookaheadCells, SubmitArmsPayload
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
@@ -187,7 +187,7 @@ class RunControl:
     def take_submission(self, command_id: str) -> None:
         self._log().ack(command_id, "applied")
 
-    def sample_lookahead(self) -> int:
+    def sample_lookahead(self) -> LookaheadCells:
         return requested_lookahead(self._inbox())
 
     def spend_sample_lookahead(self) -> None:

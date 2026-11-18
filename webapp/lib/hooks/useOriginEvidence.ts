@@ -48,8 +48,9 @@ export function useOriginEvidence(point: ObservePoint | null): OriginEvidence {
   const viewedPath = viewed?.path ?? null;
   const { index } = useViewedLineage();
   const { dash } = useViewedDashboard();
-  const placed = point ? armAt(index, viewedPath, point.key) : null;
-  const pair = useCompareWithOrigin(viewedPath, placed ? placed.facts.reading.arm.key : null);
+  const placed = point ? armAt(index, viewedPath, { round: point.round, arm: point.key }) : null;
+  const arm = placed?.facts.reading.arm;
+  const pair = useCompareWithOrigin(viewedPath, arm ? { round: arm.round, arm: arm.key } : null);
   const read = useEvidence(pair.subjects, dash?.producer.attached === true, WITH_CONFIG);
   const evidence = readyData(read);
 

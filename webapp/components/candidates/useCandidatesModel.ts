@@ -178,9 +178,9 @@ export function useCandidatesModel(dash: ServedDashboard) {
 
   const compareOn = !!compareKey && comparing.hasSubject(compareKey);
   const toggleCompare = () => {
-    if (!compareKey || !campaignId) return;
+    if (!compareKey) return;
     if (comparing.hasSubject(compareKey)) comparing.remove(compareKey);
-    else comparing.addSubject({ rootCampaignId: campaignId, subject: compareKey });
+    else comparing.addSubject(compareKey);
   };
 
   return {

@@ -248,18 +248,18 @@ def origin_panel(
     *,
     line_cells: Collection[int],
     poolable: Collection[int],
-    scope_of: Mapping[int, str],
+    benchmark_of: Mapping[int, str | None],
     size: int,
 ) -> list[int]:
     """*origin_cells* are the origin's own ROUND's in walk order, never every cell it was later read
     on: its first cells are the ones the next round's draw walks first, so the panel costs no top-up
     there, and a resumed round rebuilds it off the same banked rows."""
-    by_scope: dict[str, list[int]] = {}
+    by_benchmark: dict[str | None, list[int]] = {}
     pool = set(poolable)
     for sid in (sid for sid in dict.fromkeys(origin_cells) if sid in pool):
-        by_scope.setdefault(scope_of[sid], []).append(sid)
-    sat = set(by_scope)
+        by_benchmark.setdefault(benchmark_of[sid], []).append(sid)
+    sat = set(by_benchmark)
     for sid in sorted(set(line_cells) & set(poolable)):
-        if scope_of[sid] not in sat:
-            by_scope.setdefault(scope_of[sid], []).append(sid)
-    return sorted(sid for cells in by_scope.values() for sid in cells[:size])
+        if benchmark_of[sid] not in sat:
+            by_benchmark.setdefault(benchmark_of[sid], []).append(sid)
+    return sorted(sid for cells in by_benchmark.values() for sid in cells[:size])

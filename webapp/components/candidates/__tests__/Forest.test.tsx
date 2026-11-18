@@ -90,8 +90,8 @@ describe("one arm key re-proposed on two branches", () => {
   });
 
   it("keys two subjects, one per branch", () => {
-    expect(candidateSubject(rootDup.address)).toBe(`candidate:camp/root/${DUP}`);
-    expect(candidateSubject(forkDup.address)).toBe(`candidate:camp/fork/${DUP}`);
+    expect(candidateSubject(rootDup.address)).toBe(`candidate:camp/root/r2/${DUP}`);
+    expect(candidateSubject(forkDup.address)).toBe(`candidate:camp/fork/r3/${DUP}`);
   });
 
   it("lights only the picked one, and only the one the divergence names", () => {

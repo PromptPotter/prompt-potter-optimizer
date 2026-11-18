@@ -70,14 +70,16 @@ describe("a cells read's answer, as its panes say it", () => {
     });
     const hit = pairedReading(0.1, [0.05, 0.15]);
     const vsOrigin: PairwiseComparison = {
-      subject_a: "candidate:c/y/a0",
-      subject_b: "candidate:c/y/a1",
+      subject_a: "candidate:c/y/r0/a0",
+      subject_b: "candidate:c/y/r1/a1",
       reading: hit,
       hit: { ...hit, headline: { ...hit.headline!, flips: { gained: 1, lost: 0, unchanged: 9 } } },
       gained: ["s1"],
       lost: [],
     };
-    view(<SubjectFlips vsOrigin={vsOrigin} partial={null} before="a0" after="a1" />);
+    view(<SubjectFlips vsOrigin={vsOrigin} partial={null} before={{ key: "a0", round: 0, label: "C0", title: "C0", row: null }}
+        after={{ key: "a1", round: 1, label: "C1.1", title: "C1.1", row: null }}
+      />);
     fireEvent.focus(screen.getByText("now right").parentElement!);
     expect(await screen.findByText(/Could not read the flipped cells\./)).toBeTruthy();
   });

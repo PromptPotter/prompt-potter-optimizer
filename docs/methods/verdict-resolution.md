@@ -274,7 +274,12 @@ ruler's; cold, the parent's). PoBB's entry gate and ε ramp and the coverage flo
 cells read, not rows walked; led by the strata alone, a panel of mostly parent hits reaches its last
 ruler cell at its final row and no arm can be cut. Cost: the ruler learns off-ruler cells slower.
 
-It is a **pure function** of (parent grades, ruler, sample ids, `elimination_n_min`), so a resume
+**The benchmarks a panel's rows measure (`Sample.measured_dataset`) interleave last**, each keeping
+the order above, the one read least for its size next: an arm cut at any prefix has read every
+benchmark as evenly as the prefix allows, never one benchmark's easy misses alone. One benchmark's
+panel is unchanged. Cost: on a mixed panel an off-ruler benchmark's cell can enter the lead window.
+
+It is a **pure function** of (parent grades, ruler, panel rows, `elimination_n_min`), so a resume
 re-derives it with no sidecar; the hard-samples artifact's `round_order` is the same call.
 
 **Why static beats adaptive:** a per-measurement re-fit front-loads the parent's hit set, where every

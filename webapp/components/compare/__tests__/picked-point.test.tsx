@@ -22,7 +22,7 @@ const CYCLE = encodeCyclePath([{ campaignId: "c", cycleId: "y" }]);
 const ARM = { round: 1, key: "k1", label: "C1.1" };
 const PICKED = hierarchyCandidate(CYCLE, { id: "i1", ...ARM });
 const ITEM: CompareItem = {
-  channel: { rootCampaignId: "c", subject: "cycle:c/y" },
+  subject: "cycle:c/y",
   reading: null,
   slot: null,
   headline: null,

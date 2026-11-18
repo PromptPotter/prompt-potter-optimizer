@@ -27,6 +27,7 @@ from promptpotter.domain.command_kinds import (
     PAYLOAD_MODEL_FOR_KIND,
     CancelPayload,
     CommandKind,
+    LookaheadCells,
     LoopPayload,
     PauseCyclePayload,
     SetSampleLookaheadPayload,
@@ -59,7 +60,7 @@ class PauseAsk(NamedTuple):
 
 class LookaheadAsk(NamedTuple):
     command_id: str
-    cells: int
+    cells: LookaheadCells
     auto: bool
     taken: bool = False
 
@@ -81,16 +82,16 @@ class Controls(NamedTuple):
         return self._replace(pauses=tuple(p for p in self.pauses if p.hold == hold))
 
 
-def requested_lookahead(controls: Controls) -> int:
+def requested_lookahead(controls: Controls) -> LookaheadCells:
     ask = controls.lookahead
     if ask is None:
         return 1
     return ask.cells
 
 
-def effective_lookahead(requested: int, ceiling: int) -> int:
+def effective_lookahead(requested: LookaheadCells, ceiling: int) -> int:
     """The one clamp: the command records the request UNCLAMPED, the ceiling being the backend's."""
-    return max(1, min(requested, ceiling))
+    return max(1, ceiling if requested == "max" else min(requested, ceiling))
 
 
 LOOP_KINDS = frozenset(
@@ -147,7 +148,7 @@ class _Inbox:
             case SetSampleLookaheadPayload(cells=cells, auto=auto):
                 if held.lookahead is not None:
                     self._kinds.pop(held.lookahead.command_id, None)
-                armed = auto or cells > 1
+                armed = auto or cells != 1
                 held = held._replace(
                     lookahead=LookaheadAsk(command_id, cells, auto) if armed else None
                 )

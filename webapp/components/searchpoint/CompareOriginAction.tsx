@@ -10,7 +10,7 @@ export function CompareOriginAction({
   candidate: SelectedCandidate;
   path: CyclePath | null;
 }) {
-  const { run, originLabel } = useCompareWithOrigin(path, candidate.arm);
+  const { run, originLabel } = useCompareWithOrigin(path, candidate);
   return (
     <HoverCard
       content={

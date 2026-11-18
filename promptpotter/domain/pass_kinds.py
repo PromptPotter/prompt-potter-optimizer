@@ -32,8 +32,8 @@ class Pass:
     keeps: bool
     # The ledger bracket a held-out pass is entered, graded and exited under.
     phase: CampaignPhase | None
-    # The look-ahead it sends at: the operator's request, which a round spends, or the backend's ceiling.
-    depth: Literal["requested", "ceiling"]
+    # Its look-ahead: the operator's request, which a round spends, or `max`, the backend's ceiling.
+    depth: Literal["requested", "max"]
     # It ends early on the campaign's degradation checks.
     checks: bool
 
@@ -59,7 +59,7 @@ def _pass(
     fresh: bool = False,
     keeps: bool = False,
     phase: CampaignPhase | None = None,
-    depth: Literal["requested", "ceiling"] = "requested",
+    depth: Literal["requested", "max"] = "requested",
     checks: bool = False,
 ) -> Pass:
     return Pass(kind, scopes, arm, recorded, deliberate, spend, fresh, keeps, phase, depth, checks)
@@ -82,7 +82,7 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="diagnostic",
             keeps=True,
             phase=CampaignPhase.VERIFY,
-            depth="ceiling",
+            depth="max",
             checks=True,
         ),
         _pass(
@@ -92,7 +92,7 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="bench",
             keeps=True,
             phase=CampaignPhase.BENCH,
-            depth="ceiling",
+            depth="max",
             checks=True,
         ),
         # It re-reads rows already standing, so it joins no reading.
@@ -103,7 +103,7 @@ PASSES: dict[MeasurementRole, Pass] = {
             spend="diagnostic",
             fresh=True,
             phase=CampaignPhase.VERIFY,
-            depth="ceiling",
+            depth="max",
             checks=True,
         ),
     )

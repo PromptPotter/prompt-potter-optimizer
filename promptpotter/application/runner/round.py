@@ -245,14 +245,13 @@ def round_origin_panel(cycle: Cycle, scoring_pool: list[Sample]) -> list[int]:
     held = cycle.in_run_cells
     # The origin's OWN round, never every cell read since: a later re-score would move the exam.
     origin_round = next(rr for rr in cycle.rounds if rr.round == ordered[0].arm.round)
-    filed = cycle.session.measured_dataset
     return origin_panel(
         pairs.walked(origin_round.results),
         line_cells=set[int]().union(
             *(pairs.measured(pairs.cells_of(s, held)) for s in ordered[1:])
         ),
         poolable={s.id for s in scoring_pool},
-        scope_of={s.id: s.measured_dataset or filed for s in scoring_pool},
+        benchmark_of={s.id: s.measured_dataset for s in scoring_pool},
         size=cycle.optimizer.round_cells(len(scoring_pool)),
     )
 

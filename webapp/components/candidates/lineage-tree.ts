@@ -8,7 +8,7 @@ import type {
   SubtreeCampaign,
   SubtreeCycle,
 } from "@/lib/api/types";
-import { candidatesOf, descentOf, tagLabel, tagValue, type Descent } from "@/lib/derivations";
+import { candidatesOf, descentOf, figureOf, tagLabel, tagValue, type Descent } from "@/lib/derivations";
 import { type CyclePath, pathOfAddress } from "@/lib/ids";
 import { fmtUnit } from "@/lib/format";
 import type { CandidateBar } from "@/lib/types";
@@ -211,12 +211,18 @@ export const DENSE: Density = {
   labels: false,
 };
 
-export const forestWidth = (d: Density, maxCol: number): number =>
+const forestWidth = (d: Density, maxCol: number): number =>
   d.leftPad + (maxCol + 1) * d.colW + d.rightPad;
 
-// The labelled drawing where it fits the box, else the label-free one; DENSE until the box is measured.
-export const densityFor = (maxCol: number, boxW: number | null): Density =>
-  boxW !== null && forestWidth(ROOMY, maxCol) <= boxW ? ROOMY : DENSE;
+// A lane's name: a root by its dataset, any other cycle by its served card label.
+export const laneName = (cycle: SubtreeCycle): string =>
+  cycle.facts.mint === "root" ? (tagValue(cycle, "dataset") ?? cycle.label) : cycle.label;
+
+// A lane label in the mono face at --text-xs (11px, ~7px a character): up to three spawn glyphs, the
+// name 4px on, the hearts 6px after it. Counted, so the drawing is as wide as what it draws.
+const LABEL_CH = 7;
+const labelWidth = (e: LaneEnd): number =>
+  (3 + e.name.length) * LABEL_CH + 4 + (e.hearts ? 6 + e.hearts.length * LABEL_CH : 0);
 
 export const LANE_H = 26;
 export const HEADER_H = 18;
@@ -425,7 +431,6 @@ export interface RoundNodePos {
   isWinner: boolean;
   crown: ArmElection["crown"];
   isExpanded: boolean;
-  isLastInLane: boolean;
   cycleKind: CycleMint;
   spawn: CycleSpawn | null;
   divergence: LineageDivergence | null;
@@ -478,7 +483,6 @@ function placedNode(
     isWinner: selected,
     crown,
     isExpanded,
-    isLastInLane: false,
     cycleKind: l.cycle.facts.mint,
     spawn: l.cycle.facts.spawn,
     divergence: cand.facts.divergence,
@@ -488,8 +492,34 @@ function placedNode(
   };
 }
 
+// A lane's name sits past its LAST column, clear of the labels a node there carries: a collapsed
+// round's, centred above it, or an expanded candidate's, running right of it.
+const LANE_LABEL_GAP = { collapsed: 40, expanded: 88 };
+
+export interface LaneEnd {
+  lane: LaneLayout;
+  x: number;
+  y: number;
+  name: string;
+  hearts: string | null;
+}
+
+function laneEnds(laneByKey: ReadonlyMap<string, LaneLayout>, d: Density): LaneEnd[] {
+  return [...laneByKey.values()].flatMap((l) => {
+    const rounds = [...groupRounds(l.candidates).keys()];
+    if (rounds.length === 0) return [];
+    const gap = l.expanded ? LANE_LABEL_GAP.expanded : LANE_LABEL_GAP.collapsed;
+    const x = d.leftPad + (l.baseCol + Math.max(...rounds)) * d.colW + gap;
+    const hearts = figureOf(l.cycle, "lives")?.value ?? null;
+    return [{ lane: l, x, y: bandCenterY(l), name: laneName(l.cycle), hearts }];
+  });
+}
+
 interface FreedLayout {
   laneByKey: Map<string, LaneLayout>;
+  // Empty in the label-free drawing.
+  ends: LaneEnd[];
+  width: number;
   totalLaneRows: number;
   maxCol: number;
   d: Density;
@@ -505,7 +535,14 @@ function freed(
   boxW: number | null,
 ): FreedLayout {
   const { laneByKey, totalLaneRows, maxCol } = lanes(root, expanded, keep);
-  const d = densityFor(maxCol, boxW);
+  // The labelled drawing where it fits the box, its lane names included, else the label-free one;
+  // DENSE until the box is measured.
+  const roomyEnds = laneEnds(laneByKey, ROOMY);
+  const roomyW = Math.max(forestWidth(ROOMY, maxCol), ...roomyEnds.map((e) => e.x + labelWidth(e)));
+  const roomy = boxW !== null && roomyW <= boxW;
+  const d = roomy ? ROOMY : DENSE;
+  const ends = roomy ? roomyEnds : [];
+  const width = roomy ? roomyW : forestWidth(DENSE, maxCol);
   const nodes: RoundNodePos[] = [];
   const segs: BranchSeg[] = [];
   const spineByKeyRound = new Map<string, RoundNodePos>();
@@ -515,7 +552,6 @@ function freed(
 
   for (const [laneKey, l] of laneByKey) {
     const rounds = [...groupRounds(l.candidates).entries()].sort((a, b) => a[0] - b[0]);
-    const lastRound = rounds.at(-1)?.[0] ?? 0;
     const colX = (round: number): number => d.leftPad + (l.baseCol + round) * d.colW;
 
     if (!l.expanded) {
@@ -530,7 +566,6 @@ function freed(
         spineByKeyRound.set(`${laneKey}::r${round}`, node);
         // A collapsed round is drawn as one node, so every candidate of it is drawn there.
         for (const c of cands) nodeByCandidate.set(c.address, node);
-        if (round === lastRound) node.isLastInLane = true;
         if (prev) {
           seg(prev.x, prev.y, node.x - d.stub, node.y, "chain");
           seg(node.x - d.stub, node.y, node.x, node.y, "chain");
@@ -558,11 +593,9 @@ function freed(
       const winnerNode = winner ? roundNodes.find((n) => n.candKey === winner.address) : undefined;
       if (winnerNode) {
         spineByKeyRound.set(`${laneKey}::r${round}`, winnerNode);
-        if (round === lastRound) winnerNode.isLastInLane = true;
         lastWinnerNode = winnerNode;
       } else if (lastWinnerNode) {
         spineByKeyRound.set(`${laneKey}::r${round}`, lastWinnerNode);
-        if (round === lastRound) lastWinnerNode.isLastInLane = true;
       }
     }
   }
@@ -600,7 +633,7 @@ function freed(
     seg(childX - d.stub, childBandY, childX, childBandY, "fork");
   }
 
-  return { laneByKey, totalLaneRows, maxCol, d, nodes, segs, spineByKeyRound };
+  return { laneByKey, ends, width, totalLaneRows, maxCol, d, nodes, segs, spineByKeyRound };
 }
 
 // ---- The one entry: a placement names the layout, and the layout answers in its own shape.

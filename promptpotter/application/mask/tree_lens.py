@@ -113,7 +113,7 @@ class _Overlay:
         subset_size: int | None,
     ):
         self.diverged: dict[tuple[CyclePath, int], LineageDivergence] = {}
-        self.readings: dict[tuple[CyclePath, str], MaskReading | None] = {}
+        self.readings: dict[tuple[CyclePath, int, str], MaskReading | None] = {}
         self.subset_size = subset_size
         # Presence is what serves a `lens_value`: an `abort:` lens and a bare sample mask name none.
         self.criteria = {path: record.criterion for path, record in records.items()}
@@ -135,7 +135,7 @@ class _Overlay:
                 self.criteria.setdefault(cycle, record.criterion)
                 for rnd_rec in cyc.rounds:
                     for cand in rnd_rec.candidates:
-                        self.readings[(cycle, cand.key)] = cand.reading
+                        self.readings[(cycle, rnd_rec.round, cand.key)] = cand.reading
         self.dimmed: frozenset[tuple[CyclePath, int]] = frozenset(dimmed)
 
     def apply(self, entry: HierarchyEntry) -> HierarchyEntry:
@@ -174,8 +174,8 @@ class _Overlay:
     def _candidate(self, cycle: CyclePath, c: HierarchyCandidate) -> HierarchyCandidate:
         arm = c.facts.reading.arm
         key = (cycle, arm.round)
-        read = (cycle, arm.key) in self.readings
-        reading = self.readings.get((cycle, arm.key))
+        read = (*key, arm.key) in self.readings
+        reading = self.readings.get((*key, arm.key))
         lensed = self.criteria.get(cycle) is not None
         subset_n = (reading.n_scored if reading else 0) if read else None
         return c.model_copy(

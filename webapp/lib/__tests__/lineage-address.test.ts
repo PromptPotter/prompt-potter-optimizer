@@ -76,12 +76,13 @@ describe("candidatesAtPath", () => {
 
 describe("armAt", () => {
   it("meets a document's arm at that document's own address", () => {
-    expect(armAt(index(), ROOT, "root-c1")?.facts.individual).toBe("root-c1");
-    expect(armAt(index(), FORK, "fork-c1")?.facts.individual).toBe("fork-c1");
+    expect(armAt(index(), ROOT, { round: 1, arm: "root-c1" })?.facts.individual).toBe("root-c1");
+    expect(armAt(index(), FORK, { round: 1, arm: "fork-c1" })?.facts.individual).toBe("fork-c1");
   });
 
-  it("is null for an arm the ledger has not minted, and without an address", () => {
-    expect(armAt(index(), ROOT, "fork-c1")).toBeNull();
-    expect(armAt(index(), null, "root-c1")).toBeNull();
+  it("is null for an arm the ledger has not minted, in another round, and without an address", () => {
+    expect(armAt(index(), ROOT, { round: 1, arm: "fork-c1" })).toBeNull();
+    expect(armAt(index(), ROOT, { round: 2, arm: "root-c1" })).toBeNull();
+    expect(armAt(index(), null, { round: 1, arm: "root-c1" })).toBeNull();
   });
 });

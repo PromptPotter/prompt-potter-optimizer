@@ -1,4 +1,5 @@
 import type { PairwiseComparison, CellRow } from "@/lib/api/types";
+import type { ObservePoint } from "@/lib/derivations";
 import { useCells } from "@/lib/hooks/useCells";
 import { failureOf, shownData } from "@/lib/hooks/useRead";
 import { cx } from "@/lib/cx";
@@ -13,9 +14,9 @@ export function SubjectFlips({
 }: {
   vsOrigin: PairwiseComparison | null;
   partial: { scored: number; expected: number | null } | null;
-  // The two arm keys whose cells the flips are read off, on the viewed cycle.
-  before: string | null;
-  after: string | null;
+  // The two points whose cells the flips are read off, on the viewed cycle.
+  before: ObservePoint | null;
+  after: ObservePoint | null;
 }) {
   const counts = vsOrigin?.hit.headline?.flips;
   const coverage = vsOrigin?.hit.coverage;
@@ -53,7 +54,10 @@ function FlipSep() {
   );
 }
 
-type FlipArms = { before: string | null; after: string | null };
+type FlipArms = { before: ObservePoint | null; after: ObservePoint | null };
+
+const cellsOf = (p: ObservePoint | null) =>
+  p && { candidateId: p.key, round: p.round, scope: "cycle" as const };
 
 function FlipKeys({
   label,
@@ -84,8 +88,8 @@ function bySlot(cells: readonly CellRow[]): Map<number, CellRow> {
 
 // Mounted only while the card is open, so the two reads cost nothing until a hover asks.
 function FlipList({ keys, arms }: { keys: string[]; arms: FlipArms }) {
-  const was = useCells(arms.before ? { candidateId: arms.before, scope: "cycle" } : null);
-  const now = useCells(arms.after ? { candidateId: arms.after, scope: "cycle" } : null);
+  const was = useCells(cellsOf(arms.before));
+  const now = useCells(cellsOf(arms.after));
   const wasBody = shownData(was.read);
   const nowBody = shownData(now.read);
   const item = new Map(

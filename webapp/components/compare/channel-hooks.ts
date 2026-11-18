@@ -116,12 +116,11 @@ export function channelLevel(
 
 // The highlighted searchpoint's own reads: `ChannelDetail` mounts only while its fold is open.
 export function usePickedPoint(
-  { channel, reading }: CompareItem,
+  { subject, reading }: CompareItem,
   selected: HierarchyCandidate | null,
   index: LineageIndex,
 ) {
   const { edits } = useScenarioEdits();
-  const subject = channel.subject;
   const path = useMemo(() => (selected ? pathOfAddress(selected.address) : null), [selected]);
   const round = selected?.facts.reading.arm.round ?? null;
   // A round still scoring has no file: its point reads off the channel's own cycle, as it streams.
@@ -143,8 +142,11 @@ export function usePickedPoint(
   );
   const datasetName = reading?.dataset_name ?? null;
   const cellsPreset = useMemo<CellsPreset | null>(
-    () => (path && id && datasetName ? { path, datasetName, candidateId: id, scope: "cycle" } : null),
-    [path, id, datasetName],
+    () =>
+      path && id && datasetName && round !== null
+        ? { path, datasetName, candidateId: id, round, scope: "cycle" }
+        : null,
+    [path, id, round, datasetName],
   );
   const key = at || subject;
   // This cycle's ledger only: a pick on a fork's lane was billed to a file this read did not open.

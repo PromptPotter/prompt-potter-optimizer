@@ -1,4 +1,4 @@
-.verify-action{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-8)}
+.verify-action{display:flex;flex-direction:column;align-items:flex-start;gap:var(--space-8);min-width:0}
 .verify-action-row{display:flex;align-items:center;gap:var(--space-6)}
 .verify-samples{display:flex;align-items:center;gap:var(--space-8);padding:var(--space-4) var(--space-10);font-size:var(--text-sm);color:var(--color-text-secondary)}
 .verify-samples input{width:9ch;font-variant-numeric:tabular-nums}
@@ -10,7 +10,7 @@
 .verify-verdict.held{color:var(--color-success)}
 .verify-verdict.dropped{color:var(--color-danger)}
 .verify-facts{display:flex;flex-wrap:wrap;gap:var(--space-6) var(--space-14);margin:0}
-.verify-facts > div{display:flex;gap:var(--space-6);align-items:baseline}
+.verify-facts > div{display:flex;flex-wrap:wrap;gap:var(--space-6);align-items:baseline;min-width:0}
 .verify-facts dt{color:var(--color-text-secondary)}
-.verify-facts dd{margin:0;font-variant-numeric:tabular-nums;white-space:nowrap}
+.verify-facts dd{margin:0;font-variant-numeric:tabular-nums}
 .verify-facts strong{color:var(--color-text-primary);font-weight:600}

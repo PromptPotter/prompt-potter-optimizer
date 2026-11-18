@@ -112,8 +112,8 @@ def parse_sample_ids(text: str | None) -> frozenset[int] | None:
 
 
 SubjectKind = Literal["campaign", "cycle", "candidate"]
-# How many `/`-joined ids each kind's evidence spelling takes.
-SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "cycle": 2, "candidate": 3}
+# How many `/`-joined parts each kind's evidence spelling takes (a candidate's: `…/r<round>/<arm>`).
+SUBJECT_ARITY: dict[SubjectKind, int] = {"campaign": 1, "cycle": 2, "candidate": 4}
 
 _POOL_SEGMENTS = frozenset({"in"})
 _SUBJECT_SEGMENTS = _POOL_SEGMENTS | {"lens", "samples"}
@@ -215,7 +215,7 @@ class Subject(NamedTuple):
 
     @classmethod
     def parse(cls, spec: str) -> Subject:
-        """``kind:<campaign>[/<cycle>[/<candidate>]][;in=<c::y~…>][;lens=score:…|dials:…][;samples=1,2,3]``."""
+        """``kind:<campaign>[/<cycle>[/r<round>/<candidate>]][;in=<c::y~…>][;lens=…][;samples=1,2,3]``."""
         # `;` cannot appear in a safe-AST formula, so a lens needs no escaping.
         address, *segments = spec.split(";")
         kind, sep, rest = address.partition(":")
@@ -223,7 +223,7 @@ class Subject(NamedTuple):
         if not sep or arity is None:
             raise BadRequestError(
                 f"Unknown subject kind in {spec!r} (expected one of {sorted(SUBJECT_ARITY)}, "
-                "as `kind:<campaign>[/<cycle>[/<candidate>]]`)."
+                "as `kind:<campaign>[/<cycle>[/r<round>/<candidate>]]`)."
             )
         parts = rest.split("/")
         if len(parts) != arity or not all(parts):
@@ -237,13 +237,19 @@ class Subject(NamedTuple):
                 f"A {kind!r} subject takes no lens: an alternative formula re-decides ELECTIONS, "
                 "and only a cycle has any. Address the branch instead."
             )
-        ids = [*parts, "", ""]
-        return cls(ids[0], ids[1], ids[2], inside=inside, lens=lens, samples=samples)
+        ids = [*parts, ""]
+        subject = cls(ids[0], ids[1], inside=inside, lens=lens, samples=samples)
+        if kind != "candidate":
+            return subject
+        # Its `r<round>/<arm>` tail is the hierarchy address's, read by that address's parser.
+        tail = "/".join(parts[2:])
+        return cls.parse_address(f"{subject.address}/{tail}")._replace(samples=samples)
 
     @property
     def key(self) -> str:
         """Its evidence spelling, which `parse` reads back."""
-        ids = [p for p in (self.campaign_id, self.cycle_id, self.candidate_id) if p]
+        step = f"r{self.round}" if self.candidate_id else ""
+        ids = [p for p in (self.campaign_id, self.cycle_id, step, self.candidate_id) if p]
         segments = [f"in={encode_cycle_path(self.inside)}"] if self.inside else []
         if self.lens:
             segments.append(f"lens={self.lens.spelling}")
@@ -260,7 +266,7 @@ class Subject(NamedTuple):
         inside = decode_cycle_path(HOP_SEP.join(above))
         campaign_id, sep, cycle_id = last.partition(UNIT_SEP)
         if not campaign_id or (sep and not cycle_id) or (slash and not sep):
-            raise BadRequestError(f"Malformed hierarchy address: {address!r}.")
+            raise BadRequestError(f"Malformed address: {address!r}.")
         subject = cls(campaign_id, cycle_id, inside=inside)
         if not slash:
             return subject
@@ -272,7 +278,7 @@ class Subject(NamedTuple):
                 return subject._replace(round=int(step[1:]), candidate_id=candidate)
         except ValueError:
             pass
-        raise BadRequestError(f"Malformed hierarchy address: {address!r}.")
+        raise BadRequestError(f"Malformed address: {address!r}.")
 
     @property
     def address(self) -> str:

@@ -2286,6 +2286,9 @@ export interface SampleLookahead {
   /** The depth IN FORCE — how many cells the walk holds in flight: the armed
    * request bounded by `ceiling`. */
   depth: number;
+  /** The depth the control shows pressed: `max` where the ceiling is armed by name,
+   * else `depth`. */
+  pressed: number | 'max';
   /** Whether that depth outlives its round — the operator's auto-arm. */
   auto: boolean;
   /** The backend's `max_cells_in_flight`; 1 says the control does not apply. */
@@ -2313,16 +2316,18 @@ export interface SampleLookahead {
    * mode, not a press, so a paused run takes it for its relaunch; null where
    * offered. */
   auto_refusal: 'one_at_a_time' | 'settled' | null;
-  /** Each depth the control draws, 1 to `ceiling`. */
+  /** Each depth the control draws, 1 to `ceiling`, then `max` where `ceiling`
+   * exceeds 1. */
   depths: LookaheadDepth[];
-  /** Why no depth is pressable now (`RunState.lookahead_refusal`); empty where the
-   * run admits a press. */
-  refusal: string;
+  /** Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the
+   * backend's ceiling, the cycle settled, no run to hold calls for, money, or
+   * the stop rules; null where a deeper one is. */
+  shallow: 'one_at_a_time' | 'settled' | 'no_run' | 'past_money' | 'past_most' | null;
 }
 
 /** One depth the look-ahead control offers: that many calls held in flight. */
 export interface LookaheadDepth {
-  cells: number;
+  cells: number | 'max';
   /** `full` where that many calls are out now, `part` where the gauge allows that
    * many; null past both. */
   fill: 'full' | 'part' | null;
@@ -4908,6 +4913,8 @@ export interface ForkCyclePayload {
    * full id. */
   campaign_id: string;
   cycle_id: string;
+  /** The depth this launch's walk starts at, pressed as `set-sample-lookahead`. */
+  lookahead: LookaheadPress | null;
   /** Recorded with the command. */
   reason: string;
   /** Bounds the fork's first launch, as a start-run's; an axis left out is the
@@ -4923,6 +4930,16 @@ export interface ForkCyclePayload {
    * overrides, which is what an 'apply this from here' press means and what
    * the terminal spells `resume --rewind N`. */
   keep_rounds: boolean;
+}
+
+/** How many cells ahead the walk sends, and whether that depth stands every
+ * round. */
+export interface LookaheadPress {
+  /** 1 disarms; `max` holds as many as the backend admits, wherever its ceiling
+   * moves. */
+  cells: number | 'max';
+  /** This depth stands every round, until pressed off. */
+  auto: boolean;
 }
 
 /** The SHAPE a run takes, on the wire and in the runner alike. How far it goes is
@@ -4977,6 +4994,8 @@ export interface MintApiTokenPayload {
 
 /** Mint a campaign on an authored dataset and launch its root cycle. */
 export interface MintCampaignPayload {
+  /** The depth this launch's walk starts at, pressed as `set-sample-lookahead`. */
+  lookahead: LookaheadPress | null;
   dataset_name: string;
   budget: Budget;
   /** Laid over the dataset's own `optimization` before the mint freezes it; only
@@ -5319,8 +5338,9 @@ export interface SetSampleLookaheadPayload {
    * full id. */
   campaign_id: string;
   cycle_id: string;
-  /** 1 disarms. */
-  cells: number;
+  /** 1 disarms; `max` holds as many as the backend admits, wherever its ceiling
+   * moves. */
+  cells: number | 'max';
   /** This depth stands every round, until pressed off. */
   auto: boolean;
 }
@@ -5345,6 +5365,8 @@ export interface SkipSearchpointPayload {
  * the draft on the root cycle. */
 export interface StartCheckinPayload {
   draft_id: string;
+  /** The depth this launch's walk starts at, pressed as `set-sample-lookahead`. */
+  lookahead: LookaheadPress | null;
   budget: Budget;
   /** Start the draft as these arms of one head-to-head, its origin every arm's, in
    * place of one campaign. Its own `budget` binds each arm, so `budget` is
@@ -5360,6 +5382,8 @@ export interface StartRunPayload {
    * full id. */
   campaign_id: string;
   cycle_id: string;
+  /** The depth this launch's walk starts at, pressed as `set-sample-lookahead`. */
+  lookahead: LookaheadPress | null;
   budget: Budget;
   step_rounds: number | null;
   mode: RunMode;
@@ -5571,7 +5595,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "6fce5d1243925289";
+export const SERVED_CONTRACT = "c8ca61a02be44e1c";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5945,9 +5969,15 @@ export const CELL_TERM_META: Record<string, CellTerm> = {
 };
 
 // Mirror of application/served_dashboard.py::LOOKAHEAD_WORDS, in display order.
-export const LOOKAHEAD_WORDS: Record<'one_at_a_time' | 'settled' | 'no_further_cell' | 'more_affordable' | 'holds_every_round' | 'holds_this_round' | 'discarded' | 'depth_one' | 'depth_many', string> = {
+export const LOOKAHEAD_WORDS: Record<'one_at_a_time' | 'settled' | 'no_run' | 'past_money' | 'past_most' | 'no_further_cell' | 'more_affordable' | 'holds_every_round' | 'holds_this_round' | 'discarded' | 'depth_one' | 'depth_many' | 'depth_max' | 'depth_max_hint' | 'flight' | 'scope_every_round' | 'scope_this_round', string> = {
   "one_at_a_time": "This backend runs one sample at a time — a single call has no latency to overlap.",
-  "settled": "not available now",
+  "settled": "This cycle has settled: no walk is left to hold calls ahead for.",
+  "no_run": "No run of this cycle is in flight to hold calls ahead for.",
+  "past_money": "The spend limits afford {affordable} more call(s) out.",
+  "past_most": "The stop rules allow {pick_max} out at most.",
+  "flight": "{in_flight} of {most} out · depth {held} {scope}",
+  "scope_every_round": "every round",
+  "scope_this_round": "this round",
   "no_further_cell": "holds no further cell",
   "more_affordable": "more affordable",
   "holds_every_round": "Every round's scoring runs with this many calls in flight, up to {pick_max}, until switched off. A cut discards at most one call. The measurement is unchanged and the cycle is NOT marked babysat.",
@@ -5955,6 +5985,8 @@ export const LOOKAHEAD_WORDS: Record<'one_at_a_time' | 'settled' | 'no_further_c
   "discarded": "{discards} discarded so far.",
   "depth_one": "One at a time",
   "depth_many": "Hold {cells} in flight",
+  "depth_max": "Max · {ceiling}",
+  "depth_max_hint": "Hold as many in flight as the backend admits: {ceiling} now, and more if its ceiling rises.",
 };
 
 // Mirror of domain/account_words.py::ACCOUNT_TAB_INFO, in display order.
@@ -6404,7 +6436,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [ABORT_LENS_LABELS, ["abort:epsilon_off", "abort:all_off"]],
   [STEER_OUTSIDE_INFO, ["babysat", "refused"]],
   [CELL_TERM_META, ["fitness", "ground_truth_rank", "latency", "unworked", "cost", "tokens", "target_prompt_chars", "errored", "degraded", "cached", "retrieval_shortfall"]],
-  [LOOKAHEAD_WORDS, ["one_at_a_time", "settled", "no_further_cell", "more_affordable", "holds_every_round", "holds_this_round", "discarded", "depth_one", "depth_many"]],
+  [LOOKAHEAD_WORDS, ["one_at_a_time", "settled", "no_run", "past_money", "past_most", "flight", "scope_every_round", "scope_this_round", "no_further_cell", "more_affordable", "holds_every_round", "holds_this_round", "discarded", "depth_one", "depth_many", "depth_max", "depth_max_hint"]],
   [ACCOUNT_TAB_INFO, ["profile", "usage", "keys", "activity", "preferences", "storage", "about"]],
   [ARM_VERDICT_LABELS, ["retired", "invalid", "origin", "elected", "uncontested", "selected", "not_elected", "unmeasured", "awaiting"]],
   [CANDIDATE_COUNT_WORDS, ["replayed"]],

@@ -17,7 +17,7 @@ Each trust boundary, its kind and where it is enforced, by symbol. The decisions
 
 **The host is refused on the bearer door**, `PROMPTPOTTER_AUTH=off` included: a token resolves to its account exactly as a session of it would, through the one builder both doors call (`identity/accounts.py::account_identity`: its grant, its delegated path, its access state, its host), and is then narrowed to its scopes; one whose account is the host's is a 401 at every request, so the host's exemption from every bucket (`jobs/quota.py::refuse_request_rate`) never rides a bearer, and a leaked token spends only its account's coupon. The host acts through its browser or its terminal.
 
-`set-sample-lookahead` spends the box's shared key, so it sits at its own rung, `campaign.lookahead` ([`../decisions.md`](../decisions.md) § 0005), withheld without withholding the run. Browser-only — [`../../promptpotter/presentation/CLAUDE.md`](../../promptpotter/presentation/CLAUDE.md) § Sample look-ahead.
+`set-sample-lookahead` spends the box's shared key, so it sits at its own rung, `campaign.lookahead` ([`../decisions.md`](../decisions.md) § 0005), withheld without withholding the run, at every door.
 
 ## owner ↔ delegate — authorization
 

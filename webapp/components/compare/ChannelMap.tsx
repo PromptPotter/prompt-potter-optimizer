@@ -13,7 +13,7 @@ import { useSeededOnce } from "@/lib/hooks/useSeededOnce";
 import { useChannelView, useCompareSelection } from "@/lib/state/compare-selection";
 import { nodeOverlays, type CompareItem } from "@/lib/derivations";
 import { fmtUnit } from "@/lib/format";
-import { cycleAddressOf, encodeCyclePath, pathOfAddress, pathRoot } from "@/lib/ids";
+import { cycleAddressOf, encodeCyclePath } from "@/lib/ids";
 import { channelInk, useChannelTree, useInvalidated } from "./channel-hooks";
 
 export function ChannelMap({
@@ -25,8 +25,7 @@ export function ChannelMap({
   run: HierarchyCampaign | null;
   points: readonly CladogramChannel[];
 }) {
-  const { reading, channel } = item;
-  const subject = channel.subject;
+  const { reading, subject } = item;
   const own = channelInk(item, points);
   const tree = useChannelTree(run);
   const { index, rootPath } = tree;
@@ -118,7 +117,6 @@ function ArmedActions({ armed, subject }: { armed: HierarchyCandidate; subject: 
   const { hasSubject, addSubject, replace } = useCompareSelection();
   const { reading } = armed.facts;
   const fitness = reading.own?.fitness?.value ?? null;
-  const top = pathRoot(pathOfAddress(armed.address));
   const next = candidateSubject(armed.address);
   if (next === subject) return null;
   const already = hasSubject(next);
@@ -144,7 +142,7 @@ function ArmedActions({ armed, subject }: { armed: HierarchyCandidate; subject: 
         type="button"
         className="cmp-button"
         disabled={already}
-        onClick={() => addSubject({ rootCampaignId: top.campaignId, subject: next })}
+        onClick={() => addSubject(next)}
       >
         {already ? "Already a channel" : "Compare — add as a channel"}
       </button>

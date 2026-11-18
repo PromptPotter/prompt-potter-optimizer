@@ -100,9 +100,6 @@ class Admitted(LaunchOutcome):
         """Its run held: past the queue, the money admission and the cycle's session."""
         return await hold(self.request, self.start, self.mode)
 
-    async def launched(self) -> Launched:
-        return await self.hand_over(self.held())
-
     async def hand_over(self, holding: Coroutine[Any, Any, HeldRun]) -> Launched:
         """*holding* — `held`, or a held step that acts once the run is held (a fork's cut on its
         parent) — awaited where the run goes: inline, detached, or in the queue's own task."""
@@ -143,20 +140,6 @@ def admit(
     if inline is not None and job.queued and inline.no_wait:
         refuse_as_busy(job_registry, job)
     return Admitted(RunStart(stores, job_registry, job), request, mode, inline)
-
-
-async def launch(
-    request: LaunchRequest,
-    mode: RunMode,
-    *,
-    stores: Stores,
-    job_registry: JobRegistry,
-    inline: Inline | None,
-) -> Launched:
-    admitted = await asyncio.to_thread(
-        admit, request, mode, stores=stores, job_registry=job_registry, inline=inline
-    )
-    return await admitted.launched()
 
 
 def _detach(coro: Coroutine[Any, Any, object]) -> None:

@@ -121,12 +121,14 @@ export function candidatesOf(cycle: SubtreeCycle): HierarchyCandidate[] {
   return cycle.children.flatMap((c) => (c.entry_kind === "round" ? c.children : []));
 }
 
+// By its hierarchy address: one arm re-measured in two rounds is two candidates.
 export function armAt(
   index: LineageIndex,
   path: CyclePath | null,
-  key: string,
+  pick: CandidatePick,
 ): HierarchyCandidate | null {
-  return candidatesAtPath(index, path).find((c) => c.facts.reading.arm.key === key) ?? null;
+  const entry = path && index.byAddress.get(pickedAddressOf(encodeCyclePath(path), pick));
+  return entry?.entry_kind === "candidate" ? entry : null;
 }
 
 // Every candidate *edited* holds and each descending from one along the served descent

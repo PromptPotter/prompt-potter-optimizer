@@ -184,13 +184,10 @@ class AdaptiveQueue(nodes.Sampler):
         strata = _strata(pool, knobs.strata)
         shares = stratum_shares([len(s) for s in strata], knobs.sp_budget_round)
         cells = [cell for s, n in zip(strata, shares, strict=True) if n for cell in pick(s, n)]
-        order = build_round_order(
-            parent_grades(ctx.read(Frontier).parent_own_rows),
-            view.ruler,
-            {int(s.id): s.key for s in cells},
-            n_min=n_min,
-        )
         by_id = {int(s.id): s for s in cells}
+        order = build_round_order(
+            parent_grades(ctx.read(Frontier).parent_own_rows), view.ruler, by_id, n_min=n_min
+        )
         # Every cell closes a block: PoBB decides after each one.
         return nodes.RoundSamples(cells=cells, order=[by_id[sid] for sid in order], block_size=1)
 

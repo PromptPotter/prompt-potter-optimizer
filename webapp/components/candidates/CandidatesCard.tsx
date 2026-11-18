@@ -84,6 +84,8 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
         "cand-card",
         maskOpen && "mask-open",
       )}
+      // Freed, the tree leaves the card a row of its own: it takes the row's width.
+      span={m.treeFreed ? "full" : "column"}
       title={<CandidatesToolbar model={m} />}
     >
       <div className="fitness-body">

@@ -37,9 +37,10 @@
   font-size: var(--text-sm);
   color: var(--color-text-secondary);
 }
+/* Many narrow columns: five channels sit in one row on a 16:9 display, one per row on a phone. */
 .cmp-channels {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
   align-items: start;
   gap: var(--space-8);
   margin: 0;
@@ -58,11 +59,12 @@
 }
 .cmp-channel-row {
   display: grid;
-  grid-template-columns: minmax(0, 16rem) minmax(0, 12rem) minmax(0, 12rem) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: var(--space-8) var(--space-24);
   align-items: start;
 }
 .cmp-channel-id {
+  grid-column: 1 / 3;
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
@@ -89,18 +91,14 @@
   flex-wrap: wrap;
   gap: var(--space-4);
 }
-.cmp-channel-lead {
-  grid-column: 2 / 4;
+.cmp-channel-lead,
+.cmp-channel-headline {
+  grid-column: 1 / -1;
 }
 .cmp-channel-close {
-  grid-column: 5;
+  grid-column: 3;
   grid-row: 1;
   color: var(--color-text-secondary);
-}
-.cmp-channel-headline {
-  grid-column: 4;
-  grid-row: 1;
-  padding-top: var(--space-14);
 }
 .cmp-metric {
   display: flex;
@@ -199,23 +197,6 @@
   text-transform: none;
   letter-spacing: normal;
   color: var(--color-text-secondary);
-}
-@media (max-width: 640px) {
-  .cmp-channel-row {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
-  }
-  .cmp-channel-id {
-    grid-column: 1 / 3;
-  }
-  .cmp-channel-close {
-    grid-column: 3;
-  }
-  .cmp-channel-lead,
-  .cmp-channel-headline {
-    grid-column: 1 / -1;
-    grid-row: auto;
-    padding-top: 0;
-  }
 }
 .cmp-channel-facts {
   display: flex;

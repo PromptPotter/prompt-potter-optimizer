@@ -249,6 +249,7 @@ def dashboard_human(
         if dash.said is not None:
             lines.append(said_text(dash.said))
         lines.append(dash.caps.said)
+        lines += [f"parallel calls: {line}" for line in dash.lookahead.lines()]
     if dash.stop is not None:
         lines.append(dash.stop.said)
     if admission.refusal is None:

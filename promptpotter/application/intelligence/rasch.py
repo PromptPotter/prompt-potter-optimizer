@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, NamedTuple
@@ -17,6 +18,7 @@ from promptpotter.domain.ruler import (
     ruler_entry,
     theta_lift,
 )
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, is_hit
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.statistics import logistic
@@ -537,11 +539,13 @@ def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> Esti
 def build_round_order(
     parent_grades: Mapping[str, float],
     ruler: DeltaRuler | None,
-    cells: Mapping[int, str],
+    panel: Mapping[int, Sample],
     *,
     n_min: int,
 ) -> list[int]:
-    """*cells* maps each slot on the panel to its ``Sample.key``: grades and δ read by key, ties break by slot."""
+    """Grades and δ read by ``Sample.key``, ties break by slot; the benchmarks interleave, each in its
+    own order, so any prefix a stop rule cuts at has read every benchmark as evenly as it can."""
+    cells = {sid: s.key for sid, s in panel.items()}
     # `None` (never answered) has its own stratum: read as a miss, an unshared panel leads with its easiest cell.
     # An unmeasured δ stands at the ruler's CENTRE, never 0.0, which is a position on this scale.
     miss_stratum: list[int] = []
@@ -585,6 +589,14 @@ def build_round_order(
         for stratum in strata:
             if pick in stratum:
                 stratum.remove(pick)
-    if sorted(order) != sorted(cells):
-        raise ValueError("build_round_order: the order is not a permutation of the panel")
-    return order
+    benchmark = [panel[sid].measured_dataset for sid in order]
+    size, lead_rank = Counter(benchmark), {b: i for i, b in enumerate(dict.fromkeys(benchmark))}
+    read: Counter[str | None] = Counter()
+
+    def place(sid: int) -> tuple[float, int]:
+        # Keyed in walk order: the share of its benchmark read before it; a tie to the leading one.
+        b = panel[sid].measured_dataset
+        read[b] += 1
+        return ((read[b] - 1) / size[b], lead_rank[b])
+
+    return sorted(order, key=place)

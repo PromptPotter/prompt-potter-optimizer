@@ -407,7 +407,7 @@ def test_a_draw_led_by_one_level_still_covers_every_dataset_and_model_of_its_poo
 
 class _OrderPanel(NamedTuple):
     ids: list[int]
-    cells: dict[int, str]
+    panel: dict[int, Sample]
     parent_grades: dict[str, float]
     ordering: DeltaRuler
     on_slot: dict[int, float]
@@ -417,22 +417,22 @@ class _OrderPanel(NamedTuple):
 @pytest.fixture
 def order_panel() -> _OrderPanel:
     """24 slots, the parent hitting the first 9, a ruler carrying the first 20; slot 23 is ungraded."""
-    ids = list(range(24))
-    cells = {sid: f"k{sid}" for sid in ids}
-    parent_grades = {f"k{sid}": 1.0 if sid < 9 else 0.0 for sid in range(23)}
-    ordering = _anchored({f"k{sid}": float(sid % 7) for sid in range(20)}, mu=2.85)
-    on_slot = {sid: ordering.delta[key] for sid, key in cells.items() if key in ordering.delta}
-    return _OrderPanel(ids, cells, parent_grades, ordering, on_slot, set(range(9)))
+    panel = {s.id: s for s in samples(24)}
+    ids = list(panel)
+    parent_grades = {panel[sid].key: 1.0 if sid < 9 else 0.0 for sid in range(23)}
+    ordering = _anchored({panel[sid].key: float(sid % 7) for sid in range(20)}, mu=2.85)
+    on_slot = {sid: ordering.delta[s.key] for sid, s in panel.items() if s.key in ordering.delta}
+    return _OrderPanel(ids, panel, parent_grades, ordering, on_slot, set(range(9)))
 
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_order_leads_with_win_opportunities_and_probes_a_parent_hit_every_fourth_slot(
     order_panel: _OrderPanel,
 ) -> None:
-    ids, cells, parent_grades, ordering, on_slot, hit_ids = order_panel
-    order = build_round_order(parent_grades, ordering, cells, n_min=0)
+    ids, panel, parent_grades, ordering, on_slot, hit_ids = order_panel
+    order = build_round_order(parent_grades, ordering, panel, n_min=0)
     assert sorted(order) == ids
-    assert build_round_order(parent_grades, ordering, cells, n_min=0) == order, (
+    assert build_round_order(parent_grades, ordering, panel, n_min=0) == order, (
         "the order is not reproducible"
     )
     for pos in (4, 8, 12, 16):
@@ -454,10 +454,10 @@ def test_a_round_order_walks_n_min_cells_on_the_ruler_first_and_keeps_its_probe(
     order_panel: _OrderPanel,
 ) -> None:
     # PoBB can cut at n_min only once n_min θ-readable cells are walked.
-    _, cells, parent_grades, ordering, _, hit_ids = order_panel
-    order = build_round_order(parent_grades, ordering, cells, n_min=0)
-    led = build_round_order(parent_grades, ordering, cells, n_min=6)
-    assert all(cells[sid] in ordering.delta for sid in led[:6]), (
+    _, panel, parent_grades, ordering, _, hit_ids = order_panel
+    order = build_round_order(parent_grades, ordering, panel, n_min=0)
+    led = build_round_order(parent_grades, ordering, panel, n_min=6)
+    assert all(panel[sid].key in ordering.delta for sid in led[:6]), (
         "an off-ruler cell was walked before n_min θ-readable ones: no arm can be cut that early"
     )
     assert order.index(20) < 6 <= led.index(20), "guard: the strata alone walk off the ruler early"
@@ -468,9 +468,9 @@ def test_a_round_order_walks_n_min_cells_on_the_ruler_first_and_keeps_its_probe(
 def test_a_panel_with_no_parent_grade_opens_on_its_most_discriminating_cells(
     order_panel: _OrderPanel,
 ) -> None:
-    ids, cells, _, ordering, on_slot, _ = order_panel
+    ids, panel, _, ordering, on_slot, _ = order_panel
     centre = ordering.mu_delta
-    unknown = build_round_order({}, ordering, cells, n_min=0)
+    unknown = build_round_order({}, ordering, panel, n_min=0)
     assert sorted(unknown) == ids
     spread = [abs(on_slot.get(sid, centre) - centre) for sid in unknown]
     assert spread == sorted(spread), (
@@ -478,6 +478,24 @@ def test_a_panel_with_no_parent_grade_opens_on_its_most_discriminating_cells(
     )
     easiest = min(on_slot, key=lambda sid: (on_slot[sid], sid))
     assert unknown.index(easiest) >= 6, "the panel's easiest cell must not lead the round"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_arm_cut_at_four_of_six_cells_over_three_benchmarks_has_read_all_three() -> None:
+    # δ alone would walk benchmark "a"'s easy misses first: a cut at 4 then never reads "c".
+    rows = samples(6)
+    panel = {s.id: s.model_copy(update={"measured_dataset": "abc"[s.id // 2]}) for s in rows}
+    ordering = _anchored({s.key: float(s.id) for s in rows}, mu=2.5)
+    grades = {s.key: 0.0 for s in rows}
+    order = build_round_order(grades, ordering, panel, n_min=0)
+    assert {panel[sid].measured_dataset for sid in order[:4]} == set("abc")
+    assert [sid for sid in order if panel[sid].measured_dataset == "a"] == [0, 1], (
+        "a benchmark's rows lost their δ order"
+    )
+    one = {sid: s.model_copy(update={"measured_dataset": None}) for sid, s in panel.items()}
+    assert build_round_order(grades, ordering, one, n_min=0) == [0, 1, 2, 3, 4, 5], (
+        "a one-benchmark panel's order moved"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")

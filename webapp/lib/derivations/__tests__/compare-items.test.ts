@@ -16,15 +16,15 @@ describe("compareItems", () => {
       subjects: [
         reading("campaign:potter", "campaign"),
         reading("cycle:capo/c1", "cycle"),
-        reading("candidate:potter/c0/k", "candidate"),
+        reading("candidate:potter/c0/r1/k", "candidate"),
       ],
       head_to_head: { rows: [row("campaign:potter", "potter"), row("cycle:capo/c1", "capo")] },
     } as unknown as Evidence;
     const items = compareItems(evidence, [
-      { rootCampaignId: "capo", subject: "cycle:capo/c1" },
-      { rootCampaignId: "potter", subject: "candidate:potter/c0/k" },
-      { rootCampaignId: "gone", subject: "campaign:gone" },
-      { rootCampaignId: "potter", subject: "campaign:potter" },
+      "cycle:capo/c1",
+      "candidate:potter/c0/r1/k",
+      "campaign:gone",
+      "campaign:potter",
     ]);
     expect(items.map((i) => [i.slot, i.headline?.optimizer ?? null])).toEqual([
       [1, "capo"],
@@ -40,7 +40,7 @@ describe("compareItems", () => {
       subjects: [reading("campaign:potter", "campaign")],
       head_to_head: null,
     } as unknown as Evidence;
-    const [item] = compareItems(evidence, [{ rootCampaignId: "potter", subject: "campaign:potter" }]);
+    const [item] = compareItems(evidence, ["campaign:potter"]);
     expect(item?.headline).toBeNull();
     expect(item?.slot).toBe(0);
   });

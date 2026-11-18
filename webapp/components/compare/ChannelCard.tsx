@@ -60,7 +60,7 @@ export function ChannelCard(props: ChannelProps) {
 }
 
 function ChannelIdRow({
-  item: { channel, reading, headline },
+  item: { subject, reading, headline },
   run,
   ink,
   spec,
@@ -73,7 +73,6 @@ function ChannelIdRow({
   withdrawn: boolean;
 }) {
   const { remove } = useCompareSelection();
-  const subject = channel.subject;
   const level = channelLevel(reading, withdrawn);
   const lead = benchLead(headline);
   return (
@@ -87,7 +86,7 @@ function ChannelIdRow({
               ? reading.label
               : run
                 ? run.facts.short_label
-                : channel.rootCampaignId}
+                : subject}
         </span>
         <span className="cmp-channel-sub" title={subject}>
           {reading ? `${SUBJECT_KIND_LABELS[reading.kind]} · ${reading.campaign_id}` : "nothing measured"}

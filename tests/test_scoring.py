@@ -2527,7 +2527,7 @@ def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
             raise ConflictError("reached")
 
         addressed = Subject.parse(
-            f"candidate:innerds/{leaf.cycle_id}/c1;in={_PEER_HOP.campaign_id}::{_PEER_HOP.cycle_id}"
+            f"candidate:innerds/{leaf.cycle_id}/r1/c1;in={_PEER_HOP.campaign_id}::{_PEER_HOP.cycle_id}"
         )
         verify = VerifyCandidatePayload.model_validate(
             {**addressed.command_fields, "candidate_id": addressed.candidate_id}
@@ -5103,7 +5103,7 @@ def test_c0_is_topped_up_on_a_scope_the_line_drew_never_paired_on_its_own_scope_
         [0, 1],
         line_cells=range(4),
         poolable=range(4),
-        scope_of=dict(enumerate("aabb")),
+        benchmark_of=dict(enumerate("aabb")),
         size=2,
     ) == [0, 1, 2, 3], "a scope the line drew and C0 never sat was left off the panel"
     on_bench = pair_on_bench(

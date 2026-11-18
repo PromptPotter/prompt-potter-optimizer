@@ -4,6 +4,7 @@ import { reportIncident } from "../diagnostics";
 import { parsePick } from "../address";
 import {
   cycleAddressOf,
+  decodeCyclePath,
   encodeCyclePath,
   encodeDescend,
   pathLeaf,
@@ -475,14 +476,29 @@ export function readingPath(reading: SubjectReading): CyclePath {
   ];
 }
 
-// A candidate's evidence subject, from its hierarchy address (`<cycle path>/r{round}/{arm}`).
+// A candidate's evidence subject, from its hierarchy address (`<cycle path>/r{round}/{arm}`),
+// whose round it keeps: one arm re-measured in two rounds is two subjects.
 export function candidateSubject(address: string): string {
   const cycle = cycleAddressOf(address);
   const pick = parsePick(address.slice(cycle.length + 1));
   if (!pick) throw new Error(`not a candidate address: ${address}`);
   const path = pathOfAddress(cycle);
   const leaf = pathLeaf(path);
-  return subjectKey("candidate", [leaf.campaignId, leaf.cycleId, pick.arm], path.slice(0, -1));
+  return subjectKey(
+    "candidate",
+    [leaf.campaignId, leaf.cycleId, `r${pick.round}`, pick.arm],
+    path.slice(0, -1),
+  );
+}
+
+// The top-level campaign a subject sits under: its `;in=` chain's first hop, else its own.
+export function subjectRoot(subject: string): string {
+  const [address = "", ...segments] = subject.split(";");
+  const chain = segments.find((s) => s.startsWith("in="));
+  const own = address.slice(address.indexOf(":") + 1).split("/")[0];
+  const root = chain ? decodeCyclePath(chain.slice("in=".length))?.[0]?.campaignId : own;
+  if (!root) throw new Error(`undecodable subject ${subject}`);
+  return root;
 }
 
 // `;` separates because it cannot appear in a safe-AST formula; the server splits on it.
@@ -507,7 +523,7 @@ export function maskedSubject(
       [
         subject.campaign_id,
         ...(subject.kind === "campaign" ? [] : [subject.cycle_id]),
-        ...(subject.kind === "candidate" ? [subject.candidate_id] : []),
+        ...(subject.kind === "candidate" ? [`r${subject.round}`, subject.candidate_id] : []),
       ],
       readingPath(subject).slice(0, -1),
     ),

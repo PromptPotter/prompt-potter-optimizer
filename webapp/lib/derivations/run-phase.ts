@@ -83,14 +83,34 @@ export function affordableText(affordable: number): string {
     : `${affordable} ${LOOKAHEAD_WORDS.more_affordable}`;
 }
 
-/** What the armed look-ahead depth does: the mode in force, its bound and the calls cut so far. */
-export function lookaheadExplained(la: SampleLookahead): string {
-  if (la.auto_refusal === "one_at_a_time") return LOOKAHEAD_WORDS.one_at_a_time;
-  const held = filled(la.auto ? LOOKAHEAD_WORDS.holds_every_round : LOOKAHEAD_WORDS.holds_this_round, la);
-  return la.discards > 0 ? `${held} ${filled(LOOKAHEAD_WORDS.discarded, la)}` : held;
+/** The look-ahead now, as the terminal's `SampleLookahead.lines` words it: calls out, the depth in
+ *  force and its scope, the calls cut so far. */
+export function lookaheadFlight(la: SampleLookahead): string {
+  const scope = LOOKAHEAD_WORDS[la.auto ? "scope_every_round" : "scope_this_round"];
+  const held = la.pressed === "max" ? filled(LOOKAHEAD_WORDS.depth_max, la) : la.depth;
+  const cut = filled(LOOKAHEAD_WORDS.discarded, { discards: la.discards });
+  return `${filled(LOOKAHEAD_WORDS.flight, { ...la, scope, held })} · ${cut}`;
 }
 
-export function lookaheadDepthLabel(d: LookaheadDepth): string {
+/** What the depth in force holds and until when; null where the switch is shut (its own note says why). */
+export function lookaheadScope(la: SampleLookahead): string | null {
+  if (la.auto_refusal !== null) return null;
+  return filled(la.auto ? LOOKAHEAD_WORDS.holds_every_round : LOOKAHEAD_WORDS.holds_this_round, la);
+}
+
+/** Why no deeper press is admitted now, where the control is drawn; null where one is. */
+export function lookaheadShallow(la: SampleLookahead): string | null {
+  return la.shallow === null ? null : filled(LOOKAHEAD_WORDS[la.shallow], la);
+}
+
+/** A depth segment's label: words for one at a time and for Max, the count between. */
+export function lookaheadDepthLabel(d: LookaheadDepth, la: SampleLookahead): string {
+  if (d.cells === "max") return filled(LOOKAHEAD_WORDS.depth_max, la);
+  return d.cells === 1 ? LOOKAHEAD_WORDS.depth_one : String(d.cells);
+}
+
+export function lookaheadDepthHint(d: LookaheadDepth, la: SampleLookahead): string {
+  if (d.cells === "max") return filled(LOOKAHEAD_WORDS.depth_max_hint, la);
   return d.cells === 1 ? LOOKAHEAD_WORDS.depth_one : filled(LOOKAHEAD_WORDS.depth_many, d);
 }
 

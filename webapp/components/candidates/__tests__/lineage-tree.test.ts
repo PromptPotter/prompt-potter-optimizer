@@ -12,10 +12,8 @@ import {
   ROOMY,
   LANE_H,
   TOP_PAD,
-  densityFor,
   extentKeys,
   expandedLaneSpan,
-  forestWidth,
   layout,
   BOTTOM_PAD,
   FIRST_ROW_Y,
@@ -157,12 +155,18 @@ const freed = (
   keep: ReadonlySet<string> | null = null,
 ) => layout({ freed: tree, expanded, keep, boxW: Infinity });
 
-describe("densityFor", () => {
-  it("labels the drawing where it fits the box, and drops the labels where it would not", () => {
-    const fits = forestWidth(ROOMY, 3);
-    expect(densityFor(3, fits)).toBe(ROOMY);
-    expect(densityFor(3, fits - 1)).toBe(DENSE);
-    expect(densityFor(3, null)).toBe(DENSE);
+describe("layout, freed: density", () => {
+  it("labels the drawing where it fits the box with its lane names, else drops the labels", () => {
+    const tree = campaign("camp", [cycle(A, [1, 1, 1])]);
+    const roomy = freed(tree, new Set());
+    const [end] = roomy.ends;
+    // The drawing is as wide as its rightmost lane name runs.
+    expect(roomy.width).toBeGreaterThan(end!.x + end!.name.length * 6);
+    const at = (boxW: number | null) => layout({ freed: tree, expanded: new Set(), keep: null, boxW });
+    expect(at(roomy.width).d).toBe(ROOMY);
+    expect(at(roomy.width - 1).d).toBe(DENSE);
+    expect(at(roomy.width - 1).ends).toEqual([]);
+    expect(at(null).d).toBe(DENSE);
   });
 });
 
@@ -311,11 +315,12 @@ describe("layout, freed: placed", () => {
   const one = (rounds: Rounds) => campaign("camp", [cycle(A, rounds)]);
 
   it("collapsed: one summary node per round, chained", () => {
-    const { nodes } = freed(one([2, 3]), new Set());
+    const { nodes, ends } = freed(one([2, 3]), new Set());
     const summary = nodes.filter((n) => !n.isExpanded);
     expect(summary).toHaveLength(2);
     expect(summary.map((n) => n.round)).toEqual([1, 2]);
-    expect(summary.find((n) => n.round === 2)!.isLastInLane).toBe(true);
+    // The lane's name sits past its last column, never over the last node's own label.
+    expect(ends.map((e) => e.x)).toEqual([summary.find((n) => n.round === 2)!.x + 40]);
   });
 
   it("expanded: one node per candidate per round + winner→child chain segs", () => {

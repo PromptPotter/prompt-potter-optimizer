@@ -30,7 +30,7 @@ function Inspector({ selected, onClose }: { selected: SelectedCandidate; onClose
   const round = useRound(viewedPath, selected.round);
   const reading = round.reading(selected.arm);
   const cfg = round.cfg(selected.arm, selected.label);
-  const preset: CellsPreset = { candidateId: selected.arm, scope: "cycle" };
+  const preset: CellsPreset = { candidateId: selected.arm, round: selected.round, scope: "cycle" };
   const copy = useSearchpointCopy({
     path: viewedPath,
     round: selected.round,

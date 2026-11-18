@@ -12,6 +12,7 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.command_kinds import LookaheadCells
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import (
     ArmedCaps,
@@ -25,6 +26,7 @@ from promptpotter.domain.dashboard_rows import (
 from promptpotter.domain.origin_panel import overlap_line
 from promptpotter.domain.paired_reading import ArmName
 from promptpotter.domain.phases import (
+    LOOKAHEAD_NO_RUN,
     PRODUCER_STATE_INFO,
     RUN_PHASE_INFO,
     ProducerReading,
@@ -106,9 +108,11 @@ class SampleWalk(StrictModel):
 
 
 LookaheadShut = Literal["one_at_a_time", "settled"]
+# Why no deeper press is admitted now, the switch's reasons first.
+LookaheadShallow = Literal[LookaheadShut, "no_run", "past_money", "past_most"]
 # `SampleLookahead` worded; `{name}` is the field of that name.
 LookaheadWord = Literal[
-    LookaheadShut,
+    LookaheadShallow,
     "no_further_cell",
     "more_affordable",
     "holds_every_round",
@@ -116,12 +120,23 @@ LookaheadWord = Literal[
     "discarded",
     "depth_one",
     "depth_many",
+    "depth_max",
+    "depth_max_hint",
+    "flight",
+    "scope_every_round",
+    "scope_this_round",
 ]
 LOOKAHEAD_WORDS: Worded[LookaheadWord, str] = Worded(
     {
         "one_at_a_time": "This backend runs one sample at a time — a single call has no latency to "
         "overlap.",
-        "settled": "not available now",
+        "settled": "This cycle has settled: no walk is left to hold calls ahead for.",
+        "no_run": LOOKAHEAD_NO_RUN,
+        "past_money": "The spend limits afford {affordable} more call(s) out.",
+        "past_most": "The stop rules allow {pick_max} out at most.",
+        "flight": "{in_flight} of {most} out · depth {held} {scope}",
+        "scope_every_round": "every round",
+        "scope_this_round": "this round",
         "no_further_cell": "holds no further cell",
         "more_affordable": "more affordable",
         "holds_every_round": "Every round's scoring runs with this many calls in flight, up to "
@@ -133,6 +148,9 @@ LOOKAHEAD_WORDS: Worded[LookaheadWord, str] = Worded(
         "discarded": "{discards} discarded so far.",
         "depth_one": "One at a time",
         "depth_many": "Hold {cells} in flight",
+        "depth_max": "Max · {ceiling}",
+        "depth_max_hint": "Hold as many in flight as the backend admits: {ceiling} now, and more "
+        "if its ceiling rises.",
     }
 )
 
@@ -140,7 +158,7 @@ LOOKAHEAD_WORDS: Worded[LookaheadWord, str] = Worded(
 class LookaheadDepth(StrictModel):
     """One depth the look-ahead control offers: that many calls held in flight."""
 
-    cells: int
+    cells: LookaheadCells
     fill: Literal["full", "part"] | None = Field(
         description="`full` where that many calls are out now, `part` where the gauge allows that "
         "many; null past both."
@@ -158,6 +176,10 @@ class SampleLookahead(StrictModel):
     depth: int = Field(
         description="The depth IN FORCE — how many cells the walk holds in flight: the armed "
         "request bounded by `ceiling`."
+    )
+    pressed: LookaheadCells = Field(
+        description="The depth the control shows pressed: `max` where the ceiling is armed by "
+        "name, else `depth`."
     )
     auto: bool = Field(
         description="Whether that depth outlives its round — the operator's auto-arm."
@@ -189,12 +211,29 @@ class SampleLookahead(StrictModel):
         "press, so a paused run takes it for its relaunch; null where offered."
     )
     depths: list[LookaheadDepth] = Field(
-        description="Each depth the control draws, 1 to `ceiling`."
+        description="Each depth the control draws, 1 to `ceiling`, then `max` where `ceiling` "
+        "exceeds 1."
     )
-    refusal: str = Field(
-        description="Why no depth is pressable now (`RunState.lookahead_refusal`); empty where the "
-        "run admits a press."
+    shallow: LookaheadShallow | None = Field(
+        description="Why no deeper press than `depth` is admitted now (`LOOKAHEAD_WORDS`): the "
+        "backend's ceiling, the cycle settled, no run to hold calls for, money, or the stop "
+        "rules; null where a deeper one is."
     )
+
+    def lines(self) -> list[str]:
+        """The panel's rows as text, for a door that prints them: one wording, `LOOKAHEAD_WORDS`."""
+        dumped = self.model_dump()
+        said = {
+            **dumped,
+            "scope": LOOKAHEAD_WORDS["scope_every_round" if self.auto else "scope_this_round"],
+            "held": LOOKAHEAD_WORDS["depth_max"].format_map(dumped)
+            if self.pressed == "max"
+            else self.depth,
+        }
+        words: list[LookaheadWord] = ["flight", "discarded"]
+        if self.shallow is not None:
+            words.append(self.shallow)
+        return [LOOKAHEAD_WORDS[w].format_map(said) for w in words]
 
 
 class RoundAxis(StrictModel):
@@ -420,7 +459,7 @@ class _Present(NamedTuple):
     """Only the PRESENT holds these; a replay takes none — a past moment never had them."""
 
     allotment: Budget | None
-    lookahead: int
+    lookahead: LookaheadCells
     lookahead_auto: bool
     verify: VerifyLedger
     # A pass still running on the ledger that no attached run and no paid pass's job scores.
@@ -551,7 +590,8 @@ def _lookahead(
     allowed: int,
 ) -> SampleLookahead:
     ceiling = state.max_cells_in_flight
-    depth = 1 if standing is None else effective_lookahead(standing.lookahead, ceiling)
+    asked: LookaheadCells = 1 if standing is None else standing.lookahead
+    depth = effective_lookahead(asked, ceiling)
     affordable, most = state.lookahead_affordable, state.lookahead_most
     # Both verdicts read the depth and the gauge as just corrected.
     held_by_money = (
@@ -564,8 +604,22 @@ def _lookahead(
     pick_max = max(1, min(ceiling, most)) if most > 0 else ceiling
     auto = standing is not None and standing.lookahead_auto
     pressable = ceiling > 1 and run.lookahead_refusal == ""
+    auto_refusal: LookaheadShut | None = (
+        "one_at_a_time"
+        if ceiling <= 1
+        else "settled"
+        if RUN_PHASE_INFO[run.run_phase].settled
+        else None
+    )
+    shallow: LookaheadShallow | None = (
+        auto_refusal
+        or ("no_run" if not pressable else None)
+        or ("past_money" if held_by_money is not None else None)
+        or ("past_most" if depth >= pick_max and pick_max < ceiling else None)
+    )
     return SampleLookahead(
         depth=depth,
+        pressed="max" if ceiling > 1 and asked == "max" else depth,
         auto=auto,
         ceiling=ceiling,
         in_flight=in_flight,
@@ -576,11 +630,7 @@ def _lookahead(
         affordable=held_by_money,
         cell_reserve_usd=state.cell_reserve_usd,
         discards=state.sample_lookahead_discards,
-        auto_refusal="one_at_a_time"
-        if ceiling <= 1
-        else "settled"
-        if RUN_PHASE_INFO[run.run_phase].settled
-        else None,
+        auto_refusal=auto_refusal,
         depths=[
             LookaheadDepth(
                 cells=n,
@@ -588,8 +638,9 @@ def _lookahead(
                 pickable=pressable and n <= pick_max,
             )
             for n in range(1, ceiling + 1)
-        ],
-        refusal=run.lookahead_refusal,
+        ]
+        + ([LookaheadDepth(cells="max", fill=None, pickable=pressable)] if ceiling > 1 else []),
+        shallow=shallow,
     )
 
 

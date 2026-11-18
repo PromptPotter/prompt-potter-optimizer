@@ -257,6 +257,7 @@ INNER_SKIP_REFUSAL = (
     "An inner run is one cell of an outer measurement, and a cut searchpoint would change what "
     "that cell measured."
 )
+LOOKAHEAD_NO_RUN = "No run of this cycle is in flight to hold calls ahead for."
 
 
 class RunState(NamedTuple):
@@ -310,8 +311,11 @@ class RunState(NamedTuple):
     @property
     def lookahead_refusal(self) -> str:
         """Why `set-sample-lookahead` for ONE round is refused; empty where it is admitted. `auto`
-        is a mode and a disarm removes an arming, so neither needs a walk and neither is refused."""
-        return "" if self._walking else "No run of this cycle is in flight to hold calls ahead for."
+        is a mode and a disarm removes an arming, so neither needs a walk and neither is refused.
+        A launch still starting takes it too: its run boundary spares what its own hold was asked."""
+        if self._walking or self.run_phase in (RunPhase.QUEUED, RunPhase.STARTING):
+            return ""
+        return LOOKAHEAD_NO_RUN
 
     def arms_refusal(self, keep: Sequence[int]) -> str:
         """Why `submit-arms` keeping the drafts at *keep* is refused; empty where it is admitted."""
