@@ -3937,7 +3937,9 @@ def test_a_members_panel_lays_over_its_familys_key_by_key_at_every_depth(tmp_pat
         "tasks": [1],
     }
     (tmp_path / "fam" / "m").mkdir(parents=True)
-    (tmp_path / "fam" / "family.yaml").write_text(json.dumps({"panel": family}))
+    (tmp_path / "fam" / "family.yaml").write_text(
+        json.dumps({"pipeline": {"connector": "promptpotter"}, "panel": family})
+    )
     member = {"inner_campaign": {"optimization": {"budget": {"rounds": 2}}}, "tasks": [2]}
     (tmp_path / "fam" / "m" / "dataset.yaml").write_text(json.dumps({"panel": member}))
     read = read_dataset_definition(

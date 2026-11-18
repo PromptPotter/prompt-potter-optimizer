@@ -21,6 +21,7 @@ from promptpotter.domain.connector import (
     bearer,
     data_envelope,
 )
+from promptpotter.domain.layer_fold import Rule, rules_of
 from promptpotter.domain.pipeline_params import NodeCall, PipelineParams
 from promptpotter.domain.pipeline_schema import NodeSpendBound
 from promptpotter.domain.sample import Sample
@@ -178,6 +179,16 @@ class Connector:
 
     experiment_model: type[BaseModel] | None = None
     """What a panel parses to; an owned panel needs one. A pinned panel is its unset-free dump."""
+
+    declared_panel_model: type[BaseModel] | None = None
+    """What a dataset's ``panel`` layers fold by, where ``resolve_experiment`` reads the declared
+    panel into another ``experiment_model``; unset, the panel is declared as it parses."""
+
+    @property
+    def panel_rule(self) -> Rule:
+        model = self.declared_panel_model or self.experiment_model
+        assert model is not None, "a panel is read only where one is owned"
+        return rules_of(model)
 
     resolve_experiment: ExperimentResolver | None = None
     """Applied by ``dataset_access.py::dataset_experiment`` to every read of the panel, in place

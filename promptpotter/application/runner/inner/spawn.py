@@ -31,6 +31,7 @@ from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner.entry import run_optimization
 from promptpotter.application.runner.inner.tasks import (
+    InnerTasks,
     ResolvedInnerPanel,
     enter_inner_cell,
     inner_instrument_config,
@@ -487,6 +488,7 @@ CONNECTOR = Connector(
     wire_adapter=promptpotter_wire_adapter,
     extract_experiment=_extract_experiment,
     experiment_model=ResolvedInnerPanel,
+    declared_panel_model=InnerTasks,
     in_process_run=_in_process_run,
     max_cells_in_flight=MAX_CELLS_IN_FLIGHT,
     holds_own_sends=True,

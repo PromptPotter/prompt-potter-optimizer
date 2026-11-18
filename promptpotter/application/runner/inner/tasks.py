@@ -8,7 +8,7 @@ import itertools
 import re
 from collections.abc import Sequence
 from dataclasses import replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
 from pydantic import Field, ValidationError, model_validator
 
@@ -29,7 +29,7 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.cells import CellOptimizer, InnerCell, InnerCells, InnerTaskSpec
-from promptpotter.domain.layer_fold import Layer
+from promptpotter.domain.layer_fold import LaidAs, Layer
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import (
     NodeKind,
@@ -72,7 +72,7 @@ class InnerTasks(FrozenModel):
 
     inner_benchmark: str = Field(min_length=1)
     # A `campaign:` partial laid over each seat dataset's own block: one geometry per panel.
-    inner_campaign: dict[str, Any]
+    inner_campaign: Annotated[dict[str, Any], LaidAs(CampaignConfig)]
     tasks: list[Seat] = Field(min_length=1)
 
     @model_validator(mode="before")

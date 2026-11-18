@@ -44,6 +44,13 @@ class Laid:
     scope: tuple[str, object] | None = None
 
 
+@dataclass(frozen=True)
+class LaidAs:
+    """Declared on a mapping field holding a partial of *model*: its keys lay by *model*'s rule."""
+
+    model: type[BaseModel]
+
+
 type Rule = Callable[[tuple[str, ...]], Laid]
 
 
@@ -196,6 +203,8 @@ def _rule(model: type[BaseModel], at: tuple[str, ...]) -> Laid:
             if info is None:
                 return Laid(Lay.WHOLE)
             owner, annotation, metadata = annotation, info.annotation, list(info.metadata)
+            if (laid_as := next((m for m in metadata if isinstance(m, LaidAs)), None)) is not None:
+                annotation = laid_as.model
         elif get_origin(annotation) is dict:
             owner, annotation, metadata = None, get_args(annotation)[1], []
         else:

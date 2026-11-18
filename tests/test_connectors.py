@@ -34,6 +34,10 @@ from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.llm.spend_book import SendBound
 from promptpotter.infrastructure.run_scope import scoped
+from promptpotter.infrastructure.store.dataset_access import (
+    install_dataset,
+    read_dataset_definition,
+)
 from promptpotter.shared.errors import CellInfrastructureError
 
 
@@ -271,3 +275,32 @@ def test_a_second_n8n_endpoint_rekeys_no_cell_of_the_first(
     assert refused is not None and "['classify', 'route']" in refused, (
         "a dataset naming no endpoint ran on one of two"
     )
+
+
+# 2. A dataset's declared panel folds family→member by its connector's rule.
+
+
+def test_a_panel_member_laying_another_model_or_optimizer_keeps_no_family_call(
+    tmp_path: Path,
+) -> None:
+    """A kept ``route_order`` or ``nodes`` runs an inner campaign its member does not read as."""
+    family = {"nodes": {"l1_generate": {"config": {"model": "a/m", "route_order": ["a"]}}}}
+    member_model = {"nodes": {"l1_generate": {"config": {"model": "b/m"}}}}
+    for name, member in (("model", member_model), ("optimizer", {"optimizer": "gepa"})):
+        (tmp_path / name / "member").mkdir(parents=True)
+        (tmp_path / name / "family.yaml").write_text(
+            json.dumps({"panel": {"inner_campaign": {"optimization": family}}})
+        )
+        (tmp_path / name / "member" / "dataset.yaml").write_text(
+            json.dumps(
+                {
+                    "pipeline": {"connector": "promptpotter"},
+                    "panel": {"inner_campaign": {"optimization": member}},
+                }
+            )
+        )
+        definition = read_dataset_definition(install_dataset(tmp_path, f"{name}/member"))
+        assert definition is not None and definition.panel is not None, "guard"
+        assert definition.panel["inner_campaign"]["optimization"] == member, (
+            f"a member laying another {name} kept the family's call under its panel"
+        )

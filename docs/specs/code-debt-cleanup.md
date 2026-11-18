@@ -839,16 +839,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `Broken(degradation={})` raises `KeyError: 'fatal'` in `render/candidate.py::individual_summary`
   (small-6's report). Action: the factory builds a reading `degradation_reading` makes.
   **Re-test:** `individual_summary` renders a factory-cut arm.
-- **A panel's `inner_campaign` folds family→member by key, not by `CAMPAIGN_RULE`** (cite-fold's
-  report): `store/dataset_access.py::read_dataset_definition` lays the panel by
-  `layer_fold.py::untyped_rule`, so a member that changes a node's `model` or names another
-  `optimizer` keeps the family's `route_order` or `nodes`, which a campaign block's fold drops or
-  clears. The connector declares only the model its panel *resolves* to (`experiment_model`), which
-  for `promptpotter` (`ResolvedInnerPanel`) is not the declared panel's shape (`InnerTasks`).
-  Action: `connectors/protocol.py::Connector` declares the model its declared panel folds by,
-  `spawn.py`'s `CONNECTOR` names `InnerTasks`, whose `inner_campaign` lays by `CAMPAIGN_RULE`.
-  **Re-test:** a member changing `l1_generate`'s `model` under a family that sets `route_order`
-  resolves without that `route_order`.
 - **A campaign's cap count joins every cycle's bills to one cycle's other parts** (spend-served-fix's
   report): `served_dashboard.py::campaign_count` sets `metered_spend` (every cycle) beside this
   cycle's book's unreported, set-aside and calls out, so a sibling cycle's lapsed cells drop out of

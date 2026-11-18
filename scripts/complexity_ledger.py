@@ -133,7 +133,9 @@ BASELINE = {
     # `panel_hole` (`migrations/panel_hole_ending.py`); the chain is net 0 beside it.
     # spend-served (+19): the bench's set-aside is a hold on the payer its cells draw, and the
     # stop record and the dashboard word the book's count by part.
-    "package_lines": 111812,
+    # panel-rule-2 (+24): `Connector.declared_panel_model` and `layer_fold.py::LaidAs`, so a
+    # panel folds family→member by its connector's rule and `inner_campaign` by `CAMPAIGN_RULE`.
+    "package_lines": 111825,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

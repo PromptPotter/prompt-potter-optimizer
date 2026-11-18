@@ -17,7 +17,7 @@ from promptpotter.config.paths import install_datasets_root
 from promptpotter.connectors.protocol import Connector
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import CampaignLayer
-from promptpotter.domain.layer_fold import Layer, fold_layers, untyped_rule
+from promptpotter.domain.layer_fold import Layer, fold_layers
 from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
@@ -210,7 +210,7 @@ def campaign_defaults() -> dict[str, Any]:
 
 def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | None:
     """Per section, root first: ``pipeline`` replaces its top-level keys and merges its nodes,
-    ``campaign`` layers depth-first, ``source`` merges by key, ``panel`` at every depth, the deepest
+    ``campaign`` layers depth-first, ``source`` merges by key, ``panel`` by ``panel_rule``, the deepest
     ``card`` stands whole; its connector's node templates lie under the nodes (`with_node_templates`).
     A layer that is no definition layer raises ``FileUnreadableError`` by its path."""
     if not is_dataset_dir(dataset.directory):
@@ -235,12 +235,14 @@ def read_dataset_definition(dataset: ResolvedDataset) -> DatasetDefinition | Non
             panel_dir = path.parent
     if nodes:
         top["nodes"] = nodes
+    owner = connectors.CONNECTORS.table.get(str(top.get("connector")))
+    panel = fold_layers(owner.panel_rule, panels).document if owner and owner.owns_panel else None
     return DatasetDefinition(
         dataset.directory,
         with_node_templates(top),
         tuple(campaign),
         source,
-        fold_layers(untyped_rule, panels).document or None,
+        panel or None,
         panel_dir,
         _card(card),
     )
