@@ -50,7 +50,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 **What to try:** Read the `{node}:{code}` at the end of each `✂ broken` line.
 - `reasoning_budget_exhausted` or `output_truncated` — the model ran out of output tokens. Raise the node's `max_tokens`.
 - `reasoning_only_response` — the model stopped after reasoning without answering. Pick a different model or provider for the node.
-- `empty_response` — nothing parseable came back, often a refusal or an overloaded model. The optimizer replans away from it.
+- `empty_response` — nothing came back on that share of rows, often an overloaded model; a single empty row is a miss, never a cut. Pick a different model or provider for the node.
 
 ---
 

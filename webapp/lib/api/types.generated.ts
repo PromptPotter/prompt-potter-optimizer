@@ -3644,7 +3644,7 @@ export interface OptimizationConfig {
    * banked lift prior. */
   crowning_bar: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes';
   degradation_threshold: number;
-  /** End a candidate at the first FATAL sample (empty response, content-filtered,
+  /** End a candidate at the first FATAL sample (a backend 4xx, content-filtered,
    * structurally broken) without spending the rest of its budget. Active
    * while the degradation check runs (`degradation_threshold` > 0); the rate-
    * based check stays governed by that threshold. The bench's, run on every
@@ -5232,7 +5232,7 @@ export interface OptimizationLayer {
    * banked lift prior. */
   crowning_bar: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes' | null;
   degradation_threshold: number | null;
-  /** End a candidate at the first FATAL sample (empty response, content-filtered,
+  /** End a candidate at the first FATAL sample (a backend 4xx, content-filtered,
    * structurally broken) without spending the rest of its budget. Active
    * while the degradation check runs (`degradation_threshold` > 0); the rate-
    * based check stays governed by that threshold. The bench's, run on every
@@ -5644,7 +5644,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "dcd3abb26918c80c";
+export const SERVED_CONTRACT = "37b0dfec554b5c48";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

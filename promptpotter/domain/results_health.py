@@ -122,7 +122,7 @@ def ran_to_output_ceiling(facts: MeasuredCell) -> bool:
 
 
 def classify_result(facts: MeasuredCell) -> ResultClassification:
-    """Truncation is INFRA (a provider ceiling, recurring per sample); a backend 4xx is FATAL on one sighting.
+    """Truncation and an empty answer are INFRA, row-deterministic at best; a backend 4xx is FATAL at once.
 
     A fatal code is one row of the wound map: every wound is two axes. The DETECTION POINT picks the
     record, its score effect and lifecycle (parse-time → `ValidationFailure`, synthetic 0, per
@@ -160,10 +160,10 @@ def classify_result(facts: MeasuredCell) -> ResultClassification:
                 if finish_reason == "length"
                 else f"{node}:reasoning_only_response"
             )
-        elif finish_reason == "length":
-            infra.add(f"{node}:output_truncated")
         else:
-            fatals.add(f"{node}:empty_response")
+            infra.add(
+                f"{node}:{'output_truncated' if finish_reason == 'length' else 'empty_response'}"
+            )
 
     for adv in advisories:
         if adv.endswith(":content_filtered"):

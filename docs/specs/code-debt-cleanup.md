@@ -879,6 +879,14 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
   `campaign_spend` under the gate, admission's last scan that grows with history. Unmeasured.
   **Re-test:** hold time of `admit_and_share` at 10× today's charges file stays within 2× today's.
+- **`content_filtered` is fatal on one sighting, though a filter trips on one row's text**
+  (small-6's report): `domain/results_health.py::classify_result` keeps it on the fast path, against
+  its own law (a fatal code is deterministic for the whole config). **Held:** a measured case.
+  **Re-test:** an arm filtered on 1 of 18 rows is graded, never cut.
+- **`tests/factories.py::arm_state(cut="broken")` builds a reason no render reads**:
+  `Broken(degradation={})` raises `KeyError: 'fatal'` in `render/candidate.py::individual_summary`
+  (small-6's report). Action: the factory builds a reading `degradation_reading` makes.
+  **Re-test:** `individual_summary` renders a factory-cut arm.
 
 ## Held — no wave-4 chain yet
 

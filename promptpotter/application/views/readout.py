@@ -471,8 +471,8 @@ class ReadoutProjection(Projection):
         w = 66
         assert scores.position is not None
         label, total = scores.label, scores.position.total
-        cut = isinstance(scores, Cut) and scores.kind == "eliminated"
-        if self._block_racing and fold is not None and arm_elimination(scores) is not None:
+        cut = isinstance(scores, Cut)
+        if self._block_racing and fold is not None and (cut or arm_elimination(scores)):
             block = -(-fold.walked // self._block_size)
             self._block_decided.setdefault(block, []).append((label, cut))
         # No reading yet: the election that pairs it against its reference has not run.

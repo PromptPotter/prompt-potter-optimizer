@@ -210,7 +210,7 @@ class OptimizationConfig(OptimizerChoice):
     degradation_threshold: Annotated[float, Knob(Estimand.STOPPING)] = Field(ge=0.0, le=1.0)
     degradation_fatal_fastpath: Annotated[bool, Knob(Estimand.STOPPING)] = Field(
         description=(
-            "End a candidate at the first FATAL sample (empty response, "
+            "End a candidate at the first FATAL sample (a backend 4xx, "
             "content-filtered, structurally broken) without spending the rest of "
             "its budget. Active while the degradation check runs "
             "(`degradation_threshold` > 0); the rate-based check stays governed by "

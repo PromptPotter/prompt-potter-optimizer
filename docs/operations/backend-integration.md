@@ -25,7 +25,7 @@ A key is ABSENT when the backend reported nothing; a present key holds its decla
 | `cost_usd` | the node's tokens are priced at our rate table as `rate_priced_usd` — counted by every ceiling, never called spent |
 | `model` | spend buckets by the provider slug |
 | `served_by` | host attribution unavailable; no in-repo connector writes it |
-| `finish_reason` | a truncation cannot be told from an empty response; every empty terminal grades fatal `empty_response` |
+| `finish_reason` | a truncation cannot be told from an empty response; every empty terminal grades `empty_response`, a miss the degradation rate counts |
 | `reasoning` | the thinking share is unreadable, so a slow node reads as a slow provider |
 | `cache_read` | the prefix-cache reading is `unreported` — rendered `c?`, distinct from `c0%` |
 | `unreported_attempts` | a resend that reported no usage bills nothing; each counted one is held at one attempt's bound |

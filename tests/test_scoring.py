@@ -233,6 +233,7 @@ from promptpotter.application.scoring.selection import (
     level_band,
     readable_lifts,
 )
+from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.application.views.render.ansi import (
     render_population,
     render_round_start,
@@ -247,13 +248,16 @@ from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import (
     ArmPosition,
     BankedSearchPointError,
+    Broken,
     Concluded,
     Cut,
     CutKind,
     Measured,
+    Measuring,
     PointContext,
     Proposed,
     Refused,
+    degradation_reading,
     is_leader_eligible,
 )
 from promptpotter.domain.bench import (
@@ -3489,6 +3493,58 @@ def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does
     assert rated.check([fatal[0], *clean[:4]]) is None, "1/5 = 0.2, under the bar"
     rate_cut = rated.check([*fatal, *clean[:2]])
     assert rate_cut is not None and rate_cut.check_result["degraded_rate"] == pytest.approx(0.5)
+    late = degradation.check([*(measurement(i, 1.0) for i in range(17)), fatal[1]])
+    assert late is not None
+    assert (late.check_result["degraded_count"], late.check_result["total_scored"]) == (1, 18), (
+        "a one-row cut read every row it scored as degraded"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_empty_answer_is_a_graded_miss_and_cuts_only_by_the_rate() -> None:
+    """banking77, 2026-11-18: one stop-finished empty answer at row 18 cut an arm that answered 17."""
+    empty: dict[str, Any] = {
+        "predicted": "",
+        "pipeline_data": {
+            "terminal_node": "llm_only",
+            "step_tokens": {"llm_only": {"finish_reason": "stop", "reasoning": 0}},
+            "diagnostics": {"warnings": [{"step": "llm_only", "code": "content_empty"}]},
+        },
+    }
+    degradation = DegradationCheck(threshold=0.4, min_samples=3)
+    one_empty = [*(measurement(i, 1.0) for i in range(17)), measurement(17, 0.0, **empty)]
+    assert is_deprecated(one_empty[-1].facts), "an empty answer left the degradation rate"
+    assert degradation.check(one_empty) is None, "one empty answer cut an arm that answered 17"
+    assert scoreable_rows(one_empty)[-1].grade.fitness == 0.0, "the empty row is not a graded miss"
+    mostly_empty = [measurement(i, 0.0, **empty) for i in range(2)] + [measurement(2, 1.0)]
+    cut = degradation.check(mostly_empty)
+    assert cut is not None and cut.check_result["fatal"] is not True, "the rate did not cut it"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_block_line_counts_an_arm_the_degradation_check_cut(built_stores: Stores) -> None:
+    """banking77, 2026-11-18: the one arm racing, cut broken at row 18, read `none cut · 1 survive`."""
+    readout = ReadoutProjection(seat(built_stores).cycle.session, sink=None)
+    walked = arm_state("c1", position=ArmPosition(round=1, idx=1, total=1), total=18, cut="broken")
+    assert isinstance(walked, Cut) and isinstance(walked.reason, Broken)
+    reading = degradation_reading(
+        source="degradation",
+        degraded_count=1,
+        total_scored=18,
+        warning_types={"llm_only:content_filtered": 1},
+        dominant_warning="llm_only:content_filtered",
+        fatal=True,
+    )
+    broken = walked.model_copy(
+        update={"reason": Broken(failure=walked.reason.failure, degradation=reading)}
+    )
+    block = {"n": 1, "of": 100, "size": 18, "racing": 1}
+    readout.on_arm_measuring(
+        Measuring(**walked.model_dump(exclude={"state", "reason"}), block=block)
+    )
+    readout.on_arm_concluded(broken, score_summary(total=18, walked=18))
+    (line,) = readout._render_block_lines()
+    assert line.endswith(f"cut {broken.label} · 0 survive"), line
 
 
 @pytest.mark.usefixtures("optimizing_memory")

@@ -43,17 +43,19 @@ class DegradationCheck:
         self.fatal_fastpath = fatal_fastpath
 
     def check(self, results: Sequence[GradedCell]) -> StopSignal | None:
+        n = len(results)
+        # Deprecated samples only: an advisory transient must not eliminate a candidate.
+        degraded = sum(1 for r in results if is_deprecated(r.facts))
         if self.fatal_fastpath and results:
             classification = classify_result(results[-1].facts)
             fatal = classification.dominant_fatal
             if fatal is not None:
-                n = len(results)
                 return BrokenSignal(
                     self.name,
                     "broken",
                     degradation_reading(
                         source=self.name,
-                        degraded_count=n,
+                        degraded_count=degraded,
                         total_scored=n,
                         warning_types=dict.fromkeys(classification.fatal_codes, 1),
                         dominant_warning=fatal,
@@ -61,12 +63,7 @@ class DegradationCheck:
                     ),
                 )
 
-        n = len(results)
-        if n < self.min_samples:
-            return None
-        # Deprecated samples only: an advisory transient must not eliminate a candidate.
-        degraded = sum(1 for r in results if is_deprecated(r.facts))
-        if degraded / n < self.threshold:
+        if n < self.min_samples or degraded / n < self.threshold:
             return None
 
         wtypes: Counter[str] = Counter()

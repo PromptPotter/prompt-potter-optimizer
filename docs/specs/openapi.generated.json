@@ -12235,7 +12235,7 @@
             "type": "string"
           },
           "degradation_fatal_fastpath": {
-            "description": "End a candidate at the first FATAL sample (empty response, content-filtered, structurally broken) without spending the rest of its budget. Active while the degradation check runs (`degradation_threshold` > 0); the rate-based check stays governed by that threshold. The bench's, run on every optimizer's arms.",
+            "description": "End a candidate at the first FATAL sample (a backend 4xx, content-filtered, structurally broken) without spending the rest of its budget. Active while the degradation check runs (`degradation_threshold` > 0); the rate-based check stays governed by that threshold. The bench's, run on every optimizer's arms.",
             "title": "Degradation Fatal Fastpath",
             "type": "boolean"
           },
@@ -12420,7 +12420,7 @@
                 "type": "null"
               }
             ],
-            "description": "End a candidate at the first FATAL sample (empty response, content-filtered, structurally broken) without spending the rest of its budget. Active while the degradation check runs (`degradation_threshold` > 0); the rate-based check stays governed by that threshold. The bench's, run on every optimizer's arms.",
+            "description": "End a candidate at the first FATAL sample (a backend 4xx, content-filtered, structurally broken) without spending the rest of its budget. Active while the degradation check runs (`degradation_threshold` > 0); the rate-based check stays governed by that threshold. The bench's, run on every optimizer's arms.",
             "title": "Degradation Fatal Fastpath"
           },
           "degradation_threshold": {
