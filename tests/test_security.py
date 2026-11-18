@@ -214,7 +214,7 @@ from promptpotter.domain.cycle_paths import (
     encode_cycle_path,
 )
 from promptpotter.domain.dataset_name import validate_dataset_name
-from promptpotter.domain.draft_edit import EditDraftPatch, OptimizationOverrides
+from promptpotter.domain.draft_edit import ConfigEdit, EditDraftPatch, OptimizationOverrides
 from promptpotter.domain.hierarchy import SubtreeCampaign
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job, LaunchMove, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -3768,6 +3768,7 @@ async def test_discarding_its_draft_moves_nothing_of_an_edit_command(
 
 
 # The Start's retry and its draft's edit are read after the mint and close that consumed both.
+@pytest.mark.usefixtures("offline")
 async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retry_answers_it(
     monkeypatch: pytest.MonkeyPatch,
     command_log: _CommandLog,
@@ -4254,7 +4255,10 @@ async def test_a_head_to_head_start_withdrawn_unrun_closes_the_client_its_arms_o
     _, caller, _, answered, keyed, upload = host_tenant
     draft = await answered("ingest-upload", keyed(upload))
     resolved = EditDraftPatch(
-        raw_task_description="Answer it.", column_query="question", column_ground_truth="answer"
+        raw_task_description="Answer it.",
+        column_query="question",
+        column_ground_truth="answer",
+        config=ConfigEdit.model_validate({"dataset_split": {"bench": 1}}),
     )
     dispatcher = CommandDispatcher(caller.stores)
     edit = EditDraftCampaignPayload(draft_id=draft["draft_id"], patch=resolved)
@@ -4275,10 +4279,9 @@ async def test_a_head_to_head_start_withdrawn_unrun_closes_the_client_its_arms_o
     assert isinstance(admitted, AdmittedHeadToHead), "guard: the arms were not admitted"
     assert isinstance(admitted.source, CheckinArms), "guard"
     client = admitted.source.opened.session.backend_client
-    _ = client.http
     await admitted.withdraw(RuntimeError("the act raised past its answer"))
     admitted.source.claim.release()
-    assert client._http is None or client._http.is_closed, (
+    assert client.http.is_closed, (
         "a head-to-head withdrawn before its launch left its arms' backend client open"
     )
 

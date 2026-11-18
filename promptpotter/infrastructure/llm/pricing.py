@@ -283,7 +283,7 @@ class RouteAnswer:
 
 ROUTE_ANSWER = TypeAdapter(RouteAnswer)
 _OUTAGE_MEMO_S = 60.0
-_ROUTE_OUTAGE: dict[str, tuple[float, str]] = {}
+_ROUTE_OUTAGE: dict[Path, tuple[float, str]] = {}
 
 
 class PriceListUnreachableError(SendRefusedError):
@@ -408,7 +408,7 @@ def _remembered(memo_key: str) -> RateCeiling | None | object:
         _TTL_SECONDS if answer.ceiling is not None else _OUTAGE_MEMO_S
     ):
         return answer.ceiling
-    outage = _ROUTE_OUTAGE.get(memo_key)
+    outage = _ROUTE_OUTAGE.get(_route_answer_path(memo_key))
     if outage is not None and time.time() - outage[0] < _OUTAGE_MEMO_S:
         raise PriceListUnreachableError(outage[1])
     return _MISS
@@ -424,7 +424,7 @@ def _openrouter_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeili
     try:
         ceiling = _fetch_route_ceiling(key, pinned)
     except PriceListUnreachableError as exc:
-        _ROUTE_OUTAGE[memo_key] = (time.time(), str(exc))
+        _ROUTE_OUTAGE[_route_answer_path(memo_key)] = (time.time(), str(exc))
         raise
     now = time.time()
     held = _route_answer(memo_key)

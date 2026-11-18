@@ -181,7 +181,15 @@ class BackendClient:
         self.workload = workload
         self.backpressure = Backpressure("cells")
         self._guard = connector.session_factory()
-        self._http: httpx.AsyncClient | None = None
+        self.http = httpx.AsyncClient(
+            timeout=_HTTP_TIMEOUT_S,
+            headers=connector.credential_header() or None,
+            transport=httpx.AsyncHTTPTransport(
+                verify=tls_context(),
+                socket_options=KEEPALIVE_OPTIONS,
+                limits=httpx.Limits(keepalive_expiry=_KEEPALIVE_EXPIRY_S),
+            ),
+        )
         self._machine_slots = (
             MachineSlots(
                 jobs_dir,
@@ -230,24 +238,8 @@ class BackendClient:
             cfg.model, cfg.provider, names_provider=self._connector.model_names_provider
         )
 
-    @property
-    def http(self) -> httpx.AsyncClient:
-        if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(
-                timeout=_HTTP_TIMEOUT_S,
-                headers=self._connector.credential_header() or None,
-                transport=httpx.AsyncHTTPTransport(
-                    verify=tls_context(),
-                    socket_options=KEEPALIVE_OPTIONS,
-                    limits=httpx.Limits(keepalive_expiry=_KEEPALIVE_EXPIRY_S),
-                ),
-            )
-        return self._http
-
     async def aclose(self) -> None:
-        if self._http and not self._http.is_closed:
-            await self._http.aclose()
-            self._http = None
+        await self.http.aclose()
 
     async def _reachable_within(self, down_since: float) -> bool:
         abort = run_scope().abort_check

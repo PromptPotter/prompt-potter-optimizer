@@ -79,27 +79,12 @@ row it closes.
   equals-main, so it lands with a paid L4 re-measure. **Rides with:** admit-2, whose Owns hold
   `spawn.py::_open_seat`. **Re-test:** `git grep -n "mint(\|slotless_share(" -- promptpotter/application/runner/inner/spawn.py`
   lists the admission before the mint.
-- **A closed `BackendClient` reopens its pool on next use**: `infrastructure/backend.py::BackendClient.http`
-  (`:187`) builds a new `httpx.AsyncClient` when `_http.is_closed`, so a send after the run's close
-  leaks a pool nobody closes. Action: a closed client refuses a send (`http` built in `__init__`,
-  `aclose` closes it; httpx refuses the rest). **Rides with:** the next chain owning `tests/test_spend.py`
-  (admit-3 cut it there): `test_a_backend_cell_is_never_sent_again_while_it_may_still_bill` builds one
-  client per `aclosing`, `test_security.py:4264-4267` asserts `client.http.is_closed`. **Re-test:**
-  `git grep -n "is_closed" -- promptpotter/infrastructure/backend.py` is empty.
-
 - **Three launch faults from a code review (reported; verify each at its line first)**: `jobs/head_to_head.py:178`
   leaves a partial mint's arms unstamped, so a retry refuses `arm_taken`; `mint_and_start.py:108` and
   `checkin.py:93` leak the `BackendClient` they open when the mint is refused; ties between
   launches broken on a random `job_id` can refuse two head-to-head arms with one stamp each other
   `launch_contended`. Action: one mint door owns the client and the stamp.
   **Rides with:** admit-2.
-- **A head-to-head on a bank with no `dataset_split` runs blind** (✓): `jobs/mint.py:484-524`'s
-  `arm_plans` ("every refusal it owes") never checks `partition.bench`, so the forced `at_end`
-  (`:207`) is skipped (`loop.py:229`) and every arm spends its full budget reading "no rows held out".
-  Action: `arm_plans` refuses it, after the spend refusals. **Rides with:** the next chain owning
-  `tests/test_spend.py` (admit-3 cut it there): its duel bank at `:4914` declares `dataset_split.bench`,
-  as do `test_security.py`'s withdrawn head-to-head and `test_identity.py`'s two arm tests (the
-  replicate one on 35 rows: capo needs a 30-row search).
 - **A draft opened from the CLI dead-ends** (reported): `open-dataset-draft` and `open-origin-draft`
   have no verb that edits, resolves or starts them; and the upload bound is spelled twice
   (`cli/commands/launch.py::_ingest_checkin` vs `deps.py:149-152`). Action: `new --draft ID`, and one bound. **Rides with:** admit-2.
@@ -837,20 +822,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `urlopen` / `httpx` send outside the `offline` fixture, so a fact missing it spends a real fetch;
   three did until spend-4. Action: the conftest world refuses unrouted network by default.
   **Re-test:** a fact resolving an OpenRouter plan without `offline` raises.
-- **The door test reads `campaign_count`, not a door** (spend-served-fix's report):
-  `tests/test_spend.py::test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it` calls
-  the helper, since `current_caps` serves parts only while a producer appends. Action: drive it
-  through `current_caps` under a held, appending cycle (`test_security.py`'s `held_cycle`, moved
-  into `factories.py`). **Re-test:** the test fails when `armed_caps` drops `count=`.
-- **A process-global outage memo leaks across tests** (l4-words-fix's report):
-  `infrastructure/llm/pricing.py::_ROUTE_OUTAGE` is a module dict; in the full suite
-  `test_security.py::test_a_provider_error_on_a_live_flow_files_one_refusal_in_fixed_words` leaves it
-  holding a real-proxy fetch failure, so a later fact pricing an OpenRouter route refuses "Price list
-  unreachable". Suspected: a background route refresh (`pricing.py::refresh_route_answers`, the reaper's) outlives
-  the `offline` fixture of an app-lifespan test. Action: key the memo where a test's world resets it
-  and find the send that escapes `offline`. **Re-test:**
-  `test_an_inner_runs_stop_reaches_its_outer_cell_off_the_cycle_it_ended_on` passes without its
-  `_ROUTE_OUTAGE` monkeypatch, run after that fact.
 - **`l1_critique` on minimax runs its first cluster to `max_tokens`** (three sightings 2026-11-18:
   two dyck inner cells, `bbh-multistep-arithmetic-8b__908474` round 0, 26.7k chars, `finish=length`):
   the reply fails inside `failure_highlights.0` (`mechanism`, `claim` and `priority_fix` missing), so

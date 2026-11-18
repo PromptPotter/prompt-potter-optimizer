@@ -519,6 +519,12 @@ async def arm_plans(
             unpriced=() if bound is None else bound.unpriced,
             measured_cell_usd=None if measured is None else measured.usd,
         )
+        if not plan.partition.bench:
+            raise PayloadInvalidError(
+                f"arm {_arm_of(plan).arm_key} holds no rows out: a head-to-head is judged on its bench, "
+                "so declare a dataset_split with bench rows",
+                code="arm_bench_unsplit",
+            )
     return plans
 
 

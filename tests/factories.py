@@ -31,10 +31,12 @@ from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.jobs.launcher.admission import (
     admit_slotless,
+    claim_cycle,
     slotless_share,
 )
 from promptpotter.application.jobs.mint import declare, mint_framed_cycle
 from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     bench_choice,
@@ -101,7 +103,7 @@ from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult, WallClock
-from promptpotter.domain.job import EmbeddedRun, InnerRun
+from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun, LaunchMove
 from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
@@ -898,6 +900,26 @@ def walking_cycle(stores: Stores) -> tuple[CycleHop, Path]:
     CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(state=Running()))
     hold_cycle(cycle_dir)
     return hop, cycle_dir
+
+
+def run_holding(stores: Stores, hop: CycleHop) -> str:
+    """Minted *hop* held by a started run's job walking its loop: the job's hold on the cycle's
+    ledger, the cycle declared running under its lock. The job's id."""
+    registry = JobRegistry.attach(stores.jobs_dir)
+    job = registry.create(
+        user_id=str(stores.identity.user_id),
+        principal_id=str(stores.identity.user_id),
+        workspace=stores.campaigns.workspace,
+        hop=hop,
+        holder=CampaignLaunch(dataset_name="d"),
+    )
+    for move in (LaunchMove.ADMIT, LaunchMove.START):
+        registry.move(job.job_id, move)
+    claim_cycle(stores, hop, job.job_id)
+    cycle_dir = stores.campaigns.cycle_dir(hop)
+    CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(state=Running()))
+    hold_cycle(cycle_dir)
+    return job.job_id
 
 
 def arm_walk(

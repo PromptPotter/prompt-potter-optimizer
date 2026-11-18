@@ -2703,13 +2703,24 @@ def test_every_door_declares_through_one_seam_as_a_delta_over_todays_defaults(
     )
 
 
+def _arming(stores: Stores, decl: _Declared) -> tuple[Session, ConfigLayers, list[Sample]]:
+    """An arm's session on 35 rows holding 5 out: an arm is judged on its bench, and capo searches 30."""
+    rows = samples(35, "TRUE", query="claim ")
+    door = decl.door.model_dump(mode="json", exclude_unset=True)
+    door_layers = ConfigLayers({}, {**door, "dataset_split": {"bench": 5}})
+    return (
+        loop_session(stores, decl.opened.pipeline_schema, rows, dataset=decl.opened.dataset),
+        door_layers,
+        rows,
+    )
+
+
 def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
     built_stores: Stores, decl: _Declared
 ) -> None:
     stores = built_stores
-    opened, rows_30, _, door, _ = decl
-    arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
-    door_layers = ConfigLayers({}, door.model_dump(mode="json", exclude_unset=True))
+    door = decl.door
+    arming, door_layers, rows = _arming(stores, decl)
 
     def arm_of(key: str, budget: Budget, *, h2h: str = "h") -> list[CyclePlan]:
         request = HeadToHeadRequest(
@@ -2722,7 +2733,7 @@ def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
             ],
             budget=budget,
         )
-        return asyncio.run(arm_plans(arming, door_layers, request, rows_30))
+        return asyncio.run(arm_plans(arming, door_layers, request, rows))
 
     # No dollar cap: a backend holding its own sends prices no cell before a run.
     mint_arms(arm_of("a", Budget(usd=None, rounds=2)), adopting=None)
@@ -2765,9 +2776,7 @@ def test_a_replicate_is_numbered_at_the_mint_by_its_treatment_across_every_act(
     # A later act's arm on a standing treatment is its next replicate, on its own seed, and arms of
     # one replicate share theirs (common random numbers).
     stores = built_stores
-    opened, rows_30, _, door, _ = decl
-    arming = loop_session(stores, opened.pipeline_schema, rows_30, dataset=opened.dataset)
-    door_layers = ConfigLayers({}, door.model_dump(mode="json", exclude_unset=True))
+    arming, door_layers, rows = _arming(stores, decl)
 
     def act(h2h: str, *arms: tuple[str, OptimizationOverrides]) -> dict[str, Compare]:
         request = HeadToHeadRequest(
@@ -2776,7 +2785,7 @@ def test_a_replicate_is_numbered_at_the_mint_by_its_treatment_across_every_act(
             budget=Budget(usd=None, rounds=2),
         )
         minted = mint_arms(
-            asyncio.run(arm_plans(arming, door_layers, request, rows_30)), adopting=None
+            asyncio.run(arm_plans(arming, door_layers, request, rows)), adopting=None
         )
         purposes: dict[str, Compare] = {}
         for cycle in minted:

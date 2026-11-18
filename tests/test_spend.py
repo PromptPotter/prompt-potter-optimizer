@@ -53,6 +53,7 @@ from factories import (
     minted_dataset,
     on_jumping_clock,
     pipeline_schema,
+    run_holding,
     run_wiring,
     samples,
     score_summary,
@@ -144,7 +145,6 @@ from promptpotter.application.scoring.search_point_scorer import (
 )
 from promptpotter.application.served_dashboard import (
     ServedDashboard,
-    campaign_count,
     current_caps,
     served_dashboard,
 )
@@ -253,6 +253,7 @@ from promptpotter.domain.spend import (
     CeilingMeter,
     HeldBudget,
     KeySource,
+    SpendCount,
     SpendRollup,
     StepUsage,
     TokenAccount,
@@ -1592,8 +1593,6 @@ async def test_an_inner_runs_stop_reaches_its_outer_cell_off_the_cycle_it_ended_
         raise SendRefusedError("Insufficient credits", category=ErrorCategory.PROVIDER_CREDIT)
 
     monkeypatch.setattr(loop, "execute_round", _round)
-    # The process's outage memo, which an earlier fact's real fetch can leave set.
-    monkeypatch.setattr(pricing, "_ROUTE_OUTAGE", {})
     with (
         scoped(account=built_stores),
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
@@ -2836,7 +2835,6 @@ def test_a_price_list_that_could_not_be_fetched_is_an_outage_never_an_unpriced_c
             )
         return outage.value
 
-    # A model no other call in the suite names, so neither route memo holds it yet.
     with monkeypatch.context() as patched:
         patched.setattr(urllib.request, "urlopen", down)
         outage = asyncio.run(held_twice())
@@ -3319,11 +3317,11 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
         ],
     }
     offline.backend.asked.clear()
-    remote = backend_client(jobs, session_factory=TermNormSession)
     whole_cell = SendBound(input_tokens=100, output_tokens=50, usd=0.01)
     wallet = spend_book()
 
     async def remote_cell() -> Any:
+        remote = backend_client(jobs, session_factory=TermNormSession)
         async with (
             contextlib.aclosing(remote),
             CellEnvelope(600.0, attempts=remote.connector.cell_attempts, label="q"),
@@ -4678,7 +4676,7 @@ def test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it(tmp_pa
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
     with scoped(account=stores):
         _pay(ledger, 0.2, input_tokens=1_000, output_tokens=0)
-    job, cell, bound = uuid.uuid4().hex, uuid.uuid4().hex, Budget(usd=0.2, tokens=0)
+    job, cell, bound = run_holding(stores, hop), uuid.uuid4().hex, Budget(usd=0.2, tokens=0)
     for record in (
         Hold.of_job(job, Budget(usd=1.0, tokens=0), parent=None),
         Hold(
@@ -4707,16 +4705,20 @@ def test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it(tmp_pa
     assert book.exhausted() is None, "vacuous — the cap tipped before the set-aside"
     book.set_aside(0.1, 0, paid_by="host")
     assert book.exhausted() is ErrorCategory.SPEND_CEILING, "the set-aside never tipped the cap"
-    served = campaign_count(stores, hop, meters, hold_id=job)
+
+    def served() -> SpendCount:
+        count = next(cap for cap in current_caps(stores, hop).caps if cap.axis == "usd").count
+        assert count is not None, "a door served a live run's money cap with no count"
+        return count
+
     for part in ("billed", "unreported", "set_aside", "out"):
-        assert getattr(served, part).usd_amount == pytest.approx(
+        assert getattr(served(), part).usd_amount == pytest.approx(
             getattr(book.count(), part).usd_amount
         ), f"a door served the {part} short of the count the book stopped on"
     book.release_aside()
-    assert (
-        campaign_count(stores, hop, meters, hold_id=job).set_aside.usd_amount == 0
-        and book.exhausted() is None
-    ), "a released set-aside still binds"
+    assert served().set_aside.usd_amount == 0 and book.exhausted() is None, (
+        "a released set-aside still binds"
+    )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -5029,18 +5031,13 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "duel"))
     monkeypatch.setenv(PROVIDER_KEYS[0], NOT_A_KEY)
     stores = local_stores(tenant=None)
-    write_yaml(
-        stores.tenant_datasets.dataset_dir("duel") / DEFINITION_FILE,
-        {
-            "pipeline": {
-                "connector": "termnorm",
-                "nodes": {
-                    "llm_only": {"config": {"provider": "groq", "model": "openai/gpt-oss-120b"}}
-                },
-            },
-            "campaign": {"optimization": {"degradation_threshold": 0.4}},
-        },
-    )
+    definition = stores.tenant_datasets.dataset_dir("duel") / DEFINITION_FILE
+    pipeline = {
+        "connector": "termnorm",
+        "nodes": {"llm_only": {"config": {"provider": "groq", "model": "openai/gpt-oss-120b"}}},
+    }
+    campaign: dict[str, Any] = {"optimization": {"degradation_threshold": 0.4}}
+    write_yaml(definition, {"pipeline": pipeline, "campaign": campaign})
     bank = Bank.of(samples(60, "TRUE"))
     stores.tenant_datasets.put_bank(bank)
     stores.tenant_datasets.relabel("duel", bank.dataset_hash)
@@ -5079,6 +5076,16 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
         asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(cheap, door=Door.HOST)))
     assert short.value.code == "spend_cap_below_round", "guard: refused for its round"
     assert not campaigns(), "an arm whose round outspends its cap took a key"
+
+    # An arm is judged on its bench: a funded act on a bank holding no rows out mints nothing.
+    with pytest.raises(PayloadInvalidError) as blind:
+        unsplit = asked("duel-2", pair, Budget(usd=50.0, rounds=1))
+        asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(unsplit, door=Door.HOST)))
+    assert blind.value.code == "arm_bench_unsplit", "guard: refused for its split"
+    assert not campaigns(), "an arm with no bench rows took a key"
+    write_yaml(
+        definition, {"pipeline": pipeline, "campaign": {**campaign, "dataset_split": {"bench": 10}}}
+    )
 
     # The terminal's verb: one optimizer twice, apart by a knob, each arm bound by the one budget.
     monkeypatch.setattr(
@@ -5637,7 +5644,7 @@ def unframed_session(built_stores: Stores) -> _Framing:
     return _Framing(framing, declared, rows)
 
 
-@pytest.mark.usefixtures("account_bound")
+@pytest.mark.usefixtures("account_bound", "offline")
 def test_a_framing_paid_before_its_cycle_exists_stays_billed_past_its_refused_mint(
     built_stores: Stores,
     monkeypatch: pytest.MonkeyPatch,
@@ -5661,7 +5668,7 @@ def test_a_framing_paid_before_its_cycle_exists_stays_billed_past_its_refused_mi
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"
 
 
-@pytest.mark.usefixtures("account_bound")
+@pytest.mark.usefixtures("account_bound", "offline")
 def test_a_mint_that_dies_before_its_commit_leaves_no_campaign_to_list_run_or_bill(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch, unframed_session: _Framing
 ) -> None:
