@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from statistics import fmean
@@ -30,7 +30,12 @@ from promptpotter.application.scoring.search_point_scorer import (
     score_search_point,
 )
 from promptpotter.application.scoring.selection import level_band
-from promptpotter.domain.arms import Concluded, PointContext, candidate_label
+from promptpotter.domain.arms import (
+    BankedSearchPointError,
+    Concluded,
+    PointContext,
+    candidate_label,
+)
 from promptpotter.domain.bench import (
     BENCH_HEADLINE,
     COLUMN_GRADE,
@@ -134,9 +139,15 @@ class _Graded(NamedTuple):
 
 
 def _read_pass(
-    stores: Stores, bench_pass: BenchPass, scorer: Scorer, *, tolerance: int
+    stores: Stores,
+    bench_pass: BenchPass,
+    scorer: Scorer,
+    *,
+    tolerance: int,
+    refused: Collection[str],
 ) -> _PassReading:
-    """A pass stopped short, or past *tolerance* unscored rows, reads NOTHING, never a level over fewer rows."""
+    """A pass refused, stopped short, or past *tolerance* unscored rows, reads NOTHING, never a
+    level over fewer rows."""
     expected = len(bench_pass.sample_keys)
     held_out = individual_cells([bench_pass.walk()], bench_pass.arm.key, RoleScope.BENCH)
     sheet = walked_rows(stores, held_out, scorer).standing()
@@ -146,6 +157,8 @@ def _read_pass(
         outcome = PassOutcome(state, bench_pass.stop, scored, expected, bench_pass.reads_before)
         return _PassReading(bench_pass, None, outcome, sheet)
 
+    if bench_pass.arm.key in refused:
+        return unread(ReadingState.MEMBER_UNSCOREABLE)
     if bench_pass.stop is not None:
         return unread(bench_pass.stop.state)
     if expected - scored > tolerance:
@@ -239,7 +252,9 @@ def read_curve(
     origin = passes.origin.arm.key
     spent = _standing(spans, origin)
     standing = [*spent, *[spent[-1] if spent else origin] * (budget - len(spent))]
-    read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
+    read = partial(
+        _read_pass, stores, scorer=scorer, tolerance=passes.tolerance, refused=passes.refused
+    )
     reads = {
         key: None if (taken := passes.pass_of(key)) is None else read(taken)
         for key in dict.fromkeys([origin, *standing])
@@ -441,20 +456,17 @@ def bench_members(
     return _grade_line(stores, passes, scorer, line).members
 
 
-def _standing_pass(passes: BenchPasses, run: LiveCycleRun) -> BenchPass | None:
-    if run.selection is None or not run.rounds_closed:
-        return None
-    return passes.pass_of(run.selection.key)
-
-
 def _grade_line(stores: Stores, passes: BenchPasses, scorer: Scorer, line: BenchLine) -> _Graded:
     instrument_id = line.instrument_id
     assert instrument_id is not None, "a line that banked a pass drew its bank"
-    read = partial(_read_pass, stores, scorer=scorer, tolerance=passes.tolerance)
+    read = partial(
+        _read_pass, stores, scorer=scorer, tolerance=passes.tolerance, refused=passes.refused
+    )
     member = partial(_bench_member, (line.hop,), instrument_id=instrument_id)
     origin = read(passes.origin)
     a = member(origin)
-    selected_pass = _standing_pass(passes, line.run)
+    standing = line.run.selection if line.run.rounds_closed else None
+    selected_pass = None if standing is None else passes.pass_of(standing.key)
     if selected_pass is None:
         return _Graded(origin, None, (a, None), None)
     # One pass read twice is one member: the pair says `same_individual`, never a 0.0 lift.
@@ -544,9 +556,8 @@ async def _send_on_bench(
                 else None,
             )
         )
-        taken = _bench_pass(
-            session, search_point, arm=arm, cells=scored.cells, stop=stop, reads_before=reads_before
-        )
+        sp_hash = search_point.sp_hash(session.pipeline_schema)
+        taken = _bench_pass(session, sp_hash, arm, scored.cells, stop, reads_before)
         if scored.halt is not None:
             graded(session, taken, subject=subject)
         return taken, scored.halt
@@ -556,8 +567,7 @@ async def _send_on_bench(
 
 def _bench_pass(
     session: Session,
-    search_point: JobSearchPoint,
-    *,
+    sp_hash: str,
     arm: ArmName,
     cells: list[WalkedCell],
     stop: PassStop | None,
@@ -566,7 +576,7 @@ def _bench_pass(
     bench = session.state.scoring.partition.bench
     return BenchPass(
         arm=arm,
-        sp_hash=search_point.sp_hash(session.pipeline_schema),
+        sp_hash=sp_hash,
         cells=cells,
         sample_keys=[s.key for s in bench],
         stop=stop,
@@ -587,10 +597,18 @@ def graded(
     *,
     subject: BenchSubject,
     reserve: Budget | None = None,
+    refusal: str | None = None,
 ) -> None:
-    """The one write a line's passes are folded from: a pass no call here follows is lost with the process."""
+    """The one write a line's passes are folded from: a pass no call here follows is lost with the
+    process. A *refusal* banks a pass that sent nothing, which the fold reads refused."""
     tolerance = _tolerance(session)
-    read = _read_pass(session.store, bench_pass, session.state.scoring.scorer, tolerance=tolerance)
+    read = _read_pass(
+        session.store,
+        bench_pass,
+        session.state.scoring.scorer,
+        tolerance=tolerance,
+        refused=() if refusal is None else (bench_pass.arm.key,),
+    )
     append_record(
         PassGradedRecord(
             verification=bench_pass,
@@ -600,13 +618,9 @@ def graded(
             reserve_tokens=None if reserve is None else reserve.token_amount,
             reading=read.reading,
             state=read.outcome.state,
-            refusal=None,
+            refusal=refusal,
         )
     )
-
-
-def _with_selection(passes: BenchPasses, taken: BenchPass) -> BenchPasses:
-    return passes.model_copy(update={"selections": {**passes.selections, taken.arm.key: taken}})
 
 
 def _adoptions(
@@ -664,8 +678,16 @@ async def bench_selection(
     """Only a pause escapes a pass: any other stop ends it short, banked as a stopped pass, and sends no other."""
     origin = banked.origin
     adopted = _adoptions(session, rounds, origin=origin.arm.key, trigger=trigger)
-    # Every member rebuilds before any sends: a moved searchpoint refuses the roster unspent.
-    roster = {key: (arm, points.measured(head)) for key, (arm, head) in adopted.items()}
+    # Every member rebuilds before any sends: a moved searchpoint banks its member's pass refused,
+    # unspent, and the rest of the roster is graded.
+    roster: dict[str, tuple[ArmName, JobSearchPoint]] = {}
+    for key, (arm, head) in adopted.items():
+        try:
+            roster[key] = (arm, points.measured(head))
+        except BankedSearchPointError as exc:
+            refused = _bench_pass(session, head.sp_hash, arm, [], None, _reads_before(session))
+            graded(session, refused, subject="selected", refusal=str(exc))
+            banked = banked.with_selection(refused, str(exc))
     for key, (arm, sp) in roster.items():
         held = banked.pass_of(key)
         if held is not None and held.answers(
@@ -677,7 +699,7 @@ async def bench_selection(
             graded(session, taken, subject="selected")
         elif STOP_REASON_INFO[run_stop_reason(stop)].outcome is StopOutcome.PAUSED:
             raise stop
-        banked = _with_selection(banked, taken)
+        banked = banked.with_selection(taken, None)
         if stop is not None:
             return banked
     return banked
@@ -782,15 +804,15 @@ async def bench_origin(
             label=candidate_label(0, 0),
             round_num=0,
         )
-        split = session.state.scoring.partition.split
         after = _bench_counted(stores, hop)
         passes = BenchPasses(
-            tolerance=split.tolerance if split is not None else 0,
+            tolerance=_tolerance(session),
             origin=origin_pass,
             reserve_usd=after.usd_amount - before.usd_amount,
             reserve_tokens=after.token_amount - before.token_amount,
             # A pass sent beside another reference pairs with nothing on this one.
             selections={},
+            refused={},
         )
     graded(
         session,

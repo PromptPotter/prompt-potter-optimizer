@@ -789,9 +789,7 @@ def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
             continue
         if view.subject == "selected":
             if held is not None:
-                held = held.model_copy(
-                    update={"selections": {**held.selections, taken.arm.key: taken}}
-                )
+                held = held.with_selection(taken, view.refusal)
         elif held is None or held.origin != taken:
             # A different origin pass is a new reference: no earlier selection pairs on it.
             held = BenchPasses(
@@ -800,6 +798,7 @@ def scan_bench_passes(spans: Iterable[LedgerSpan]) -> BenchPasses | None:
                 reserve_usd=view.reserve_usd or 0.0,
                 reserve_tokens=view.reserve_tokens or 0,
                 selections={},
+                refused={},
             )
     return held
 

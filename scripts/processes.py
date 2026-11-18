@@ -273,11 +273,10 @@ _HELD = "PROMPTPOTTER_HEAVY_LOCK_HELD"
 
 
 def clone_root() -> Path:
-    """The clone's main tree, which every worktree and every pushed tip shares."""
+    """The clone's main tree, which every worktree and every pushed tip shares; a tree in no clone
+    (a `git archive` copy, a base for `--against`) shares it with nothing, so it is its own."""
     rc, common = git("rev-parse", "--path-format=absolute", "--git-common-dir")
-    if rc:
-        raise RuntimeError(f"gate: {REPO} is not in a git clone: {common}")
-    return Path(common.strip()).parent
+    return REPO if rc else Path(common.strip()).parent
 
 
 def clone_cache() -> Path:

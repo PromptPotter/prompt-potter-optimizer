@@ -213,12 +213,9 @@ class LiveCycle(NamedTuple):
         return share.allotment
 
 
-# What an enclosing book files a nested run's sends as, as its ledger's copy of them does.
+# What an enclosing book files a nested run's sends as, as its ledger's copy of them does, where
+# the enclosing run's scope files its cells as no kind of their own (a bench pass files `bench`).
 _ENCLOSED: TokenUsageKind = "backend"
-
-
-def _resource(hold: Hold) -> TokenUsageKind:
-    return _ENCLOSED if hold.resource is None else hold.resource
 
 
 class SpendBook:
@@ -257,8 +254,10 @@ class SpendBook:
         self.set_aside_tokens = 0
         # The ledger a nested run's sends are copied onto, as this book's root.
         self.ledger: CycleEventLog | None = None
-        # A nested run's book: each send is admitted against it AND every book enclosing it.
+        # A nested run's book: each send is admitted against it AND every book enclosing it, which
+        # files it as `enclosed_as`: the kind of the enclosing pass that spawned the run.
         self.enclosing: SpendBook | None = None
+        self.enclosed_as: TokenUsageKind = _ENCLOSED
 
     # Each read live: a running change moves the cycle's standing record and the job's hold.
     @property
@@ -340,7 +339,7 @@ class SpendBook:
         *beside*'s are the caller's to count."""
         usd, tokens = 0.0, 0
         for hold in money.open.values():
-            kind = _resource(hold)
+            kind = hold.resource or _ENCLOSED
             if hold.parent != self.hold_id or kind == beside:
                 continue
             if host or self.binds(kind):
@@ -481,7 +480,8 @@ class SpendBook:
         while book is not None:
             if book.binds(kind) or book.enclosing is None:
                 yield book, kind
-            book, kind = book.enclosing, _ENCLOSED
+            kind = book.enclosed_as
+            book = book.enclosing
 
     def refuse_unless_room(
         self, asks: Asks, kind: TokenUsageKind, what: str, paid_by: KeySource
@@ -563,15 +563,15 @@ class SpendBook:
         """A call's usage on *ledger*, the scope's as its send was admitted, a replay's included;
         a nested run's lands on its root's ledger first, the copy money is summed off."""
         if self.nested:
-            self.root().mirror(record)
+            self.root().mirror(record, self.enclosed_as)
         ledger.append(record)
 
-    def mirror(self, record: TokenUsageRecord) -> None:
-        """The root ledger's copy of a nested run's call, which its meter counts."""
+    def mirror(self, record: TokenUsageRecord, kind: TokenUsageKind) -> None:
+        """The root ledger's copy of a nested run's call, filed as *kind*, which its meter counts."""
         if self.ledger is None:
             return
         mode = instrument_mode()
-        copy = record.filed_as(_ENCLOSED).model_copy(
+        copy = record.filed_as(kind).model_copy(
             update={
                 "node": f"{NESTED_NODE_PREFIX}{record.node}",
                 # The ROOT's round, whose ledger this lands on; the nested run binds its own.

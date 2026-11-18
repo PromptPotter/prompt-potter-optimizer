@@ -4,9 +4,12 @@ roll the code back once it has written: the old code would run on what it wrote.
 
 from __future__ import annotations
 
+import contextlib
 import functools
+import math
+import sys
 from collections import Counter
-from contextlib import AbstractContextManager
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
@@ -62,9 +65,10 @@ from promptpotter.infrastructure.store.io import (
     iter_files,
     read_text_optional,
     rmtree_robust,
+    take_lock,
     unlink_robust,
     write_bytes,
-    write_lock,
+    write_lock_name,
     write_text,
 )
 from promptpotter.infrastructure.store.layout import INNER_SANDBOXES_DIR, CampaignLayout
@@ -289,6 +293,8 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
     )
     runs: dict[Path, Unloadable] = {}
     unloadable: list[Unloadable] = []
+    # A run's directory is walked for its locks once, never once per file of it that fails.
+    holding = functools.cache(lambda unit: holder_in_reach(jobs, (unit,), _locks(data_root, unit)))
     for path, why in why_at.items():
         found = found_at[path]
         if why is None or found is None or found.kind.fate is not Fate.RUN:
@@ -296,7 +302,7 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
         unit = data_root / run_unit(
             PurePosixPath(path.relative_to(data_root).as_posix()), found.kind
         )
-        if holder_in_reach(jobs, (unit,), _locks(data_root, unit)) is not None:
+        if holding(unit) is not None:
             unloadable.append(Unloadable(path, found, why))
         else:
             runs.setdefault(unit, Unloadable(unit, found, f"{path}: {why}"))
@@ -327,10 +333,11 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
     caches: list[Unloadable] = []
     unknown: list[Path] = []
     proven = 0
+    # By ancestry, never by pairing each file with each dropped unit: a landing that drops every
+    # run over a real root otherwise holds every other entry for minutes.
+    dropped = {*runs, *(one.path for one in torn)}
     for path, found in found_at.items():
-        if path in gone or any(
-            path.is_relative_to(unit) for unit in (*runs, *(one.path for one in torn))
-        ):
+        if path in gone or path in dropped or not dropped.isdisjoint(path.parents):
             continue
         if found is None:
             unknown.append(path)
@@ -482,9 +489,25 @@ def last_landing(projects_root: Path) -> LandedStamp | None:
         return None
 
 
-def holding_landing(projects_root: Path) -> AbstractContextManager[None]:
-    """The one hold a landing is planned and applied under, at every door that lands."""
-    return write_lock(_stamp(projects_root))
+@contextlib.contextmanager
+def holding_landing(projects_root: Path) -> Iterator[None]:
+    """The one hold a landing is planned and applied under, at every door that lands: held for the
+    whole landing, so an entry finding one in flight says so where its human reads (first-run
+    setup's stderr) and waits for it, never a write lock's traceback."""
+    gate = _stamp(projects_root).with_name(write_lock_name(LANDED_SCHEMA_FILE))
+    if (lock := take_lock(gate, wait_s=0)) is None:
+        print(
+            f"waiting on the data root landing in flight over {projects_root.parent} …",
+            file=sys.stderr,
+            flush=True,
+        )
+        # Unbounded: the kernel drops an OS lock with its holder, so only a live landing holds it.
+        lock = take_lock(gate, wait_s=math.inf)
+    assert lock is not None, "an unbounded wait ends holding"
+    try:
+        yield
+    finally:
+        lock.release()
 
 
 def _landed(projects_root: Path) -> bool:

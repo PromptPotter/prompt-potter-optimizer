@@ -108,9 +108,9 @@ from promptpotter.application.host_surface import (
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs import registry as registry_module
 from promptpotter.application.jobs.launcher import launch as launcher_launch
+from promptpotter.application.jobs.launcher import run_job as run_job_module
 from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
-    RunStart,
     admitted,
     destroying,
     paid_call,
@@ -127,7 +127,13 @@ from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import LibraryAuthored, library
-from promptpotter.application.maintenance.landing import apply_landing, last_landing, plan_landing
+from promptpotter.application.maintenance import landing as landing_module
+from promptpotter.application.maintenance.landing import (
+    apply_landing,
+    holding_landing,
+    last_landing,
+    plan_landing,
+)
 from promptpotter.application.maintenance.migrate import MIGRATIONS
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import (
@@ -221,6 +227,7 @@ from promptpotter.domain.phases import (
     ProducerState,
     RunAdmission,
     RunPhase,
+    StopOutcome,
     StopReason,
 )
 from promptpotter.domain.pipeline_schema import PipelineNode
@@ -250,8 +257,9 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
+from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.said import Said, pins
-from promptpotter.domain.spend import NOTHING_PAID, Budget
+from promptpotter.domain.spend import NOTHING_PAID, Budget, HeldBudget
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure, ValidationReason
 from promptpotter.infrastructure import docker_host
@@ -2355,8 +2363,11 @@ def test_an_archived_campaigns_launch_and_pass_are_refused_at_the_slot_door_befo
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_never_crashed(
-    built_stores: Stores, tmp_path: Path, held_cycle: _HeldCycle
+    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
+    # The detached run's own process, on its loop over a real registry: it adopts the job, the
+    # campaign archived past the handoff refuses it, and it releases the job refused. A gate taken
+    # on the loop refuses there (`io.py::refuse_on_event_loop`), so a sync registry call fails here.
     hop = held_cycle.hop
     past = JobRegistry(tmp_path.with_name(f"{tmp_path.name}-jobs"), capacity=lambda _live: 1)
     handed = past.create(
@@ -2367,8 +2378,30 @@ def test_a_campaign_refusal_past_a_spawns_handoff_ends_the_admitted_job_refused_
         holder=CampaignLaunch("ds1"),
     )
     past.move(handed.job_id, LaunchMove.ADMIT)
-    RunStart(built_stores, past, handed).release(
-        CampaignRefusedError(CampaignRefusal.NOT_ACTIVE, "archived past its handoff")
+    built_stores.campaigns.archive_campaign(hop.campaign_id)
+    nothing = Budget()
+    spec = JobSpec(
+        job_id=handed.job_id,
+        hop=hop,
+        mode=RunMode(),
+        identity=built_stores.identity,
+        budget=HeldBudget(
+            admitted=nothing,
+            standing=nothing,
+            job_id=handed.job_id,
+            step_rounds=None,
+            share=nothing,
+        ),
+        jobs_dir=past.jobs_dir,
+        projects_root=built_stores.projects_root,
+        shared_root=built_stores.shared_root,
+        install_datasets_root=built_stores.install_datasets_root,
+        research_datasets_root=built_stores.research_datasets_root,
+    )
+    # Its handshake writes the spawner's pipe, which this process is not.
+    monkeypatch.setattr(run_job_module, "_tell_spawner", lambda: None)
+    assert asyncio.run(run_job_module.run_job(spec)) is StopOutcome.FAILED, (
+        "a detached run never adopted its job, or ran past its campaign's refusal"
     )
     handed_back = past.get(handed.job_id)
     assert handed_back is not None and (handed_back.lapse, handed_back.ending) == (
@@ -2849,6 +2882,48 @@ def test_a_landing_drops_a_cache_this_build_cannot_read_unasked_and_a_file_no_ro
     assert [str(fold) in line for line in dropped] == [True], f"a cache dropped unsaid: {dropped}"
     assert stamp is not None and stamp.said == dropped, "the stamp lost what the landing dropped"
     assert UserStore(campaigns.workspace).load() == user, "a landing dropped a survivor"
+
+
+def test_an_entry_finding_a_landing_in_flight_says_so_and_waits_it_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = tmp_path / "data" / "projects"
+    taken, waiting, release = threading.Event(), threading.Event(), threading.Event()
+    take = store_io.take_lock
+
+    def spy(path: Path, *, wait_s: float) -> Any:
+        if wait_s:
+            waiting.set()
+        return take(path, wait_s=wait_s)
+
+    def landing_in_flight() -> None:
+        with holding_landing(root):
+            taken.set()
+            release.wait()
+
+    monkeypatch.setattr(landing_module, "take_lock", spy)
+    first = threading.Thread(target=landing_in_flight)
+    first.start()
+    taken.wait()
+    entered: list[bool] = []
+
+    def entry() -> None:
+        with holding_landing(root):
+            entered.append(True)
+
+    second = threading.Thread(target=entry)
+    second.start()
+    # Bounded only so a hold that refuses instead of waiting fails here, never hangs the suite.
+    held_off = waiting.wait(timeout=60)
+    release.set()
+    first.join()
+    second.join()
+    assert held_off and entered == [True], (
+        "an entry beside a landing in flight never took the hold after it"
+    )
+    assert "waiting on the data root landing in flight" in capsys.readouterr().err, (
+        "an entry waited on a landing in flight unsaid"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")

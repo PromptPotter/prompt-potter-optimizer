@@ -377,9 +377,10 @@ def bench_status(
     elif origin.state is not ReadingState.READ:
         state, subject, decided = origin.state, "origin", origin
     elif selected is None:
-        # Asking again would send nothing: the pass a line with no round is owed is the origin's.
-        nothing_to_ask = unsent is ReadingState.NOT_ASKED and not run.rounds_closed
-        state = ReadingState.NO_SELECTION if nothing_to_ask else unsent
+        # No round past the origin selected anyone, so no selection's pass is owed: only a failed
+        # run says more.
+        nothing_selected = unsent is not ReadingState.RUN_FAILED and not run.rounds_closed
+        state = ReadingState.NO_SELECTION if nothing_selected else unsent
     else:
         state, decided = selected.state, selected
         subject = None if state is ReadingState.READ else "selected"

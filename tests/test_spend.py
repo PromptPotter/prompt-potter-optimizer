@@ -2727,6 +2727,23 @@ def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(tmp_path: Path) -> 
     assert money_on(root.path).metered["search_incurred"].usd_amount == pytest.approx(0.01), (
         "a nested run's replay reached its root's search-incurred meter at another price"
     )
+    # Spawned by the root's bench pass: the bench's price, never the search's.
+    inner.enclosed_as = "bench"
+    with _billing_on(CycleEventLog(tmp_path / "benched.jsonl"), inner):
+        telemetry.emit_replay_usage(
+            node="cell",
+            usage=TokenAccount(input=10, output=5),
+            duration_s=0.0,
+            price=price,
+            served_by=None,
+        )
+    by_kind = scan_ledger_spend([LedgerSpan(root.path)]).spend.by_kind
+    assert money_on(root.path).metered["search_incurred"].usd_amount == pytest.approx(0.01), (
+        "a nested run a bench pass spawned was metered as the search's spend"
+    )
+    assert by_kind["bench"].incurred_usd == pytest.approx(0.01), (
+        "a nested run a bench pass spawned did not read under the bench's kind"
+    )
 
 
 @pytest.mark.usefixtures("run_bound")

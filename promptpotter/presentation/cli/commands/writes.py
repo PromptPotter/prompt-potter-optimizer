@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import sys
 from collections import Counter
 from contextlib import nullcontext
@@ -175,12 +176,16 @@ def _render_landing(landing: Landing, *, written: bool, last: LandedStamp | None
 async def cmd_land_data(args: argparse.Namespace) -> CommandResult:
     projects_root = default_projects_root()
     last = last_landing(projects_root)
-    # A dry run writes nothing, its hold's lock file included.
-    with nullcontext() if args.dry_run else holding_landing(projects_root):
-        landing = plan_landing(projects_root, reset=args.reset)
-        written = not (landing.refused or args.dry_run)
-        if written:
-            landing = apply_landing(projects_root, landing)
+
+    def land() -> tuple[Landing, bool]:
+        # A dry run writes nothing, its hold's lock file included.
+        with nullcontext() if args.dry_run else holding_landing(projects_root):
+            landing = plan_landing(projects_root, reset=args.reset)
+            written = not (landing.refused or args.dry_run)
+            return (apply_landing(projects_root, landing) if written else landing), written
+
+    # Off the loop: the hold waits on a landing another entry has in flight.
+    landing, written = await asyncio.to_thread(land)
     return CommandResult(
         data={
             "written": written,

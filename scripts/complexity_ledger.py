@@ -98,8 +98,10 @@ BASELINE = {
     # fetched no rates reads the floor's one table, never a copy keyed by its absent file.
     # l1-edits (+35): L1's edit list applied in one place, its missed anchor an arm's own reason,
     # and every optimizer call's record on failure too, its error on the node's audit block; the
-    # all-no-op round and the pool twin gone.
-    "package_lines": 111041,
+    # all-no-op round and the pool twin gone. l4-runs (+39): a bench member whose point moved banks
+    # its pass refused and the fold reads it so, and a nested run is filed as its spawner's kind;
+    # (+28) an entry finding a landing in flight says so and waits, off the CLI's loop.
+    "package_lines": 111071,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

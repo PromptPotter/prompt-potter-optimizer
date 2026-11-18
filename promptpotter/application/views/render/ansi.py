@@ -370,7 +370,7 @@ def render_pass_graded(v: PassGradedRecord) -> str:
     if isinstance(reading, NoiseBand):
         return f"  {DIM}{render_noise_band(v)}{RESET}"
     if v.refusal is not None:
-        return f"  {YELLOW}verify {v.verification.arm.label}: not sent — {v.refusal}{RESET}"
+        return f"  {YELLOW}{v.verification.kind} {v.verification.arm.label}: not sent — {v.refusal}{RESET}"
     if reading is None:
         cut = v.verification.stop
         stop = "" if cut is None else f": {cut.cause.value}"

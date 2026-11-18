@@ -1316,6 +1316,7 @@ def bench_passes(origin: BenchPass, *held: BenchPass, tolerance: int = 0) -> Ben
         reserve_usd=0.0,
         reserve_tokens=0,
         selections={taken.arm.key: taken for taken in held},
+        refused={},
     )
 
 

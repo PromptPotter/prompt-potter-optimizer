@@ -246,9 +246,12 @@ from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import (
     ArmPosition,
+    BankedSearchPointError,
+    Concluded,
     Cut,
     CutKind,
     Measured,
+    PointContext,
     Proposed,
     Refused,
     is_leader_eligible,
@@ -3014,6 +3017,50 @@ def test_every_adoption_grades_each_selection_the_line_adopted_once(
         again = graded("every_adoption", every)
         assert all(again.selections[key] is every.selections[key] for key in adopted), (
             "a pass that answers was sent again"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_member_whose_point_moved_banks_its_pass_refused_and_the_roster_grades_on(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(tmp_path, monkeypatch, offline) as picked:
+        cycle, session = picked.cycle, picked.session
+        head, moved = _adopting_twice(picked, monkeypatch)
+        measured = PointContext.measured
+
+        def rebuild(points: PointContext, arm: Concluded) -> JobSearchPoint:
+            if arm.individual.id == moved:
+                raise BankedSearchPointError("moved under it")
+            return measured(points, arm)
+
+        monkeypatch.setattr(PointContext, "measured", rebuild)
+        line_bench.graded(session, picked.origin_pass, subject="origin")
+        banked = asyncio.run(
+            bench_selection(
+                session,
+                cycle.rounds,
+                points=cycle.points,
+                banked=bench_passes(picked.origin_pass),
+                trigger="every_adoption",
+            )
+        )
+        folded = line_bench.line_passes(session.store, session.hop.campaign_id)
+        assert folded is not None and folded.refused == banked.refused == {
+            moved: "moved under it"
+        }, "the moved member's refusal was not banked on its pass"
+        assert not folded.selections[moved].cells and folded.selections[head].cells, (
+            "the refusal spent on the moved member, or stopped the rest of the roster"
+        )
+        read = line_bench._read_pass(
+            session.store,
+            folded.selections[moved],
+            session.state.scoring.scorer,
+            tolerance=folded.tolerance,
+            refused=folded.refused,
+        )
+        assert read.outcome.state is ReadingState.MEMBER_UNSCOREABLE, (
+            "the fold read a refused pass as anything but unscoreable"
         )
 
 

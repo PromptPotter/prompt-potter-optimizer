@@ -47,8 +47,10 @@ class HeldOutPass(FrozenModel):
         return IndividualWalk(self.arm.key, frozenset({self.kind}), self.cells)
 
     def answers(self, sp_hash: str, sample_keys: list[str], scorer_id: str) -> bool:
-        """Banked whole for this point, on these rows, under this grader: re-sending it buys nothing."""
-        return self.stop is None and (self.sp_hash, self.sample_keys, self.scorer_id) == (
+        """Banked whole for this point, on these rows, under this grader: re-sending it buys nothing.
+        A refused pass sent nothing, so it answers nothing."""
+        whole = self.stop is None and bool(self.cells)
+        return whole and (self.sp_hash, self.sample_keys, self.scorer_id) == (
             sp_hash,
             sample_keys,
             scorer_id,
@@ -106,6 +108,18 @@ class BenchPasses(FrozenModel):
     # The latest pass of each individual the line selected, by its id: a pass measures an
     # individual, so a rewind displaces none.
     selections: dict[str, BenchPass]
+    # A selection whose point no longer rebuilds (`arms.py::BankedSearchPointError`), by id, with
+    # why: its pass sent nothing, so it reads unscoreable and the cycle keeps its search's stop.
+    refused: dict[str, str]
+
+    def with_selection(self, taken: BenchPass, refusal: str | None) -> BenchPasses:
+        key = taken.arm.key
+        refused = {k: why for k, why in self.refused.items() if k != key}
+        if refusal is not None:
+            refused[key] = refusal
+        return self.model_copy(
+            update={"selections": {**self.selections, key: taken}, "refused": refused}
+        )
 
     def pass_of(self, individual_id: str) -> BenchPass | None:
         if individual_id == self.origin.arm.key:

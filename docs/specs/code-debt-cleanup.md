@@ -858,31 +858,11 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
 
-- **No test runs a detached job**: `test_spend.py` monkeypatches `run_job.py::spawn_job`, so a sync lock
-  on `run_job`'s loop killed every server launch and head-to-head arm for two days with the gate green
-  (fixed `d17fb2f83`). Action: one test drives `run_job` on a loop against a real registry (adopt,
-  refuse, release). **Re-test:** reintroduce a sync `job_registry.adopt` in `run_job`; a test fails.
-- **A moved roster point closes the cycle as a crash**: `domain/arms.py::BankedSearchPointError`,
-  raised by `runner/bench.py::bench_selection`'s rebuild, reaches the end pass's `end_run_on`, so the
-  cycle closes `CRASHED` with a traceback over its search's own stop, and every resume refuses again;
-  under `every_adoption` every graded roster member can raise it. Action: bank the refusal on that
-  member's pass (`PassGradedRecord.refusal`, as `scoring/passes.py::verify_on_saturation` banks a
-  verify's), read it refused in the bench fold, and keep the search's stop. **Re-test:** a member
-  whose point no longer rebuilds leaves the cycle on its search's stop, that member's pass read refused.
 - **A citation's panel is matched by substring, not by word**: `potter/validators.py::l1_evidence_grounding`
   tests `words in _words(panel)`, so a one-word quote is held by whichever panel sorts first.
   **Re-test:** a one-word citation that only one panel holds as a word names that panel.
 - **The derived citation panel is not served**: `L1Variants.tsx` reads the raw reply, which no longer
   names a panel. Action: serve the child's `EvidenceGrounding.field` on its variant row.
-- **The offline run refuses outside a git clone**: `processes.py::clone_root`, so a base copy for
-  `gate.py --only equals-main --against` needs a detached worktree. **Re-test:** run
-  `scripts/offline_run.py` in a `git archive` copy.
-- **A landing holds every other entry for minutes, and they crash on it**: the l1-cite landing on this
-  desk (15 campaigns, all dropped) held `landing.py::holding_landing` ~12 min inside the first launch,
-  silent, while a concurrent `cycles` died on `store/io.py::write_lock`'s 5 s `TimeoutError` traceback.
-  Action: time `plan_landing` by phase and cut the slow one; an entry finding a landing in flight says
-  so and waits. **Re-test:** a landing over the same root under a minute; `cycles` during one prints
-  a wait line, no traceback.
 - **A panel member restates the family's whole `inner_campaign`**: `store/dataset_access.py` merges
   the `panel:` section with `|=`, one level deep, so `e2e` repeats every key to change one. Action:
   fold the panel section by the rule every layered document uses (`layer_fold.py::fold_layers`).
@@ -892,6 +872,20 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   Action: a field is offered only where its node ran on the measured samples, for every campaign.
   **Rides with:** the outer chain (D7). **Re-test:** a C0 on `promptpotter-self/run` offers no
   `l3_plan` field until one inner run calls it.
+- **An inner run a bench pass spawns files all its own calls as `bench`**: the spawner's
+  `run_scope().filed_as` survives into the inner scope (`runner/inner/tasks.py:412`), so inner
+  cycle_8a2bda4c4c97 reads `{bench: 12}` on the offline world. Action: `enter_inner_cell` carries the
+  spawner's kind on `InstrumentMode` and clears `filed_as`; `arm_spend_book` reads `enclosed_as` off
+  the mode. **Rides with:** the outer chain (`runner/inner/**`). **Re-test:** the `--l4 --straight
+  --bench-trigger every_adoption` leg's inner ledger files no call as `bench`.
+- **The noise-floor pass may bank a refusal beside cells**: `scoring/passes.py:538` sets `refusal`
+  before it knows the pass read nothing, which `PassGradedRecord._refused_reads_nothing` rejects.
+  Unverified. **Re-test:** a noise-floor pass that scored a cell and then refused raises nothing.
+- **A copy fetched at the click may lose the clipboard**: `ui/CopyButton.tsx::copy` awaits the served
+  export, then calls `navigator.clipboard.writeText`, past the press in browsers that bind the write
+  to it (the operator's Candidates copy failed on 2026-11-18 while the export served HTTP 200 in
+  1.4 s). Action: hand the clipboard the pending text inside the press (`ClipboardItem` over the
+  promise). **Re-test:** the Candidates `Chat` copy in Firefox and Safari.
 
 ## Held — no wave-4 chain yet
 
