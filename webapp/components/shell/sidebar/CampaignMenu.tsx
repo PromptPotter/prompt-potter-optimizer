@@ -3,6 +3,7 @@ import { commands } from "@/lib/api";
 import type { ListedCampaign } from "@/lib/api/types";
 import { tagValue } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { useIngest } from "@/lib/state/ingest-flow";
 import { useWorkspace } from "@/lib/state/workspace";
 import { Button, Dialog, FailureLine, Menu, MenuItem, Switch } from "@/components/ui";
@@ -20,6 +21,8 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
   const flow = useIngest();
   // An unstarted campaign has no run to rename or archive: Delete is its one action.
   const unstarted = campaign.entry_kind === "unstarted";
+  // A delegate is offered only the acts its grant files.
+  const files = useFiles("account");
 
   const runArchive = () =>
     void cmd.run("archive", () =>
@@ -66,6 +69,10 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
 
   const pending = cmd.pending !== null;
   const archived = !unstarted && campaign.facts.lifecycle === "archived";
+  const renames = !unstarted && files("rename-campaign");
+  const archives = !unstarted && files(archived ? "unarchive-campaign" : "archive-campaign");
+  const deletes = files(act.kind);
+  if (!renames && !archives && !deletes) return null;
 
   return (
     <>
@@ -90,37 +97,39 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
       >
         {({ close }) => (
           <>
-            {!unstarted && (
-              <>
-                <MenuItem
-                  onClick={() => {
-                    close();
-                    cmd.clear();
-                    setDraft(campaign.facts.label ?? "");
-                    setRenaming(true);
-                  }}
-                >
-                  Rename
-                </MenuItem>
-                <MenuItem
-                  onClick={() => {
-                    close();
-                    if (archived) runUnarchive();
-                    else runArchive();
-                  }}
-                >
-                  {archived ? "Unarchive" : "Archive"}
-                </MenuItem>
-              </>
+            {renames && (
+              <MenuItem
+                onClick={() => {
+                  close();
+                  cmd.clear();
+                  setDraft(campaign.facts.label ?? "");
+                  setRenaming(true);
+                }}
+              >
+                Rename
+              </MenuItem>
             )}
-            <MenuItem
-              onClick={() => {
-                close();
-                setConfirmDelete(true);
-              }}
-            >
-              <span className="campaign-menu-danger">Delete</span>
-            </MenuItem>
+            {archives && (
+              <MenuItem
+                onClick={() => {
+                  close();
+                  if (archived) runUnarchive();
+                  else runArchive();
+                }}
+              >
+                {archived ? "Unarchive" : "Archive"}
+              </MenuItem>
+            )}
+            {deletes && (
+              <MenuItem
+                onClick={() => {
+                  close();
+                  setConfirmDelete(true);
+                }}
+              >
+                <span className="campaign-menu-danger">Delete</span>
+              </MenuItem>
+            )}
           </>
         )}
       </Menu>

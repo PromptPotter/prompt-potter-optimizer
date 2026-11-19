@@ -238,6 +238,8 @@ class PassRefusal(StrEnum):
     ORIGIN_UNSCORED = "origin_unscored"
     GRADED = "graded"
     NO_SELECTION = "no_selection"
+    # Its reader may not file the pass's kind (`command_kinds.py::filable`): offered nowhere.
+    READ_ONLY = "read_only"
 
 
 PASS_REFUSAL_INFO: Worded[PassRefusal, str] = Worded(
@@ -268,6 +270,7 @@ PASS_REFUSAL_INFO: Worded[PassRefusal, str] = Worded(
         ),
         PassRefusal.GRADED: "The line's selection is already graded.",
         PassRefusal.NO_SELECTION: "No round closed past the origin, so there is no selection to grade.",
+        PassRefusal.READ_ONLY: "You read this run; asking for its passes is not yours.",
     }
 )
 assert PASS_REFUSAL_INFO.keys() == set(PassRefusal)
@@ -289,11 +292,18 @@ class PassAdmission(FrozenModel):
 
 
 def verify_admission(
-    *, inner: bool, refused: CampaignRefusal | None, run: LiveCycleRun
+    *,
+    inner: bool,
+    refused: CampaignRefusal | None,
+    run: LiveCycleRun,
+    files: bool,
 ) -> PassAdmission:
-    """Read before the verify's own pass holds the cycle, so any pass's lock is one in flight."""
+    """Read before the verify's own pass holds the cycle, so any pass's lock is one in flight;
+    *files* is whether its reader may file a verify (`command_kinds.py::filable`)."""
     refusal = (
-        PassRefusal.INNER
+        PassRefusal.READ_ONLY
+        if not files
+        else PassRefusal.INNER
         if inner
         else PassRefusal(refused.value)
         if refused is not None
@@ -342,8 +352,10 @@ def bench_status(
     origin: PassOutcome | None,
     selected: PassOutcome | None,
     run: LiveCycleRun,
+    files: bool,
 ) -> BenchStatus:
-    """*refused* is the campaign's own refusal, the one admission refuses a pass with."""
+    """*refused* is the campaign's own refusal, the one admission refuses a pass with; *files* is
+    whether its reader may file the pass (`command_kinds.py::filable`): else it is offered none."""
     subject: BenchSubject | None = None
     decided: PassOutcome | None = None
     outcome = None if run.ending is None else stop_reason_outcome(run.ending)
@@ -374,7 +386,9 @@ def bench_status(
         subject = None if state is ReadingState.READ else "selected"
 
     refusal: PassRefusal | None = None
-    if inner:
+    if not files:
+        refusal = PassRefusal.READ_ONLY
+    elif inner:
         refusal = PassRefusal.INNER
     elif not on_live_cycle:
         refusal = PassRefusal.NO_MANIFEST if held_by is None else PassRefusal.HELD_ELSEWHERE
@@ -397,7 +411,7 @@ def bench_status(
         trigger=trigger,
         can_run=refusal is None,
         refusal=refusal,
-        offered=refusal is None or (not inner and state.kind is ReadingStateKind.WAITING),
+        offered=refusal is None or (not inner and files and state.kind is ReadingStateKind.WAITING),
         subject=subject,
         held_by=held_by,
         stop=None if decided is None else decided.stop,

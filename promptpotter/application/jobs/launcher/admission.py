@@ -34,9 +34,11 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
 )
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.command_kinds import filable
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.hierarchy import RunAdmission
 from promptpotter.domain.job import (
     UNRESOLVED_HOP,
     CallBucket,
@@ -51,7 +53,6 @@ from promptpotter.domain.job import (
 )
 from promptpotter.domain.phases import (
     PauseCause,
-    RunAdmission,
     RunPhase,
     RunState,
     StopOutcome,
@@ -236,9 +237,12 @@ def campaign_refusal(stores: Stores, campaign: Campaign) -> CampaignRefusedError
 
 
 def admitted(stores: Stores, campaign: Campaign, run: RunState) -> RunAdmission:
-    """*run*'s launch half with its campaign's refusal joined: the acts every served read offers."""
-    refused = campaign_refusal(stores, campaign)
-    return RunAdmission.of(run, campaign_refusal=None if refused is None else Refusal.of(refused))
+    """*run*'s launch half with its campaign's refusal and its reader's kinds joined (the read's own
+    `stores.identity`, capability-less on the exhibit): the acts every served read offers."""
+    joined = (
+        None if (refused := campaign_refusal(stores, campaign)) is None else Refusal.of(refused)
+    )
+    return RunAdmission.of(run, campaign_refusal=joined, filable=filable(stores.identity))
 
 
 def refuse_campaign(stores: Stores, campaign: Campaign) -> None:

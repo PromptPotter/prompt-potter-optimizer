@@ -2,6 +2,7 @@ import { useState } from "react";
 import { commands, cycleAddress } from "@/lib/api";
 import type { LookaheadAbreastStep, LookaheadDepth } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { useViewedDashboard } from "@/lib/state/poll";
 import { encodeCyclePath } from "@/lib/ids";
 import { useEntry } from "@/lib/hooks/useRegistry";
@@ -22,6 +23,8 @@ export function useRemoteModel() {
   const cmd = useCommand<"skip" | "sample-lookahead">("remote-control", viewed?.address ?? null);
   const [shown, setShown] = useState<Shown | null>(null);
   const isOuterView = (viewedPath?.length ?? 1) === 1;
+  // The kinds the viewed cycle's reader may file: a control outside them is not drawn.
+  const files = useFiles(viewedPath);
 
   if (!viewedPath) return null;
 
@@ -69,6 +72,7 @@ export function useRemoteModel() {
     toOuter: () => navigate({ path: viewedPath.slice(0, 1) }),
     toInner: (campaignId: string, cycleId: string) =>
       navigate({ path: [...viewedPath, { campaignId, cycleId }] }),
+    files,
     skipRefusal: dash.skip_refusal,
     caps: dash.caps.caps,
     overshoot: dash.run_limits.overshoot,

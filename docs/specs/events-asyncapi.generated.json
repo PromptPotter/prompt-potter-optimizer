@@ -6053,7 +6053,8 @@
           "selecting",
           "origin_unscored",
           "graded",
-          "no_selection"
+          "no_selection",
+          "read_only"
         ],
         "title": "PassRefusal",
         "type": "string"

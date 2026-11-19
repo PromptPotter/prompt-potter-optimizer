@@ -1393,6 +1393,7 @@ def bench_line(
         "held_out": 4,
         "instrument_id": "i",
         "spend": None,
+        "files": True,
     } | line
     return BenchLine(
         run=LiveCycleRun(
@@ -1515,6 +1516,7 @@ def cycle_result(
                 selection=None,
                 rounds_closed=0,
             ),
+            files=True,
         ),
         origin=None,
         selected=None,

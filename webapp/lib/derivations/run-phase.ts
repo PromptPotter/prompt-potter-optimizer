@@ -59,22 +59,19 @@ export function refusalText(refusal: Refusal | null): string | null {
   return refusal === null ? null : withActs(refusal.message, refusal.next_acts);
 }
 
-/** A stop as served, then its step and the acts the cycle's admission offers — a pause asked and
- * not yet reached, where the run stops. A campaign that refuses a launch (served
- * `launch_refusal`) offers no `start-run`. */
-export function stopNote(stop: StopReading, launchRefusal: string): string {
+/** A stop as served, then its step and the acts past it the cycle's admission offers its reader
+ * (served `stop_acts`) — a pause asked and not yet reached, where the run stops. */
+export function stopNote(stop: StopReading, acts: readonly NextAct[]): string {
   if (stop.stop_reason === null) {
     return `${stop.said} — ${refusalText(RUN_PHASE_INFO.paused.refusal) ?? ""}`;
   }
-  const info = STOP_REASON_INFO[stop.stop_reason];
-  const offered = info.next_acts.filter((act) => !(launchRefusal && act.kind === "start-run"));
-  const next = withActs(info.next_step, offered);
+  const next = withActs(STOP_REASON_INFO[stop.stop_reason].next_step, acts);
   return next ? `${stop.said} — ${next}` : stop.said;
 }
 
 /** What the run's stop said and what the operator does now; empty where it has not stopped. */
 export function runNextStep(state: HierarchyState): string {
-  return state.stop === null ? "" : stopNote(state.stop, state.admission.launch_refusal);
+  return state.stop === null ? "" : stopNote(state.stop, state.admission.stop_acts);
 }
 
 /** How many more cells the spend limits admit, where money holds the walk. */

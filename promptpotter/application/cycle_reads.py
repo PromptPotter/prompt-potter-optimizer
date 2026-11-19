@@ -21,6 +21,7 @@ from promptpotter.application.views.render.export import ExportFiles, ExportProv
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.campaign import CampaignCycle
+from promptpotter.domain.command_kinds import CommandKind, filable
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import (
     CycleAt,
@@ -223,7 +224,7 @@ async def _signed_ticks(caller: Caller, every_s: float) -> AsyncIterator[None]:
 async def cycle_event_frames(
     caller: Caller, cycle: ViewedCycle
 ) -> AsyncIterator[ProjectionEnvelope]:
-    tail = CycleLedgerTail(cycle.dir, cycle.hop.cycle_id)
+    tail = CycleLedgerTail(cycle.dir, cycle.hop.cycle_id, filable(cycle.stores.identity))
     yield await asyncio.to_thread(
         lambda: tail.snapshot_frame(
             served_dashboard(cycle.stores, cycle.hop).model_dump(mode="json")
@@ -301,35 +302,42 @@ def _store_stats(stores: Stores, named: str) -> Iterator[tuple[str, tuple[object
             yield from _store_stats(inner, named)
 
 
+type _Reader = tuple[CommandKind, ...]
+
+
 @dataclass
 class _Owned:
-    """One owner's count of moves, and each subject of it the last walk found, at its stats and `n`:
-    one no walk finds any more leaves."""
+    """One owner's count of moves, and each subject of it the last walk found, per reader (the
+    kinds it files, which its reads' offers stand on), at its stats and `n`: one no walk finds any
+    more leaves. A reader's first walk counts past every move, so a grant moves its versions."""
 
     moves: int = 0
-    held: dict[str, tuple[tuple[object, ...], int]] = field(default_factory=dict)
+    held: dict[tuple[_Reader, str], tuple[tuple[object, ...], int]] = field(default_factory=dict)
 
-    def counted(self, named: str, found: dict[str, tuple[object, ...]]) -> dict[str, FeedVersion]:
-        for gone in [s for s in self.held if s.startswith(named) and s not in found]:
-            del self.held[gone]
+    def counted(
+        self, reader: _Reader, named: str, found: dict[str, tuple[object, ...]]
+    ) -> dict[str, FeedVersion]:
+        mine = [s for r, s in self.held if r == reader]
+        for gone in [s for s in mine if s.startswith(named) and s not in found]:
+            del self.held[reader, gone]
         for subject, stats in found.items():
-            if (was := self.held.get(subject)) is None or was[0] != stats:
+            if (was := self.held.get((reader, subject))) is None or was[0] != stats:
                 self.moves += 1
-                self.held[subject] = (stats, self.moves)
-        return {s: FeedVersion(process=SERVING_PROCESS, n=self.held[s][1]) for s in found}
+                self.held[reader, subject] = (stats, self.moves)
+        return {s: FeedVersion(process=SERVING_PROCESS, n=self.held[reader, s][1]) for s in found}
 
 
 # Keyed by what owns a subject (the account's store; the registry and the account's limit for
 # `machine`), so every reader of it shares one count; walked and counted under one lock, so one
-# write moves a subject once.
+# write moves a subject once for each reader.
 _OWNED: dict[str, _Owned] = {}
 _COUNTING = threading.Lock()
 
 
 def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[str, FeedVersion]:
     """Each subject *named* covers, by prefix (every one by default), at its version, counted from
-    stats that are the same for every reader of it, never a fold or a reader's view."""
-    owner = str(stores.base_dir)
+    stats, never a fold, per the kinds its reader files (`entries_version` serves them too)."""
+    owner, reader = str(stores.base_dir), filable(stores.identity)
     with _COUNTING:
         found: dict[str, tuple[object, ...]] = {}
         if named.startswith(_STORE) or _STORE.startswith(named):
@@ -337,11 +345,11 @@ def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[st
         if "account".startswith(named):
             # What the account filed: an edit, a setting, a draft turn. A run's appends do not move it.
             found["account"] = (file_sig(stores.commands.path), stores.drafts.version())
-        versions = _OWNED.setdefault(owner, _Owned()).counted(named, found)
+        versions = _OWNED.setdefault(owner, _Owned()).counted(reader, named, found)
         if "machine".startswith(named):
             machine = {"machine": machine_version(stores, jobs)}
             versions |= _OWNED.setdefault(f"{jobs.jobs_dir}\x1f{owner}", _Owned()).counted(
-                named, machine
+                reader, named, machine
             )
     return versions
 

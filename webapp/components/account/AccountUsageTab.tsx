@@ -24,6 +24,7 @@ import { cssPct, filled, fmtAgo } from "@/lib/format";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { useWorkspace } from "@/lib/state/workspace";
 import { ACCOUNT, couponRead, quotaRead, commands } from "@/lib/api";
 
@@ -237,11 +238,14 @@ function slotId(s: MachineSlot): string {
 // The caller's own waiting launches, each withdrawn by its job id: nothing ran, nothing was spent.
 function QueueTable({ queue }: { queue: MachineQueueEntry[] }) {
   const cmd = useCommand<string>("account-queue", ACCOUNT);
-  const columns: readonly Column<MachineQueueEntry>[] = [
+  const cancels = useFiles("account")("cancel-queued");
+  const columns: Column<MachineQueueEntry>[] = [
     { id: "position", label: "Place", width: "4rem", cell: (q) => q.position },
     { id: "what", label: "Waiting", width: "minmax(0,1fr)", cell: (q) => q.what },
     { id: "since", label: "Since", width: "8rem", align: "end", cell: (q) => fmtAgo(q.created_at) },
-    {
+  ];
+  if (cancels) {
+    columns.push({
       id: "cancel",
       label: "",
       width: "6rem",
@@ -256,8 +260,8 @@ function QueueTable({ queue }: { queue: MachineQueueEntry[] }) {
           {cmd.pending === q.job_id ? "Cancelling…" : "Cancel"}
         </Button>
       ),
-    },
-  ];
+    });
+  }
   return (
     <>
       <DataTable
@@ -273,8 +277,19 @@ function QueueTable({ queue }: { queue: MachineQueueEntry[] }) {
 
 function LimitControl({ quota }: { quota: QuotaStatus }) {
   const cmd = useCommand<"set-concurrent-cycles">("account-run-limit", ACCOUNT);
+  const sets = useFiles("account")("set-concurrent-cycles");
   const limit = quota.max_concurrent_cycles;
 
+  if (quota.max_concurrent_cycles_writable && !sets) {
+    return (
+      <div className="account-limit readonly">
+        <p className="account-note">
+          <strong>{limit} at once.</strong> Setting how many of this account&apos;s runs share the
+          machine is not yours.
+        </p>
+      </div>
+    );
+  }
   if (!quota.max_concurrent_cycles_writable) {
     return (
       <div className="account-limit readonly">

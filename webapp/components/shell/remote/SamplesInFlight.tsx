@@ -22,10 +22,7 @@ function providerHold(held: ServedBackpressure): string {
 
 export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
   const { lookahead: la, providerHeld } = m;
-  const pending = m.pending !== null;
-  const shallow = lookaheadShallow(la);
   const scope = lookaheadScope(la);
-  const maxOffered = la.depths.some((d) => d.cells === "max" && d.pickable);
   return (
     <div className="remote-panel-section">
       <div className="section-title">Samples in flight</div>
@@ -70,6 +67,24 @@ export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
           </Term>
         </div>
       ) : null}
+      {m.files("set-sample-lookahead") ? (
+        <LookaheadControls model={m} />
+      ) : (
+        <p className="remote-note">{la.flight}</p>
+      )}
+      {scope !== null ? <p className="remote-note">{scope}</p> : null}
+    </div>
+  );
+}
+
+// The look-ahead's presses: drawn only for a reader who may file `set-sample-lookahead`.
+function LookaheadControls({ model: m }: { model: RemoteModel }) {
+  const { lookahead: la } = m;
+  const pending = m.pending !== null;
+  const shallow = lookaheadShallow(la);
+  const maxOffered = la.depths.some((d) => d.cells === "max" && d.pickable);
+  return (
+    <>
       <div className="remote-cells-group">
         <span className="lbl">Samples per candidate</span>
         <SegmentedControl
@@ -127,7 +142,6 @@ export function SamplesInFlight({ model: m }: { model: RemoteModel }) {
           />
         </span>
       </div>
-      {scope !== null ? <p className="remote-note">{scope}</p> : null}
-    </div>
+    </>
   );
 }

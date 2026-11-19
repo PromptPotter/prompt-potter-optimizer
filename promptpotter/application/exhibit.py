@@ -2,7 +2,8 @@
 
 `EXHIBIT_CAMPAIGN` names it in the host's account; a signed-in, unblocked account with "Try & learn"
 on (`User.demo_mode_enabled`) reads its subjects off the host's stores, built with no capability, so
-nothing acts on it. A command keeps the caller's stores, where the exhibit is not found.
+nothing acts on it and no read offers an act (`command_kinds.py::filable`). A command keeps the
+caller's stores, where the exhibit is not found.
 """
 
 from __future__ import annotations

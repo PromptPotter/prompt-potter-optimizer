@@ -12,7 +12,7 @@ import {
 import { wordKeys } from "@/lib/api/words";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useVerify } from "@/lib/hooks/useVerify";
-import { useViewedCycle } from "@/lib/state/lineage";
+import { useCycleAt } from "@/lib/state/lineage";
 import { filled, unitCount } from "@/lib/format";
 import {
   Button,
@@ -55,8 +55,10 @@ export function VerifyAction({
   const said = saturated?.at === here ? saturated.answer : null;
   const sending = cmd.pending !== null;
   const { readings, passes, unit } = useVerify(path);
-  // The served admission, the one the command is refused by; null under a moment.
-  const admission = useViewedCycle()?.facts.verify ?? null;
+  // The served admission of the cycle it files on, the one the command is refused by, its reader
+  // joined (`read_only`: it reads the passes and presses none); null under a moment.
+  const admission = useCycleAt(path)?.facts.verify ?? null;
+  const offered = admission !== null && admission.refusal !== "read_only";
 
   if (!path || !candidate.label) return null;
 
@@ -91,15 +93,15 @@ export function VerifyAction({
 
   return (
     <div className="verify-action">
-      <div className="verify-action-row">
+      {offered ? <div className="verify-action-row">
         <HoverCard
           content={
-            admission?.refusal
+            admission.refusal
               ? PASS_REFUSAL_INFO[admission.refusal]
               : "Re-score this candidate on search cells it has never been measured on."
           }
         >
-          <Button onClick={run} disabled={busy || !admission?.can_run}>
+          <Button onClick={run} disabled={busy || !admission.can_run}>
             {busy ? "Verifying…" : `Verify ${candidate.label}`}
           </Button>
         </HoverCard>
@@ -156,7 +158,7 @@ export function VerifyAction({
             </>
           )}
         </Menu>
-      </div>
+      </div> : null}
       {busy && (
         <p className="verify-action-note">
           {flying && unit

@@ -9,6 +9,7 @@ import {
 } from "@/lib/derivations";
 import { pathOfAddress, type CyclePath } from "@/lib/ids";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { useViewedLineage } from "@/lib/state/lineage";
 import { useViewMemory } from "@/lib/state/view-memory";
 import { useMetrics } from "@/lib/state/candidates";
@@ -115,6 +116,8 @@ export function useCampaignForest({
   const spawn = cycleAt(index, path)?.facts.spawn ?? null;
   const forkParent = spawn ? (index.cycles.find((c) => c.address === spawn.parent) ?? null) : null;
 
+  // No read offers the stub's delete: its reader's kinds say whether it is drawn.
+  const files = useFiles(path);
   const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup", campaignId);
   const del = useCommand<"delete-cycle">("lineage-delete", cycleId);
   // The dialog and its answer are the campaign's they were pressed on: another campaign reads neither.
@@ -161,7 +164,7 @@ export function useCampaignForest({
     forkParent,
     cleanup,
     deleteViewed:
-      campaignId && cycleId && spawn && !viewedHasRounds
+      campaignId && cycleId && spawn && !viewedHasRounds && files("delete-cycle")
         ? (then) =>
             void del.run(
               "delete-cycle",

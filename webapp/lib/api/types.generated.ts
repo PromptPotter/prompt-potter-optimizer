@@ -71,6 +71,9 @@ export interface MeResponse {
   connected_accounts: ConnectedAccount[];
   available_providers: string[];
   capabilities: string[];
+  /** The kinds this account may file (`command_kinds.py::filable`): what an act on
+   * the account (its campaigns' lifecycle, its usage, its keys) is drawn by. */
+  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
   access_state: 'active' | 'blocked';
   terms_version: string;
   terms_accepted_version: string | null;
@@ -608,9 +611,9 @@ export interface StopReading {
   said: string;
 }
 
-/** The launch half of a cycle's run verbs, its campaign's refusal joined: what
- * the one run control offers. The loop's verbs answer off `RunState` alone,
- * which no campaign moves. */
+/** The launch half of a cycle's run verbs, its campaign's refusal and its
+ * reader's kinds joined: what the one run control offers. The loop's verbs
+ * answer off `RunState` alone, which no campaign moves. */
 export interface RunAdmission {
   /** The verb the one run control offers; null where it offers none. */
   offers: 'pause' | 'resume' | 'start' | null;
@@ -620,10 +623,9 @@ export interface RunAdmission {
    * run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent
    * as served. */
   payload: Record<string, Record<string, string | number | boolean>>;
-  /** Why the cycle's campaign refuses every launch (archived, its definition
-   * moved), so its stop's `start-run` acts are not offered; empty where a
-   * launch is admitted. */
-  launch_refusal: string;
+  /** The acts past the run's stop its reader files: no `start-run` where its
+   * campaign refuses every launch (archived, its definition moved). */
+  stop_acts: NextAct[];
 }
 
 /** When an entry opened and last moved. */
@@ -1052,7 +1054,7 @@ export interface BenchStatus {
   /** Whether the pass is admitted now. Every entry point reads this one answer. */
   can_run: boolean;
   /** Why not, exactly where `can_run` is false. */
-  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
+  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | 'read_only' | null;
   state: 'read' | 'not_asked' | 'pending' | 'not_held' | 'no_holdout' | 'held_elsewhere' | 'pass_stopped' | 'past_tolerance' | 'member_unscoreable' | 'under_two_cells' | 'no_selection' | 'same_individual' | 'run_failed' | 'scope_differs' | 'measurand_differs' | 'dataset_differs' | 'cell_set_differs' | 'instrument_differs';
   trigger: 'manual' | 'at_end' | 'every_adoption';
   /** Whether the grade control shows: admitted, or a pass still waited on. Never on
@@ -1169,7 +1171,7 @@ export interface PassAdmission {
   /** Whether the pass is admitted now. Every entry point reads this one answer. */
   can_run: boolean;
   /** Why not, exactly where `can_run` is false. */
-  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | null;
+  refusal: 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | 'read_only' | null;
 }
 
 /** An open check-in, listed as a campaign: no Start has minted it, so it has no
@@ -1285,8 +1287,12 @@ export interface SubtreeCampaignFacts {
   runs_with: CampaignRunsWith | null;
   /** How many cycles `cleanup-empty-cycles` deletes here now
    * (`admission.py::deletable_stubs`, the command's own list: no held stub
-   * counts). */
+   * counts); none where its reader may not file it. */
   deletable_stubs: number;
+  /** The kinds this read's reader may file (`command_kinds.py::filable`): what an
+   * act no read offers (limits, look-ahead, a fork, a scenario, a bank) is
+   * drawn by. */
+  filable: ('pause' | 'submit-arms' | 'skip-searchpoint' | 'set-sample-lookahead' | 'start-run' | 'fork-cycle' | 'mint-campaign' | 'head-to-head' | 'start-checkin' | 'verify-candidate' | 'held-out' | 'cancel' | 'set-limits' | 'set-concurrent-cycles' | 'cancel-queued' | 'delete-cycle' | 'cleanup-empty-cycles' | 'archive-campaign' | 'unarchive-campaign' | 'delete-campaign' | 'rename-campaign' | 'compact-archive' | 'edit-draft-campaign' | 'resolve-origin' | 'bank-snippet' | 'discard-draft' | 'ingest-upload' | 'open-dataset-draft' | 'open-origin-draft' | 'set-user-settings' | 'accept-terms' | 'set-api-key' | 'remove-api-key' | 'mint-api-token' | 'list-api-tokens' | 'revoke-api-token')[];
 }
 
 /** A cycle as the subtree read serves it: its rounds under it. */
@@ -1752,8 +1758,9 @@ export interface ServedDashboard {
   /** The verb the run control offers now, its campaign's refusal joined
    * (`admission.py::admitted`), or the sentence where it offers none. */
   admission: RunAdmission;
-  /** Why `skip-searchpoint` is refused, off the run alone (`RunState`), which no
-   * campaign moves; empty where it is admitted. */
+  /** Why `skip-searchpoint` is refused, off the run (`RunState`), which no campaign
+   * moves, and its reader (`command_kinds.py::filable`); empty where it is
+   * admitted. */
   skip_refusal: string;
   /** Why the cycle reads `paused` or `terminal` — what caused it, the stop it was
    * left on and what said so (`RunState.stop`); null in every other phase. */
@@ -5608,6 +5615,9 @@ export type LifecycleFilter = 'active' | 'archived' | 'deleted' | 'all';
 export const TONES = ["quiet", "success", "live", "attention", "warn", "danger"] as const;
 export type Tone = (typeof TONES)[number];
 
+// Every command kind, in its table's order (domain/command_kinds.py::CommandKind).
+export const COMMAND_KINDS = ["pause", "submit-arms", "skip-searchpoint", "set-sample-lookahead", "start-run", "fork-cycle", "mint-campaign", "head-to-head", "start-checkin", "verify-candidate", "held-out", "cancel", "set-limits", "set-concurrent-cycles", "cancel-queued", "delete-cycle", "cleanup-empty-cycles", "archive-campaign", "unarchive-campaign", "delete-campaign", "rename-campaign", "compact-archive", "edit-draft-campaign", "resolve-origin", "bank-snippet", "discard-draft", "ingest-upload", "open-dataset-draft", "open-origin-draft", "set-user-settings", "accept-terms", "set-api-key", "remove-api-key", "mint-api-token", "list-api-tokens", "revoke-api-token"] as const;
+
 // Each kind whose `Press` claims the browser door (domain/command_kinds.py::CommandKind.browser).
 export type BrowserKind = "accept-terms" | "archive-campaign" | "bank-snippet" | "cancel" | "cancel-queued" | "cleanup-empty-cycles" | "compact-archive" | "delete-campaign" | "delete-cycle" | "discard-draft" | "edit-draft-campaign" | "fork-cycle" | "held-out" | "ingest-upload" | "list-api-tokens" | "mint-api-token" | "open-dataset-draft" | "open-origin-draft" | "pause" | "remove-api-key" | "rename-campaign" | "resolve-origin" | "revoke-api-token" | "set-api-key" | "set-concurrent-cycles" | "set-limits" | "set-sample-lookahead" | "set-user-settings" | "skip-searchpoint" | "start-checkin" | "start-run" | "submit-arms" | "unarchive-campaign" | "verify-candidate";
 
@@ -5743,7 +5753,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "4bdec1024222e867";
+export const SERVED_CONTRACT = "e07ce0283e8b789f";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5779,7 +5789,7 @@ export type MeasurandUnit = 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'to
 export type CostAbsence = 'no_lift' | 'unpriced_tokens' | 'zero_spend';
 
 // promptpotter.domain.bench::PassRefusal
-export type PassRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection';
+export type PassRefusal = 'inner' | 'no_manifest' | 'held_elsewhere' | 'campaign_not_active' | 'definition_unread' | 'connector_moved' | 'no_holdout' | 'in_flight' | 'selecting' | 'origin_unscored' | 'graded' | 'no_selection' | 'read_only';
 
 // promptpotter.domain.campaign::LifecycleStatus
 export type LifecycleStatus = 'active' | 'archived' | 'deleted';
@@ -6223,6 +6233,7 @@ export const PASS_REFUSAL_INFO: Record<PassRefusal, string> = {
   "origin_unscored": "The origin has not been scored, so there is no reference to grade against.",
   "graded": "The line's selection is already graded.",
   "no_selection": "No round closed past the origin, so there is no selection to grade.",
+  "read_only": "You read this run; asking for its passes is not yours.",
 };
 
 // Mirror of domain/campaign.py::LIFECYCLE_STATUS_LABELS, in display order.
@@ -6612,7 +6623,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [DISPLAY_METRIC_INFO, ["fitness", "ability", "composite"]],
   [ARM_END_INFO, ["invalid", "skipped", "broken", "refused", "eliminated", "locked_in"]],
   [COST_ABSENCE_WORDS, ["no_lift", "unpriced_tokens", "zero_spend"]],
-  [PASS_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection"]],
+  [PASS_REFUSAL_INFO, ["inner", "no_manifest", "held_elsewhere", "campaign_not_active", "definition_unread", "connector_moved", "no_holdout", "in_flight", "selecting", "origin_unscored", "graded", "no_selection", "read_only"]],
   [LIFECYCLE_STATUS_LABELS, ["active", "archived", "deleted"]],
   [HARD_SAMPLE_ORDER_LABELS, ["info_gain", "difficulty"]],
   [HEATMAP_SCOPE_LABELS, ["cycle", "campaign", "dataset"]],

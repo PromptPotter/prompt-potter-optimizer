@@ -63,6 +63,7 @@ from promptpotter.domain.command_kinds import (
     Door,
     ReadKind,
     SubmitArmsPayload,
+    filable,
 )
 from promptpotter.domain.hierarchy import HierarchyCampaign, HierarchyCycle
 from promptpotter.domain.records.run_records import LaunchAnswer
@@ -389,6 +390,16 @@ class CancelTask(HostRequest[HostTask]):
 
     async def answered_by(self, session: HostSession) -> HostTask:
         return HostTask.of(await session._cancel(self.task_id))
+
+
+@dataclass(frozen=True, slots=True)
+class ListTools(HostRequest[list[HostTool]]):
+    """The tools its caller may call: every read, and each command its gate files
+    (`command_kinds.py::filable`), so a scoped bearer is listed no kind its scope refuses."""
+
+    async def answered_by(self, session: HostSession) -> list[HostTool]:
+        kinds = filable(session.caller.stores.identity)
+        return [t for t in HOST_TOOLS.values() if t.read_only or t.kind in kinds]
 
 
 @dataclass(frozen=True, slots=True)

@@ -9,7 +9,7 @@ from pydantic import Field, computed_field
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.said import Tone
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.shared.errors import ActValue, DiagnosticError, ErrorCategory, NextAct
+from promptpotter.shared.errors import DiagnosticError, ErrorCategory, NextAct
 from promptpotter.shared.worded import Worded
 
 
@@ -354,7 +354,7 @@ class RunPhaseInfo(NamedTuple):
 QUEUE_STARTS_ITSELF = "it starts by itself when a slot frees"
 
 
-def _holding(code: str, said: str, *acts: NextAct) -> Refusal:
+def worded_refusal(code: str, said: str, *acts: NextAct) -> Refusal:
     return Refusal(code=code, message=said, details={}, next_acts=acts)
 
 
@@ -367,10 +367,10 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             False,
             2,
             None,
-            _holding("run_queued", f"Queued — {QUEUE_STARTS_ITSELF}."),
+            worded_refusal("run_queued", f"Queued — {QUEUE_STARTS_ITSELF}."),
         ),
         RunPhase.STARTING: RunPhaseInfo(
-            "Starting", False, False, False, 1, None, _holding("run_starting", "Starting up…")
+            "Starting", False, False, False, 1, None, worded_refusal("run_starting", "Starting up…")
         ),
         RunPhase.RUNNING: RunPhaseInfo("Running", True, False, False, 1, "pause", None),
         # No loop walks it, so a skip or a look-ahead has nothing to spend; the one stop reaches it.
@@ -383,7 +383,7 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             False,
             2,
             "resume",
-            _holding("run_stopping", "Stopping at its next checkpoint."),
+            worded_refusal("run_stopping", "Stopping at its next checkpoint."),
         ),
         # Blocked on the operator, so it leads the dock; its act answers the arms it holds for.
         RunPhase.GATE: RunPhaseInfo(
@@ -393,14 +393,20 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             True,
             0,
             None,
-            _holding(
+            worded_refusal(
                 "run_held",
                 "Holding for you — the chat says what it waits on.",
                 NextAct(kind="submit-arms", field="keep", value="the draft indexes to measure"),
             ),
         ),
         RunPhase.DETACHED: RunPhaseInfo(
-            "Detached", False, False, False, 3, "start", _holding("run_detached", "Producer gone.")
+            "Detached",
+            False,
+            False,
+            False,
+            3,
+            "start",
+            worded_refusal("run_detached", "Producer gone."),
         ),
         RunPhase.TERMINAL: RunPhaseInfo(
             "Ended",
@@ -409,7 +415,7 @@ RUN_PHASE_INFO: Worded[RunPhase, RunPhaseInfo] = Worded(
             False,
             3,
             "start",
-            _holding("run_ending", "Writing its last files."),
+            worded_refusal("run_ending", "Writing its last files."),
         ),
     }
 )
@@ -426,52 +432,6 @@ def run_phase_label(run_phase: RunPhase, stop_reason: StopReason | None) -> str:
     if run_phase is not RunPhase.TERMINAL:
         return RUN_PHASE_INFO[run_phase].label
     return "—" if stop_reason is None else STOP_REASON_INFO[stop_reason].label
-
-
-class RunAdmission(FrozenModel):
-    """The launch half of a cycle's run verbs, its campaign's refusal joined: what the one run
-    control offers. The loop's verbs answer off `RunState` alone, which no campaign moves."""
-
-    offers: RunAction | None = Field(
-        description="The verb the one run control offers; null where it offers none."
-    )
-    refusal: Refusal | None = Field(
-        description="Why the control offers none, with the acts past it; null where it offers one."
-    )
-    payload: dict[str, dict[str, ActValue]] = Field(
-        description="What the offered start or resume sends beside the cycle's address: the "
-        "`start-run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent as served."
-    )
-    launch_refusal: str = Field(
-        description="Why the cycle's campaign refuses every launch (archived, its definition "
-        "moved), so its stop's `start-run` acts are not offered; empty where a launch is admitted."
-    )
-
-    @classmethod
-    def of(cls, run: RunState, *, campaign_refusal: Refusal | None) -> RunAdmission:
-        """Read only through `admission.py::admitted`, which joins *campaign_refusal*, the cycle's
-        campaign's own: a launch verb it refuses is not offered."""
-        info = RUN_PHASE_INFO[run.run_phase]
-        pausing = info.action == "pause"
-        declined = run.pause_refusal if pausing else run.start_refusal
-        refusal: Refusal | None = None
-        if info.action is None:
-            refusal = info.refusal
-        elif declined:
-            # The phase names a verb its producer does not admit yet; a pause and an inner run say
-            # their own refusal.
-            refusal = _holding("run_declined", declined) if pausing or run.inner else info.refusal
-        refuses_launch = campaign_refusal is not None and info.action in ("resume", "start")
-        if refuses_launch and refusal is None:
-            refusal = campaign_refusal
-        stop = None if run.stop is None else run.stop.stop_reason
-        acts = () if stop is None or pausing or refuses_launch else STOP_REASON_INFO[stop].next_acts
-        return cls(
-            offers=info.action if refusal is None else None,
-            refusal=refusal,
-            payload={k: v for act in acts for k, v in act.payload.items()},
-            launch_refusal="" if campaign_refusal is None else campaign_refusal.message,
-        )
 
 
 class DashboardState(enum.StrEnum):

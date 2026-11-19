@@ -31,6 +31,7 @@ from promptpotter.domain.arm_reading import (
     arm_verdict,
 )
 from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.command_kinds import CommandKind, filable
 from promptpotter.domain.cycle_index import CycleIndex
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Lens, Subject
 from promptpotter.domain.hierarchy import (
@@ -373,13 +374,18 @@ class _Build:
             sandbox = inner_sandbox_store(stores, cycle.hop)
             if sandbox is not None and depth > 0:
                 self._inner(sandbox, (*inside, cycle.hop), cycle, cycles, depth=depth - 1)
+        kinds = filable(stores.identity)
+        cleans = CommandKind.CLEANUP_EMPTY_CYCLES in kinds
         return SubtreeCampaign(
             **_fields(entry)
             | {
                 "children": [self._cycle(cycle, cycles) for cycle in cycles],
                 "facts": SubtreeCampaignFacts(
                     **_fields(entry.facts),
-                    deletable_stubs=len(deletable_stubs(stores, campaign.root_hop)),
+                    deletable_stubs=len(deletable_stubs(stores, campaign.root_hop))
+                    if cleans
+                    else 0,
+                    filable=list(kinds),
                 ),
             }
         )

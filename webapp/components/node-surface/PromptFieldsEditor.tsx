@@ -12,6 +12,7 @@ import {
 } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { useWorkspace } from "@/lib/state/workspace";
 import { PromptSegments } from "./PromptSegments";
 import type { NodeScope } from "@/lib/address";
@@ -96,8 +97,9 @@ export function PromptFieldsEditor({
   );
   // An edit is banked as a version of its snippet in the campaign or check-in it is written in.
   const { viewed, checkin } = useWorkspace();
-  const campaignId = viewed?.root.campaignId ?? null;
-  const experiment = campaignId ?? checkin?.draftId ?? null;
+  // Banked where its reader may file it: a campaign's reader off its tree, a check-in's the account.
+  const banks = useFiles(viewed?.path ?? (checkin ? "account" : null))("bank-snippet");
+  const experiment = banks ? (viewed?.root.campaignId ?? checkin?.draftId ?? null) : null;
   const bank = useCommand<"bank-snippet">("prompt-snippets", experiment);
   const sent = useRef(new Set<string>());
   // Typed since the last bank, by field: framed until the served library holds it, and never in

@@ -6,7 +6,7 @@ import hashlib
 import json
 import re
 from collections import ChainMap
-from collections.abc import Mapping
+from collections.abc import Collection, Iterable, Mapping
 from enum import StrEnum
 from typing import Annotated, Any, ClassVar, Literal, NamedTuple, Self, get_args
 
@@ -38,6 +38,7 @@ from promptpotter.domain.phases import (
     INNER_PAUSE_REFUSAL,
     INNER_SKIP_REFUSAL,
     STOP_REASON_INFO,
+    RunAction,
 )
 from promptpotter.domain.pipeline_params import node_rule
 from promptpotter.domain.pipeline_schema import ParamIntent
@@ -58,6 +59,8 @@ from promptpotter.shared.identity import (
     CAMPAIGN_LOOKAHEAD_CAP,
     CAMPAIGN_RUN_CAP,
     CAMPAIGN_STEP_CAP,
+    IdentityContext,
+    has_capability,
 )
 from promptpotter.shared.named_rows import require_own_docstring
 from promptpotter.shared.worded import Worded
@@ -407,6 +410,27 @@ class CommandKind(StrEnum):
         BROWSER,
         True,
     )
+
+
+def filable(identity: IdentityContext) -> tuple[CommandKind, ...]:
+    """The map from a kind's `capability` to *identity*'s: the kinds whose capability it holds,
+    which every served offer is built from. Outside it stand the dispatcher's two other refusals,
+    a cancel's rung (`dispatcher.py::_rung`, the capability of the command it stops) and a kind's
+    door (`CommandKind.pressed_at`): an offer is a kind its reader holds, never a door it reached."""
+    return tuple(k for k in CommandKind if has_capability(identity, k.capability))
+
+
+# The kind each run verb files (`RunAdmission.offers`): a resume is a start of a paused cycle.
+RUN_VERB_KIND: dict[RunAction, CommandKind] = {
+    "pause": CommandKind.PAUSE,
+    "resume": CommandKind.START_RUN,
+    "start": CommandKind.START_RUN,
+}
+
+
+def acts_filed(acts: Iterable[NextAct], kinds: Collection[CommandKind]) -> tuple[NextAct, ...]:
+    """*acts* a reader filing *kinds* may take: a kind among them, or a field or a file."""
+    return tuple(act for act in acts if not act.kind or act.kind in kinds)
 
 
 # The longest command id a door sends or names; `CommandCall` mints a uuid's 36.

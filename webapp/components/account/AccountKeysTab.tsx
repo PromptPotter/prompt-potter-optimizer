@@ -10,6 +10,7 @@ import {
 } from "@/lib/api/types";
 import { fmtAgo } from "@/lib/format";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { useRead } from "@/lib/hooks/useRead";
 
 export function AccountKeysTab() {
@@ -30,6 +31,7 @@ type KeyVerb = "save-key" | "remove-key";
 
 export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
   const cmd = useCommand<KeyVerb>("account-keys", ACCOUNT);
+  const files = useFiles("account");
   const busy = cmd.pending !== null;
 
   const save = (provider: string, secret: string) =>
@@ -52,8 +54,8 @@ export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
               payer={route.payer}
               held={route.key}
               busy={busy}
-              onSave={(secret) => save(route.provider, secret)}
-              onRemove={() => remove(route.provider)}
+              onSave={files("set-api-key") ? (secret) => save(route.provider, secret) : null}
+              onRemove={files("remove-api-key") ? () => remove(route.provider) : null}
             />
           ))}
         </ul>
@@ -79,8 +81,9 @@ function KeyRow({
   payer: ProviderRoute["payer"];
   held: AccountKey | null;
   busy: boolean;
-  onSave: (secret: string) => void;
-  onRemove: () => void;
+  // Null where its reader may not file the act: the row reads, unpressable.
+  onSave: ((secret: string) => void) | null;
+  onRemove: (() => void) | null;
 }) {
   return (
     <li className="account-key">
@@ -91,30 +94,34 @@ function KeyRow({
             <code aria-label={`${provider} key ending ${held.last4}`}>…{held.last4}</code>
             <span className="account-note">added {fmtAgo(held.added_at)}</span>
           </span>
-          <Button
-            variant="danger"
-            disabled={busy}
-            aria-label={`Remove the ${provider} key`}
-            onClick={onRemove}
-          >
-            Remove
-          </Button>
+          {onRemove && (
+            <Button
+              variant="danger"
+              disabled={busy}
+              aria-label={`Remove the ${provider} key`}
+              onClick={onRemove}
+            >
+              Remove
+            </Button>
+          )}
         </>
       ) : (
         <>
           <span className="account-note">
             {payer === null ? "No key: nothing sends on it." : `Sends on the ${KEY_SOURCE_LABELS[payer]}.`}
           </span>
-          <CommitInput
-            className="account-key-input"
-            type="password"
-            value=""
-            disabled={busy}
-            placeholder="Paste a key, then Enter"
-            aria-label={`${provider} API key`}
-            validate={(draft) => draft !== ""}
-            onCommit={onSave}
-          />
+          {onSave && (
+            <CommitInput
+              className="account-key-input"
+              type="password"
+              value=""
+              disabled={busy}
+              placeholder="Paste a key, then Enter"
+              aria-label={`${provider} API key`}
+              validate={(draft) => draft !== ""}
+              onCommit={onSave}
+            />
+          )}
         </>
       )}
     </li>

@@ -11,6 +11,7 @@ import {
   type CapAxis,
 } from "@/lib/api/types";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { fmtUsd } from "@/lib/format";
 import { capInput, capWords, parseCapIn, type Cap } from "@/lib/run-limits";
 import { useWorkspace } from "@/lib/state/workspace";
@@ -53,6 +54,8 @@ interface Props {
 export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
+  // Where its reader may not file `set-limits`, the caps read, unpressable.
+  const files = useFiles(viewedPath)("set-limits");
   const [drafts, setDrafts] = useState<Drafts>(() => draftsOf(caps));
   // Never remounted on a unit switch: unseeded, `apply()` writes the prior cycle's caps on the new.
   const address = viewed?.address ?? null;
@@ -69,7 +72,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
   const [note, setNote] = useState<{ at: string | null; text: string } | null>(null);
   const said = note?.at === address ? note.text : null;
   const pending = cmd.pending !== null;
-  const disabled = !viewedPath;
+  const disabled = !viewedPath || !files;
 
   // Only a CHANGED axis is named: an unnamed one stays as it stands, and a named null would lift it.
   const typed = {} as Record<CapAxis, Cap>;
@@ -147,7 +150,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
               ) : null}
             </span>
             <small className="run-limits-book">{bookText(cap)}</small>
-            {cap.armed != null ? (
+            {cap.armed != null && files ? (
               <Button
                 className="run-limits-lift"
                 disabled={disabled || pending}
@@ -177,7 +180,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
             checked={overshoot}
             label="Hold each call at its node's mean bill"
             locked={disabled || pending}
-            lockedNote="saving"
+            lockedNote={files ? "saving" : "not yours to set"}
             onChange={() =>
               void send(
                 { overshoot: !overshoot },
@@ -194,17 +197,19 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
           ) : null}
         </span>
       </div>
-      <div className="run-limits-actions">
-        {isHalt ? <small className="run-limits-book">Halts the run after the current round.</small> : null}
-        <button
-          type="button"
-          className="run-limits-set"
-          disabled={disabled || pending || !hasChange}
-          onClick={onSet}
-        >
-          {pending ? "Setting…" : "Set caps"}
-        </button>
-      </div>
+      {files ? (
+        <div className="run-limits-actions">
+          {isHalt ? <small className="run-limits-book">Halts the run after the current round.</small> : null}
+          <button
+            type="button"
+            className="run-limits-set"
+            disabled={disabled || pending || !hasChange}
+            onClick={onSet}
+          >
+            {pending ? "Setting…" : "Set caps"}
+          </button>
+        </div>
+      ) : null}
       {said ? <small className="run-limits-note">{said}</small> : null}
       <FailureLine failure={cmd.failure} />
       <Dialog

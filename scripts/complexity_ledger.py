@@ -201,7 +201,18 @@ BASELINE = {
     # one count per owner from stats such as `machine_status.py::machine_version`'s, never a reader's
     # view, walked and counted under one lock, a vanished store gone and a subject no walk finds
     # dropped) and a command's ack names the versions its write produced.
-    "package_lines": 112259,
+    # exhibit-acts (+65 over 112259): `command_kinds.py::filable` / `offered`, the dispatcher's
+    # capability map read by every offer, and `RunAdmission`, moved beside `HierarchyState`.
+    # exhibit-acts-fix 1 (+77): every served offer built for its reader where it is built (skip,
+    # verify, held-out, stubs, a hold's decision), the kinds served once per tree and on `/auth/me`.
+    # 2 (+11): a read's version covers its reader's kinds, the feed counted per reader.
+    # 5 (+2): a run's own refusal stands, its acts narrowed to its reader's; `read_only` only where
+    # its reader files none of what the run asks.
+    # 6 (+3): `RunAdmission.stop_acts`, the stop's acts its reader files, where the client filtered.
+    # 8 (+11): `host_surface.py::ListTools`, the MCP listing as its session's identity files it.
+    # 9 (+13): `filable`'s docstring names what stands outside the map; `holding` -> `worded_refusal`
+    # wraps `RUN_PHASE_INFO`'s detached row (+6); the launch test reads `RUN_VERB_KIND`.
+    "package_lines": 112441,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { commands, cycleAddress } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { FailureLine, HoverCard } from "@/components/ui";
 import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
@@ -22,6 +23,8 @@ export function ApplyScenarioPanel({
   // The fork is the cycle's and criterion's it was applied on: another paints its own button.
   const here = `${scope}\n${criterion}`;
   const [doneAt, setDoneAt] = useState<string | null>(null);
+  // The readout is every reader's; the fork is pressed only where its reader files one.
+  const forks = useFiles(path)("fork-cycle");
 
   if (!criterion || !path) return null;
   const at = divergentRound ?? nextRound;
@@ -72,7 +75,7 @@ export function ApplyScenarioPanel({
         <p className="note-info">
           Forked at round {at}. The sidebar follows the new branch as it comes up.
         </p>
-      ) : (
+      ) : forks ? (
         <HoverCard
           content={`Mint a branch at round ${at} carrying this criterion, keeping every round before it. Tagged operator_rewind in lineage.`}
         >
@@ -80,7 +83,7 @@ export function ApplyScenarioPanel({
             {pending ? "Applying…" : isLive ? `Stop & apply from round ${at}` : `Apply from round ${at}`}
           </button>
         </HoverCard>
-      )}
+      ) : null}
     </div>
   );
 }

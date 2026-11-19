@@ -42,6 +42,8 @@ export type HardSampleOrder = CellsResponse["order"];
 export type CellStatus = CellsResponse["cells"][number]["status"];
 
 export type MeasuredUnit = ServedDashboard["measured_unit"];
+// served: `command_kinds.py::filable` — a kind the read's own reader may file.
+export type Filable = SubtreeCampaign["facts"]["filable"][number];
 
 export type ActivityWindow = ActivityResponse["window"];
 export type ActivityGroupBy = ActivityResponse["group_by"];

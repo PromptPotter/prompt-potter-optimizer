@@ -500,16 +500,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/29 · tv-2 (what tv-2 left at its landing)
 
-- **A reader with no capability is offered acts, and each one 404s** (tv-2's report; webd-4's
-  review): the exhibit's reader is built with no capability (`application/exhibit.py::
-  exhibit_stores`), yet `jobs/launcher/admission.py::admitted` serves it `offers: "pause"`, and every
-  other served act (a decision gate's, verify / held-out / cancel, steer-fork, apply-scenario,
-  bank-snippet, lineage cleanup and delete) is drawn from facts that never read the reader (I3). A
-  client gate keyed on the follow leaks on the first pin: the read alone knows whose stores it came
-  from. Action: a served read names the acts ITS reader may take, from the one capability map the
-  dispatcher gates on (`shared/identity.py`), and every act surface of the five entry points reads
-  that. **Re-test:** follow the exhibit as a non-host, pinned and followed, at a decision gate: the
-  served read names no act and no act renders.
 - **The account feed never re-asks an exhibit's reads when the host's store moves**: a follower's
   view stands still. Action: the feed's subject includes the exhibit's. **Re-test:** the host's
   round closes; the follower's dashboard moves without a reload.

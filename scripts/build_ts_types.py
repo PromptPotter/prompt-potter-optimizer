@@ -409,6 +409,13 @@ def _emit_tones() -> str:
     )
 
 
+def _emit_command_kinds() -> str:
+    return (
+        "// Every command kind, in its table's order (domain/command_kinds.py::CommandKind).\n"
+        f"export const COMMAND_KINDS = {json.dumps([k.value for k in CommandKind])} as const;"
+    )
+
+
 def _emit_live_windows() -> str:
     return (
         "// How often an open call beats (infrastructure/llm/heartbeat.py::HEARTBEAT_INTERVAL_S).\n"
@@ -541,6 +548,7 @@ def main() -> int:
     )
     blocks.append(_emit_lifecycle_filter())
     blocks.append(_emit_tones())
+    blocks.append(_emit_command_kinds())
     blocks.append(command_contract)
     blocks.append(_emit_read_routes())
     blocks.append(word_tables)

@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { useRead } from "@/lib/hooks/useRead";
 import { fmtBytes } from "@/lib/format";
 import {
@@ -37,6 +38,7 @@ export function ArchiveCompactionControl() {
   const dry = useCommand<Mode>("archive-preview", ACCOUNT);
   const commit = useCommand<Mode>("archive-apply", ACCOUNT);
   const held = useRead(archiveDatasetsRead());
+  const maintains = useFiles("account")("compact-archive");
   const busy = dry.pending !== null || commit.pending !== null;
 
   // A preview must not stand as consent for another mode or another dataset.
@@ -96,7 +98,8 @@ export function ArchiveCompactionControl() {
         )}
       </ReadState>
 
-      <div className="wsmaint-actions">
+      {!maintains && <p className="account-muted">Maintaining this archive is not yours.</p>}
+      <div className="wsmaint-actions" hidden={!maintains}>
         <Button onClick={() => void run(false)} disabled={busy}>
           {busy && !preview ? "Checking…" : "Preview"}
         </Button>

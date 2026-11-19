@@ -9,16 +9,30 @@ from pydantic import Field
 from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
 from promptpotter.domain.bench import BenchCurve, BenchScore, PassAdmission
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
-from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
+from promptpotter.domain.command_kinds import (
+    PAYLOAD_MODEL_FOR_KIND,
+    RUN_VERB_KIND,
+    CommandKind,
+    acts_filed,
+)
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phases import RunAdmission, RunState, StopReading
+from promptpotter.domain.phases import (
+    RUN_PHASE_INFO,
+    STOP_REASON_INFO,
+    RunAction,
+    RunState,
+    StopReading,
+    worded_refusal,
+)
 from promptpotter.domain.records.run_records import ForkDirection, ForkTrigger
+from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.said import Said
 from promptpotter.domain.spend import MeteredSpend
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
+from promptpotter.shared.errors import ActValue, NextAct
 
 type CycleMint = Literal["root", "fork", "inner"]
 type TagKind = Literal[
@@ -80,6 +94,77 @@ class HierarchySpan(FrozenModel):
 
     opened_at: str
     last_at: str = Field(description="The newest activity under the entry.")
+
+
+READ_ONLY = worded_refusal("read_only", "You read this run; acting on it is not yours.")
+
+
+class RunAdmission(FrozenModel):
+    """The launch half of a cycle's run verbs, its campaign's refusal and its reader's kinds
+    joined: what the one run control offers. The loop's verbs answer off `RunState` alone, which
+    no campaign moves."""
+
+    offers: RunAction | None = Field(
+        description="The verb the one run control offers; null where it offers none."
+    )
+    refusal: Refusal | None = Field(
+        description="Why the control offers none, with the acts past it; null where it offers one."
+    )
+    payload: dict[str, dict[str, ActValue]] = Field(
+        description="What the offered start or resume sends beside the cycle's address: the "
+        "`start-run` its stop names (a DIVERGED stop's `mode.on_divergence: fork`), sent as served."
+    )
+    stop_acts: tuple[NextAct, ...] = Field(
+        description="The acts past the run's stop its reader files: no `start-run` where its "
+        "campaign refuses every launch (archived, its definition moved)."
+    )
+
+    @classmethod
+    def of(
+        cls,
+        run: RunState,
+        *,
+        campaign_refusal: Refusal | None,
+        filable: tuple[CommandKind, ...],
+    ) -> RunAdmission:
+        """Read only through `admission.py::admitted`, which joins *campaign_refusal*, the cycle's
+        campaign's own, and *filable*, its reader's: a verb either refuses is not offered."""
+        info = RUN_PHASE_INFO[run.run_phase]
+        pausing = info.action == "pause"
+        declined = run.pause_refusal if pausing else run.start_refusal
+        refusal: Refusal | None = None
+        if info.action is None:
+            refusal = info.refusal
+        elif declined:
+            # The phase names a verb its producer does not admit yet; a pause and an inner run say
+            # their own refusal.
+            refusal = (
+                worded_refusal("run_declined", declined) if pausing or run.inner else info.refusal
+            )
+        # A resume files what a start does: the launch a campaign may refuse.
+        launches = info.action is not None and RUN_VERB_KIND[info.action] is RUN_VERB_KIND["start"]
+        refuses_launch = campaign_refusal is not None and launches
+        if refuses_launch and refusal is None:
+            refusal = campaign_refusal
+        if refusal is None:
+            # The run asks its verb alone: a reader who may not file it reads the run.
+            if info.action and RUN_VERB_KIND[info.action] not in filable:
+                refusal = READ_ONLY
+        elif refusal.next_acts:
+            # Its own refusal stands with the acts past it its reader files; none, it reads the run.
+            filed = acts_filed(refusal.next_acts, filable)
+            refusal = Refusal(**{**dict(refusal), "next_acts": filed}) if filed else READ_ONLY
+        stop = None if run.stop is None else run.stop.stop_reason
+        named = () if stop is None else STOP_REASON_INFO[stop].next_acts
+        acts = acts_filed(
+            tuple(a for a in named if not refuses_launch or a.kind != "start-run"), filable
+        )
+        return cls(
+            offers=info.action if refusal is None else None,
+            refusal=refusal,
+            payload={} if pausing else {k: v for act in acts for k, v in act.payload.items()},
+            stop_acts=acts,
+        )
 
 
 class HierarchyState(FrozenModel):
@@ -184,7 +269,12 @@ class SubtreeCampaignFacts(CampaignFacts):
 
     deletable_stubs: int = Field(
         description="How many cycles `cleanup-empty-cycles` deletes here now "
-        "(`admission.py::deletable_stubs`, the command's own list: no held stub counts)."
+        "(`admission.py::deletable_stubs`, the command's own list: no held stub counts); none "
+        "where its reader may not file it."
+    )
+    filable: list[CommandKind] = Field(
+        description="The kinds this read's reader may file (`command_kinds.py::filable`): what "
+        "an act no read offers (limits, look-ahead, a fork, a scenario, a bank) is drawn by."
     )
 
 

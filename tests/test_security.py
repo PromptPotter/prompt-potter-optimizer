@@ -95,6 +95,7 @@ from promptpotter.application.datasets.draft_campaign import new_draft, owned_dr
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.datasets.tabular_ingest import IngestError
 from promptpotter.application.embedded_run import host_dispatcher
+from promptpotter.application.hierarchy import entries_version
 from promptpotter.application.hierarchy_subtree import hierarchy_subtree, subtree_version
 from promptpotter.application.host_surface import (
     HOST_TOOLS,
@@ -162,6 +163,7 @@ from promptpotter.application.optimizers.potter.records import L2Memory, L3Memor
 from promptpotter.application.read_params import (
     CampaignPipelineParams,
     CycleDashboardParams,
+    HierarchyParams,
     HierarchySubtreeParams,
 )
 from promptpotter.application.run_phase_control import RunControl
@@ -187,6 +189,7 @@ from promptpotter.domain.command_events import (
     WORKSPACE_SUBJECT,
     CommandAckRecord,
     CommandRecord,
+    KeptRefusal,
     subject_key,
 )
 from promptpotter.domain.command_kinds import (
@@ -228,7 +231,13 @@ from promptpotter.domain.cycle_paths import (
 )
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.draft_edit import ConfigEdit, EditDraftPatch, OptimizationOverrides
-from promptpotter.domain.hierarchy import SubtreeCampaign
+from promptpotter.domain.hierarchy import (
+    HierarchyCampaign,
+    HierarchyCycle,
+    RunAdmission,
+    SubtreeCampaign,
+    entries_under,
+)
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job, LaunchMove, ScoringPass
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
@@ -238,7 +247,6 @@ from promptpotter.domain.phases import (
     RUN_PHASE_INFO,
     PauseCause,
     ProducerState,
-    RunAdmission,
     RunPhase,
     StopOutcome,
     StopReason,
@@ -1444,6 +1452,100 @@ async def test_a_follower_reads_the_hosts_exhibit_and_acts_on_none_of_it(exhibit
 
 
 @pytest.mark.usefixtures("offline")
+def test_a_reads_version_moves_with_the_kinds_its_reader_files(exhibit: _Exhibit) -> None:
+    # A grant moves no store, yet every offer the read serves: no 304 serves another reader's acts.
+    hop, follower = exhibit
+    host = workspace(default_identity(tenant_id="host-1"))
+    followed = CycleDashboardParams(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id)
+    assert entries_version([followed.stores(Caller(follower))]) != entries_version([host])
+    jobs = JobRegistry.attach(host.jobs_dir)
+    granted = dataclasses.replace(
+        host,
+        identity=dataclasses.replace(host.identity, capabilities=frozenset({CAMPAIGN_RUN_CAP})),
+    )
+    assert entries_version([granted]) != entries_version([host]), "a grant left the ETag standing"
+    before = cycle_reads.feed_versions(host, jobs, "store:")
+    after = cycle_reads.feed_versions(granted, jobs, "store:")
+    assert before.keys() == after.keys()
+    assert all(after[s].n > before[s].n for s in before), "a grant moved no feed version"
+    assert cycle_reads.feed_versions(host, jobs, "store:") == before, (
+        "one reader's walk moved another's"
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_reader_is_offered_only_the_acts_its_capabilities_file(exhibit: _Exhibit) -> None:
+    # The gate and the offer are one rule: the follower reads with no capability, the host with all.
+    # The run stands where a verb is offered (held, then gone with its definition readable), then
+    # where it asks nothing (its definition unread): its own refusal stands for every reader.
+    hop, follower = exhibit
+    host = workspace(default_identity(tenant_id="host-1"))
+    campaign = minted_campaign(hop)
+    minted_dataset(host, campaign)
+    cycle_dir = host.campaigns.cycle_dir(hop)
+    _running(cycle_dir)
+    cycle = CycleDashboardParams(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id)
+    for stand, verb in (("held", "pause"), ("gone", "start"), ("unread", None)):
+        if stand == "gone":
+            release_cycle(cycle_dir)
+        if stand == "unread":
+            definition = host.tenant_datasets.dataset_dir(campaign.dataset_name) / DEFINITION_FILE
+            write_yaml(definition, {"pipeline": {"connector": "moved"}})
+        phase = RunPhase.RUNNING if stand == "held" else RunPhase.DETACHED
+        assert host.run_state(hop).run_phase is phase
+        for reader, kinds in ((follower, []), (host, list(CommandKind))):
+            tree = HierarchySubtreeParams(address=hop.campaign_id).answer(Caller(reader))
+            listed = HierarchyParams(campaign=hop.campaign_id).answer(Caller(reader)).entries
+            admissions = [
+                *(e.state.admission for e in entries_under(tree) if isinstance(e, HierarchyCycle)),
+                *(e.state.admission for e in listed if isinstance(e, HierarchyCampaign)),
+                served_dashboard(cycle.stores(Caller(reader)), hop).admission,
+            ]
+            assert len(admissions) == 3
+            assert isinstance(tree, SubtreeCampaign)
+            assert tree.facts.filable == kinds, "a reader was offered a kind its gate refuses"
+            for admission in admissions:
+                refused = admission.refusal
+                if verb is None:
+                    assert refused is not None and refused.code == "definition_unread", (
+                        "a refusal asking its reader nothing was read as another's"
+                    )
+                elif kinds:
+                    assert (admission.offers, refused) == (verb, None), stand
+                else:
+                    assert admission.offers is None, (
+                        f"a reader with no capability was offered {verb}"
+                    )
+                    assert refused is not None and refused.code == "read_only", refused
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_scoped_reader_of_a_command_is_offered_only_the_acts_its_scope_files() -> None:
+    owner = workspace(dataclasses.replace(_who("owner-1"), capabilities=OWNER_COMMAND_CAPABILITIES))
+    refused = _command(
+        MintCampaignPayload(dataset_name="d"), "2026-01-01T00:00:00Z", WORKSPACE_SUBJECT
+    )
+    owner.commands.append(refused)
+    past = NextAct(kind="start-run", field="mode.from_round", value=2)
+    owner.commands.append(
+        CommandAckRecord(
+            command_id=refused.command_id,
+            status="rejected",
+            refusal=KeptRefusal(
+                http_status=409,
+                refusal=Refusal(code="c", message="m", details={}, next_acts=(past,)),
+            ),
+        )
+    )
+    scoped = workspace(
+        dataclasses.replace(_who("owner-1"), capabilities=frozenset({CAMPAIGN_CREATE_CAP}))
+    )
+    for reader, acts in ((owner, [past]), (scoped, [])):
+        read = read_command(reader, JobRegistry.attach(reader.jobs_dir), refused.command_id)
+        assert list(read.next_acts) == acts, "a reader was offered an act its scope refuses"
+
+
+@pytest.mark.usefixtures("offline")
 def test_a_follower_descends_only_into_the_exhibits_own_inner_runs(exhibit: _Exhibit) -> None:
     # The sandbox key is flat: a chain naming a private host cycle under the exhibit spliced its run in.
     hop, follower = exhibit
@@ -1780,7 +1882,7 @@ def test_a_deleted_campaigns_subjects_leave_the_count(built_stores: Stores, tmp_
     rmtree_robust(sandbox)
     rmtree_robust(built_stores.campaigns.campaign_root_dir(hop.campaign_id))
     assert subject not in cycle_reads.feed_versions(built_stores, jobs), "guard"
-    counted = {s for owned in cycle_reads._OWNED.values() for s in owned.held}
+    counted = {s for owned in cycle_reads._OWNED.values() for _, s in owned.held}
     assert subject not in counted, (
         "a deleted campaign's subject stays counted for the process's life"
     )
@@ -5369,7 +5471,14 @@ async def test_the_mcp_door_over_http_serves_a_session_to_the_bearer_that_opened
         await http.post("/mcp/", json=initialized, headers={**bearer(mine), **session})
         listed = await http.post("/mcp/", json=listing, headers={**bearer(mine), **session})
         tools = {tool["name"] for tool in _mcp_said(listed)["result"]["tools"]}
-        assert tools == set(HOST_TOOLS), "the HTTP door listed another registry than the host's"
+        # A `step`-scoped bearer is listed every read and only the commands its scope files.
+        scoped = {
+            name
+            for name, tool in HOST_TOOLS.items()
+            if tool.read_only
+            or (isinstance(tool.kind, CommandKind) and tool.kind.capability == CAMPAIGN_STEP_CAP)
+        }
+        assert tools == scoped, "the HTTP door listed a tool its bearer's scope refuses"
         for who, headers in (("another account's bearer", bearer(theirs)), ("no carrier", accept)):
             refused = await http.post("/mcp/", json=listing, headers={**headers, **session})
             assert refused.status_code in (401, 404), f"{who} was served a session it never opened"

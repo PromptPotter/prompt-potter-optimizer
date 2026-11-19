@@ -28,6 +28,7 @@ from promptpotter.domain.campaign import (
     ceiling_meter,
 )
 from promptpotter.domain.checkin_draft import DraftFile
+from promptpotter.domain.command_kinds import filable
 from promptpotter.domain.cycle_index import STATUS_MARK_INFO, CycleIndex, RunStatus
 from promptpotter.domain.cycle_paths import (
     CycleHop,
@@ -551,8 +552,9 @@ def unstarted_entry(
 
 
 def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
-    """Stats only: every input an entry reads in *held* — run state, the archive rows its bench and
-    lens grade, the ruler, the command log, each dataset's scorer — so a client holding it is answered unread."""
+    """Stats only: every input an entry reads in *held* — its reader's kinds (the acts it is
+    offered), run state, the archive rows its bench and lens grade, the ruler, the command log, each
+    dataset's scorer — so a client holding it is answered unread."""
     stores = {s.base_dir: s for s in held}.values()
     archives = {s.archive.base_dir: s.archive for s in stores}.values()
     rulers = sorted({s.ruler.path for s in stores})
@@ -566,6 +568,8 @@ def entries_version(held: Iterable[Stores]) -> tuple[object, ...]:
     )
     return (
         *{str(s.identity.user_id) for s in stores},
+        # A grant or a token's scope moves no store, yet every offer the body serves.
+        *{filable(s.identity) for s in stores},
         *(s.campaigns.version() for s in stores),
         *(s.drafts.version() for s in stores),
         # A Start's stage moves no draft file: its own fact, read only where a draft could be held.

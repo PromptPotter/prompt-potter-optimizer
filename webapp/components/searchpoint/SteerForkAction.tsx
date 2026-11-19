@@ -3,6 +3,7 @@ import type { SelectedCandidate } from "@/lib/types";
 import type { PipelineAt } from "@/lib/hooks/useConnector";
 import type { CyclePath } from "@/lib/ids";
 import { Dialog, HoverCard } from "@/components/ui";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { SteerForkPanel } from "./SteerForkPanel";
 
 export function SteerForkAction({
@@ -15,8 +16,9 @@ export function SteerForkAction({
   pipelineAt?: PipelineAt | null;
 }) {
   const [open, setOpen] = useState(false);
+  const files = useFiles(path)("fork-cycle");
 
-  if (!path || path.length === 0) return null;
+  if (!path || path.length === 0 || !files) return null;
 
   return (
     <>

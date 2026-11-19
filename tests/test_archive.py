@@ -2998,5 +2998,5 @@ def test_a_halts_own_words_are_the_stop_its_run_serves_and_its_chat_says(
             observers.release()
         served = stores.run_state(hop).stop
         assert served is not None and words in served.said, f"stop {n}'s reading lost its words"
-        notices = LedgerIndex.of(cycle_ledger(cycle).path).view(ActivityFeed).state.notices
+        notices = LedgerIndex.of(cycle_ledger(cycle).path).view(ActivityFeed).notices
         assert any(words in (said.detail or "") for said in notices), f"the chat lost stop {n}"

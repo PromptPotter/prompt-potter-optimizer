@@ -12,7 +12,13 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import CampaignCycle, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.command_kinds import UNARMED, LookaheadAbreast, LookaheadCells
+from promptpotter.domain.command_kinds import (
+    UNARMED,
+    CommandKind,
+    LookaheadAbreast,
+    LookaheadCells,
+    filable,
+)
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dashboard_rows import (
     ArmedCaps,
@@ -23,6 +29,7 @@ from promptpotter.domain.dashboard_rows import (
     ServedRound,
     served_rounds,
 )
+from promptpotter.domain.hierarchy import READ_ONLY, RunAdmission
 from promptpotter.domain.origin_panel import overlap_line
 from promptpotter.domain.paired_reading import ArmName
 from promptpotter.domain.phases import (
@@ -30,7 +37,6 @@ from promptpotter.domain.phases import (
     PRODUCER_STATE_INFO,
     RUN_PHASE_INFO,
     ProducerReading,
-    RunAdmission,
     RunPhase,
     RunState,
     StopReading,
@@ -374,8 +380,8 @@ class ServedDashboard(DashboardFacts):
         "(`admission.py::admitted`), or the sentence where it offers none."
     )
     skip_refusal: str = Field(
-        description="Why `skip-searchpoint` is refused, off the run alone (`RunState`), which no "
-        "campaign moves; empty where it is admitted."
+        description="Why `skip-searchpoint` is refused, off the run (`RunState`), which no "
+        "campaign moves, and its reader (`command_kinds.py::filable`); empty where it is admitted."
     )
     stop: StopReading | None = Field(
         description="Why the cycle reads `paused` or `terminal` — what caused it, the stop it was "
@@ -732,6 +738,7 @@ def _serve(
     state: LiveDashboardState,
     *,
     hop: CycleHop,
+    skip_refusal: str,
     run: RunState,
     admission: RunAdmission,
     meter: CeilingMeter,
@@ -771,7 +778,7 @@ def _serve(
         run_phase=run.run_phase,
         producer=run.producer,
         admission=admission,
-        skip_refusal=run.skip_refusal,
+        skip_refusal=skip_refusal,
         stop=run.stop,
         overlap_line_round=None if line_round is None else line_round.round,
         overlap_line_n=None if line_round is None else len(line_round.overlap.positions),
@@ -836,6 +843,8 @@ def served_dashboard(
     meter = ceiling_meter(campaign.declaration.purpose)
     # The read's own join, never the checkout's: the campaign's refusal moves no ledger.
     admission = admitted(stores, campaign, run)
+    skips = CommandKind.SKIP_SEARCHPOINT in filable(stores.identity)
+    skip_refusal = run.skip_refusal or ("" if skips else READ_ONLY.message)
 
     state = fold_at(CycleAt(cycle=CycleDir(cycle_path), hop=hop, offset=at))
     if state is None:
@@ -853,6 +862,7 @@ def served_dashboard(
         return _serve(
             state,
             hop=hop,
+            skip_refusal=skip_refusal,
             run=run,
             admission=admission,
             meter=meter,
@@ -865,6 +875,7 @@ def served_dashboard(
     return _serve(
         state,
         hop=hop,
+        skip_refusal=skip_refusal,
         run=run,
         admission=admission,
         meter=meter,

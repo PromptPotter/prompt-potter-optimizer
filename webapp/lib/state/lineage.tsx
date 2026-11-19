@@ -9,6 +9,7 @@ import { shownData, useRead } from "@/lib/hooks/useRead";
 import type { ReadResult } from "@/lib/read-cache";
 import { useSelection } from "@/lib/state/selection";
 import { createModuleStore } from "@/lib/state/module-store";
+import type { CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/state/workspace";
 
 type CampaignTree = ReadResult<SubtreeCampaign>;
@@ -162,6 +163,14 @@ export function useViewedCycle(): SubtreeCycle | null {
   const { index } = useViewedLineage();
   const path = useWorkspace().viewed?.path ?? null;
   return useMemo(() => cycleAt(index, path), [index, path]);
+}
+
+// The cycle at *path* off its own campaign's tree: an act filed on it reads the read its path came
+// from, never the viewed cycle's (a compare channel's may be another campaign's, the exhibit's).
+export function useCycleAt(path: CyclePath | null): SubtreeCycle | null {
+  const campaignId = path?.[0]?.campaignId ?? null;
+  const tree = shownData(useLineageTree(campaignId ?? "", campaignId !== null));
+  return useMemo(() => cycleAt(lineageIndexOf(tree), path), [tree, path]);
 }
 
 // The viewed LEAF's dataset, its served subtree tag: a drilled-in inner run names its own.

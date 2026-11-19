@@ -10,6 +10,7 @@ from typing import Literal, NamedTuple
 from promptpotter.application.jobs.launcher.admission import PassStoppedError
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.domain.command_events import CommandAckRecord, CommandRecord, CommandStatus
+from promptpotter.domain.command_kinds import CommandKind, acts_filed, filable
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import UNRESOLVED_HOP, Job
 from promptpotter.domain.phases import (
@@ -169,10 +170,13 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
     status: TaskStatus
     acts: tuple[NextAct, ...] = ()
     holds: list[ArmsHold] = []
+    # The acts and holds its reader may answer, by the dispatcher's own rule.
+    kinds = filable(stores.identity)
+    answers = CommandKind.SUBMIT_ARMS in kinds
     launched = launched_jobs(jobs, owned)
     if launched is not None:
         held = {job.job_id: _hold(stores, job) for job in launched}
-        holds = [hold for hold in held.values() if hold is not None]
+        holds = [h for h in held.values() if h is not None and answers]
         read = [job_status(job, held=held[job.job_id] is not None) for job in launched]
         status = next(s for s in _PRECEDENCE if s in {r.status for r in read})
         said = "; ".join(r.said for r in read)
@@ -211,7 +215,7 @@ def read_command(stores: Stores, jobs: JobRegistry, command_id: str) -> CommandR
         token_id=filed.token_id,
         status=status,
         said=said,
-        next_acts=acts,
+        next_acts=acts_filed(acts, kinds),
         created_at=filed.timestamp,
         last_updated_at=updated,
         launches=None if launched is None else [LaunchedJob.of(job) for job in launched],

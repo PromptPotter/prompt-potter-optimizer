@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import ClassVar, Literal, NamedTuple
 
 from pydantic import Field
@@ -27,11 +28,32 @@ class ActivityState(FrozenModel):
     )
 
 
+class _ArmsHeld(NamedTuple):
+    """A gate holding for a round's arms: the round and its drafts, worded per reader."""
+
+    round_num: int | None
+    drafts: list[Said]
+
+
 class ActivityAt(NamedTuple):
     """The chat as of a ledger line: what a frame carries, never the feed's history."""
 
     at_offset: int
-    state: ActivityState
+    status: Said | None
+    notices: list[Said]
+    held: _ArmsHeld | None
+
+    def read_by(self, kinds: Collection[CommandKind]) -> ActivityState:
+        """The chat as a reader filing *kinds* (`command_kinds.py::filable`) reads it: a hold it
+        may not answer offers it no act and asks it nothing."""
+        held = self.held
+        return ActivityState(
+            status=self.status,
+            notices=self.notices,
+            decision=None
+            if held is None
+            else _arms_gate(*held, answers=CommandKind.SUBMIT_ARMS in kinds),
+        )
 
 
 class KeepDraftsAction(FrozenModel):
@@ -56,9 +78,18 @@ class ActivityDecision(FrozenModel):
     actions: list[KeepDraftsAction]
 
 
-def _arms_gate(round_num: int | None, drafts: list[Said]) -> ActivityDecision:
-    """One button keeps every draft; an arm of the operator's own is written text."""
+def _arms_gate(round_num: int | None, drafts: list[Said], *, answers: bool) -> ActivityDecision:
+    """One button keeps every draft; an arm of the operator's own is written text. A reader who
+    may not answer reads the hold in the run's voice, with no act."""
     held = "The round" if round_num is None else f"Round {round_num}"
+    if not answers:
+        return ActivityDecision(
+            title=f"{held} holds for its arms",
+            lead=f"{held} measures nothing until it is answered with its arms.",
+            facts=drafts,
+            reasons=[],
+            actions=[],
+        )
     drafted = (
         "Keep a draft below, add arms of your own, or both."
         if drafts
@@ -93,7 +124,7 @@ class ActivityFeed:
         self._status: Narrated | None = None
         self._notices: list[Narrated] = []
 
-    def state(self) -> ActivityState:
+    def value(self) -> ActivityAt:
         narration, status, gate = self.narration, self._status, self.narration.gate
         drafts = [
             Said(
@@ -107,17 +138,15 @@ class ActivityFeed:
         # A holding gate's row is its decision, so the chat says it once.
         if gate is not None or (status is not None and not narration.lives(status)):
             status = None
-        return ActivityState(
-            status=None if status is None else status.said,
-            notices=[n.said for n in self._notices if narration.lives(n)],
-            decision=None if gate is None else _arms_gate(narration.round, drafts),
+        return ActivityAt(
+            self.at_offset,
+            None if status is None else status.said,
+            [n.said for n in self._notices if narration.lives(n)],
+            None if gate is None else _ArmsHeld(narration.round, drafts),
         )
 
     def feed(self, record: NarratedRecord) -> None:
         self.read(self.at_offset, record)
-
-    def value(self) -> ActivityAt:
-        return ActivityAt(self.at_offset, self.state())
 
     def read(self, sequence: int, record: NarratedRecord) -> Narrated | None:
         narration = self.narration

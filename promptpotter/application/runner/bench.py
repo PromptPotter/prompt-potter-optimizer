@@ -59,6 +59,7 @@ from promptpotter.domain.bench import (
 )
 from promptpotter.domain.campaign import Campaign, CampaignCycle, worked_seconds
 from promptpotter.domain.campaign_config import CampaignConfig
+from promptpotter.domain.command_kinds import CommandKind, filable
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -129,6 +130,8 @@ class BenchLine:
     instrument_id: str | None
     run: LiveCycleRun
     spend: SpendRollup | None
+    # Whether the read's reader may file `held-out` (`command_kinds.py::filable`).
+    files: bool
 
 
 class _Graded(NamedTuple):
@@ -384,6 +387,7 @@ def read_bench(
         origin=None if graded is None else graded.origin.outcome,
         selected=None if selected is None else selected.outcome,
         run=line.run,
+        files=line.files,
     )
     vs_origin = None if graded is None else graded.vs_origin
     if vs_origin is None:
@@ -889,15 +893,17 @@ def bench_line(
         ),
         run=run,
         spend=scan_ledger_spend(stores.campaigns.line_spans(campaign.root_hop)).spend,
+        files=CommandKind.HELD_OUT in filable(stores.identity),
     )
 
 
 def cycle_verify(stores: Stores, at: CampaignCycle) -> PassAdmission:
-    """What `verify-candidate` on *at* is admitted under, as every door serves it."""
+    """What `verify-candidate` on *at* is admitted under, as every door serves it to its reader."""
     return verify_admission(
         inner=stores.inner,
         refused=_refused(stores, at.campaign),
         run=live_cycle_run(stores, at.hop),
+        files=CommandKind.VERIFY_CANDIDATE in filable(stores.identity),
     )
 
 

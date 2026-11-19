@@ -2,6 +2,7 @@ import { AccountSection } from "./AccountSection";
 import { FailureLine, ReadState, Switch } from "@/components/ui";
 import { ACCOUNT, patchUserSettings, userSettingsRead } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 import { useRead } from "@/lib/hooks/useRead";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
 import { useShowCandidates } from "@/lib/prefs/tree";
@@ -9,6 +10,7 @@ import { useShowCandidates } from "@/lib/prefs/tree";
 export function AccountPreferencesTab() {
   const read = useRead(userSettingsRead());
   const cmd = useCommand<"user-settings">("preferences", ACCOUNT);
+  const sets = useFiles("account")("set-user-settings");
 
   const toggle = (next: boolean) =>
     void cmd.run("user-settings", () =>
@@ -28,8 +30,8 @@ export function AccountPreferencesTab() {
               <Switch
                 label="Follow the host's exhibit"
                 checked={settings.demo_mode_enabled}
-                locked={busy}
-                lockedNote="saving"
+                locked={busy || !sets}
+                lockedNote={sets ? "saving" : "not yours to set"}
                 onChange={() => toggle(!settings.demo_mode_enabled)}
               />
             )}

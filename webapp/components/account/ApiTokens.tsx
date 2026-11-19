@@ -5,11 +5,14 @@ import { ACCOUNT, listApiTokens, mintApiToken, revokeApiToken } from "@/lib/api"
 import type { AccountTokens, MintedToken, TokenEntry } from "@/lib/api/types";
 import { fmtAgo } from "@/lib/format";
 import { useCommand } from "@/lib/hooks/useCommand";
+import { useFiles } from "@/lib/hooks/useFiles";
 
 type TokenVerb = "list" | "mint" | "revoke";
 
-// The listing is a command (its capability is the owner's alone), re-run after each mint and revoke.
+// The listing is a command, re-run after each mint and revoke; a reader who may not list reads none.
 export function ApiTokens() {
+  const files = useFiles("account");
+  const lists = files("list-api-tokens");
   const cmd = useCommand<TokenVerb>("account-tokens", ACCOUNT);
   const [held, setHeld] = useState<AccountTokens | null>(null);
   const [minted, setMinted] = useState<MintedToken | null>(null);
@@ -17,8 +20,10 @@ export function ApiTokens() {
   const busy = cmd.pending !== null;
 
   const relist = () => void cmd.run("list", listApiTokens, setHeld);
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- once, on mount
-  useEffect(relist, []);
+  useEffect(() => {
+    if (lists) relist();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once its reader lists
+  }, [lists]);
 
   const chosen = scopes ?? new Set(held?.grantable ?? []);
   const toggle = (scope: string) =>
@@ -29,6 +34,7 @@ export function ApiTokens() {
   const revoke = (token: TokenEntry) =>
     void cmd.run("revoke", () => revokeApiToken(token.id)).then((r) => r.ok && relist());
 
+  if (!lists) return null;
   return (
     <AccountSection
       title="Your API tokens"
@@ -42,7 +48,7 @@ export function ApiTokens() {
           <code aria-label="The new token">{minted.secret}</code>
         </p>
       )}
-      {held !== null && held.grantable.length > 0 && (
+      {held !== null && held.grantable.length > 0 && files("mint-api-token") && (
         <div className="account-token-mint">
           <ChipGroup label="Scopes">
             {held.grantable.map((scope) => (
@@ -79,7 +85,7 @@ export function ApiTokens() {
                       : `revoked ${fmtAgo(token.revoked_at)}`}
                   </span>
                 </span>
-                {token.revoked_at === null && (
+                {token.revoked_at === null && files("revoke-api-token") && (
                   <Button
                     variant="danger"
                     disabled={busy}

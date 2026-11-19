@@ -196,7 +196,7 @@ def host_server(session: HostSession) -> Server[Any]:
                         read_only_hint=tool.read_only, destructive_hint=tool.destructive
                     ),
                 )
-                for tool in host_surface.HOST_TOOLS.values()
+                for tool in await session.answer(host_surface.ListTools())
             ]
         )
 

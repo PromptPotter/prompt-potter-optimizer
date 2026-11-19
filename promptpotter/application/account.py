@@ -16,6 +16,7 @@ from pydantic import Field, SecretStr
 
 from promptpotter.config.paths import ACCOUNTS_LOCK, default_projects_root, jobs_dir
 from promptpotter.config.settings import LOCK_TIMEOUT, TERMS_VERSION, settings
+from promptpotter.domain.command_kinds import CommandKind, filable
 from promptpotter.domain.records.run_records import AccountEvent, AccountEventRecord, Device
 from promptpotter.domain.said import Tone
 from promptpotter.domain.spend import Budget
@@ -235,6 +236,10 @@ class MeResponse(StrictModel):
     connected_accounts: list[ConnectedAccount]
     available_providers: list[str]
     capabilities: list[str]
+    filable: list[CommandKind] = Field(
+        description="The kinds this account may file (`command_kinds.py::filable`): what an act "
+        "on the account (its campaigns' lifecycle, its usage, its keys) is drawn by."
+    )
     access_state: AccessState
     terms_version: str
     terms_accepted_version: str | None
@@ -257,6 +262,7 @@ def me(stores: Stores, user: User | None, *, configured: Iterable[str]) -> MeRes
         connected_accounts=[ConnectedAccount(provider=provider, email=email)] if provider else [],
         available_providers=sorted(set(configured) - {provider}),
         capabilities=sorted(identity.capabilities),
+        filable=list(filable(identity)),
         access_state=identity.access_state,
         terms_version=TERMS_VERSION,
         terms_accepted_version=accepted,

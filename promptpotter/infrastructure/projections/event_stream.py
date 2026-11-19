@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Collection
 from itertools import islice
 from pathlib import Path
 from typing import Any, cast
 
 from promptpotter.domain.activity import ActivityFeed
+from promptpotter.domain.command_kinds import CommandKind
 from promptpotter.domain.projection_envelope import ProjectionEnvelope, ProjectionKind
 from promptpotter.infrastructure.store.io import (
     complete_lines,
@@ -19,10 +21,12 @@ LedgerIndex.readers(ActivityFeed)
 
 class CycleLedgerTail:
     """Synchronous file I/O: a caller on an event loop uses ``asyncio.to_thread``. Its activity is the
-    ledger index's: the index validated every line, so the tail re-validates none."""
+    ledger index's, as a reader filing *kinds* reads it: the index validated every line, so the
+    tail re-validates none."""
 
-    def __init__(self, cycle_dir: Path, cycle_id: str) -> None:
+    def __init__(self, cycle_dir: Path, cycle_id: str, kinds: Collection[CommandKind]) -> None:
         self._cycle_id = cycle_id
+        self._kinds = kinds
         self._ledger_path = CycleLayout(cycle_dir).ledger
         self._byte_pos = 0
         self._line_index = 0
@@ -43,7 +47,7 @@ class CycleLedgerTail:
             cycle_id=self._cycle_id,
             sequence=offset,
             payload=body,
-            activity=self._index().view(ActivityFeed, offset).state,
+            activity=self._index().view(ActivityFeed, offset).read_by(self._kinds),
         )
 
     def read_new(self) -> list[ProjectionEnvelope]:
@@ -71,7 +75,7 @@ class CycleLedgerTail:
             self._line_index += 1
         if not read:
             return []
-        activity = feed.state
+        activity = feed.read_by(self._kinds)
         return [
             ProjectionEnvelope(
                 kind=cast(ProjectionKind, rec["record_type"]),

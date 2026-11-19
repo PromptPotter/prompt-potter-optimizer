@@ -13,6 +13,7 @@ import type {
   CandidateFacts,
   CurrentRound,
   DashboardCandidate,
+  Filable,
   SubtreeCampaign,
   HierarchyCandidate,
   SubtreeCycle,
@@ -39,6 +40,11 @@ import type {
   Said,
   VerificationMark,
 } from "@/lib/api/types";
+import { COMMAND_KINDS } from "@/lib/api/types";
+
+// The kinds an owner files (`command_kinds.py::filable` over every capability: every kind): a
+// fixture's reader is the owner unless a test says it reads with none, as the exhibit's follower does.
+export const OWNER_FILABLE: Filable[] = [...COMMAND_KINDS];
 
 // The envelope every rendered level wears, empty; each builder lays its level's own fields over it.
 function envelope(): { tags: HierarchyTag[]; figures: Figure[]; lines: Said[]; children: never[] } {
@@ -419,7 +425,7 @@ export function hierarchyState(over: Partial<HierarchyState> = {}): HierarchySta
     status: { run_phase: "terminal", stop_reason: null, mark: "unknown" },
     attached: false,
     stop: null,
-    admission: { offers: null, refusal: null, payload: {}, launch_refusal: "" },
+    admission: { offers: null, refusal: null, payload: {}, stop_acts: [] },
     intervened: false,
     ...over,
   };
@@ -490,6 +496,7 @@ export function subtreeCampaign(
       lifecycle: "active",
       runs_with: null,
       deletable_stubs: 0,
+      filable: OWNER_FILABLE,
     },
     ...over,
   };
@@ -599,7 +606,7 @@ export function dash(over: Partial<ServedDashboard> = {}): ServedDashboard {
     },
     held_call: null,
     producer: producerReading(),
-    admission: { offers: "pause", refusal: null, payload: {}, launch_refusal: "" },
+    admission: { offers: "pause", refusal: null, payload: {}, stop_acts: [] },
     skip_refusal: "",
     backpressure: null,
     measured_unit: "sample",

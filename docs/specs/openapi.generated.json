@@ -4228,6 +4228,49 @@
         "title": "CommandAcceptedBody",
         "type": "object"
       },
+      "CommandKind": {
+        "description": "A row is `kind, handler, capability, press[, destructive[, answering]]`: the handler is\n`application/commands/{module}:{attr}`; every kind names its capability;\n`destructive` is MCP's `destructiveHint`, true for an apply that overwrites or removes.",
+        "enum": [
+          "pause",
+          "submit-arms",
+          "skip-searchpoint",
+          "set-sample-lookahead",
+          "start-run",
+          "fork-cycle",
+          "mint-campaign",
+          "head-to-head",
+          "start-checkin",
+          "verify-candidate",
+          "held-out",
+          "cancel",
+          "set-limits",
+          "set-concurrent-cycles",
+          "cancel-queued",
+          "delete-cycle",
+          "cleanup-empty-cycles",
+          "archive-campaign",
+          "unarchive-campaign",
+          "delete-campaign",
+          "rename-campaign",
+          "compact-archive",
+          "edit-draft-campaign",
+          "resolve-origin",
+          "bank-snippet",
+          "discard-draft",
+          "ingest-upload",
+          "open-dataset-draft",
+          "open-origin-draft",
+          "set-user-settings",
+          "accept-terms",
+          "set-api-key",
+          "remove-api-key",
+          "mint-api-token",
+          "list-api-tokens",
+          "revoke-api-token"
+        ],
+        "title": "CommandKind",
+        "type": "string"
+      },
       "CommandReading": {
         "additionalProperties": false,
         "description": "A command read afresh off the account's log: where it stands, in the words of its task\nstatus, at the address the dispatcher resolved and filed it on; a launch's jobs, each at the\ncycle it holds now (``None`` for a command launching none).",
@@ -10712,6 +10755,14 @@
             ],
             "title": "Email"
           },
+          "filable": {
+            "description": "The kinds this account may file (`command_kinds.py::filable`): what an act on the account (its campaigns' lifecycle, its usage, its keys) is drawn by.",
+            "items": {
+              "$ref": "#/components/schemas/CommandKind"
+            },
+            "title": "Filable",
+            "type": "array"
+          },
           "issuer": {
             "anyOf": [
               {
@@ -10779,6 +10830,7 @@
           "connected_accounts",
           "available_providers",
           "capabilities",
+          "filable",
           "access_state",
           "terms_version",
           "terms_accepted_version"
@@ -13916,7 +13968,8 @@
           "selecting",
           "origin_unscored",
           "graded",
-          "no_selection"
+          "no_selection",
+          "read_only"
         ],
         "title": "PassRefusal",
         "type": "string"
@@ -15379,13 +15432,8 @@
       },
       "RunAdmission": {
         "additionalProperties": false,
-        "description": "The launch half of a cycle's run verbs, its campaign's refusal joined: what the one run\ncontrol offers. The loop's verbs answer off `RunState` alone, which no campaign moves.",
+        "description": "The launch half of a cycle's run verbs, its campaign's refusal and its reader's kinds\njoined: what the one run control offers. The loop's verbs answer off `RunState` alone, which\nno campaign moves.",
         "properties": {
-          "launch_refusal": {
-            "description": "Why the cycle's campaign refuses every launch (archived, its definition moved), so its stop's `start-run` acts are not offered; empty where a launch is admitted.",
-            "title": "Launch Refusal",
-            "type": "string"
-          },
           "offers": {
             "anyOf": [
               {
@@ -15424,13 +15472,21 @@
               }
             ],
             "description": "Why the control offers none, with the acts past it; null where it offers one."
+          },
+          "stop_acts": {
+            "description": "The acts past the run's stop its reader files: no `start-run` where its campaign refuses every launch (archived, its definition moved).",
+            "items": {
+              "$ref": "#/components/schemas/NextAct"
+            },
+            "title": "Stop Acts",
+            "type": "array"
           }
         },
         "required": [
           "offers",
           "refusal",
           "payload",
-          "launch_refusal"
+          "stop_acts"
         ],
         "title": "RunAdmission",
         "type": "object"
@@ -16486,7 +16542,7 @@
             "$ref": "#/components/schemas/SampleCoverage"
           },
           "skip_refusal": {
-            "description": "Why `skip-searchpoint` is refused, off the run alone (`RunState`), which no campaign moves; empty where it is admitted.",
+            "description": "Why `skip-searchpoint` is refused, off the run (`RunState`), which no campaign moves, and its reader (`command_kinds.py::filable`); empty where it is admitted.",
             "title": "Skip Refusal",
             "type": "string"
           },
@@ -18070,9 +18126,17 @@
         "description": "What only the subtree read knows: it scans every sibling's ledger.",
         "properties": {
           "deletable_stubs": {
-            "description": "How many cycles `cleanup-empty-cycles` deletes here now (`admission.py::deletable_stubs`, the command's own list: no held stub counts).",
+            "description": "How many cycles `cleanup-empty-cycles` deletes here now (`admission.py::deletable_stubs`, the command's own list: no held stub counts); none where its reader may not file it.",
             "title": "Deletable Stubs",
             "type": "integer"
+          },
+          "filable": {
+            "description": "The kinds this read's reader may file (`command_kinds.py::filable`): what an act no read offers (limits, look-ahead, a fork, a scenario, a bank) is drawn by.",
+            "items": {
+              "$ref": "#/components/schemas/CommandKind"
+            },
+            "title": "Filable",
+            "type": "array"
           },
           "label": {
             "anyOf": [
@@ -18129,7 +18193,8 @@
           "live_cycle",
           "lifecycle",
           "runs_with",
-          "deletable_stubs"
+          "deletable_stubs",
+          "filable"
         ],
         "title": "SubtreeCampaignFacts",
         "type": "object"
