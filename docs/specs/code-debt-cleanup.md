@@ -753,18 +753,19 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   canonical spelling (`os.path.realpath` on both, the `\\?\` prefix stripped after). **Re-test:** on
   Windows, a write under the 8.3 spelling of a deleted campaign raises `NotFoundError`.
 
-### wave-5 · rates (what rates-2 left at its landing)
+### wave-5 · rates (what rates-3 left at its landing)
 
-- **A dead price list is said nowhere** (rates-2's report): `pricing.py::refresh_rates` logs a
-  failed fetch, stamps the rates file fresh and returns `False`; the sweep's `rates` step
-  (`reaper.py::_refreshed`) records a clean pass, and the stamp keeps every later tick clean for a
-  day, so `machine-status` never says upstream is dead and spend prices off a list of unknown age.
-  Root: the refresh answers the fault it hit, and the rates file's age (the last SUCCESSFUL fetch)
-  is a served fact beside the step's pass. **Re-test:** with upstream unreachable, `machine-status`
-  names the rates step's fault and the list's age for as long as it lasts.
-- **The offline world has no dead upstream** (rates-2's report): `offline_world.py` offers no
-  "upstream unreachable" switch and no fetch count, so a fact patches `pricing.UPSTREAM_URL` and
-  reads `Router.unrouted`, a set. **Rides with:** tests-x.
+- **A route answer left stale is said nowhere** (rates-3's report): `pricing.py::refresh_route_answers`
+  swallows an outage (`PriceListUnreachableError`) and logs an `OSError` per row, returning `None`,
+  so the sweep's `route-answers` step (`reaper.py::_refreshed`) records a clean pass and a row it
+  cannot refresh or drop stands silently. Root: the refresh answers the rows it left, as
+  `RatesFile.unfetched` does for rates. **Re-test:** a route answer whose refresh raises `OSError`
+  reads in `machine_status(...).unswept` under `route-answers`.
+- **One step's record has two writers** (rates-3's report): `reaper.py::sweep_dead_cycles` records its
+  own pass and `periodic_sweep`'s except-branch records a raise for the same step. Root: a step
+  returns its faults and one place records them (launches call `sweep_dead_cycles` outside the
+  loop, so the record moves to its callers). **Re-test:** `git grep -c "\.record_pass(" --
+  promptpotter/application/jobs/reaper.py` == 1 (3 today).
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 

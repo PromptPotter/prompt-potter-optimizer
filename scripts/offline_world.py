@@ -425,7 +425,7 @@ def _bundled_rates() -> dict[str, dict[str, Any]]:
 class Router:
     """The world: the backend and the n8n harness at their addresses, an LLM on any of its wires
     and its key check, the model catalogue (empty unless a journey lists one), Harbor's registry once one is published, the
-    upstream price list (the bundled floor unless a journey says what it lists), a sign-in provider's token endpoint
+    upstream price list (the bundled floor unless a journey says what it lists or kills it), a sign-in provider's token endpoint
     once a journey says what it answers; anything else is named in `unrouted` and refused."""
 
     def __init__(self, llm: FakeLLM, backend: FakeBackend) -> None:
@@ -438,6 +438,9 @@ class Router:
         # Upstream's rows, `provider/model` -> its per-token costs, as `refresh_rates` fetches them:
         # the bundled floor, unless a journey says what upstream lists.
         self.rates: dict[str, dict[str, Any]] = _bundled_rates()
+        # Upstream unreachable, as a dead host fails `urlopen`; every try at it counted alike.
+        self.upstream_dead = False
+        self.rate_fetches = 0
         # `host/path` of a token endpoint -> the (status, body) it answers every code with.
         self.token_endpoints: dict[str, tuple[int, dict[str, Any]]] = {}
         # An OpenRouter model -> the hosts its gateway lists; one unnamed lists `OPENROUTER_ENDPOINTS`.
@@ -581,6 +584,9 @@ def install_network(router: Router) -> Callable[[], None]:
             model = target.partition("/models/")[2].removesuffix("/endpoints")
             return _Body(json.dumps(router.hosts.get(model, OPENROUTER_ENDPOINTS)).encode())
         if target == UPSTREAM_URL:
+            router.rate_fetches += 1
+            if router.upstream_dead:
+                raise urllib.error.URLError("offline: upstream's price list is unreachable")
             return _Body(json.dumps(router.rates).encode())
         router.unrouted.add(f"urlopen {target}")
         raise urllib.error.URLError("offline run")

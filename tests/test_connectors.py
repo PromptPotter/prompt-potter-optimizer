@@ -105,7 +105,7 @@ def _dspy_cell(program: dspy_module.DspyProgram, max_calls: int, ledger: Path) -
 
 def _priced(offline: Router) -> None:
     offline.rates = {"openai/gpt-x": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}}
-    assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
+    assert pricing.refresh_rates(force=True).fault is None, "the world's price list was not fetched"
 
 
 def _program(lm: Any, calls: int, metric: Any) -> dspy_module.DspyProgram:

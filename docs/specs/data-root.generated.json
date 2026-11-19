@@ -3319,14 +3319,50 @@
           }
         },
         "additionalProperties": false,
-        "description": "The bundled floor and the fetched cache alike: a name to its one rate body.",
+        "description": "The bundled floor and the home's cache alike: a name to its one rate body. The cache also\nholds its last try (the once-a-day key), when upstream last answered, and the fault of a try\nsince; a cache that does not load is dropped and fetched again, so its shape moves freely.",
         "properties": {
+          "fault": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fault"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Fetched At"
+          },
           "models": {
             "additionalProperties": {
               "$ref": "#/$defs/RateBody"
             },
             "title": "Models",
             "type": "object"
+          },
+          "tried_at": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tried At"
           }
         },
         "required": [

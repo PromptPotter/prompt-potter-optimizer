@@ -7,7 +7,6 @@ import contextlib
 import functools
 import json
 import logging
-import os
 import time
 import urllib.error
 import urllib.request
@@ -27,7 +26,7 @@ from promptpotter.infrastructure.store.io import (
     write_text,
 )
 from promptpotter.infrastructure.store.read_model import derived, file_sig
-from promptpotter.shared.errors import ErrorCategory, SendRefusedError
+from promptpotter.shared.errors import ErrorCategory, SendRefusedError, fault_said
 from promptpotter.shared.hashing import stable_hash
 
 logger = logging.getLogger(__name__)
@@ -97,12 +96,26 @@ class RateBody(StrictModel):
 
 
 class RatesFile(StrictModel):
-    """The bundled floor and the fetched cache alike: a name to its one rate body."""
+    """The bundled floor and the home's cache alike: a name to its one rate body. The cache also
+    holds its last try (the once-a-day key), when upstream last answered, and the fault of a try
+    since; a cache that does not load is dropped and fetched again, so its shape moves freely."""
 
     models: dict[str, RateBody]
+    tried_at: float | None = None
+    fetched_at: float | None = None
+    fault: str | None = None
+
+    def unfetched(self) -> str | None:
+        """The fault this list stands under, with what it prices off; None for a fresh fetch."""
+        if self.fault is None:
+            return None
+        if self.fetched_at is None:
+            return f"{self.fault}; pricing off the bundled floor"
+        age_h = (time.time() - self.fetched_at) / 3600
+        return f"{self.fault}; pricing off the list fetched {age_h:.1f}h ago"
 
 
-def _strip_upstream(raw: dict[str, Any]) -> RatesFile:
+def _strip_upstream(raw: dict[str, Any]) -> dict[str, RateBody]:
     """The one door upstream's vocabulary reaches: its ``litellm_provider`` is our ``lister``, and a
     row no rate body types (a side unpriced) is no rate."""
     models: dict[str, RateBody] = {}
@@ -112,7 +125,7 @@ def _strip_upstream(raw: dict[str, Any]) -> RatesFile:
         kept = {k: body[k] for k in RateBody.model_fields if k in body}
         with contextlib.suppress(ValidationError):
             models[name] = RateBody.model_validate(kept | {"lister": body.get("litellm_provider")})
-    return RatesFile(models=models)
+    return models
 
 
 def cache_path() -> Path:
@@ -120,36 +133,40 @@ def cache_path() -> Path:
     return user_data_root() / "rates.json"
 
 
-def refresh_rates(*, force: bool = False) -> bool:
-    """Every process that prices calls it, a launch and the API's sweep: the home's rates file is the
-    once-a-day key, and a failed fetch stamps it too, so a dead upstream costs one timeout a day."""
-    path = cache_path()
-    with contextlib.suppress(OSError):
-        if not force and time.time() - path.stat().st_mtime < _TTL_SECONDS:
-            return True
+def refresh_rates(*, force: bool = False) -> RatesFile:
+    """Every process that prices calls it, a launch and the API's sweep, and is answered the list it
+    prices off: the home's rates file is the once-a-day key, a failed try is stamped in it too, so a
+    dead upstream costs one timeout a day, and its fault stands there until a fetch succeeds."""
+    path, now, held = cache_path(), time.time(), _cached()
+    if not force and held.tried_at is not None and now - held.tried_at < _TTL_SECONDS:
+        return held
     try:
         with urllib.request.urlopen(UPSTREAM_URL, timeout=_FETCH_TIMEOUT_S) as resp:
             payload = resp.read(_MAX_BODY_BYTES + 1)
         if len(payload) > _MAX_BODY_BYTES:
             raise ValueError(f"payload exceeded {_MAX_BODY_BYTES} bytes")
-        raw = json.loads(payload.decode("utf-8"))
+        listed = _strip_upstream(json.loads(payload.decode("utf-8")))
     except (OSError, ValueError) as exc:
-        logger.warning("spend: rate refresh from %s failed (%s); prior or floor", UPSTREAM_URL, exc)
-        try:
-            os.utime(path)
-        except FileNotFoundError:  # The floor prices alone, as it did.
-            write_text(path, RatesFile(models={}).model_dump_json())
-        return False
-
-    stripped = _strip_upstream(raw)
-    write_text(path, stripped.model_dump_json(exclude_none=True))
-    logger.info("spend: refreshed %d model rates → %s", len(stripped.models), path)
-    return True
+        fault = f"rate refresh from upstream failed ({fault_said(exc)[0]})"
+        logger.warning("spend: %s; prior or floor", fault)
+        held = RatesFile(models=held.models, tried_at=now, fetched_at=held.fetched_at, fault=fault)
+    else:
+        logger.info("spend: refreshed %d model rates → %s", len(listed), path)
+        held = RatesFile(models=listed, tried_at=now, fetched_at=now)
+    write_text(path, held.model_dump_json(exclude_none=True))
+    return held
 
 
-def _read_rates(path: Path | None) -> dict[str, RateBody]:
-    raw = None if path is None else read_bytes_optional(path)
-    return {} if raw is None else RatesFile.model_validate_json(raw).models
+def _cached() -> RatesFile:
+    """The home's list; one that does not load is dropped, so the next refresh fetches it again,
+    and the floor prices meanwhile."""
+    path = cache_path()
+    try:
+        return RatesFile.model_validate_json(read_bytes_optional(path) or '{"models": {}}')
+    except ValidationError as exc:
+        logger.warning("spend: dropped %s, which does not load (%s)", path, exc)
+        unlink_robust(path)
+        return RatesFile(models={})
 
 
 def _models_to_rates(models: Mapping[str, RateBody]) -> RateTable:
@@ -176,27 +193,15 @@ def _models_to_rates(models: Mapping[str, RateBody]) -> RateTable:
 
 def load_rates() -> RateTable:
     """Kept by where it reads and what the files hold: a rates file any process rewrites re-prices
-    every reader's next send; a home that fetched none reads the floor's one table."""
-    fetched = None if (seen := file_sig(cache_path())) is None else cache_path()
+    every reader's next send. The shipped floor refuses, the bug it is, and the fetch lies OVER
+    it: a row upstream never listed keeps the price the bundle gave it."""
     return derived(
-        ("rates", BUNDLED_PATH, fetched),
-        sig=(file_sig(BUNDLED_PATH), seen),
-        compute=lambda: _rates_at(BUNDLED_PATH, fetched),
+        ("rates", BUNDLED_PATH, cache_path()),
+        sig=(file_sig(BUNDLED_PATH), file_sig(cache_path())),
+        compute=lambda: _models_to_rates(
+            RatesFile.model_validate_json(BUNDLED_PATH.read_bytes()).models | _cached().models
+        ),
     )
-
-
-def _rates_at(bundled_path: Path, fetched_path: Path | None) -> RateTable:
-    """The shipped floor refuses, the bug it is; a fetched cache that does not load is dropped, so the
-    next refresh fetches it again, and the floor prices meanwhile."""
-    try:
-        fetched = _read_rates(fetched_path)
-    except ValidationError as exc:
-        assert fetched_path is not None, "no fetch reads no row, so none refuses"
-        logger.warning("spend: dropped %s, which does not load (%s)", fetched_path, exc)
-        unlink_robust(fetched_path)
-        fetched = {}
-    # The fetch lies OVER the floor: a row upstream never listed keeps the price the bundle gave it.
-    return _models_to_rates(_read_rates(bundled_path) | fetched)
 
 
 def lookup_rate(model: str | None, provider: str | None) -> Rate | None:

@@ -25,7 +25,10 @@ SWEEP_EVERY_S = 900.0
 
 # The periodic steps, each recording its last pass (`JobRegistry.record_pass`), any process's.
 SWEEP_STEP, ROUTE_ANSWERS_STEP, RATES_STEP = "sweep", "route-answers", "rates"
-_PRICES = ((RATES_STEP, refresh_rates), (ROUTE_ANSWERS_STEP, refresh_route_answers))
+_PRICES = (
+    (RATES_STEP, lambda: refresh_rates().unfetched()),
+    (ROUTE_ANSWERS_STEP, refresh_route_answers),
+)
 
 
 def reclaim_orphan_sandboxes(projects_root: Path) -> int:
@@ -114,6 +117,6 @@ async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY
         steps = ((SWEEP_STEP, functools.partial(sweep, projects_root)), *refresh)
 
 
-def _refreshed(jobs: JobRegistry, step: str, prices: Callable[[], object]) -> None:
-    prices()
-    jobs.record_pass(step, ())
+def _refreshed(jobs: JobRegistry, step: str, prices: Callable[[], str | None]) -> None:
+    # The fault its prices stand under, until a pass clears it.
+    jobs.record_pass(step, [fault] if (fault := prices()) else [])

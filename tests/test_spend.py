@@ -560,7 +560,9 @@ def test_a_rate_belongs_to_its_provider_model_pair_and_a_cache_read_reprices_ins
     (tmp_path / "floor.json").write_text('{"models": {}}', encoding="utf-8")
     with monkeypatch.context() as patched:
         patched.setattr(pricing, "BUNDLED_PATH", tmp_path / "floor.json")
-        assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
+        assert pricing.refresh_rates(force=True).fault is None, (
+            "the world's price list was not fetched"
+        )
         lookup, usd = pricing.lookup_rate, pricing.compute_usd
         for model, provider, rate in (
             ("deepseek-v4-flash", "deepseek", Rate(0.00000014, 0.00000028)),
@@ -1951,7 +1953,7 @@ _HOLD_USD = 600 * 1e-6 + 1500 * 2e-6
 
 def _priced_wire(offline: Router) -> _Provider:
     offline.rates = {"openai/gpt-x": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}}
-    assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
+    assert pricing.refresh_rates(force=True).fault is None, "the world's price list was not fetched"
     offline.llm.says = provider = _Provider()
     return provider
 
@@ -3973,7 +3975,7 @@ def test_a_price_off_our_rate_table_is_recorded_beside_spend_never_as_spend(
     offline.rates = {
         "openrouter/openai/gpt-4o": {"input_cost_per_token": 1e-6, "output_cost_per_token": 2e-6}
     }
-    assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
+    assert pricing.refresh_rates(force=True).fault is None, "the world's price list was not fetched"
     usage = TokenAccount(input=400_000, output=100_000)
     price = telemetry.call_price(
         "optimizer",
@@ -4348,7 +4350,7 @@ def test_the_tier_fences_a_provider_only_where_the_boxs_key_pays_it(
 @pytest.mark.usefixtures("run_bound")
 def test_a_dollar_ceiling_admits_only_a_route_a_rate_prices(offline: Router) -> None:
     offline.rates = {"openai/dear": {"input_cost_per_token": 5e-8, "output_cost_per_token": 6e-7}}
-    assert pricing.refresh_rates(force=True), "the world's price list was not fetched"
+    assert pricing.refresh_rates(force=True).fault is None, "the world's price list was not fetched"
     assert (pricing.route_priced("x", "openai"), pricing.route_priced("dear", "openai")) == (
         False,
         True,

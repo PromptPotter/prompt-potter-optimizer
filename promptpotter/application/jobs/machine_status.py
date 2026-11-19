@@ -226,9 +226,10 @@ class MachineStatusResponse(StrictModel):
     )
     unswept: list[str] = Field(
         default_factory=list,
-        description="Each periodic step (the sweep, the route answers) whose last pass, in any "
-        "process, raised or left a cycle it could not read, with what: what it reclaims stands "
-        "until a pass runs clean. Served where every slot is.",
+        description="Each periodic step (the sweep, the rates, the route answers) whose last pass, "
+        "in any process, raised, left a cycle it could not read, or priced off a list upstream "
+        "did not answer (with that list's age), with what: it stands until a pass runs clean. "
+        "Served where every slot is.",
     )
     notice: Said | None = Field(
         description="A landing in progress, `busy` and the caller's place in `queue` — a fact about "
