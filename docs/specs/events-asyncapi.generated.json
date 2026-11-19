@@ -9216,7 +9216,7 @@
       },
       "TokenAccount": {
         "additionalProperties": false,
-        "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.",
+        "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null part means no breakdown was reported; ``0`` means one was, and it was zero. A sum\nadds the parts reported and stays null only where neither side reported one.",
         "properties": {
           "cache_read": {
             "anyOf": [
@@ -9231,9 +9231,16 @@
             "title": "Cache Read"
           },
           "cache_write": {
-            "default": 0,
-            "title": "Cache Write",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cache Write"
           },
           "input": {
             "default": 0,
@@ -9246,9 +9253,16 @@
             "type": "integer"
           },
           "reasoning": {
-            "default": 0,
-            "title": "Reasoning",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reasoning"
           }
         },
         "title": "TokenAccount",
@@ -9269,14 +9283,28 @@
         "description": "ONE answered send, or a replay; a send that reported no usage writes none.",
         "properties": {
           "cache_read_tokens": {
-            "default": 0,
-            "title": "Cache Read Tokens",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cache Read Tokens"
           },
           "cache_write_tokens": {
-            "default": 0,
-            "title": "Cache Write Tokens",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Cache Write Tokens"
           },
           "duration_s": {
             "default": 0.0,
@@ -9312,9 +9340,16 @@
             "type": "integer"
           },
           "reasoning_tokens": {
-            "default": 0,
-            "title": "Reasoning Tokens",
-            "type": "integer"
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Reasoning Tokens"
           },
           "record_type": {
             "const": "token_usage",

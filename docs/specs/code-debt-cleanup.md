@@ -232,20 +232,6 @@ plan/apply pair and a temporary locked through its replace. Left:
   Root: seat the origin through the walk that files it. **Rides with:** the chain owning
   `tests/factories.py::seat`. **Re-test:** a noise floor through `_peer_cycle` alone reads its
   round-0 rows.
-- **A reported zero of reasoning reads as unreported** (small-11's report): `TokenAccount.reasoning`
-  is an `int`, so `domain/spend.py::StepUsage.from_account` writes `tokens.reasoning or None` and
-  `openai_compat.py::ReportedUsage.tokens` reads `reasoning` / `cache_write` with `or 0`. Root:
-  `reasoning` and `cache_write` are `int | None`, as `cache_read` is. **Re-test:** a reply reporting
-  `reasoning_tokens: 0` reaches a step's usage as 0, one reporting none as `None`. **Built** on
-  `wip/small-13` `b360ae0de`; it lands together with the next row, as ONE re-key: alone, every
-  offline fold's `tokens.cache_write` reads `None` because the row below drops the part.
-- **A step's usage drops `cache_write`** (small-13's report): `domain/spend.py::StepUsage` has no
-  `cache_write`, so `StepUsage.from_account` drops it despite its docstring ("the counts ride
-  whole"), and `offline_world.py` reports neither part. Root: `StepUsage` carries every
-  `TokenAccount` part, and the offline world reports the parts a provider reports. Also folding the
-  unknown into 0: `domain/records/run_records.py::TokenUsageRecord` ("0 also means no breakdown")
-  and `domain/results_health.py` (`usage.reasoning or 0`). **Re-test:** a reply reporting
-  `cache_write_tokens: 5` reaches a fold's `tokens.cache_write` as 5.
 - **Two precedence rules join an arm's rows** (small-13's report): `bench/cycle.py::ArmWalk.continued`
   keeps the EARLIER row (`where(_unheld)`), while `CellSheet.merged` lets the later scored row win.
   Root: one rule, `merged`'s; `continued` merges without the filter. **Re-test:** an arm re-read on a

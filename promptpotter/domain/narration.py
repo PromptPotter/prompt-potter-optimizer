@@ -310,7 +310,7 @@ class Narration:
         if (usage := record.usage) is not None:
             if usage.total > 0:
                 bits.append(f"{usage.total} tok")
-            if usage.reasoning > 0 and usage.output > 0:
+            if usage.reasoning and usage.output > 0:
                 bits.append(f"{usage.reasoning / usage.output:.0%} reasoning")
             prefix = prefix_reading(usage.cache_share(replayed=replayed), replayed=replayed)
             if prefix.state == "unreported":

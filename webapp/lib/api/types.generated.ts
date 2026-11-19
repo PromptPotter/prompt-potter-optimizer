@@ -1595,9 +1595,9 @@ export interface ArmSamples {
 export interface TokenAccount {
   input: number;
   output: number;
-  reasoning: number;
+  reasoning: number | null;
   cache_read: number | null;
-  cache_write: number;
+  cache_write: number | null;
 }
 
 /** One arm's difficulty-adjusted Rasch ability on its round's joint-fit scale. */
@@ -5700,7 +5700,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "7091703d118147bb";
+export const SERVED_CONTRACT = "d560ae8c6ceb9dfa";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

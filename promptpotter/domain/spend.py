@@ -50,6 +50,7 @@ class StepUsage:
     reasoning: int | None = None
     # THEY discounted the call; the `cached` flag beside it says WE replayed it.
     cache_read: int | None = None
+    cache_write: int | None = None
     # The counts above sum every request the node sent; these left and reported no usage (a 5xx).
     unreported_attempts: int = 0
 
@@ -59,23 +60,15 @@ class StepUsage:
 
     @classmethod
     def from_account(cls, tokens: TokenAccount, **billed: Any) -> StepUsage:
-        """The one builder every connector calls: the counts ride whole, so none drops a part."""
-        reasoning = tokens.reasoning or None
-        return cls(
-            tokens.input, tokens.output, reasoning=reasoning, cache_read=tokens.cache_read, **billed
-        )
+        """The one builder every connector calls: `TokenAccount`'s fields are the roster of parts."""
+        return cls(**tokens.model_dump(), **billed)
 
     def wire(self) -> dict[str, object]:
         return _STEP_USAGE.write(self)
 
     @property
     def account(self) -> TokenAccount:
-        return TokenAccount(
-            input=self.input,
-            output=self.output,
-            reasoning=self.reasoning or 0,
-            cache_read=self.cache_read,
-        )
+        return TokenAccount(**{part: getattr(self, part) for part in TokenAccount.model_fields})
 
 
 _STEP_USAGE = WireRecord.of(
@@ -86,32 +79,35 @@ _STEP_USAGE = WireRecord.of(
 )
 
 
+def _reported_sum(a: int | None, b: int | None) -> int | None:
+    return b if a is None else a if b is None else a + b
+
+
 class TokenAccount(FrozenModel):
     """What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.
 
     ``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further
-    totals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.
+    totals. A null part means no breakdown was reported; ``0`` means one was, and it was zero. A sum
+    adds the parts reported and stays null only where neither side reported one.
     """
 
     input: int = 0
     output: int = 0
-    reasoning: int = 0
+    reasoning: int | None = None
     cache_read: int | None = None
-    #: No ``None`` arm: no backend reports one, so absence is not expressible here.
-    cache_write: int = 0
+    cache_write: int | None = None
 
     @property
     def total(self) -> int:
         return self.input + self.output
 
     def __add__(self, other: TokenAccount) -> TokenAccount:
-        reads = [r for r in (self.cache_read, other.cache_read) if r is not None]
         return TokenAccount(
             input=self.input + other.input,
             output=self.output + other.output,
-            reasoning=self.reasoning + other.reasoning,
-            cache_read=sum(reads) if reads else None,
-            cache_write=self.cache_write + other.cache_write,
+            reasoning=_reported_sum(self.reasoning, other.reasoning),
+            cache_read=_reported_sum(self.cache_read, other.cache_read),
+            cache_write=_reported_sum(self.cache_write, other.cache_write),
         )
 
     @classmethod
@@ -748,10 +744,11 @@ class SpendBucket(StrictModel):
         if record.bill is not None:
             self.input_tokens += in_tok
             self.output_tokens += out_tok
-            self.reasoning_tokens += int(record.reasoning_tokens)
+            # A sum over the parts REPORTED: an unreported part adds nothing, so each is a lower bound.
+            self.reasoning_tokens += record.reasoning_tokens or 0
             # Billed side only: a replay's cache tokens would report a prefix holding on calls never made.
-            self.cache_read_tokens += int(record.cache_read_tokens)
-            self.cache_write_tokens += int(record.cache_write_tokens)
+            self.cache_read_tokens += record.cache_read_tokens or 0
+            self.cache_write_tokens += record.cache_write_tokens or 0
             if price.cost_usd is not None:
                 self.used_usd = round(self.used_usd + price.cost_usd, 6)
             elif price.rate_priced_usd is not None:

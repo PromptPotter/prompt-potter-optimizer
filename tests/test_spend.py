@@ -6020,3 +6020,51 @@ def test_a_delete_that_spent_nothing_commits_at_its_tombstone_and_its_id_is_neve
     assert campaigns.claim_campaign_id("ds1", built_stores.charges) == f"{prefix}__cccccc", (
         "a zero-spend delete's id was minted again"
     )
+
+
+def test_a_reported_zero_of_reasoning_reaches_a_step_as_zero_and_none_as_unreported() -> None:
+    # Imported here: the module's head is another chain's while this one runs beside it.
+    from promptpotter.domain.records.run_records import LLMCallRecord
+    from promptpotter.infrastructure.llm.openai_compat import ReportedUsage
+
+    said = {"prompt_tokens": 9, "completion_tokens": 4}
+    zero = ReportedUsage.model_validate(
+        {
+            **said,
+            "completion_tokens_details": {"reasoning_tokens": 0},
+            "prompt_tokens_details": {"cache_write_tokens": 0},
+        }
+    ).tokens
+    silent = ReportedUsage.model_validate(said).tokens
+    wrote = ReportedUsage.model_validate(
+        {**said, "prompt_tokens_details": {"cache_write_tokens": 5}}
+    ).tokens
+    assert StepUsage.from_account(zero).reasoning == 0, "a reported zero read as unreported"
+    assert StepUsage.from_account(silent).reasoning is None, "an unreported part read as 0"
+    # A row's step entry rides the wire, and the fold reads its account off it.
+    folds = {
+        name: TokenAccount.from_step_tokens(
+            {"n": StepUsage.from_wire(StepUsage.from_account(tokens).wire())}
+        )
+        for name, tokens in (("wrote", wrote), ("zero", zero), ("silent", silent))
+    }
+    assert [(f.cache_write, f.reasoning) for f in folds.values() if f is not None] == [
+        (5, None),
+        (0, 0),
+        (None, None),
+    ], "a step's usage dropped a reported part, or reported one never sent"
+    assert (silent + silent).reasoning is None and (silent + zero).reasoning == 0, (
+        "a sum turned an unreported part into a count, or a reported one into nothing"
+    )
+    # Banked `llm_call` and `token_usage` lines, written when the parts were ints, still load.
+    banked = {"node": "n", "usage": {"input": 9, "output": 4, "reasoning": 0, "cache_write": 0}}
+    usage = LLMCallRecord.model_validate(banked).usage
+    assert usage is not None and (usage.reasoning, usage.cache_write) == (0, 0)
+    price = CallPrice(
+        kind="backend", model=None, provider=None, cost_usd=None, rate_priced_usd=None
+    )
+    parts = {"reasoning_tokens": 0, "cache_read_tokens": 0, "cache_write_tokens": 0}
+    line = TokenUsageRecord.model_validate(
+        {"node": "n", "input_tokens": 9, "output_tokens": 4, "money": price.model_dump(), **parts}
+    )
+    assert (line.reasoning_tokens, line.cache_write_tokens) == (0, 0)

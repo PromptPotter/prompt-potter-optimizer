@@ -654,6 +654,18 @@
                 "default": null,
                 "title": "Cache Read"
               },
+              "cache_write": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Write"
+              },
               "cost_usd": {
                 "anyOf": [
                   {
@@ -1201,6 +1213,18 @@
                 ],
                 "default": null,
                 "title": "Cache Read"
+              },
+              "cache_write": {
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Write"
               },
               "cost_usd": {
                 "anyOf": [
@@ -3054,7 +3078,7 @@
           },
           "TokenAccount": {
             "additionalProperties": false,
-            "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.",
+            "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null part means no breakdown was reported; ``0`` means one was, and it was zero. A sum\nadds the parts reported and stays null only where neither side reported one.",
             "properties": {
               "cache_read": {
                 "anyOf": [
@@ -3069,9 +3093,16 @@
                 "title": "Cache Read"
               },
               "cache_write": {
-                "default": 0,
-                "title": "Cache Write",
-                "type": "integer"
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Write"
               },
               "input": {
                 "default": 0,
@@ -3084,9 +3115,16 @@
                 "type": "integer"
               },
               "reasoning": {
-                "default": 0,
-                "title": "Reasoning",
-                "type": "integer"
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning"
               }
             },
             "title": "TokenAccount",
@@ -3720,7 +3758,7 @@
           },
           "TokenAccount": {
             "additionalProperties": false,
-            "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null ``cache_read`` means no breakdown was reported; ``0`` means one was, with no hit.",
+            "description": "What ONE metered thing consumed: a provider round-trip, a measured row or a searchpoint.\n\n``reasoning`` is a subset of ``output`` and both cache counts of ``input``, never further\ntotals. A null part means no breakdown was reported; ``0`` means one was, and it was zero. A sum\nadds the parts reported and stays null only where neither side reported one.",
             "properties": {
               "cache_read": {
                 "anyOf": [
@@ -3735,9 +3773,16 @@
                 "title": "Cache Read"
               },
               "cache_write": {
-                "default": 0,
-                "title": "Cache Write",
-                "type": "integer"
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Cache Write"
               },
               "input": {
                 "default": 0,
@@ -3750,9 +3795,16 @@
                 "type": "integer"
               },
               "reasoning": {
-                "default": 0,
-                "title": "Reasoning",
-                "type": "integer"
+                "anyOf": [
+                  {
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "title": "Reasoning"
               }
             },
             "title": "TokenAccount",

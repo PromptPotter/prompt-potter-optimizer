@@ -76,7 +76,7 @@ def rate_priced_usd(
         usage.output,
         provider=provider,
         cache_read_tokens=usage.cache_read or 0,
-        cache_write_tokens=usage.cache_write,
+        cache_write_tokens=usage.cache_write or 0,
     )
 
 
@@ -144,7 +144,7 @@ def token_usage_record(
         input_tokens=usage.input,
         output_tokens=usage.output,
         reasoning_tokens=usage.reasoning,
-        cache_read_tokens=usage.cache_read or 0,
+        cache_read_tokens=usage.cache_read,
         cache_write_tokens=usage.cache_write,
         duration_s=float(duration_s),
         money=money,

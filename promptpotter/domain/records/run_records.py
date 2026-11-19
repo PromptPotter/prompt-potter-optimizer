@@ -556,12 +556,12 @@ class TokenUsageRecord(CycleRecord):
     served_by: str | None = None
     input_tokens: int
     output_tokens: int
-    # A SUBSET of ``output_tokens``; 0 also means no breakdown was reported, never "did not think".
-    reasoning_tokens: int = 0
-    # A SUBSET of ``input_tokens`` the PROVIDER cached; 0 also means no breakdown. Not a replay.
-    cache_read_tokens: int = 0
+    # `TokenAccount`'s parts: ``None`` is no breakdown reported. A SUBSET of ``output_tokens``.
+    reasoning_tokens: int | None = None
+    # A SUBSET of ``input_tokens`` the PROVIDER cached. Not a replay.
+    cache_read_tokens: int | None = None
     # The part of ``input_tokens`` billed at a premium to POPULATE that cache.
-    cache_write_tokens: int = 0
+    cache_write_tokens: int | None = None
     duration_s: float = 0.0
     # A send's bill; a replay's recorded price alone, which no wallet paid.
     money: Bill | CallPrice

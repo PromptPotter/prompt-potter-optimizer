@@ -98,11 +98,11 @@ def terminal_node(facts: MeasuredCell) -> str | None:
     return facts.pipeline.terminal_node
 
 
-def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int]:
+def _terminal_llm_shape(facts: MeasuredCell, node: str) -> tuple[str | None, int | None]:
     usage = facts.pipeline.step_tokens.get(node)
     if usage is None:
-        return (None, 0)
-    return (usage.finish_reason, usage.reasoning or 0)
+        return (None, None)
+    return (usage.finish_reason, usage.reasoning)
 
 
 def _answered(facts: MeasuredCell) -> bool:
@@ -153,8 +153,9 @@ def classify_result(facts: MeasuredCell) -> ResultClassification:
     # ``content_empty`` describes ONE ATTEMPT: the backend retries, and that retry can answer.
     if node is not None and f"{node}:content_empty" in advisories and not _answered(facts):
         finish_reason, reasoning_tokens = _terminal_llm_shape(facts, node)
-        # Reasoning tokens prove the model WORKED, so an empty answer is the ROUTE's, never the candidate's.
-        if reasoning_tokens > 0:
+        # Reasoning tokens prove the model WORKED, so an empty answer is the ROUTE's, never the candidate's;
+        # neither a reported zero nor an unreported count proves it.
+        if reasoning_tokens:
             infra.add(
                 f"{node}:reasoning_budget_exhausted"
                 if finish_reason == "length"
