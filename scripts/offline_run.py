@@ -9,9 +9,11 @@ it: ``docs/developer/offline-run.md``.
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import atexit
 import contextlib
+import copy
 import dataclasses
 import hashlib
 import inspect
@@ -38,7 +40,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx
 import yaml
-from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, imported
+from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 from offline_world import (
     LABELS,
     MARKER,
@@ -65,7 +67,6 @@ from processes import (
     replace_changed,
 )
 
-import promptpotter
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
 from promptpotter.application.caller import Caller
@@ -95,6 +96,7 @@ from promptpotter.application.optimizers.nodes import (
     BEHAVIOUR_KEYS_FILE,
     NODE_MEMBERS,
     BehaviourKeys,
+    member_package_dir,
 )
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
@@ -109,6 +111,7 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
+from promptpotter.domain.arm_reading import ScoreboardRow
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -132,6 +135,7 @@ from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_r
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.run_records import CycleStart, OriginGatePass
+from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.sample import Bank, Sample
@@ -155,6 +159,7 @@ from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import default_identity
+from promptpotter.shared.import_walk import imported_files
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
@@ -168,8 +173,8 @@ STAMP = "offline-run.json"
 # The key a workspace went green under, written last, so a killed or rewritten one holds none.
 GREEN = "green.key"
 TRACE = "trace.json"
-# Set in a leg's env under `--coverage`: the directory its process files the lines it ran into.
-COVERAGE = "PROMPTPOTTER_OFFLINE_COVERAGE"
+# Each leg's process files the lines it ran into its own workspace, as `ran-lines-<pid>.json`.
+RAN_LINES = "ran-lines"
 CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
 DIVERGED = "diverged"
@@ -1586,17 +1591,16 @@ def _id_map(ledger: list[dict[str, Any]], rounds: list[dict[str, Any]]) -> dict[
     """Each arm key by the label of its FIRST walk; a parent no round walked by the round reading it."""
     ids: dict[str, str] = {}
     for d in rounds:
-        for row in d.get("scoreboard") or []:
-            arm = row["reading"]["arm"]
-            if arm["label"] != "parent":
-                ids.setdefault(arm["key"], arm["label"])
+        for row in _ranked(d):
+            if row.reading.arm.label != "parent":
+                ids.setdefault(row.reading.arm.key, row.reading.arm.label)
     for r in _proposed(ledger):
         lineage = r["state"]["individual"].get("lineage") or {}
         for pid in lineage.get("parent_ids") or []:
             ids.setdefault(pid, f"parent@R{r.get('round')}")
     for d in rounds:
-        for row in d.get("scoreboard") or []:
-            ids.setdefault(row["reading"]["arm"]["key"], f"parent@R{d.get('round')}")
+        for row in _ranked(d):
+            ids.setdefault(row.reading.arm.key, f"parent@R{d.get('round')}")
     return ids
 
 
@@ -1640,7 +1644,7 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
     out["election"] = {k: election.get(k) for k in ELECTION_KEYS}
     health = d.get("health") or {}
     out["health"] = {k: health.get(k) for k in ("grade", "cause")}
-    readings = [r["reading"] for r in d.get("scoreboard") or []]
+    readings = [row.reading for row in _ranked(d)]
     out["arms"] = {
         ids.get(key, key): {
             **{k: arm.get(k) for k in ARM_KEYS},
@@ -1649,7 +1653,7 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
         for key, arm in (d.get("arms") or {}).items()
     }
     out["folds"] = {ids.get(k, k): v for k, v in (d.get("folds") or {}).items()}
-    out["scoreboard_order"] = [ids.get(r["arm"]["key"], r["arm"]["label"]) for r in readings]
+    out["scoreboard_order"] = [ids.get(r.arm.key, r.arm.label) for r in readings]
     out["cells"] = {ids.get(k, k): _cells(v) for k, v in (d.get("cells") or {}).items()}
     return out
 
@@ -1729,6 +1733,11 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
+def _ranked(d: dict[str, Any]) -> list[ScoreboardRow]:
+    """The rank a round file's arms read in: it stores facts, the rank is `RoundOutcome.ranked`."""
+    return RoundOutcome.model_validate({k: d[k] for k in RoundOutcome.model_fields}).ranked()
+
+
 def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
     rounds = [
         json.loads(p.read_text(encoding="utf-8")) for p in sorted((cycle / "rounds").glob("*.json"))
@@ -1800,7 +1809,7 @@ def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
         fingerprints = {}
     for name in sorted(builtin.intersection(names)):
         trace = BehaviourTrace.read(home / name)
-        fingerprints[name] = stable_hash([trace.decisions, trace.requests])
+        fingerprints[name] = stable_hash([trace.decisions, trace.requests, unrun(name, home)])
     fingerprint = held.estimator
     if "potter" in names and (nested := home / "potter" / L4 / TRACE).is_file():
         fingerprint = stable_hash(BehaviourTrace.read(nested.parent).inner_half())
@@ -1813,10 +1822,64 @@ def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
     return wrote
 
 
+def unrun(name: str, home: Path) -> dict[str, list[str]]:
+    """Per file of *name*'s member packages, by package-relative path, the code its straight run
+    cannot vouch for: what the world ran is keyed by its behaviour, the rest by its AST
+    (`_unvouched`). Raises where the run's ran-lines name none of those files, which would read
+    as "nothing ran" (a trace filed by another tree, a leg that filed nothing)."""
+    ran = ran_lines(home / name, recursive=False)
+    roster = select_optimizer(bench_choice(name)).member_nodes
+    files = {
+        path.relative_to(PACKAGE_ROOT).as_posix(): path
+        for package in {member_package_dir(NODE_MEMBERS.table[n]) for n in roster}
+        for path in package.rglob("*.py")
+    }
+    if not ran.keys() & files.keys():
+        raise LookupError(f"{home / name}'s ran-lines name no file of {name}'s member packages")
+    return {
+        rel: _unvouched(
+            ast.parse(path.read_text(encoding="utf-8")).body, ran[rel], "", inside=False
+        )
+        for rel, path in sorted(files.items())
+    }
+
+
+_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
+
+
+def _unvouched(nodes: list[Any], ran: set[int], path: str, *, inside: bool) -> list[str]:
+    """Each statement's `ast.dump` (no positions: formatting and comments never key) under its
+    nesting path, its bodies walked apart: every statement outside a function body, which runs at
+    import whatever the run reached, and each one inside that the run never reached. A def keys
+    its decorators and defaults, never its name or parameters: its body's behaviour is the trace."""
+    keyed: list[str] = []
+    for node in nodes:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            args = node.args
+            header = [*node.decorator_list, *args.defaults, *filter(None, args.kw_defaults)]
+            keyed += [f"{path}def {ast.dump(e)}" for e in header]
+            keyed += _unvouched(node.body, ran, f"{path}def/", inside=True)
+            continue
+        bodies = [f for f in _BODIES if isinstance(getattr(node, f, None), list)]
+        first = getattr(node, "lineno", None) or node.pattern.lineno
+        last = getattr(node, "end_lineno", None) or node.body[-1].end_lineno
+        if not inside or not any(at in ran for at in range(first, last + 1)):
+            head = copy.copy(node)
+            for field in bodies:
+                setattr(head, field, [])
+            keyed.append(path + ast.dump(head))
+        for field in bodies:
+            keyed += _unvouched(
+                getattr(node, field), ran, f"{path}{type(node).__name__}.{field}/", inside=inside
+            )
+    return keyed
+
+
 def traced(out: Path) -> None:
     """Files into *out* at exit each package line a function of this process ran, as PEP 669
-    reports it: once a line, then disabled, so the run pays for each line once."""
-    package = str(Path(promptpotter.__file__).parent)
+    reports it (once a line, then disabled, so the run pays for each line once), by
+    package-relative POSIX path, so a trace reads the same from every tree."""
+    package = f"{PACKAGE_ROOT}{os.sep}"
     ran: dict[str, set[int]] = defaultdict(set)
     monitoring = sys.monitoring
 
@@ -1826,8 +1889,10 @@ def traced(out: Path) -> None:
         return monitoring.DISABLE
 
     def filed() -> None:
-        lines = {name: sorted(at) for name, at in ran.items()}
-        (out / f"{os.getpid()}.json").write_text(json.dumps(lines), encoding="utf-8")
+        lines = {
+            Path(name).relative_to(PACKAGE_ROOT).as_posix(): sorted(at) for name, at in ran.items()
+        }
+        (out / f"{RAN_LINES}-{os.getpid()}.json").write_text(json.dumps(lines), encoding="utf-8")
 
     monitoring.use_tool_id(monitoring.COVERAGE_ID, OFFLINE_RUN)
     monitoring.register_callback(monitoring.COVERAGE_ID, monitoring.events.LINE, line)
@@ -1850,18 +1915,25 @@ def _function_lines(path: Path) -> set[int]:
     return lines
 
 
-def coverage_by_package(out: Path) -> list[str]:
-    ran: dict[str, set[int]] = defaultdict(set)
-    for filed in out.glob("*.json"):
+def ran_lines(workspace: Path, *, recursive: bool) -> defaultdict[str, set[int]]:
+    """The lines the legs run in *workspace* ran, by package-relative path; its own process alone
+    unless *recursive*."""
+    ran: defaultdict[str, set[int]] = defaultdict(set)
+    pattern = f"{RAN_LINES}-*.json"
+    for filed in workspace.rglob(pattern) if recursive else workspace.glob(pattern):
         for name, lines in json.loads(filed.read_text(encoding="utf-8")).items():
-            ran[os.path.normcase(name)].update(lines)
-    root = Path(promptpotter.__file__).parent
+            ran[name].update(lines)
+    return ran
+
+
+def coverage_by_package(home: Path) -> list[str]:
+    ran = ran_lines(home, recursive=True)
     counted: dict[str, list[int]] = defaultdict(lambda: [0, 0])
-    for path in root.rglob("*.py"):
-        parts = path.relative_to(root).parts
+    for path in PACKAGE_ROOT.rglob("*.py"):
+        parts = path.relative_to(PACKAGE_ROOT).parts
         package = "/".join(parts[: min(2, len(parts) - 1)]) or "promptpotter"
         body = _function_lines(path)
-        counted[package][0] += len(body & ran[os.path.normcase(str(path))])
+        counted[package][0] += len(body & ran["/".join(parts)])
         counted[package][1] += len(body)
     total = [sum(hit for hit, _ in counted.values()), sum(n for _, n in counted.values())]
     return [
@@ -1895,7 +1967,7 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
     def imports(files: Iterable[Path]) -> set[str]:
         hit: set[str] = set()
         for path in files:
-            for target in imported(path):
+            for target in imported_files(path):
                 hit.update(d for d in owners if target.startswith(d))
         return hit
 
@@ -1949,25 +2021,14 @@ def claim_home(home: Path, stamp: dict[str, object]) -> Path:
     return home
 
 
-def prepared_home(
-    home: Path, stamp: dict[str, object], due: Sequence[str], *, held: bool, coverage: bool
-) -> Path | None:
-    """*home* cleared for *due*'s workspaces, and under *coverage* the directory every leg's
-    process files the lines it ran into, named in the env each leg inherits."""
+def prepared_home(home: Path, stamp: dict[str, object], due: Sequence[str], *, held: bool) -> None:
+    """*home* cleared for *due*'s workspaces."""
     if held:
         for name in due:
             if (home / name).exists():
                 rmtree_robust(home / name)
     else:
         claim_home(home, stamp)
-    if not coverage:
-        return None
-    covered = home / "coverage"
-    if covered.exists():
-        rmtree_robust(covered)
-    covered.mkdir()
-    os.environ[COVERAGE] = str(covered)
-    return covered
 
 
 def child_env(root: Path) -> dict[str, str]:
@@ -2254,10 +2315,9 @@ def read_children(
 def run_child_leg(args: argparse.Namespace) -> None:
     if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
         raise SystemExit("offline run: --child runs only under the env its parent builds")
-    if filed_into := os.environ.get(COVERAGE):
-        traced(Path(filed_into))
     # Its outputs land in its directory, its run in the data root it was handed.
     workspace = Path.cwd()
+    traced(workspace)
     if args.terminal:
         run_terminal(
             args.child,
@@ -2342,7 +2402,7 @@ def main() -> int:
     ap.add_argument(
         "--coverage",
         action="store_true",
-        help="print, per package, the function-body lines every leg's process ran; keeps no green",
+        help="print, per package, the function-body lines every leg's process ran",
     )
     ap.add_argument("--child", help=argparse.SUPPRESS)
     ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
@@ -2381,7 +2441,7 @@ def main() -> int:
         if args.controlled
         else args.optimizer or sorted(optimizers.MANIFESTS.table)
     )
-    kept = None if args.coverage else LastGreen.open()
+    kept = LastGreen.open()
     keys = {} if kept is None else optimizer_keys(kept, names, controlled=args.controlled)
     held = holds_run(home, run)
     green = still_green(home, keys) if held else set()
@@ -2399,7 +2459,7 @@ def main() -> int:
         return int(keying and behaviour_keys(home, names))
     stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run, "workspaces": names}
     queue_behind_siblings("offline_run")
-    covered = prepared_home(home, stamp, due, held=held, coverage=args.coverage)
+    prepared_home(home, stamp, due, held=held)
     end_children_with_this_process()
     # One workspace each: a shared archive and δ ruler let one optimizer's run move another's.
     child_args = ["--rows", str(args.rows), "--bench-trigger", args.bench_trigger]
@@ -2525,8 +2585,8 @@ def main() -> int:
     if args.controlled and not any(failed.values()):
         print(controlled_reading(home, arm_names))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
-    if covered is not None:
-        print("\n".join(coverage_by_package(covered)))
+    if args.coverage:
+        print("\n".join(coverage_by_package(home)))
     # Under the home its flags stamped, and only where the sources read the same as before it.
     if kept is not None:
         now = optimizer_keys(kept, due, controlled=args.controlled)

@@ -144,7 +144,7 @@ def served_round(
         election=closed.election,
         candidates=[
             ServedArm.of(row.reading, closed.arms[row.reading.arm.key])
-            for row in closed.scoreboard
+            for row in closed.ranked()
             if row.reading.role.is_proposal
         ],
         headline=closed.headline,

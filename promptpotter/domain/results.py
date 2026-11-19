@@ -4,7 +4,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import Any, Literal
 
-from pydantic import ConfigDict, Field, computed_field
+from pydantic import ConfigDict, Field
 
 from promptpotter.domain.arm_reading import (
     ArmElection,
@@ -104,7 +104,7 @@ class Election(FrozenModel):
     leading: ArmKey | None = Field(
         description="The ONE arm this round is read off, as its selector named it and never "
         "re-ranked: the selection where there is one, on a held round the challenger that came "
-        "closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. "
+        "closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. "
         "`null` where the selector could read no arm. NOT whose numbers the headline carries: "
         "that is `ended_on`."
     )
@@ -116,7 +116,7 @@ class Election(FrozenModel):
     # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
     electable: int
     fit: dict[ArmKey, ArmFit] = Field(default_factory=dict)
-    # `Selector.elects_on`: the column of `scoreboard` the round was WON on.
+    # `Selector.elects_on`: the column of `RoundView.candidates` the round was WON on.
     elects_on: DisplayMetric
     # The selector's own reason; ``None`` on the origin round, which chose between nobody.
     verdict_reason: str | None = None
@@ -256,10 +256,8 @@ class RoundOutcome(FrozenModel):
 
 
 class RoundResult(RoundOutcome):
-    """A round with its rows, which is the round file itself."""
-
-    # `extra="ignore"`: the computed `round_id`/`scoreboard` are dumped and must read back.
-    model_config = ConfigDict(extra="ignore")
+    """A round with its rows, which is the round file itself: facts alone, so no served word is
+    stored (a surface reads its rank, `ranked`, and its headline, `headline`)."""
 
     # Offset of the statement it stands on. ``None`` where no ledger was bound: 0 is a real offset.
     at_offset: int | None = None
@@ -267,11 +265,6 @@ class RoundResult(RoundOutcome):
     cells: dict[ArmKey, CellSheet] = Field(default_factory=dict)
     # Keyed by the MEASURED individual, outside the arms: `raced` reads them beside the draw.
     overlap_results: dict[str, CellSheet] = Field(default_factory=dict)
-
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def round_id(self) -> str:
-        return f"round_{self.round}"
 
     @property
     def results(self) -> CellSheet:
@@ -298,18 +291,9 @@ class RoundResult(RoundOutcome):
             overlap={k: v.addresses() for k, v in self.overlap_results.items()},
         )
 
-    @computed_field  # type: ignore[prop-decorator]
-    @property
-    def scoreboard(self) -> list[ScoreboardRow]:
-        """`ranked`, served: the ledger's `RoundOutcome` cannot carry a computed field."""
-        return self.ranked()
-
-    @computed_field(  # type: ignore[prop-decorator]
-        description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
-        "numbers are its own."
-    )
     @property
     def headline(self) -> ArmReading | None:
+        """The arm the round ENDED on (`election.ended_on`), read."""
         ended_on = None if self.election is None else self.election.ended_on
         return next((r for r in self.arm_readings() if r.arm.key == ended_on), None)
 

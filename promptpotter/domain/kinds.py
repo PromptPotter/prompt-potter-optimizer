@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, ClassVar
+
 from pydantic import BaseModel
 
 
@@ -10,12 +12,16 @@ class RegistryIncompleteError(RuntimeError):
 class KindTable[M: BaseModel]:
     """The ONE kind -> model table: a model registers as its class is built, and every read by kind
     goes through ``parse``. A table whose package walks its modules at import completes there;
-    one without completes at its declared step."""
+    one without completes at its declared step. ``every`` is each table built: a load dispatches
+    by name through these alone, so the landing key walks them all (`landing.py::loading_modules`)."""
+
+    every: ClassVar[list[KindTable[Any]]] = []
 
     def __init__(self, what: str) -> None:
         self._what = what
         self._held: dict[str, type[M]] = {}
         self._complete = False
+        KindTable.every.append(self)
 
     def register(self, kind: str, model: type[M]) -> None:
         if (held := self._held.setdefault(kind, model)) is not model:

@@ -26,6 +26,7 @@ from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
 from promptpotter.domain.cycle_paths import HOP_SEP, ID_COMPONENT_PATTERN, UNIT_SEP
 from promptpotter.domain.layer_fold import UNBOUNDED
+from promptpotter.domain.paired_reading import UNIT_FORMATS, Estimate, EstimateForm
 from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
 from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTION_PREFIX
 from promptpotter.domain.said import TONES
@@ -512,6 +513,39 @@ _HEADER = """\
 """
 
 
+_WORDS_PATH = REPO / "webapp" / "lib" / "__tests__" / "estimate-words.generated.json"
+# Exact binary ties at every unit's digits (1/40 as a rate, 0.125, 1250 tokens), −0, compact steps.
+_WORDED_VALUES = (
+    *(0.0, -0.0, 1 / 40, 0.125, -0.125, 0.0125, -0.0125, 0.0625, 0.5, 1.5, 2.5, 1 / 3),
+    *(0.25, -0.25, 1 / 32, -1 / 32, 1250.0, -2500.0, 999.5, 1_250_000.0, -1_250_000.0),
+)
+
+
+def _estimate_words() -> str:
+    """Python's words for an `Estimate`'s facts, per unit × form, which the browser's
+    `format.ts::fmtEstimate` is held to by vitest: Python's formatter is the one spec."""
+    cases = []
+    for unit in UNIT_FORMATS:
+        for form in typing.get_args(EstimateForm):
+            for lo, value in zip(
+                _WORDED_VALUES[-1:] + _WORDED_VALUES, _WORDED_VALUES, strict=False
+            ):
+                for band in ((None, None), (lo, value)):
+                    e = Estimate(
+                        value=value,
+                        ci_lo=band[0],
+                        ci_hi=band[1],
+                        n=None,
+                        se=None,
+                        unit=unit,
+                        form=form,
+                    )
+                    words = {"point": e.point, "band": e.band, "text": e.text}
+                    cases.append({"facts": e.model_dump(mode="json"), **words})
+    rows = ",\n".join(json.dumps(case, ensure_ascii=False) for case in cases)
+    return f"[\n{rows}\n]\n"
+
+
 def main() -> int:
     for root in _served_roots():
         _emit_type(root)
@@ -553,8 +587,9 @@ def main() -> int:
     blocks.append(_emit_live_windows())
     blocks.append(_emit_cycle_path_grammar())
     content = _HEADER + "\n\n".join(blocks) + "\n"
-    verb = "wrote" if replace_changed(_OUT_PATH, content) else "unchanged"
-    print(f"{verb} {_OUT_PATH.relative_to(REPO)}")
+    for path, text in ((_OUT_PATH, content), (_WORDS_PATH, _estimate_words())):
+        verb = "wrote" if replace_changed(path, text) else "unchanged"
+        print(f"{verb} {path.relative_to(REPO)}")
     return 0
 
 

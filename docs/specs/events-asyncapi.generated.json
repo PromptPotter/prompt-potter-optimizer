@@ -2982,7 +2982,7 @@
                 "type": "null"
               }
             ],
-            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
             "title": "Leading"
           },
           "reelection": {
@@ -3077,7 +3077,7 @@
                 "type": "null"
               }
             ],
-            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
             "title": "Leading"
           },
           "record_type": {
@@ -3280,7 +3280,7 @@
       },
       "Estimate": {
         "additionalProperties": false,
-        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nIt holds facts alone, so a stored or hashed estimate never reads a word; a surface words it\nwhere it prints it (`text`, or `band`, the interval alone; the browser's\n`webapp/lib/format.ts::fmtEstimate`), never a bound of its own.",
+        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nIt holds facts alone, so a stored or hashed estimate never reads a word; a surface words it\nwhere it prints it (`text`, or `band`, the interval alone), never a bound of its own.",
         "properties": {
           "ci_hi": {
             "anyOf": [

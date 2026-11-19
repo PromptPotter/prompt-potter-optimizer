@@ -29,8 +29,9 @@ import typing
 from collections.abc import Iterator
 from pathlib import Path
 
-from last_green import import_statements
 from processes import REPO, clone_cache, git, replace_changed, run
+
+from promptpotter.shared.import_walk import import_statements
 
 # The ceiling each row's last raise declared; a row that never rose past it in this branch ignores it.
 BASELINE = {
@@ -199,13 +200,21 @@ BASELINE = {
     # made record classes in module globals.
     # addr-3 (+59) less addr-4 (−20) = +39: a run declaration is a fold patch over `defaults.yaml`
     # that refuses a list it cannot lay (`layer_fold.py::patch_between`), and an arm is one
-    # `RunSpec` planned on its seat and numbered once at the mint (`ArmSeat`). bkeys-3 (+21, provisional likewise): the landing key
-    # hashes the code a load runs (`landing.py::loading_modules`'s schema walk).
+    # `RunSpec` planned on its seat and numbered once at the mint (`ArmSeat`). bkeys-3 (+21): the
+    # landing key hashes the code a load runs (`landing.py::loading_modules`'s schema walk).
     # addr-4's fix pass (+85): a cycle files the cell identity it drew under and a moved one
     # refuses (`moved_leaves` over the drawn record, +45); a null clears on every layer and
     # `unbounded` is the one no-bound word on each budget axis (+19); the archive and the ruler
     # are addressed by `config_key` (+23); the rest nets −2.
-    "package_lines": 112321,
+    # bkeys-4 (+90): the landing key's code is the import closure of what a load calls, one walk
+    # the gate's scripts share (`shared/import_walk.py`, moved out of `scripts/last_green.py`);
+    # +10, a plugin manifest keys its own code and its built-in members' fingerprints; −16, a
+    # round file stores facts (`RoundResult` dumps no computed field). bkeys-4 fix (+31): a file is
+    # walked from its own tree (`import_walk.py::_tree`) and hashed off the walk's one parse; the
+    # walk reads every `KindTable` (`kinds.py::KindTable.every`); a plugin's built-in package keys
+    # by the one built-in reaching it, derived live beside `select_optimizer`
+    # (`optimizer_manifest.py::behaviour_key`).
+    "package_lines": 112436,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

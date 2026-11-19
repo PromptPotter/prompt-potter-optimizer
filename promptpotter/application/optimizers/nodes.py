@@ -6,7 +6,7 @@ import importlib
 import pkgutil
 import sys
 import typing
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -52,7 +52,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
-from promptpotter.shared.hashing import normalized_module, stable_hash
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.plugin_registry import Registry
 
@@ -345,7 +345,8 @@ BEHAVIOUR_KEYS_FILE = PACKAGE_ROOT / "assets" / "behaviour_keys.json"
 
 class BehaviourKeys(FrozenModel):
     world: str
-    # By built-in optimizer: the hash of its straight run's trace in `world`.
+    # By built-in optimizer: the hash of its straight run's trace in `world` and of its member
+    # packages' code that run cannot vouch for (`offline_run.py::unrun`).
     fingerprints: dict[str, str]
     # The hash of the L4 leg's inner campaigns in `world`, never its outer's own half.
     estimator: str
@@ -360,46 +361,11 @@ class BehaviourKeys(FrozenModel):
         return stable_hash([self.estimator, self.world])
 
 
-def _package_dir(member: NodeMember) -> Path:
+def member_package_dir(member: NodeMember) -> Path:
     """The built-in optimizer package declaring *member*, or the top package of a plugin's."""
     package = member_package(member)
     top = f"{_PACKAGE}.{package}" if package else type(member).__module__.split(".")[0]
     return Path(str(sys.modules[top].__file__)).parent
-
-
-def _files_hash(roots: Iterable[Path]) -> str:
-    """Code less its prose (`normalized_module`), any other file as it stands; read live."""
-    return stable_hash(
-        {
-            path.relative_to(root.parent).as_posix(): (
-                normalized_module(text) if path.suffix == ".py" else text
-            )
-            for root in sorted(roots)
-            for path in sorted(root.rglob("*"))
-            if path.is_file()
-            and path.suffix not in (".pyc", ".md")
-            and (text := path.read_text(encoding="utf-8"))
-        }
-    )
-
-
-def behaviour_key(name: str, members: Iterable[NodeMember], manifests: Sequence[Path]) -> str:
-    """L4 identity (architecture §0.5): a built-in's fingerprint on the offline world and the
-    world's version, so a rename that moves no decision re-keys nothing; a manifest outside the
-    package has no fingerprint, so the code of the packages declaring its members stands in. A
-    built-in missing from `BEHAVIOUR_KEYS_FILE` raises: a stale key is a refused commit, never a
-    second identity."""
-    keys = BehaviourKeys.held()
-    if not all(directory.is_relative_to(PACKAGE_ROOT) for directory in manifests):
-        return stable_hash(
-            {"code": _files_hash({_package_dir(member) for member in members}), "world": keys.world}
-        )
-    if name not in keys.fingerprints:
-        raise LookupError(
-            f"{BEHAVIOUR_KEYS_FILE.name} holds no {name!r}: give it any fingerprint there, and "
-            "`scripts/offline_run.py` regenerates its own"
-        )
-    return stable_hash({"fingerprint": keys.fingerprints[name], "world": keys.world})
 
 
 @dataclass(frozen=True)

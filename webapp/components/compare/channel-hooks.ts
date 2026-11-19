@@ -14,7 +14,7 @@ import type { CellsPreset } from "@/lib/hooks/useCells";
 import { shownData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import { lineageIndexOf, useLineageTree } from "@/lib/state/lineage";
-import { fmtBand, fmtPoint, PLACEHOLDER } from "@/lib/format";
+import { fmtBand, fmtMetric, PLACEHOLDER } from "@/lib/format";
 
 import { type CyclePath, decodeCyclePath, encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import { editsFor, pointKeyOf, useScenarioEdits } from "./config-edit";
@@ -104,7 +104,7 @@ export function channelLevel(
 
   return (
     reading && {
-      value: withdrawn ? "?" : (fmtPoint(reading.estimate) ?? PLACEHOLDER),
+      value: withdrawn ? "?" : fmtMetric(reading.estimate),
       band: withdrawn
         ? "? · ? cells"
         : `${fmtBand(reading.estimate) ?? PLACEHOLDER} · ${reading.n_cells} cell${

@@ -38,7 +38,7 @@ def _is_prose(stmt: ast.stmt) -> bool:
     )
 
 
-def _normalized_source(tree: ast.AST) -> str:
+def normalized_tree(tree: ast.AST) -> str:
     """Documenting, reformatting or relocating a name is free; rebinding one moves the digest."""
     bindings: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
@@ -69,7 +69,7 @@ def module_source_digest(*modules: ModuleType) -> str:
 @functools.cache
 def normalized_module(text: str) -> str:
     """Memoized on the text, never the module: an edit on disk is never answered by an older read."""
-    return _normalized_source(ast.parse(text))
+    return normalized_tree(ast.parse(text))
 
 
 def stable_hash(value: Any, *, length: int = ID_HEX) -> str:

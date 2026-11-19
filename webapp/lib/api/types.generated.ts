@@ -941,8 +941,7 @@ export interface Measurand {
 /** THE estimate off cells — a level or a lift, in its unit, with its two-sided
  * 95% interval. It holds facts alone, so a stored or hashed estimate never
  * reads a word; a surface words it where it prints it (`text`, or `band`, the
- * interval alone; the browser's `webapp/lib/format.ts::fmtEstimate`), never a
- * bound of its own. */
+ * interval alone), never a bound of its own. */
 export interface Estimate {
   value: number;
   /** The 95% interval on `value`; both bounds are null where the estimate has no
@@ -2527,8 +2526,8 @@ export interface Election {
   /** The ONE arm this round is read off, as its selector named it and never re-
    * ranked: the selection where there is one, on a held round the challenger
    * that came closest on the selector's own objective, at round 0 the origin.
-   * Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT
-   * whose numbers the headline carries: that is `ended_on`. */
+   * Rank 1 of `RoundView.candidates`. `null` where the selector could read no
+   * arm. NOT whose numbers the headline carries: that is `ended_on`. */
   leading: string | null;
   /** WHOSE numbers the round's headline carries: the selection where the round
    * selected; on a held round the retained parent, re-read on this round's
@@ -3056,8 +3055,9 @@ export interface MetricSpec {
   label: string;
   expression: string;
   unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
-  /** Each value is a difference off an origin, so it reads signed, as a lift does */
-  lift: boolean;
+  /** `lift` where each value is a difference off an origin, so it reads signed;
+   * worded as an `Estimate` of this form is */
+  form: 'level' | 'lift';
   higher_is_better: boolean | null;
   description: string;
   /** What to CALL this metric's axis: the label, plus the unit only where the unit
@@ -5732,7 +5732,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "f55584ec646b9107";
+export const SERVED_CONTRACT = "3852410a3cbbb952";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

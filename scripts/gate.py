@@ -38,7 +38,6 @@ from last_green import (
     OFFLINE_RUN_READS,
     LastGreen,
     digest,
-    imported,
     reads,
 )
 from processes import (
@@ -201,11 +200,16 @@ _LAYERING: tuple[tuple[str, tuple[str, ...], str | tuple[str, ...]], ...] = (
 
 
 def _layering(_: Selection) -> Outcome:
+    # A check runs in the pinned venv; this module's own imports also run under the bare one.
+    from promptpotter.shared.import_walk import imported_files
+
     package = "promptpotter/"
     imports: dict[str, list[str]] = {}
     for path in _sources(REPO / package, "*.py"):
         rel = path.relative_to(REPO).as_posix()
-        imports[rel[len(package) :]] = sorted(target[len(package) :] for target in imported(path))
+        imports[rel[len(package) :]] = sorted(
+            target[len(package) :] for target in imported_files(path)
+        )
     hits = [
         f"{who or package}* must not import {' or '.join(banned)} — {source} imports {target}"
         for who, banned, exempt in _LAYERING
@@ -1367,6 +1371,7 @@ _TREE = ("",)
 _ENGINE = ("!webapp/",)
 _GATE = ("scripts/gate.py", "scripts/last_green.py", "scripts/processes.py")
 _GENERATED_TYPES = "webapp/lib/api/types.generated.ts"
+_ESTIMATE_WORDS = "webapp/lib/__tests__/estimate-words.generated.json"
 _GENERATED_MARKS = "webapp/components/ui/vendor-marks.generated.ts"
 _WEBAPP_READS = ("webapp/", "tests/fixtures/", *_GATE)
 _ENGINE_RUNTIME = (*ENGINE_RUNTIME, *_GATE)
@@ -1715,8 +1720,8 @@ CHECKS: tuple[Check, ...] = (
         _probe("scripts/build_ts_types.py", _rewrote),
         mb=190,  # 153
         tier="commit",
-        reads=(*_ENGINE_RUNTIME, "scripts/build_ts_types.py", _GENERATED_TYPES),
-        writes=(_GENERATED_TYPES,),
+        reads=(*_ENGINE_RUNTIME, "scripts/build_ts_types.py", _GENERATED_TYPES, _ESTIMATE_WORDS),
+        writes=(_GENERATED_TYPES, _ESTIMATE_WORDS),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
     Check(
