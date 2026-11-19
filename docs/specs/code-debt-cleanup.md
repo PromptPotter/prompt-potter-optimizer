@@ -853,14 +853,6 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   decision records addresses and its replay reads every side through the one scorer it runs; a
   run-data wipe, and `offline_run.py::LEDGER_KEYS` keeps `inputs_ref` whole, so the behaviour keys
   move. **Window:** W1 · potter-w1 (else W3). **Re-test:** `git grep -n "prior_histories" -- promptpotter` is empty; open: does a rival-only re-grade reach `elimination_cut`'s replay?
-- **An unset lever is spelled two ways in the reply-cache key**: `store/llm_reuse_cache.py::hash_call`
-  hashes `temperature`, `json_schema`, `seed`, `max_tokens` and `reasoning_effort` always (a `None`
-  included), but `route_order` and `top_p` "only when set: an unconditional `null` re-keys every
-  banked reply", so the key's shape records the order its levers were added: a compatibility rule
-  inside an identity. `optimizer_reuse` and `judge_reuse` are CACHE, so once users hold paid replies it
-  can never be normalized. Root: the key hashes the request as sent, by one rule (set fields, nulls
-  dropped); every banked reply misses once. **Window:** W1 · cache key, a file-disjoint link beside
-  W1's C0 re-ask. **Re-test:** `git grep -n "if request\." -- promptpotter/infrastructure/store/llm_reuse_cache.py` is empty.
 - **The neutral round envelope stores one backend's ranking report and a second copy of its cells**:
   `domain/results.py::RoundOutcome.diagnostics` is a `round_diagnostics.py::RoundDiagnostics`
   (`rank_buckets`, `top_k_accuracy`, `near_misses`, per-sample `rank` / `gt_in_*`) that

@@ -23,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 
 def hash_call(request: ChatRequest, *, provider: str) -> str:
-    """The request as sent: its `wire_schema`, never a class name, keys the reply."""
+    """The request as sent, by one rule: each set field, an unset lever absent; its
+    `wire_schema`, never a class name."""
     payload: dict[str, Any] = {
         "messages": request.messages,
         "model": request.model,
@@ -33,13 +34,10 @@ def hash_call(request: ChatRequest, *, provider: str) -> str:
         "seed": request.seed,
         "max_tokens": request.max_tokens,
         "reasoning_effort": request.reasoning_effort,
+        "route_order": request.route_order,
+        "top_p": request.top_p,
     }
-    # An optional lever joins only when set: an unconditional `null` re-keys every banked reply.
-    if request.route_order:
-        payload["route_order"] = request.route_order
-    if request.top_p is not None:
-        payload["top_p"] = request.top_p
-    return stable_hash(payload, length=ADDRESS_HEX)
+    return stable_hash({k: v for k, v in payload.items() if v is not None}, length=ADDRESS_HEX)
 
 
 class _Claims:
