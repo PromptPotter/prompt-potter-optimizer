@@ -25,12 +25,13 @@ from promptpotter.domain.arm_reading import fitness_terms_text, fold_fitness_tex
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CyclePayload
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_result import CycleResult
+from promptpotter.domain.dashboard_rows import ServedRound
 from promptpotter.domain.origin_panel import (
     ROUND_ADVANCE_INFO,
     RoundAdvance,
     StallEffect,
 )
-from promptpotter.domain.paired_reading import level_text
+from promptpotter.domain.paired_reading import Estimate, level_text
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
     PauseCause,
@@ -226,6 +227,20 @@ def render_advance_status(advance: RoundAdvance, stall: int) -> str:
         return _node_line(f"{GREEN}✓ {info.label}, auto-continuing...{RESET}")
     rounds = "round" if stall == 1 else "rounds"
     return _node_line(f"{YELLOW}⚠ {info.label} — {stall} {rounds} without an advance{RESET}")
+
+
+def render_noise_walk(served: ServedRound) -> list[str]:
+    """The round's noise walk and its promotion's hold, off the round as the dashboard serves it."""
+    lines = []
+    if (walk := served.lift_prior) is not None:
+        mu0 = Estimate.normal(walk.mu0, walk.mu0_se, unit="theta", form="lift", n=walk.pairs)
+        lines.append(
+            f"noise walk: μ0 {mu0.text} over the parent, τ {walk.tau:.2f} logits across "
+            f"{walk.pairs} pairs"
+        )
+    if (held := served.hold_up) is not None:
+        lines.append(f"held up: the promotion holds {held.text} over the parent it beat")
+    return [_node_line(line) for line in lines]
 
 
 def render_completion(

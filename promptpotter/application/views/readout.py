@@ -25,6 +25,7 @@ from promptpotter.application.views.render.phase import (
     acts_line,
     fmt_elapsed,
     render_advance_status,
+    render_noise_walk,
     render_progress_table,
     render_round_stats,
     round_verdict_basis,
@@ -59,6 +60,7 @@ from promptpotter.domain.arms import (
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.dashboard_rows import served_rounds
 from promptpotter.domain.narration import NarratedRecord, Narration
 from promptpotter.domain.paired_reading import level_text, lift_text
 from promptpotter.domain.pass_kinds import PASSES
@@ -570,6 +572,10 @@ class ReadoutProjection(Projection):
                     self._write(line)
         for fact in (f for f in round_result.optimizer_facts if f.kind == "stat"):
             self._write(_node_line(f"{fact.label}: {fact.text}"))
+        closed = [self._closed[n].summary() for n in sorted(self._closed)]
+        served = next(r for r in served_rounds(closed, {}, series) if r.round == rn)
+        for line in render_noise_walk(served):
+            self._write(line)
         self._write(
             render_advance_status(round_result.overlap.advance, standing.rounds_without_advance)
         )

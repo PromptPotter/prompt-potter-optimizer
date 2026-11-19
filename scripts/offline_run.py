@@ -68,13 +68,21 @@ from processes import (
 import promptpotter
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
+from promptpotter.application.caller import Caller
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.measuring import held_out
 from promptpotter.application.datasets.authored import dataset_campaign_block
 from promptpotter.application.datasets.loaders import definition_source
-from promptpotter.application.embedded_run import host_dispatcher, run_campaign, run_head_to_head
+from promptpotter.application.embedded_run import (
+    CycleDashboardParams,
+    answer_read,
+    host_dispatcher,
+    run_campaign,
+    run_head_to_head,
+)
 from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
+from promptpotter.application.host_surface import CallTool, HostSession
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.maintenance.landing import check_every_treatment, plan_landing
 from promptpotter.application.optimizer_manifest import (
@@ -89,6 +97,7 @@ from promptpotter.application.optimizers.nodes import (
     BehaviourKeys,
 )
 from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.served_dashboard import ServedDashboard
 from promptpotter.config.paths import (
     PACKAGE_ROOT,
     PROJECTS_DIR,
@@ -113,6 +122,7 @@ from promptpotter.domain.command_kinds import (
     HeldOutPayload,
     MintCampaignPayload,
     PauseCyclePayload,
+    ReadKind,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.draft_edit import CampaignLayer, OptimizationOverrides
@@ -139,7 +149,12 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
-from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
+from promptpotter.infrastructure.store.layout import (
+    CycleLayout,
+    cycle_dir_for,
+    dataset_id_prefix,
+    inner_sandboxes_dir,
+)
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
@@ -1072,6 +1087,38 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     if final in (None, StopReason.REBASED):
         raise SystemExit(f"offline run: the line still reads {final}")
     print(f"rebased {len(forks)} times, {spent} of {rounds} rounds spent, line ended {final}")
+    await noise_walk_doors(stores, session.hop, list(cycles))
+
+
+async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) -> None:
+    """The line's warm ruler separates arms, so each door reads the noise walk and the hold off
+    one served round: the readouts of *line* name μ0 and τ, the embedded and MCP reads of *hop*
+    serve both."""
+    embedded = await answer_read(
+        CycleDashboardParams(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id), stores
+    )
+    assert isinstance(embedded, ServedDashboard), "the dashboard read serves the dashboard"
+    asked = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id}
+    mcp = await HostSession(Caller(stores)).answer(CallTool(ReadKind.CYCLE_DASHBOARD, asked))
+    readout = "".join(
+        CycleLayout(cycle_dir_for(stores.base_dir, at)).readout.read_text("utf-8") for at in line
+    )
+    walk = {"lift_prior", "hold_up"}
+    served = [r.model_dump(mode="json", include=walk) for r in embedded.rounds]
+    hosted = json.loads(json.dumps(mcp.value))["rounds"]
+    if served != [{k: r[k] for k in walk} for r in hosted]:
+        raise SystemExit("offline run: the MCP and embedded doors read two noise walks")
+    held = [r for r in served if r["hold_up"]]
+    said = {
+        "lift_prior": any(r["lift_prior"] for r in served),
+        "hold_up": bool(held),
+        "μ0": "noise walk: μ0 " in readout,
+        "τ": ", τ " in readout,
+        "held up": "held up: " in readout,
+    }
+    if missing := [name for name, read in said.items() if not read]:
+        raise SystemExit(f"offline run: the separating round's doors read no {missing}")
+    print(f"noise walk read at every door: {len(held)} promotions held up")
 
 
 async def run_gated(optimizer: str, workspace: Path, *, rows: int) -> None:
