@@ -1878,7 +1878,7 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
             parent_arm = closed.arms[parent]
             assert isinstance(parent_arm, Cut | Measured), f"{case}: the parent never concluded"
             held = session.store.ruler.rows(session_ruler_scope(session), ruler_clock(session))
-            observed = {cell for walked, cell, _ in held if walked == parent_arm.sp_hash}
+            observed = {cell for walked, cell, _ in held if walked == parent_arm.config_key}
             assert {cell.key for cell in closed.rows(parent)} <= observed, (
                 f"{case}: a parent's observation never reached the δ fit its election read"
             )

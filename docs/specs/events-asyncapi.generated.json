@@ -1896,6 +1896,10 @@
         "additionalProperties": false,
         "description": "Stopped short of its panel against it.",
         "properties": {
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
           "expected_samples": {
             "title": "Expected Samples",
             "type": "integer"
@@ -1988,6 +1992,7 @@
           "position",
           "individual",
           "sp_hash",
+          "config_key",
           "resolved_params",
           "expected_samples",
           "reason"
@@ -4542,6 +4547,10 @@
       "Measured": {
         "additionalProperties": false,
         "properties": {
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
           "expected_samples": {
             "title": "Expected Samples",
             "type": "integer"
@@ -4614,6 +4623,7 @@
           "position",
           "individual",
           "sp_hash",
+          "config_key",
           "resolved_params",
           "expected_samples",
           "locked_in"
@@ -4729,6 +4739,10 @@
             "default": null,
             "title": "Block"
           },
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
           "expected_samples": {
             "title": "Expected Samples",
             "type": "integer"
@@ -4803,6 +4817,7 @@
           "position",
           "individual",
           "sp_hash",
+          "config_key",
           "resolved_params",
           "expected_samples"
         ],

@@ -211,7 +211,7 @@ async def measure_as_parent(
     arm = measuring(
         Proposed(role=role, position=walked_position(cycle.rounds, key), individual=individual),
         sp,
-        session.pipeline_schema,
+        session,
         expected=len(asked),
         sample_order=[s.id for s in cells],
     )

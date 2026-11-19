@@ -58,6 +58,7 @@ from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import cell_optimizer
 from promptpotter.application.runner.loop import walk_round_zero
 from promptpotter.application.runner.mint import open_launch
+from promptpotter.application.scoring.arm_states import filed_ids
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, mean_lift
 from promptpotter.config.paths import default_projects_root, install_datasets_root, user_data_root
@@ -360,6 +361,7 @@ def arm_state(
         "individual": prompted(instruction=name),
         "validation_failures": failures,
         "sp_hash": name,
+        "config_key": name,
         "resolved_params": {},
         "expected_samples": total,
     } | overrides
@@ -686,7 +688,7 @@ def seat(
             position=ArmPosition(round=0, idx=0, total=1),
             individual=individual,
             resolved_params=sp.config_params.dump(),
-            sp_hash=sp.sp_hash(session.pipeline_schema),
+            **filed_ids(sp, session),
         )
         seated = Cycle.start(
             ReadArm(ArmKey(individual.id), c0, read(session)),

@@ -172,7 +172,7 @@ def regraded_ruler(
     else each row off its address's latest grade-A archive answer."""
     if scorer.id == stamp.scope.scorer:
         return restamped(stores.ruler, stamp, n_min=n_min, enable_2pl=enable_2pl).ruler
-    entries = {entry.prompt_fields_id: entry for entry in stores.archive.list_all()}
+    entries = {entry.config_key: entry for entry in stores.archive.list_all()}
     asked: dict[str, set[str]] = {}
     for address, key, _ in stores.ruler.rows(stamp.scope, stamp.reach):
         if address not in stamp.excluded:
@@ -194,7 +194,7 @@ def regraded_ruler(
 def parent_line(rounds: Sequence[RoundResult]) -> set[str]:
     """The origin and every pick since, by archive address: the individuals each round judges against."""
     return {
-        head.sp_hash
+        head.config_key
         for rr in rounds
         if rr.election is not None
         and rr.election.selected is not None
@@ -260,9 +260,9 @@ class DifficultyView:
         session = self.session
         assert session.campaign_id, "an election runs inside a campaign"
         sheets = [
-            (arm.sp_hash, rr.raced(key))
+            (arm.config_key, rr.raced(key))
             for key, arm in rr.arms.items()
-            if isinstance(arm, Concluded) and arm.sp_hash
+            if isinstance(arm, Concluded)
         ]
         session.store.ruler.fold(
             session_ruler_scope(session),

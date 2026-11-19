@@ -216,6 +216,7 @@ from promptpotter.application.runner.inner.spawn import (
 )
 from promptpotter.application.runner.inner.tasks import InnerTasks, inner_instrument_config
 from promptpotter.application.runner.round import author_arm, run_init
+from promptpotter.application.scoring.arm_states import filed_ids
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
@@ -4100,13 +4101,13 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
 
     # Round 0 measured each parent a reflection re-reads; the bench resolves it by id.
     def measured(*held: OptSearchPoint) -> list[RoundResult]:
-        points, schema = reflected_on.cycle.points, reflected_on.cycle.session.pipeline_schema
+        points = reflected_on.cycle.points
         arms = [
             arm_state(
                 "parent",
                 individual=ind,
                 resolved_params=points.job(ind).config_params.dump(),
-                sp_hash=points.job(ind).sp_hash(schema),
+                **filed_ids(points.job(ind), reflected_on.cycle.session),
             )
             for ind in (origin, *held)
         ]

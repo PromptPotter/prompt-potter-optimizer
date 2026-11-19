@@ -1512,9 +1512,9 @@ export interface ArmReading {
    * re-read on its cells as a reference — never one of the round's proposals,
    * whatever round `arm` names. */
   role: 'origin' | 'panel' | 'parent';
-  /** The archive address of this arm's measurements (`prompt_fields_id`). Not a
-   * key: a re-proposed configuration shares it across rounds. Empty before it
-   * is measured. */
+  /** This arm's id, what it sends (the archive's `prompt_fields_id`; its address is
+   * `config_key`). Not a key: a re-proposed configuration shares it across
+   * rounds. Empty before it is measured. */
   sp_hash: string;
   changes_description: string;
   /** Where the arm's walk stands: proposed, being measured, or ended — cut short
@@ -5732,7 +5732,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "79f544bc7fa1e976";
+export const SERVED_CONTRACT = "239b635101ff7db2";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

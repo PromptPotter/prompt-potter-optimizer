@@ -122,6 +122,7 @@ from promptpotter.application.runner.mint import start_launch
 from promptpotter.application.runner.round import run_init
 from promptpotter.application.runner.termination import RUN_STOPS, end_run_on
 from promptpotter.application.scoring import query_loop, search_point_scorer
+from promptpotter.application.scoring.arm_states import filed_ids
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
@@ -2809,7 +2810,7 @@ def repair(built_stores: Stores) -> _Repair:
             position=ArmPosition(round=1, idx=0, total=1),
             individual=child,
             resolved_params=sp.config_params.dump(),
-            sp_hash=sp.sp_hash(cycle.session.pipeline_schema),
+            **filed_ids(sp, cycle.session),
         )
         line = [
             cycle.origin_round.model_copy(update={"optimizer_state": cycle.close_state(0)}),

@@ -234,7 +234,7 @@ def seat_campaign_origin(
     unmeasured = measuring(
         proposed,
         sp,
-        session.pipeline_schema,
+        session,
         expected=len(scoring_set),
         sample_order=[s.id for s in scoring_set],
     )
