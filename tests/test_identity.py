@@ -24,7 +24,7 @@ from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from statistics import NormalDist
-from typing import Any, ClassVar, NamedTuple, cast
+from typing import Annotated, Any, ClassVar, NamedTuple, cast
 from unittest.mock import Mock
 
 import openpyxl
@@ -272,7 +272,14 @@ from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, Optim
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells, InnerTaskSpec
-from promptpotter.domain.layer_fold import Layer, fold_layers, patch_between, rules_of, wire_patch
+from promptpotter.domain.layer_fold import (
+    Lay,
+    Layer,
+    fold_layers,
+    patch_between,
+    rules_of,
+    wire_patch,
+)
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.paired_reading import ArmKey
@@ -2752,6 +2759,28 @@ def test_a_declaration_lays_back_what_it_dropped_from_the_defaults() -> None:
         patch = patch_between(rule, under, over)
         laid = fold_layers(rule, [Layer("d", under), Layer("c", wire_patch(rule, patch))])
         assert laid.document == over, f"{patch} lays another config than the one it declared"
+
+
+class _Listed(BaseModel):
+    kept: Annotated[list[str] | None, Lay.SUBSET] = None
+    gained: Annotated[list[str], Lay.UNION] = Field(default_factory=list)
+
+
+def test_a_declaration_refuses_a_subset_list_that_widens() -> None:
+    # A subset keeps only what the fold already held: a new name would be dropped in silence.
+    rule = rules_of(_Listed)
+    assert patch_between(rule, {"kept": ["a", "b"]}, {"kept": ["b"]}) == {"kept": ["b"]}
+    with pytest.raises(PayloadInvalidError, match="kept"):
+        patch_between(rule, {"kept": ["a"]}, {"kept": ["a", "c"]})
+
+
+def test_a_declaration_refuses_a_union_list_that_is_not_the_defaults_plus_extras() -> None:
+    # A union only gains: a dropped or reordered default would come back under the patch.
+    rule = rules_of(_Listed)
+    assert patch_between(rule, {"gained": ["a"]}, {"gained": ["a", "c"]}) == {"gained": ["a", "c"]}
+    for over in (["c"], ["c", "a"]):
+        with pytest.raises(PayloadInvalidError, match="gained"):
+            patch_between(rule, {"gained": ["a"]}, {"gained": over})
 
 
 def _arming(stores: Stores, decl: _Declared) -> tuple[Session, ConfigLayers, list[Sample]]:

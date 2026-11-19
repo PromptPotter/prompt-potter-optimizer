@@ -14,6 +14,8 @@ from typing import Annotated, Any, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
+from promptpotter.shared.errors import PayloadInvalidError
+
 
 class Lay(Enum):
     """How a layer's value at a key lays over the fold's, declared as the key's field metadata."""
@@ -124,9 +126,9 @@ def _laid[N: str](
         current = out.get(key)
         lay = rule(path).lay
         if lay is Lay.SUBSET and isinstance(current, list):
-            out[key] = [v for v in value if v in current] if isinstance(value, list) else current
+            out[key] = _list_laid(lay, current, value) if isinstance(value, list) else current
         elif lay is Lay.UNION and isinstance(current, list) and isinstance(value, list):
-            out[key] = [*current, *(v for v in value if v not in current)]
+            out[key] = _list_laid(lay, current, value)
         elif lay in (Lay.KEYS, Lay.CALL) and isinstance(value, Mapping):
             base: Mapping[str, object] = current if isinstance(current, Mapping) else {}
             if base is not current:
@@ -160,7 +162,8 @@ def patch_between(
     rule: Rule, under: Mapping[str, object], over: Mapping[str, object], *at: str
 ) -> dict[str, object]:
     """The wire patch (`wire_patch`'s form: ``null`` clears) *rule* lays over *under* to make
-    *over*: what *over* states beyond *under*, and nothing *under* already holds."""
+    *over*: what *over* states beyond *under*, and nothing *under* already holds. A list no
+    patch lays (a subset that widens, a union that is not *under*'s plus extras) is refused."""
     out: dict[str, object] = {}
     rescoped = {
         k
@@ -184,8 +187,25 @@ def patch_between(
             if sub or key not in under or key in rescoped:
                 out[key] = sub
         elif key not in under or held != value:
+            if (
+                lay in (Lay.SUBSET, Lay.UNION)
+                and isinstance(held, list)
+                and isinstance(value, list)
+                and _list_laid(lay, held, value) != value
+            ):
+                raise PayloadInvalidError(
+                    f"`{'.'.join(path)}` lays as a {lay.value} over {held!r}, so no patch "
+                    f"makes it {value!r}",
+                    code="fold_unexpressible",
+                )
             out[key] = value
     return out
+
+
+def _list_laid(lay: Lay, held: list[object], value: list[object]) -> list[object]:
+    if lay is Lay.SUBSET:
+        return [v for v in value if v in held]
+    return [*held, *(v for v in value if v not in held)]
 
 
 def wire_patch(rule: Rule, sent: Mapping[str, object], *at: str) -> dict[str, object]:
