@@ -13,7 +13,7 @@ import {
   useChartReading,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtMetric, PLACEHOLDER } from "@/lib/format";
+import { fmtBand, fmtMetric, fmtPoint, PLACEHOLDER } from "@/lib/format";
 
 import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
 import { cssPx, getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
@@ -237,8 +237,8 @@ function MergedRow({
   ink: string;
   className: string;
 }) {
-  const value = row.estimate?.point ?? PLACEHOLDER;
-  const interval = row.estimate?.band ?? PLACEHOLDER;
+  const value = fmtPoint(row.estimate) ?? PLACEHOLDER;
+  const interval = fmtBand(row.estimate) ?? PLACEHOLDER;
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
     <IntervalRow

@@ -384,25 +384,22 @@ def _files_hash(roots: Iterable[Path]) -> str:
 
 
 def behaviour_key(name: str, members: Iterable[NodeMember], manifests: Sequence[Path]) -> str:
-    """L4 identity (architecture §0.5): the code of the packages declaring its members and the
-    files of the manifests it resolves from, its fingerprint on the offline world (`None` for a
-    plugin's manifest) and the world's version. A built-in missing from `BEHAVIOUR_KEYS_FILE`
-    raises: a stale key is a refused commit, never a second identity."""
+    """L4 identity (architecture §0.5): a built-in's fingerprint on the offline world and the
+    world's version, so a rename that moves no decision re-keys nothing; a manifest outside the
+    package has no fingerprint, so the code of the packages declaring its members stands in. A
+    built-in missing from `BEHAVIOUR_KEYS_FILE` raises: a stale key is a refused commit, never a
+    second identity."""
     keys = BehaviourKeys.held()
-    builtin = all(directory.is_relative_to(PACKAGE_ROOT) for directory in manifests)
-    if builtin and name not in keys.fingerprints:
+    if not all(directory.is_relative_to(PACKAGE_ROOT) for directory in manifests):
+        return stable_hash(
+            {"code": _files_hash({_package_dir(member) for member in members}), "world": keys.world}
+        )
+    if name not in keys.fingerprints:
         raise LookupError(
             f"{BEHAVIOUR_KEYS_FILE.name} holds no {name!r}: give it any fingerprint there, and "
             "`scripts/offline_run.py` regenerates its own"
         )
-    return stable_hash(
-        {
-            "code": _files_hash({_package_dir(member) for member in members}),
-            "prompts": _files_hash(manifests),
-            "fingerprint": keys.fingerprints[name] if builtin else None,
-            "world": keys.world,
-        }
-    )
+    return stable_hash({"fingerprint": keys.fingerprints[name], "world": keys.world})
 
 
 @dataclass(frozen=True)

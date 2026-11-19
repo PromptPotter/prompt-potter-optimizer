@@ -16,6 +16,7 @@ import base64
 import contextlib
 import dataclasses
 import functools
+import inspect
 import json
 import logging
 import os
@@ -315,7 +316,7 @@ from promptpotter.infrastructure.store import io as store_io
 from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
-from promptpotter.infrastructure.store.data_root import Fate, classify
+from promptpotter.infrastructure.store.data_root import KINDS, Fate, classify
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
@@ -2942,6 +2943,27 @@ def test_older_code_refuses_to_land_a_root_newer_code_landed_and_drops_nothing(
     with pytest.raises(ConflictError, match=r"v999\.0\.0 landed it"):
         apply_landing(projects_root, plan_landing(projects_root, reset=False))
     assert fold.exists(), "older code dropped a file the newer code landed"
+
+
+def test_an_edit_to_code_a_survivors_load_runs_lands_the_root_again() -> None:
+    # A survivor's validator may call a helper beside its model: an edit there changes what loads,
+    # so a root landed before it is walked again, never read as landed.
+    survivors: set[str] = set()
+    for kind in KINDS:
+        if kind.fate is Fate.SURVIVOR and isinstance(kind.shape, TypeAdapter):
+            landing_module._ran(kind.shape.core_schema, survivors)
+    helper = min(survivors & landing_module.loading_modules())
+    landed = landing_module.landing_key.__wrapped__()
+    source = inspect.getsource
+    with pytest.MonkeyPatch.context() as edited:
+        edited.setattr(
+            inspect,
+            "getsource",
+            lambda obj: source(obj) + ("\nEDITED = 1\n" if obj is sys.modules[helper] else ""),
+        )
+        assert landing_module.landing_key.__wrapped__() != landed, (
+            f"an edit to {helper}, which a survivor's load runs, left the landing key"
+        )
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")

@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Chart } from "react-chartjs-2";
 import { ensureChartRegistered, lineLook, lineMotion } from "@/lib/chart";
+import { fmtPoint } from "@/lib/format";
 import { cssPx, getCss, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { liftOf } from "@/lib/derivations";
@@ -396,7 +397,7 @@ export const FitnessChart = memo(function FitnessChart({
 
   const crown = useMemo(() => {
     const lift = standingIdx == null ? null : liftOf(views[standingIdx]?.reading?.vs_reference ?? null);
-    return lift == null || lift.side === "spans" ? "" : ` ${lift.estimate.point}`;
+    return lift == null || lift.side === "spans" ? "" : ` ${fmtPoint(lift.estimate)}`;
 
   }, [views, standingIdx]);
 

@@ -284,19 +284,15 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### bkeys-2 (what bkeys left at its landing)
 
-- **A rename re-keys every banked L4 cell's treatment**: the cell estimator is the L4 leg's behaviour
-  (`nodes.py::BehaviourKeys.cell_estimator`), but `nodes.py::behaviour_key` still hashes each
-  optimizer package's source into `InnerTaskSpec.optimizer_treatment`, so ren's renames moved all five
-  treatment digests, every request byte-identical, and l4-outer-6's `Frontier` → `Parent` re-keyed
-  every banked cell for potter, capo-pobb and gepa. Root: a treatment keyed by its fingerprint alone.
-  **Rides with:** bkeys-2. **Re-test:** a rename in `optimizers/potter/` leaves `treatment:potter`
-  (`offline_run.py --digests`) unchanged.
-- **The trace hashes a display field** (rec's landing, reported): `MemberAddress.pass_role` has no
-  reader but rides the round-file readings the trace hashes, so deleting it moves the behaviour keys.
-  Root: the behaviour key reads the decisions, not the display fields nor their spelling: ren's renames
-  re-keyed `behaviour_keys.json` by field names alone (decisions identical once normalized), and its
-  landing wiped the banked origins with them. **Rides with:** bkeys-2. **Re-test:** deleting
-  `pass_role`, or renaming a trace field, leaves `behaviour_keys.json` unchanged.
+- **The trace hashes a field's spelling** (rec's landing, reported; bkeys-3 took `Estimate`'s words;
+  `MemberAddress.pass_role` is no display field: `paired.py::read_pair`'s address equality reads it,
+  and capo-pobb's `same_individual` moved without it): `offline_run.py::behaviour_keys` hashes the
+  trace with its keys, and the trace keeps whole
+  sub-documents (`ELECTION_KEYS`' `fit`, `LEDGER_KEYS`' `election.fit`, `run.bench`, `round_index`),
+  so ren's renames re-keyed `behaviour_keys.json` by field names alone (decisions identical once
+  normalized). Root: the trace names each decision it reads, so a model rename moves only its pick.
+  **Rides with:** bkeys-2. **Re-test:** renaming a field the trace reads leaves `behaviour_keys.json`
+  unchanged.
 
 - **An L4 cell's key holds its config, not what its session loads** (✓): `InnerTaskSpec`
   (`runner/inner/tasks.py::InnerTasks`: node config, laid campaign identity, treatment, estimator)
@@ -677,11 +673,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-- **A reader's helper body is not keyed** (land-order's report): `landing.py::landing_key` hashes
-  each reader's and migration's own source, so a helper a reader calls (the record validators behind
-  `ledger_line`) or a pydantic validator on a row's model can change what loads without moving the
-  key. Root: a shape's loading behaviour has no digest beyond its JSON schema. **Rides with:** rel.
-  **Re-test:** edit a validator a survivor's model runs; `landing_key()` moves.
 
 ### wave-5 · store (what store-2f, store-2g and store-3b left at their landing)
 
@@ -827,15 +818,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 These land in the re-key windows, `W1` (keys, address, cell key and archive row, one wipe) and `W2`
 (ledger record shapes), each row naming its window and chain.
 
-- **Served words are written to the ledger, and two digests read them: a banked proposal's and the
-  behaviour keys'**: `domain/paired_reading.py::Estimate` dumps three `@computed_field`s (`band`,
-  `point`, `text`; its module allows one) and reads back on `extra="ignore"`: 14,201 desk
-  `sample_scored` records carry them, and six other kinds. `results.py::round_document_digest` hashes
-  them into `consumed` (`round.py::operator_arms`, `resume.py::_stale_generation`) and
-  `offline_run.py::LEDGER_KEYS` keeps `election.fit` whole, so a `lift_text` edit stales every banked
-  proposal and re-keys `behaviour_keys.json`. New beside "The trace hashes a display field": the stored
-  form, and `consumed`, which no trace filter reaches. Root: a stored model holds facts, a served one
-  words them. **Window:** W1 · bkeys-3. **Re-test:** an `Estimate`'s `model_dump(mode="json")` holds no `band`, `point` or `text`.
 - **An inner campaign's id is 24 bits of its content**: `runner/inner/spawn.py::inner_campaign_id`
   cuts `stable_hash([spec.key(), resolved_overrides(overrides)], length=6)`, and `_open_seat` lets the
   campaign that exists decide, so two `(cell, arm edit)` pairs on one id continue one campaign

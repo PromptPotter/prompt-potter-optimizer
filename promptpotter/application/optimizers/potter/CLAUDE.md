@@ -40,7 +40,7 @@
 
 ## Editing a renderer's PROSE is a measurement change
 
-`nodes.py::behaviour_key` hashes this package's code and its fingerprint on the offline world, so rewording a directive re-keys potter and voids banked origins; the offline run regenerates the fingerprint, and the gate is red until it is committed. A prompt-shaping constant lives in `bundle.py`. A validator either REJECTS (`validators.py`: a `ValidationFailure` the layer heals) or SCORES (`behavior_checks.py`, into `review.md`), never both.
+`nodes.py::behaviour_key` hashes potter's fingerprint on the offline world, so a rewording that moves a request or a decision re-keys potter and voids banked origins, and a rename re-keys nothing; the offline run regenerates the fingerprint, and the gate is red until it is committed. A prompt-shaping constant lives in `bundle.py`. A validator either REJECTS (`validators.py`: a `ValidationFailure` the layer heals) or SCORES (`behavior_checks.py`, into `review.md`), never both.
 
 ## Add no 4th layer — L4 is a recursion
 
