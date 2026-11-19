@@ -71,11 +71,6 @@ describe("CyclePath", () => {
       expect(ownerOfAddress("justlogic__ab12cd")).toBe("justlogic__ab12cd");
     });
 
-    it("owns an origin address by the origin id — it names no campaign", () => {
-      // `cycle_<hash>` and `{dataset}__{rand6}` owners cannot collide.
-      expect(ownerOfAddress("cycle_47d99f21ef84")).toBe("cycle_47d99f21ef84");
-    });
-
     it("answers null on a malformed address rather than a wrong owner", () => {
       expect(ownerOfAddress("")).toBeNull();
       expect(ownerOfAddress("::cy")).toBeNull();

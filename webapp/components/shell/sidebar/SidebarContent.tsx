@@ -1,100 +1,51 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Empty, FailureLine, Loading, SignInPrompt } from "@/components/ui";
 import { useAuth } from "@/lib/state/auth";
-import { tagValue } from "@/lib/derivations";
 import { failureOf, shownData } from "@/lib/hooks/useRead";
-import { useActivePointer, useRegistry } from "@/lib/hooks/useRegistry";
+import { useRegistry } from "@/lib/hooks/useRegistry";
+import { ForestRows } from "./ForestRows";
 import {
+  clearListedFilter,
+  datasetOf,
+  isFiltered,
   listedUnder,
-  setListedLifecycle,
-  useListedLifecycle,
-} from "@/lib/state/listed-lifecycle";
-import { useShowCandidates } from "@/lib/prefs/tree";
-import { useNodeToggle } from "@/lib/state/view-memory";
-import { useWorkspace } from "@/lib/state/workspace";
-import { ForestRows, type TreeCtx } from "./ForestRows";
+  useListedFilter,
+} from "./listed-filter";
 import { SidebarFilterPopover } from "./SidebarFilterPopover";
 
 export function SidebarContent() {
   const { status } = useAuth();
-  const { viewed, pick } = useWorkspace();
-  const viewedPath = viewed?.path ?? null;
   const { read, entries } = useRegistry();
-  const listedLifecycle = useListedLifecycle();
+  const filter = useListedFilter();
   const loaded = shownData(read) !== null;
   const failure = failureOf(read);
-  const { active } = useActivePointer();
-  const nodes = useNodeToggle();
-  const [showCandidates] = useShowCandidates();
-  const [datasetFilter, setDatasetFilter] = useState<string | null>(null);
 
   const listed = useMemo(
-    () => entries.filter((c) => listedUnder(listedLifecycle, c)),
-    [entries, listedLifecycle],
+    () => entries.filter((c) => listedUnder(filter.lifecycle, c)),
+    [entries, filter.lifecycle],
   );
   const shown = useMemo(
-    () =>
-      datasetFilter == null
-        ? listed
-        : listed.filter((c) => (tagValue(c, "dataset") || "(unknown)") === datasetFilter),
-    [listed, datasetFilter],
+    () => (filter.dataset == null ? listed : listed.filter((c) => datasetOf(c) === filter.dataset)),
+    [listed, filter.dataset],
   );
-
-  const datasetNames = useMemo(() => {
-    const s = new Set<string>();
-    for (const c of listed) s.add(tagValue(c, "dataset") || "(unknown)");
-    return [...s].sort();
-  }, [listed]);
-
-  // The ACTIVE cycle, never the viewed one: a manual selection must not pop a cycle open.
-  const focusKey = active?.campaign_id ?? null;
-
-  // Latched per (campaign, active cycle): unlatched, a remount re-opens a row just collapsed.
-  useEffect(() => {
-    if (!focusKey || !active) return;
-    if (nodes.autoExpandedFor(active.campaign_id) === active.cycle_id) return;
-    nodes.markAutoExpanded(active.campaign_id, active.cycle_id, focusKey);
-  }, [focusKey, active, nodes]);
-
-  const ctx: TreeCtx = useMemo(
-    () => ({
-      isNodeOpen: nodes.isOpen,
-      toggleNode: nodes.toggle,
-      viewedPath,
-      picked: pick !== null,
-      showCandidates,
-    }),
-    [nodes, viewedPath, pick, showCandidates],
-  );
-
-  const filtered = listedLifecycle === "archived" || datasetFilter != null;
-  const clearFilters = () => {
-    setListedLifecycle("active");
-    setDatasetFilter(null);
-  };
+  const datasetNames = useMemo(() => [...new Set(listed.map(datasetOf))].sort(), [listed]);
 
   return (
     <div className="unit-library">
       <div className="unit-library-head">
         <span>Campaigns</span>
-        <SidebarFilterPopover
-          listedLifecycle={listedLifecycle}
-          setListedLifecycle={setListedLifecycle}
-          datasetNames={datasetNames}
-          datasetFilter={datasetFilter}
-          setDatasetFilter={setDatasetFilter}
-        />
+        <SidebarFilterPopover datasetNames={datasetNames} />
       </div>
-      {filtered && (
+      {isFiltered(filter) && (
         <div className="unit-library-active-filter">
           <span className="unit-library-active-filter-text">
-            {listedLifecycle === "archived" && <span>Archived</span>}
-            {datasetFilter != null && <span>{datasetFilter}</span>}
+            {filter.lifecycle === "archived" && <span>Archived</span>}
+            {filter.dataset != null && <span>{filter.dataset}</span>}
           </span>
           <button
             type="button"
             className="unit-library-active-filter-clear"
-            onClick={clearFilters}
+            onClick={clearListedFilter}
             title="Clear filters"
             aria-label="Clear filters"
           >
@@ -119,13 +70,13 @@ export function SidebarContent() {
           <Loading className="unit-library-note">loading…</Loading>
         ))
       )}
-      {loaded && shown.length === 0 && listedLifecycle === "archived" && (
+      {loaded && shown.length === 0 && filter.lifecycle === "archived" && (
         <Empty className="unit-library-note" title="No archived campaigns">
           Archive a campaign from its <code>⋯</code> menu to declutter the active list. Archives
           are reversible from this tab.
         </Empty>
       )}
-      {loaded && shown.length === 0 && listedLifecycle !== "archived" && (
+      {loaded && shown.length === 0 && filter.lifecycle !== "archived" && (
         <Empty className="unit-library-note" title="No campaigns yet">
           Hit <strong>+ New campaign</strong> above. Bring the data your pipeline gets wrong — the
           Potter reads it, sets up the first run, and starts improving.
@@ -133,7 +84,7 @@ export function SidebarContent() {
       )}
       {loaded && shown.length > 0 && (
         <ul className="unit-library-list">
-          <ForestRows entries={shown} ctx={ctx} />
+          <ForestRows entries={shown} />
         </ul>
       )}
     </div>

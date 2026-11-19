@@ -51,8 +51,7 @@ export function pathOfAddress(address: string): CyclePath {
   return path;
 }
 
-// The top-level id an address files under in view memory: its first campaign, or a bare id
-// (a top-level campaign's address, or an origin's cycle id, which groups campaigns).
+// The top-level campaign an address files under in view memory, at any depth.
 export function ownerOfAddress(address: string): string | null {
   const top = cycleAddressOf(address).split(HOP_SEP)[0] ?? "";
   const cut = top.indexOf(UNIT_SEP);

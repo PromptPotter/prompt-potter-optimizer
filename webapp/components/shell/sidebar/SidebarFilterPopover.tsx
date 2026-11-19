@@ -1,15 +1,7 @@
 import { useMemo, useState } from "react";
 import { Icon, Popover, SegmentedControl, type Segment } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import type { ListedLifecycle } from "@/lib/state/listed-lifecycle";
-
-interface Props {
-  listedLifecycle: ListedLifecycle;
-  setListedLifecycle: (f: ListedLifecycle) => void;
-  datasetNames: string[];
-  datasetFilter: string | null;
-  setDatasetFilter: (d: string | null) => void;
-}
+import { isFiltered, type ListedLifecycle, setListedFilter, useListedFilter } from "./listed-filter";
 
 const FILTER_GLYPH = (
   <Icon size={15} strokeWidth={1.7}>
@@ -30,14 +22,8 @@ const LIFECYCLE_SEGMENTS: readonly Segment<ListedLifecycle>[] = [
   },
 ];
 
-export function SidebarFilterPopover({
-  listedLifecycle,
-  setListedLifecycle,
-  datasetNames,
-  datasetFilter,
-  setDatasetFilter,
-}: Props) {
-  const active = listedLifecycle === "archived" || datasetFilter != null;
+export function SidebarFilterPopover({ datasetNames }: { datasetNames: string[] }) {
+  const active = isFiltered(useListedFilter());
 
   return (
     <Popover
@@ -56,26 +42,13 @@ export function SidebarFilterPopover({
         </button>
       )}
     >
-      {() => (
-        <FilterPanel
-          listedLifecycle={listedLifecycle}
-          setListedLifecycle={setListedLifecycle}
-          datasetNames={datasetNames}
-          datasetFilter={datasetFilter}
-          setDatasetFilter={setDatasetFilter}
-        />
-      )}
+      {() => <FilterPanel datasetNames={datasetNames} />}
     </Popover>
   );
 }
 
-function FilterPanel({
-  listedLifecycle,
-  setListedLifecycle,
-  datasetNames,
-  datasetFilter,
-  setDatasetFilter,
-}: Props) {
+function FilterPanel({ datasetNames }: { datasetNames: string[] }) {
+  const { lifecycle, dataset } = useListedFilter();
   const [q, setQ] = useState("");
   const shown = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -89,8 +62,8 @@ function FilterPanel({
       <SegmentedControl
         className="sidebar-filter-lifecycle"
         options={LIFECYCLE_SEGMENTS}
-        value={listedLifecycle}
-        onChange={setListedLifecycle}
+        value={lifecycle}
+        onChange={(next) => setListedFilter({ lifecycle: next })}
         ariaLabel="Campaign lifecycle"
       />
 
@@ -111,8 +84,8 @@ function FilterPanel({
           >
             <button
               type="button"
-              className={cx("unit-library-filter-chip", datasetFilter == null && "active")}
-              onClick={() => setDatasetFilter(null)}
+              className={cx("unit-library-filter-chip", dataset == null && "active")}
+              onClick={() => setListedFilter({ dataset: null })}
             >
               All datasets
             </button>
@@ -120,8 +93,8 @@ function FilterPanel({
               <button
                 key={d}
                 type="button"
-                className={cx("unit-library-filter-chip", datasetFilter === d && "active")}
-                onClick={() => setDatasetFilter(datasetFilter === d ? null : d)}
+                className={cx("unit-library-filter-chip", dataset === d && "active")}
+                onClick={() => setListedFilter({ dataset: dataset === d ? null : d })}
                 title={d}
               >
                 {d}

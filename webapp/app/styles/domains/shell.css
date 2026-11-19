@@ -110,6 +110,8 @@
 .unit-library-kind{display:inline-block;margin-left:6px;padding:0 var(--space-4);border-radius:3px;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;vertical-align:middle}
 /* `:not(.selected)` on the hover is load-bearing, or hover grey paints over the accent and the row flashes deselected. */
 .unit-library-family{display:flex;align-items:center;gap:2px;padding:0 var(--space-4);border-radius:6px}
+/* A touch hit area is 44px (`responsive.css`): a shorter row lets the next row's ▶ take this one's tap. */
+@media (pointer:coarse){.unit-library-family{min-height:var(--touch-target-min)}}
 .unit-library-family > .unit-library-item{flex:1;min-width:0;width:auto}
 .unit-library-family:not(.selected):hover{background:var(--color-background-hover)}
 .unit-library-family > .unit-library-item:hover{background:transparent;color:var(--color-text-primary)}

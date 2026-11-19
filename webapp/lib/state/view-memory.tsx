@@ -4,7 +4,7 @@ import { STORAGE_KEYS } from "@/lib/storage-keys";
 import { ownerOfAddress } from "@/lib/ids";
 
 // Bumping this DROPS every stored record rather than migrating it.
-const RECORD_VERSION = 5;
+const RECORD_VERSION = 6;
 
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
@@ -14,10 +14,8 @@ const MAX_CAMPAIGNS = 24;
 export interface CampaignView {
   v: number;
   at: number;
-  // Sidebar rows toggled AWAY from the default their call site passes to `isOpen`.
-  toggled: string[];
-  // Latches the one-shot reveal, or a sidebar remount re-opens a row the operator collapsed.
-  autoExpandedFor: string | null;
+  // Sidebar rows the operator opened: every row starts closed.
+  opened: string[];
   viewedPath: string | null;
   // `address.ts::formatPick`'s spelling.
   viewedPick: string | null;
@@ -36,8 +34,7 @@ export function emptyView(): CampaignView {
   return {
     v: RECORD_VERSION,
     at: 0,
-    toggled: [],
-    autoExpandedFor: null,
+    opened: [],
     viewedPath: null,
     viewedPick: null,
     treeFreed: false,
@@ -66,14 +63,14 @@ export const viewMemoryCodec = {
 
 interface ViewMemory {
   viewFor: (owner: string | null) => CampaignView;
-  toggledFor: (owner: string | null) => ReadonlySet<string>;
+  openedFor: (owner: string | null) => ReadonlySet<string>;
   // Called from the handler that changed the axis, never during render.
   recordView: (owner: string | null, patch: Partial<CampaignView>) => void;
 }
 
 const ViewMemoryContext = createContext<ViewMemory | null>(null);
 
-const EMPTY_TOGGLED: ReadonlySet<string> = new Set();
+const EMPTY_OPENED: ReadonlySet<string> = new Set();
 
 export function ViewMemoryProvider({ children }: { children: ReactNode }) {
   const [store, setStore] = useLocalStorage<Store>(STORAGE_KEYS.viewMemory, EMPTY_STORE, viewMemoryCodec);
@@ -86,15 +83,15 @@ export function ViewMemoryProvider({ children }: { children: ReactNode }) {
     [store],
   );
 
-  const toggledByOwner = useMemo(() => {
+  const openedByOwner = useMemo(() => {
     const m = new Map<string, ReadonlySet<string>>();
-    for (const [key, view] of Object.entries(store)) m.set(key, new Set(view.toggled));
+    for (const [key, view] of Object.entries(store)) m.set(key, new Set(view.opened));
     return m;
   }, [store]);
-  const toggledFor = useCallback(
+  const openedFor = useCallback(
     (owner: string | null): ReadonlySet<string> =>
-      (owner ? toggledByOwner.get(owner) : undefined) ?? EMPTY_TOGGLED,
-    [toggledByOwner],
+      (owner ? openedByOwner.get(owner) : undefined) ?? EMPTY_OPENED,
+    [openedByOwner],
   );
 
   const recordView = useCallback(
@@ -114,8 +111,8 @@ export function ViewMemoryProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<ViewMemory>(
-    () => ({ viewFor, toggledFor, recordView }),
-    [viewFor, toggledFor, recordView],
+    () => ({ viewFor, openedFor, recordView }),
+    [viewFor, openedFor, recordView],
   );
   return <ViewMemoryContext.Provider value={value}>{children}</ViewMemoryContext.Provider>;
 }
@@ -126,51 +123,30 @@ export function useViewMemory(): ViewMemory {
   return ctx;
 }
 
-// An ORIGIN spans campaigns, so it owns a record under its own `cycle_<hash>` id (`ownerOfAddress`).
 interface NodeToggle {
-  isOpen: (key: string, openByDefault: boolean) => boolean;
+  isOpen: (key: string) => boolean;
   toggle: (key: string) => void;
-  autoExpandedFor: (campaignId: string | null) => string | null;
-  markAutoExpanded: (campaignId: string, cycleId: string, key: string) => void;
 }
 
 export function useNodeToggle(): NodeToggle {
-  const { viewFor, toggledFor, recordView } = useViewMemory();
+  const { openedFor, recordView } = useViewMemory();
 
   const isOpen = useCallback(
-    (key: string, openByDefault: boolean) =>
-      toggledFor(ownerOfAddress(key)).has(key) ? !openByDefault : openByDefault,
-    [toggledFor],
+    (key: string) => openedFor(ownerOfAddress(key)).has(key),
+    [openedFor],
   );
 
   const toggle = useCallback(
     (key: string) => {
       const owner = ownerOfAddress(key);
       if (!owner) return;
-      const toggled = new Set(toggledFor(owner));
-      if (toggled.has(key)) toggled.delete(key);
-      else toggled.add(key);
-      recordView(owner, { toggled: [...toggled] });
+      const opened = new Set(openedFor(owner));
+      if (opened.has(key)) opened.delete(key);
+      else opened.add(key);
+      recordView(owner, { opened: [...opened] });
     },
-    [toggledFor, recordView],
+    [openedFor, recordView],
   );
 
-  const autoExpandedFor = useCallback(
-    (campaignId: string | null) => viewFor(campaignId).autoExpandedFor,
-    [viewFor],
-  );
-
-  const markAutoExpanded = useCallback(
-    (campaignId: string, cycleId: string, key: string) => {
-      const toggled = new Set(toggledFor(campaignId));
-      toggled.add(key);
-      recordView(campaignId, { toggled: [...toggled], autoExpandedFor: cycleId });
-    },
-    [toggledFor, recordView],
-  );
-
-  return useMemo(
-    () => ({ isOpen, toggle, autoExpandedFor, markAutoExpanded }),
-    [isOpen, toggle, autoExpandedFor, markAutoExpanded],
-  );
+  return useMemo(() => ({ isOpen, toggle }), [isOpen, toggle]);
 }

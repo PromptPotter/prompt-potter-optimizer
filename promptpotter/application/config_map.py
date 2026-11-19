@@ -298,6 +298,7 @@ class ConfigKnob(StrictModel):
         "operator's edit; any set bench knob), and on an optimizer node's knob dataset, "
         "free_tier or seed"
     )
+    set_by_layer: bool = Field(description="True unless `source` is default or manifest")
 
 
 class ConfigEstimandGroup(StrictModel):
@@ -387,6 +388,7 @@ def _knob_rows(
             label=knob_label(decl.dotted),
             value=None if value is _MISSING else value,
             source=source,
+            set_by_layer=source not in ("default", "manifest"),
         )
         rows.append((knob, frozenset(decl.knob.estimands)))
     return rows

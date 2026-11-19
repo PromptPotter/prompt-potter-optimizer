@@ -4406,6 +4406,8 @@ export interface ConfigKnob {
    * campaign (the operator's edit; any set bench knob), and on an optimizer
    * node's knob dataset, free_tier or seed */
   source: 'default' | 'dataset' | 'campaign' | 'free_tier' | 'start' | 'manifest';
+  /** True unless `source` is default or manifest */
+  set_by_layer: boolean;
 }
 
 export interface ConfigCoupling {
@@ -5700,7 +5702,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "7091703d118147bb";
+export const SERVED_CONTRACT = "ee05954205d5cc39";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

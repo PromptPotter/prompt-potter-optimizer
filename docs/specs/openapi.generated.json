@@ -4783,6 +4783,11 @@
             "title": "Path",
             "type": "string"
           },
+          "set_by_layer": {
+            "description": "True unless `source` is default or manifest",
+            "title": "Set By Layer",
+            "type": "boolean"
+          },
           "source": {
             "description": "Where the value came from: default (`defaults.yaml`) | manifest (an optimizer node's knob, as its manifest declares it) | the layer that set it: campaign (the operator's edit; any set bench knob), and on an optimizer node's knob dataset, free_tier or seed",
             "enum": [
@@ -4805,7 +4810,8 @@
           "path",
           "label",
           "value",
-          "source"
+          "source",
+          "set_by_layer"
         ],
         "title": "ConfigKnob",
         "type": "object"

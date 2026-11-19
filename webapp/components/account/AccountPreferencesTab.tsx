@@ -70,7 +70,7 @@ function CampaignTreeSection() {
   return (
     <AccountSection
       title="Campaign tree"
-      lede="Off by default, so a campaign is the last row of its branch — no ▶, and its candidates are read on the dashboard, where the chart plots them against each other. Turn this on to open a campaign into C0, C1.1, C1.2 … in the sidebar instead. A self-optimization run opens either way, since each of its candidates contains a whole inner run. Kept on this device only."
+      lede="Off by default, so a campaign is the last row of its branch — no ▶, and its candidates are read on the dashboard, where the chart plots them against each other. A self-optimization run still opens into its candidates, since each contains inner runs, and stops at those runs. Turn this on to open every campaign, inner runs included, into C0, C1.1, C1.2 … in the sidebar. Kept on this device only."
       aside={
         <Switch
           label="Open campaigns into their candidates"

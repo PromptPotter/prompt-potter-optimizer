@@ -50,12 +50,12 @@ test("a seat cell drills into the inner run that measured it", async ({ page, re
 
   // The row's name opens on its model's vendor mark, then the label.
   const row = page.getByRole("button", { name: new RegExp(`(^|\\s)${escape(name)}(\\s|$)`) }).first();
-  // Only the ACTIVE campaign opens itself (`SidebarContent`); a viewed one is opened down to its cells.
+  // No row opens itself (`view-memory.tsx::useNodeToggle`): the viewed campaign is opened down to its cells.
   const viewed = page.locator(".unit-library-family.selected");
   await expect(viewed).toBeVisible({ timeout: 60_000 });
   const own = viewed.getByRole("button", { name: "Expand" });
   if (await own.count()) await own.click();
-  // An opened campaign reads its subtree before it draws a row (`ForestRows.tsx::RunRow`): open one
+  // An opened campaign reads its subtree before it draws a row (`ForestRows.tsx::RunSubtree`): open one
   // level more only once no read is in flight, never on a glance taken while one is.
   const reading = page.getByText(/^Reading its candidates/);
   await expect(async () => {

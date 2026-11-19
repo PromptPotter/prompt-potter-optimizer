@@ -12,7 +12,7 @@ import {
   tagLabel,
   tagValue,
 } from "@/lib/derivations";
-import { encodeCyclePath, pathOfAddress, type CyclePath } from "@/lib/ids";
+import { encodeCyclePath, pathOfAddress } from "@/lib/ids";
 import type {
   HierarchyCampaign,
   HierarchyCandidate,
@@ -21,7 +21,9 @@ import type {
   SubtreeCycle,
   UnstartedCampaign,
 } from "@/lib/api/types";
+import { useShowCandidates } from "@/lib/prefs/tree";
 import { useLineageTree } from "@/lib/state/lineage";
+import { useNodeToggle } from "@/lib/state/view-memory";
 import { useWorkspace } from "@/lib/state/workspace";
 import { PLACEHOLDER } from "@/lib/format";
 import { HoverCard, ReadState } from "@/components/ui";
@@ -30,102 +32,61 @@ import { CampaignRowLabel, PhaseMark } from "./CampaignRowLabel";
 import { CompareToggle } from "./CompareToggle";
 import { RowHoverCard } from "./RowHoverCard";
 
-export interface TreeCtx {
-  isNodeOpen: (key: string, openByDefault: boolean) => boolean;
-  toggleNode: (key: string) => void;
-  viewedPath: CyclePath | null;
-  // A candidate is picked on the viewed path, so no cycle row is the one selected.
-  picked: boolean;
-  showCandidates: boolean;
+// Every row starts closed; only the operator's press opens one (`view-memory.tsx::useNodeToggle`).
+
+// The WHOLE path, not the leaf cycleId: `cycle_id` is an origin hash two campaigns can share. A
+// candidate picked on the viewed path selects no cycle row.
+function useIsViewed(cycleAddress: string): boolean {
+  const { viewed, pick } = useWorkspace();
+  return viewed != null && encodeCyclePath(viewed.path) === cycleAddress && pick === null;
 }
 
-export function ForestRows({ entries, ctx }: { entries: ListedCampaign[]; ctx: TreeCtx }) {
+export function ForestRows({ entries }: { entries: ListedCampaign[] }) {
   const groups = useMemo(() => groupByRoot(entries), [entries]);
   return (
     <>
       {groups.map((group) => (
-        <OriginRow key={group.rootCycleId} group={group} ctx={ctx} />
+        <OriginRow key={group.rootCycleId} group={group} />
       ))}
     </>
   );
 }
 
-function GroupRow({
-  addr,
-  openByDefault,
-  ctx,
-  className,
-  hint,
-  name,
-  meta,
-  children,
-}: {
-  addr: string;
-  openByDefault: boolean;
-  ctx: TreeCtx;
-  className: string;
-  hint?: string;
-  name: ReactNode;
-  meta?: ReactNode;
-  children: ReactNode;
-}) {
-  const open = ctx.isNodeOpen(addr, openByDefault);
-  const row = (
-    <span className="unit-library-row">
-      <span className="unit-library-name">{name}</span>
-      <span className="unit-library-meta">{meta}</span>
-    </span>
-  );
+// A header, never a fold: closed, it would hide whole campaigns.
+function OriginRow({ group }: { group: RootGroup }) {
+  const { rootCycleId, label, campaigns } = group;
+  if (campaigns.length === 1) return <ListedRow campaign={campaigns[0]!} />;
   return (
     <>
-      <div className={`unit-library-family ${className}`}>
-        <Twist open={open} onClick={() => ctx.toggleNode(addr)} />
+      <div className="unit-library-family origin-row">
         <span className="unit-library-item origin-label">
-          {hint ? (
-            <HoverCard content={hint} focusable>
-              {row}
-            </HoverCard>
-          ) : (
-            row
-          )}
+          <HoverCard
+            content={`${campaigns.length} campaigns start from this same specification (${rootCycleId}), so their origin scores pool.`}
+            focusable
+          >
+            <span className="unit-library-name">
+              spec {label}
+              <span className="unit-library-kind">{campaigns.length} runs</span>
+            </span>
+          </HoverCard>
         </span>
       </div>
-      {open && <ul className="unit-library-children">{children}</ul>}
+      <ul className="unit-library-children">
+        {campaigns.map((campaign) => (
+          <li key={campaign.address}>
+            <ListedRow campaign={campaign} />
+          </li>
+        ))}
+      </ul>
     </>
   );
 }
 
-function OriginRow({ group, ctx }: { group: RootGroup; ctx: TreeCtx }) {
-  const { rootCycleId, label, campaigns } = group;
-  if (campaigns.length === 1) return <ListedRow campaign={campaigns[0]!} ctx={ctx} />;
-  return (
-    <GroupRow
-      addr={rootCycleId}
-      openByDefault
-      ctx={ctx}
-      className="origin-row"
-      hint={`${campaigns.length} campaigns start from this same specification (${rootCycleId}). Identical runs mean the candidates that produced them collapsed to the same prompt.`}
-      name={
-        <>
-          spec {label}
-          <span className="unit-library-kind">{campaigns.length} runs</span>
-        </>
-      }
-    >
-      {campaigns.map((campaign) => (
-        <li key={campaign.address}>
-          <ListedRow campaign={campaign} ctx={ctx} />
-        </li>
-      ))}
-    </GroupRow>
-  );
-}
-
-function ListedRow({ campaign, ctx }: { campaign: ListedCampaign; ctx: TreeCtx }) {
+function ListedRow({ campaign }: { campaign: ListedCampaign }) {
   return campaign.entry_kind === "unstarted" ? (
     <UnstartedRow campaign={campaign} />
   ) : (
-    <RunRow campaign={campaign} ctx={ctx} />
+    <RunRow campaign={campaign} />
   );
 }
 
@@ -150,64 +111,92 @@ function UnstartedRow({ campaign }: { campaign: UnstartedCampaign }) {
   );
 }
 
-function RunRow({ campaign, ctx: shared }: { campaign: HierarchyCampaign; ctx: TreeCtx }) {
-  const selfOptimization = hasTag(campaign, "self_optimization");
-  // Whatever the preference says: a self-optimization candidate CONTAINS its inner runs.
-  const ctx = useMemo(
-    () => (selfOptimization ? { ...shared, showCandidates: true } : shared),
-    [shared, selfOptimization],
+function RunRow({ campaign }: { campaign: HierarchyCampaign }) {
+  return (
+    <CampaignRow
+      campaign={campaign}
+      controls={
+        <>
+          <CompareToggle campaign={campaign} />
+          <CampaignMenu campaign={campaign} />
+        </>
+      }
+    >
+      <RunSubtree address={campaign.address} />
+    </CampaignRow>
   );
-  const { navigate } = useWorkspace();
-  const rootPath = useMemo(() => pathOfAddress(campaign.facts.root), [campaign.facts.root]);
-  // Closed by default: an open campaign fetches its subtree.
-  const open = ctx.showCandidates && ctx.isNodeOpen(campaign.address, false);
-  const tree = useLineageTree(campaign.address, open);
-  const archived = campaign.facts.lifecycle === "archived";
-  // The WHOLE path, not the leaf cycleId: `cycle_id` is an origin hash two campaigns can share.
-  const selected =
-    ctx.viewedPath != null &&
-    encodeCyclePath(ctx.viewedPath) === campaign.facts.root &&
-    !ctx.picked;
+}
 
+// Mounted only while its row is open: an open campaign fetches its subtree.
+function RunSubtree({ address }: { address: string }) {
+  const tree = useLineageTree(address, true);
+  return (
+    <ReadState read={tree} subject="its candidates" className="inner-library-empty">
+      {(root) => <CampaignBody body={root} />}
+    </ReadState>
+  );
+}
+
+// An inner run's subtree came with its outer's read.
+function InnerCampaignRow({ campaign }: { campaign: SubtreeCampaign }) {
+  return (
+    <CampaignRow campaign={campaign}>
+      <CampaignBody body={campaign} />
+    </CampaignRow>
+  );
+}
+
+function CampaignRow({
+  campaign,
+  controls,
+  children,
+}: {
+  campaign: HierarchyCampaign;
+  controls?: ReactNode;
+  children: ReactNode;
+}) {
+  const { navigate } = useWorkspace();
+  const nodes = useNodeToggle();
+  const [showCandidates] = useShowCandidates();
+  // A campaign's own candidates are the dashboard's candidate window, so the tree stops above them
+  // unless the preference asks; a self-optimization campaign opens regardless, since each of its
+  // candidates CONTAINS inner runs.
+  const opens = showCandidates || hasTag(campaign, "self_optimization");
+  const open = opens && nodes.isOpen(campaign.address);
+  const archived = campaign.facts.lifecycle === "archived";
+  const selected = useIsViewed(campaign.facts.root);
   return (
     <>
       <RowHoverCard card={campaign}>
         <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
-          {ctx.showCandidates ? (
-            <Twist open={open} onClick={() => ctx.toggleNode(campaign.address)} />
-          ) : null}
+          {opens ? <Twist open={open} onClick={() => nodes.toggle(campaign.address)} /> : null}
           <button
             type="button"
             className="unit-library-item"
-            onClick={() => navigate({ path: rootPath }, { resume: true })}
+            onClick={() => navigate({ path: pathOfAddress(campaign.facts.root) }, { resume: true })}
             aria-current={selected ? "true" : undefined}
             disabled={archived}
           >
             <CampaignRowLabel campaign={campaign} />
           </button>
-          <CompareToggle campaign={campaign} />
-          <CampaignMenu campaign={campaign} />
+          {controls}
         </div>
       </RowHoverCard>
-      {open && (
-        <ReadState read={tree} subject="its candidates" className="inner-library-empty">
-          {(root) => <CampaignBody body={root} ctx={ctx} />}
-        </ReadState>
-      )}
+      {open && children}
     </>
   );
 }
 
-function CampaignBody({ body, ctx }: { body: SubtreeCampaign; ctx: TreeCtx }) {
+function CampaignBody({ body }: { body: SubtreeCampaign }) {
   const cycles = body.children;
   return (
     <ul className="unit-library-children">
       {cycles.length === 1 ? (
-        <CycleBody cycle={cycles[0]!} ctx={ctx} />
+        <CycleBody cycle={cycles[0]!} />
       ) : (
         cycles.map((cycle) => (
           <li key={cycle.address}>
-            <CycleRow cycle={cycle} isLiveCycle={cycle.address === body.facts.live_cycle} ctx={ctx} />
+            <CycleRow cycle={cycle} />
           </li>
         ))
       )}
@@ -215,30 +204,20 @@ function CampaignBody({ body, ctx }: { body: SubtreeCampaign; ctx: TreeCtx }) {
   );
 }
 
-function CycleRow({
-  cycle,
-  isLiveCycle,
-  ctx,
-}: {
-  cycle: SubtreeCycle;
-  isLiveCycle: boolean;
-  ctx: TreeCtx;
-}) {
+function CycleRow({ cycle }: { cycle: SubtreeCycle }) {
   const { navigate } = useWorkspace();
-  const path = pathOfAddress(cycle.address);
-  const viewed = ctx.viewedPath != null && encodeCyclePath(ctx.viewedPath) === cycle.address;
-  // Every cycle open stacks each fork's whole roster on a phone: the line and the viewed one open.
-  const open = ctx.isNodeOpen(cycle.address, isLiveCycle || viewed);
-  const selected = viewed && !ctx.picked;
+  const nodes = useNodeToggle();
+  const open = nodes.isOpen(cycle.address);
+  const selected = useIsViewed(cycle.address);
   return (
     <>
       <RowHoverCard card={cycle}>
         <div className={cx("unit-library-family", selected && "selected")}>
-          <Twist open={open} onClick={() => ctx.toggleNode(cycle.address)} />
+          <Twist open={open} onClick={() => nodes.toggle(cycle.address)} />
           <button
             type="button"
             className="unit-library-item"
-            onClick={() => navigate({ path }, { resume: true })}
+            onClick={() => navigate({ path: pathOfAddress(cycle.address) }, { resume: true })}
             aria-current={selected ? "true" : undefined}
           >
             <CycleRowLabel cycle={cycle} />
@@ -247,14 +226,14 @@ function CycleRow({
       </RowHoverCard>
       {open && (
         <ul className="unit-library-children">
-          <CycleBody cycle={cycle} ctx={ctx} />
+          <CycleBody cycle={cycle} />
         </ul>
       )}
     </>
   );
 }
 
-function CycleBody({ cycle, ctx }: { cycle: SubtreeCycle; ctx: TreeCtx }) {
+function CycleBody({ cycle }: { cycle: SubtreeCycle }) {
   const rows = candidatesOf(cycle);
   const unplaced = cycle.children.filter((c): c is SubtreeCampaign => c.entry_kind === "campaign");
   const { live, retired } = splitRetired(rows);
@@ -263,17 +242,17 @@ function CycleBody({ cycle, ctx }: { cycle: SubtreeCycle; ctx: TreeCtx }) {
       {rows.length === 0 && <li className="inner-library-empty">Never ran</li>}
       {live.map((cand) => (
         <li key={cand.address}>
-          <CandidateRow cand={cand} ctx={ctx} />
+          <CandidateRow cand={cand} />
         </li>
       ))}
       {retired.map((group) => (
         <li key={group.branch}>
-          <RetiredGroupRow cycle={cycle} group={group} ctx={ctx} />
+          <RetiredGroupRow cycle={cycle} group={group} />
         </li>
       ))}
       {unplaced.map((campaign) => (
         <li key={campaign.address}>
-          <InnerCampaignRow campaign={campaign} ctx={ctx} />
+          <InnerCampaignRow campaign={campaign} />
         </li>
       ))}
     </>
@@ -288,7 +267,6 @@ function Twist({ open, onClick }: { open: boolean; onClick: () => void }) {
       onClick={onClick}
       aria-label={open ? "Collapse" : "Expand"}
       aria-expanded={open}
-      tabIndex={-1}
     >
       {open ? "▼" : "▶"}
     </button>
@@ -308,38 +286,44 @@ function CycleRowLabel({ cycle }: { cycle: SubtreeCycle }) {
   );
 }
 
-function RetiredGroupRow({
-  cycle,
-  group,
-  ctx,
-}: {
-  cycle: SubtreeCycle;
-  group: RetiredGroup;
-  ctx: TreeCtx;
-}) {
+function RetiredGroupRow({ cycle, group }: { cycle: SubtreeCycle; group: RetiredGroup }) {
+  const nodes = useNodeToggle();
+  const key = `${cycle.address}/retired/${group.branch}`;
+  const open = nodes.isOpen(key);
   const n = group.candidates.length;
   const [first] = group.candidates;
   return (
-    <GroupRow
-      addr={`${cycle.address}/retired/${group.branch}`}
-      openByDefault={false}
-      ctx={ctx}
-      className="retired"
-      name={<span className="unit-library-kind">⑂ {tagLabel(first ?? null, "superseded")}</span>}
-      meta={<span className="unit-library-status">{`${n} attempt${n === 1 ? "" : "s"}`}</span>}
-    >
-      {group.candidates.map((cand) => (
-        <li key={cand.address}>
-          <CandidateRow cand={cand} ctx={ctx} />
-        </li>
-      ))}
-    </GroupRow>
+    <>
+      <div className="unit-library-family retired">
+        <Twist open={open} onClick={() => nodes.toggle(key)} />
+        <span className="unit-library-item">
+          <span className="unit-library-row">
+            <span className="unit-library-name">
+              <span className="unit-library-kind">⑂ {tagLabel(first ?? null, "superseded")}</span>
+            </span>
+            <span className="unit-library-meta">
+              <span className="unit-library-status">{`${n} attempt${n === 1 ? "" : "s"}`}</span>
+            </span>
+          </span>
+        </span>
+      </div>
+      {open && (
+        <ul className="unit-library-children">
+          {group.candidates.map((cand) => (
+            <li key={cand.address}>
+              <CandidateRow cand={cand} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </>
   );
 }
 
-function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx }) {
+function CandidateRow({ cand }: { cand: HierarchyCandidate }) {
   const inner = cand.children;
-  const open = ctx.isNodeOpen(cand.address, true);
+  const nodes = useNodeToggle();
+  const open = nodes.isOpen(cand.address);
   const { isPicked, pick } = useSelectNode({ resume: true });
   const selected = isPicked(cand);
   const retired = tagValue(cand, "superseded") !== null;
@@ -349,9 +333,7 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
     <>
       <RowHoverCard card={cand}>
         <div className={cx("unit-library-family", selected && "selected", retired && "retired")}>
-          {inner.length > 0 ? (
-            <Twist open={open} onClick={() => ctx.toggleNode(cand.address)} />
-          ) : null}
+          {inner.length > 0 ? <Twist open={open} onClick={() => nodes.toggle(cand.address)} /> : null}
           <button
             type="button"
             className="unit-library-item candidate-label"
@@ -372,34 +354,11 @@ function CandidateRow({ cand, ctx }: { cand: HierarchyCandidate; ctx: TreeCtx })
         <ul className="unit-library-children">
           {inner.map((campaign) => (
             <li key={campaign.address}>
-              <InnerCampaignRow campaign={campaign} ctx={ctx} />
+              <InnerCampaignRow campaign={campaign} />
             </li>
           ))}
         </ul>
       )}
-    </>
-  );
-}
-
-function InnerCampaignRow({ campaign, ctx }: { campaign: SubtreeCampaign; ctx: TreeCtx }) {
-  const { navigate } = useWorkspace();
-  const open = ctx.isNodeOpen(campaign.address, true);
-  const rootPath = pathOfAddress(campaign.facts.root);
-  return (
-    <>
-      <RowHoverCard card={campaign}>
-        <div className="unit-library-family">
-          <Twist open={open} onClick={() => ctx.toggleNode(campaign.address)} />
-          <button
-            type="button"
-            className="unit-library-item"
-            onClick={() => navigate({ path: rootPath }, { resume: true })}
-          >
-            <CampaignRowLabel campaign={campaign} />
-          </button>
-        </div>
-      </RowHoverCard>
-      {open && <CampaignBody body={campaign} ctx={ctx} />}
     </>
   );
 }

@@ -43,9 +43,9 @@ describe("pruneStore", () => {
 
 describe("viewMemoryCodec", () => {
   it("round-trips a record", () => {
-    const store = { a: view({ toggled: ["cycle:x::y"], expandedLanes: ["x::y|cand"] }) };
+    const store = { a: view({ opened: ["cycle:x::y"], expandedLanes: ["x::y|cand"] }) };
     const back = viewMemoryCodec.deserialize(viewMemoryCodec.serialize(store));
-    expect(back.a?.toggled).toEqual(["cycle:x::y"]);
+    expect(back.a?.opened).toEqual(["cycle:x::y"]);
     expect(back.a?.expandedLanes).toEqual(["x::y|cand"]);
   });
 
@@ -60,11 +60,10 @@ describe("viewMemoryCodec", () => {
     expect(keys).toEqual(
       [
         "at",
-        "autoExpandedFor",
         "expandedForLane",
         "expandedLanes",
+        "opened",
         "treeFreed",
-        "toggled",
         "v",
         "viewedPick",
         "viewedPath",
