@@ -174,7 +174,7 @@ class RunDeclaration(FrozenModel):
 
     dataset_hash: str = Field(min_length=1)
     run_seed: int | None
-    # The loop's own set keys, less the budget and the run seed.
+    # The loop's fold patch over the defaults (`null` clears), less the budget and the run seed.
     loop: dict[str, Any]
     # Only the axes that differ from the default.
     budget: Budget
@@ -212,7 +212,10 @@ def _pinned(loop: Mapping[str, Any], keys: Mapping[str, Any]) -> dict[str, Any]:
         if key not in loop:
             continue
         value = loop[key]
-        out[key] = _pinned(value, sub) if isinstance(sub, dict) else value
+        if not isinstance(sub, dict):
+            out[key] = value
+        elif pinned := _pinned(value, sub):
+            out[key] = pinned
     return out
 
 

@@ -706,19 +706,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   babysit act, decisions.md § 0005) and read it there. **Re-test:** a launch at a fork whose line
   narrowed a model steers to the root-only model and reads `babysat`.
 
-### wave-5 · cfg (what cfg-3 and cfg-4 left at their landing)
-
-- **A run declaration lays today's defaults by a second merge beside the one fold** (cfg-4's report):
-  `datasets/authored.py::effective_config` lays `defaults_config()` under a declaration's parts by a
-  shallow `**` merge, and `declare_run` diffs whole top-level values against the defaults dump, so a
-  declaration is a replace-per-key document while `layer_fold.py::fold_layers` lays a mapping key by
-  key (lists by `SUBSET`/`UNION`). It is right today only because `declare_run` dumps complete values;
-  `CampaignConfig.overlaid` in its place would keep a default's mapping key a declaration dropped.
-  Root: a `RunDeclaration`'s `loop` / `environment.target` is a fold patch (`CLEAR` for a dropped key)
-  laid over `defaults.yaml` by `fold_layers`; it reshapes the measured address every root id hashes
-  (wipes run data, moves root ids). **Re-test:** `git grep -cE "\*\*defaults\." --
-  promptpotter/application/datasets/authored.py` == 0 (now 2).
-
 ### wave-5 · webapp (what the responsive walk showed at the w5i landing)
 
 - **A control sits under the remote-control bar at landscape-844** (rates-6's and cfg-4's reports): on

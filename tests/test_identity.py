@@ -272,7 +272,7 @@ from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, Optim
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells, InnerTaskSpec
-from promptpotter.domain.layer_fold import Layer, fold_layers, rules_of
+from promptpotter.domain.layer_fold import Layer, fold_layers, patch_between, rules_of, wire_patch
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.paired_reading import ArmKey
@@ -2721,6 +2721,22 @@ def test_every_door_declares_through_one_seam_as_a_delta_over_todays_defaults(
     assert len(run_ids) == 3, (
         "two arms over one content, or an arm and a seat, share a run id every surface keys on"
     )
+
+
+def test_a_declaration_lays_back_what_it_dropped_from_the_defaults() -> None:
+    # A default's mapping key the config dropped, and a node map an optimizer switch rescopes.
+    rule = rules_of(CampaignConfig)
+    under = {
+        "judges": {"kept": {"model": "a"}, "dropped": {"model": "b"}},
+        "optimization": {"optimizer": "potter", "nodes": {"l1_generate": {"config": {"k": 1}}}},
+    }
+    for over in (
+        {"judges": {"kept": {"model": "a"}}, "optimization": under["optimization"]},
+        {"judges": under["judges"], "optimization": {"optimizer": "capo", "nodes": {}}},
+    ):
+        patch = patch_between(rule, under, over)
+        laid = fold_layers(rule, [Layer("d", under), Layer("c", wire_patch(rule, patch))])
+        assert laid.document == over, f"{patch} lays another config than the one it declared"
 
 
 def _arming(stores: Stores, decl: _Declared) -> tuple[Session, ConfigLayers, list[Sample]]:
