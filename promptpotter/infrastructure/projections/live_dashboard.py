@@ -140,7 +140,7 @@ def build_candidate_rows(
     arms = [
         (key, arm, narration.fold(round_num, key))
         for key in narration.announced(round_num)
-        if (arm := narration.state(round_num, key)).role != MeasurementRole.PARENT
+        if (arm := narration.state(round_num, key)).role.is_proposal
     ]
     cuts = panel_cuts([panel_counts(arm, fold) for _, arm, fold in arms])
     rows: list[LiveCandidate] = []
@@ -340,6 +340,11 @@ class LiveDashboardState(DashboardFacts):
             mark.orphaned() if mark.state == "running" and mark.kind != spare else mark
             for mark in self.verification
         ]
+
+    def unfiled(self) -> int | None:
+        """`current_round` while no round file holds it: the one answer every served read asks."""
+        current = self.current_round.round
+        return None if any(r.round == current for r in self.rounds) else current
 
     def round_closed(self) -> bool:
         """`current_round` lingers after its close: closed once `rounds` holds it with rows."""

@@ -11,7 +11,7 @@ A module lives by what it IS: `api/` the wire, `state/` one provider or store pe
 | `dashboard.json` | `lib/state/poll.tsx` → `useViewedDashboard()` | in-flight `current_round` + `rounds[]`: FitnessChart and the SPEND breakdown |
 | `/hierarchy` | `lib/hooks/useRegistry.ts` | every surface that lists, switches, docks or heads a run |
 | `/hierarchy/{address}` | `lib/state/lineage.tsx` | the genealogy at any depth |
-| `/campaigns/{id}/cycles/{id}/rounds/{n}` | `lib/hooks/useRound.ts` | the round; `round_NNNN.json` only as raw text in Files |
+| `/campaigns/{id}/cycles/{id}/rounds/{n}` | `lib/hooks/useRound.ts` | the round, filed or not yet (`RoundView.unfiled`); `round_NNNN.json` only as raw text in Files |
 | `…/rounds/{n}/audit` | `lib/hooks/useRoundNodes.ts` | per-node LLM I/O |
 | `/datasets/{name}/cells` | `lib/hooks/useCells.ts::useCells` | every list of measured cells |
 | `/campaigns/{id}/pipeline?at=` | `lib/hooks/useConnector.ts::useConnector` | every config row, model chip, lock glyph, provenance badge (I9) |

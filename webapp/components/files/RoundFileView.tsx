@@ -18,7 +18,7 @@ function ArmLift({ reading }: { reading: PairedReading | null }) {
   );
 }
 
-// The served order IS the rank: `RoundView.candidates` lists the round's arms as its scoreboard ranks them.
+// The served order IS the rank: `RoundView.candidates` lists the round's own arms as its scoreboard ranks them.
 function scoreboardColumns(
   wonOnTheta: boolean,
   arms: readonly ServedArm[],

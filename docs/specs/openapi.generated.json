@@ -15253,10 +15253,10 @@
       },
       "RoundView": {
         "additionalProperties": false,
-        "description": "One closed round as a surface reads it: its arms and its verdict. Its rows are the\nmeasurement log's (`GET /datasets/{name}/cells`); what the engine banks beside them — folds,\ndiagnostics, optimizer state — stays on the ledger.",
+        "description": "One round as a surface reads it, filed or not yet (`unfiled`): its arms and its verdict.\nIts rows are the measurement log's (`GET /datasets/{name}/cells`); what the engine banks\nbeside them — folds, diagnostics, optimizer state — stays on the ledger.",
         "properties": {
           "candidates": {
-            "description": "Every arm the round read, in rank order.",
+            "description": "The round's own arms, never the parent it re-read: a filed round's in rank order, an unfiled one's as announced.",
             "items": {
               "$ref": "#/components/schemas/ServedArm"
             },
@@ -15287,13 +15287,19 @@
           "round": {
             "title": "Round",
             "type": "integer"
+          },
+          "unfiled": {
+            "description": "No file holds it yet: its arms stream in, with no election or headline.",
+            "title": "Unfiled",
+            "type": "boolean"
           }
         },
         "required": [
           "round",
           "election",
           "candidates",
-          "headline"
+          "headline",
+          "unfiled"
         ],
         "title": "RoundView",
         "type": "object"
@@ -20262,7 +20268,7 @@
     },
     "/api/v1/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}": {
       "get": {
-        "description": "One closed round: its last close's arms and verdict, and the rows it names, each carrying\nits mark as ``status``.\n\nA fork answers for the rounds it inherited; a round that does not stand closed is not found.\n``at`` is the dashboard read's: the round as it stood at that line of the cycle's own ledger.",
+        "description": "One round: a closed one's last close's arms and verdict, or the one no file holds yet.\n\nA fork answers for the rounds it inherited; any other round is not found.\n``at`` is the dashboard read's: the round as it stood at that line of the cycle's own ledger.",
         "operationId": "cycle_round_api_v1_campaigns__campaign_id__cycles__cycle_id__rounds__round_num__get",
         "parameters": [
           {

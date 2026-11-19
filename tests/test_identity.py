@@ -34,6 +34,7 @@ from factories import (
     PARENT,
     PROMPT_INFO,
     arm_state,
+    arm_walk,
     backend_client,
     defaulted_config,
     inner_cells,
@@ -81,6 +82,7 @@ from promptpotter.application.commands import launching, origin_resolving
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher, Opened
 from promptpotter.application.commands.launching import dispatch_start_checkin, parse_cycle_start
 from promptpotter.application.config_map import bench_defaults_pin
+from promptpotter.application.cycle_reads import served_round
 from promptpotter.application.datasets import (
     ingest,
     loaders,
@@ -3368,6 +3370,27 @@ def test_a_stop_declared_inside_its_run_scope_reaches_dashboard_json(
     dashboard = json.loads(CycleLayout(root_dir).dashboard.read_text())
     assert dashboard["stop_reason"] == StopReason.ROUNDS_BUDGET, (
         "a stop declared inside its run scope left dashboard.json without it"
+    )
+
+
+def test_an_arm_landing_in_the_unfiled_round_moves_the_round_reads_validator(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # The round read 304s on the leaf store's version: an arm it missed would stay missing, unsaid.
+    stores = built_stores
+    opened, held_campaign = held
+    hop = held_campaign.root_hop
+    launched = effective_config(decl.declared)
+    declare_run_wiring(opened, launched, selected=select_optimizer(launched.optimization))
+    stood = entries_version([stores])
+    arm_walk(CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop))), [], individual="c0")
+    assert entries_version([stores]) != stood, (
+        "an arm landed in the unfiled round and its read's validator stood: a 304 hides the arm"
+    )
+    served = served_round(stores, hop, 0, moment=None)
+    assert served is not None and served.unfiled, "the round in flight was not served unfiled"
+    assert [arm.reading.arm.key for arm in served.candidates] == ["c0"], (
+        "the round read missed the arm its validator moved on"
     )
 
 

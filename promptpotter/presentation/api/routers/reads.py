@@ -39,6 +39,7 @@ from promptpotter.application.read_params import (
     CycleDashboardParams,
     CycleEventsParams,
     CycleExportParams,
+    CycleRoundParams,
     DatasetCellsParams,
     EvidenceParams,
     FeedParams,
@@ -132,7 +133,7 @@ def _subtree(asked: _Asked, read: HierarchySubtreeParams) -> Response:
     return _conditional(asked.request, (version, read), lambda: read.answer(asked.caller))
 
 
-def _dashboard(asked: _Asked, read: CycleDashboardParams) -> Response:
+def _leaf_store(asked: _Asked, read: CycleDashboardParams | CycleRoundParams) -> Response:
     cycle = read.viewed(asked.caller)
     # The leaf store's version, which its feed frame names: it covers the derived phase's edges.
     version = entries_version([cycle.stores])
@@ -184,7 +185,8 @@ _FRAMED: dict[ReadKind, _Framing] = {
     ReadKind.HIERARCHY: _Framing(_hierarchy),
     ReadKind.HIERARCHY_STEPS: _Framing(_steps),
     ReadKind.HIERARCHY_SUBTREE: _Framing(_subtree),
-    ReadKind.CYCLE_DASHBOARD: _Framing(_dashboard),
+    ReadKind.CYCLE_DASHBOARD: _Framing(_leaf_store),
+    ReadKind.CYCLE_ROUND: _Framing(_leaf_store),
     ReadKind.CYCLE_EXPORT: _Framing(
         _export,
         {

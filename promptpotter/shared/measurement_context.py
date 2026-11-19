@@ -29,6 +29,11 @@ class MeasurementRole(enum.StrEnum):
     BENCH = "bench"
     NOISE_FLOOR = "noise_floor"
 
+    @property
+    def is_proposal(self) -> bool:
+        """An arm its round proposed: never the parent it re-read beside them."""
+        return self != MeasurementRole.PARENT
+
 
 class RoleScope(enum.StrEnum):
     """Which roles a reading of an individual's cells may see; two scopes never pair."""

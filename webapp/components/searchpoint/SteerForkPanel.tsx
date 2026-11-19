@@ -19,6 +19,9 @@ import { NodeSurface } from "@/components/node-surface/NodeSurface";
 import { Empty, FailureLine, HoverCard, ReadState, Said } from "@/components/ui";
 import { LimitReconcile } from "./LimitReconcile";
 
+// One empty seed: a fresh `{}` per render would re-seed `NodeConfigEditor` and drop an edit.
+const NO_OVERLAY: Record<string, Record<string, unknown>> = {};
+
 // The editor hands back the candidate's whole config with the edit laid in; the steer is the edit.
 function editOf(
   next: Record<string, Record<string, unknown>>,
@@ -52,7 +55,7 @@ export function SteerForkPanel({
   const round = useRound(path, candidate.round);
   const start = round.start(candidate.arm);
   const startPrompts = start?.origin_prompts ?? {};
-  const overlay = start?.pipeline_overlay ?? {};
+  const overlay = start?.pipeline_overlay ?? NO_OVERLAY;
   const [pickedOverlay, setPickedOverlay] = useState<Record<
     string,
     Record<string, unknown>

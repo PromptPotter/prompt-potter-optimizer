@@ -146,7 +146,11 @@ BASELINE = {
     # small-11 link 2 (+28): `mcp/server.py::_Manager.sessions`, the HTTP door's own session table
     # (opened on a reply naming it, ended by DELETE / 404 / the SDK's idle timeout), since mcp 2.3
     # exposes no session-end hook and the sweep may no longer read its private `_server_instances`.
-    "package_lines": 111876,
+    # live-3 (+40 with its fix pass): the round read serves the round no file holds yet off the
+    # dashboard's fold (`RoundView.unfiled`, decided by `LiveDashboardState.unfiled`) and frames a
+    # 304 on the leaf store, so no client stitches the two; `MeasurementRole.is_proposal` is the
+    # one rule of a round's own arms.
+    "package_lines": 111916,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

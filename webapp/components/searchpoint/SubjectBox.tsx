@@ -38,12 +38,11 @@ export function SubjectBox() {
   });
 
   if (!dash?.cycle_id) return null;
-  const row = point?.row ?? null;
   return (
     <div className="subject-box">
       <SubjectSignals origin={evidence.origin} shown={evidence.shown} compare={evidence.compare} />
       <div className="subject-head">
-        <SubjectHeadline reading={row?.reading ?? null} />
+        <SubjectHeadline reading={shown.reading} />
         {subject.options.length > 1 ? (
           <SegmentedControl<ObserveState>
             options={subject.options}

@@ -465,13 +465,9 @@ and derived the knob couplings from each member's draws and the escalation ladde
   the literal count to a falling baseline. **Rides with:** webd. **Re-test:** the check's baseline is 0.
 - **The webapp's live state lands on the wrong subject or the wrong version** (a live-state pass,
   reported): feed versions are unordered hashes
-  (`cycle_reads.py:221-224`, a sha of `repr`), so a stale read reverts a draft edit, an ack shows applied
-  before the feed moves, and a second press files a second start-run (root: a monotone version per
-  subject); time-ray pages are not contiguous with the head (earlier
-  pages ride a fixed cursor, `reads.ts:603-626`); reads with no subject break I10 (`useRound` mixes
-  sources, `useRound.ts:40-46`); `useCampaignForest.ts:121`'s `cleanupAcked` is set by the
-  cleanup's answer and never keyed by `campaignId`, so another campaign reads the cleanup as done
-  (live-2's grep; key it as `VerifyAction`'s press state is). **Rides with:** webd.
+  (`application/cycle_reads.py::feed_versions`, a sha of `repr`), so a stale read reverts a draft
+  edit, an ack shows applied before the feed moves, and a second press files a second start-run
+  (root: a monotone version per subject). **Rides with:** webd.
 - **The served contract has three hand copies** (✓): `commands.ts:103-108` hand-writes `Partial`
   `ConfigOverrides` / `ForkStart` beside the generated `CommandSent`; SSE frames are cast with `as`
   (`live-stream.ts::openLiveStream`); the build handshake covers fetches, not streams; and
@@ -480,6 +476,18 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **An L4 panel's Leader card is empty** (C0 on a3312e3e1, 390 and 1280): `panes.tsx::LeaderPane`'s
   `SubjectBox` draws nothing for an origin-only outer campaign and no line says why (I1). **Rides
   with:** webd. **Re-test:** that card names the origin or says why it has no leader.
+- **A round's own arms are spelled beside `MeasurementRole.is_proposal`** (live-3f's report):
+  `scoring/passes.py:266`, `domain/run_standing.py:444`, `store/lineage_queries.py:184,203` still
+  write `role != MeasurementRole.PARENT`. Action: each asks `is_proposal`. **Re-test:**
+  `git grep -c "!= MeasurementRole.PARENT" -- promptpotter` is 0.
+- **A steer editor resets on its base's identity** (live-3f's report): `NodeConfigEditor.tsx:71`
+  resets its rows when `base` is a new object, so a steer edit on a round in flight resets on each
+  answer. Action: the base keys on its content. **Re-test:** an edit survives a new answer whose
+  base holds the same values.
+- **A read picks its freshness off its own last answer** (live-3f's report): `useRound.ts:35` peeks
+  `readResult` to choose `roundRead`'s `once` vs `byEtag`. Action: a `final(body)` on
+  `ReadDescriptor`, owned by `read-cache.ts`, stops a read once its answer says it is final.
+  **Re-test:** no hook imports `readResult` to pick a descriptor.
 
 ### batch/28 · lb
 

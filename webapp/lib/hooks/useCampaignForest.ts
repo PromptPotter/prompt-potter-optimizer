@@ -117,29 +117,30 @@ export function useCampaignForest({
 
   const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup", campaignId);
   const del = useCommand<"delete-cycle">("lineage-delete", cycleId);
-  const [cleanupOpen, setCleanupOpen] = useState(false);
-  const [cleanupAcked, setCleanupAcked] = useState(false);
+  // The dialog and its answer are the campaign's they were pressed on: another campaign reads neither.
+  const [openOn, setOpenOn] = useState<string | null>(null);
+  const [ackedOn, setAckedOn] = useState<string | null>(null);
 
   const cleanup: LineageCleanup = {
-    open: cleanupOpen,
+    open: openOn !== null && openOn === campaignId,
     failure: cmd.failure,
     cleaning: cmd.pending !== null,
-    acked: cleanupAcked,
+    acked: ackedOn !== null && ackedOn === campaignId,
     stubCount: tree ? tree.facts.deletable_stubs : null,
     request: () => {
       cmd.clear();
-      setCleanupOpen(true);
+      setOpenOn(campaignId);
     },
     cancel: () => {
-      setCleanupOpen(false);
+      setOpenOn(null);
       cmd.clear();
     },
     confirm: () => {
       const rootId = tree ? pathOfAddress(tree.facts.root).at(-1)?.cycleId : undefined;
       if (!campaignId || !rootId) return;
       void cmd.run("cleanup-empty-cycles", () => commands["cleanup-empty-cycles"]({ campaign_id: campaignId, cycle_id: rootId }), () => {
-        setCleanupAcked(true);
-        setCleanupOpen(false);
+        setAckedOn(campaignId);
+        setOpenOn(null);
       });
     },
   };

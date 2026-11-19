@@ -2492,17 +2492,21 @@ export interface WarmingDashboard {
   stop: StopReading | null;
 }
 
-/** One closed round as a surface reads it: its arms and its verdict. Its rows are
- * the measurement log's (`GET /datasets/{name}/cells`); what the engine banks
- * beside them — folds, diagnostics, optimizer state — stays on the ledger. */
+/** One round as a surface reads it, filed or not yet (`unfiled`): its arms and
+ * its verdict. Its rows are the measurement log's (`GET
+ * /datasets/{name}/cells`); what the engine banks beside them — folds,
+ * diagnostics, optimizer state — stays on the ledger. */
 export interface RoundView {
   round: number;
   election: Election | null;
-  /** Every arm the round read, in rank order. */
+  /** The round's own arms, never the parent it re-read: a filed round's in rank
+   * order, an unfiled one's as announced. */
   candidates: ServedArm[];
   /** The arm the round ENDED on (`election.ended_on`), read: the headline's numbers
    * are its own. */
   headline: ArmReading | null;
+  /** No file holds it yet: its arms stream in, with no election or headline. */
+  unfiled: boolean;
 }
 
 /** What a round's selector decided over its arms, by key; ``selected`` null = the
@@ -5676,7 +5680,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "38ef4a6dd69a7534";
+export const SERVED_CONTRACT = "b0e34013c483fe30";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

@@ -190,7 +190,7 @@ class RoundOutcome(FrozenModel):
     @property
     def proposed(self) -> dict[ArmKey, ArmState]:
         """The arms the round PROPOSED, in slot order: no reference it re-read."""
-        return {key: arm for key, arm in self.arms.items() if arm.role != MeasurementRole.PARENT}
+        return {key: arm for key, arm in self.arms.items() if arm.role.is_proposal}
 
     @property
     def candidates_scored(self) -> int:

@@ -346,8 +346,13 @@ export function roundRead(
   path: CyclePath,
   round: number,
   at: number | null = null,
+  unfiled = true,
 ): ReadDescriptor<RoundView> {
-  return once("round", cyclePathUrl("cycle-round", path, { round_num: String(round) }, at == null ? {} : { at: String(at) }));
+  const url = cyclePathUrl("cycle-round", path, { round_num: String(round) }, at == null ? {} : { at: String(at) });
+  // In flight it moves with its store. Filed, it reads once: its rows re-read the archive
+  // (`closed_rounds.py::walked_rows`), so no close stamps it, and a live store's version moves per tick.
+  if (!unfiled) return { ...once<RoundView>("round", url), auth: true };
+  return { ...byEtag<RoundView>("round", url), auth: true, subject: storeOf(path) };
 }
 
 export function roundAuditRead(path: CyclePath, round: number): ReadDescriptor<RoundAudit | null> {
@@ -635,27 +640,31 @@ export function stepsRead(path: CyclePath, limit: number, before: string | null)
   };
 }
 
-// The `pages` windows before `anchor` (a head window's `cursor_prev`), as one body oldest-first:
-// each page is its own `stepsRead`, so asking one more page re-validates the ones already held.
+// The windows before `anchor` (a served `cursor_prev`), as one body oldest-first, each page its own
+// `stepsRead`: `pages` of them, or back to the step (`newerThan`, an address) a page already shows,
+// which it leaves out — so a moved head meets the pages without moving them.
 export function earlierStepsRead(
   path: CyclePath,
   limit: number,
   anchor: string,
-  pages: number,
+  upTo: { pages: number } | { newerThan: string },
 ): ReadDescriptor<HierarchySteps> {
   const unit = encodeCyclePath(path);
+  const newerThan = "newerThan" in upTo ? upTo.newerThan : null;
+  const pages = "pages" in upTo ? upTo.pages : Infinity;
   return {
-    id: `earlier-steps${SEP}${unit}${SEP}${anchor}${SEP}${pages}`,
+    id: `earlier-steps${SEP}${unit}${SEP}${anchor}${SEP}${newerThan ?? pages}`,
     auth: true,
-    // One more page asked keeps the pages already shown.
-    keep: `earlier-steps${SEP}${unit}${SEP}${anchor}`,
+    // One more page asked keeps the pages shown; a moved head keeps the bridge to the same step.
+    keep: `earlier-steps${SEP}${unit}${SEP}${newerThan === null ? anchor : `to${SEP}${newerThan}`}`,
     load: async (signal) => {
       let steps: HierarchySteps["steps"] = [];
       let cursor: string | null = anchor;
       for (let page = 0; page < pages && cursor !== null; page++) {
         const window: HierarchySteps = await readThrough(stepsRead(path, limit, cursor), signal);
-        steps = [...window.steps, ...steps];
-        cursor = window.cursor_prev;
+        const met = window.steps.findIndex((s) => s.address === newerThan);
+        steps = [...window.steps.slice(met + 1), ...steps];
+        cursor = met >= 0 ? null : window.cursor_prev;
       }
       return { kind: "ok", data: { steps, cursor_prev: cursor }, validator: null };
     },

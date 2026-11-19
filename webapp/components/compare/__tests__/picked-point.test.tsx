@@ -7,14 +7,7 @@ import { clearReadCache } from "@/lib/read-cache";
 import { AuthProvider } from "@/lib/state/auth";
 import { ViewMemoryProvider } from "@/lib/state/view-memory";
 import { WorkspaceProvider } from "@/lib/state/workspace";
-import {
-  armReading,
-  currentRound,
-  dash,
-  hierarchyCandidate,
-  liveRow,
-  producerReading,
-} from "@/lib/test-fixtures";
+import { hierarchyCandidate, roundOfArms } from "@/lib/test-fixtures";
 import { usePickedPoint } from "../channel-hooks";
 import { NO_EDITS, ScenarioEditsProvider } from "../config-edit";
 
@@ -28,15 +21,8 @@ const ITEM: CompareItem = {
   headline: null,
 };
 
-// Round 1 still scoring on the picked point's own cycle: no round file, its row on the dashboard.
-const SCORING = dash({
-  producer: producerReading({ attached: true }),
-  current_round: currentRound({
-    round: 1,
-    candidates: [liveRow({ reading: armReading({ arm: ARM }), resolved_params: { temperature: 0.3 } })],
-  }),
-  round_axis: { completed: [], live: 1, position: 1, unfiled: 1 },
-});
+// Round 1 still scoring on the picked point's own cycle: no round file, the round read serves its arms.
+const SCORING = { ...roundOfArms(1, [{ ...ARM, resolved_params: { temperature: 0.3 } }]), unfiled: true };
 
 const EDITING = { edits: NO_EDITS, setEdits: () => {} };
 
@@ -53,21 +39,25 @@ function wrapper({ children }: { children: ReactNode }) {
 }
 
 describe("usePickedPoint — a point on a round still scoring", () => {
+  const asked: string[] = [];
   beforeEach(() => {
+    asked.length = 0;
     clearReadCache(true);
     vi.stubGlobal("fetch", async (url: string) => {
       const path = new URL(url, "http://x").pathname;
+      asked.push(path);
       if (path.endsWith("/auth/me")) return Response.json({ tenant_id: "t", user_id: "u" });
       if (path.endsWith("/hierarchy")) return Response.json({ entries: [] });
-      if (path.endsWith("/dashboard")) return Response.json(SCORING);
+      if (path.endsWith("/rounds/1")) return Response.json(SCORING);
       return new Response(null, { status: 404 });
     });
   });
 
-  it("reads its config and reading off the channel's own cycle, which this tab streams", async () => {
+  it("reads its config and reading off the round read alone, never the channel's dashboard", async () => {
     const { result } = renderHook(() => usePickedPoint(ITEM, PICKED, EMPTY_LINEAGE), { wrapper });
     await waitFor(() => expect(result.current.cfg?.config).toEqual({ temperature: 0.3 }));
     expect(result.current.reading?.arm).toEqual(ARM);
-    expect(result.current.roundRead.status).toBe("idle");
+    expect(result.current.unfiled).toBe(true);
+    expect(asked.some((p) => p.endsWith("/dashboard"))).toBe(false);
   });
 });

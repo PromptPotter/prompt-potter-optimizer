@@ -457,24 +457,25 @@ class CycleRoundParams(
     read=ReadKind.CYCLE_ROUND,
     route="/campaigns/{campaign_id}/cycles/{cycle_id}/rounds/{round_num}",
 ):
-    """One closed round: its last close's arms and verdict, and the rows it names, each carrying
-    its mark as ``status``.
+    """One round: a closed one's last close's arms and verdict, or the one no file holds yet.
 
-    A fork answers for the rounds it inherited; a round that does not stand closed is not found.
+    A fork answers for the rounds it inherited; any other round is not found.
     ``at`` is the dashboard read's: the round as it stood at that line of the cycle's own ledger.
     """
 
     round_num: int = Field(ge=0)
     at: int | None = Field(default=None, ge=0, description="A line of the leaf cycle's own ledger")
 
-    def answer(self, caller: Caller) -> RoundView:
-        cycle = self.viewed(caller)
-        closed = served_round(cycle.stores, cycle.hop, self.round_num, moment=cycle.moment(self.at))
-        if closed is None:
+    def served(self, cycle: ViewedCycle) -> RoundView:
+        round_ = served_round(cycle.stores, cycle.hop, self.round_num, moment=cycle.moment(self.at))
+        if round_ is None:
             raise NotFoundError(
-                f"Round {self.round_num} of '{cycle.hop.campaign_id}/{cycle.hop.cycle_id}' is not closed"
+                f"Round {self.round_num} of '{cycle.hop.campaign_id}/{cycle.hop.cycle_id}' is not served"
             )
-        return closed
+        return round_
+
+    def answer(self, caller: Caller) -> RoundView:
+        return self.served(self.viewed(caller))
 
 
 class CycleRoundAuditParams(

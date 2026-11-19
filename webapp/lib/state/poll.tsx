@@ -103,8 +103,8 @@ export function useViewedDashboard(): DashboardPoll {
 
 const RAY_WINDOW = 200;
 
-// How far back the operator paged the viewed cycle: naming no view, it outlives the ray's mount;
-// the pages themselves are `earlierStepsRead`'s, in the cache beside the head window.
+// How far back the operator paged the viewed cycle: naming no view, it outlives the ray's mount.
+// The pages ride the cursor the head had when first paged, so a moving head never slides them.
 const paging = createModuleStore<{ unit: string | null; anchor: string | null; pages: number }>({
   unit: null,
   anchor: null,
@@ -128,10 +128,18 @@ export function useTimeRay(): TimeRay {
   const headWindow = shownData(head);
   const paged = paging.useStore();
   const own = paged.unit === unit && paged.anchor !== null ? paged : null;
-  const earlierAsk = path && own?.anchor ? earlierStepsRead(path, RAY_WINDOW, own.anchor, own.pages) : null;
+  const anchor = own?.anchor ?? null;
+  const earlierAsk = path && anchor ? earlierStepsRead(path, RAY_WINDOW, anchor, { pages: paged.pages }) : null;
   const earlier = useRead(earlierAsk);
   const earlierId = earlierAsk?.id ?? null;
   const earlierWindow = shownData(earlier);
+  // A head that moved past the anchor meets the pages through one bridge: the steps before it,
+  // back to the newest one a page shows.
+  const newest = earlierWindow?.steps.at(-1)?.address ?? null;
+  const headCursor = headWindow?.cursor_prev ?? null;
+  const bridged = path && anchor && newest && headCursor && headCursor !== anchor;
+  const bridge = useRead(bridged ? earlierStepsRead(path, RAY_WINDOW, headCursor, { newerThan: newest }) : null);
+  const bridgeSteps = bridged ? shownData(bridge)?.steps : undefined;
   const cursor = own ? (earlierWindow?.cursor_prev ?? null) : (headWindow?.cursor_prev ?? null);
   const earlierStatus = earlier.status;
   const loadOlder = useCallback(() => {
@@ -146,8 +154,8 @@ export function useTimeRay(): TimeRay {
   const earlierSteps = earlierWindow?.steps;
   const headSteps = headWindow?.steps;
   const steps = useMemo(
-    () => [...(earlierSteps ?? []), ...(headSteps ?? [])],
-    [earlierSteps, headSteps],
+    () => [...(earlierSteps ?? []), ...(bridgeSteps ?? []), ...(headSteps ?? [])],
+    [earlierSteps, bridgeSteps, headSteps],
   );
   return { steps, head, earlier, hasMore: cursor !== null, loadOlder };
 }

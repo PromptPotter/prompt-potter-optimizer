@@ -15,7 +15,6 @@ export * from "./pipeline-layout";
 export * from "./pipeline-nodes";
 export * from "./prompt-fields";
 export * from "./prompt-segments";
-export * from "./round-candidates";
 export * from "./round-reading";
 export * from "./round-samples";
 export * from "./round-timeline";

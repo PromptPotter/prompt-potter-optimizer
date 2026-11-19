@@ -311,7 +311,7 @@ def _round_axis(state: LiveDashboardState, *, live: bool) -> RoundAxis:
         completed=completed,
         live=in_flight,
         position=in_flight if in_flight is not None else completed[-1] if completed else None,
-        unfiled=None if any(r.round == current for r in state.rounds) else current,
+        unfiled=state.unfiled(),
     )
 
 

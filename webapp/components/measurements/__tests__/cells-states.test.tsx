@@ -77,8 +77,8 @@ describe("a cells read's answer, as its panes say it", () => {
       gained: ["s1"],
       lost: [],
     };
-    view(<SubjectFlips vsOrigin={vsOrigin} partial={null} before={{ key: "a0", round: 0, label: "C0", title: "C0", row: null }}
-        after={{ key: "a1", round: 1, label: "C1.1", title: "C1.1", row: null }}
+    view(<SubjectFlips vsOrigin={vsOrigin} partial={null} before={{ key: "a0", round: 0, label: "C0", title: "C0" }}
+        after={{ key: "a1", round: 1, label: "C1.1", title: "C1.1" }}
       />);
     fireEvent.focus(screen.getByText("now right").parentElement!);
     expect(await screen.findByText(/Could not read the flipped cells\./)).toBeTruthy();

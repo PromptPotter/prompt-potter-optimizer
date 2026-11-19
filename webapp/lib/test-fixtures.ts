@@ -526,6 +526,7 @@ export function roundDoc(over: Partial<RoundView> = {}): RoundView {
     election: null,
     candidates: [],
     headline: null,
+    unfiled: false,
     ...over,
   };
 }

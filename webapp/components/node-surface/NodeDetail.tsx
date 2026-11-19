@@ -363,9 +363,8 @@ function CallRun({
   const usage = block?.usage;
   const variants = variantsOf(response);
   const { viewed } = useWorkspace();
-  const { arms: read } = useRound(variants ? (viewed?.path ?? null) : null, round);
-  // A parent re-read in this round was held by its own round's panels.
-  const arms = read.filter((a) => a.reading.arm.round === round);
+  // The round's own arms: the server lists no parent it re-read.
+  const { arms } = useRound(variants ? (viewed?.path ?? null) : null, round);
   const prefix = block?.prefix;
 
   // The ask carries the routing suffix; OpenRouter echoes `block.model` bare, dropping `:nitro`.

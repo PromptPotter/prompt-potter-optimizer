@@ -1,10 +1,9 @@
 import { useState, type ReactNode } from "react";
 import { useWorkspace } from "@/lib/state/workspace";
 import { useRound } from "@/lib/hooks/useRound";
-import { ARM_END_INFO } from "@/lib/api/types";
+import { ARM_END_INFO, type ServedArm } from "@/lib/api/types";
 import type { CellsPreset } from "@/lib/hooks/useCells";
 import { useViewedDashboard } from "@/lib/state/poll";
-import type { ArmRow } from "@/lib/types";
 import type { CandidateVerdict } from "@/lib/derivations";
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { fmtUnit, unitPlural } from "@/lib/format";
@@ -28,28 +27,28 @@ export function MeasurementRun({
   const { dash, isLive } = useViewedDashboard();
   const { viewed, pick, pickCandidate } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
-  const onSelectCandidate = (c: ArmRow | null): void => {
+  const onSelectCandidate = (c: ServedArm | null): void => {
     const arm = c?.reading.arm;
     pickCandidate(arm ? { round: arm.round, arm: arm.key } : null);
   };
   const {
     unfiled: isLiveView,
     read: roundRead,
-    rows: candidates,
+    arms: candidates,
     start,
     verdicts,
   } = useRound(viewedPath, round);
 
   const [candFilter, setCandFilter] = useState<string>("all");
   const picked = candidates.find((c) => c.reading.arm.key === candFilter);
-  const narrowTo = picked && picked.source !== "inflight" ? picked.reading.arm.key : undefined;
+  const narrowTo = picked && !isLiveView ? picked.reading.arm.key : undefined;
   const preset: CellsPreset = { round, scope: "cycle", candidateId: narrowTo };
   const oneCandidate = candFilter !== "all";
   const shown = oneCandidate
     ? candidates.filter((c) => c.reading.arm.key === candFilter)
     : candidates;
 
-  if (!dash || (!isLiveView && roundRead.status === "loading")) {
+  if (!dash || roundRead.status === "loading") {
     return (
       <Region>
         <Loading className="samples-empty">Loading round {round}…</Loading>
@@ -57,7 +56,7 @@ export function MeasurementRun({
     );
   }
   const unit = dash.measured_unit;
-  if (!isLiveView && roundRead.status === "failed") {
+  if (roundRead.status === "failed" && candidates.length === 0) {
     return (
       <Region>
         <FailureLine
@@ -109,7 +108,7 @@ export function MeasurementRun({
           const verdict = verdicts.get(arm.key);
           return (
             <section
-              key={c.key}
+              key={arm.key}
               className={`rsv-group${isCandSelected ? " selected" : ""}`}
             >
               <button
@@ -216,7 +215,7 @@ function Region({ children }: { children: ReactNode }) {
 }
 
 // `rejected`, never `0%`: an invalid arm holds no level.
-function segmentFor(c: ArmRow, verdict: CandidateVerdict | undefined): Segment<string> {
+function segmentFor(c: ServedArm, verdict: CandidateVerdict | undefined): Segment<string> {
   const { arm, own } = c.reading;
   if (c.reading.end === "invalid") {
     const reason = verdict?.failures[0]?.value;

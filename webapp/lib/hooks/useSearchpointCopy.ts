@@ -16,7 +16,7 @@ export interface SearchpointIdentity {
 }
 
 // The one copy of a searchpoint: a host names WHICH arm, and its spec, scores and cells are read
-// here off the round read (`useRound`, the dashboard while the round is unfiled) and the cells read.
+// here off the round read (`useRound`, filed or in flight) and the cells read.
 export function useSearchpointCopy({ path, round, arm, label, datasetName }: SearchpointIdentity): {
   choices: { key: string; label: string; data: unknown }[];
   cellsFailure: ReadFailure | null;

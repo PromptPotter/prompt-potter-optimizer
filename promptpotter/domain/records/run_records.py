@@ -299,7 +299,7 @@ class RoundStatement(RoundOutcome):
             candidates=[
                 DashboardCandidate(reading=reading)
                 for reading in self.arm_readings()
-                if reading.role != MeasurementRole.PARENT
+                if reading.role.is_proposal
             ],
             selection=list(dict.fromkeys(self.positions[key] for key, _, _ in longest)),
             health=RoundHealth.of(self.round, self.health),

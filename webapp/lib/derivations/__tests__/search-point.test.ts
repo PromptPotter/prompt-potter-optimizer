@@ -138,7 +138,7 @@ describe("resolveObserveSubject — best", () => {
     );
     expect(s.state).toBe("best");
     expect(s.point).toMatchObject({ round: 1, label: "C1.3" });
-    expect(s.point?.row?.reading.arm.key).toBe("r1c2");
+    expect(s.point?.key).toBe("r1c2");
   });
 
   it("badges the origin as `origin`, a promoted winner as `best`", () => {
@@ -192,18 +192,14 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
       ],
     }),
   });
-  const joined = (s: ObserveSubject) => {
-    const arm = s.point?.row?.reading.arm;
-    return arm !== undefined && arm.key === s.point?.key;
-  };
-  const level = (s: ObserveSubject) => s.point?.row?.reading.own?.fitness?.value;
+  // The point names its arm; the round read (`useRound`) is the one source of its reading.
+  const keyOf = (s: ObserveSubject) => s.point?.key;
 
   it("best: the last crown, with ITS round's reading while a later round held", () => {
     const s = resolveObserveSubject(closed, stood, false, NO_PICK);
     expect(s.state).toBe("best");
     expect(s.point).toMatchObject({ round: 1, label: "C1.2", title: "best · C1.2" });
-    expect(joined(s)).toBe(true);
-    expect(s.point?.row?.reading.election.selected).toBe(true);
+    expect(keyOf(s)).toBe("r1c1");
     expect(s.reading).toMatchObject({ round: 1, improved: true });
     expect(s.verdict).toMatchObject({ round: 2, improved: false });
     expect(s.round).toBe(1);
@@ -213,18 +209,16 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
   it("latest at rest: the served observed arm, and that round's verdict", () => {
     const s = resolveObserveSubject(closed, stood, false, asked("latest"));
     expect(s.point).toMatchObject({ round: 2, label: "C2.3", title: "latest · C2.3" });
-    expect(joined(s)).toBe(true);
+    expect(keyOf(s)).toBe("r2c2");
     expect(s.reading).toMatchObject({ round: 2, improved: false });
     expect(s.verdict).toBeNull();
   });
 
-  it("latest while live: the in-flight row, its fitness in hand, and no closed reading", () => {
+  it("latest while live: the in-flight arm, and no closed reading", () => {
     const s = resolveObserveSubject(running, stood, true, NO_PICK);
     expect(s.state).toBe("latest");
     expect(s.point).toMatchObject({ round: 3, label: "C3.2", title: "live — C3.2" });
-    expect(joined(s)).toBe(true);
-    expect(s.point?.row?.source).toBe("inflight");
-    expect(level(s)).toBe(0.75);
+    expect(keyOf(s)).toBe("C3.2");
     expect(s.reading).toBeNull();
     expect(s.round).toBe(3);
     expect(s.live).toBe(true);
@@ -246,15 +240,15 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     const one = resolveObserveSubject(closed, stood, false, { ...NO_PICK, round: 1 });
     expect(one.state).toBe("round");
     expect(one.point).toMatchObject({ round: 1, label: "C1.2", title: "round 1 · C1.2" });
-    expect(joined(one)).toBe(true);
+    expect(keyOf(one)).toBe("r1c1");
     const held = resolveObserveSubject(closed, stood, false, { ...NO_PICK, round: 2 });
     expect(held.point).toMatchObject({ round: 2, label: "C2.2" });
-    expect(joined(held)).toBe(true);
+    expect(keyOf(held)).toBe("r2c1");
     expect(held.reading?.round).toBe(2);
     expect(held.verdict).toBe(held.reading);
     const zero = resolveObserveSubject(closed, stood, false, { ...NO_PICK, round: 0 });
     expect(zero.point).toMatchObject({ round: 0, label: "C0", title: "round 0 · C0" });
-    expect(joined(zero)).toBe(true);
+    expect(keyOf(zero)).toBe("r0c0");
   });
 
   it("an asked-for state wins while it has a target, and is dropped when it has none", () => {
@@ -288,16 +282,13 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
 });
 
 describe("originPoint — the origin as the served tree names it", () => {
-  const snap = dash({ rounds: [crowned(0, 0, 1), crowned(1, 0, 2)] });
-
   it("addresses the origin by the arm key its own cycle speaks", () => {
-    const p = originPoint(snap, hierarchyCandidate("camp::cycle_a", { id: "r0c0", label: "C0" }));
-    expect(p).toMatchObject({ round: 0, label: "C0", title: "origin · C0" });
-    expect(p?.row?.reading.arm.key).toBe("r0c0");
+    const p = originPoint(hierarchyCandidate("camp::cycle_a", { id: "r0c0", label: "C0" }));
+    expect(p).toMatchObject({ round: 0, key: "r0c0", label: "C0", title: "origin · C0" });
   });
 
   it("is null until the tree names one — never round 0's first row", () => {
-    expect(originPoint(snap, null)).toBeNull();
+    expect(originPoint(null)).toBeNull();
   });
 });
 

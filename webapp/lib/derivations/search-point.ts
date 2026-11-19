@@ -9,9 +9,7 @@ import type {
   RunStanding,
   ServedArm,
 } from "@/lib/api/types";
-import type { ArmRow } from "@/lib/types";
 import { OBSERVE_STATES, type ObserveState } from "@/lib/address";
-import { rowAt } from "./round-candidates";
 import { roundReading, type RoundReading } from "./round-reading";
 
 const OBSERVE_LABELS: Record<ObserveState, string> = {
@@ -114,22 +112,19 @@ function roundObserveTarget(dash: ServedDashboard | null, round: number): Observ
   return dash?.rounds.find((x) => x.round === round)?.leading ?? null;
 }
 
+// Names the arm alone: its reading is the round read's (`useRound`), the one source of a round.
 export interface ObservePoint extends ObserveTarget {
   title: string;
-  row: ArmRow | null;
 }
 
-function pointAt(dash: ServedDashboard | null, target: ObserveTarget, title: string): ObservePoint {
-  return { ...target, title, row: rowAt(dash, target.key) };
+function pointAt(target: ObserveTarget, title: string): ObservePoint {
+  return { ...target, title };
 }
 
-export function originPoint(
-  dash: ServedDashboard | null,
-  origin: HierarchyCandidate | null,
-): ObservePoint | null {
+export function originPoint(origin: HierarchyCandidate | null): ObservePoint | null {
   if (!origin) return null;
   const { arm } = origin.facts.reading;
-  return pointAt(dash, arm, `origin · ${arm.label}`);
+  return pointAt(arm, `origin · ${arm.label}`);
 }
 
 export interface ObserveSelection {
@@ -193,7 +188,7 @@ export function resolveObserveSubject(
       selection.round,
     ),
     point: target
-      ? pointAt(dash, target, subjectTitle(state, target, state === "latest" && inFlight))
+      ? pointAt(target, subjectTitle(state, target, state === "latest" && inFlight))
       : null,
     reading,
     verdict:

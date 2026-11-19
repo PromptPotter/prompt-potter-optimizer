@@ -20,7 +20,13 @@ from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.cycle_paths import CycleHop, CyclePath, encode_cycle_path
+from promptpotter.domain.cycle_paths import (
+    CycleAt,
+    CycleDir,
+    CycleHop,
+    CyclePath,
+    encode_cycle_path,
+)
 from promptpotter.domain.dashboard_rows import ServedArm
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.hierarchy import HierarchySteps
@@ -29,6 +35,7 @@ from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
+from promptpotter.infrastructure.projections.live_dashboard import fold_at
 from promptpotter.infrastructure.store.family_ray_queries import (
     RayCursor,
     build_family_ray,
@@ -85,16 +92,22 @@ def round_audit(cycle: ViewedCycle, round_num: int) -> RoundAudit | None:
 
 
 class RoundView(StrictModel):
-    """One closed round as a surface reads it: its arms and its verdict. Its rows are the
-    measurement log's (`GET /datasets/{name}/cells`); what the engine banks beside them — folds,
-    diagnostics, optimizer state — stays on the ledger."""
+    """One round as a surface reads it, filed or not yet (`unfiled`): its arms and its verdict.
+    Its rows are the measurement log's (`GET /datasets/{name}/cells`); what the engine banks
+    beside them — folds, diagnostics, optimizer state — stays on the ledger."""
 
     round: int
     election: Election | None
-    candidates: list[ServedArm] = Field(description="Every arm the round read, in rank order.")
+    candidates: list[ServedArm] = Field(
+        description="The round's own arms, never the parent it re-read: a filed round's in rank "
+        "order, an unfiled one's as announced."
+    )
     headline: ArmReading | None = Field(
         description="The arm the round ENDED on (`election.ended_on`), read: the headline's "
         "numbers are its own."
+    )
+    unfiled: bool = Field(
+        description="No file holds it yet: its arms stream in, with no election or headline."
     )
 
 
@@ -107,6 +120,17 @@ def _closed(
 def served_round(
     stores: Stores, hop: CycleHop, round_num: int, *, moment: Moment | None
 ) -> RoundView | None:
+    # One series: a round no file holds yet (the dashboard's `unfiled`) is the fold's, merged here.
+    at = None if moment is None else moment.offset
+    state = fold_at(CycleAt(CycleDir(cycle_dir_for(stores.base_dir, hop)), hop, at))
+    if state is not None and state.unfiled() == round_num:
+        return RoundView(
+            round=round_num,
+            election=None,
+            candidates=[*state.current_round.candidates],
+            headline=None,
+            unfiled=True,
+        )
     campaign = stores.campaigns.campaign(hop.campaign_id)
     closed = _closed(stores, campaign, hop, round_num, moment=moment)
     if closed is None:
@@ -115,9 +139,12 @@ def served_round(
         round=closed.round,
         election=closed.election,
         candidates=[
-            ServedArm.of(row.reading, closed.arms[row.reading.arm.key]) for row in closed.scoreboard
+            ServedArm.of(row.reading, closed.arms[row.reading.arm.key])
+            for row in closed.scoreboard
+            if row.reading.role.is_proposal
         ],
         headline=closed.headline,
+        unfiled=False,
     )
 
 
