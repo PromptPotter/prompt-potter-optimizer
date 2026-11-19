@@ -572,7 +572,7 @@ class Escalation(nodes.Controller):
                 node=self.name,
                 knob=knob,
                 label=label,
-                value=None if value == "unbounded" else value,
+                value=value,
                 integer=True,
             )
             for knob, label, value in patiences

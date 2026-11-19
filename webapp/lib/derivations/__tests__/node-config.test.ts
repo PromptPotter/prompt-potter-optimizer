@@ -385,6 +385,8 @@ describe("parseParam (a value typed in, read by its served row)", () => {
   it("commits only what the served type reads as the typed value", () => {
     expect(parseParam(knob({}), "4")).toBe(4);
     expect(parseParam(knob({}), "1.5")).toBeUndefined();
+    expect(parseParam(knob({ options: ["unbounded"] }), "unbounded")).toBe("unbounded");
+    expect(parseParam(knob({}), "unbounded")).toBeUndefined();
     expect(parseParam(knob({}), "")).toBeUndefined();
     expect(parseParam(knob({ integer: false }), "0.05")).toBe(0.05);
     expect(parseParam(knob({ integer: false, nullable: true }), " ")).toBeNull();

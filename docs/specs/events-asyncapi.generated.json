@@ -5460,6 +5460,10 @@
                 "type": "number"
               },
               {
+                "const": "unbounded",
+                "type": "string"
+              },
+              {
                 "type": "null"
               }
             ],

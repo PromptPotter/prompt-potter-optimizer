@@ -2294,7 +2294,7 @@ export interface OptimizerLimit {
   node: string;
   knob: string;
   label: string;
-  value: number | null;
+  value: number | 'unbounded' | null;
   integer: boolean;
 }
 
@@ -5732,7 +5732,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "239b635101ff7db2";
+export const SERVED_CONTRACT = "f55584ec646b9107";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

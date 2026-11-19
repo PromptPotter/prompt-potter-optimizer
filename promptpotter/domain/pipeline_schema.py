@@ -728,22 +728,25 @@ def _knob_row(row: NodeConfigParam, node: "PipelineNode") -> NodeConfigParam:
         defs[ref["$ref"].rsplit("/", 1)[-1]] if "$ref" in ref else ref
         for ref in prop.get("anyOf") or [prop]
     ]
-    kind = next(o for o in options if o.get("type") != "null")
-    enum = [str(v) for v in kind.get("enum") or ([kind["const"]] if "const" in kind else [])]
+    typed = [o for o in options if o.get("type") != "null"]
+    # Every arm is read: a word arm (`unbounded`) is an option beside a number arm's value.
+    words = [str(v) for o in typed for v in o.get("enum") or ([o["const"]] if "const" in o else [])]
+    valued = [o for o in typed if "enum" not in o and "const" not in o]
+    kind = valued[0] if valued else typed[0]
     description = str(prop.get("description") or "")
     json_type = kind.get("type") or ("object" if "properties" in kind else "string")
     return row.model_copy(
         update={
             "declared": prop["default"],
-            "kind": "enum" if enum else _knob_kind(json_type),
+            "kind": _knob_kind(json_type) if valued else "enum",
             "integer": kind.get("type") == "integer",
             "nullable": any(o.get("type") == "null" for o in options),
             "minimum": kind.get("minimum"),
             "exclusive_minimum": kind.get("exclusiveMinimum"),
             "maximum": kind.get("maximum"),
             "exclusive_maximum": kind.get("exclusiveMaximum"),
-            "options": enum,
-            "permitted": enum,
+            "options": words,
+            "permitted": words,
             "description": _plain(description),
             "summary": _summary(description),
         }
