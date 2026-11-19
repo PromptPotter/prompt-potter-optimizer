@@ -278,7 +278,7 @@ def _call_record(
 ) -> LLMCallRecord:
     """Enough to rebuild the request beside what came back: the config, prompt and schema sent."""
     merged = call.merged
-    config = {"temperature": _sampled_at(merged), "route_order": merged.route_order or None}
+    config = {"temperature": _sampled_at(merged), "route_order": call.request.route_order}
     keys = ("model", "max_tokens", "reasoning_effort", "top_p", "seed")
     asked = {"type": call.label, "config": merged.model_dump(include=set(keys)) | config}
     asked |= trace_meta or {"messages": call.request.messages}
@@ -354,8 +354,7 @@ async def llm_call(
             reasoning_effort=merged.reasoning_effort,
             top_p=merged.top_p,
             seed=merged.seed,
-            # An empty route pins nothing, so it is no request for one.
-            route_order=merged.route_order or None,
+            route_order=merged.route_order,
         ),
         context=context,
         injections=injections,

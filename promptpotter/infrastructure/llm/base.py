@@ -91,6 +91,11 @@ class ChatRequest:
     route_order: list[str] | None = None
     tools: tuple[Tool, ...] | None = None
 
+    def __post_init__(self) -> None:
+        # An empty route pins nothing, so it is no request for one.
+        if not self.route_order:
+            object.__setattr__(self, "route_order", None)
+
     @functools.cached_property
     def wire_schema(self) -> dict[str, Any] | None:
         """The schema SENT, titles stripped: the client sends it and `hash_call` keys on it."""

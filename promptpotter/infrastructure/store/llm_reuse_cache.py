@@ -11,6 +11,7 @@ from typing import Any
 
 from promptpotter.domain.spend import TokenUsageKind
 from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
+from promptpotter.infrastructure.llm.openai_compat import sent_effort
 from promptpotter.infrastructure.llm.telemetry import (
     call_price,
     claim_call_price,
@@ -33,7 +34,7 @@ def hash_call(request: ChatRequest, *, provider: str) -> str:
         "json_schema": request.wire_schema,
         "seed": request.seed,
         "max_tokens": request.max_tokens,
-        "reasoning_effort": request.reasoning_effort,
+        "reasoning_effort": sent_effort(request.reasoning_effort),
         "route_order": request.route_order,
         "top_p": request.top_p,
     }
