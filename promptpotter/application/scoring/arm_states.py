@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import Any
 
-from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.scoring.search_point_scorer import SCORING_ERROR_ABORT, ScoredWalk
 from promptpotter.domain.arms import (
     Broken,
@@ -21,13 +20,11 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.phases import WalkEnd
 from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.sample import ArchiveEntry
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
 from promptpotter.shared.errors import ErrorCategory
-
-if TYPE_CHECKING:
-    from promptpotter.application.initialization.session import Session
 
 _CONFIG_DETERMINISTIC_ABORT = frozenset({ErrorCategory.CLIENT.value, ErrorCategory.PIPELINE.value})
 
@@ -72,40 +69,26 @@ def read_breakage(
     )
 
 
-class FiledIds(TypedDict):
-    sp_hash: str
-    config_key: str
-
-
-def filed_ids(sp: JobSearchPoint, session: Session) -> FiledIds:
-    """*sp*'s two ids off the entry the gateway files its cells under: ``sp_hash`` what it sends,
-    ``config_key`` its archive address, under the session's cell identity."""
-    entry = archive_entry(
-        sp,
-        dataset_hash=session.bank.dataset_hash,
-        pipeline_schema=session.pipeline_schema,
-        cell_identity=session.cell_identity,
-    )
-    return FiledIds(sp_hash=entry.prompt_fields_id, config_key=entry.config_key)
-
-
 def measuring(
     arm: Proposed,
     sp: JobSearchPoint,
-    session: Session,
+    entry: ArchiveEntry,
     *,
     expected: int,
     sample_order: Sequence[int] = (),
     n_priors: int = 0,
     block: Mapping[str, int] | None = None,
 ) -> Measuring:
+    """*entry* is the one *sp*'s cells are filed under (`search_point_scorer.py::filed_entry`):
+    ``sp_hash`` what it sends, ``config_key`` its archive address."""
     return Measuring(
         role=arm.role,
         position=arm.position,
         individual=arm.individual,
         overlay=arm.overlay,
         validation_failures=arm.validation_failures,
-        **filed_ids(sp, session),
+        sp_hash=entry.prompt_fields_id,
+        config_key=entry.config_key,
         resolved_params=sp.config_params.dump(),
         sample_order=list(sample_order),
         n_priors=n_priors,

@@ -69,7 +69,7 @@ def origin_content_hash(
     answer_terms: Collection[str],
 ) -> str:
     """What the origin SENDS over its rows: a cell's identity is not in it, and is checked beside it
-    off the cycle's drawn record (`PartitionRecord.cell_identity`)."""
+    off the cycle's drawn record (`CampaignSurvey.drawn`)."""
     return points.job(origin).content_hash(dataset, answer_terms=answer_terms)[:12]
 
 

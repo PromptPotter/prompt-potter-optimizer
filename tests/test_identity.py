@@ -216,10 +216,10 @@ from promptpotter.application.runner.inner.spawn import (
 )
 from promptpotter.application.runner.inner.tasks import InnerTasks, inner_instrument_config
 from promptpotter.application.runner.round import author_arm, run_init
-from promptpotter.application.scoring.arm_states import filed_ids
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
+from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.config import paths
 from promptpotter.config.paths import (
     block_packs_root,
@@ -4155,7 +4155,7 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
                 "parent",
                 individual=ind,
                 resolved_params=points.job(ind).config_params.dump(),
-                **filed_ids(points.job(ind), reflected_on.cycle.session),
+                filed=filed_entry(points.job(ind), reflected_on.cycle.session),
             )
             for ind in (origin, *held)
         ]

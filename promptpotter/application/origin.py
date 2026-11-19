@@ -21,7 +21,7 @@ from promptpotter.application.scoring.formula.compiler import (
     realize_dials,
 )
 from promptpotter.application.scoring.metrics import compute_composite_fitness
-from promptpotter.application.scoring.search_point_scorer import ScoredWalk
+from promptpotter.application.scoring.search_point_scorer import ScoredWalk, filed_entry
 from promptpotter.domain.arms import ArmPosition, Concluded, Proposed
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
@@ -234,7 +234,7 @@ def seat_campaign_origin(
     unmeasured = measuring(
         proposed,
         sp,
-        session,
+        filed_entry(sp, session),
         expected=len(scoring_set),
         sample_order=[s.id for s in scoring_set],
     )

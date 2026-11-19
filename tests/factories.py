@@ -58,9 +58,9 @@ from promptpotter.application.runner.inner import spawn
 from promptpotter.application.runner.inner.tasks import cell_optimizer
 from promptpotter.application.runner.loop import walk_round_zero
 from promptpotter.application.runner.mint import open_launch
-from promptpotter.application.scoring.arm_states import filed_ids
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, mean_lift
+from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.config.paths import default_projects_root, install_datasets_root, user_data_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import (
@@ -340,10 +340,11 @@ def arm_state(
     invalid_reason: ValidationReason | None = None,
     locked_in: bool = False,
     elimination: dict[str, Any] | None = None,
+    filed: ArchiveEntry | None = None,
     **overrides: Any,
 ) -> Cut | Measured:
     """A concluded arm whose individual is named by *name*; ``position=None`` is a reference arm, a
-    round-0 position the origin."""
+    round-0 position the origin. *filed* is the entry its cells are filed under, else *name* ids it."""
     failures = (
         [ValidationFailure(axis="prompt_fields", value="", allowed=[], reason=invalid_reason)]
         if invalid_reason
@@ -361,8 +362,8 @@ def arm_state(
         "position": position,
         "individual": prompted(instruction=name),
         "validation_failures": failures,
-        "sp_hash": name,
-        "config_key": name,
+        "sp_hash": name if filed is None else filed.prompt_fields_id,
+        "config_key": name if filed is None else filed.config_key,
         "resolved_params": {},
         "expected_samples": total,
     } | overrides
@@ -688,7 +689,7 @@ def seat(
             position=ArmPosition(round=0, idx=0, total=1),
             individual=individual,
             resolved_params=sp.config_params.dump(),
-            **filed_ids(sp, session),
+            filed=filed_entry(sp, session),
         )
         seated = Cycle.start(
             ReadArm(ArmKey(individual.id), c0, read(session)),
