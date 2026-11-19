@@ -6650,7 +6650,7 @@
                 "type": "null"
               }
             ],
-            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
             "title": "Leading"
           },
           "reelection": {

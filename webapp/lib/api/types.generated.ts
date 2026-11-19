@@ -2525,8 +2525,8 @@ export interface Election {
   /** The ONE arm this round is read off, as its selector named it and never re-
    * ranked: the selection where there is one, on a held round the challenger
    * that came closest on the selector's own objective, at round 0 the origin.
-   * Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT
-   * whose numbers the headline carries: that is `ended_on`. */
+   * Rank 1 of `RoundView.candidates`. `null` where the selector could read no
+   * arm. NOT whose numbers the headline carries: that is `ended_on`. */
   leading: string | null;
   /** WHOSE numbers the round's headline carries: the selection where the round
    * selected; on a held round the retained parent, re-read on this round's
@@ -5728,7 +5728,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "1226538f7edf5d86";
+export const SERVED_CONTRACT = "7cb72928f0f50a36";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
