@@ -1291,7 +1291,29 @@ def run_terminal(
     sys.argv = ["promptpotter", *(new if verb == "new" else [verb])]
     # A child of a pool thread may inherit SIGINT ignored; a terminal's process never does.
     signal.signal(signal.SIGINT, signal.default_int_handler)
-    cli_main.main()
+    try:
+        cli_main.main()
+    finally:
+        (workspace / f"{verb}.json").write_text(json.dumps(left(stores)), encoding="utf-8")
+
+
+def left(stores: Stores) -> dict[str, Any]:
+    """What a terminal leg left, read by its own process: a store builds only in its own home."""
+    (campaign_id,) = stores.campaigns.list_campaign_ids()
+    (cycle,) = stores.campaigns.campaign_cycle_dirs(campaign_id)
+    hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle.name)
+    state = stores.run_state(hop)
+    jobs = [json.loads(p.read_text(encoding="utf-8")) for p in stores.jobs_dir.glob("*.json")]
+    (mint,) = _commands(stores, WORKSPACE_SUBJECT)[CommandKind.MINT_CAMPAIGN]
+    assert isinstance(mint, MintCampaignPayload)
+    started = _commands(stores, subject_key(stores.subject(hop))).get(CommandKind.START_RUN, [])
+    return {
+        "state": str(state),
+        "phase": state.run_phase,
+        "held": state.producer.attached or any(j["released_at"] is None for j in jobs),
+        "minted_config": mint.campaign_config is not None,
+        "started": len(started),
+    }
 
 
 def _commands(stores: Stores, subject: str) -> dict[CommandKind, list[CommandPayload]]:
@@ -1310,28 +1332,19 @@ def interrupted(
     workspace.mkdir()
     if (rc := spawn_terminal(workspace, "new", interrupts)) != StopOutcome.PAUSED.exit_code:
         return False, f"`new` under {interrupts} SIGINT exited {rc}, not as a pause does"
-    projects = Path(long_path(data_root(workspace))) / PROJECTS_DIR
-    stores = build_stores(default_identity(), projects_root=projects)
-    (campaign_id,) = stores.campaigns.list_campaign_ids()
-    (cycle,) = stores.campaigns.campaign_cycle_dirs(campaign_id)
-    hop = CycleHop(campaign_id=campaign_id, cycle_id=cycle.name)
-    stopped = stores.run_state(hop)
-    jobs = [json.loads(p.read_text(encoding="utf-8")) for p in stores.jobs_dir.glob("*.json")]
-    if stopped.producer.attached or any(j["released_at"] is None for j in jobs):
-        return False, f"`new` exited 130 still holding its cycle or its slot ({stopped})"
-    if interrupts == 1 and stopped.run_phase is not RunPhase.PAUSED:
-        return False, f"one SIGINT left the cycle {stopped.run_phase}, not paused"
-    (mint,) = _commands(stores, WORKSPACE_SUBJECT)[CommandKind.MINT_CAMPAIGN]
-    assert isinstance(mint, MintCampaignPayload)
-    if mint.campaign_config is None:
+    stopped = json.loads((workspace / "new.json").read_text(encoding="utf-8"))
+    if stopped["held"]:
+        return False, f"`new` exited 130 still holding its cycle or its slot ({stopped['state']})"
+    if interrupts == 1 and stopped["phase"] != RunPhase.PAUSED:
+        return False, f"one SIGINT left the cycle {stopped['phase']}, not paused"
+    if not stopped["minted_config"]:
         return False, "the mint-campaign record carries no config"
     if rc := spawn_terminal(workspace, "resume", 0):
         return False, f"`resume` after {interrupts} SIGINT exited {rc}"
-    ended = stores.run_state(hop)
-    started = _commands(stores, subject_key(stores.subject(hop))).get(CommandKind.START_RUN, [])
-    if ended.run_phase is not RunPhase.TERMINAL or len(started) != 1:
-        return False, f"`resume` left the cycle {ended.run_phase} on {len(started)} start-run"
-    return True, f"exit 130 {stopped.run_phase}, slot released; `resume` ran it to its end"
+    ended = json.loads((workspace / "resume.json").read_text(encoding="utf-8"))
+    if ended["phase"] != RunPhase.TERMINAL or ended["started"] != 1:
+        return False, f"`resume` left the cycle {ended['phase']} on {ended['started']} start-run"
+    return True, f"exit 130 {stopped['phase']}, slot released; `resume` ran it to its end"
 
 
 async def run_arms(

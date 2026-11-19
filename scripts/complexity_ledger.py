@@ -171,7 +171,7 @@ BASELINE = {
     # verify's band of fresh − recorded, and `declared_two_valued`, the one check of a declaration.
     # link 4 (+4): `metric_measurand` maps the core `fitness` channel to its grade, nothing else.
     # store-3 (+14): a draft is a third deleted unit (`io.py::_ANCHORS`), and an anchor is matched
-    # whole from the data root (`io.py::_plain`), so a nested root and a slug `projects/a/campaigns/b` write.
+    # whole from the data root (`io.py::_place`), so a nested root and a slug `projects/a/campaigns/b` write.
     # store-3b (+5): `io.py::claim_dir`, a campaign's exclusive create through io; `_created` answers
     # "gone" only where the unit is absent. `cycle_reads.py::write_export` (+1): an export follows the umask.
     # inner-1 (+7): `InstrumentMode.enclosed_as`, the spawner's kind off the inner's `filed_as`; the
@@ -180,7 +180,7 @@ BASELINE = {
     # sides spread, else Newcombe's construction over each side's band, a constant side's its support's).
     # rates-3 (+9): `RatesFile` holds its last try, last fetch and standing fault, and
     # `RatesFile.unfetched` says them to the sweep's rates step; one cache reader (`_cached`) (−8).
-    # desk (+3): `io.py::_plain` says why it resolves (8.3 names, links) and `_created` why it makes
+    # desk (+3): `io.py::_place` says why it resolves (8.3 names, links) and `_created` why it makes
     # the dirs on the path as given; `permitted_narrowing` takes `at: Campaign | CampaignCycle`.
     # rates-4 (+14): `refresh_route_answers` returns each row it left with the answer it keeps and
     # its age; `reaper.py::_recorded` is a step's one recorder, the reclaim's own step `orphans`.
@@ -192,7 +192,9 @@ BASELINE = {
     # rk-dec-3 link 1 (+21): `phase.py::render_noise_walk`, the round readout's μ0, τ and hold off
     # the round `served_rounds` serves the dashboard at that close. link 2 (+16): the cycle read
     # names its headline's column (`Election.ended_on`), the one an unfiltered spread reads.
-    "package_lines": 112186,
+    # store-4 (+7): `io.py::refuse_off_workspace` matches a store's workspace to `WORKSPACE_SHAPES`
+    # through the anchor's own `_place` (one compare, `_plain` folded in).
+    "package_lines": 112193,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

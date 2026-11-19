@@ -847,10 +847,11 @@ def _writes_under(
     }
 
 
-def test_a_store_off_the_data_root_io_places_from_is_refused(tmp_path: Path) -> None:
-    # Off it, io's anchor never binds: a write into a deleted cycle re-makes it.
-    with pytest.raises(ValueError, match="not under the data root"):
-        build_stores(default_identity(), projects_root=tmp_path / "projects")
+def test_a_store_off_a_workspace_shape_is_refused(tmp_path: Path) -> None:
+    # Off them, io's anchor never binds: a write into a deleted cycle re-makes it.
+    for root in (tmp_path / "projects", user_data_root() / "projects" / "x" / "projects"):
+        with pytest.raises(ValueError, match="is no workspace of the data root"):
+            build_stores(default_identity(), projects_root=root)
 
 
 def test_a_write_past_its_campaigns_delete_answers_not_found_and_makes_no_campaign_dir(

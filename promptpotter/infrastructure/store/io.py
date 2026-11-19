@@ -116,11 +116,6 @@ def _long_path(p: str | Path) -> str:
     return "\\\\?\\" + os.path.abspath(s)
 
 
-def _plain(p: str | Path) -> Path:
-    """One spelling of a path for the anchor's compare: absolute, links and 8.3 short names resolved."""
-    return Path(os.path.realpath(str(p).removeprefix("\\\\?\\")).removeprefix("\\\\?\\"))
-
-
 def unlink_robust(path: Path) -> None:
     for attempt in range(4):
         try:
@@ -266,6 +261,21 @@ _ANCHORS = tuple(
 ) + tuple((f"{workspace}/{DRAFTS_DIR}/*", "draft") for workspace in WORKSPACE_SHAPES)
 
 
+def _place(path: Path) -> Path | None:
+    """*path* from the data root, both absolute, links and 8.3 names resolved; ``None`` off it."""
+    path, root = (
+        Path(os.path.realpath(str(p).removeprefix("\\\\?\\")).removeprefix("\\\\?\\"))
+        for p in (path, user_data_root())
+    )
+    return path.relative_to(root) if path.is_relative_to(root) else None
+
+
+def refuse_off_workspace(workspace: Path) -> None:
+    """A workspace stands at one of `WORKSPACE_SHAPES`, or no anchor binds under it."""
+    if not ((rel := _place(workspace)) and any(rel.full_match(s) for s in WORKSPACE_SHAPES)):
+        raise ValueError(f"{workspace} is no workspace of the data root {user_data_root()}")
+
+
 def claim_dir(directory: Path) -> None:
     """THE dir maker, by `_created`'s rule: exclusive, so a dir that stands raises `FileExistsError`."""
     _created(directory, lambda: os.mkdir(_long_path(directory)))
@@ -285,12 +295,11 @@ def _created[T](path: Path, create: Callable[[], T]) -> T:
         return create()
     except FileNotFoundError as missing:
         # Matched whole from the data root, normalized first: a `..` reaches no anchor unseen.
-        parent, root = _plain(path).parent, _plain(user_data_root())
-        rel = parent.relative_to(root) if parent.is_relative_to(root) else None
-        if unit := next((u for shape, u in _ANCHORS if rel and rel.full_match(shape)), None):
-            if os.path.isdir(_long_path(parent)):
+        rel = _place(path)
+        if rel and (unit := next((u for s, u in _ANCHORS if rel.parent.full_match(s)), None)):
+            if os.path.isdir(_long_path(user_data_root() / rel.parent)):
                 raise  # The unit stands: what vanished is the create's own (a swept temporary).
-            raise NotFoundError(f"{unit} {parent.name!r} is gone") from None
+            raise NotFoundError(f"{unit} {rel.parent.name!r} is gone") from None
         # The path as given, never its resolved spelling: a dangling link's target is made by no write.
         make_dirs(path.parent)
         try:

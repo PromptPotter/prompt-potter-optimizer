@@ -715,18 +715,20 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   inside the root's reads `clean`. Action: decide which narrowing a launch at a hop answers to (the
   babysit act, decisions.md § 0005) and read it there. **Re-test:** a launch at a fork whose line
   narrowed a model steers to the root-only model and reads `babysat`.
-- **A store under the data root off its workspace shapes** (tests-x's report): `build_stores` refuses
-  only a root outside `user_data_root()`; one under it matching no `io.py::WORKSPACE_SHAPES` (say
-  `<home>/projects/x/projects`) still builds, and io's anchor never binds there. The one holder is
-  `scripts/offline_run.py::interrupted`, which builds Stores over a child leg's data root from the
-  parent. Root: the parent reads a leg through the leg's own process, then `build_stores` matches the
-  shapes. **Re-test:** `build_stores` on `<home>/projects/x/projects` raises.
-- **io's path spelling is private** (tests-x's report): `stores.py::build_stores` imports
-  `io.py::_plain`, the one spelling of a path for the anchor's compare. Root: io names it publicly.
-  **Re-test:** `git grep -c "import.*_plain" -- promptpotter` is 0 outside io.
 
-### wave-5 · rates (what rates-4 left at its landing)
+### wave-5 · rates (what rates-5 left at its landing)
 
+- **An orphan reclaim is observed by its count** (rates-5's report): `reaper.py::reclaim_orphan_sandboxes`
+  returns a reclaimed count `reaper.py::sweep` discards, read only by tests, and swallows an `OSError`
+  on a sandbox's delete, so a sandbox that cannot be deleted is reported nowhere (not in
+  `machine-status`). Root: it returns its faults to `_recorded` as the sweep does, and the facts read
+  the sandbox dir. **Re-test:** `git grep -c "except OSError:" --
+  promptpotter/application/jobs/reaper.py` == 0.
+- **The bench-defaults pin walks code defaults that no longer exist** (cfg-3's report):
+  `config_map.py::bench_defaults_pin` hashes `_leaf_defaults(CampaignConfig)` beside `defaults.yaml`;
+  since cfg-3 every value that walk sees is an absence, so it re-keys nothing, and `_models_in` is a
+  second model-tree walker beside the import check in `campaign_config.py`. Root: the pin is
+  `defaults.yaml`'s hash alone. **Re-test:** `git grep -c "_leaf_defaults" -- promptpotter` == 0.
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
