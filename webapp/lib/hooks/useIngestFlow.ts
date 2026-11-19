@@ -124,10 +124,10 @@ export function useIngestFlow({
   // How a queued Start ended unminted, beside Start as its own refusal would be.
   const [unminted, setUnminted] = useState<CommandFailure | null>(null);
   // Every write rides a slot; a draft's edits are a queue on one, so overlapping blurs land in order.
-  const opening = useCommand<"upload" | "dataset" | "origin">("checkin-open", { scope: subject });
-  const resolving = useCommand<"resolve">("checkin-resolve", { scope: draftId });
-  const writing = useCommand<"edit" | "library">("checkin-edit", { scope: draftId });
-  const starting = useCommand<"start">("checkin-start", { scope: draftId });
+  const opening = useCommand<"upload" | "dataset" | "origin">("checkin-open", subject);
+  const resolving = useCommand<"resolve">("checkin-resolve", draftId);
+  const writing = useCommand<"edit" | "library">("checkin-edit", draftId);
+  const starting = useCommand<"start">("checkin-start", draftId);
   // A counter, not a boolean: the first queued edit to land must not clear a sibling's flag.
   const [pendingPatches, setPendingPatches] = useState(0);
   const draftWrites = useRef<Promise<unknown>>(Promise.resolve());

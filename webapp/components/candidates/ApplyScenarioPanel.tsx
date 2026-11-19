@@ -2,7 +2,7 @@ import { useState } from "react";
 import { commands, cycleAddress } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { FailureLine, HoverCard } from "@/components/ui";
-import type { CyclePath } from "@/lib/ids";
+import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 
 export function ApplyScenarioPanel({
   path,
@@ -17,7 +17,7 @@ export function ApplyScenarioPanel({
   divergentRound: number | null;
   nextRound: number;
 }) {
-  const cmd = useCommand<"apply-scenario">("apply-scenario");
+  const cmd = useCommand<"apply-scenario">("apply-scenario", path && encodeCyclePath(path));
   const [done, setDone] = useState(false);
 
   if (!criterion || !path) return null;

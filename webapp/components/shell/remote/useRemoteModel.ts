@@ -19,7 +19,7 @@ export function useRemoteModel() {
   const viewedPath = viewed?.path ?? null;
   const leafEntry = useEntry(viewedPath ? encodeCyclePath(viewedPath) : null);
   const { dash, isLive } = useViewedDashboard();
-  const cmd = useCommand<"skip" | "sample-lookahead">("remote-control");
+  const cmd = useCommand<"skip" | "sample-lookahead">("remote-control", viewed?.address ?? null);
   const [shown, setShown] = useState<Shown | null>(null);
   const isOuterView = (viewedPath?.length ?? 1) === 1;
 

@@ -27,8 +27,10 @@ export function useRunControl(): RunControl | null {
   const { dash } = useViewedDashboard();
   const { viewed } = useWorkspace();
   const viewedPath = viewed?.path ?? null;
-  const cmd = useCommand<"pause" | "start-run">("run-control");
-  const [pausing, setPausing] = useState(false);
+  const address = viewed?.address ?? null;
+  const cmd = useCommand<"pause" | "start-run">("run-control", address);
+  // The address a pause was pressed on: its note is that cycle's alone.
+  const [pausedAt, setPausedAt] = useState<string | null>(null);
 
   const runPhase = dash?.run_phase;
   const admission = dash?.admission;
@@ -38,7 +40,7 @@ export function useRunControl(): RunControl | null {
   const [prevRunPhase, setPrevRunPhase] = useState(runPhase);
   if (runPhase !== prevRunPhase) {
     setPrevRunPhase(runPhase);
-    if (!phaseWalks(runPhase)) setPausing(false);
+    if (!phaseWalks(runPhase)) setPausedAt(null);
   }
 
   if (!viewedPath) return null;
@@ -46,7 +48,7 @@ export function useRunControl(): RunControl | null {
   const toggle = () => {
     if (action === null) return;
     if (action === "pause") {
-      setPausing(true);
+      setPausedAt(address);
       void cmd.run("pause", () => commands["pause"](cycleAddress(viewedPath)));
       return;
     }
@@ -71,7 +73,7 @@ export function useRunControl(): RunControl | null {
     running: action === "pause",
     pending: cmd.pending !== null,
     // A refused pause retires the note, or it promises a wait that never ends.
-    pausing: pausing && cmd.failure === null,
+    pausing: pausedAt === address && cmd.failure === null,
     pausingNote: dash
       ? `Finishing ${phasePauseLabel(dash.state, dash.optimizer_step)} — will pause after the current sample.`
       : "",

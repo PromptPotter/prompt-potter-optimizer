@@ -20,8 +20,8 @@ export function LiveSegment({
   listening: boolean;
   decision: ActivityDecision | null;
 }) {
-  const cmd = useCommand<string>("decision");
   const { viewed } = useWorkspace();
+  const cmd = useCommand<string>("decision", viewed?.address ?? null);
   const viewedPath = viewed?.path ?? null;
 
   const now = listening ? (status ?? { tone: "quiet" as const, label: "Listening for activity…", detail: null }) : null;

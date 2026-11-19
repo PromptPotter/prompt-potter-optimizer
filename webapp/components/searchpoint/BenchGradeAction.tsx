@@ -11,8 +11,8 @@ export function BenchGradeAction() {
   const { viewed } = useWorkspace();
   const status = useViewedCycle()?.facts.bench?.status ?? null;
   const scope = viewed?.address ?? null;
-  const cmd = useCommand<"held-out">("held-out", { scope });
-  const stop = useCommand<"cancel">("cancel", { scope });
+  const cmd = useCommand<"held-out">("held-out", scope);
+  const stop = useCommand<"cancel">("cancel", scope);
   const [acting, setActing] = useState<string | null>(null);
   if (!viewed || !status?.offered) return null;
   const grading = cmd.pending !== null || status.refusal === "in_flight";

@@ -464,9 +464,11 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `onboarding.css:44`). Action: each size reads a token of
   `webapp/app/styles/foundation/tokens.css`, fields skin in `base.css` alone, and a gate check holds
   the literal count to a falling baseline. **Rides with:** webd. **Re-test:** the check's baseline is 0.
-- **The webapp's live state lands on the wrong subject or the wrong version** (a live-state pass;
-  reported unless ✓): ✓ 20 of 30 `useCommand` slots pass no `scope`, so their answer lands on
-  whatever subject is in view; feed versions are unordered hashes
+- **The webapp's live state lands on the wrong subject or the wrong version** (a live-state pass,
+  reported): view state a surface holds for its subject is not keyed by address
+  (`VerifyAction.tsx:48`'s `acting` and `saturated` reset on `candidate.arm` alone, so its stop and
+  saturated note paint on another cycle; `ApplyScenarioPanel.tsx:21`'s `done` survives a moved
+  `path`; cmd-2's report, the shape `useRunControl`'s `pausedAt` closed); feed versions are unordered hashes
   (`cycle_reads.py:221-224`, a sha of `repr`), so a stale read reverts a draft edit, an ack shows applied
   before the feed moves, and a second press files a second start-run (root: a monotone version per
   subject); time-ray pages are not contiguous with the head (earlier
@@ -474,10 +476,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   sources, `useRound.ts:40-46`); the feed opens on any subscription, auth or not (`read-cache.ts::subscribe` →
   `read-cache.ts::openFeed`); `dropCachedRead` runs while the read has subscribers (`read-cache.ts::dropCachedRead`, caller
   `useIngestFlow.ts:374`). **Rides with:** webd.
-- **A caller's throwing `then` reads as the server's refusal** (live-1's report): `useCommand.ts::run`
-  calls `then` inside the send's `try`, so a programmer bug in a caller lands as an operator
-  `failure` with a server failure kind. Action: `then` runs after the send settled and its throw is an
-  incident (`reportIncident`), never a `CommandFailure`; `run` still never throws. **Rides with:** webd.
 - **The served contract has three hand copies** (✓): `commands.ts:103-108` hand-writes `Partial`
   `ConfigOverrides` / `ForkStart` beside the generated `CommandSent`; SSE frames are cast with `as`
   (`live-stream.ts::openLiveStream`); the build handshake covers fetches, not streams; and

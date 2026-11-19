@@ -3,14 +3,14 @@
 import { useState } from "react";
 import { BRAND } from "@/lib/brand";
 import { useAuth } from "@/lib/state/auth";
-import { acceptTerms } from "@/lib/api/account";
+import { ACCOUNT, acceptTerms } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { Button, Dialog, FailureLine } from "@/components/ui";
 
 export function ConsentGate() {
   const { status, me, refresh } = useAuth();
   const [checked, setChecked] = useState(false);
-  const cmd = useCommand<"accept-terms">("consent-gate");
+  const cmd = useCommand<"accept-terms">("consent-gate", ACCOUNT);
 
   const open =
     status === "authed" &&

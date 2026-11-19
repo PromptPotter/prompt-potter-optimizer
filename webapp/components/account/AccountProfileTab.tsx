@@ -3,7 +3,7 @@ import { PROVIDER_LABEL, ProviderIcon } from "./providers";
 import { Badge, Button, CopyButton, Empty, FailureLine, ReadState } from "@/components/ui";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
-import { meRead, postLogout } from "@/lib/api";
+import { ACCOUNT, meRead, postLogout } from "@/lib/api";
 import type { MeResponse } from "@/lib/api/types";
 
 const CAP_PREFIX = "campaign.";
@@ -154,7 +154,7 @@ function PermissionsSection({ capabilities }: { capabilities: string[] }) {
 
 function SessionSection({ me }: { me: MeResponse }) {
   // Nothing polls the session; the navigation below is the read-back.
-  const cmd = useCommand<"logout">("account-session");
+  const cmd = useCommand<"logout">("account-session", ACCOUNT);
   const signOut = () =>
     void cmd.run("logout", postLogout, () => {
       window.location.href = "/login";

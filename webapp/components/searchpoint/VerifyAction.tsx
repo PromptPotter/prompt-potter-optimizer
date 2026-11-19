@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { SelectedCandidate } from "@/lib/types";
-import type { CyclePath } from "@/lib/ids";
+import { encodeCyclePath, type CyclePath } from "@/lib/ids";
 import { commands, cycleAddress, mintCommandId, type VerifyStrategy } from "@/lib/api/commands";
 import {
   PASS_REFUSAL_INFO,
@@ -42,8 +42,9 @@ export function VerifyAction({
   candidate: SelectedCandidate;
   path: CyclePath | null;
 }) {
-  const cmd = useCommand<"verify-candidate">("verify-candidate");
-  const stop = useCommand<"cancel">("cancel");
+  const scope = path && encodeCyclePath(path);
+  const cmd = useCommand<"verify-candidate">("verify-candidate", scope);
+  const stop = useCommand<"cancel">("cancel", scope);
   const [acting, setActing] = useState<string | null>(null);
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
   const [samples, setSamples] = useState("");

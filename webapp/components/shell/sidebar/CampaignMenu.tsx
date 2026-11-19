@@ -8,7 +8,7 @@ import { useWorkspace } from "@/lib/state/workspace";
 import { Button, Dialog, FailureLine, Menu, MenuItem } from "@/components/ui";
 
 export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
-  const cmd = useCommand<"archive" | "unarchive" | "rename" | "delete">("campaign-menu");
+  const cmd = useCommand<"archive" | "unarchive" | "rename" | "delete">("campaign-menu", campaign.address);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");

@@ -1,6 +1,6 @@
 import { AccountSection } from "./AccountSection";
 import { FailureLine, ReadState, Switch } from "@/components/ui";
-import { patchUserSettings, userSettingsRead } from "@/lib/api";
+import { ACCOUNT, patchUserSettings, userSettingsRead } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useRead } from "@/lib/hooks/useRead";
 import { applyTheme, readStoredTheme, useThemeVersion } from "@/lib/theme";
@@ -8,7 +8,7 @@ import { useShowCandidates } from "@/lib/prefs/tree";
 
 export function AccountPreferencesTab() {
   const read = useRead(userSettingsRead());
-  const cmd = useCommand<"user-settings">("preferences");
+  const cmd = useCommand<"user-settings">("preferences", ACCOUNT);
 
   const toggle = (next: boolean) =>
     void cmd.run("user-settings", () =>

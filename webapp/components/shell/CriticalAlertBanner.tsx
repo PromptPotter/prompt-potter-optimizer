@@ -19,7 +19,7 @@ export function CriticalAlertBanner() {
   const cycleId = viewed?.root.cycleId ?? null;
   const registryFailure = failureOf(useRegistry().read);
   const pointerFailure = failureOf(useActivePointer().read);
-  const pause = useCommand<"pause">("critical-alert", { scope: cycleId });
+  const pause = useCommand<"pause">("critical-alert", cycleId);
   const { health } = useBackend();
   const page = readyData(useRead(healthRead()))?.webapp ?? null;
 

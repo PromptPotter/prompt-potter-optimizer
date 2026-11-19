@@ -1,7 +1,7 @@
 import { AccountSection } from "./AccountSection";
 import { ApiTokens } from "./ApiTokens";
 import { Button, CommitInput, Empty, FailureLine, ReadState } from "@/components/ui";
-import { couponRead, deleteApiKey, putApiKey } from "@/lib/api";
+import { ACCOUNT, couponRead, deleteApiKey, putApiKey } from "@/lib/api";
 import {
   type AccountKey,
   type CouponStatus,
@@ -29,7 +29,7 @@ export function AccountKeysTab() {
 type KeyVerb = "save-key" | "remove-key";
 
 export function ProviderKeys({ coupon }: { coupon: CouponStatus }) {
-  const cmd = useCommand<KeyVerb>("account-keys");
+  const cmd = useCommand<KeyVerb>("account-keys", ACCOUNT);
   const busy = cmd.pending !== null;
 
   const save = (provider: string, secret: string) =>

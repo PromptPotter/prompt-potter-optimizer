@@ -1,13 +1,13 @@
 // Takes precedence over ConsentGate: a blocked account cannot submit, so has nothing to consent to.
 
 import { useAuth } from "@/lib/state/auth";
-import { postLogout } from "@/lib/api/account";
+import { ACCOUNT, postLogout } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { Button, Dialog } from "@/components/ui";
 
 export function AccessGate() {
   const { status, me } = useAuth();
-  const cmd = useCommand<"logout">("access-gate");
+  const cmd = useCommand<"logout">("access-gate", ACCOUNT);
 
   const open = status === "authed" && !!me && me.access_state === "blocked";
 

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { archiveDatasetsRead, commands } from "@/lib/api";
+import { ACCOUNT, archiveDatasetsRead, commands } from "@/lib/api";
 import {
   type ArchiveReport,
   ARCHIVE_MODE_INFO,
@@ -34,8 +34,8 @@ export function ArchiveCompactionControl() {
   const [dataset, setDataset] = useState("");
   const [preview, setPreview] = useState<ArchiveReport | null>(null);
   const [done, setDone] = useState<ArchiveReport | null>(null);
-  const dry = useCommand<Mode>("archive-preview");
-  const commit = useCommand<Mode>("archive-apply");
+  const dry = useCommand<Mode>("archive-preview", ACCOUNT);
+  const commit = useCommand<Mode>("archive-apply", ACCOUNT);
   const held = useRead(archiveDatasetsRead());
   const busy = dry.pending !== null || commit.pending !== null;
 

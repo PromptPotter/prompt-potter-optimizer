@@ -61,7 +61,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
     setPrevKey(key);
     setDrafts(draftsOf(caps));
   }
-  const cmd = useCommand<"set-limits">("run-limits", { scope: viewed?.leaf.cycleId ?? null });
+  const cmd = useCommand<"set-limits">("run-limits", viewed?.address ?? null);
   const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [note, setNote] = useState<string | null>(null);
   const pending = cmd.pending !== null;

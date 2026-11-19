@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AccountSection } from "./AccountSection";
 import { Button, Chip, ChipGroup, CommitInput, Empty, FailureLine } from "@/components/ui";
-import { listApiTokens, mintApiToken, revokeApiToken } from "@/lib/api";
+import { ACCOUNT, listApiTokens, mintApiToken, revokeApiToken } from "@/lib/api";
 import type { AccountTokens, MintedToken, TokenEntry } from "@/lib/api/types";
 import { fmtAgo } from "@/lib/format";
 import { useCommand } from "@/lib/hooks/useCommand";
@@ -10,7 +10,7 @@ type TokenVerb = "list" | "mint" | "revoke";
 
 // The listing is a command (its capability is the owner's alone), re-run after each mint and revoke.
 export function ApiTokens() {
-  const cmd = useCommand<TokenVerb>("account-tokens");
+  const cmd = useCommand<TokenVerb>("account-tokens", ACCOUNT);
   const [held, setHeld] = useState<AccountTokens | null>(null);
   const [minted, setMinted] = useState<MintedToken | null>(null);
   const [scopes, setScopes] = useState<ReadonlySet<string> | null>(null);

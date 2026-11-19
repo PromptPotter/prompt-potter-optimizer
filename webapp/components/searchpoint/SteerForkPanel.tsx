@@ -68,7 +68,7 @@ export function SteerForkPanel({
   const editedNarrowing = useRef<Record<string, ParamIntent[]>>({});
   const limits = useRef<RunLimitOverrides>({});
 
-  const cmd = useCommand<"steer-fork">("steer-fork");
+  const cmd = useCommand<"steer-fork">("steer-fork", encodeCyclePath(path));
   const pending = cmd.pending !== null;
 
   const confirm = () => {

@@ -25,7 +25,7 @@ import { readyData, useRead } from "@/lib/hooks/useRead";
 import { useMachineStatus } from "@/lib/hooks/useMachineStatus";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useWorkspace } from "@/lib/state/workspace";
-import { couponRead, quotaRead, commands } from "@/lib/api";
+import { ACCOUNT, couponRead, quotaRead, commands } from "@/lib/api";
 
 const SEGMENTED_MAX = 8;
 
@@ -236,7 +236,7 @@ function slotId(s: MachineSlot): string {
 
 // The caller's own waiting launches, each withdrawn by its job id: nothing ran, nothing was spent.
 function QueueTable({ queue }: { queue: MachineQueueEntry[] }) {
-  const cmd = useCommand<string>("account-queue");
+  const cmd = useCommand<string>("account-queue", ACCOUNT);
   const columns: readonly Column<MachineQueueEntry>[] = [
     { id: "position", label: "Place", width: "4rem", cell: (q) => q.position },
     { id: "what", label: "Waiting", width: "minmax(0,1fr)", cell: (q) => q.what },
@@ -272,7 +272,7 @@ function QueueTable({ queue }: { queue: MachineQueueEntry[] }) {
 }
 
 function LimitControl({ quota }: { quota: QuotaStatus }) {
-  const cmd = useCommand<"set-concurrent-cycles">("account-run-limit");
+  const cmd = useCommand<"set-concurrent-cycles">("account-run-limit", ACCOUNT);
   const limit = quota.max_concurrent_cycles;
 
   if (!quota.max_concurrent_cycles_writable) {

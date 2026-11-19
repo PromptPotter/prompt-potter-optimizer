@@ -1,4 +1,4 @@
-import { commands } from "@/lib/api";
+import { ACCOUNT, commands } from "@/lib/api";
 import {
   type DatasetIndexEntry,
   type DatasetIndexResponse,
@@ -35,7 +35,7 @@ export function DatasetPickList({
   busy: boolean;
 }) {
   // Its spend stays banked to the account: a discard deletes the draft, never what it cost.
-  const discard = useCommand<"discard">("checkin-picklist");
+  const discard = useCommand<"discard">("checkin-picklist", ACCOUNT);
   const discardDraft = (draftId: string) =>
     void discard.run(
       "discard",

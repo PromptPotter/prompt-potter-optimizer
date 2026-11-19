@@ -3,7 +3,7 @@ import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api/client";
-import { clearIncidents } from "@/lib/diagnostics";
+import { clearIncidents, getIncidents } from "@/lib/diagnostics";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { clearReadCache, subscribe, type ReadDescriptor } from "@/lib/read-cache";
 import { AuthProvider } from "@/lib/state/auth";
@@ -51,7 +51,7 @@ describe("useCommand — a write re-asks no read: the feed says what it moved", 
     it(`re-asks nothing ${answered}`, async () => {
       await settle();
       expect(asked).toEqual({ coupon: 1, hierarchy: 1 });
-      const { result } = renderHook(() => useCommand<"write">("test"), { wrapper });
+      const { result } = renderHook(() => useCommand<"write">("test", "A"), { wrapper });
       await act(async () => {
         await result.current.run("write", send);
       });
@@ -81,7 +81,7 @@ describe("useCommand — a send's answer is the scope's it was sent from", () =>
     return { promise, resolve, reject };
   };
   const mount = (scope: string) =>
-    renderHook((p: { scope: string }) => useCommand<"write">("test", p), {
+    renderHook((p: { scope: string }) => useCommand<"write">("test", p.scope), {
       wrapper,
       initialProps: { scope },
     });
@@ -145,4 +145,20 @@ describe("useCommand — a send's answer is the scope's it was sent from", () =>
       }
     });
   }
+
+  it("reports a caller's throwing `then` as one incident, never as the server's refusal", async () => {
+    clearIncidents();
+    const { result } = mount("A");
+    let answer!: unknown;
+    await act(async () => {
+      answer = await result.current.run("write", async () => "ok", () => {
+        throw new TypeError("caller bug");
+      });
+    });
+    expect(answer).toEqual({ ok: true, value: "ok" });
+    expect(result.current.failure).toBeNull();
+    expect(result.current.pending).toBeNull();
+    // The session probe's offline answer is an incident of its own surface.
+    expect(getIncidents().filter((i) => i.surface === "test:write")).toHaveLength(1);
+  });
 });

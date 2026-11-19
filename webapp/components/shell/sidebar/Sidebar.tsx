@@ -1,7 +1,7 @@
 // The disabled footer search icon is an INTENTIONAL placeholder: never sweep it as non-functional.
 import { useWorkspace } from "@/lib/state/workspace";
 import { useAuth } from "@/lib/state/auth";
-import { postLogout } from "@/lib/api";
+import { ACCOUNT, postLogout } from "@/lib/api";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useSidebarCollapsed } from "@/lib/prefs/sidebar";
 import { BRAND } from "@/lib/brand";
@@ -25,7 +25,7 @@ export function Sidebar() {
 
   const { status, openAuthPrompt } = useAuth();
   // Nothing polls the session; the navigation below is the read-back.
-  const logout = useCommand<"logout">("sidebar-session");
+  const logout = useCommand<"logout">("sidebar-session", ACCOUNT);
   const handleSignOut = () =>
     void logout.run("logout", postLogout, () => {
       window.location.href = "/login/";

@@ -115,8 +115,8 @@ export function useCampaignForest({
   const spawn = cycleAt(index, path)?.facts.spawn ?? null;
   const forkParent = spawn ? (index.cycles.find((c) => c.address === spawn.parent) ?? null) : null;
 
-  const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup");
-  const del = useCommand<"delete-cycle">("lineage-delete", { scope: cycleId });
+  const cmd = useCommand<"cleanup-empty-cycles">("lineage-cleanup", campaignId);
+  const del = useCommand<"delete-cycle">("lineage-delete", cycleId);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [cleanupAcked, setCleanupAcked] = useState(false);
 
