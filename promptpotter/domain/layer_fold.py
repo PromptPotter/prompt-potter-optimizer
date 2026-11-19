@@ -156,6 +156,38 @@ def _only_clears(patch: Mapping[str, object]) -> bool:
     return all(v is CLEAR or (isinstance(v, Mapping) and _only_clears(v)) for v in patch.values())
 
 
+def patch_between(
+    rule: Rule, under: Mapping[str, object], over: Mapping[str, object], *at: str
+) -> dict[str, object]:
+    """The wire patch (`wire_patch`'s form: ``null`` clears) *rule* lays over *under* to make
+    *over*: what *over* states beyond *under*, and nothing *under* already holds."""
+    out: dict[str, object] = {}
+    rescoped = {
+        k
+        for k in under
+        if (scope := rule((*at, k)).scope) is not None and over.get(scope[0]) != under.get(scope[0])
+    }
+    for key in under.keys() - over.keys() - rescoped:
+        out[key] = None
+    for key, value in over.items():
+        path = (*at, key)
+        held = {} if key in rescoped else under.get(key)
+        lay = rule(path).lay
+        if lay in (Lay.KEYS, Lay.CALL) and isinstance(value, Mapping) and isinstance(held, Mapping):
+            sub = patch_between(rule, held, value, *path)
+            if (
+                lay is Lay.CALL
+                and value.get("model") != held.get("model")
+                and "route_order" in value
+            ):
+                sub["route_order"] = value["route_order"]
+            if sub or key not in under or key in rescoped:
+                out[key] = sub
+        elif key not in under or held != value:
+            out[key] = value
+    return out
+
+
 def wire_patch(rule: Rule, sent: Mapping[str, object], *at: str) -> dict[str, object]:
     """A patch as every door sends it, laid as the fold reads it: an absent key leaves its value,
     ``null`` is `CLEAR` (the layer below shows through), and ``""`` is the empty string. A value

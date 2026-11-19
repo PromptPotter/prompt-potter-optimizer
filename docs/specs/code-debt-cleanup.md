@@ -42,12 +42,6 @@ row it closes.
   `git grep -n "cut_operator_fork(\|admit(" -- promptpotter/application/commands/launching.py` lists the
   admission before the cut. Measured at +60 in `promptpotter` as its own door (`wip/valid-2` d75eb7e is
   the reference build), so it rides admit-2's one admission door.
-- **An arm is planned on a replicate it does not have yet**: `command_kinds.py::HeadToHeadRequest.purpose`
-  declares replicate 1 and `jobs/mint.py::_numbered` overwrites it under the record hold; the placeholder
-  reaches the root id, so admission prices plans whose ids are not final. Action: a purpose-free run spec
-  feeds `resolve_cycle_plan`, `effective_config` and `shared_part`; the plan carries
-  `Optimize | ArmSeat(head_to_head_id, arm_key)`, and the mint builds `Compare(Arm(…, replicate))` once.
-  **Rides with:** admit-2. **Re-test:** `git grep -n "replicate=1" -- promptpotter`.
 - **A mint takes no claim until `admission.py::claim_cycle`**: `mint()` has no job, and the L4 inner and
   embedded mints hold no claim at all, so the landing tells a live mint from a torn one by the job
   registry alone (`maintenance/landing.py::plan_landing` asks `maintenance/reset.py::holder_in_reach` of
@@ -244,13 +238,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   before the schema types it), and schema, parsing, overlay and knobs each hold a view of the document
   (~11 modules). Action: one typed node document with knobs a view on it; the steer a named layer. It
   closes the pipeline-switch row. **Rides with:** cfg.
-- **Potter's demo axis is dead wherever a dataset holds out no demo pool**: the derived coupling
-  `l1_generate.shots_without_demo_pool` (`application/config_map.py::_draw_couplings`) now badges every default potter
-  campaign, because `defaults.yaml` holds out no `dataset_split.demo` and only justlogic declares one
-  (`demo: 50`), while `l1_generate.k_max` is 5. The badge is true; the default is the fork. Action
-  (operator's call): hold out a demo split by default (every split re-keys, search loses rows) or drop
-  the axis from the default (`k_max: 0`, re-keys potter). **Re-test:** a default potter campaign on a
-  shipped dataset raises no `inert` coupling.
 
 ### valid (after rk-dec, before the behaviour keys)
 
@@ -702,18 +689,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   babysit act, decisions.md § 0005) and read it there. **Re-test:** a launch at a fork whose line
   narrowed a model steers to the root-only model and reads `babysat`.
 
-### wave-5 · cfg (what cfg-3 and cfg-4 left at their landing)
-
-- **A run declaration lays today's defaults by a second merge beside the one fold** (cfg-4's report):
-  `datasets/authored.py::effective_config` lays `defaults_config()` under a declaration's parts by a
-  shallow `**` merge, and `declare_run` diffs whole top-level values against the defaults dump, so a
-  declaration is a replace-per-key document while `layer_fold.py::fold_layers` lays a mapping key by
-  key (lists by `SUBSET`/`UNION`). It is right today only because `declare_run` dumps complete values;
-  `CampaignConfig.overlaid` in its place would keep a default's mapping key a declaration dropped.
-  Root: a `RunDeclaration`'s `loop` / `environment.target` is a fold patch (`CLEAR` for a dropped key)
-  laid over `defaults.yaml` by `fold_layers`; it reshapes the measured address every root id hashes
-  (wipes run data, moves root ids). **Re-test:** `git grep -cE "\*\*defaults\." --
-  promptpotter/application/datasets/authored.py` == 0 (now 2).
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
@@ -892,14 +867,6 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   decision records addresses and its replay reads every side through the one scorer it runs; a
   run-data wipe, and `offline_run.py::LEDGER_KEYS` keeps `inputs_ref` whole, so the behaviour keys
   move. **Window:** W1 · potter-w1 (else W3). **Re-test:** `git grep -n "prior_histories" -- promptpotter` is empty; open: does a rival-only re-grade reach `elimination_cut`'s replay?
-- **An unset lever is spelled two ways in the reply-cache key**: `store/llm_reuse_cache.py::hash_call`
-  hashes `temperature`, `json_schema`, `seed`, `max_tokens` and `reasoning_effort` always (a `None`
-  included), but `route_order` and `top_p` "only when set: an unconditional `null` re-keys every
-  banked reply", so the key's shape records the order its levers were added: a compatibility rule
-  inside an identity. `optimizer_reuse` and `judge_reuse` are CACHE, so once users hold paid replies it
-  can never be normalized. Root: the key hashes the request as sent, by one rule (set fields, nulls
-  dropped); every banked reply misses once. **Window:** W1 · cache key, a file-disjoint link beside
-  W1's C0 re-ask. **Re-test:** `git grep -n "if request\." -- promptpotter/infrastructure/store/llm_reuse_cache.py` is empty.
 - **The neutral round envelope stores one backend's ranking report and a second copy of its cells**:
   `domain/results.py::RoundOutcome.diagnostics` is a `round_diagnostics.py::RoundDiagnostics`
   (`rank_buckets`, `top_k_accuracy`, `near_misses`, per-sample `rank` / `gt_in_*`) that

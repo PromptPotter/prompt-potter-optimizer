@@ -225,10 +225,7 @@ async def admit_head_to_head(
         session.bank.samples,
         origin_override=None if opened is None else opened.origin_override,
     )
-    configs = [
-        (effective_config(plan.declaration), plan.declaration.environment.connector)
-        for plan in plans
-    ]
+    configs = [(effective_config(plan.spec), plan.spec.environment.connector) for plan in plans]
     asks = [
         (config.optimization.budget, sends_on(session.store, config, connector))
         for config, connector in configs

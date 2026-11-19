@@ -23,7 +23,7 @@ from pydantic import (
     model_validator,
 )
 
-from promptpotter.domain.campaign import Arm, ArmName, Compare
+from promptpotter.domain.campaign import ArmName, ArmSeat
 from promptpotter.domain.dataset_name import DatasetName, validate_dataset_name
 from promptpotter.domain.draft_edit import (
     CampaignLayer,
@@ -1057,11 +1057,9 @@ class HeadToHeadRequest(StrictModel):
         budget = self.budget.model_dump(mode="json", exclude_unset=True)
         return {**arm.optimization_sent, **({"budget": budget} if budget else {})}
 
-    def purpose(self, arm: ArmRequest) -> Compare:
-        """Replicate 1 as asked: the mint numbers it on the arms standing under its record lock."""
-        return Compare(
-            arm=Arm(head_to_head_id=self.head_to_head_id, arm_key=arm.arm_key, replicate=1)
-        )
+    def seat(self, arm: ArmRequest) -> ArmSeat:
+        """The mint numbers its replicate on the arms standing under its record lock."""
+        return ArmSeat(head_to_head_id=self.head_to_head_id, arm_key=arm.arm_key)
 
 
 class StartCheckinPayload(LaunchPayload, DraftPayload, kind=CommandKind.START_CHECKIN):

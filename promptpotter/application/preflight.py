@@ -8,7 +8,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
 from promptpotter.application.optimizers.nodes import unfit_pipeline
 from promptpotter.connectors.protocol import Connector
-from promptpotter.domain.campaign import Arm
+from promptpotter.domain.campaign import ArmSeat
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.phase_acts import (
     CapUnderRound,
@@ -175,7 +175,7 @@ def run_preflight_checks(
 
 
 def refuse_arm_below_round(
-    arm: Arm,
+    arm: ArmSeat,
     config: CampaignConfig,
     selected: SelectedOptimizer,
     *,
