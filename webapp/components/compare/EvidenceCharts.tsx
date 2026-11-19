@@ -13,7 +13,7 @@ import {
   useChartReading,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtBand, fmtLift, fmtMetric, fmtUnit, PLACEHOLDER } from "@/lib/format";
+import { fmtBand, fmtMetric, PLACEHOLDER } from "@/lib/format";
 
 import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
 import { getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
@@ -83,7 +83,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
       {cell === undefined
         ? null
         : `${cell} · ${series
-            .map((s) => `${s.label} ${(evidence.metric.spec.lift ? fmtLift : fmtUnit)(evidence.metric.spec.unit, s.values[cell])}`)
+            .map((s) => `${s.label} ${fmtMetric({ ...evidence.metric.spec, value: s.values[cell] })}`)
             .join(" · ")}`}
     </ChartReading>
   );

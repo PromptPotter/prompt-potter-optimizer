@@ -11104,6 +11104,15 @@
             "title": "Expression",
             "type": "string"
           },
+          "form": {
+            "description": "`lift` where each value is a difference off an origin, so it reads signed; worded as an `Estimate` of this form is",
+            "enum": [
+              "level",
+              "lift"
+            ],
+            "title": "Form",
+            "type": "string"
+          },
           "higher_is_better": {
             "anyOf": [
               {
@@ -11123,11 +11132,6 @@
             "title": "Label",
             "type": "string"
           },
-          "lift": {
-            "description": "Each value is a difference off an origin, so it reads signed, as a lift does",
-            "title": "Lift",
-            "type": "boolean"
-          },
           "unit": {
             "$ref": "#/components/schemas/MeasurandUnit"
           }
@@ -11137,7 +11141,7 @@
           "label",
           "expression",
           "unit",
-          "lift",
+          "form",
           "higher_is_better",
           "description",
           "axis_label"
