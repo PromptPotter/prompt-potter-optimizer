@@ -53,6 +53,7 @@ from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import (
     Arm,
+    ArmSeat,
     Campaign,
     CampaignCycle,
     Compare,
@@ -60,6 +61,7 @@ from promptpotter.domain.campaign import (
     Optimize,
     Purpose,
     RunDeclaration,
+    RunSpec,
     SharedPart,
 )
 from promptpotter.domain.campaign_config import (
@@ -137,10 +139,22 @@ def refuse_unrunnable(
 
 
 @dataclass(frozen=True)
+class ArmSpec:
+    """An arm as planned: what it runs and its seat; the mint numbers its replicate (`_numbered`)."""
+
+    spec: RunSpec
+    seat: ArmSeat
+
+
+def spec_of(declared: RunDeclaration | ArmSpec) -> RunSpec:
+    return declared.spec if isinstance(declared, ArmSpec) else declared
+
+
+@dataclass(frozen=True)
 class CyclePlan:
     """What a mint writes and a resume checks, every refusal already asked of what the cycle runs."""
 
-    declaration: RunDeclaration
+    declared: RunDeclaration | ArmSpec
     schema: PipelineSchema
     pipeline_params: PipelineParams
     origin: OptSearchPoint
@@ -171,6 +185,17 @@ class CyclePlan:
         )
 
     @property
+    def spec(self) -> RunSpec:
+        return spec_of(self.declared)
+
+    @property
+    def declaration(self) -> RunDeclaration:
+        assert isinstance(self.declared, RunDeclaration), (
+            "an arm is declared as its mint numbers it"
+        )
+        return self.declared
+
+    @property
     def cycle_id(self) -> str:
         return root_cycle_id_of(self.origin_hash, self.declaration)
 
@@ -196,8 +221,15 @@ class OpenedCycle:
 def declare(
     session: Session, campaign_config: CampaignConfig, *, purpose: Purpose
 ) -> RunDeclaration:
-    """Every door's ONE declaration: a compare run searches prompts alone and is benched."""
-    if isinstance(purpose, Compare):
+    """Every door's ONE declaration."""
+    return RunDeclaration.of(
+        _spec(session, campaign_config, compare=isinstance(purpose, Compare)), purpose
+    )
+
+
+def _spec(session: Session, campaign_config: CampaignConfig, *, compare: bool) -> RunSpec:
+    """A compare run searches prompts alone and is benched."""
+    if compare:
         campaign_config = campaign_config.model_copy(
             update={
                 "optimizer_narrowing": _prompt_axes_only(session, campaign_config),
@@ -211,7 +243,6 @@ def declare(
     assert session.dataset is not None, "a declaration names the dataset the session opened"
     return declare_run(
         campaign_config,
-        purpose=purpose,
         dataset_hash=session.bank.dataset_hash,
         connector=runnable_definition(session.dataset).connector,
         bench_defaults_pin=bench_defaults_pin(),
@@ -220,7 +251,7 @@ def declare(
 
 def resolve_cycle_plan(
     session: Session,
-    declaration: RunDeclaration,
+    declared: RunDeclaration | ArmSpec,
     dataset: Sequence[Sample],
     *,
     origin_override: dict[str, NodePrompt] | None = None,
@@ -240,7 +271,7 @@ def resolve_cycle_plan(
             else None
         )
         cycle = CycleConfig.laid(
-            effective_config(declaration), [LaidSpan(start=start, scoring_lock=None)]
+            effective_config(spec_of(declared)), [LaidSpan(start=start, scoring_lock=None)]
         )
     configured = configure_and_apply_pipeline(session, cycle)
     pipeline_params = configured.pipeline_params
@@ -252,10 +283,10 @@ def resolve_cycle_plan(
         pipeline_params,
         configured.pipeline_schema,
         stores=session.store,
-        connector=declaration.environment.connector,
+        connector=spec_of(declared).environment.connector,
     )
     return CyclePlan(
-        declaration=declaration,
+        declared=declared,
         schema=schema,
         pipeline_params=pipeline_params,
         origin=resolve_origin_opt_search_point(
@@ -378,10 +409,9 @@ def _differs_line(name: str, declared: object, running: object) -> str:
     return name
 
 
-def _arm_of(plan: CyclePlan) -> Arm:
-    purpose = plan.declaration.purpose
-    assert isinstance(purpose, Compare), "an arm's plan declares its head-to-head"
-    return purpose.arm
+def _arm_of(plan: CyclePlan) -> ArmSeat:
+    assert isinstance(plan.declared, ArmSpec), "an arm is planned on its seat"
+    return plan.declared.seat
 
 
 def standing_arms(stores: Stores, h2h_id: str) -> dict[str, Campaign]:
@@ -399,7 +429,7 @@ def _record_of(plan: CyclePlan) -> HeadToHeadRecord:
         head_to_head_id=_arm_of(plan).head_to_head_id,
         created_at=utcnow_iso(),
         origin=plan.origin_hash,
-        shared=plan.declaration.shared_part(),
+        shared=plan.spec.shared_part(),
         # Every arm reads this one version, so no arm's election moves another's scale.
         ruler_version=plan.session.store.ruler.version(),
     )
@@ -410,7 +440,7 @@ def _refuse_off_record(
 ) -> None:
     """*stood_by* names what *record* is: the stored declaration, or this act's first arm."""
     arm = _arm_of(plan)
-    shared = plan.declaration.shared_part()
+    shared = plan.spec.shared_part()
     differs = [
         name
         for name in SharedPart.model_fields
@@ -466,11 +496,9 @@ def _numbered(plans: Sequence[CyclePlan], standing: Mapping[str, Campaign]) -> l
     numbered: list[CyclePlan] = []
     for plan in plans:
         taken[plan.treatment.digest] += 1
-        arm = _arm_of(plan).model_copy(update={"replicate": taken[plan.treatment.digest]})
-        purpose = Compare(arm=arm)
-        numbered.append(
-            replace(plan, declaration=plan.declaration.model_copy(update={"purpose": purpose}))
-        )
+        arm = Arm(**dict(_arm_of(plan)), replicate=taken[plan.treatment.digest])
+        declared = RunDeclaration.of(plan.spec, Compare(arm=arm))
+        numbered.append(replace(plan, declared=declared))
     return numbered
 
 
@@ -497,10 +525,8 @@ async def arm_plans(
                 "an arm stops on its budget, never on a fitness: drop the halt fitness",
                 code="arm_halt_refused",
             )
-        declaration = declare(armed, config, purpose=request.purpose(arm))
-        plans.append(
-            resolve_cycle_plan(armed, declaration, dataset, origin_override=origin_override)
-        )
+        declared = ArmSpec(_spec(armed, config, compare=True), request.seat(arm))
+        plans.append(resolve_cycle_plan(armed, declared, dataset, origin_override=origin_override))
     _held_to_record(
         plans,
         session.store.campaigns.load_head_to_head(request.head_to_head_id),
@@ -601,7 +627,7 @@ def mint(plan: CyclePlan, *, campaign_id: str, adopting: str | None) -> OpenedCy
 def _record_held(plans: Sequence[CyclePlan]) -> Iterator[HeadToHeadRecord | None]:
     """An act's arms hold their head-to-head's record from before anything it pays through their mint."""
     first = plans[0]
-    if not isinstance(first.declaration.purpose, Compare):
+    if not isinstance(first.declared, ArmSpec):
         yield None
         return
     with first.session.store.campaigns.head_to_head_held(_arm_of(first).head_to_head_id) as stored:
@@ -613,13 +639,13 @@ def _mint_all(
 ) -> list[OpenedCycle]:
     """Arms join their head-to-head on the framed plans they mint; each campaign id is drawn here, past every refusal."""
     first = plans[0]
-    if isinstance(first.declaration.purpose, Compare):
+    if isinstance(first.declared, ArmSpec):
         stores = first.session.store
         standing = standing_arms(stores, _arm_of(first).head_to_head_id)
-        plans = _numbered(plans, standing)
         record = _held_to_record(plans, stored, standing)
         if stored is None:
             stores.campaigns.declare_head_to_head(record)
+        plans = _numbered(plans, standing)
     return [
         mint(
             plan,

@@ -42,12 +42,6 @@ row it closes.
   `git grep -n "cut_operator_fork(\|admit(" -- promptpotter/application/commands/launching.py` lists the
   admission before the cut. Measured at +60 in `promptpotter` as its own door (`wip/valid-2` d75eb7e is
   the reference build), so it rides admit-2's one admission door.
-- **An arm is planned on a replicate it does not have yet**: `command_kinds.py::HeadToHeadRequest.purpose`
-  declares replicate 1 and `jobs/mint.py::_numbered` overwrites it under the record hold; the placeholder
-  reaches the root id, so admission prices plans whose ids are not final. Action: a purpose-free run spec
-  feeds `resolve_cycle_plan`, `effective_config` and `shared_part`; the plan carries
-  `Optimize | ArmSeat(head_to_head_id, arm_key)`, and the mint builds `Compare(Arm(…, replicate))` once.
-  **Rides with:** admit-2. **Re-test:** `git grep -n "replicate=1" -- promptpotter`.
 - **A mint takes no claim until `admission.py::claim_cycle`**: `mint()` has no job, and the L4 inner and
   embedded mints hold no claim at all, so the landing tells a live mint from a torn one by the job
   registry alone (`maintenance/landing.py::plan_landing` asks `maintenance/reset.py::holder_in_reach` of

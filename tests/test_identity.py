@@ -1056,7 +1056,6 @@ def test_the_unframed_ablation_renders_no_framing_resumed_or_not(built_stores: S
     declared = effective_config(
         declare_run(
             unframed,
-            purpose=Optimize(),
             dataset_hash="bank",
             connector="termnorm",
             bench_defaults_pin=bench_defaults_pin(),

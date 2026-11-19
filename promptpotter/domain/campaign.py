@@ -109,11 +109,16 @@ class DeterminismClamp(StrictModel):
 ArmName = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
 
 
-class Arm(FrozenModel):
-    """The head-to-head a campaign is an arm of, frozen at mint."""
+class ArmSeat(FrozenModel):
+    """An arm as its head-to-head names it: what a plan holds before the mint numbers it."""
 
     head_to_head_id: ArmName
     arm_key: ArmName
+
+
+class Arm(ArmSeat):
+    """The head-to-head a campaign is an arm of, frozen at mint."""
+
     # Arms of one replicate share its draws (`run_clamp`); numbered at the mint by treatment.
     replicate: int = Field(ge=1)
 
@@ -167,10 +172,10 @@ class SharedPart(FrozenModel):
     bench_defaults_pin: str
 
 
-class RunDeclaration(FrozenModel):
-    """What a campaign, an L4 seat and a head-to-head arm each ARE: every part is what a layer
-    named, never a default restated, beside ``bench_defaults_pin``, the bench defaults it is a
-    delta over as they stood when it was declared — its optimizer's are its campaign's ``Treatment``."""
+class RunSpec(FrozenModel):
+    """What a run runs, before what it is FOR: every part is what a layer named, never a default
+    restated, beside ``bench_defaults_pin``, the bench defaults it is a delta over as they stood
+    when it was declared — its optimizer's are its campaign's ``Treatment``."""
 
     dataset_hash: str = Field(min_length=1)
     run_seed: int | None
@@ -179,13 +184,7 @@ class RunDeclaration(FrozenModel):
     # Only the axes that differ from the default.
     budget: Budget
     environment: Environment
-    # Part of what an arm IS, so two arms of one content never share a run id.
-    purpose: Purpose
     bench_defaults_pin: str = Field(min_length=1)
-
-    @property
-    def digest(self) -> str:
-        return stable_hash(self.model_dump(mode="json"))
 
     def shared_part(self) -> SharedPart:
         return SharedPart(
@@ -196,6 +195,21 @@ class RunDeclaration(FrozenModel):
             environment=self.environment,
             bench_defaults_pin=self.bench_defaults_pin,
         )
+
+
+class RunDeclaration(RunSpec):
+    """What a campaign, an L4 seat and a head-to-head arm each ARE: its spec and its purpose."""
+
+    # Part of what an arm IS, so two arms of one content never share a run id.
+    purpose: Purpose
+
+    @classmethod
+    def of(cls, spec: RunSpec, purpose: Purpose) -> RunDeclaration:
+        return cls(**dict(spec), purpose=purpose)
+
+    @property
+    def digest(self) -> str:
+        return stable_hash(self.model_dump(mode="json"))
 
 
 # The loop keys every arm of a head-to-head runs alike.

@@ -12,7 +12,7 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.application.scoring.judges.registry import judge_instrument, two_valued_terms
 from promptpotter.config.paths import install_datasets_root
-from promptpotter.domain.campaign import Environment, Purpose, RunDeclaration
+from promptpotter.domain.campaign import Environment, RunSpec
 from promptpotter.domain.campaign_config import CAMPAIGN_RULE, CampaignConfig
 from promptpotter.domain.draft_edit import CampaignLayer
 from promptpotter.domain.layer_fold import Folded, Layer, fold_layers, patch_between, wire_patch
@@ -105,17 +105,15 @@ _ENVIRONMENT_KEYS = frozenset(
 def declare_run(
     config: CampaignConfig,
     *,
-    purpose: Purpose,
     dataset_hash: str,
     connector: str,
     bench_defaults_pin: str,
-) -> RunDeclaration:
-    """Every door's config becomes ONE declaration: the fold patch it lays over today's defaults."""
+) -> RunSpec:
+    """Every door's config becomes ONE spec: the fold patch it lays over today's defaults."""
     defaults = defaults_config()
     named = patch_between(CAMPAIGN_RULE, _unbudgeted(defaults), _unbudgeted(config))
     budget, standing = config.optimization.budget, defaults.optimization.budget
-    return RunDeclaration(
-        purpose=purpose,
+    return RunSpec(
         dataset_hash=dataset_hash,
         run_seed=config.run_seed if "run_seed" in named else None,
         loop={k: v for k, v in named.items() if k not in _ENVIRONMENT_KEYS | {"run_seed"}},
@@ -132,7 +130,7 @@ def declare_run(
     )
 
 
-def effective_config(declaration: RunDeclaration) -> CampaignConfig:
+def effective_config(declaration: RunSpec) -> CampaignConfig:
     """The ONE derivation of what a declaration runs: its patch laid over today's defaults."""
     defaults = defaults_config()
     seed = {} if declaration.run_seed is None else {"run_seed": declaration.run_seed}
