@@ -16,7 +16,6 @@ import base64
 import contextlib
 import dataclasses
 import functools
-import inspect
 import json
 import logging
 import os
@@ -180,6 +179,7 @@ from promptpotter.config.paths import (
     user_data_root,
 )
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
+from promptpotter.domain import kinds as kinds_module
 from promptpotter.domain.arms import ArmPosition, Broken, Cut
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
@@ -316,7 +316,7 @@ from promptpotter.infrastructure.store import io as store_io
 from promptpotter.infrastructure.store.account_spend import campaign_spend
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
-from promptpotter.infrastructure.store.data_root import KINDS, Fate, classify
+from promptpotter.infrastructure.store.data_root import Fate, classify
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
@@ -2945,24 +2945,20 @@ def test_older_code_refuses_to_land_a_root_newer_code_landed_and_drops_nothing(
     assert fold.exists(), "older code dropped a file the newer code landed"
 
 
-def test_an_edit_to_code_a_survivors_load_runs_lands_the_root_again() -> None:
-    # A survivor's validator may call a helper beside its model: an edit there changes what loads,
-    # so a root landed before it is walked again, never read as landed.
-    survivors: set[str] = set()
-    for kind in KINDS:
-        if kind.fate is Fate.SURVIVOR and isinstance(kind.shape, TypeAdapter):
-            landing_module._ran(kind.shape.core_schema, survivors)
-    helper = min(survivors & landing_module.loading_modules())
+def test_an_edit_to_code_a_load_runs_lands_the_root_again() -> None:
+    # Every ledger line and banked state part parses through `KindTable.parse`, a module no schema
+    # names: an edit there changes what loads, so a root landed before it is walked again.
+    helper = Path(kinds_module.__file__)
     landed = landing_module.landing_key.__wrapped__()
-    source = inspect.getsource
+    read = Path.read_text
     with pytest.MonkeyPatch.context() as edited:
         edited.setattr(
-            inspect,
-            "getsource",
-            lambda obj: source(obj) + ("\nEDITED = 1\n" if obj is sys.modules[helper] else ""),
+            Path,
+            "read_text",
+            lambda path, *a, **kw: read(path, *a, **kw) + ("\nEDITED = 1\n" * (path == helper)),
         )
         assert landing_module.landing_key.__wrapped__() != landed, (
-            f"an edit to {helper}, which a survivor's load runs, left the landing key"
+            "an edit to `KindTable.parse`, which every ledger load runs, left the landing key"
         )
 
 

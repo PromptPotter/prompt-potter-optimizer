@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import ast
 import hashlib
 import importlib.metadata
 import json
@@ -10,7 +9,6 @@ import os
 import sys
 import sysconfig
 from collections.abc import Mapping, Sequence
-from functools import cache
 from pathlib import Path
 from stat import S_ISDIR, S_ISREG
 
@@ -59,64 +57,6 @@ def reads(rel: str, prefixes: Sequence[str]) -> bool:
     inside = tuple(p for p in prefixes if not p.startswith("!"))
     outside = tuple(p[1:] for p in prefixes if p.startswith("!"))
     return rel.startswith(inside) or bool(outside and not rel.startswith(outside))
-
-
-def _module_name(rel: str) -> str:
-    parts = Path(rel).with_suffix("").parts
-    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
-
-
-@cache
-def _package_modules() -> dict[str, str]:
-    rels = (p.relative_to(REPO).as_posix() for p in (REPO / "promptpotter").rglob("*.py"))
-    return {_module_name(rel): rel for rel in rels}
-
-
-def _is_type_checking(test: ast.expr) -> bool:
-    return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
-        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
-    )
-
-
-def import_statements(path: Path) -> list[tuple[set[str], bool]]:
-    """Each package file one import statement of *path* names, and whether the statement sits
-    under ``TYPE_CHECKING``; function bodies included."""
-    importer = _module_name(path.relative_to(REPO).as_posix())
-    home = importer if path.name == "__init__.py" else importer.rpartition(".")[0]
-    modules = _package_modules()
-    found: list[tuple[set[str], bool]] = []
-    # An import is a statement, so no expression is walked; a function body is.
-    todo: list[tuple[ast.AST, bool]] = [(ast.parse(path.read_text(encoding="utf-8")), False)]
-    while todo:
-        sub, typed = todo.pop()
-        names: list[str] = []
-        if isinstance(sub, ast.Import):
-            names = [a.name for a in sub.names]
-        elif isinstance(sub, ast.ImportFrom):
-            base = sub.module or ""
-            if sub.level:
-                up = home.split(".")[: len(home.split(".")) - (sub.level - 1)]
-                base = ".".join([*up, base] if base else up)
-            names = [base, *(f"{base}.{a.name}" for a in sub.names)]
-        if names:
-            found.append(({modules[n] for n in names if n in modules}, typed))
-        for field, value in ast.iter_fields(sub):
-            if isinstance(value, list):
-                inner = typed or (
-                    field == "body" and isinstance(sub, ast.If) and _is_type_checking(sub.test)
-                )
-                todo.extend(
-                    (child, inner)
-                    for child in value
-                    if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
-                )
-    return found
-
-
-def imported(path: Path) -> set[str]:
-    """The package's files *path* imports, function bodies and `TYPE_CHECKING` included: a layer a
-    type crosses is crossed."""
-    return {rel for files, _ in import_statements(path) for rel in files}
 
 
 class LastGreen:

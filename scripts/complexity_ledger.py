@@ -29,8 +29,9 @@ import typing
 from collections.abc import Iterator
 from pathlib import Path
 
-from last_green import import_statements
 from processes import REPO, clone_cache, git, replace_changed, run
+
+from promptpotter.shared.import_walk import import_statements
 
 # The ceiling each row's last raise declared; a row that never rose past it in this branch ignores it.
 BASELINE = {
@@ -200,8 +201,10 @@ BASELINE = {
     # addr-3 (+59, provisional: its fix pass hunts it down): a run declaration is a fold patch over
     # `defaults.yaml` (`layer_fold.py::patch_between`), an arm is planned on its seat and numbered
     # once at the mint (`RunSpec` / `ArmSeat`). bkeys-3 (+21, provisional likewise): the landing key
-    # hashes the code a load runs (`landing.py::loading_modules`'s schema walk).
-    "package_lines": 112256,
+    # hashes the code a load runs (`landing.py::loading_modules`). bkeys-4 (+90): that code is the
+    # import closure of what a load calls, one walk the gate's scripts share
+    # (`shared/import_walk.py`, moved out of `scripts/last_green.py`).
+    "package_lines": 112346,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

@@ -88,6 +88,7 @@ from promptpotter.infrastructure.store.stores import (
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PotterError
 from promptpotter.shared.hashing import normalized_module, stable_hash
+from promptpotter.shared.import_walk import import_closure
 from promptpotter.shared.named_rows import walked
 
 
@@ -520,10 +521,10 @@ def _loads(model: object, modules: set[str]) -> None:
         _ran(TypeAdapter(one).core_schema, modules)
 
 
-def loading_modules() -> frozenset[str]:
-    """Every package module whose code a load runs: each row's reader and the validators and
-    models its shape builds (a ledger row's every record kind, each state kind a record nests), and
-    every migration."""
+def loading_modules() -> dict[str, Path]:
+    """Every package module whose code a load runs: the import closure of each row's reader and
+    the validators and models its shape builds (a ledger row's every record kind, each state kind
+    a record nests), and of every migration."""
     modules: set[str] = set()
     for kind in KINDS:
         if isinstance(kind.shape, TypeAdapter):
@@ -534,7 +535,7 @@ def loading_modules() -> frozenset[str]:
             _loads(kind.shape.model, modules)
     _loads(STATE_KINDS, modules)
     _ran(list(MIGRATIONS.values()), modules)
-    return frozenset(m for m in modules if m.startswith(f"{__name__.partition('.')[0]}."))
+    return import_closure(modules)
 
 
 @functools.cache
@@ -543,8 +544,8 @@ def landing_key() -> str:
     prose: a helper a validator calls changes what loads as surely as a field does."""
     rows = {kind.name: row_schema(kind) for kind in KINDS}
     code = {
-        name: normalized_module(inspect.getsource(sys.modules[name]))
-        for name in sorted(loading_modules())
+        name: normalized_module(path.read_text(encoding="utf-8"))
+        for name, path in loading_modules().items()
     }
     return stable_hash({"rows": rows, "code": code}, length=16)
 

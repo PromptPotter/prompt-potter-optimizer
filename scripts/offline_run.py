@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import httpx
 import yaml
-from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen, imported
+from last_green import OFFLINE_RUN, OFFLINE_RUN_READS, LastGreen
 from offline_world import (
     LABELS,
     MARKER,
@@ -155,6 +155,7 @@ from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.identity import default_identity
+from promptpotter.shared.import_walk import imported_files
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping, Sequence
@@ -1895,7 +1896,7 @@ def unreached(names: Sequence[str]) -> dict[str, tuple[str, ...]]:
     def imports(files: Iterable[Path]) -> set[str]:
         hit: set[str] = set()
         for path in files:
-            for target in imported(path):
+            for target in imported_files(path):
                 hit.update(d for d in owners if target.startswith(d))
         return hit
 

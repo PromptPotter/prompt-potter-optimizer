@@ -38,7 +38,6 @@ from last_green import (
     OFFLINE_RUN_READS,
     LastGreen,
     digest,
-    imported,
     reads,
 )
 from processes import (
@@ -201,11 +200,16 @@ _LAYERING: tuple[tuple[str, tuple[str, ...], str | tuple[str, ...]], ...] = (
 
 
 def _layering(_: Selection) -> Outcome:
+    # A check runs in the pinned venv; this module's own imports also run under the bare one.
+    from promptpotter.shared.import_walk import imported_files
+
     package = "promptpotter/"
     imports: dict[str, list[str]] = {}
     for path in _sources(REPO / package, "*.py"):
         rel = path.relative_to(REPO).as_posix()
-        imports[rel[len(package) :]] = sorted(target[len(package) :] for target in imported(path))
+        imports[rel[len(package) :]] = sorted(
+            target[len(package) :] for target in imported_files(path)
+        )
     hits = [
         f"{who or package}* must not import {' or '.join(banned)} — {source} imports {target}"
         for who, banned, exempt in _LAYERING
