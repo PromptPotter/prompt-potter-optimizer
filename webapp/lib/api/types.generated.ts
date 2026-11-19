@@ -939,8 +939,10 @@ export interface Measurand {
 }
 
 /** THE estimate off cells — a level or a lift, in its unit, with its two-sided
- * 95% interval. Every surface prints `text`, or `band` (the interval alone);
- * none prints a bound of its own. */
+ * 95% interval. It holds facts alone, so a stored or hashed estimate never
+ * reads a word; a surface words it where it prints it (`text`, or `band`, the
+ * interval alone; the browser's `webapp/lib/format.ts::fmtEstimate`), never a
+ * bound of its own. */
 export interface Estimate {
   value: number;
   /** The 95% interval on `value`; both bounds are null where the estimate has no
@@ -953,14 +955,6 @@ export interface Estimate {
   se: number | null;
   unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
   form: 'level' | 'lift';
-  /** SERVED: the interval alone, its bounds in the unit `point` names; null with no
-   * spread. */
-  band: string | null;
-  /** SERVED: the value alone, as a person reads it in its unit. */
-  point: string;
-  /** SERVED: `point`, then `band` where there is one; no surface prints an estimate
-   * of its own. */
-  text: string;
 }
 
 /** What moving from member `a` to member `b` did cell by cell, on a binary
@@ -5735,7 +5729,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "6cac0d3589aee814";
+export const SERVED_CONTRACT = "046fc9286632ec75";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

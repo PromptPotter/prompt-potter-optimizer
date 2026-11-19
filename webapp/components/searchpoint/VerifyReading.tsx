@@ -4,7 +4,7 @@ import {
   VERIFY_STRATEGY_LABELS,
 } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
-import { fmtSigned, PLACEHOLDER, unitCount } from "@/lib/format";
+import { fmtEstimate, fmtSigned, PLACEHOLDER, unitCount } from "@/lib/format";
 import { Term } from "@/components/ui";
 import { PairedLift } from "@/components/searchpoint/PairedLift";
 
@@ -25,8 +25,8 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             </Term>
           </dt>
           <dd>
-            {recorded.fitness?.text ?? PLACEHOLDER} →{" "}
-            <strong>{fresh.fitness?.text ?? PLACEHOLDER}</strong>{" "}
+            {fmtEstimate(recorded.fitness) ?? PLACEHOLDER} →{" "}
+            <strong>{fmtEstimate(fresh.fitness) ?? PLACEHOLDER}</strong>{" "}
             ({fmtSigned(reading.fitness_increment, 2)})
           </dd>
         </div>
@@ -37,8 +37,8 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             </Term>
           </dt>
           <dd>
-            {recorded.composite?.text ?? PLACEHOLDER} →{" "}
-            <strong>{fresh.composite?.text ?? PLACEHOLDER}</strong> (
+            {fmtEstimate(recorded.composite) ?? PLACEHOLDER} →{" "}
+            <strong>{fmtEstimate(fresh.composite) ?? PLACEHOLDER}</strong> (
             {fmtSigned(reading.composite_increment, 2)})
           </dd>
         </div>
@@ -52,7 +52,7 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
             <PairedLift reading={reading.vs_origin} unread="sentence">
               {({ estimate }, shared) => (
                 <>
-                  <strong>{estimate.text}</strong> on {shared} shared
+                  <strong>{fmtEstimate(estimate)}</strong> on {shared} shared
                 </>
               )}
 
