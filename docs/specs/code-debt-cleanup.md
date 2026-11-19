@@ -241,13 +241,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   before the schema types it), and schema, parsing, overlay and knobs each hold a view of the document
   (~11 modules). Action: one typed node document with knobs a view on it; the steer a named layer. It
   closes the pipeline-switch row. **Rides with:** cfg.
-- **Potter's demo axis is dead wherever a dataset holds out no demo pool**: the derived coupling
-  `l1_generate.shots_without_demo_pool` (`application/config_map.py::_draw_couplings`) now badges every default potter
-  campaign, because `defaults.yaml` holds out no `dataset_split.demo` and only justlogic declares one
-  (`demo: 50`), while `l1_generate.k_max` is 5. The badge is true; the default is the fork. Action
-  (operator's call): hold out a demo split by default (every split re-keys, search loses rows) or drop
-  the axis from the default (`k_max: 0`, re-keys potter). **Re-test:** a default potter campaign on a
-  shipped dataset raises no `inert` coupling.
 
 ### valid (after rk-dec, before the behaviour keys)
 
