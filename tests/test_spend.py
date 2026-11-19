@@ -14,6 +14,7 @@ import inspect
 import json
 import random
 import ssl
+import subprocess
 import sys
 import threading
 import time
@@ -2883,6 +2884,22 @@ def test_a_free_send_fits_at_exactly_nothing_left_and_never_once_overdrawn() -> 
     assert book.fits(free, paid_by="host") == 0, "an overdrawn book admitted a free send"
 
 
+_ASK_INSIDE_AN_OUTAGE = """
+import sys, urllib.error, urllib.request
+from promptpotter.infrastructure.llm import pricing
+fetched = []
+def down(*args, **kwargs):
+    fetched.append(args)
+    raise urllib.error.URLError("no route to host")
+urllib.request.urlopen = down
+try:
+    pricing.route_ceiling(sys.argv[1], "openrouter")
+except pricing.PriceListUnreachableError:
+    sys.exit(f"{len(fetched)} fetches" if fetched else 0)
+sys.exit("no outage")
+"""
+
+
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_a_price_list_that_could_not_be_fetched_is_an_outage_never_an_unpriced_call(
     monkeypatch: pytest.MonkeyPatch,
@@ -2909,6 +2926,14 @@ def test_a_price_list_that_could_not_be_fetched_is_an_outage_never_an_unpriced_c
         outage = asyncio.run(held_twice())
     assert len(fetches) == 1, f"{len(fetches)} fetches — one per send, each a full timeout"
     assert run_stop_reason(outage) is StopReason.PRICE_LIST_UNREACHABLE, "an outage read as no rate"
+    held_back = subprocess.run(
+        [sys.executable, "-c", _ASK_INSIDE_AN_OUTAGE, "vendor/model-x"],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert held_back.returncode == 0, f"a second process re-fetched inside the outage: {held_back}"
 
 
 def _replay(usd: float) -> TokenUsageRecord:

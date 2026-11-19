@@ -263,20 +263,21 @@ ROUTE_ANSWERS_DIR = "route_ceilings"
 
 @dataclass(frozen=True)
 class RouteAnswer:
-    """What a fetch of a route's hosts answered, and when: no ceiling where no host prices it. It
-    names its route and hosts, which the one refresher reads back (`refresh_route_answers`), and
-    *since*, its route's first answer of that fate, which a re-fetch answering the same keeps."""
+    """What a fetch of a route's hosts answered, and when: no ceiling where no host prices it, an
+    *outage* where none was fetched, keeping the last. It names its route and hosts, which the one
+    refresher reads back (`refresh_route_answers`), and *since*, its route's first answer of that
+    fate, which a re-fetch answering the same keeps."""
 
     route: str
     hosts: tuple[str, ...] | None
     at: float
     since: float
     ceiling: RateCeiling | None
+    outage: str | None
 
 
 ROUTE_ANSWER = TypeAdapter(RouteAnswer)
 _OUTAGE_MEMO_S = 60.0
-_ROUTE_OUTAGE: dict[Path, tuple[float, str]] = {}
 
 
 class PriceListUnreachableError(SendRefusedError):
@@ -325,20 +326,20 @@ def route_priced(model: str, provider: str, *, hosts: tuple[str, ...] | None = N
 def remembered_priced(model: str, provider: str) -> bool | None:
     """`route_priced` off what is already known, never a fetch: the last answer any process's
     fetch gave, which the API's sweep keeps fresh (`refresh_route_answers`). ``None`` for a route
-    no answer stands for, as through an outage, which the Start admits through."""
+    no answer stands for, or whose last try met an outage, which the Start admits through."""
     if provider.lower() != "openrouter":
         return lookup_rate(model, provider) is not None
     key = _route_model(model)
     if key is None:
         return False
     answer = _route_answer(key)
-    return None if answer is None else answer.ceiling is not None
+    return None if answer is None or answer.outage else answer.ceiling is not None
 
 
 def refresh_route_answers() -> list[str]:
     """Blocking, the API sweep's alone, one rule for both fates: an answer a day past its *since*
     goes, which reads as no answer, offered, and fetched again by its route's next send; a younger
-    unpriced one past `_OUTAGE_MEMO_S` is fetched again, a host may price its route since. No row
+    unpriced or outage one past `_OUTAGE_MEMO_S` is fetched again, a host may price it since. No row
     outlives a day of its answer, and one row's failure ends that row alone: answered as each row
     it left, its route, what failed and the answer it keeps, with that answer's age."""
     answers, left = user_data_root() / ROUTE_ANSWERS_DIR, []
@@ -349,7 +350,7 @@ def refresh_route_answers() -> list[str]:
                 continue
             if time.time() - answer.since >= _TTL_SECONDS:
                 unlink_robust(path)
-            elif answer.ceiling is None and time.time() - answer.at >= _OUTAGE_MEMO_S:
+            elif time.time() - answer.at >= _stands_for(answer):
                 _openrouter_ceiling(answer.route, answer.hosts)
         except (PriceListUnreachableError, OSError) as exc:
             said = fault_said(exc)[0]
@@ -397,17 +398,18 @@ def _memo_key(key: str, pinned: tuple[str, ...] | None) -> str:
 
 
 def _remembered(memo_key: str) -> RateCeiling | None | object:
-    """``_MISS`` where only a fetch answers; a remembered outage raises."""
+    """``_MISS`` where only a fetch answers; an outage inside its window raises, in any process."""
     answer = _route_answer(memo_key)
-    # An unpriced answer is re-asked sooner: a host listing the model later prices it.
-    if answer is not None and time.time() - answer.at < (
-        _TTL_SECONDS if answer.ceiling is not None else _OUTAGE_MEMO_S
-    ):
-        return answer.ceiling
-    outage = _ROUTE_OUTAGE.get(_route_answer_path(memo_key))
-    if outage is not None and time.time() - outage[0] < _OUTAGE_MEMO_S:
-        raise PriceListUnreachableError(outage[1])
-    return _MISS
+    if answer is None or time.time() - answer.at >= _stands_for(answer):
+        return _MISS
+    if answer.outage is not None:
+        raise PriceListUnreachableError(answer.outage)
+    return answer.ceiling
+
+
+def _stands_for(answer: RouteAnswer) -> float:
+    # An unpriced answer or an outage is re-asked sooner: a host may price the route since.
+    return _TTL_SECONDS if answer.ceiling is not None and answer.outage is None else _OUTAGE_MEMO_S
 
 
 def _openrouter_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeiling | None:
@@ -417,16 +419,17 @@ def _openrouter_ceiling(model: str, pinned: tuple[str, ...] | None) -> RateCeili
     memo_key = _memo_key(key, pinned)
     if (hit := _remembered(memo_key)) is not _MISS:
         return cast("RateCeiling | None", hit)
+    held, outage = _route_answer(memo_key), None
     try:
         ceiling = _fetch_route_ceiling(key, pinned)
     except PriceListUnreachableError as exc:
-        _ROUTE_OUTAGE[_route_answer_path(memo_key)] = (time.time(), str(exc))
-        raise
+        ceiling, outage = (None if held is None else held.ceiling), exc
     now = time.time()
-    held = _route_answer(memo_key)
     since = held.since if held is not None and (held.ceiling is None) == (ceiling is None) else now
-    answer = RouteAnswer(key, pinned, now, since, ceiling)
+    answer = RouteAnswer(key, pinned, now, since, ceiling, None if outage is None else str(outage))
     write_bytes(_route_answer_path(memo_key), ROUTE_ANSWER.dump_json(answer))
+    if outage is not None:
+        raise outage
     return ceiling
 
 

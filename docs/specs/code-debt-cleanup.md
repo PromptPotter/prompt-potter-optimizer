@@ -727,11 +727,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ### wave-5 · rates (what rates-4 left at its landing)
 
-- **A route outage is remembered per process** (rates-4's report): `pricing.py::_ROUTE_OUTAGE` is a
-  process-global memo keyed by path, so only the process that met an outage holds back; another
-  re-fetches within `_OUTAGE_MEMO_S`. Root: the outage is a fact of the route answer on disk (its
-  `at` already dates the try), read by every process. **Re-test:** `git grep -c "_ROUTE_OUTAGE" --
-  promptpotter` == 0.
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 

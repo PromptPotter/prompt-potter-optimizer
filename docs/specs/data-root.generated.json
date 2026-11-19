@@ -4005,7 +4005,7 @@
             "type": "object"
           }
         },
-        "description": "What a fetch of a route's hosts answered, and when: no ceiling where no host prices it. It\nnames its route and hosts, which the one refresher reads back (`refresh_route_answers`), and\n*since*, its route's first answer of that fate, which a re-fetch answering the same keeps.",
+        "description": "What a fetch of a route's hosts answered, and when: no ceiling where no host prices it, an\n*outage* where none was fetched, keeping the last. It names its route and hosts, which the one\nrefresher reads back (`refresh_route_answers`), and *since*, its route's first answer of that\nfate, which a re-fetch answering the same keeps.",
         "properties": {
           "at": {
             "title": "At",
@@ -4035,6 +4035,17 @@
             ],
             "title": "Hosts"
           },
+          "outage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outage"
+          },
           "route": {
             "title": "Route",
             "type": "string"
@@ -4049,7 +4060,8 @@
           "hosts",
           "at",
           "since",
-          "ceiling"
+          "ceiling",
+          "outage"
         ],
         "title": "RouteAnswer",
         "type": "object"
