@@ -19,7 +19,6 @@ from promptpotter.application.optimizers.nodes import (
     Reviewer,
     RoundWalk,
     llm_nodes,
-    member_package,
     member_package_dir,
 )
 from promptpotter.config.paths import (
@@ -74,6 +73,7 @@ from promptpotter.shared.errors import (
     unknown_slots_said,
 )
 from promptpotter.shared.hashing import normalized_module, stable_hash
+from promptpotter.shared.import_walk import import_closure, package_imports
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import (
@@ -1016,37 +1016,25 @@ def _files_hash(roots: Iterable[Path]) -> str:
     )
 
 
-def behaviour_key(name: str, members: Iterable[NodeMember], manifests: Sequence[Path]) -> str:
+def behaviour_key(name: str, members: Sequence[NodeMember], manifests: Sequence[Path]) -> str:
     """L4 identity (architecture §0.5): a built-in's fingerprint on the offline world and the
     world's version, so a rename on a line the world ran re-keys nothing, an edit to one it never
-    ran does. A manifest outside the package has no fingerprint: its own members' packages and its
-    manifest directories key it by their code, a built-in member's package by the fingerprint of
-    the one built-in whose roster reaches it, or by its own code where several share it. A built-in
+    ran does. A manifest outside the package has no trace, so it keys by all it can run: its
+    members' packages and its manifest directories as they stand, and the package code their
+    imports and this module's reach (the run every optimizer takes), so an edit to code a plugin
+    can reach re-keys it and an edit to a built-in it never imports never does. A built-in
     missing from `BEHAVIOUR_KEYS_FILE` raises: a stale key is a refused commit, never a second
     identity."""
     keys = BehaviourKeys.held()
     if not all(directory.is_relative_to(PACKAGE_ROOT) for directory in manifests):
-        own = {member_package_dir(m) for m in members if member_package(m) is None}
-        reaches = {
-            o: {
-                member_package(NODE_MEMBERS.table[n])
-                for n in select_optimizer(bench_choice(o)).member_nodes
-            }
-            for o in keys.fingerprints
-        }
-        builtin: dict[str, str] = {}
-        for package in sorted({p for m in members if (p := member_package(m))}):
-            match [o for o, reached in reaches.items() if package in reached]:
-                case []:
-                    raise LookupError(f"no built-in optimizer's roster reaches {package!r}")
-                case [one]:
-                    builtin[package] = keys.fingerprints[one]
-                case _:
-                    builtin[package] = _files_hash(
-                        {member_package_dir(m) for m in members if member_package(m) == package}
-                    )
+        roots = {*map(member_package_dir, members), *manifests}
+        plugin_files = (
+            p for r in roots if not r.is_relative_to(PACKAGE_ROOT) for p in r.rglob("*.py")
+        )
+        reached = {__name__, *(type(m).__module__ for m in members)}
+        reached.update(n for path in plugin_files for n in package_imports(path))
         return stable_hash(
-            {"code": _files_hash({*own, *manifests}), "builtin": builtin, "world": keys.world}
+            {"code": _files_hash(roots), "engine": import_closure(reached), "world": keys.world}
         )
     if name not in keys.fingerprints:
         raise LookupError(

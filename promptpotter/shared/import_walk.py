@@ -49,7 +49,24 @@ def _imports(path: Path, parsed: ast.Module) -> list[tuple[set[str], bool]]:
     importer = _module_name(path.resolve().relative_to(root).as_posix())
     home = importer if path.name == "__init__.py" else importer.rpartition(".")[0]
     modules = package_modules(root)
-    found: list[tuple[set[str], bool]] = []
+    return [
+        ({modules[n] for n in names if n in modules}, typed)
+        for names, typed in _named(parsed, home)
+    ]
+
+
+def package_imports(path: Path) -> set[str]:
+    """The package modules a file outside the package (a plugin's) imports by name, function
+    bodies and `TYPE_CHECKING` included."""
+    modules = package_modules(_PACKAGE.parent)
+    parsed = ast.parse(path.read_text(encoding="utf-8"))
+    return {n for names, _ in _named(parsed, home="") for n in names if n in modules}
+
+
+def _named(parsed: ast.Module, home: str) -> list[tuple[list[str], bool]]:
+    """Each import statement's dotted names, a relative one read from *home*, and whether it sits
+    under ``TYPE_CHECKING``."""
+    found: list[tuple[list[str], bool]] = []
     # An import is a statement, so no expression is walked; a function body is.
     todo: list[tuple[ast.AST, bool]] = [(parsed, False)]
     while todo:
@@ -64,7 +81,7 @@ def _imports(path: Path, parsed: ast.Module) -> list[tuple[set[str], bool]]:
                 base = ".".join([*up, base] if base else up)
             names = [base, *(f"{base}.{a.name}" for a in sub.names)]
         if names:
-            found.append(({modules[n] for n in names if n in modules}, typed))
+            found.append((names, typed))
         for field, value in ast.iter_fields(sub):
             if isinstance(value, list):
                 inner = typed or (
