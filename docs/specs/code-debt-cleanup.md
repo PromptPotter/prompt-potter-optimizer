@@ -232,6 +232,11 @@ plan/apply pair and a temporary locked through its replace. Left:
   Root: seat the origin through the walk that files it. **Rides with:** the chain owning
   `tests/factories.py::seat`. **Re-test:** a noise floor through `_peer_cycle` alone reads its
   round-0 rows.
+- **A reported zero of reasoning reads as unreported** (small-11's report): `TokenAccount.reasoning`
+  is an `int`, so `domain/spend.py::StepUsage.from_account` writes `tokens.reasoning or None` and
+  `openai_compat.py::ReportedUsage.tokens` reads `reasoning` / `cache_write` with `or 0`. Root:
+  `reasoning` and `cache_write` are `int | None`, as `cache_read` is. **Re-test:** a reply reporting
+  `reasoning_tokens: 0` reaches a step's usage as 0, one reporting none as `None`.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 
@@ -536,10 +541,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   operator's step after the box update, a connector with the token as its `Authorization` request
   header. **Rides with:** the next box update. **Re-test:** in claude.ai, a custom connector at the
   box's MCP URL answers `tools/list`.
-- **The HTTP door's sweep reads the SDK's private `_server_instances`** (tv-2's report): a session
-  that expires idle leaves only at the door's next request. Action: the sweep rides the SDK's own
-  session-end hook, or the door owns its session table. **Rides with:** the next mcp chain.
-  **Re-test:** `git grep -n "_server_instances" -- promptpotter` is empty.
 
 ### batch/29 · tv-2 (what tv-2 left at its landing)
 

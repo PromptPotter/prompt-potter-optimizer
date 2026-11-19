@@ -50,6 +50,7 @@ from factories import (
     mint_fork,
     minted_campaign,
     minted_dataset,
+    on_jumping_clock,
     optimizer_state,
     pipeline_schema,
     round_result,
@@ -5089,6 +5090,18 @@ def _mcp_said(answer: httpx.Response) -> dict[str, Any]:
     return cast(dict[str, Any], json.loads(data))
 
 
+_MCP_HELLO = {
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-06-18",
+        "capabilities": {},
+        "clientInfo": {"name": "test-host", "version": "0"},
+    },
+}
+
+
 # One door's journey: the session a bearer opens answers it, and no other caller.
 @pytest.mark.usefixtures("offline")
 async def test_the_mcp_door_over_http_serves_a_session_to_the_bearer_that_opened_it_alone(
@@ -5109,16 +5122,7 @@ async def test_the_mcp_door_over_http_serves_a_session_to_the_bearer_that_opened
         scopes=frozenset({CAMPAIGN_STEP_CAP}),
     )
     accept = {"Accept": "application/json, text/event-stream"}
-    hello = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "test-host", "version": "0"},
-        },
-    }
+    hello = _MCP_HELLO
     listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
 
     def bearer(secret: str) -> dict[str, str]:
@@ -5148,46 +5152,65 @@ async def test_the_mcp_door_over_http_serves_a_session_to_the_bearer_that_opened
             assert refused.status_code in (401, 404), f"{who} was served a session it never opened"
 
 
-@pytest.mark.usefixtures("offline")
-async def test_the_mcp_doors_managers_leave_once_their_sessions_end(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def _door_on_tokens(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tokens: int) -> Any:
+    """An `HttpDoor` and the app mounting it, its caller the `x-who`'th of *tokens* tokens."""
     from promptpotter.presentation.mcp.server import HttpDoor
 
     monkeypatch.setattr(settings_mod.settings, "ALLOWED_ORIGINS", "http://testserver")
     door = HttpDoor()
     callers = [
         Caller(workspace(tmp_path, dataclasses.replace(_who("ada"), token_id=f"tok-{i}")))
-        for i in range(50)
+        for i in range(tokens)
     ]
 
     async def mounted(scope: Scope, receive: Receive, send: Send) -> None:
-        who = int(dict(scope["headers"])[b"x-who"])
-        scope["state"] = {"caller": callers[who]}
+        scope["state"] = {"caller": callers[int(dict(scope["headers"])[b"x-who"])]}
         await door(scope, receive, send)
 
-    hello = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2025-06-18",
-            "capabilities": {},
-            "clientInfo": {"name": "test-host", "version": "0"},
-        },
-    }
-    asgi = httpx.ASGITransport(app=mounted)
-    async with (
-        door.running(),
-        httpx.AsyncClient(transport=asgi, base_url="http://testserver") as http,
-    ):
-        for who in range(len(callers)):
-            headers = {"Accept": "application/json, text/event-stream", "x-who": str(who)}
-            opened = await http.post("/", json=hello, headers=headers)
-            assert opened.status_code == 200, opened.text
-            session = {**headers, "mcp-session-id": opened.headers["mcp-session-id"]}
+    return door, mounted
+
+
+def _mcp_client(app: Any) -> httpx.AsyncClient:
+    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://testserver")
+
+
+async def _mcp_opened(http: httpx.AsyncClient, who: int) -> dict[str, str]:
+    """The headers of a session token *who* opened."""
+    headers = {"Accept": "application/json, text/event-stream", "x-who": str(who)}
+    opened = await http.post("/", json=_MCP_HELLO, headers=headers)
+    assert opened.status_code == 200, opened.text
+    return {**headers, "mcp-session-id": opened.headers["mcp-session-id"]}
+
+
+@pytest.mark.usefixtures("offline")
+async def test_the_mcp_doors_managers_leave_once_their_sessions_end(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    door, mounted = _door_on_tokens(tmp_path, monkeypatch, 50)
+    async with door.running(), _mcp_client(mounted) as http:
+        for who in range(50):
+            session = await _mcp_opened(http, who)
             assert (await http.delete("/", headers=session)).status_code == 200
         assert not door._managers, "the door kept a manager for each token whose session ended"
+
+
+@pytest.mark.usefixtures("offline")
+@on_jumping_clock
+async def test_an_mcp_session_the_sdk_expired_idle_leaves_the_doors_table(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    door, mounted = _door_on_tokens(tmp_path, monkeypatch, 2)
+    async with door.running(), _mcp_client(mounted) as http:
+        idle = await _mcp_opened(http, 0)
+        [held] = door._managers.values()
+        assert held.manager.session_idle_timeout is not None
+        await asyncio.sleep(held.manager.session_idle_timeout + 1)
+        await http.delete("/", headers=await _mcp_opened(http, 1))
+        assert not door._managers, "the door kept a manager whose one session expired idle"
+        listing = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+        assert (await http.post("/", json=listing, headers=idle)).status_code == 404, (
+            "the door dropped a session the SDK still serves"
+        )
 
 
 @pytest.mark.usefixtures("offline")

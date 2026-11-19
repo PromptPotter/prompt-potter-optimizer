@@ -19,7 +19,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from typing import Any, cast
 from urllib.parse import urlsplit
@@ -31,11 +31,12 @@ try:
     from mcp.server.context import ServerRequestContext
     from mcp.server.lowlevel import Server
     from mcp.server.stdio import stdio_server
+    from mcp.server.streamable_http import MCP_SESSION_ID_HEADER
     from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from mcp.server.transport_security import TransportSecuritySettings
     from mcp.shared.exceptions import MCPError
     from mcp.shared.message import ServerMessageMetadata
-    from starlette.types import Receive, Scope, Send
+    from starlette.types import Message, Receive, Scope, Send
 except ModuleNotFoundError:
     require_extra(Extra.MCP)
     raise
@@ -344,13 +345,33 @@ async def serve_stdio(caller: Caller) -> None:
         await server.run(read, write, server.create_initialization_options())
 
 
+_SESSION_ID = MCP_SESSION_ID_HEADER.encode()
+
+
 @dataclass
 class _Manager:
-    """One authority's session manager, the task serving it, and its requests in flight."""
+    """One authority's session manager, the task serving it, its requests in flight, and the door's
+    own table of its sessions: each open one to the loop time it last answered."""
 
     manager: StreamableHTTPSessionManager
     serving: asyncio.Task[None]
     in_flight: int = 0
+    sessions: dict[bytes, float] = field(default_factory=dict)
+
+    def answered(self, scope: Scope, start: Message, now: float) -> None:
+        """A session opens on the reply naming it; its DELETE, or a 404 (the SDK forgot it), ends it."""
+        named = dict(scope["headers"]).get(_SESSION_ID) or dict(start["headers"]).get(_SESSION_ID)
+        status = start["status"]
+        if named and (status == 404 or (status < 400 and scope["method"] == "DELETE")):
+            self.sessions.pop(named, None)
+        elif named and status < 400:
+            self.sessions[named] = now
+
+    def ended(self, now: float) -> bool:
+        """A session past the SDK's idle timeout ends here as it ends there, on the loop's clock."""
+        idle = self.manager.session_idle_timeout or float("inf")
+        self.sessions = {named: seen for named, seen in self.sessions.items() if now - seen < idle}
+        return not self.in_flight and not self.sessions
 
 
 class HttpDoor:
@@ -358,9 +379,10 @@ class HttpDoor:
     (`deps.py::mounted_caller`) onto the request's state. One session manager per authority (its
     account, its token and the rungs they hold), so every session a manager holds runs as that one
     caller: a request on a session another opened finds no session there (404). A manager whose
-    sessions all ended leaves at the door's next request, so the map holds the authorities with a
-    session open. Its managers run in the API's lifespan (`running`), never at import;
-    DNS-rebinding protection reads the install's allowed origins."""
+    sessions all ended in the door's own table (`_Manager.sessions`) leaves at the door's next
+    request, so the map holds the authorities with a session open. Its managers run in the API's
+    lifespan (`running`), never at import; DNS-rebinding protection reads the install's allowed
+    origins."""
 
     def __init__(self) -> None:
         self._managers: dict[tuple[object, ...], _Manager] = {}
@@ -383,19 +405,25 @@ class HttpDoor:
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         caller: Caller = scope["state"]["caller"]
         opened = await self._manager(caller)
+        # A request cut before it answered moves no session.
+        start: Message = {"status": 500, "headers": []}
+
+        async def watched(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                start.update(message)
+            await send(message)
+
         try:
-            await opened.manager.handle_request(scope, receive, send)
+            await opened.manager.handle_request(scope, receive, watched)
         finally:
             async with self._opening:
                 opened.in_flight -= 1
-                self._sweep()
-
-    def _sweep(self) -> None:
-        """The SDK forgets a session however it ends (a DELETE, its idle timeout, a crash)."""
-        for authority, held in list(self._managers.items()):
-            if not held.in_flight and not held.manager._server_instances:
-                del self._managers[authority]
-                held.serving.cancel()
+                opened.answered(scope, start, now := asyncio.get_running_loop().time())
+                # A manager with no request in flight and no session open in its table leaves.
+                for authority, held in list(self._managers.items()):
+                    if held.ended(now):
+                        del self._managers[authority]
+                        held.serving.cancel()
 
     async def _manager(self, caller: Caller) -> _Manager:
         who = caller.stores.identity

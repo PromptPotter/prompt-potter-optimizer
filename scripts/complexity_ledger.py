@@ -143,7 +143,10 @@ BASELINE = {
     # naming its form off the model's schema, and REST's 422 handing `refusing` its route's model.
     # refuse-1 link 2 (+2): `spend_book.py::_said`, the count's words beside the calls out, which a
     # stop now names as a send's refusal does, since both read the one remainder.
-    "package_lines": 111848,
+    # small-11 link 2 (+28): `mcp/server.py::_Manager.sessions`, the HTTP door's own session table
+    # (opened on a reply naming it, ended by DELETE / 404 / the SDK's idle timeout), since mcp 2.3
+    # exposes no session-end hook and the sweep may no longer read its private `_server_instances`.
+    "package_lines": 111876,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
