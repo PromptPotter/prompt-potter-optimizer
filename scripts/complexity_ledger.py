@@ -203,8 +203,9 @@ BASELINE = {
     # once at the mint (`RunSpec` / `ArmSeat`). bkeys-3 (+21, provisional likewise): the landing key
     # hashes the code a load runs (`landing.py::loading_modules`). bkeys-4 (+90): that code is the
     # import closure of what a load calls, one walk the gate's scripts share
-    # (`shared/import_walk.py`, moved out of `scripts/last_green.py`).
-    "package_lines": 112346,
+    # (`shared/import_walk.py`, moved out of `scripts/last_green.py`); +10, a plugin manifest keys
+    # its own code and its built-in members' fingerprints (`nodes.py::behaviour_key`).
+    "package_lines": 112356,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
