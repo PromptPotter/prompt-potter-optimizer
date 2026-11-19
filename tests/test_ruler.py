@@ -102,6 +102,7 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.infrastructure.store.ruler_store import RulerStore
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError
+from promptpotter.shared.identity import default_identity
 
 # 1. The estimator
 
@@ -344,7 +345,7 @@ def test_one_tenant_ruler_judges_an_arm_only_on_the_rows_it_may_read(tmp_path: P
 # One warm round (~3 s to open) feeds both: its draws read it, then the re-entry folds on it.
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_draws_fresh_cells_and_a_reentered_one_orders_on_the_lines_it_opened_on(
-    tmp_path: Path, offline: Router
+    offline: Router,
 ) -> None:
     # The parent hits the easiest 16 of 40 cells on a graded ruler, and each round's cells must
     # still be the pool's, or the election reads rows the held-out bench never would.
@@ -358,7 +359,7 @@ def test_a_round_draws_fresh_cells_and_a_reentered_one_orders_on_the_lines_it_op
         return answer
 
     offline.backend.matches = hits_easiest  # type: ignore[method-assign]
-    drawing = jumping_clock(run_init_round(workspace(tmp_path / "draw"), offline, graded_pool))
+    drawing = jumping_clock(run_init_round(workspace(), offline, graded_pool))
     session = drawing.cycle.session
     session.store.ruler.fold(
         session_ruler_scope(session),
@@ -564,7 +565,7 @@ class _Traced(NamedTuple):
 
 
 @pytest.fixture
-def traced(tmp_path: Path) -> _Traced:
+def traced() -> _Traced:
     """A run of four rounds on a warm tenant ruler, and the reader of its level series."""
     scope = RulerScope(scorer="acc", dataset="ds")
     bank = samples(12, "t")
@@ -624,7 +625,7 @@ def traced(tmp_path: Path) -> _Traced:
         "b": [float(i % 6 == 0) for i in range(12)],
     }
     # Graded, never binary: tied δ would pin most cells to the prior.
-    warmed = workspace(tmp_path / "series")
+    warmed = workspace()
     tenant = warmed.ruler
     tenant.fold(
         scope,
@@ -707,10 +708,10 @@ def test_a_series_reads_no_row_past_the_reach_its_reader_holds(traced: _Traced) 
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
-    tmp_path: Path, traced: _Traced
+    traced: _Traced,
 ) -> None:
     series_of, _, _, bank, scope, _, _, _, run = traced
-    lone = workspace(tmp_path / "lone")
+    lone = workspace(default_identity("lone"))
     lone.ruler.fold(
         scope, [("f0", s.key, (s.id + 1) / 16) for s in bank], campaign="else", own=None
     )

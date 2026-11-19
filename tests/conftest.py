@@ -52,9 +52,10 @@ def refused_network() -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def own_home(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Each fact's data root is its own: a door that resolves the home (`paths.py::user_data_root`)
-    lands in this fact's tree, never the session's, which no fact leaves a file in. Beside
-    `tmp_path`, never in it: a fact's own data root there is one a landing proves file by file."""
-    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path.parent / f"{tmp_path.name}-home"))
+    lands in this fact's tree, never the session's, which no fact leaves a file in. A directory of
+    `tmp_path`, never `tmp_path` itself: a landing proves every file of the data root, and a fact's
+    scratch is none of them; pytest's retention takes it with `tmp_path`."""
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "home"))
 
 
 @pytest.fixture
@@ -66,12 +67,12 @@ def optimizing_memory() -> Iterator[None]:
 
 
 @pytest.fixture
-def built_stores(tmp_path: Path) -> Stores:
-    return workspace(tmp_path)
+def built_stores() -> Stores:
+    return workspace()
 
 
 @pytest.fixture
-def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]:
+def offline(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
     """The offline run's world; a journey sets what its edges answer (`llm.says`, `backend.faults`,
     `rates` — then `pricing.refresh_rates(force=True)` fetches them).
 
@@ -82,7 +83,7 @@ def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Router]
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
     restore = install_network(world)
     send_pacing.cache_clear()
-    with scoped(account=workspace(tmp_path / "account")):
+    with scoped(account=workspace()):
         yield world
     restore()
     send_pacing.cache_clear()

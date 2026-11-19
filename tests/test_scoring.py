@@ -441,7 +441,7 @@ from promptpotter.shared.errors import (
     PotterError,
     SendRefusedError,
 )
-from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal
+from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.plugin_registry import Registry
 from promptpotter.shared.statistics import paired_mean_t
@@ -991,7 +991,7 @@ async def _init(dataset_name: str, stores: Stores) -> None:
 
 @pytest.mark.usefixtures("offline")
 def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_owner_binds(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Unrefused, a judge named `max` breaks every `max(...)` formula, and a connector term
     # `n_turns` reads its report on a dial and the turn count in a formula.
@@ -1041,7 +1041,7 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
     )
 
     def judge_refuses(name: str) -> bool:
-        stores = workspace(tmp_path / "judge")
+        stores = workspace()
         session = loop_session(
             stores,
             pipeline_schema(nodes=[observed]),
@@ -1063,7 +1063,7 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
         return False
 
     def observation_refuses(name: str) -> bool:
-        stores = workspace(tmp_path / "observed")
+        stores = workspace()
         mapping = [
             {"pipeline_key": "final_ranking", "output_field": "generated_text", "is_llm": True},
             {"pipeline_key": name, "output_field": name},
@@ -1658,7 +1658,7 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
 # Round 2 re-reads the leader round 1 held.
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # The cells that ranked it first are the ones its luck rode.
     def one_more_than_parent(prompt: str, sample: Sample) -> bool:
@@ -1668,7 +1668,7 @@ def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
         return order % 2 == 0 or ("Check each premise." in prompt and order == 1)
 
     with _peer_cycle(
-        workspace(tmp_path / "retest"),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "potter",
@@ -1696,7 +1696,7 @@ def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # The election's scale re-read off the archive: unchanged under its own formula, moved under
     # an edited one, since every row the ruler holds is re-graded, not only the record's own cells.
@@ -1704,7 +1704,7 @@ def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
         return _PEER_READ_ORDER[sample.id] % 2 == 0 or "Check" in prompt
 
     with _peer_cycle(
-        workspace(tmp_path / "ab"),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "potter",
@@ -1790,14 +1790,13 @@ def _capo_says() -> Callable[[dict[str, Any]], str]:
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # Round 1 races the seeds with its offspring; its parent is the origin, never bought a cell.
     def cut_by_budget(
         cut_round: int, budget: int, replayed: int, parent_cells: int, panel_gate: str
     ) -> None:
         case = f"round {cut_round} cut under panel_gate={panel_gate}"
-        root = tmp_path / f"cut-{cut_round}-{panel_gate}"
 
         paid: list[int] = []
         book = spend_book(None, usd_reserve=None)
@@ -1813,7 +1812,7 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
             return _PEER_READ_ORDER[sample.id] % 2 == 0
 
         with _peer_cycle(
-            workspace(root),
+            workspace(default_identity(f"cut-{cut_round}-{panel_gate}")),
             _PEER_HOP,
             monkeypatch,
             "capo",
@@ -1895,7 +1894,7 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at_mu(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     def raced(failing: str) -> RoundResult:
 
@@ -1904,7 +1903,7 @@ def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at
             return block == 0 or not any(f"task, {arm}." in prompt for arm in failing)
 
         with _peer_cycle(
-            workspace(tmp_path / f"race-{failing}"),
+            workspace(default_identity(f"race-{failing}")),
             _PEER_HOP,
             monkeypatch,
             "capo",
@@ -2046,14 +2045,13 @@ def test_potters_queue_in_a_peers_roster_sizes_its_panel_off_its_own_knobs(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_one_round_composes_a_peers_crossover_and_selector_with_potters_race(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
+    monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
 ) -> None:
     name, walk, composed, crossover_says, crossed, composed_nodes = peer_composition
-    root = tmp_path / "composition"
     with (
         composed(walk),
         _peer_cycle(
-            workspace(root),
+            workspace(),
             _PEER_HOP,
             monkeypatch,
             name,
@@ -2110,7 +2108,7 @@ def test_a_crossover_donor_gives_a_minority_of_the_loci_the_two_differ_on() -> N
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_cut_theta_round_reads_its_cold_parent_on_the_cells_the_archive_holds_graded(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
+    monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
 ) -> None:
     # The guard and the election alike.
     name, walk, composed, crossover_says, _, composed_nodes = peer_composition
@@ -2143,7 +2141,7 @@ def test_a_cut_theta_round_reads_its_cold_parent_on_the_cells_the_archive_holds_
     with (
         composed([*walk[:-1], "theta_election"]),
         _peer_cycle(
-            workspace(tmp_path / "theta-cut"),
+            workspace(),
             _PEER_HOP,
             monkeypatch,
             name,
@@ -2216,9 +2214,7 @@ _PEER_PAUSE = PauseCyclePayload(
 
 
 @contextmanager
-def _peer_bench(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> Iterator[_PeerBench]:
+def _peer_bench(monkeypatch: pytest.MonkeyPatch, offline: Router) -> Iterator[_PeerBench]:
     """The bench's CAPO cycle seated, and its campaign filed so a command reaches it."""
     bench_nodes = {
         "blocks": {"config": {"block_size": 4, "max_blocks": 2}},
@@ -2227,9 +2223,8 @@ def _peer_bench(
         "few_shot": {"config": {"k_max": 0}},
         "survival": {"config": {"size": 2}},
     }
-    root = tmp_path / "bench"
     with _peer_cycle(
-        workspace(root),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "capo",
@@ -2249,11 +2244,9 @@ def _peer_bench(
 
 
 @contextmanager
-def _bench_cycle(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> Iterator[_Bench]:
+def _bench_cycle(monkeypatch: pytest.MonkeyPatch, offline: Router) -> Iterator[_Bench]:
     """Its round, whose declared pick tops a higher-composite arm, and the origin's bench pass."""
-    with _peer_bench(tmp_path, monkeypatch, offline) as (cycle, ledger, session, stores, cycle_dir):
+    with _peer_bench(monkeypatch, offline) as (cycle, ledger, session, stores, cycle_dir):
         picked = asyncio.run(execute_round(cycle, 1)).result
         head, fold = picked.head, picked.fold
         assert head is not None and fold is not None and fold.fitness is not None
@@ -2412,9 +2405,9 @@ def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_an_arm_is_read_on_the_theta_its_election_takes_on_the_scale_its_race_read(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _bench_cycle(tmp_path, monkeypatch, offline) as bench:
+    with _bench_cycle(monkeypatch, offline) as bench:
         cycle, picked, fold = bench.cycle, bench.picked, bench.fold
         assert picked.election is not None
         crowned = picked.election.selected
@@ -2441,9 +2434,9 @@ def test_an_arm_is_read_on_the_theta_its_election_takes_on_the_scale_its_race_re
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_pause_reaches_a_bench_pass_in_flight_and_it_banks_as_stopped_on_the_cells_it_walked(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _bench_cycle(tmp_path, monkeypatch, offline) as bench:
+    with _bench_cycle(monkeypatch, offline) as bench:
         stores, cycle_dir = bench.stores, bench.cycle_dir
         phases, acks, stopped_view = _pause_mid_pass(bench, monkeypatch)
         assert (phases, acks) == ([RunPhase.SCORING, RunPhase.PAUSED], ["accepted"]), (
@@ -2465,9 +2458,9 @@ def test_a_pause_reaches_a_bench_pass_in_flight_and_it_banks_as_stopped_on_the_c
 # The cancel after the pass ended names the task the host cancel opened.
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
+    with _peer_bench(monkeypatch, offline) as bench:
         stores, cycle_dir = bench.stores, bench.cycle_dir
         # A cancel of a command that ended stands for nothing, so no stop waits for whatever holds
         # the cycle next.
@@ -2578,9 +2571,9 @@ def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
+    with _peer_bench(monkeypatch, offline) as bench:
         stores = bench.stores
         # The command addresses the leaf by the id prefix a read takes, below its chain, so the act
         # reaches the leaf's campaign under its full id.
@@ -2611,9 +2604,9 @@ def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_campaigns_command_by_a_prefix_acts_on_its_full_id_as_a_cycles_does(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
+    with _peer_bench(monkeypatch, offline) as bench:
         stores = bench.stores
         benched: list[str] = []
 
@@ -2633,9 +2626,9 @@ def test_a_campaigns_command_by_a_prefix_acts_on_its_full_id_as_a_cycles_does(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
+    with _peer_bench(monkeypatch, offline) as bench:
         stores = bench.stores
         host = HostSession(Caller(stores))
         # The filing names the pass's cycle even once another campaign shares the sent prefix.
@@ -2669,9 +2662,9 @@ def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_rescored(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
+    with _peer_bench(monkeypatch, offline) as bench:
         ledger = bench.ledger
         drawn, session, origin_sp = _closed_origin(bench)
         with scoped(ledger=ledger):
@@ -2687,9 +2680,9 @@ def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_re
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_noise_floor_that_scored_cells_and_read_no_band_files_them_unread(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
+    with _peer_bench(monkeypatch, offline) as bench:
         _, session, origin_sp = _closed_origin(bench)
         replicates: list[int] = []
 
@@ -2711,11 +2704,11 @@ def test_a_noise_floor_that_scored_cells_and_read_no_band_files_them_unread(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorded_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     offline.llm.says = _bench_says
     with _peer_cycle(
-        workspace(tmp_path / "replicated"),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "capo",
@@ -2751,9 +2744,9 @@ def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorde
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _peer_bench(tmp_path, monkeypatch, offline) as bench:
+    with _peer_bench(monkeypatch, offline) as bench:
         ledger = bench.ledger
         _, session, origin_sp = _closed_origin(bench)
 
@@ -2779,9 +2772,9 @@ def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_spent_budget_stops_the_bench_pass_and_the_held_passes_beside_it_stand(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _bench_cycle(tmp_path, monkeypatch, offline) as bench:
+    with _bench_cycle(monkeypatch, offline) as bench:
         origin_pass, head, graded = bench.origin_pass, bench.head, bench.graded
         earlier = origin_pass.model_copy(
             update={"arm": ArmName(key=ArmKey("an earlier pick"), round=7, label="C7.1")}
@@ -2800,9 +2793,9 @@ def test_a_spent_budget_stops_the_bench_pass_and_the_held_passes_beside_it_stand
 # The refused pass holds the cells the paused pass banked.
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_refusal_mid_walk_banks_the_cells_the_pass_held_never_zero_over_paid_rows(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _bench_cycle(tmp_path, monkeypatch, offline) as bench:
+    with _bench_cycle(monkeypatch, offline) as bench:
         head, graded = bench.head, bench.graded
         paused_pass = _pause_mid_pass(bench, monkeypatch)[2].verification
 
@@ -2823,9 +2816,9 @@ def test_a_refusal_mid_walk_banks_the_cells_the_pass_held_never_zero_over_paid_r
 # A pass after the stop replays the cells the paused pass banked, and each regrade reads the last.
 @pytest.mark.usefixtures("optimizing_memory")
 def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composite_round(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _bench_cycle(tmp_path, monkeypatch, offline) as picked:
+    with _bench_cycle(monkeypatch, offline) as picked:
         cycle, session, head, graded = picked.cycle, picked.session, picked.head, picked.graded
         paused_pass = _pause_mid_pass(picked, monkeypatch)[2].verification
         passes = graded()
@@ -2872,10 +2865,8 @@ def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composit
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing(
-    tmp_path: Path,
-) -> None:
-    line_stores = workspace(tmp_path / "line")
+def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing() -> None:
+    line_stores = workspace()
     pick = prompted(instruction="the declared pick")
     spent = PassStop(cause=StopReason.SPEND_BUDGET, warning=None)
     refused = PassStop(cause=WalkEnd.CLIENT_ERROR, warning=None)
@@ -3009,10 +3000,8 @@ def _area_passes(stores: Stores, first: str, second: str) -> tuple[BenchPass, ..
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_the_held_out_area_averages_each_row_over_the_round_budget_against_the_origin(
-    tmp_path: Path,
-) -> None:
-    stores = workspace(tmp_path / "area")
+def test_the_held_out_area_averages_each_row_over_the_round_budget_against_the_origin() -> None:
+    stores = workspace()
     scorer = scorer_of(_H2H_FORMULA)
     first, second = prompted(instruction="first"), prompted(instruction="second")
     origin, first_pass, second_pass = _area_passes(stores, first.id, second.id)
@@ -3048,8 +3037,8 @@ def test_the_held_out_area_averages_each_row_over_the_round_budget_against_the_o
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_rebase_discarded_adoption_stays_in_the_held_out_area(tmp_path: Path) -> None:
-    stores = workspace(tmp_path / "fork")
+def test_a_rebase_discarded_adoption_stays_in_the_held_out_area() -> None:
+    stores = workspace()
     scorer = scorer_of(_H2H_FORMULA)
     first, second = prompted(instruction="first"), prompted(instruction="second")
     # The first cycle adopts twice; its fork cuts at round 2, standing on round 1's adoption.
@@ -3092,9 +3081,9 @@ def _adopting_twice(picked: _Bench, monkeypatch: pytest.MonkeyPatch) -> tuple[st
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_every_adoption_grades_each_selection_the_line_adopted_once(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _bench_cycle(tmp_path, monkeypatch, offline) as picked:
+    with _bench_cycle(monkeypatch, offline) as picked:
         cycle, session = picked.cycle, picked.session
         adopted = set(_adopting_twice(picked, monkeypatch))
 
@@ -3118,9 +3107,9 @@ def test_every_adoption_grades_each_selection_the_line_adopted_once(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_member_whose_point_moved_banks_its_pass_refused_and_the_roster_grades_on(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _bench_cycle(tmp_path, monkeypatch, offline) as picked:
+    with _bench_cycle(monkeypatch, offline) as picked:
         cycle, session = picked.cycle, picked.session
         head, moved = _adopting_twice(picked, monkeypatch)
         measured = PointContext.measured
@@ -3162,9 +3151,9 @@ def test_a_member_whose_point_moved_banks_its_pass_refused_and_the_roster_grades
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_every_adoption_sets_aside_one_pass_per_selection_it_will_grade(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    with _bench_cycle(tmp_path, monkeypatch, offline) as picked:
+    with _bench_cycle(monkeypatch, offline) as picked:
         cycle, session = picked.cycle, picked.session
         _adopting_twice(picked, monkeypatch)
         monkeypatch.setattr(line_bench, "cell_channels_of", lambda *_: {"cost": 0.01})
@@ -3187,9 +3176,9 @@ def test_every_adoption_sets_aside_one_pass_per_selection_it_will_grade(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
-    authored = workspace(tmp_path / "authored")
+    authored = workspace()
     hop, cycle_dir = walking_cycle(authored)
     measured: list[str] = []
 
@@ -3435,12 +3424,12 @@ def test_a_cost_terms_tie_breaks_never_pin_p_best_at_a_coin(trailing: _Trailing)
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_an_origin_round_serves_its_lift_over_the_constant_answer_on_the_cells_it_scored(
-    tmp_path: Path, offline: Router
+    offline: Router,
 ) -> None:
     bank = [
         Sample(id=i, query=f"q{i}", ground_truth="TRUE" if i < 9 else "FALSE") for i in range(12)
     ]
-    origin = jumping_clock(run_init_round(workspace(tmp_path), offline, bank)).cycle.origin_round
+    origin = jumping_clock(run_init_round(workspace(), offline, bank)).cycle.origin_round
     floor = origin.health.constant_floor
     assert floor is not None and (floor.label, floor.floor) == ("TRUE", 0.75), (
         f"the floor is not the modal truth's share: {floor}"
@@ -3637,14 +3626,12 @@ def test_a_block_line_counts_an_arm_the_degradation_check_cut(built_stores: Stor
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_rung_the_endpoint_refuses_reads_refused_on_its_arm_never_broken(
-    tmp_path: Path, offline: Router
-) -> None:
+def test_a_rung_the_endpoint_refuses_reads_refused_on_its_arm_never_broken(offline: Router) -> None:
     said = {"detail": "Unsupported value: 'reasoning_effort' does not support 'high' here."}
     offline.backend.faults["/matches"] = [httpx.Response(400, json=said) for _ in range(12)]
     origin = jumping_clock(
         run_init_round(
-            workspace(tmp_path), offline, samples(12, "TRUE"), optimization={"origin_gate": "off"}
+            workspace(), offline, samples(12, "TRUE"), optimization={"origin_gate": "off"}
         )
     ).cycle.origin_round
     arm = origin.origin
@@ -4150,11 +4137,11 @@ def test_no_pair_to_read_stands_alone_and_a_pair_owed_refused_or_unlanded_is_no_
 
 
 def _lived_peer(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> AbstractContextManager[tuple[Cycle, CycleEventLog]]:
     """A CAPO peer on a life bank of 2 capped at 4."""
     return _peer_cycle(
-        workspace(tmp_path / "peer"),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "capo",
@@ -4165,10 +4152,8 @@ def _lived_peer(
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_the_bench_stops_a_peer_on_spent_lives(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    with _lived_peer(tmp_path, monkeypatch) as (cycle, _):
+def test_the_bench_stops_a_peer_on_spent_lives(monkeypatch: pytest.MonkeyPatch) -> None:
+    with _lived_peer(monkeypatch) as (cycle, _):
         lives = cycle.config.optimization.lives
         assert lives is not None
         origin_arm = arm_state(
@@ -4206,9 +4191,9 @@ def test_the_bench_stops_a_peer_on_spent_lives(
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resolved(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    with _lived_peer(tmp_path, monkeypatch) as (cycle, _):
+    with _lived_peer(monkeypatch) as (cycle, _):
         readings = {
             RoundAdvance.ADVANCED: _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
             RoundAdvance.NOT_SEPARATED: _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL),
@@ -4247,12 +4232,12 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_stands(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     member = NODE_MEMBERS.get("l1_generate")
     assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
     with _peer_cycle(
-        workspace(tmp_path / "edits"),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "potter",
@@ -4344,13 +4329,13 @@ def test_a_citation_names_the_panel_holding_its_words_whole_and_in_order() -> No
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_an_optimizer_call_whose_send_raises_leaves_its_record_and_still_raises(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # A call announced and never closed reads as one still waiting, whatever it cost.
     member = NODE_MEMBERS.get("l1_generate")
     assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
     with _peer_cycle(
-        workspace(tmp_path / "refused"),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "potter",
@@ -4373,12 +4358,12 @@ def test_an_optimizer_call_whose_send_raises_leaves_its_record_and_still_raises(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # The scorer parses answer_format.
     member = cast("L1Generate", NODE_MEMBERS.get("l1_generate"))
     with _peer_cycle(
-        workspace(tmp_path / "held_format"),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "potter",
@@ -4419,7 +4404,7 @@ def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_capo_inits_reply_out_of_form_is_one_refused_child(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # An array of blanks seeds nothing; read as in form, it left the round without one arm or a word.
     # A reply nested past the parser's stack crashed the init instead of refusing it.
@@ -4428,7 +4413,7 @@ def test_capo_inits_reply_out_of_form_is_one_refused_child(
         (json.dumps(["  ", ""]), "[" * 5000 + "]" * 5000, "[" + "1+" * 20000 + "1]")
     ):
         with _peer_cycle(
-            workspace(tmp_path / f"init_{n}"),
+            workspace(default_identity(f"init-{n}")),
             _PEER_HOP,
             monkeypatch,
             "capo",
@@ -4446,11 +4431,11 @@ def test_capo_inits_reply_out_of_form_is_one_refused_child(
 # Round 3's fork offer reads the rounds the disk-faulted closes landed.
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # The round the fork hangs from is restated electing that arm, so the line continues from it.
     with _peer_cycle(
-        workspace(tmp_path / "reelect"),
+        workspace(),
         _PEER_HOP,
         monkeypatch,
         "potter",
@@ -4556,7 +4541,7 @@ def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_clos
     live = SliceMap(carried)
     closed = round_result(1, optimizer_state=optimizer_state(), cells={})
     line = [round_result(0, optimizer_state=optimizer_state(), cells={}), closed]
-    closing = seat(workspace(tmp_path / "fired_ws")).cycle
+    closing = seat(workspace()).cycle
     for n in (1, 2):
         close_round(fired_ledger, line[:n], cycle=closing)
 
@@ -4606,10 +4591,8 @@ def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_clos
 
 # Each press reads the inbox and the phase the press before it left.
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_dropped(
-    tmp_path: Path,
-) -> None:
-    commanded = workspace(tmp_path / "commands")
+def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_dropped() -> None:
+    commanded = workspace()
     command_hop, command_dir = walking_cycle(commanded)
     commands = CycleEventLog.open(CycleDir(command_dir))
     control = RunControl(commands=commanded.commands, cycle=commanded.subject(command_hop))
@@ -5692,9 +5675,9 @@ class _Declared(NamedTuple):
 
 
 @pytest.fixture
-def declared_head_to_heads(tmp_path: Path) -> _Declared:
+def declared_head_to_heads() -> _Declared:
     """Five declared head-to-heads, one over defaults its arms no longer run under."""
-    h2h_stores = workspace(tmp_path / "h2h")
+    h2h_stores = workspace()
     declared = minted_campaign(
         CycleHop(campaign_id="arm", cycle_id="cycle_arm"),
         config=_h2h_config("potter", 0, _H2H_FORMULA, None),
@@ -6045,7 +6028,7 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
 ) -> None:
     monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": FakeHarness.URL})
     monkeypatch.setattr(settings, "N8N_HARNESS_TOKEN", SecretStr("harness-secret"))
-    stores = workspace(tmp_path)
+    stores = workspace()
     harness = n8n.CONNECTOR
     assert harness.pipeline_declaration is not None
     graph = harness.pipeline_declaration(stores, None)

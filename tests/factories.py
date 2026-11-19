@@ -60,7 +60,7 @@ from promptpotter.application.runner.loop import walk_round_zero
 from promptpotter.application.runner.mint import open_launch
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, mean_lift
-from promptpotter.config.paths import install_datasets_root
+from promptpotter.config.paths import default_projects_root, install_datasets_root, user_data_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import (
     PROBE_WORKLOAD,
@@ -466,11 +466,13 @@ def backend_client(jobs_dir: Path, **declared: Any) -> BackendClient:
     )
 
 
-def workspace(root: Path, identity: IdentityContext | None = None) -> Stores:
+def workspace(identity: IdentityContext | None = None) -> Stores:
+    """The workspace at this fact's data root (`conftest.py::own_home`); its install tier beside it,
+    as a wheel's sits outside the data root."""
     return build_stores(
         default_identity() if identity is None else identity,
-        projects_root=root / "projects",
-        install_datasets_root=root / "datasets",
+        projects_root=default_projects_root(),
+        install_datasets_root=user_data_root().parent / "datasets",
     )
 
 

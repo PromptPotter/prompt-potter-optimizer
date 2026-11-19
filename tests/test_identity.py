@@ -217,7 +217,11 @@ from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.config import paths
-from promptpotter.config.paths import block_packs_root, install_datasets_root
+from promptpotter.config.paths import (
+    block_packs_root,
+    default_projects_root,
+    install_datasets_root,
+)
 from promptpotter.connectors import CONNECTORS, upload_connector
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors.dbllmbench import DbllmbenchPanel
@@ -358,7 +362,11 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import rmtree_robust, write_json, write_yaml
-from promptpotter.infrastructure.store.layout import CampaignLayout, CycleLayout
+from promptpotter.infrastructure.store.layout import (
+    CampaignLayout,
+    CycleLayout,
+    inner_sandboxes_dir,
+)
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
@@ -478,12 +486,12 @@ def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
 
 
 def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
-    tmp_path: Path, built_stores: Stores, offline: Router
+    built_stores: Stores, offline: Router
 ) -> None:
     capo = select_optimizer(bench_choice("capo"))
     capo_seat = jumping_clock(
         run_init_round(
-            workspace(tmp_path / "capo"),
+            workspace(default_identity("capo")),
             offline,
             samples(40, "TRUE"),
             optimization={"optimizer": "capo"},
@@ -500,7 +508,7 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     )
     baseline = potter.prompt_hashes()
     assert potter.prompt_hashes() == baseline, "an unmoved preset re-hashed"
-    inner = workspace(tmp_path / "outer")
+    inner = workspace(default_identity("outer"))
 
     def arm(optimizer: str, overrides: dict[str, dict[str, Any]]) -> RoundContext:
         return jumping_clock(inner_seat(inner, offline, optimizer, overrides))
@@ -1112,7 +1120,7 @@ def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: 
     assert edited["other"] == after["other"], "one seat's edit re-keyed another seat"
     sandbox = build_stores(
         built_stores.identity,
-        projects_root=built_stores.base_dir / ".inner" / "cell",
+        projects_root=inner_sandboxes_dir(built_stores.shared_root) / "cell",
         install_datasets_root=built_stores.install_datasets_root,
         shared_root=built_stores.shared_root,
     )
@@ -1246,7 +1254,7 @@ def tiered(tmp_path: Path) -> Stores:
         write_yaml(root / name / DEFINITION_FILE, definition)
     tiered = build_stores(
         default_identity(),
-        projects_root=tmp_path / "tiered",
+        projects_root=default_projects_root(),
         install_datasets_root=install_root,
         research_datasets_root=research_root,
     )
@@ -1293,9 +1301,9 @@ def test_a_names_second_holder_blocks_no_campaign_or_origin(tiered: Stores) -> N
     ], "the origins survey dropped an origin whose name another tier also holds"
 
 
-def test_a_root_holding_no_resolved_run_serves_its_own_refusal(tmp_path: Path) -> None:
+def test_a_root_holding_no_resolved_run_serves_its_own_refusal() -> None:
     # Never one sentence for every refusal, so the reader learns which record to repair.
-    unresolved = build_stores(default_identity(), projects_root=tmp_path / "unresolved")
+    unresolved = build_stores(default_identity(), projects_root=default_projects_root())
     refused_root = CycleHop(campaign_id="camp-bare", cycle_id="cycle_bare00000000")
     unresolved.campaigns.create_campaign(minted_campaign(refused_root, dataset_name="carded"))
     unresolved.campaigns.mint_cycle(refused_root)
@@ -1400,13 +1408,16 @@ def test_the_listing_reads_each_card_and_never_the_research_tier(tiered: Stores)
 def shipped_tiers(tmp_path_factory: pytest.TempPathFactory) -> tuple[Stores, list[set[str]]]:
     """The checkout's stores and each shipped tier's names, read once through the listing: the
     research tier as a store's install tier, since the listing never lists research."""
-    home = tmp_path_factory.mktemp("checkout")
-    checkout = build_stores(default_identity(), projects_root=home / "checkout")
-    research = checkout.research_datasets_root
-    assert research is not None, "this checkout lost a tier"
-    as_install = build_stores(
-        default_identity(), projects_root=home / "research", install_datasets_root=research
-    )
+    with pytest.MonkeyPatch.context() as home:
+        home.setenv("PROMPTPOTTER_HOME", str(tmp_path_factory.mktemp("checkout")))
+        checkout = build_stores(default_identity(), projects_root=default_projects_root())
+        research = checkout.research_datasets_root
+        assert research is not None, "this checkout lost a tier"
+        as_install = build_stores(
+            default_identity("research"),
+            projects_root=default_projects_root(),
+            install_datasets_root=research,
+        )
     return checkout, [
         {ref.dataset.name for ref in list_readable_datasets(stores)}
         for stores in (checkout, as_install)
@@ -2832,7 +2843,7 @@ def test_an_arm_sets_an_operators_knobs_only() -> None:
 
 
 def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
-    tmp_path: Path, built_stores: Stores, decl: _Declared
+    built_stores: Stores, decl: _Declared
 ) -> None:
     # An arm so declared runs what a campaign minted on that declaration resolves to.
     stores = built_stores
@@ -2877,7 +2888,7 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     # campaign state, never the account's datasets, or a tenant seat refuses every arm.
     sandboxed = spawn.sandbox_stores(
         InnerSpawnContext(
-            inner_sandbox_root=tmp_path / "sandbox",
+            inner_sandbox_root=inner_sandboxes_dir(default_projects_root()) / "sandbox",
             identity=stores.identity,
             shared_root=stores.shared_root,
             install_datasets_root=stores.install_datasets_root,
@@ -2892,9 +2903,9 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     assert resolve_dataset(sandboxed, "decl") == resolve_dataset(stores, "decl"), (
         "an inner run resolved its seat's account dataset elsewhere than the panel that seated it"
     )
-    assert sandboxed.campaigns.campaign_root_dir("c").is_relative_to(tmp_path / "sandbox"), (
-        "an inner run's campaign state left its sandbox for the account's"
-    )
+    assert sandboxed.campaigns.campaign_root_dir("c").is_relative_to(
+        inner_sandboxes_dir(default_projects_root()) / "sandbox"
+    ), "an inner run's campaign state left its sandbox for the account's"
     l4_arm = declare(
         opened,
         seat_config,
@@ -3104,7 +3115,6 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     write_yaml(decl_definition, {**as_minted, "pipeline": {"connector": "n8n"}})
     asked = (len(offline.backend.asked), len(offline.harness.asked))
     with monkeypatch.context() as cli:
-        cli.setenv("PROMPTPOTTER_HOME", str(tmp_path))
         cli.setattr(
             sys,
             "argv",
@@ -3178,9 +3188,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     write_yaml(decl_definition, as_minted)
 
 
-def test_a_sandboxed_mint_moves_no_account_label(
-    tmp_path: Path, built_stores: Stores, decl: _Declared
-) -> None:
+def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _Declared) -> None:
     # An inner run reads the account's datasets and names none of its banks: the outer's mint does.
     stores = built_stores
     opened, rows_30, solve, door, declared = decl
@@ -3189,7 +3197,7 @@ def test_a_sandboxed_mint_moves_no_account_label(
     assert "decl" in labelled, "a campaign's mint named no bank"
     sandboxed = spawn.sandbox_stores(
         InnerSpawnContext(
-            inner_sandbox_root=tmp_path / "sandbox",
+            inner_sandbox_root=inner_sandboxes_dir(default_projects_root()) / "sandbox",
             identity=stores.identity,
             shared_root=stores.shared_root,
             install_datasets_root=stores.install_datasets_root,
@@ -3694,13 +3702,11 @@ def test_a_nested_fields_description_folds_into_the_contract_it_names() -> None:
     )
 
 
-def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrote_it_on(
-    tmp_path: Path,
-) -> None:
+def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrote_it_on() -> None:
     # Each step reads the panel, schema or child the step before resolved.
     # A checkout resolves its research tier with no setting; a seat no committed tier holds is the
     # account's: a panel the account cannot resolve refuses at init, naming the seat.
-    outer_stores = build_stores(default_identity(), projects_root=tmp_path / "outer")
+    outer_stores = build_stores(default_identity(), projects_root=default_projects_root())
     outer = resolve_dataset(outer_stores, "promptpotter-self/run")
     assert (outer.tier, outer.tier_root) == ("research", _RESEARCH), (
         "a checkout did not resolve the L4 panel from its own research tier"
@@ -4749,7 +4755,7 @@ def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refuse
 
 
 def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifests(
-    tmp_path: Path, built_stores: Stores, offline: Router
+    built_stores: Stores, offline: Router
 ) -> None:
     # A panel mixing two manifests; the edit it admits reaches the inner cell's request.
     potter = select_optimizer(bench_choice("potter"))
@@ -4812,7 +4818,10 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
     )
     capo_seat = jumping_clock(
         inner_seat(
-            workspace(tmp_path / "outer"), offline, "capo", payload["optimizer_prompt_overrides"]
+            workspace(default_identity("outer")),
+            offline,
+            "capo",
+            payload["optimizer_prompt_overrides"],
         )
     )
     sent = (

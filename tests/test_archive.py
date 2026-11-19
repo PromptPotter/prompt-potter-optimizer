@@ -126,7 +126,7 @@ from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.search_point_scorer import replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.application.views.render.phase import acts_line
-from promptpotter.config.paths import MEASUREMENTS_DIR
+from promptpotter.config.paths import MEASUREMENTS_DIR, user_data_root
 from promptpotter.domain.activity import ActivityFeed
 from promptpotter.domain.arms import ArmPosition, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
@@ -237,7 +237,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     cleanup_stub_fork_if_empty,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
+from promptpotter.infrastructure.store.stores import Stores, build_stores, inner_sandbox_store
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -260,7 +260,7 @@ _CAMPAIGN = "testds__20260101-000000"
 
 
 def _walk_panel(
-    root: Path,
+    tenant: str,
     panel: list[Sample],
     per_sample: str,
     per_cell: str | None,
@@ -274,7 +274,7 @@ def _walk_panel(
         nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)],
     )
     session = loop_session(
-        workspace(root),
+        workspace(default_identity(tenant)),
         schema,
         panel if bank is None else bank,
         scorer=scorer_of(per_sample, per_cell),
@@ -294,7 +294,11 @@ def _walk_panel(
 
     measured = None if ledger is None else "arm"
     with (
-        scoped(ledger=CycleEventLog(root / "walk.jsonl" if ledger is None else ledger)),
+        scoped(
+            ledger=CycleEventLog(
+                user_data_root().parent / f"walk-{tenant}.jsonl" if ledger is None else ledger
+            )
+        ),
         mock.patch.object(query_loop, "measure_sample", _measure),
     ):
         walked = asyncio.run(
@@ -384,16 +388,16 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     panel = wider_panel[:6]
     banked_under = ("label_match(predicted, ground_truth)", None)
     read_under = ("0.5 * label_match(predicted, ground_truth)", "0.5 * fitness + 0.25")
-    shared, banked_walk = _walk_panel(tmp_path / "shared", panel, *banked_under, bank=wider_panel)
+    shared, banked_walk = _walk_panel("shared", panel, *banked_under, bank=wider_panel)
     assert all(GRADE_KEYS & r.keys() for r in banked_walk.sheet.wire()), "guard: the walk graded"
     banked = archive_queries.walked_answers(shared.store, banked_walk.cells)
     assert len(banked) == len(panel), "a walked answer was not banked"
     signatures = shared.store.archive.cell_signatures()
-    _, fresh = _walk_panel(tmp_path / "fresh", panel, *read_under)
+    _, fresh = _walk_panel("fresh", panel, *read_under)
     worth = {c.key: c.grade.objective for c in fresh.sheet}
     assert len(set(worth.values())) == 2, "guard: hits and misses are worth different amounts"
 
-    _, replayed = _walk_panel(tmp_path / "shared", panel, *read_under, bank=wider_panel)
+    _, replayed = _walk_panel("shared", panel, *read_under, bank=wider_panel)
     assert all(c.facts.cached for c in replayed.sheet), "guard: the second read bought nothing"
     ruler_cells = {key: y for _, key, y in ruler_rows(shared.store, [("x", replayed.sheet)], None)}
     assert ruler_cells == pytest.approx(worth), "the ruler read the banked formula's grades"
@@ -830,13 +834,6 @@ _STEERED = ForkSpec(
 )
 
 
-@pytest.fixture
-def homed_stores(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Stores:
-    """A workspace AT the fact's data root: io places a campaign and a cycle from that root alone."""
-    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path.resolve()))
-    return workspace(tmp_path.resolve())
-
-
 def _writes_under(
     stores: Stores, hop: CycleHop, held: CycleEventLog
 ) -> dict[str, Callable[[], object]]:
@@ -849,13 +846,19 @@ def _writes_under(
     }
 
 
+def test_a_store_off_the_data_root_io_places_from_is_refused(tmp_path: Path) -> None:
+    # Off it, io's anchor never binds: a write into a deleted cycle re-makes it.
+    with pytest.raises(ValueError, match="not under the data root"):
+        build_stores(default_identity(), projects_root=tmp_path / "projects")
+
+
 def test_a_write_past_its_campaigns_delete_answers_not_found_and_makes_no_campaign_dir(
-    homed_stores: Stores,
+    built_stores: Stores,
 ) -> None:
-    hop, held = _minted(homed_stores, "cycle_deleted")
-    assert homed_stores.campaigns.delete_campaign(hop.campaign_id, keep_results=False)
-    writes = _writes_under(homed_stores, hop, held) | {
-        "a fork mint": lambda: homed_stores.campaigns.mint_cycle(
+    hop, held = _minted(built_stores, "cycle_deleted")
+    assert built_stores.campaigns.delete_campaign(hop.campaign_id, keep_results=False)
+    writes = _writes_under(built_stores, hop, held) | {
+        "a fork mint": lambda: built_stores.campaigns.mint_cycle(
             hop.model_copy(update={"cycle_id": "c_fork"}),
             CycleMintedRecord(
                 parent=f"../{hop.cycle_id}", forked_at_offset=0, cut_round=0, fork=_STEERED
@@ -865,30 +868,30 @@ def test_a_write_past_its_campaigns_delete_answers_not_found_and_makes_no_campai
     for what, write in writes.items():
         with pytest.raises(NotFoundError):
             write()
-        assert not homed_stores.campaigns.campaign_root_dir(hop.campaign_id).exists(), (
+        assert not built_stores.campaigns.campaign_root_dir(hop.campaign_id).exists(), (
             f"{what} after the delete re-made a campaign no manifest names"
         )
 
 
 def test_a_write_past_its_cycles_cleanup_answers_not_found_and_makes_no_cycle_dir(
-    homed_stores: Stores,
+    built_stores: Stores,
 ) -> None:
-    root, _ = _minted(homed_stores, "cycle_root")
-    stub = _mint_sibling(homed_stores.campaigns, root, "cycle_stub", _STEERED, cut_round=0)
-    held = CycleEventLog.open(CycleDir(homed_stores.campaigns.cycle_dir(stub)))
-    assert cleanup_stub_fork_if_empty(campaign_store=homed_stores.campaigns, hop=stub)[0]
-    for what, write in _writes_under(homed_stores, stub, held).items():
+    root, _ = _minted(built_stores, "cycle_root")
+    stub = _mint_sibling(built_stores.campaigns, root, "cycle_stub", _STEERED, cut_round=0)
+    held = CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(stub)))
+    assert cleanup_stub_fork_if_empty(campaign_store=built_stores.campaigns, hop=stub)[0]
+    for what, write in _writes_under(built_stores, stub, held).items():
         with pytest.raises(NotFoundError):
             write()
-        assert not homed_stores.campaigns.cycle_dir(stub).exists(), (
+        assert not built_stores.campaigns.cycle_dir(stub).exists(), (
             f"{what} after the cleanup re-made a cycle its campaign no longer lists"
         )
 
 
 def test_a_draft_ledger_append_past_its_discard_answers_not_found_and_makes_no_draft_dir(
-    homed_stores: Stores,
+    built_stores: Stores,
 ) -> None:
-    drafts, draft_id = homed_stores.drafts, "d_0123456789abcdef"
+    drafts, draft_id = built_stores.drafts, "d_0123456789abcdef"
     make_dirs(drafts.draft_dir(draft_id))
     held = CycleEventLog.open(CycleDir(drafts.draft_dir(draft_id)))
     held.append(RoundWarningRecord(kind="layer_parse_failure", message="billed"))
@@ -899,10 +902,10 @@ def test_a_draft_ledger_append_past_its_discard_answers_not_found_and_makes_no_d
 
 
 def test_a_cycle_deleted_under_a_replace_reads_not_found_and_its_projection_warns_nothing(
-    homed_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    hop, held = _minted(homed_stores, "cycle_replaced")
-    cycle = homed_stores.campaigns.cycle_dir(hop)
+    hop, held = _minted(built_stores, "cycle_replaced")
+    cycle = built_stores.campaigns.cycle_dir(hop)
     said: list[type[Exception]] = []
 
     class _Deriving(Projection):
@@ -931,11 +934,11 @@ def test_a_cycle_deleted_under_a_replace_reads_not_found_and_its_projection_warn
 
 
 def test_a_replace_whose_temporary_was_swept_under_a_standing_cycle_raises_as_itself(
-    homed_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A reset's `**/.*.tmp` sweep in the window before the replace: the cycle stands, so no "gone".
-    hop, _ = _minted(homed_stores, "cycle_swept")
-    cycle = homed_stores.campaigns.cycle_dir(hop)
+    hop, _ = _minted(built_stores, "cycle_swept")
+    cycle = built_stores.campaigns.cycle_dir(hop)
     replace = os.replace
 
     def swept_first(src: str, dst: str, *args: object, **kwargs: object) -> None:
@@ -952,10 +955,10 @@ def test_a_replace_whose_temporary_was_swept_under_a_standing_cycle_raises_as_it
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows deletes no cycle under a held lock")
 def test_an_append_whose_cycle_is_deleted_before_its_cut_answers_not_found(
-    homed_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    hop, held = _minted(homed_stores, "cycle_cut")
-    cycle = homed_stores.campaigns.cycle_dir(hop)
+    hop, held = _minted(built_stores, "cycle_cut")
+    cycle = built_stores.campaigns.cycle_dir(hop)
     with open(held.path, "ab") as torn:
         torn.write(b'{"torn')
 
@@ -971,10 +974,10 @@ def test_an_append_whose_cycle_is_deleted_before_its_cut_answers_not_found(
 
 
 def test_a_relative_write_into_a_deleted_campaign_answers_not_found(
-    homed_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    hop, _ = _minted(homed_stores, "cycle_relative")
-    root = homed_stores.campaigns.campaign_root_dir(hop.campaign_id)
+    hop, _ = _minted(built_stores, "cycle_relative")
+    root = built_stores.campaigns.campaign_root_dir(hop.campaign_id)
     shutil.rmtree(root)
     with monkeypatch.context() as patched:
         patched.chdir(root.parent)
@@ -993,9 +996,9 @@ def test_a_relative_write_into_a_deleted_campaign_answers_not_found(
             assert not root.exists(), "an 8.3 short path re-made a deleted campaign"
 
 
-def test_a_standing_cycles_projection_fault_warns_whatever_its_type(homed_stores: Stores) -> None:
+def test_a_standing_cycles_projection_fault_warns_whatever_its_type(built_stores: Stores) -> None:
     # A purged archive's `NotFoundError` and a sibling's unreadable index are no gone cycle.
-    _, held = _minted(homed_stores, "cycle_standing")
+    _, held = _minted(built_stores, "cycle_standing")
     faults: tuple[Exception, ...] = (
         NotFoundError("archive no longer holds samples"),
         FileUnreadableError(FileKind.STORE, path="index.json", reason="line 0: invalid"),
@@ -1032,11 +1035,11 @@ def test_a_write_refuses_only_a_campaign_or_cycle_by_its_place_never_a_dir_so_na
     root = tmp_path.resolve() / "projects" / "x" / "campaigns" / "D"
     monkeypatch.setenv("PROMPTPOTTER_HOME", str(root))
     fresh = refused(lambda: write_json(root / "logs" / "x.json", {}))
-    stores = workspace(root)
-    tenant = workspace(root, default_identity("campaigns")).campaigns
+    stores = workspace()
+    tenant = workspace(default_identity("campaigns")).campaigns
     gone_campaign, _ = _minted(stores, "cycle_kept")
     shutil.rmtree(stores.campaigns.campaign_root_dir(gone_campaign.campaign_id))
-    cut = workspace(root, default_identity("cut"))
+    cut = workspace(default_identity("cut"))
     gone_cycle, _ = _minted(cut, "cycle_cut")
     shutil.rmtree(cut.campaigns.cycle_dir(gone_cycle))
     beside = cut.campaigns.cycle_dir(_minted(cut, "cycle_beside")[0])
@@ -2279,9 +2282,10 @@ class _Family(NamedTuple):
 
 @pytest.fixture(scope="module")
 def family_tree(tmp_path_factory: pytest.TempPathFactory) -> _Family:
-    """Built once: every fact on it only reads."""
-    with scoped(memory=OpenAt()):
-        return _family(workspace(tmp_path_factory.mktemp("family")))
+    """Built once, at a home of its own: every fact on it only reads."""
+    with scoped(memory=OpenAt()), pytest.MonkeyPatch.context() as home:
+        home.setenv("PROMPTPOTTER_HOME", str(tmp_path_factory.mktemp("family")))
+        return _family(workspace())
 
 
 def _family(stores: Stores) -> _Family:

@@ -26,6 +26,7 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.draft_store import DraftStore
 from promptpotter.infrastructure.store.io import (
+    _plain,
     rmtree_robust,
     unlink_robust,
     validate_path_component,
@@ -217,17 +218,18 @@ def build_stores(
     research_datasets_root: Path | None | Literal["checkout"] = "checkout",
     shared_root: Path | None = None,
 ) -> Stores:
-    """``projects_root`` takes no default: one would address the real workspace from a sandbox.
-    The research root is the checkout's where a fresh build asks for it (``checkout``); a
-    carried one, ``None`` included, is kept as carried."""
-    root = projects_root
-    tenant_dir = tenant_workspace(root, identity.tenant_id)
-    shared = shared_root if shared_root is not None else root
+    """``projects_root`` takes no default (one would address the real workspace from a sandbox), and
+    off the data root io places a write from (`paths.py::user_data_root`) it is refused. A fresh
+    build asks the checkout's research root (``checkout``); a carried one, ``None`` too, is kept."""
+    if not _plain(projects_root).is_relative_to(data_root := _plain(paths.user_data_root())):
+        raise ValueError(f"{projects_root} is not under the data root {data_root}")
+    tenant_dir = tenant_workspace(projects_root, identity.tenant_id)
+    shared = shared_root if shared_root is not None else projects_root
     home = archive_home(identity, settings.SHARED_ARCHIVE, shared_root=shared)
     account = tenant_workspace(shared, identity.tenant_id)
     return Stores(
         base_dir=tenant_dir,
-        projects_root=root,
+        projects_root=projects_root,
         shared_root=shared,
         install_datasets_root=install_datasets_root or paths.install_datasets_root(),
         research_datasets_root=(

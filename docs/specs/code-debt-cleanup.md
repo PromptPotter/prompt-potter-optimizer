@@ -670,8 +670,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   renamed field passes there; the real `Admitted.held` needs a runnable bank under the hand-built
   scenario line (the `seat` row's root). Action: the real record. **Rides with:** tests-w's successor.
   **Re-test:** `git grep -c "SimpleNamespace" -- tests/test_archive.py` is 0.
-- **A fact's home outlives it** (tests-w's report): pytest's `tmp_path` retention keeps every home
-  on disk. **Rides with:** tests-w's successor. **Re-test:** no home retained beyond pytest's last run.
 
 ### batch/32 · ts-score
 
@@ -751,17 +749,15 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   inside the root's reads `clean`. Action: decide which narrowing a launch at a hop answers to (the
   babysit act, decisions.md § 0005) and read it there. **Re-test:** a launch at a fork whose line
   narrowed a model steers to the root-only model and reads `babysat`.
-- **A test home is built beside `factories.workspace`** (store-2's report): facts in `test_spend.py` and
-  `test_security.py` built ledgers, locks and homes under paths nothing minted and passed because io
-  made dirs. Root: test homes mint through `factories.workspace`. **Rides with:** tests-x.
-- **The data root has two sources** (store-3b's report, the store-3 review's probe): io reads
-  `paths.py::user_data_root()` on every miss while a store carries `Stores.projects_root`; where they
-  disagree every door fails open silently (a store outside the home re-makes a deleted cycle), and in
-  the suite they always do (`conftest.py::own_home` sets `<tmp>-home`, `built_stores` is
-  `workspace(tmp_path)`), so the anchor is off in every fact but the `homed_stores` ones. Root: one
-  binding source (`build_stores` refuses a root outside the data root) with test homes built under
-  it. **Rides with:** tests-x. **Re-test:** a store built outside the home refuses; every fact's
-  store sits under its home.
+- **A store under the data root off its workspace shapes** (tests-x's report): `build_stores` refuses
+  only a root outside `user_data_root()`; one under it matching no `io.py::WORKSPACE_SHAPES` (say
+  `<home>/projects/x/projects`) still builds, and io's anchor never binds there. The one holder is
+  `scripts/offline_run.py::interrupted`, which builds Stores over a child leg's data root from the
+  parent. Root: the parent reads a leg through the leg's own process, then `build_stores` matches the
+  shapes. **Re-test:** `build_stores` on `<home>/projects/x/projects` raises.
+- **io's path spelling is private** (tests-x's report): `stores.py::build_stores` imports
+  `io.py::_plain`, the one spelling of a path for the anchor's compare. Root: io names it publicly.
+  **Re-test:** `git grep -c "import.*_plain" -- promptpotter` is 0 outside io.
 
 ### wave-5 · rates (what rates-4 left at its landing)
 

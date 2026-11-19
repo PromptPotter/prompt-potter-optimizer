@@ -150,7 +150,7 @@ from promptpotter.application.served_dashboard import (
     current_caps,
     served_dashboard,
 )
-from promptpotter.config.paths import user_data_root
+from promptpotter.config.paths import default_projects_root, jobs_dir
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
@@ -711,7 +711,7 @@ async def test_an_ungraded_cell_bills_what_it_spent_and_a_replay_states_its_rows
     cells = CycleEventLog(tmp_path / "cells.jsonl")
     unbounded = spend_book()
     session = loop_session(
-        workspace(tmp_path / "ungraded"),
+        workspace(),
         pipeline_schema([]),
         [],
         client=backend_client(
@@ -1091,9 +1091,7 @@ def test_budget_equality_is_over_the_axes_each_names() -> None:
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
-    tmp_path: Path,
-) -> None:
+def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key() -> None:
     # An identity rebuilt from the tenant alone carries no issuer, and no issuer IS the operator.
     signup = IdentityContext(
         user_id=UserId("sub-9"),
@@ -1102,8 +1100,8 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
         email="a@example.com",
         capabilities=frozenset({"campaign.run"}),
     )
-    stores = workspace(tmp_path, signup)
-    spawned = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    stores = workspace(signup)
+    spawned = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
     held = _held(
         stores,
         spawned,
@@ -1869,13 +1867,11 @@ def test_a_ledger_index_serves_the_file_as_it_stands_grown_compacted_raced_and_s
 def test_a_cell_one_account_paid_replays_free_to_another_only_from_a_named_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    homes = tmp_path / "homes"
-
     def account(sub: str) -> Stores:
         signed_in = IdentityContext(
             user_id=UserId(sub), tenant_id=TenantId(sub), issuer=Issuer(_WEB)
         )
-        return workspace(homes, signed_in)
+        return workspace(signed_in)
 
     cell_entry = filed_under([("llm_only", {"model": "m"})])
     paid = MeasuredCell.from_wire(
@@ -1893,7 +1889,7 @@ def test_a_cell_one_account_paid_replays_free_to_another_only_from_a_named_home(
     def bank_and_replay(shared: str) -> tuple[list[str], float]:
         monkeypatch.setattr(settings, "SHARED_ARCHIVE", shared)
         filed(account("ada-id").archive, [paid], cell_entry, created_at=shared)
-        ledger = CycleEventLog(homes / f"bob-{shared}.jsonl")
+        ledger = CycleEventLog(tmp_path / f"bob-{shared}.jsonl")
         book = spend_book(1.0, meters="bill", metered_on=ledger.path)
         with _billing_on(ledger, book):
             for answer in account("bob-id").archive.population(cell_entry):
@@ -1908,7 +1904,7 @@ def test_a_cell_one_account_paid_replays_free_to_another_only_from_a_named_home(
     with pytest.raises(PayloadInvalidError):
         purge_cold_store(account("ada-id"), apply=True)
     assert replayed_by_bob() == ["k"], "an account's refused purge still took the shared home"
-    purge_cold_store(workspace(homes, default_identity()), apply=True)
+    purge_cold_store(workspace(default_identity()), apply=True)
 
 
 # 3. A campaign's ceiling
@@ -2020,15 +2016,13 @@ def _stopped_on(book: SpendBook) -> StopReason | None:
 
 
 @pytest.mark.usefixtures("offline")
-def test_a_mid_run_ceiling_reaches_the_running_book_and_the_loop(
-    tmp_path: Path, built_stores: Stores
-) -> None:
+def test_a_mid_run_ceiling_reaches_the_running_book_and_the_loop(built_stores: Stores) -> None:
     # The declared ceiling lives on the ledger alone, so a launch's flag sweep cannot take it.
     campaigns = built_stores.campaigns
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     campaigns.mint_cycle(hop)
     cycle_dir = campaigns.cycle_dir(hop)
-    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    jobs = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
     declared = _held(built_stores, jobs, Budget())
 
     def declare(budget: Budget) -> None:
@@ -2146,9 +2140,9 @@ class _SharedCeiling(NamedTuple):
 
 
 @pytest.fixture
-def shared_ceiling(tmp_path: Path, built_stores: Stores) -> _SharedCeiling:
+def shared_ceiling(built_stores: Stores) -> _SharedCeiling:
     """The jobs dir every reader attaches to, with room for every fork, and launches on it."""
-    shared = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
+    shared = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 4)
     payer = account_of(built_stores)
 
     def bill(at: CycleHop, usd: float) -> None:
@@ -2400,7 +2394,6 @@ def test_a_ceiling_its_campaign_has_spent_admits_nothing(
 
 @pytest.mark.usefixtures("offline")
 def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     built_stores: Stores,
     shared_ceiling: _SharedCeiling,
@@ -2416,7 +2409,7 @@ def test_a_job_retargeted_mid_stamp_is_never_overwritten_by_the_runs_stale_copy(
         holder=CampaignLaunch("ds1"),
     )
     shared.move(stamped.job_id, LaunchMove.ADMIT)
-    api = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 4)
+    api = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 4)
     read_job = shared.get
     retarget = threading.Thread(
         target=api.move, args=(stamped.job_id, LaunchMove.LAND), kwargs={"hop": race[0]}
@@ -2492,12 +2485,11 @@ def test_a_busy_admission_gate_refuses_a_launch_and_never_a_running_jobs_stamp(
 
 @pytest.mark.usefixtures("offline")
 def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
-    tmp_path: Path, shared_ceiling: _SharedCeiling
+    shared_ceiling: _SharedCeiling,
 ) -> None:
     # A $10 campaign that has spent $3 shares the $7 left; its account binds through the reserve.
     shared, _, _, _ = shared_ceiling
     delegate = workspace(
-        tmp_path,
         IdentityContext(
             user_id=UserId("sub-d"),
             tenant_id=TenantId("sub-d"),
@@ -2657,7 +2649,7 @@ def test_a_remote_cell_open_at_the_runs_wall_clock_is_cut_on_it(
     remote = backend_client(jobs, cell_envelope_s=cell_envelope_of(600.0))
     clock = spend_book(None, usd_reserve=None, wall_clock_s=30.0)
     cut_session = loop_session(
-        workspace(tmp_path / "cut"),
+        workspace(),
         pipeline_schema([]),
         [],
         scorer=_HIT,
@@ -2693,9 +2685,7 @@ def test_a_cell_row_carries_the_category_its_sends_close_decided(
 ) -> None:
     offline.backend.faults = {"/matches": [httpx.Response(503, json={"detail": "down"})] * 12}
     remote = backend_client(tmp_path / "jobs")
-    session = loop_session(
-        workspace(tmp_path / "down"), pipeline_schema([]), [], scorer=_HIT, client=remote
-    )
+    session = loop_session(workspace(), pipeline_schema([]), [], scorer=_HIT, client=remote)
 
     async def downed_cell() -> MeasuredCell:
         async with contextlib.aclosing(remote):
@@ -2766,7 +2756,7 @@ def test_with_overshoot_on_a_call_holds_its_nodes_mean_bill_in_the_run_after_the
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     built_stores.campaigns.create_campaign(minted_campaign(hop))
     built_stores.campaigns.mint_cycle(hop)
-    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    jobs = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
     book = _armed(built_stores, hop, _held(built_stores, jobs, Budget(usd=1.0)))
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.10)
 
@@ -2793,7 +2783,7 @@ def test_with_overshoot_on_a_call_holds_its_nodes_mean_bill_in_the_run_after_the
 
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_a_bill_past_its_overshoot_hold_draws_on_the_run_and_the_dashboard_serves_it(
-    tmp_path: Path, built_stores: Stores
+    built_stores: Stores,
 ) -> None:
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     campaign = minted_campaign(hop)
@@ -2802,7 +2792,7 @@ def test_a_bill_past_its_overshoot_hold_draws_on_the_run_and_the_dashboard_serve
     built_stores.campaigns.mint_cycle(hop)
     ledger = CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(hop)))
     ledger.append(run_wiring())
-    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    jobs = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
     book = _armed(built_stores, hop, _held(built_stores, jobs, Budget(usd=1.0)))
     _change_run_limits(CommandDispatcher(built_stores, jobs), hop, Budget(), overshoot=True)
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.10)
@@ -2844,13 +2834,13 @@ def test_an_overshoot_switched_on_before_the_launch_wires_its_cycle_is_served_on
 
 
 def test_a_launch_standing_its_held_budget_keeps_the_pause_its_allowance_declared(
-    tmp_path: Path, built_stores: Stores
+    built_stores: Stores,
 ) -> None:
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     stored_campaign(built_stores, minted_campaign(hop))
     built_stores.campaigns.mint_cycle(hop)
     built_stores.campaigns.append(hop, StandingBudgetRecord(pause_at_round=4))
-    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    jobs = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
     held = _held(built_stores, jobs, Budget(usd=1.0), standing=Budget(rounds=2))
     stand_held_budget(built_stores, hop, held)
     standing = built_stores.campaigns.read_standing_budget(hop)
@@ -3882,8 +3872,12 @@ _OWN_ONLY = (ProviderSend("openrouter", "user"),)
 _OPENED = "2000-01-01T00:00:00Z"
 
 
+def _other(user: User, tenant: str) -> User:
+    """*user* as an account of its own in the fact's home."""
+    return user.model_copy(update={"user_id": tenant, "tenant_id": tenant})
+
+
 def _account_stores(
-    tmp_path: Path,
     *,
     issuer: str | None,
     user: User,
@@ -3894,7 +3888,6 @@ def _account_stores(
     """`issuer` set makes this a WEB identity; the box operator has none and is unmetered. Its one
     campaign's cycle is `_HELD_HOP`; its charges hold what the box's keys *spent* for it."""
     stores = workspace(
-        tmp_path,
         IdentityContext(
             user_id=UserId(user.user_id),
             tenant_id=TenantId(user.tenant_id),
@@ -4091,42 +4084,43 @@ def test_every_paid_door_admits_its_declared_ceiling_and_holds_what_the_coupon_h
     tmp_path: Path,
 ) -> None:
     for n, door in enumerate(_doors()):
-        at = tmp_path / f"door-{n}"
-        at.mkdir()
-        user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
-        stores = _account_stores(
-            at, issuer=door.issuer, user=user, spent=door.spent, face=door.face
-        )
-        registry = JobRegistry(stores.jobs_dir, capacity=lambda _live: 1)
-        if door.running is not None:
-            _running(stores, registry, **door.running)
+        # A home per door, as an install is, so no door reads another's jobs or spend.
+        with pytest.MonkeyPatch.context() as home:
+            home.setenv("PROMPTPOTTER_HOME", str(tmp_path / f"door-{n}"))
+            user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
+            stores = _account_stores(
+                issuer=door.issuer, user=user, spent=door.spent, face=door.face
+            )
+            registry = JobRegistry(stores.jobs_dir, capacity=lambda _live: 1)
+            if door.running is not None:
+                _running(stores, registry, **door.running)
 
-        if isinstance(door.admits, type):
-            with pytest.raises(door.admits) as refused:
-                if door.paid is None:
-                    _launch(door, user, stores, registry)
-                else:
-                    asyncio.run(door.paid(stores))
-            # The refusal names the ceiling that binds: only the run's own is the run's to drop.
-            if isinstance(refused.value, BudgetUnenforceableError):
-                binds = refused.value.details["binds"]
-                assert binds == ("allowance" if door.issuer else "run"), f"door {n}: names {binds}"
-            continue
-        knocked, reserve = _launch(door, user, stores, registry)
-        assert (knocked.usd, knocked.tokens) == door.admits, (
-            f"door {n}: a launch was admitted under another ceiling than its campaign declared"
-        )
-        assert (reserve.usd, reserve.tokens) == pytest.approx(door.reserves), (
-            f"door {n}: the coupon held back another amount than it has left for the run"
-        )
+            if isinstance(door.admits, type):
+                with pytest.raises(door.admits) as refused:
+                    if door.paid is None:
+                        _launch(door, user, stores, registry)
+                    else:
+                        asyncio.run(door.paid(stores))
+                # The refusal names the ceiling that binds: only the run's own is the run's to drop.
+                if isinstance(refused.value, BudgetUnenforceableError):
+                    binds = refused.value.details["binds"]
+                    assert binds == ("allowance" if door.issuer else "run"), (
+                        f"door {n}: names {binds}"
+                    )
+                continue
+            knocked, reserve = _launch(door, user, stores, registry)
+            assert (knocked.usd, knocked.tokens) == door.admits, (
+                f"door {n}: a launch was admitted under another ceiling than its campaign declared"
+            )
+            assert (reserve.usd, reserve.tokens) == pytest.approx(door.reserves), (
+                f"door {n}: the coupon held back another amount than it has left for the run"
+            )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_cycle_retaken_after_a_killed_bench_pass_closes_its_dead_bracket(
-    tmp_path: Path,
-) -> None:
+def test_a_cycle_retaken_after_a_killed_bench_pass_closes_its_dead_bracket() -> None:
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
-    killed = _account_stores(tmp_path / "killed", issuer=_WEB, user=user, spent=None)
+    killed = _account_stores(issuer=_WEB, user=user, spent=None)
     CycleEventLog.open(CycleDir(killed.campaigns.cycle_dir(_HELD_HOP))).append(
         PhaseRecord(phase=CampaignPhase.BENCH, step="enter")
     )
@@ -4148,12 +4142,12 @@ def test_a_cycle_retaken_after_a_killed_bench_pass_closes_its_dead_bracket(
 
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Per provider; the box's refusal names the provider an own key would free.
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     spent_out = _account_stores(
-        tmp_path / "keys", issuer=_WEB, user=user, spent=_SPENT_THE_COUPON, own_key="openrouter"
+        issuer=_WEB, user=user, spent=_SPENT_THE_COUPON, own_key="openrouter"
     )
     own = paying_key(spent_out.api_keys.load(), "openrouter")
     assert own is not None and (own.paid_by, own.secret.get_secret_value()) == ("user", "sk-own"), (
@@ -4195,7 +4189,7 @@ def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
     assert (payers["openrouter"], payers["openai"]) == ("user", "host"), (
         "the served payer of a provider is not the one its sends go out on"
     )
-    fresh = _account_stores(tmp_path / "fresh", issuer=_WEB, user=user, spent=None)
+    fresh = _account_stores(issuer=_WEB, user=_other(user, "fresh"), spent=None)
     with monkeypatch.context() as patched:
         patched.setattr(settings, "GROQ_API_KEY", SecretStr(""))
         assert provider_send(fresh.api_keys.load(), "groq").payer is None, (
@@ -4204,12 +4198,12 @@ def test_an_accounts_own_key_wins_and_the_boxs_key_sends_only_on_a_live_coupon(
 
 
 # One bill, read by each coupon the host sets over it in turn.
-def test_a_coupon_the_host_sets_is_served_and_afresh_draws_from_now_leaving_the_bill_whole(
-    tmp_path: Path,
-) -> None:
+def test_a_coupon_the_host_sets_is_served_and_afresh_draws_from_now_leaving_the_bill_whole() -> (
+    None
+):
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01T00:00:00Z")
-    stores = _account_stores(tmp_path, issuer=_WEB, user=user, spent=_SPENT_THE_COUPON)
-    projects = tmp_path / "projects"
+    stores = _account_stores(issuer=_WEB, user=user, spent=_SPENT_THE_COUPON)
+    projects = default_projects_root()
     assert stores.campaigns.workspace == projects / "sub-9", "the account is not where it is set"
     bill = stores.charges.path.read_bytes()
     lifetime = coupon_status(stores).host_key_spend
@@ -4232,9 +4226,9 @@ def test_a_coupon_the_host_sets_is_served_and_afresh_draws_from_now_leaving_the_
         set_coupon(projects, "sub-0", Budget(usd=1.0), afresh=False)
 
 
-def test_a_grant_file_without_its_start_does_not_load(tmp_path: Path) -> None:
+def test_a_grant_file_without_its_start_does_not_load() -> None:
     # Read as granted this instant, it would never age: the coupon would draw nothing it was charged.
-    stores = workspace(tmp_path)
+    stores = workspace()
     stores.grant.path.parent.mkdir(parents=True, exist_ok=True)
     stores.grant.path.write_text(json.dumps({"face": {"usd": 1.0}}), encoding="utf-8")
     with pytest.raises(FileUnreadableError):
@@ -4278,15 +4272,15 @@ def test_a_compare_arms_uncounted_bench_sends_still_draw_the_coupons_reserve(
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_the_free_tier_holds_an_ungranted_web_account_and_no_other(tmp_path: Path) -> None:
+def test_the_free_tier_holds_an_ungranted_web_account_and_no_other() -> None:
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     hand_set = Budget(usd=50.0, tokens=50_000)
     for n, (issuer, face, on_tier) in enumerate(
         ((_WEB, None, True), (None, None, False), (_WEB, hand_set, False))
     ):
-        at = tmp_path / f"tier-{n}"
-        at.mkdir()
-        stores = _account_stores(at, issuer=issuer, user=user, spent=None, face=face)
+        stores = _account_stores(
+            issuer=issuer, user=_other(user, f"tier-{n}"), spent=None, face=face
+        )
         assert free_tier.on_free_tier(stores) is on_tier, (
             f"account {n} sits on the wrong side of the tier"
         )
@@ -4302,16 +4296,14 @@ class _FreeFence(NamedTuple):
 
 
 @pytest.fixture
-def free_fence(tmp_path: Path) -> _FreeFence:
+def free_fence() -> _FreeFence:
     """A web account's fence on the box's keys and on its own key, and a check-in laid under it."""
     user = User(user_id="sub-9", tenant_id="sub-9", created_at="2026-01-01")
     boxed = free_tier.free_fence(
-        _account_stores(tmp_path / "boxed", issuer=_WEB, user=user, spent=None), "termnorm"
+        _account_stores(issuer=_WEB, user=_other(user, "boxed"), spent=None), "termnorm"
     )
     keyed = free_tier.free_fence(
-        _account_stores(
-            tmp_path / "keyed", issuer=_WEB, user=user, spent=None, own_key="openrouter"
-        ),
+        _account_stores(issuer=_WEB, user=_other(user, "keyed"), spent=None, own_key="openrouter"),
         "termnorm",
     )
     assert boxed is not None and keyed is not None and boxed.task and keyed.task, (
@@ -4471,9 +4463,9 @@ def test_the_fence_walks_every_call_a_run_sends_a_judges_model_included(
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_paid_verb_never_bills_a_cycle_its_producer_still_holds(tmp_path: Path) -> None:
+def test_a_paid_verb_never_bills_a_cycle_its_producer_still_holds() -> None:
     operator = User(user_id="op", tenant_id="op", created_at="")
-    held_stores = _account_stores(tmp_path / "held", issuer=None, user=operator, spent=None)
+    held_stores = _account_stores(issuer=None, user=operator, spent=None)
     cycle_dir = held_stores.campaigns.cycle_dir(_HELD_HOP)
     hold_cycle(cycle_dir)
 
@@ -4498,9 +4490,8 @@ def test_a_paid_verb_never_bills_a_cycle_its_producer_still_holds(tmp_path: Path
     asyncio.run(bill_held())
 
 
-def _web_account(tmp_path: Path, sub: str) -> Stores:
+def _web_account(sub: str) -> Stores:
     return workspace(
-        tmp_path,
         IdentityContext(
             user_id=UserId(sub),
             tenant_id=TenantId(sub),
@@ -4512,10 +4503,8 @@ def _web_account(tmp_path: Path, sub: str) -> Stores:
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside_it(
-    tmp_path: Path,
-) -> None:
-    passing = _web_account(tmp_path, "sub-8")
+def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside_it() -> None:
+    passing = _web_account("sub-8")
     passing.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
     payer = account_of(passing)
     slots = JobRegistry.attach(passing.jobs_dir)
@@ -4567,8 +4556,8 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
 
 # The uncap arms over the round cap and token ceiling the changes before it moved.
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(tmp_path: Path) -> None:
-    metered = _web_account(tmp_path, "sub-9")
+def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone() -> None:
+    metered = _web_account("sub-9")
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
     campaign = minted_campaign(hop)
     metered.campaigns.create_campaign(campaign)
@@ -4626,11 +4615,9 @@ def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(tmp_path: Path) 
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
-    tmp_path: Path,
-) -> None:
+def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once() -> None:
     # A fork's walked prefix not twice, and what the parent billed past the cut counts too.
-    forker = _web_account(tmp_path, "sub-7")
+    forker = _web_account("sub-7")
     root = CycleHop(campaign_id="camp-7", cycle_id="cycle_budget0007")
     fork = CycleHop(campaign_id="camp-7", cycle_id="cycle_budget0007_fork_r1")
     forker.campaigns.create_campaign(minted_campaign(root))
@@ -4702,11 +4689,9 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_clamped_spend_cap_reads_asked_armed_and_the_campaigns_own_spend(
-    tmp_path: Path,
-) -> None:
+def test_a_clamped_spend_cap_reads_asked_armed_and_the_campaigns_own_spend() -> None:
     # A cap read against another book than its own, or a clamp nobody hears of, misleads a spend.
-    clamped = _web_account(tmp_path, "sub-6")
+    clamped = _web_account("sub-6")
     root = CycleHop(campaign_id="camp-6", cycle_id="cycle_budget0006")
     sibling = CycleHop(campaign_id="camp-6", cycle_id="cycle_budget0006_fork_r1")
     clamped.campaigns.create_campaign(minted_campaign(root))
@@ -4744,9 +4729,9 @@ def test_a_clamped_spend_cap_reads_asked_armed_and_the_campaigns_own_spend(
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_the_served_spend_cap_reads_the_count_its_books_stop_reads(tmp_path: Path) -> None:
+def test_the_served_spend_cap_reads_the_count_its_books_stop_reads() -> None:
     # A cap served short of its book's count halts a run on money no door showed.
-    stores = _web_account(tmp_path, "sub-9")
+    stores = _web_account("sub-9")
     hop = CycleHop(campaign_id="camp-9", cycle_id="cycle_budget0009")
     stores.campaigns.create_campaign(minted_campaign(hop))
     stores.campaigns.mint_cycle(hop)
@@ -4797,9 +4782,9 @@ def test_the_served_spend_cap_reads_the_count_its_books_stop_reads(tmp_path: Pat
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it(tmp_path: Path) -> None:
+def test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it() -> None:
     # C0 run__265c4d's shape: billed, a lapsed cell and the bench's set-aside tip the cap together.
-    stores = _web_account(tmp_path, "sub-9")
+    stores = _web_account("sub-9")
     hop = CycleHop(campaign_id="camp-9", cycle_id="cycle_budget0009")
     stores.campaigns.create_campaign(minted_campaign(hop))
     stores.campaigns.mint_cycle(hop)
@@ -4856,7 +4841,7 @@ def test_of_two_set_limits_raises_the_second_reads_the_wallet_after_the_firsts_r
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Set-limits is an admission, so the reserves stand within the face.
-    racer = _web_account(tmp_path, "sub-8")
+    racer = _web_account("sub-8")
     racer.grant.set(Budget(usd=0.30), afresh=False, opened_at=_OPENED)
     racing = JobRegistry(tmp_path / "jobs-8", capacity=lambda _live: 2)
     raced = [CycleHop(campaign_id=f"camp-8{n}", cycle_id=f"cycle_race80{n}") for n in (1, 2)]
@@ -4926,7 +4911,7 @@ def test_a_set_limits_raced_by_a_delete_answers_not_found_and_leaves_no_campaign
     tmp_path: Path,
 ) -> None:
     # Its door loaded the campaign; the delete lands before its append. At the data root io reads.
-    stores = _web_account(user_data_root(), "sub-g")
+    stores = _web_account("sub-g")
     hop = CycleHop(campaign_id="camp-g", cycle_id="cycle_gone0000")
     stores.campaigns.create_campaign(minted_campaign(hop))
     stores.campaigns.mint_cycle(hop)
@@ -4941,11 +4926,11 @@ def test_a_set_limits_raced_by_a_delete_answers_not_found_and_leaves_no_campaign
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_set_limits_inside_a_launchs_admission_window_answers_its_limits_or_a_typed_refusal(
-    tmp_path: Path,
-) -> None:
+def test_set_limits_inside_a_launchs_admission_window_answers_its_limits_or_a_typed_refusal() -> (
+    None
+):
     # The cycle's holder is a launch whose hold is not written yet: money waits, rounds land.
-    starter = _web_account(tmp_path, "sub-6")
+    starter = _web_account("sub-6")
     starter.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
     registry = JobRegistry(starter.jobs_dir, capacity=lambda _live: 1)
     at = CycleHop(campaign_id="camp-6", cycle_id="cycle_start60")
@@ -4976,8 +4961,8 @@ def test_set_limits_inside_a_launchs_admission_window_answers_its_limits_or_a_ty
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_run_its_own_key_pays_holds_none_of_the_coupon(tmp_path: Path) -> None:
-    own = _web_account(tmp_path, "sub-5")
+def test_a_run_its_own_key_pays_holds_none_of_the_coupon() -> None:
+    own = _web_account("sub-5")
     own.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
     registry = JobRegistry(own.jobs_dir, capacity=lambda _live: 1)
     at = CycleHop(campaign_id="camp-5", cycle_id="cycle_own50")
@@ -5019,11 +5004,9 @@ def test_a_run_its_own_key_pays_holds_none_of_the_coupon(tmp_path: Path) -> None
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_resume_reserves_at_most_what_the_coupon_has_left_past_its_campaigns_spend(
-    tmp_path: Path,
-) -> None:
+def test_a_resume_reserves_at_most_what_the_coupon_has_left_past_its_campaigns_spend() -> None:
     # The campaign's past spend widens its ceiling's room, never the coupon's.
-    resumer = _web_account(tmp_path, "sub-4")
+    resumer = _web_account("sub-4")
     resumer.grant.set(Budget(usd=1.0), afresh=False, opened_at=_OPENED)
     at = CycleHop(campaign_id="camp-4", cycle_id="cycle_resume40")
     resumer.campaigns.create_campaign(minted_campaign(at))
@@ -5057,10 +5040,10 @@ def test_a_resume_reserves_at_most_what_the_coupon_has_left_past_its_campaigns_s
 # Each headroom reads the holds and bills the steps before it left on the account.
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Its spend counts once, so a launch beside it is quoted what the coupon can still pay.
-    biller = _web_account(tmp_path, "sub-6")
+    biller = _web_account("sub-6")
     biller.grant.set(Budget(usd=0.30), afresh=False, opened_at=_OPENED)
     billed_hop = CycleHop(campaign_id="camp-6b", cycle_id="cycle_billed01")
     biller.campaigns.create_campaign(minted_campaign(billed_hop))
@@ -5188,9 +5171,8 @@ def test_a_live_run_holds_its_reserve_less_what_it_billed_until_its_hold_closes(
 # Each act counts the campaigns and launches the acts before it minted.
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whole(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path / "duel"))
     monkeypatch.setenv(PROVIDER_KEYS[0], NOT_A_KEY)
     stores = local_stores(tenant=None)
     definition = stores.tenant_datasets.dataset_dir("duel") / DEFINITION_FILE

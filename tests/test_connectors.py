@@ -232,7 +232,7 @@ def test_a_harbor_roster_repinned_under_a_live_server_resolves_as_pinned(
     monkeypatch.setattr(harbor, "_ROSTER_DIR", tmp_path)
     resolve = harbor.CONNECTOR.resolve_experiment
     assert resolve is not None
-    stores = workspace(tmp_path / "harbor")
+    stores = workspace()
     panel = {"harbor_dataset": "bench", "harbor_dataset_version": "1.0"}
     for pinned in (["t1"], ["t2", "t3"]):
         tasks = [{"id": t, "path": t} for t in pinned]
@@ -246,9 +246,9 @@ def test_a_harbor_roster_repinned_under_a_live_server_resolves_as_pinned(
 # An n8n cell is keyed on the URL the wire posts to.
 @pytest.mark.usefixtures("offline")
 def test_a_trailing_slash_on_the_n8n_harness_url_rekeys_no_cell(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    stores = workspace(tmp_path)
+    stores = workspace()
     harness = n8n.CONNECTOR.identity_config
     assert harness is not None
     keys = []
@@ -260,10 +260,8 @@ def test_a_trailing_slash_on_the_n8n_harness_url_rekeys_no_cell(
 
 # Each dataset names its endpoint; adding one is no `.env` edit of another's.
 @pytest.mark.usefixtures("offline")
-def test_a_second_n8n_endpoint_rekeys_no_cell_of_the_first(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    stores = workspace(tmp_path)
+def test_a_second_n8n_endpoint_rekeys_no_cell_of_the_first(monkeypatch: pytest.MonkeyPatch) -> None:
+    stores = workspace()
     harness = n8n.CONNECTOR.identity_config
     assert harness is not None
     first, second = "https://n8n.example/webhook/classify", "https://n8n.example/webhook/route"
