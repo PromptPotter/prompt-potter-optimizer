@@ -335,28 +335,31 @@ def remembered_priced(model: str, provider: str) -> bool | None:
     return None if answer is None else answer.ceiling is not None
 
 
-def refresh_route_answers() -> None:
+def refresh_route_answers() -> list[str]:
     """Blocking, the API sweep's alone, one rule for both fates: an answer a day past its *since*
     goes, which reads as no answer, offered, and fetched again by its route's next send; a younger
     unpriced one past `_OUTAGE_MEMO_S` is fetched again, a host may price its route since. No row
-    outlives a day of its answer, and one row's failure ends that row alone."""
-    answers = user_data_root() / ROUTE_ANSWERS_DIR
+    outlives a day of its answer, and one row's failure ends that row alone: answered as each row
+    it left, its route, what failed and the answer it keeps, with that answer's age."""
+    answers, left = user_data_root() / ROUTE_ANSWERS_DIR, []
     for path in sorted(answers.glob("*.json")) if answers.is_dir() else ():
+        answer = None
         try:
-            # An outage keeps the answer it had.
-            with contextlib.suppress(PriceListUnreachableError):
-                _refresh(path)
-        except OSError as exc:
-            logger.warning("spend: route answer %s left as it stood: %s", path.name, exc)
-
-
-def _refresh(path: Path) -> None:
-    if (answer := _read_answer(path)) is None:
-        return
-    if time.time() - answer.since >= _TTL_SECONDS:
-        unlink_robust(path)
-    elif answer.ceiling is None and time.time() - answer.at >= _OUTAGE_MEMO_S:
-        _openrouter_ceiling(answer.route, answer.hosts)
+            if (answer := _read_answer(path)) is None:
+                continue
+            if time.time() - answer.since >= _TTL_SECONDS:
+                unlink_robust(path)
+            elif answer.ceiling is None and time.time() - answer.at >= _OUTAGE_MEMO_S:
+                _openrouter_ceiling(answer.route, answer.hosts)
+        except (PriceListUnreachableError, OSError) as exc:
+            said = fault_said(exc)[0]
+            if answer is None:
+                left.append(f"{path.stem}: {said}")
+                continue
+            fate = "an unpriced" if answer.ceiling is None else "a priced"
+            age_h = (time.time() - answer.at) / 3600
+            left.append(f"{answer.route}: {said}; keeping {fate} answer {age_h:.1f}h old")
+    return left
 
 
 def _route_answer_path(memo_key: str) -> Path:

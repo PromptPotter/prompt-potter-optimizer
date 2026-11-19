@@ -182,7 +182,9 @@ BASELINE = {
     # `RatesFile.unfetched` says them to the sweep's rates step; one cache reader (`_cached`) (−8).
     # desk (+3): `io.py::_plain` says why it resolves (8.3 names, links) and `_created` why it makes
     # the dirs on the path as given; `permitted_narrowing` takes `at: Campaign | CampaignCycle`.
-    "package_lines": 112131,
+    # rates-4 (+14): `refresh_route_answers` returns each row it left with the answer it keeps and
+    # its age; `reaper.py::_recorded` is a step's one recorder, the reclaim's own step `orphans`.
+    "package_lines": 112145,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

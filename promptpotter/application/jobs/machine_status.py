@@ -226,9 +226,9 @@ class MachineStatusResponse(StrictModel):
     )
     unswept: list[str] = Field(
         default_factory=list,
-        description="Each periodic step (the sweep, the rates, the route answers) whose last pass, "
-        "in any process, raised, left a cycle it could not read, or priced off a list upstream "
-        "did not answer (with that list's age), with what: it stands until a pass runs clean. "
+        description="Each periodic step (the sweep, its orphans, the rates, the route answers) whose "
+        "last pass, in any process, raised, left a cycle unread, or priced off a list or a route "
+        "answer it could not refresh (with its age), with what: it stands until a pass runs clean. "
         "Served where every slot is.",
     )
     notice: Said | None = Field(

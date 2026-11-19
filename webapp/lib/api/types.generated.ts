@@ -274,10 +274,10 @@ export interface MachineStatusResponse {
   /** Each job file no count above includes, with why it does not load: a run it
    * names may hold a slot the machine cannot see. Served where every slot is. */
   unloadable: string[];
-  /** Each periodic step (the sweep, the rates, the route answers) whose last pass,
-   * in any process, raised, left a cycle it could not read, or priced off a
-   * list upstream did not answer (with that list's age), with what: it stands
-   * until a pass runs clean. Served where every slot is. */
+  /** Each periodic step (the sweep, its orphans, the rates, the route answers)
+   * whose last pass, in any process, raised, left a cycle unread, or priced
+   * off a list or a route answer it could not refresh (with its age), with
+   * what: it stands until a pass runs clean. Served where every slot is. */
   unswept: string[];
   /** A landing in progress, `busy` and the caller's place in `queue` — a fact about
    * the NEXT launch, never about a run in view; null where a slot is free and
@@ -5700,7 +5700,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "436ea52b2507a151";
+export const SERVED_CONTRACT = "7091703d118147bb";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

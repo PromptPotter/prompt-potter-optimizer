@@ -23,10 +23,11 @@ from promptpotter.shared.errors import FileUnreadableError, NotFoundError, fault
 # Scheduling only: what counts as dead has no clock in it.
 SWEEP_EVERY_S = 900.0
 
-# The periodic steps, each recording its last pass (`JobRegistry.record_pass`), any process's.
-SWEEP_STEP, ROUTE_ANSWERS_STEP, RATES_STEP = "sweep", "route-answers", "rates"
+# The periodic steps, each returning its faults to `_recorded`, any process's.
+SWEEP_STEP, ORPHANS_STEP = "sweep", "orphans"
+ROUTE_ANSWERS_STEP, RATES_STEP = "route-answers", "rates"
 _PRICES = (
-    (RATES_STEP, lambda: refresh_rates().unfetched()),
+    (RATES_STEP, lambda: [f] if (f := refresh_rates().unfetched()) else []),
     (ROUTE_ANSWERS_STEP, refresh_route_answers),
 )
 
@@ -76,25 +77,46 @@ def _reap(stores: Stores, unread: list[str]) -> int:
     return reaped
 
 
+def _recorded(projects_root: Path, step: str, run: Callable[[], list[str]]) -> None:
+    """The one recorder of a step's pass, whoever runs it: the faults *run* returns, or the one it
+    raises, which ends neither the loop nor a launch. A clean pass clears what an earlier left."""
+    try:
+        faults = run()
+    except Exception as fault:  # noqa: BLE001
+        faults = [fault_said(fault)[0]]
+    JobRegistry.attach(jobs_dir(projects_root)).record_pass(step, faults)
+
+
 def sweep_dead_cycles(projects_root: Path) -> int:
     """Every launch's, and the server's tick: each cycle it could not read stands in
     `machine-status` until a pass reads it."""
-    unread: list[str] = []
-    reaped = sum(
-        _reap(tenant_stores(projects_root, WorkspaceDir(tenant)), unread)
-        for tenant in sorted(projects_root.iterdir() if projects_root.is_dir() else ())
-        if campaigns_root_dir_for(WorkspaceDir(tenant)).is_dir()
-    )
-    JobRegistry.attach(jobs_dir(projects_root)).record_pass(SWEEP_STEP, unread)
+    reaped = 0
+
+    def reap() -> list[str]:
+        nonlocal reaped
+        unread: list[str] = []
+        reaped = sum(
+            _reap(tenant_stores(projects_root, WorkspaceDir(tenant)), unread)
+            for tenant in sorted(projects_root.iterdir() if projects_root.is_dir() else ())
+            if campaigns_root_dir_for(WorkspaceDir(tenant)).is_dir()
+        )
+        return unread
+
+    _recorded(projects_root, SWEEP_STEP, reap)
     return reaped
 
 
 def sweep(projects_root: Path) -> None:
     """Every reclaim of what a dead producer left: no read stamps or deletes any of it, and only
     this releases its runs (`reap_dead_runs`)."""
+
+    def orphans() -> list[str]:
+        reclaim_orphan_sandboxes(projects_root)
+        reap_dead_runs(projects_root, JobRegistry.attach(jobs_dir(projects_root)))
+        return []
+
     sweep_dead_cycles(projects_root)
-    reclaim_orphan_sandboxes(projects_root)
-    reap_dead_runs(projects_root, JobRegistry.attach(jobs_dir(projects_root)))
+    _recorded(projects_root, ORPHANS_STEP, orphans)
 
 
 async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY_S) -> None:
@@ -102,21 +124,10 @@ async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY
     list at most a day old, and the route answers, whose one refresher this loop is. At boot the
     prices alone, so a restart serves no day-old one; the reclaim waits a tick: every read derives
     what a dead producer left, so no first page waits on it."""
-    jobs = JobRegistry.attach(jobs_dir(projects_root))
-    refresh = tuple((name, functools.partial(_refreshed, jobs, name, fn)) for name, fn in _PRICES)
-    steps: tuple[tuple[str, Callable[[], None]], ...] = refresh
+    prices = [functools.partial(_recorded, projects_root, name, run) for name, run in _PRICES]
+    steps = prices
     while True:
-        for name, step in steps:
-            # A raising step must not END the loop, nor skip the other: each would stop for the
-            # rest of the server's uptime. A clean pass is each step's own to record.
-            try:
-                await asyncio.to_thread(step)
-            except Exception as fault:  # noqa: BLE001
-                jobs.record_pass(name, [fault_said(fault)[0]])
+        for step in steps:
+            await asyncio.to_thread(step)
         await asyncio.sleep(interval_s)
-        steps = ((SWEEP_STEP, functools.partial(sweep, projects_root)), *refresh)
-
-
-def _refreshed(jobs: JobRegistry, step: str, prices: Callable[[], str | None]) -> None:
-    # The fault its prices stand under, until a pass clears it.
-    jobs.record_pass(step, [fault] if (fault := prices()) else [])
+        steps = [functools.partial(sweep, projects_root), *prices]

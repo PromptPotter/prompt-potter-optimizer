@@ -750,19 +750,18 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   it. **Rides with:** tests-x. **Re-test:** a store built outside the home refuses; every fact's
   store sits under its home.
 
-### wave-5 · rates (what rates-3 left at its landing)
+### wave-5 · rates (what rates-4 left at its landing)
 
-- **A route answer left stale is said nowhere** (rates-3's report): `pricing.py::refresh_route_answers`
-  swallows an outage (`PriceListUnreachableError`) and logs an `OSError` per row, returning `None`,
-  so the sweep's `route-answers` step (`reaper.py::_refreshed`) records a clean pass and a row it
-  cannot refresh or drop stands silently. Root: the refresh answers the rows it left, as
-  `RatesFile.unfetched` does for rates. **Re-test:** a route answer whose refresh raises `OSError`
-  reads in `machine_status(...).unswept` under `route-answers`.
-- **One step's record has two writers** (rates-3's report): `reaper.py::sweep_dead_cycles` records its
-  own pass and `periodic_sweep`'s except-branch records a raise for the same step. Root: a step
-  returns its faults and one place records them (launches call `sweep_dead_cycles` outside the
-  loop, so the record moves to its callers). **Re-test:** `git grep -c "\.record_pass(" --
-  promptpotter/application/jobs/reaper.py` == 1 (3 today).
+- **A sweep's reap is observed by its count** (rates-4's report): `reaper.py::sweep_dead_cycles`
+  returns a reaped count no production code reads, only tests (`tests/test_security.py`), so it keeps
+  a `nonlocal` closure to hand `_recorded` its faults. Root: the facts read the reaped cycles'
+  `stop_reason`, and the sweep returns its faults. **Re-test:** `git grep -c "nonlocal" --
+  promptpotter/application/jobs/reaper.py` == 0.
+- **A route outage is remembered per process** (rates-4's report): `pricing.py::_ROUTE_OUTAGE` is a
+  process-global memo keyed by path, so only the process that met an outage holds back; another
+  re-fetches within `_OUTAGE_MEMO_S`. Root: the outage is a fact of the route answer on disk (its
+  `at` already dates the try), read by every process. **Re-test:** `git grep -c "_ROUTE_OUTAGE" --
+  promptpotter` == 0.
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
@@ -783,7 +782,11 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   floors the SE at `1/(4n)` beside `bounded_mean_interval`'s support bound, the rule a constant
   graded side now reads in `difference_interval`. Folding it moves CAPO's paired t race (via
   `paired_mean_t`) and `read_arms`' SEs, so it needs an offline-run attribution of every moved pick
-  first. **Re-test:** one rule for a constant side in `statistics.py`, each moved pick named.
+  first. **Held:** the support bound is an interval, not an SE, and over a paired difference's
+  support [−1, 1] it is far wider than the floor (n = 20: all ties ±0.42 against ±0.026; all wins
+  [0.64, 1] against [0.97, 1]), so the fold would cost the race most of its power: decide what a
+  constant paired side should claim before cutting either. **Re-test:** one rule for a constant side
+  in `statistics.py`, each moved pick named.
 - **θ's frontier reads every row of its sheet** (readings-6's report): `bench/difficulty.py::frontier`
   iterates the sheet it is handed, not its `standing()` rows, so a merged sheet not yet folded would
   fit θ on a cell's duplicates; every caller folds today. Root: a sheet the merge returns is

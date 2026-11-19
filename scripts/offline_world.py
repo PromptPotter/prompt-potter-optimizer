@@ -445,6 +445,8 @@ class Router:
         self.token_endpoints: dict[str, tuple[int, dict[str, Any]]] = {}
         # An OpenRouter model -> the hosts its gateway lists; one unnamed lists `OPENROUTER_ENDPOINTS`.
         self.hosts: dict[str, dict[str, Any]] = {}
+        # OpenRouter unreachable, as a dead host fails `urlopen` on its endpoints list.
+        self.openrouter_dead = False
         self.unrouted: set[str] = set()
 
     def route(
@@ -581,6 +583,8 @@ def install_network(router: Router) -> Callable[[], None]:
     def urlopen(url: Any, *_: Any, **__: Any) -> Any:
         target = url if isinstance(url, str) else url.full_url
         if "openrouter.ai/api/v1/models/" in target and target.endswith("/endpoints"):
+            if router.openrouter_dead:
+                raise urllib.error.URLError("offline: OpenRouter's host list is unreachable")
             model = target.partition("/models/")[2].removesuffix("/endpoints")
             return _Body(json.dumps(router.hosts.get(model, OPENROUTER_ENDPOINTS)).encode())
         if target == UPSTREAM_URL:

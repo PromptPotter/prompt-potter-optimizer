@@ -12,7 +12,7 @@ from factories import run_init_round, samples, spend_book
 from offline_world import PolicyFault, Router
 
 from promptpotter.application.jobs.machine_status import machine_status
-from promptpotter.application.jobs.reaper import RATES_STEP, periodic_sweep
+from promptpotter.application.jobs.reaper import RATES_STEP, ROUTE_ANSWERS_STEP, periodic_sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.scoring.judges.grounding import ANSWER_GROUNDING
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
@@ -108,6 +108,53 @@ async def test_a_dead_price_list_stands_in_machine_status_and_is_tried_once_a_da
         if holding[0]:
             go.release()
             await asyncio.to_thread(left.acquire)
+
+
+async def _route_answers_after_a_boot_pass(projects_root: Path, jobs: JobRegistry) -> list[str]:
+    """The route-answers step's standing after the sweep's boot pass, as `machine-status` serves it."""
+    recorded, record_pass = threading.Event(), JobRegistry.record_pass
+
+    def held(registry: JobRegistry, step: str, faults: Any) -> None:
+        record_pass(registry, step, faults)
+        if step == ROUTE_ANSWERS_STEP:
+            recorded.set()
+
+    with pytest.MonkeyPatch.context() as patched:
+        patched.setattr(JobRegistry, "record_pass", held)
+        sweeping = asyncio.create_task(periodic_sweep(projects_root, interval_s=3600))
+        try:
+            await asyncio.to_thread(recorded.wait)
+        finally:
+            sweeping.cancel()
+    served = machine_status(jobs, identity=default_identity(), account_limit=1).unswept
+    return [line for line in served if line.startswith(f"{ROUTE_ANSWERS_STEP}: ")]
+
+
+async def test_a_route_answer_the_sweep_cannot_refresh_stands_in_machine_status(
+    built_stores: Stores, offline: Router, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One unpriced answer, then the sweep's passes over it: each pass's world is the last one's.
+    unhosted, jobs = "vendor/unhosted-model", JobRegistry.attach(built_stores.jobs_dir)
+    offline.hosts[unhosted] = {"data": {"endpoints": []}}
+    assert pricing.route_priced(unhosted, "openrouter") is False
+    monkeypatch.setattr(pricing, "_OUTAGE_MEMO_S", 0.0)
+    offline.openrouter_dead = True
+    (said,) = await _route_answers_after_a_boot_pass(built_stores.projects_root, jobs)
+    assert unhosted in said and "unreachable" in said and "unpriced answer 0.0h old" in said, said
+    offline.openrouter_dead = False
+    with monkeypatch.context() as stuck:
+        # A day-old answer whose drop the disk refuses.
+        stuck.setattr(pricing, "_TTL_SECONDS", 0.0)
+        stuck.setattr(pricing, "unlink_robust", _refused)
+        (said,) = await _route_answers_after_a_boot_pass(built_stores.projects_root, jobs)
+        assert unhosted in said and "refused" in said, said
+    assert await _route_answers_after_a_boot_pass(built_stores.projects_root, jobs) == [], (
+        "a pass that refreshed every route answer left a fault standing"
+    )
+
+
+def _refused(path: Path) -> NoReturn:
+    raise PermissionError(f"refused: {path.name}")
 
 
 # 2. A fault in the world's own policy raises out of the call, never reads as a refused one
