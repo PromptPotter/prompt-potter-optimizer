@@ -49,7 +49,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import CYCLE_AXES, Budget, HeldBudget
 from promptpotter.infrastructure.backend import CELL
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.pricing import refresh_rates_in_background
+from promptpotter.infrastructure.llm.pricing import refresh_rates_once
 from promptpotter.infrastructure.llm.spend_book import filed
 from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.run_scope import rescope, run_scope
@@ -117,7 +117,7 @@ async def open_launch(
     # Before this launch takes a cell: a re-read of a cell the campaign priced prices nothing.
     campaigns = session.store.campaigns
     rescope(priced=campaigns.campaign_root_dir(session.campaign_id))
-    refresh_rates_in_background()
+    await asyncio.to_thread(refresh_rates_once)
     # SET, never a `min`: admission already layered seed and standing.
     campaign_config = campaign_config.model_copy(
         update={

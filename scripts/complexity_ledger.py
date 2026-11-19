@@ -155,7 +155,8 @@ BASELINE = {
     # launch's pair. A read's validator is `file_sig`, never an mtime alone (−16).
     # webd-2 link 1 (+30): `cycle_reads.py::stamped_frames` and `FrameStamp`, the served contract on
     # every stream frame (an `EventSource` reads no header), and the two stamped frame models served.
-    "package_lines": 111982,
+    # rates-1 (−6): a launch awaits `pricing.py::refresh_rates_once`, no refresh thread per mint.
+    "package_lines": 111976,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -226,7 +227,9 @@ BASELINE = {
     "p_reads": 323,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     # webd-2 (+1): `test_stream_stamp.py`, its brief's own file, since store-2f lands in the others.
-    "test_files": 8,
+    # rates-1 (+1): `test_world_edges.py`, what a run meets at its edges: the rates it prices by
+    # and a fault in the offline world's own policy.
+    "test_files": 9,
     # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).
     "test_functions_over_150": 0,
     # Top-level class names the package defines twice, private ones included: one name, two things.

@@ -682,12 +682,8 @@ and derived the knob couplings from each member's draws and the escalation ladde
   renamed field passes there; the real `Admitted.held` needs a runnable bank under the hand-built
   scenario line (the `seat` row's root). Action: the real record. **Rides with:** tests-w's successor.
   **Re-test:** `git grep -c "SimpleNamespace" -- tests/test_archive.py` is 0.
-- **A fact's home outlives it** (tests-w's report): `runner/mint.py` calls
-  `pricing.py::refresh_rates_in_background` per mint, a daemon thread that can outlive its fact's
-  `tmp_path` home, and pytest's `tmp_path`
-  retention keeps every home on disk. Root first: whether a refresh belongs to a mint at all, or to
-  the process that prices. **Rides with:** tests-w's successor. **Re-test:** after the suite, no
-  refresh thread alive past its fact, and no home retained beyond pytest's last run.
+- **A fact's home outlives it** (tests-w's report): pytest's `tmp_path` retention keeps every home
+  on disk. **Rides with:** tests-w's successor. **Re-test:** no home retained beyond pytest's last run.
 
 ### batch/32 · ts-score
 
@@ -784,15 +780,21 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `derived_file_stale` warning INTO the deleted cycle. Root: one "gone" from every io door, and a
   projection over a gone cycle is skipped, never warned into it. **Re-test:** a fact deleting the
   cycle between `mkstemp` and the replace reads `NotFoundError`, and no warning row is attempted.
-- **The offline world reads a fault in its own policy as a refused call** (store-2's report): a stale
-  `cycle_config` call raised inside `offline_run.py`'s fake LLM policy (`offline_world.py::FakeLLM.reply`'s
-  `self.says(body)`) and the run halted at `origin_gate` with 0 inner campaigns instead of crashing,
-  so a harness bug reads as a decision. Unverified since `ea020d03f` (a non-wire error raises as
-  itself). Action: a fault inside the policy raises out of the scenario. **Re-test:** a policy raising
-  `KeyError` fails `offline_run.py --against` with that traceback.
 - **A test home is built beside `factories.workspace`** (store-2's report): facts in `test_spend.py` and
   `test_security.py` built ledgers, locks and homes under paths nothing minted and passed because io
   made dirs. Root: test homes mint through `factories.workspace`. **Rides with:** tests-x.
+
+### wave-5 · rates (what rates-1 left at its landing)
+
+- **The rates refresh is keyed on the process, the rates on the home** (rates-1's report):
+  `pricing.py::refresh_rates_once` is a `functools.cache` in front of `refresh_rates`, whose file
+  mtime is already the once-a-day key. An API process that launches nothing prices `paid_call`,
+  `paid_pass` and capability reads off a `rates.json` a day stale, a long-lived embedded host never
+  refreshes after its first launch, and a fact fetches or not by what an earlier fact in the
+  process did (`test_security.py:3276` patches `pricing.cache_path` for it). Root: the refresh
+  belongs to the rates file's owner, keyed on the file, and the API's `reaper.py::periodic_sweep`
+  owns it there. **Re-test:** an API process with no launch refreshes a day-old `rates.json`;
+  `git grep -c "cache_clear" -- tests` is 0.
 
 ### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
 

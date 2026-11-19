@@ -5,6 +5,7 @@ run inside this one world; what it fakes and why: ``docs/developer/offline-run.m
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import enum
 import hashlib
 import inspect
@@ -28,7 +29,7 @@ from promptpotter.infrastructure.llm.registry import keyed_specs
 from promptpotter.infrastructure.llm.telemetry import current_round
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable, Mapping, Sequence
+    from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 
     from promptpotter.domain.sample import Sample
 
@@ -121,7 +122,8 @@ class FakeLLM:
     """The LLM edge: every provider's `LLM_WIRE`, every body it is sent kept in `sent`.
 
     *says* is the policy: a text, a whole reply, or a response carrying a status — sync or async,
-    and it may raise an `httpx` transport error as a dropped connection does."""
+    and it may raise what a wire raises (an `httpx` transport error, an `OSError`). Anything else
+    it raises is the harness's own bug, a `PolicyFault` no handler of a refused call takes."""
 
     def __init__(self, says: Callable[[dict[str, Any]], Said | Awaitable[Said]]) -> None:
         self.says = says
@@ -131,15 +133,31 @@ class FakeLLM:
         self, request: httpx.Request, body: dict[str, Any]
     ) -> httpx.Response | Awaitable[httpx.Response]:
         self.sent.append(body)
-        said = self.says(body)
-        if inspect.isawaitable(said):
-            pending = said
+        with _policy_faults():
+            said = self.says(body)
+            if not inspect.isawaitable(said):
+                return _wire(request, body, said)
+        pending = said
 
-            async def landed() -> httpx.Response:
+        async def landed() -> httpx.Response:
+            with _policy_faults():
                 return _wire(request, body, await pending)
 
-            return landed()
-        return _wire(request, body, said)
+        return landed()
+
+
+class PolicyFault(BaseException):
+    """A fault in the world's policy: past every `except Exception`, out of the scenario."""
+
+
+@contextlib.contextmanager
+def _policy_faults() -> Iterator[None]:
+    try:
+        yield
+    except (httpx.RequestError, OSError):
+        raise
+    except Exception as fault:
+        raise PolicyFault(repr(fault)) from fault
 
 
 def _wire(request: httpx.Request, body: dict[str, Any], said: Said) -> httpx.Response:

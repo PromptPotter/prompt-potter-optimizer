@@ -7,7 +7,6 @@ import contextlib
 import functools
 import json
 import logging
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -120,19 +119,12 @@ def cache_path() -> Path:
     return user_data_root() / "rates.json"
 
 
-def _cache_fresh() -> bool:
+def refresh_rates(*, force: bool = False) -> bool:
+    with contextlib.suppress(OSError):
+        if not force and time.time() - cache_path().stat().st_mtime < _TTL_SECONDS:
+            return True
     try:
-        age_s = time.time() - cache_path().stat().st_mtime
-    except OSError:
-        return False
-    return age_s < _TTL_SECONDS
-
-
-def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> bool:
-    if not force and _cache_fresh():
-        return True
-    try:
-        with urllib.request.urlopen(UPSTREAM_URL, timeout=timeout) as resp:
+        with urllib.request.urlopen(UPSTREAM_URL, timeout=_FETCH_TIMEOUT_S) as resp:
             payload = resp.read(_MAX_BODY_BYTES + 1)
         if len(payload) > _MAX_BODY_BYTES:
             logger.warning(
@@ -155,8 +147,10 @@ def refresh_rates(*, force: bool = False, timeout: float = _FETCH_TIMEOUT_S) -> 
     return True
 
 
-def refresh_rates_in_background() -> None:
-    threading.Thread(target=refresh_rates, name="rates-refresh", daemon=True).start()
+@functools.cache
+def refresh_rates_once() -> bool:
+    """The process's first launch awaits it, every later one reads what it fetched; no thread."""
+    return refresh_rates()
 
 
 def _read_rates(path: Path | None) -> dict[str, RateBody]:
