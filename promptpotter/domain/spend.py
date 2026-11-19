@@ -4,7 +4,7 @@ import operator
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import reduce
-from typing import TYPE_CHECKING, Literal, NamedTuple, get_args
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple, get_args
 
 from pydantic import (
     Field,
@@ -56,6 +56,14 @@ class StepUsage:
     @classmethod
     def from_wire(cls, entry: Mapping[str, object]) -> StepUsage:
         return _STEP_USAGE.read(entry)
+
+    @classmethod
+    def from_account(cls, tokens: TokenAccount, **billed: Any) -> StepUsage:
+        """The one builder every connector calls: the counts ride whole, so none drops a part."""
+        reasoning = tokens.reasoning or None
+        return cls(
+            tokens.input, tokens.output, reasoning=reasoning, cache_read=tokens.cache_read, **billed
+        )
 
     def wire(self) -> dict[str, object]:
         return _STEP_USAGE.write(self)

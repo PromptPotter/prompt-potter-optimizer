@@ -30,7 +30,7 @@ from promptpotter.domain.pipeline_schema import LLMSpendBound
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import TurnRecord
 from promptpotter.domain.search_point import split_rendered_prompt
-from promptpotter.domain.spend import StepUsage
+from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.docker_host import (
     docker,
     docker_daemon_fault,
@@ -254,7 +254,7 @@ def _spent(records: list[dict[str, Any]], cfg: NodeCall) -> dict[str, dict[str, 
     if not records:
         return {}
     tokens = [r.get("tokens") or {} for r in records]
-    entry = StepUsage(
+    spent = TokenAccount(
         input=sum(int(t.get("input") or 0) for t in tokens),
         output=sum(int(t.get("output") or 0) for t in tokens),
         # Only the search image reports `cached`; upstream's build counts input and output alone.
@@ -263,9 +263,8 @@ def _spent(records: list[dict[str, Any]], cfg: NodeCall) -> dict[str, dict[str, 
             if all("cached" in t for t in tokens)
             else None
         ),
-        model=cfg.model,
     )
-    return {WRITER_NODE: entry.wire()}
+    return {WRITER_NODE: StepUsage.from_account(spent, model=cfg.model).wire()}
 
 
 def _stalled(record: Mapping[str, Any]) -> str | None:

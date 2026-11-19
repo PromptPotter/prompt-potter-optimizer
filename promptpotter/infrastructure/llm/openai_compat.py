@@ -119,7 +119,7 @@ class ReportedUsage(BaseModel):
             input=self.prompt_tokens or 0,
             output=self.completion_tokens or 0,
             reasoning=self.reasoning_tokens or 0,
-            cache_read=self.cached_tokens or 0,
+            cache_read=self.cached_tokens,
             cache_write=self.cache_write_tokens or 0,
         )
 

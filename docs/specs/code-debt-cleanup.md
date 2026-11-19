@@ -257,14 +257,13 @@ plan/apply pair and a temporary locked through its replace. Left:
   carrying its `SendOutcome`, which changes what `openai_compat`'s client raises for every caller
   (`judges/call.py` catches `httpx.HTTPError`; `infrastructure/backend.py::run_query`'s `raise_for_status` builds a
   fresh exception after the send closed). **Rides with:** the chain owning the client's raise contract.
-- **A cell's step usage drops reasoning**: `connectors/dspy_module.py::step_tokens` and
-  `connectors/harbor.py::_step_tokens` build `StepUsage` without `reasoning`, though the field exists;
-  and `openai_compat.py::ReportedUsage.tokens` writes `cache_read=… or 0` where `TokenAccount` reads
-  `None` as no breakdown reported. Root: `StepUsage` is built from `ReportedUsage` alone.
-  **Rides with:** passes-6.
-- **Two tests fail beside their claim**: `tests/test_security.py` is not collectable in a venv lacking
-  the `mcp` extra; `tests/test_scoring.py::_peer_cycle` files no round-0 cells, so a noise floor
-  through it reads nothing. **Rides with:** passes-6.
+- **`_peer_cycle` seats an origin reading the archive does not hold** (usage-1's report):
+  `tests/test_scoring.py::_peer_cycle`'s `measured_origin` builds round 0's seated sheet from the
+  bare `_measure`, never `score_search_point`, so the reading names rows no cell file backs and no
+  round 0 closes; a fact reading round 0 walks it itself (`_closed_origin`, `open_origin_round`).
+  Root: seat the origin through the walk that files it. **Rides with:** the chain owning
+  `tests/factories.py::seat`. **Re-test:** a noise floor through `_peer_cycle` alone reads its
+  round-0 rows.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 

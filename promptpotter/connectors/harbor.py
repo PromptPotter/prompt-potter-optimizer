@@ -978,10 +978,8 @@ def _step_tokens(
     usage = usage or TokenAccount()
     model, provider = episode.call.model, episode.call.provider
     return {
-        AGENT_NODE: StepUsage(
-            input=usage.input,
-            output=usage.output,
-            cache_read=usage.cache_read,
+        AGENT_NODE: StepUsage.from_account(
+            usage,
             cost_usd=cost_usd,
             rate_priced_usd=rate_priced_usd(
                 usage, model=model, provider=provider, cost_usd=cost_usd
@@ -997,14 +995,11 @@ def _sum_spend(parts: list[dict[str, StepUsage]]) -> dict[str, dict[str, object]
     entries = [p[AGENT_NODE] for p in parts if AGENT_NODE in p]
     if not entries:
         return {}
-    reads = [e.cache_read for e in entries if e.cache_read is not None]
     reported = [e.cost_usd for e in entries if e.cost_usd is not None]
     priced = [e.rate_priced_usd for e in entries if e.rate_priced_usd is not None]
     all_reported = len(reported) == len(entries)
-    total = StepUsage(
-        input=sum(e.input for e in entries),
-        output=sum(e.output for e in entries),
-        cache_read=sum(reads) if reads else None,
+    total = StepUsage.from_account(
+        sum((e.account for e in entries), TokenAccount()),
         cost_usd=sum(reported) if all_reported else None,
         rate_priced_usd=(
             sum(reported) + sum(priced)

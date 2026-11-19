@@ -135,11 +135,8 @@ class _ProgramCalls:
         if not self.used.total:
             return {}
         return {
-            PROGRAM_NODE: StepUsage(
-                input=self.used.input,
-                output=self.used.output,
-                model=self.model,
-                provider=self.provider,
+            PROGRAM_NODE: StepUsage.from_account(
+                self.used, model=self.model, provider=self.provider
             ).wire()
         }
 

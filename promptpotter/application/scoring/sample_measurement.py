@@ -395,9 +395,8 @@ def _estimated_usage(
     in_text = prompt if isinstance(prompt, str) else ""
     out_text = " ".join(_observed_texts(node, resp_data))
     model, provider = priced_as
-    return StepUsage(
-        input=len(in_text) // 4,
-        output=len(out_text) // 4,
+    return StepUsage.from_account(
+        TokenAccount(input=len(in_text) // 4, output=len(out_text) // 4),
         estimated=True,
         model=model,
         provider=provider,

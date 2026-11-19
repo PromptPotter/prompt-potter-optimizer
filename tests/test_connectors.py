@@ -182,6 +182,10 @@ def test_a_resent_dspy_call_spends_one_of_its_programs_max_calls(
     assert [bill.reasoning_tokens for bill in bills] == [2, 2], (
         "an answered call's bill dropped its reasoning tokens, or the call left no bill"
     )
+    served = data["step_tokens"][dspy_module.PROGRAM_NODE]
+    assert (served.get("reasoning"), served.get("cache_read", "unreported")) == (4, "unreported"), (
+        f"the cell's step usage {served} dropped the reasoning, or read an unreported cache as 0"
+    )
 
 
 def test_an_llm_judge_metrics_send_is_the_cells_billed_beside_the_programs(
