@@ -825,17 +825,17 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   ids without end. `clean_reask` heals it at a full call's price. Action: attribute one banked
   payload by block, then a tighter prompt bounds the cluster body (CLAUDE.md: the prompt, not a cap).
   **Re-test:** the three banked inputs re-asked under the new prompt finish `stop`.
-- **`l1_generate` re-proposes an arm the race already measured, and its re-race buys no evidence**
-  (census 2026-11-19 over 113 inner cells): 94 arms raced in round r+1 on round r's identical rows,
-  every row cached, 82 of them with a positive in-race lift. Potter keeps no survivors (a round's
-  population is its parent), so each is `l1_generate` at temperature 0 re-emitting a measured arm
-  verbatim (an id is its content) after a round that crowned nothing: a variant slot whose verdict
-  cannot move. Case: `bbh-multistep-arithmetic-8b__2d64a7` round 3 proposal 0 is round 2's
-  `e35a6671e62a0fb4`, +13 over its crown on 150 fixed rows, never crowned. **Held:** the fork, refuse
-  a measured id at the child door (the slot goes to a new idea) or read a re-proposed arm on fresh
-  rows (the re-proposal becomes evidence). Free first: replay that arm against its crown through
-  `candidate_abilities` and `elect_round_winner` at 40, 80 and 120 rows, which prices the second.
-  **Re-test:** no inner round races an arm on rows an earlier round already read it on.
+- **A held round's leader is kept for a fresh read that reads no fresh row** (census 2026-11-19):
+  `potter/election.py::_kept_for_a_fresh_read` carries a held round's leader into the next round
+  "once: only the next round's panel says whether it clears the bar", but the panel never moves under
+  the L4 seats' `per_round_resubset: false` (`promptpotter-self/family.yaml`) nor in any campaign
+  while δ is cold ([`verdict-resolution.md`](../methods/verdict-resolution.md) § The between-round draw — blind, so the election reads the pool). Over
+  124 inner cells, 104 rounds carried a kept leader and 104 of 104 re-read only rows it had read, so
+  its verdict cannot move. Case: `bbh-multistep-arithmetic-8b__2d64a7`'s `e35a6671e62a0fb4`, which
+  picked on 75 of judge 2's rows and elected by the round's own election on 75 others crowns in 84%
+  of splits. Root: the keep makes the next round read rows its leader has not read. It moves potter's
+  decisions and costs L4 the cached re-reads (up to 2 × 40 paid rows per held round). **Held:** the
+  operator's yes on that cost. **Re-test:** no kept leader races only rows it has read.
 
 ## Held — no wave-4 chain yet
 
