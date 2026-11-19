@@ -2714,6 +2714,16 @@ def test_a_credit_refusal_is_the_providers_on_any_4xx() -> None:
         assert failed_send(refused).failure is ErrorCategory.PROVIDER_CREDIT, (
             f"a {status} credit refusal was charged to the prompt"
         )
+    # Gemini's per-minute limit says "quota" too, and a backoff ends it: a throttle, never a stop.
+    limited = httpx.Response(
+        429,
+        text="You exceeded your current quota. Retry in 20s. RESOURCE_EXHAUSTED",
+        request=request,
+    )
+    throttled = httpx.HTTPStatusError("429", request=request, response=limited)
+    assert failed_send(throttled).failure is ErrorCategory.PROVIDER_THROTTLED, (
+        "a rate limit worded as quota stopped the run as a credit refusal"
+    )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")

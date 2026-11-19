@@ -452,9 +452,10 @@ class OpenAICompatibleClient:
                             continue
                         wait = budget.resend_wait() if outcome.resendable else None
                         if wait is None:
-                            # The wire's failure carries its close; a typed refusal, the model's
-                            # missing remedy or a bug raises as itself.
-                            if not isinstance(exc, httpx.HTTPError):
+                            # The wire's failure carries its close, a raw `ConnectionError` too;
+                            # a typed refusal, a model's missing remedy or a bug raises as itself.
+                            wire = isinstance(exc, httpx.HTTPError)
+                            if not wire and outcome.failure is not ErrorCategory.CONNECTION:
                                 raise
                             raise FailedSendError(outcome) from exc
                         logger.warning(
