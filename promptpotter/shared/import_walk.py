@@ -9,8 +9,12 @@ from functools import cache
 from pathlib import Path
 
 _PACKAGE = Path(__file__).resolve().parents[1]
-# Files are named as the repo names them (`promptpotter/x/y.py`), installed or not.
-_BASE = _PACKAGE.parent
+
+
+def _tree(path: Path) -> Path:
+    """The tree *path* sits in, its files named from there (`promptpotter/x/y.py`): a script walks
+    its own checkout, never the one the interpreter imported the package from."""
+    return next(p.parent for p in path.resolve().parents if not (p.parent / "__init__.py").exists())
 
 
 def _module_name(rel: str) -> str:
@@ -19,9 +23,9 @@ def _module_name(rel: str) -> str:
 
 
 @cache
-def package_modules() -> dict[str, str]:
-    """Each package module's dotted name, to its file."""
-    rels = (p.relative_to(_BASE).as_posix() for p in _PACKAGE.rglob("*.py"))
+def package_modules(tree: Path) -> dict[str, str]:
+    """Each module of the package in *tree*: its dotted name, to its file."""
+    rels = (p.relative_to(tree).as_posix() for p in (tree / _PACKAGE.name).rglob("*.py"))
     return {_module_name(rel): rel for rel in rels}
 
 
@@ -34,9 +38,10 @@ def _is_type_checking(test: ast.expr) -> bool:
 def import_statements(path: Path) -> list[tuple[set[str], bool]]:
     """Each package file one import statement of *path* names, and whether the statement sits
     under ``TYPE_CHECKING``; function bodies included."""
-    importer = _module_name(path.resolve().relative_to(_BASE).as_posix())
+    tree = _tree(path)
+    importer = _module_name(path.resolve().relative_to(tree).as_posix())
     home = importer if path.name == "__init__.py" else importer.rpartition(".")[0]
-    modules = package_modules()
+    modules = package_modules(tree)
     found: list[tuple[set[str], bool]] = []
     # An import is a statement, so no expression is walked; a function body is.
     todo: list[tuple[ast.AST, bool]] = [(ast.parse(path.read_text(encoding="utf-8")), False)]
@@ -76,7 +81,8 @@ def import_closure(modules: Iterable[str]) -> dict[str, Path]:
     """Every package module *modules* reach through imports, to its file, themselves and each
     one's enclosing packages included (an import runs their `__init__`): the code a call into one
     can run, a function body's import included, so a module named may not be loaded yet."""
-    files = package_modules()
+    tree = _PACKAGE.parent
+    files = package_modules(tree)
     names = {rel: name for name, rel in files.items()}
     seen: set[str] = set()
     todo = [files[m] for m in modules if m in files]
@@ -86,5 +92,5 @@ def import_closure(modules: Iterable[str]) -> dict[str, Path]:
         seen.add(rel)
         name = names[rel]
         parents = (name.rpartition(".")[0],) if "." in name else ()
-        todo.extend({*imported_files(_BASE / rel), *(files[p] for p in parents)} - seen)
-    return {names[rel]: _BASE / rel for rel in sorted(seen)}
+        todo.extend({*imported_files(tree / rel), *(files[p] for p in parents)} - seen)
+    return {names[rel]: tree / rel for rel in sorted(seen)}

@@ -9,9 +9,11 @@ it: ``docs/developer/offline-run.md``.
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 import atexit
 import contextlib
+import copy
 import dataclasses
 import hashlib
 import inspect
@@ -65,7 +67,6 @@ from processes import (
     replace_changed,
 )
 
-import promptpotter
 from promptpotter.application import optimizers
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
 from promptpotter.application.caller import Caller
@@ -1831,26 +1832,63 @@ def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
 
 
 def unrun(name: str, home: Path) -> dict[str, list[str]]:
-    """Per file of *name*'s member packages, the function-body lines its straight run never ran,
-    as they read: what the world ran is keyed by its behaviour, what it did not run by its source
-    (the other value of a knob an arm sets, a walk the default never takes, a heal branch)."""
+    """Per file of *name*'s member packages, by package-relative path, the code its straight run
+    cannot vouch for: what the world ran is keyed by its behaviour, the rest by its AST
+    (`_unvouched`). Raises where the run's ran-lines name none of those files, which would read
+    as "nothing ran" (a trace filed by another tree, a leg that filed nothing)."""
     ran = ran_lines(home / name, recursive=False)
     roster = select_optimizer(bench_choice(name)).member_nodes
-    out: dict[str, list[str]] = {}
-    for package in sorted({member_package_dir(NODE_MEMBERS.table[n]) for n in roster}):
-        for path in sorted(package.rglob("*.py")):
-            text = path.read_text(encoding="utf-8").splitlines()
-            left = _function_lines(path) - ran[os.path.normcase(str(path))]
-            out[path.relative_to(PACKAGE_ROOT).as_posix()] = [
-                text[at - 1].strip() for at in sorted(left)
-            ]
-    return out
+    files = {
+        path.relative_to(PACKAGE_ROOT).as_posix(): path
+        for package in {member_package_dir(NODE_MEMBERS.table[n]) for n in roster}
+        for path in package.rglob("*.py")
+    }
+    if not ran.keys() & files.keys():
+        raise LookupError(f"{home / name}'s ran-lines name no file of {name}'s member packages")
+    return {
+        rel: _unvouched(
+            ast.parse(path.read_text(encoding="utf-8")).body, ran[rel], "", inside=False
+        )
+        for rel, path in sorted(files.items())
+    }
+
+
+_BODIES = ("body", "orelse", "finalbody", "handlers", "cases")
+
+
+def _unvouched(nodes: list[Any], ran: set[int], path: str, *, inside: bool) -> list[str]:
+    """Each statement's `ast.dump` (no positions: formatting and comments never key) under its
+    nesting path, its bodies walked apart: every statement outside a function body, which runs at
+    import whatever the run reached, and each one inside that the run never reached. A def keys
+    its decorators and defaults, never its name or parameters: its body's behaviour is the trace."""
+    keyed: list[str] = []
+    for node in nodes:
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            args = node.args
+            header = [*node.decorator_list, *args.defaults, *filter(None, args.kw_defaults)]
+            keyed += [f"{path}def {ast.dump(e)}" for e in header]
+            keyed += _unvouched(node.body, ran, f"{path}def/", inside=True)
+            continue
+        bodies = [f for f in _BODIES if isinstance(getattr(node, f, None), list)]
+        first = getattr(node, "lineno", None) or node.pattern.lineno
+        last = getattr(node, "end_lineno", None) or node.body[-1].end_lineno
+        if not inside or not any(at in ran for at in range(first, last + 1)):
+            head = copy.copy(node)
+            for field in bodies:
+                setattr(head, field, [])
+            keyed.append(path + ast.dump(head))
+        for field in bodies:
+            keyed += _unvouched(
+                getattr(node, field), ran, f"{path}{type(node).__name__}.{field}/", inside=inside
+            )
+    return keyed
 
 
 def traced(out: Path) -> None:
     """Files into *out* at exit each package line a function of this process ran, as PEP 669
-    reports it: once a line, then disabled, so the run pays for each line once."""
-    package = str(Path(promptpotter.__file__).parent)
+    reports it (once a line, then disabled, so the run pays for each line once), by
+    package-relative POSIX path, so a trace reads the same from every tree."""
+    package = f"{PACKAGE_ROOT}{os.sep}"
     ran: dict[str, set[int]] = defaultdict(set)
     monitoring = sys.monitoring
 
@@ -1860,7 +1898,9 @@ def traced(out: Path) -> None:
         return monitoring.DISABLE
 
     def filed() -> None:
-        lines = {name: sorted(at) for name, at in ran.items()}
+        lines = {
+            Path(name).relative_to(PACKAGE_ROOT).as_posix(): sorted(at) for name, at in ran.items()
+        }
         (out / f"{RAN_LINES}-{os.getpid()}.json").write_text(json.dumps(lines), encoding="utf-8")
 
     monitoring.use_tool_id(monitoring.COVERAGE_ID, OFFLINE_RUN)
@@ -1885,24 +1925,24 @@ def _function_lines(path: Path) -> set[int]:
 
 
 def ran_lines(workspace: Path, *, recursive: bool) -> defaultdict[str, set[int]]:
-    """The lines the legs run in *workspace* ran, by file; its own process alone unless *recursive*."""
+    """The lines the legs run in *workspace* ran, by package-relative path; its own process alone
+    unless *recursive*."""
     ran: defaultdict[str, set[int]] = defaultdict(set)
     pattern = f"{RAN_LINES}-*.json"
     for filed in workspace.rglob(pattern) if recursive else workspace.glob(pattern):
         for name, lines in json.loads(filed.read_text(encoding="utf-8")).items():
-            ran[os.path.normcase(name)].update(lines)
+            ran[name].update(lines)
     return ran
 
 
 def coverage_by_package(home: Path) -> list[str]:
     ran = ran_lines(home, recursive=True)
-    root = Path(promptpotter.__file__).parent
     counted: dict[str, list[int]] = defaultdict(lambda: [0, 0])
-    for path in root.rglob("*.py"):
-        parts = path.relative_to(root).parts
+    for path in PACKAGE_ROOT.rglob("*.py"):
+        parts = path.relative_to(PACKAGE_ROOT).parts
         package = "/".join(parts[: min(2, len(parts) - 1)]) or "promptpotter"
         body = _function_lines(path)
-        counted[package][0] += len(body & ran[os.path.normcase(str(path))])
+        counted[package][0] += len(body & ran["/".join(parts)])
         counted[package][1] += len(body)
     total = [sum(hit for hit, _ in counted.values()), sum(n for _, n in counted.values())]
     return [

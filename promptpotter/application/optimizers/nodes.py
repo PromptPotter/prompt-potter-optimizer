@@ -345,8 +345,8 @@ BEHAVIOUR_KEYS_FILE = PACKAGE_ROOT / "assets" / "behaviour_keys.json"
 
 class BehaviourKeys(FrozenModel):
     world: str
-    # By built-in optimizer: the hash of its straight run's trace in `world` and of the source of
-    # every function-body line in its member packages that run never ran.
+    # By built-in optimizer: the hash of its straight run's trace in `world` and of its member
+    # packages' code that run cannot vouch for (`offline_run.py::unrun`).
     fingerprints: dict[str, str]
     # By built-in member package: the built-ins whose roster reaches it, whose fingerprints key it.
     packages: dict[str, list[str]]
