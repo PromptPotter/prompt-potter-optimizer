@@ -217,6 +217,18 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   (`multistep-wide`, seeds 1–6 and 8–14) deliver +7.3 and +4.4 (paired −3.0 ± 2.2): a cell's
   replicate SD is 5.6 against 6.9 across seats and runs, so a seed barely fixes what its inner
   run delivers, and a two-arm contrast on thirteen seats an arm has an SE of about 2.2 pts.
+  One authored outer round on those seats (`promptpotter-self.multistep-wide__773fe8`, round 1,
+  `l1_generate` arms on the origin, held-out lift per seat, paired against a null arm that adds
+  one space; the analysis frozen before the cells): a **crippled** persona ("a careful copy
+  editor") delivers **−4.5 [−7.7, −1.2]** vs null (exact sign-flip p 0.016): its inner search
+  sits near a floor (lift 0 to +3 on every seat, SD 1.1, against null's 5.8), so the instrument
+  resolves a harmful outer edit with its sign. The three generator-drafted edits (the outer
+  operator made explicit, compact fixed-shape derivations, re-derivation from the raw expression)
+  read −2.3, −2.9 and −0.2, each interval over 0 at Bonferroni-3 and reaching about +5, and a
+  generic positive arm (stack procedures cross-checked, from a dyck seat) −1.8 [−8.0, +4.5]. Null
+  vs round 0's origin: +1.2 (SE 2.7 for two such noisy arms, so an 80%-power effect is about 8
+  pts, more than the origin's whole delivered lift). A gain from these edits is unresolved at
+  thirteen seats, not ruled out (one cell lost to the Windows replace race).
   `bbh-word-sorting-8b__423a03`
   (`word_sorting` on the 8B; arm: `bbh-word-sorting-cot`'s group-by-letter procedure with a count
   check): origin 42% on 40, arm **30% vs parent 40%** on 88 paired rows (cut, θ lift −0.49 ± 0.32);
