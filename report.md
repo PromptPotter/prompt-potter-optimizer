@@ -1,0 +1,54 @@
+# addr-4 report
+
+Base `e8183708f` (origin/land/w1); origin/main last commit Thu Nov 19 17:40 2026 +0100. Arc `arc/addr-4` at `383c97118`.
+
+| Link | Commit | promptpotter +/− |
+|---|---|---|
+| 1 A null knob keeps one meaning (`unbounded` is the no-bound) | `aea743e0a` | +40/−27 |
+| 2 An arm's id is what it sends; identity keys a cell only | `40e48d60a` | +79/−123 |
+| 3 `k_max` has one home, the manifest's `0` | `e29846d66` | +3/−6 |
+| 4 An arm plan is one `RunSpec` plus its purpose | `7c716a647` | +71/−79 |
+| 5 The reply key hashes the effort as sent; an empty route is none | `7f806f600` | +10/−5 |
+| 6 The fold refuses a list it cannot lay | `f660ad28f` | +23/−3 |
+| 7 Dead route re-add gone; a default campaign reads θ first | `8814c8818` | +4/−10 |
+| ledger | `383c97118` | addr-3's raise +59 → +39 (`package_lines` 112256 → 112236) |
+
+**LEAN:** +224/−247 in total (net −23). Links 1, 5 and 6 grow, and the growth is the fix itself: a typed `unbounded` arm, the sent effort, and the refusal.
+
+**Re-tests (before → after):**
+- 1: a null knob round-trips to the manifest's value → `null` is refused and `unbounded` round-trips.
+- 2: `_without_identity` exists in 1 file → 0.
+- 4: `ArmSpec` / `spec_of` exist → 0.
+- 5: an omitted effort or an empty route keys its own reply → the same key as the plain request.
+- 6: a widening SUBSET or non-extension UNION is emitted silently → `fold_unexpressible`.
+- 7: a default potter campaign raises `display_subset_relative_under_resubset` → it does not.
+
+**Gate:** the full `scripts/gate.py` is green at the tip (30 checks). The first tip run had one playwright failure, which passed on rerun (Symptoms).
+
+**Equals-main** (`/tmp/ha --against /tmp/hb`):
+- Every capo, capo-pobb, gepa, levi and potter leg is UNMOVED.
+- potter/l4 MOVED. Its decisions lose only 10 `inner_origin` leaves (link 2: identity is no longer in the sent params). Its requests are unmoved. Its 24 inner requests move only by the fake nonce: the 29 request bodies are identical once 8-hex values are masked. No pick moved.
+
+**Digests** (bisected; both move at link 3, where `k_max` left defaults.yaml for potter's manifest):
+- estimator `65cc26408ce71f10` → `f709c57234a4f062`
+- potter `5fc2308907883c5e` → `d7971389611ef043`
+- capo, capo-pobb, gepa and levi are unchanged.
+- `behaviour_keys.json` estimator `e0f3be90` → `78e1d9f1`.
+
+**Wipes:** run data, not migrated. `PartitionRecord.instrument_id` is now required, and a null knob is refused. This container held 0 campaigns.
+
+**Decided in-run:**
+- The no-bound spelling is `unbounded`, and a null `NodeCall` extra is unset.
+- `ParamLayers.recorded` is deleted (its only reader was the identity case). A point's instrument is filed on `PartitionRecord`. This departs from the brief's "recorded keeps the identity".
+- The preflight compares full instrument ids, read through `CampaignSurvey.instrument` with the survey's fault guard.
+- `display_metric: ability` is the default, as F9's root is a defaults value.
+- Files outside Owns, touched without collision: `evidence/read.py`, `evidence/head_to_head.py`, `runner/bench.py`, `runner/mint.py`, `scoring/closed_rounds.py`, `records/partition.py`, `pipeline_schema.py`, `pipeline_params.py`, potter `panels.py`/`escalation.py`/`members.py`, `intelligence/earned_blocks.py`, `embedded_run.py`, `checkin.py`, `mint_and_start.py`, `spawn.py`, `tests/factories.py`.
+
+## Rows closed
+- **An identity re-key moves offline decisions** (link 2)
+
+## Rows to file
+- **`instrument_of` takes params it reads only identity from**: `domain/paired_reading.py::instrument_of(dataset_hash, params)` reads only the inner origin. Since link 2 that is cell identity, never sent params, so its callers lay `PipelineParams.filed(cell_identity)` to call it. Action: it takes the cell identity. **Rides with:** bkeys (owns the file). **Re-test:** `git grep -c "filed(" -- promptpotter/application/runner/mint.py` == 0.
+
+## Symptoms
+- `webapp/e2e/walk/responsive.spec.ts:55` (phone-412): "a tap lands off the control drawn there", because a `rowhover-shell` card covered the rows. It passed on rerun, and 375/393 passed in the same run. Suspected root: the previous test's hover card does not close before the tap probe.
