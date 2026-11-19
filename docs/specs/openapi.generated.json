@@ -3995,7 +3995,7 @@
             "title": "Mean Fitness"
           },
           "measured_samples": {
-            "description": "`samples` holding a graded cell in scope — every `hit_spread` but `unmeasured`.",
+            "description": "`samples` the headline holds a graded cell of — every `hit_spread` but `unmeasured`.",
             "title": "Measured Samples",
             "type": "integer"
           },
@@ -5691,7 +5691,7 @@
           },
           "hit_spread": {
             "$ref": "#/components/schemas/HitSpread",
-            "description": "How often those cells got the sample right: `never`, `partly` or `always` — `unmeasured` where the scope holds no graded cell of it. Served, because the two thresholds are the scorer's."
+            "description": "How often the headline's graded cells got the sample right: `never`, `partly` or `always` — `unmeasured` where they hold none of it. In cycle scope the headline is the individual the latest election ended on (`Election.ended_on`), so a sample only an earlier parent saw is no miss of it; in dataset scope, every configuration. Served, because the two thresholds are the scorer's."
           },
           "mean_fitness": {
             "anyOf": [
@@ -5707,7 +5707,7 @@
           },
           "n_measured": {
             "default": 0,
-            "description": "GRADED cells of this sample in scope (errored and unscored cells excluded) — the denominator of `mean_fitness` and `hit_spread`.",
+            "description": "GRADED cells of this sample in scope (errored and unscored cells excluded) — the denominator of `mean_fitness`.",
             "title": "N Measured",
             "type": "integer"
           },

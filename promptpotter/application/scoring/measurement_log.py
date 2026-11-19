@@ -91,7 +91,7 @@ _SPAN_KEYS = frozenset({"step_tokens", "step_timings", "terminal_node", "total_t
 
 _PREDICTED_CHARS = 120
 
-ScopeCells = tuple[list[CellCandidate], list[CellRow]]
+ScopeCells = tuple[list[CellCandidate], list[CellRow], str | None]
 
 
 def _trim(text: object) -> str:
@@ -426,6 +426,7 @@ class _LeaderboardPage:
     view: HardSamples
     candidates: list[CellCandidate]
     cells: list[CellRow]
+    headline: str | None
     order: HardSampleOrder
     ranked: list[int]
     """Page positions in served order; index + 1 IS each row's ``hard_sample_rank``."""
@@ -452,7 +453,7 @@ def _leaderboard_page(
         shown = {sid: bank.samples[sid] for sid in selected}
         wanted = {shown[sid].key: sid for sid in selected}
         graded_under = dataset_scorer(resolve_dataset(art_store, cells.name))
-        candidates, rows = _dataset_cells(art_store, graded_under, bank, wanted)
+        candidates, rows, headline = _dataset_cells(art_store, graded_under, bank, wanted)
     else:
         drawn = art_store.campaigns.last(hop, PartitionRecord)
         at = art_store.campaigns.campaign_cycle(hop)
@@ -462,7 +463,7 @@ def _leaderboard_page(
         shown = _drawn_rows(cells, drawn, selected)
         wanted = {shown[sid].key: sid for sid in selected}
         graded_under = campaign_scorer(art_store, at.campaign)
-        candidates, rows = _cycle_cells(art_store, hop, graded_under, wanted, cells.at)
+        candidates, rows, headline = _cycle_cells(art_store, hop, graded_under, wanted, cells.at)
 
     resolved, ranked = rank_hard_samples(
         view,
@@ -475,6 +476,7 @@ def _leaderboard_page(
         view=view,
         candidates=candidates,
         cells=rows,
+        headline=headline,
         order=resolved,
         ranked=[wanted[key] for key in ranked],
         fitness_unit=graded_under.fitness_unit,
@@ -488,23 +490,30 @@ def _cycle_cells(
     wanted: Mapping[str, int],
     at: int | None,
 ) -> ScopeCells:
-    """A column is an INDIVIDUAL, named by the arm it first was, so one a later round carried is served once."""
+    """A column is an INDIVIDUAL, named by the arm it first was, so one a later round carried is
+    served once. The headline is the latest election's `ended_on`, a dataset scope's every column."""
     cycle_dir = cycle_dir_for(stores.base_dir, hop)
     moment = None if at is None else Moment(CycleLayout(cycle_dir).ledger, at)
     chain = stores.campaigns.chain(hop, moment=moment)
     walks = scan_ledger_walks(chain)
+    standing = scan_standing_rounds(chain)
+    elected = max(standing.elections, default=None)
+    ended_on = None if elected is None else standing.elections[elected].ended_on
     candidates: dict[str, CellCandidate] = {}
     cells: list[CellRow] = []
-    for (round_no, arm_key), arm in scan_standing_rounds(chain).arms.items():
+    headline = None
+    for (round_no, arm_key), arm in standing.arms.items():
         state = arm.state
         if isinstance(state, Cut) and state.kind == "invalid":
             continue
         label, individual_id = arm_name(arm_key, state, round_no).label, state.individual.id
+        key = f"{hop.cycle_id}/{individual_id}"
+        if arm_key == ended_on:
+            headline = key
         live = isinstance(state, Proposed | Measuring)
         if (column := candidates.get(individual_id)) is not None:
             candidates[individual_id] = column.model_copy(update={"live": column.live or live})
             continue
-        key = f"{hop.cycle_id}/{individual_id}"
         candidates[individual_id] = CellCandidate(
             key=key,
             label=str(label),
@@ -520,7 +529,7 @@ def _cycle_cells(
             for cell in sheet
             if cell.key in wanted
         )
-    return list(candidates.values()), cells
+    return list(candidates.values()), cells, headline
 
 
 def _dataset_cells(
@@ -557,7 +566,7 @@ def _dataset_cells(
                 for cell in sheet
                 if cell.key in wanted
             )
-    return candidates, cells
+    return candidates, cells, None
 
 
 def _dataset_campaign_config(stores: Stores, name: str) -> CampaignConfig:
@@ -603,9 +612,13 @@ def measurement_log(
     ranked = [sid for sid in page.ranked if sid in by_sample] if filtered else page.ranked
     held = {c.candidate for c in kept}
     candidates = [c for c in page.candidates if c.key in held] if filtered else page.candidates
+    # A filter names the cells its headline reads; unfiltered, the cycle's is its selection's.
+    spread_of = None if filtered else page.headline
 
     def _item(sid: int) -> DatasetItem:
-        graded = _graded(by_sample.get(sid, []))
+        rows = by_sample.get(sid, [])
+        graded = _graded(rows)
+        headline = _graded([c for c in rows if spread_of in (None, c.candidate)])
         sample = shown[sid]
         on_ruler = page.view.difficulty(sample.key)
         return DatasetItem(
@@ -621,7 +634,7 @@ def measurement_log(
             pick_score=on_ruler.pick_score,
             n_measured=len(graded),
             mean_fitness=sum(graded) / len(graded) if graded else None,
-            hit_spread=hit_spread(graded),
+            hit_spread=hit_spread(headline),
         )
 
     graded_all = _graded(kept)

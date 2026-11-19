@@ -97,6 +97,7 @@ from promptpotter.application.optimizers.nodes import (
     BehaviourKeys,
 )
 from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.served_dashboard import ServedDashboard
 from promptpotter.config.paths import (
     PACKAGE_ROOT,
@@ -149,12 +150,7 @@ from promptpotter.infrastructure.store.archive_queries import (
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
-from promptpotter.infrastructure.store.layout import (
-    CycleLayout,
-    cycle_dir_for,
-    dataset_id_prefix,
-    inner_sandboxes_dir,
-)
+from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
@@ -1048,6 +1044,7 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
     # The first campaign banks the rows the second's ruler is fit on; the second pauses at 1.
+    banked: list[str] = []
     for step_rounds in (None, 1):
         session, _ = await run_campaign(
             DATASET,
@@ -1058,6 +1055,7 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
             step_rounds=step_rounds,
             mode=RunMode(),
         )
+        banked.append(session.campaign_id)
     llm.rebasing = True
     session, _ = await run_campaign(
         session.hop,
@@ -1088,6 +1086,57 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
         raise SystemExit(f"offline run: the line still reads {final}")
     print(f"rebased {len(forks)} times, {spent} of {rounds} rounds spent, line ended {final}")
     await noise_walk_doors(stores, session.hop, list(cycles))
+    spread_reads_the_selection(
+        stores, [hop for c in banked for hop, _ in stores.campaigns.campaign_cycles(c)]
+    )
+
+
+def spread_reads_the_selection(stores: Stores, hops: Iterable[CycleHop]) -> None:
+    """At each election past a pick, a sample only C0 measured reads no miss of the selection
+    the line stands on: the spread reads the headline's cells, never every candidate's."""
+    only_c0 = 0
+    for hop in hops:
+        lines = list(_jsonl(stores.campaigns.layout(hop).ledger))
+        elections = [at for at, r in enumerate(lines, 1) if r.get("record_type") == "election"]
+        for at in elections:
+            past = lines[:at]
+            if not any(
+                r.get("record_type") == "election" and r["round"] and r["selected"] for r in past
+            ):
+                continue
+            scope = cells_scope(
+                stores,
+                DATASET,
+                scope="cycle",
+                campaign_id=hop.campaign_id,
+                cycle_id=hop.cycle_id,
+                descend=(),
+                at=at,
+            )
+            read = measurement_log(
+                scope,
+                limit=10_000,
+                max_unmeasured=None,
+                order=None,
+                candidate_id=None,
+                round=None,
+                status=None,
+            )
+            label = {c.key: c.label for c in read.candidates}
+            seen: dict[int, set[str]] = {}
+            for cell in read.cells:
+                if cell.fitness is not None:
+                    seen.setdefault(cell.position, set()).add(label[cell.candidate])
+            c0_only = [s for s in read.samples if seen.get(s.position) == {"C0"}]
+            if missed := [s.position for s in c0_only if s.hit_spread == "never"]:
+                raise SystemExit(
+                    f"offline run: {hop.cycle_id} at {at} reads {missed}, which only C0 measured, "
+                    "as missed by the selection"
+                )
+            only_c0 += len(c0_only)
+    if not only_c0:
+        raise SystemExit("offline run: no read past a pick held a sample only C0 measured")
+    print(f"the spread read {only_c0} samples only C0 measured as none of the selection's")
 
 
 async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) -> None:
@@ -1100,9 +1149,7 @@ async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) 
     assert isinstance(embedded, ServedDashboard), "the dashboard read serves the dashboard"
     asked = {"campaign_id": hop.campaign_id, "cycle_id": hop.cycle_id}
     mcp = await HostSession(Caller(stores)).answer(CallTool(ReadKind.CYCLE_DASHBOARD, asked))
-    readout = "".join(
-        CycleLayout(cycle_dir_for(stores.base_dir, at)).readout.read_text("utf-8") for at in line
-    )
+    readout = "".join(stores.campaigns.layout(at).readout.read_text("utf-8") for at in line)
     walk = {"lift_prior", "hold_up"}
     served = [r.model_dump(mode="json", include=walk) for r in embedded.rounds]
     hosted = json.loads(json.dumps(mcp.value))["rounds"]

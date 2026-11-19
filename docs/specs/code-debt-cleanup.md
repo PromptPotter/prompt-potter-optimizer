@@ -264,16 +264,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   the axis from the default (`k_max: 0`, re-keys potter). **Re-test:** a default potter campaign on a
   shipped dataset raises no `inert` coupling.
 
-### batch/26 · rk-dec
-
-- **The never / partly / always spread contradicts the headline beside it**:
-  `application/scoring/measurement_log.py::_cycle_cells` pools every candidate the cycle ran, so
-  `domain/cells.py::hit_spread` reads a sample only C0 saw as "never". Action: the spread reads the
-  headline's own cells. **Rides with:** readings.
-- **`hold_up` is withheld on a flat ruler**, so the offline world never shows it: the readout
-  cannot be seen in the harness that proves the doors. Action: the offline world banks one round whose
-  ruler separates arms. **Rides with:** tests-w.
-
 ### valid (after rk-dec, before the behaviour keys)
 
 - **A fork's share lands at its landing**: a running cycle's job moves onto its fork through

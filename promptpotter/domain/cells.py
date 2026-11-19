@@ -308,15 +308,17 @@ class DatasetItem(StrictModel):
     n_measured: int = Field(
         default=0,
         description="GRADED cells of this sample in scope (errored and unscored cells excluded) "
-        "— the denominator of `mean_fitness` and `hit_spread`.",
+        "— the denominator of `mean_fitness`.",
     )
     mean_fitness: float | None = Field(
         default=None, description="Mean graded fitness over those cells; null when none."
     )
     hit_spread: HitSpread = Field(
-        description="How often those cells got the sample right: `never`, `partly` or `always` "
-        "— `unmeasured` where the scope holds no graded cell of it. Served, because the two "
-        "thresholds are the scorer's.",
+        description="How often the headline's graded cells got the sample right: `never`, "
+        "`partly` or `always` — `unmeasured` where they hold none of it. In cycle scope the "
+        "headline is the individual the latest election ended on (`Election.ended_on`), so a "
+        "sample only an earlier parent saw is no miss of it; in dataset scope, every "
+        "configuration. Served, because the two thresholds are the scorer's.",
     )
 
 
@@ -357,6 +359,7 @@ class CellsResponse(StrictModel):
     partly_hit: int = Field(description="`samples` whose `hit_spread` is `partly`.")
     always_hit: int = Field(description="`samples` whose `hit_spread` is `always`.")
     measured_samples: int = Field(
-        description="`samples` holding a graded cell in scope — every `hit_spread` but `unmeasured`."
+        description="`samples` the headline holds a graded cell of — every `hit_spread` but "
+        "`unmeasured`."
     )
     unmeasured_samples: int = Field(description="`samples` whose `hit_spread` is `unmeasured`.")

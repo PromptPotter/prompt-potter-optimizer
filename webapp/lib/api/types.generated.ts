@@ -4565,7 +4565,7 @@ export interface CellsResponse {
   partly_hit: number;
   /** `samples` whose `hit_spread` is `always`. */
   always_hit: number;
-  /** `samples` holding a graded cell in scope — every `hit_spread` but
+  /** `samples` the headline holds a graded cell of — every `hit_spread` but
    * `unmeasured`. */
   measured_samples: number;
   /** `samples` whose `hit_spread` is `unmeasured`. */
@@ -4611,13 +4611,16 @@ export interface DatasetItem {
   /** SE of that δ (large = barely measured). */
   delta_se: number | null;
   /** GRADED cells of this sample in scope (errored and unscored cells excluded) —
-   * the denominator of `mean_fitness` and `hit_spread`. */
+   * the denominator of `mean_fitness`. */
   n_measured: number;
   /** Mean graded fitness over those cells; null when none. */
   mean_fitness: number | null;
-  /** How often those cells got the sample right: `never`, `partly` or `always` —
-   * `unmeasured` where the scope holds no graded cell of it. Served, because
-   * the two thresholds are the scorer's. */
+  /** How often the headline's graded cells got the sample right: `never`, `partly`
+   * or `always` — `unmeasured` where they hold none of it. In cycle scope the
+   * headline is the individual the latest election ended on
+   * (`Election.ended_on`), so a sample only an earlier parent saw is no miss
+   * of it; in dataset scope, every configuration. Served, because the two
+   * thresholds are the scorer's. */
   hit_spread: 'unmeasured' | 'never' | 'partly' | 'always';
 }
 
@@ -5700,7 +5703,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "d560ae8c6ceb9dfa";
+export const SERVED_CONTRACT = "f6b4cf2bb7159942";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
