@@ -61,6 +61,7 @@ from promptpotter.infrastructure.store.io import (
     FileMark,
     append_jsonl,
     complete_lines,
+    file_stat,
     open_bytes_robust,
     read_bytes_optional,
     read_tail,
@@ -141,8 +142,10 @@ Signature = tuple[int, int, int]
 
 
 def file_sig(path: Path) -> Signature | None:
+    """THE validator of a file a read stands on: its size moves on every append, where its mtime can
+    stand within one tick of a coarse clock (Windows') and serve a spurious 304."""
     try:
-        st = path.stat()
+        st = file_stat(path)
     except FileNotFoundError:
         return None
     return st.st_ino, st.st_size, st.st_mtime_ns

@@ -14,7 +14,6 @@ from promptpotter.infrastructure.store.io import (
     CAMPAIGNS_DIR,
     CYCLES_DIR,
     INNER_SANDBOXES_DIR,
-    newest_mtime_ns,
     read_bytes_optional,
     validate_path_component,
 )
@@ -268,7 +267,3 @@ def declared_files(layout: CycleLayout | CampaignLayout, root: Path) -> list[Pat
         and p.parent == root
         and p.suffix
     ]
-
-
-def cycle_validator_ns(cycle_dir: Path) -> int | None:
-    return newest_mtime_ns(CycleLayout(cycle_dir).ledger)

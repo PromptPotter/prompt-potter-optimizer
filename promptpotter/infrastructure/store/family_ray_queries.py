@@ -18,15 +18,13 @@ from promptpotter.domain.narration import Narrated
 from promptpotter.domain.projection_envelope import bearing_record
 from promptpotter.domain.record_kinds import RECORDS
 from promptpotter.domain.records import CycleRecord
-from promptpotter.infrastructure.store.layout import (
-    cycle_dir_for,
-    cycle_validator_ns,
-)
+from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_queries import FamilyCycle
 from promptpotter.infrastructure.store.read_model import (
     EVERY_ARM,
     LedgerIndex,
     RecordClasses,
+    file_sig,
     folded,
 )
 from promptpotter.shared.clock import epoch_seconds
@@ -168,7 +166,8 @@ def ray_validator_parts(
     parts: list[object] = ["ray", _CURATION_TAG, limit, before]
     for cycle in cycles:
         parts.append(Subject.of(cycle.path).address)
-        parts.append(cycle_validator_ns(cycle_dir_for(cycle.store.base_dir, cycle.path[-1])))
+        cycle_dir = cycle_dir_for(cycle.store.base_dir, cycle.path[-1])
+        parts.append(file_sig(CycleLayout(cycle_dir).ledger))
     return tuple(parts)
 
 

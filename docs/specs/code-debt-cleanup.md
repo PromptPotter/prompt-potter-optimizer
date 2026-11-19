@@ -724,7 +724,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   382 of ~10k a 25-s run), an immediate re-open included, which is a silent wrong read. **Held:** a
   design whose reader never reads a present file as absent; the box (Linux) is untouched.
   **Rides with:** rel 2. **Re-test:** the hammer, 0 refused writes and 0 absent reads.
-- **Run data is stat'ed bare outside `store/io.py`**: `store/read_model.py::file_sig`, six more
+- **Run data is stat'ed bare outside `store/io.py`**: six
   `.stat()` sites (`optimizer_manifest.py:96`, `pricing.py:114`, `event_stream.py:49`,
   `run_state.py:39`, `measurement_archive.py:480`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
   past `MAX_PATH` reads as absent. Root: the data root spelled once in its long form (`config/paths.py`),

@@ -897,16 +897,3 @@ def replace_lines[T](path: Path, build: Callable[[], tuple[Iterable[str], T]]) -
 def write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
     text = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
     write_bytes(path, text.encode("utf-8"))
-
-
-def newest_mtime_ns(*paths: Path) -> int | None:
-    """Nanoseconds, not float seconds: the float collides on a same-tick append and serves a spurious 304."""
-    newest: int | None = None
-    for p in paths:
-        try:
-            m = file_stat(p).st_mtime_ns
-        except OSError:
-            continue
-        if newest is None or m > newest:
-            newest = m
-    return newest
