@@ -1760,6 +1760,7 @@ def scenario_line(built_stores: Stores) -> _Scenario:
     drawn = PartitionRecord.of(
         partition_bank(bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0),
         dataset_hash="bank",
+        instrument_id="bank",
     )
     store.append(scenario, drawn)
     unheld = (
@@ -2778,7 +2779,9 @@ def repair(built_stores: Stores) -> _Repair:
         stored_campaign(stores, minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
         drawn = partition_bank(repair_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
-        stores.campaigns.append(hop, PartitionRecord.of(drawn, dataset_hash="bank"))
+        stores.campaigns.append(
+            hop, PartitionRecord.of(drawn, dataset_hash="bank", instrument_id="bank")
+        )
         rows = [
             measurement(i, 1.0, sample_key=s.key, predicted="g") for i, s in enumerate(repair_bank)
         ]

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.application.scoring.evaluators import SampleEvaluator
@@ -102,8 +102,8 @@ class Session:
     # Where `dataset_name` resolved at init; `None` where a session measures no definition.
     dataset: ResolvedDataset | None = None
     pipeline_params: PipelineParams = field(default_factory=PipelineParams)
-    # Per node, the `pipeline_params` keys hashed into identity and never sent to a backend.
-    identity_keys: dict[str, frozenset[str]] = field(default_factory=dict)
+    # Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.filed`).
+    cell_identity: dict[str, dict[str, Any]] = field(default_factory=dict)
     # The campaign its launch's door loaded, and its cycle bound: written by `bound` alone, so a
     # fork is a new session, never a moved field.
     campaign: Campaign | None = None
@@ -190,7 +190,7 @@ class Session:
 
     @property
     def instrument_id(self) -> str:
-        return instrument_of(self.bank.dataset_hash, self.pipeline_params)
+        return instrument_of(self.bank.dataset_hash, self.pipeline_params.filed(self.cell_identity))
 
     def points(self, framing: TaskDecomposition) -> PointContext:
         return PointContext(

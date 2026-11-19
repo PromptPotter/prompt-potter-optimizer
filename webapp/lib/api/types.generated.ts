@@ -674,7 +674,7 @@ export interface RunsWithParam {
   /** The config grid's own param key (`NodeConfigParam.key`) */
   key: string;
   value: unknown;
-  source: 'dataset' | 'campaign' | 'free_tier' | 'start' | 'model_floor' | 'identity' | 'evolved' | 'unset';
+  source: 'dataset' | 'campaign' | 'free_tier' | 'start' | 'model_floor' | 'evolved' | 'unset';
 }
 
 /** The models of one vendor that a campaign's root cycle runs. */
@@ -4048,7 +4048,7 @@ export interface NodeConfigParam {
   never_axis: '' | 'cost_lever' | 'schema_owned';
   movable_by: ('proposer' | 'optimizer')[];
   held: boolean;
-  source: 'dataset' | 'campaign' | 'free_tier' | 'start' | 'model_floor' | 'identity' | 'evolved' | 'unset';
+  source: 'dataset' | 'campaign' | 'free_tier' | 'start' | 'model_floor' | 'evolved' | 'unset';
   permitted: string[];
   permitted_stated: boolean;
   /** `provider` the route's host, `effort` the reasoning ladder a model answers,
@@ -5729,7 +5729,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "046fc9286632ec75";
+export const SERVED_CONTRACT = "36140ec582d4dbf7";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

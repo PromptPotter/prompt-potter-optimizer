@@ -300,7 +300,11 @@ def resolve_cycle_plan(
         admits=campaign_admits(cycle.config, configured.pipeline_schema),
         partition=partition,
         # Slots in the session's bank, whichever rows of it the caller hands in.
-        drawn=PartitionRecord.of(partition, dataset_hash=session.bank.dataset_hash),
+        drawn=PartitionRecord.of(
+            partition,
+            dataset_hash=session.bank.dataset_hash,
+            instrument_id=configured.instrument_id,
+        ),
         cycle=cycle,
         session=configured,
     )

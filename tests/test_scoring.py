@@ -4893,7 +4893,10 @@ def _evidence_campaign(
     for cycle in {root, hop}:
         stores.campaigns.mint_cycle(cycle)
         stores.campaigns.append(
-            cycle, PartitionRecord.of(partition, dataset_hash=held.dataset_hash)
+            cycle,
+            PartitionRecord.of(
+                partition, dataset_hash=held.dataset_hash, instrument_id=held.dataset_hash
+            ),
         )
         ledgers[cycle] = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(cycle)))
         arm_walk(

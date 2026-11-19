@@ -444,12 +444,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
   launch against a backend one contract behind fails at the probe, naming both numbers;
   `connectors/termnorm.py` probes `/version`.
-- **An identity re-key moves offline decisions**: an arm's content id carries identity-only keys
-  (`pipeline_resolve.py::identity_layer`). A pure re-key therefore changes which cells are drawn and
-  raced. xconn 3's revision leaf alone moved potter's crossed leader (C2.6 → C2.7) and p_best/θ in
-  capo-pobb, levi and potter (`wip/xconn` f70980fe7). Action: an arm's id derives from what the arm
-  sends, never from its identity keys. **Rides with:** xconn 3, before it lands. **Re-test:**
-  `wip/xconn`'s run against its base moves only `backend_revision` leaves.
 - **A moved capability or backend revision alone passes a resume**: it is a drift cause only when the
   origin hash also mismatches (`jobs/mint.py::resolve_resume`, `::_revision_moved`). Action: a resume
   refuses a moved capability or backend revision. **Rides with:** xconn 3. **Re-test:** a resume after a

@@ -18,6 +18,8 @@ class PartitionRecord(CycleRecord):
 
     record_type: Literal["bank_partition"] = "bank_partition"
     dataset_hash: str
+    # `paired_reading.py::instrument_of` at the draw: its cells' identity is filed, never a point's.
+    instrument_id: str
     split: DatasetSplit
     search_ids: list[int]
     bench_ids: list[int]
@@ -27,9 +29,12 @@ class PartitionRecord(CycleRecord):
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @classmethod
-    def of(cls, partition: BankPartition, *, dataset_hash: str) -> PartitionRecord:
+    def of(
+        cls, partition: BankPartition, *, dataset_hash: str, instrument_id: str
+    ) -> PartitionRecord:
         return cls(
             dataset_hash=dataset_hash,
+            instrument_id=instrument_id,
             split=partition.split,
             search_ids=[s.id for s in partition.search],
             bench_ids=[s.id for s in partition.bench],

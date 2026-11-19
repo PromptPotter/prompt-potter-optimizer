@@ -448,7 +448,7 @@ def test_a_value_the_canonical_form_cannot_spell_is_refused() -> None:
         stable_hash({"when": Path(".")})
 
 
-def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
+def test_the_judge_a_cell_is_graded_by_moves_its_archive_key_and_no_arm_id() -> None:
     schema = pipeline_schema(
         [
             PipelineNode(
@@ -460,11 +460,12 @@ def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
         ]
     )
 
+    sent = ParamLayers(schema=schema, workspace=None).fold().params
+
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
+        # The point sends `sent` under every judge, so its id never moves; its cells' key does.
         identity = identity_layer(None, None, None, judges, schema.active_steps, base_url="")
-        return schema.sp_hash(
-            ParamLayers(schema=schema, workspace=None, identity=identity).fold().params
-        )
+        return schema.sp_hash(sent.filed(identity))
 
     def judge(name: str, model: str) -> JudgeSpec:
         return JudgeSpec(
@@ -956,7 +957,9 @@ def test_an_unpinned_node_is_filed_as_and_sent_to_the_host_it_is_pinned_to(
             PipelineParams().with_nodes({"llm_only": cfg}), routed
         )
         job = PointContext(schema=routed, framing=TaskDecomposition(), demo=[]).job(point)
-        return archive_entry(job, dataset_hash="d", pipeline_schema=routed).config_key
+        return archive_entry(
+            job, dataset_hash="d", pipeline_schema=routed, cell_identity={}
+        ).config_key
 
     for model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b:nitro"):
         bare = normalize_model_id(model)
@@ -1015,7 +1018,9 @@ def test_an_edit_on_the_second_prompt_node_is_scored_with_it_and_filed_apart() -
 
     def scored(point: OptSearchPoint) -> tuple[dict[str, Any], str]:
         job = PointContext(schema=chain, framing=TaskDecomposition(), demo=[]).job(point)
-        key = archive_entry(job, dataset_hash="d", pipeline_schema=chain).config_key
+        key = archive_entry(
+            job, dataset_hash="d", pipeline_schema=chain, cell_identity={}
+        ).config_key
         return job.pipeline_params.laid_nodes, key
 
     (before, before_key), (after, after_key) = scored(two), scored(second)
@@ -3028,6 +3033,7 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
         PartitionRecord.of(
             partition_bank(rows_30, door.dataset_split, seed=0),
             dataset_hash=opened.bank.dataset_hash,
+            instrument_id=opened.bank.dataset_hash,
         ),
     )
     opened = opened.bound(held_campaign.root_cycle)
@@ -4363,7 +4369,7 @@ def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
     bank, _, _ = _split_bank()
     l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
     cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
-    back = PartitionRecord.of(cell_drawn, dataset_hash="d").restored(bank)
+    back = PartitionRecord.of(cell_drawn, dataset_hash="d", instrument_id="d").restored(bank)
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"
     )
@@ -4383,6 +4389,7 @@ def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stor
         PartitionRecord.of(
             partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0),
             dataset_hash=drawn_bank.dataset_hash,
+            instrument_id=drawn_bank.dataset_hash,
         ),
     )
     relabelled = built_stores.tenant_datasets.labelled("recut")

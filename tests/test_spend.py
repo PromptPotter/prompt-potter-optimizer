@@ -836,7 +836,10 @@ def _searching(usd_per_query: float) -> Any:
 
 def _filed(stores: Stores, sp: JobSearchPoint, session: Any) -> ReplayFeed:
     entry = archive_entry(
-        sp, dataset_hash=session.bank.dataset_hash, pipeline_schema=session.pipeline_schema
+        sp,
+        dataset_hash=session.bank.dataset_hash,
+        pipeline_schema=session.pipeline_schema,
+        cell_identity=session.cell_identity,
     )
     return ReplayFeed(stores.archive, entry.node_configs)
 
@@ -1735,7 +1738,10 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
             built_stores.archive,
             banked.values(),
             archive_entry(
-                sp, dataset_hash=session.bank.dataset_hash, pipeline_schema=session.pipeline_schema
+                sp,
+                dataset_hash=session.bank.dataset_hash,
+                pipeline_schema=session.pipeline_schema,
+                cell_identity=session.cell_identity,
             ),
             grade=REUSABLE_MIN_GRADE,
             created_at="2026-01-01T00:00:00Z",

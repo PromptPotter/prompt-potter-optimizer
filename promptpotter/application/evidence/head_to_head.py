@@ -593,6 +593,7 @@ def _read(
             split=drawn.split,
             bench_rows=drawn.bench_rows,
             scorer_id=scorer.id,
+            instrument_id=drawn.instrument_id,
             origin_params=None
             if origin_round is None
             else origin_round.close.origin.individual.pipeline_params,

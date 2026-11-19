@@ -180,6 +180,17 @@ class PipelineParams(FrozenModel):
     def with_nodes(self, nodes: Mapping[str, NodeCall | Mapping[str, object]]) -> Self:
         return self.model_validate({**self._laid_steps, **nodes})
 
+    def filed(self, identity: Mapping[str, Mapping[str, Any]]) -> Self:
+        """As the archive files a cell of it: each node's *identity* (what keys a cell, never sent)
+        laid over what it sends. A point's own params never hold it, so its id is what it sends."""
+        laid = self.laid_nodes
+        return self.with_nodes(
+            {
+                node: {**laid.get(node, {}), **identity.get(node, {})}
+                for node in [*laid, *(n for n in identity if n not in laid)]
+            }
+        )
+
     def overlaid(self, overlay: Mapping[str, Mapping[str, Any]], schema: PipelineSchema) -> Self:
         """*overlay* laid over its nodes; a node *schema* does not declare refuses."""
         if undeclared := sorted(overlay.keys() - {n.name for n in schema.declared_nodes}):

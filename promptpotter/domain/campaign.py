@@ -10,7 +10,7 @@ from pydantic import Field
 
 from promptpotter.domain.bench import CampaignRefusal, DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.paired_reading import CellSet, instrument_of
+from promptpotter.domain.paired_reading import CellSet
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import ParamSource
 from promptpotter.domain.records.run_records import LaunchClockRecord
@@ -41,11 +41,12 @@ def bench_set_of(
     split: DatasetSplit | None,
     bench_rows: CellSet,
     scorer_id: str,
+    instrument_id: str,
     origin_params: PipelineParams | None,
     origin: str,
 ) -> BenchSet:
     return BenchSet(
-        instrument_id=instrument_of(dataset_hash, origin_params),
+        instrument_id=instrument_id,
         dataset_hash=dataset_hash,
         split=split,
         bench_rows=bench_rows,

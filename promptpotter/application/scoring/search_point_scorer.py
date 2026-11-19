@@ -292,7 +292,10 @@ def open_walk(
     pipeline_schema = session.pipeline_schema
 
     entry = archive_entry(
-        search_point, dataset_hash=session.bank.dataset_hash, pipeline_schema=pipeline_schema
+        search_point,
+        dataset_hash=session.bank.dataset_hash,
+        pipeline_schema=pipeline_schema,
+        cell_identity=session.cell_identity,
     )
     row = PASSES[kind]
     node_configs = [] if row.fresh else entry.node_configs
