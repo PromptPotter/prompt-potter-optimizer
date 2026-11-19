@@ -117,7 +117,8 @@ def _long_path(p: str | Path) -> str:
 
 
 def _plain(p: str | Path) -> Path:
-    return Path(os.path.abspath(str(p).removeprefix("\\\\?\\")))
+    """One spelling of a path for the anchor's compare: absolute, links and 8.3 short names resolved."""
+    return Path(os.path.realpath(str(p).removeprefix("\\\\?\\")).removeprefix("\\\\?\\"))
 
 
 def unlink_robust(path: Path) -> None:
@@ -290,7 +291,8 @@ def _created[T](path: Path, create: Callable[[], T]) -> T:
             if os.path.isdir(_long_path(parent)):
                 raise  # The unit stands: what vanished is the create's own (a swept temporary).
             raise NotFoundError(f"{unit} {parent.name!r} is gone") from None
-        make_dirs(parent)
+        # The path as given, never its resolved spelling: a dangling link's target is made by no write.
+        make_dirs(path.parent)
         try:
             return create()
         except FileNotFoundError:

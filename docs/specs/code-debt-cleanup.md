@@ -731,11 +731,13 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ### wave-5 · store (what store-2f, store-2g and store-3b left at their landing)
 
-- **A cycle read still takes (campaign, hop)**: `pipeline_resolve.py::permitted_narrowing` (an
-  optional `hop`, ``None`` reading the campaign's subject) takes the pair `CampaignCycle` carries; its
-  callers sit in `bench/resume_and_fork/fork_siblings.py` and `commands/launching.py`. Action: it takes
-  `at: CampaignCycle`, the campaign-subject callers named. **Re-test:** `git grep -cE "campaign:
-  Campaign, hop: CycleHop" -- promptpotter` == 0.
+- **A launch's steer verdict reads the root's narrowing**: `commands/launching.py` reads a launch's
+  node rows at its hop ("a row's menu is its cycle's own declaration") but judges its steer with
+  `permitted_narrowing(stores, of)`, the campaign root's, where a fork's start judges against its
+  parent cycle's (`fork_siblings.py::operator_start`). A steer outside a forked line's narrowing and
+  inside the root's reads `clean`. Action: decide which narrowing a launch at a hop answers to (the
+  babysit act, decisions.md § 0005) and read it there. **Re-test:** a launch at a fork whose line
+  narrowed a model steers to the root-only model and reads `babysat`.
 - **A test home is built beside `factories.workspace`** (store-2's report): facts in `test_spend.py` and
   `test_security.py` built ledgers, locks and homes under paths nothing minted and passed because io
   made dirs. Root: test homes mint through `factories.workspace`. **Rides with:** tests-x.
@@ -747,11 +749,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   binding source (`build_stores` refuses a root outside the data root) with test homes built under
   it. **Rides with:** tests-x. **Re-test:** a store built outside the home refuses; every fact's
   store sits under its home.
-- **An 8.3 short path still fails open** (store-3b's report, probed on Windows): `io.py::_plain` makes
-  a path absolute but expands no short name, so `C:\PROGRA~1\…` against a long-named data root
-  matches no anchor and re-makes a deleted unit. Root: the data root and the path compared in one
-  canonical spelling (`os.path.realpath` on both, the `\\?\` prefix stripped after). **Re-test:** on
-  Windows, a write under the 8.3 spelling of a deleted campaign raises `NotFoundError`.
 
 ### wave-5 · rates (what rates-3 left at its landing)
 

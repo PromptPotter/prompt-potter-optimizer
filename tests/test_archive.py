@@ -980,6 +980,16 @@ def test_a_relative_write_into_a_deleted_campaign_answers_not_found(
         with pytest.raises(NotFoundError):
             write_json(Path(root.name) / "manifest.json", {})
     assert not root.exists(), "a relative path re-made a deleted campaign"
+    # An 8.3 short spelling of the same dir, where the volume keeps one.
+    if sys.platform == "win32":
+        import ctypes
+
+        short = ctypes.create_unicode_buffer(32768)
+        ctypes.windll.kernel32.GetShortPathNameW(str(root.parent), short, len(short))
+        if short.value and short.value != str(root.parent):
+            with pytest.raises(NotFoundError):
+                write_json(Path(short.value) / root.name / "manifest.json", {})
+            assert not root.exists(), "an 8.3 short path re-made a deleted campaign"
 
 
 def test_a_standing_cycles_projection_fault_warns_whatever_its_type(homed_stores: Stores) -> None:

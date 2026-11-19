@@ -180,7 +180,9 @@ BASELINE = {
     # sides spread, else Newcombe's construction over each side's band, a constant side's its support's).
     # rates-3 (+9): `RatesFile` holds its last try, last fetch and standing fault, and
     # `RatesFile.unfetched` says them to the sweep's rates step; one cache reader (`_cached`) (−8).
-    "package_lines": 112128,
+    # desk (+3): `io.py::_plain` says why it resolves (8.3 names, links) and `_created` why it makes
+    # the dirs on the path as given; `permitted_narrowing` takes `at: Campaign | CampaignCycle`.
+    "package_lines": 112131,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

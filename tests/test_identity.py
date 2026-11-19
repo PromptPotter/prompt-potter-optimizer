@@ -2507,7 +2507,9 @@ def test_a_node_permits_what_its_recorded_schema_serves_under_the_line(
     assert fork_preview(stores, steered.campaign_id, {"a": {"model": "z"}}).steer != "clean", (
         "a model no layer permits forked clean"
     )
-    at_fork = permitted_narrowing(stores, steered, fork)["a"].param_allowed_values
+    at_fork = permitted_narrowing(stores, CampaignCycle(steered, fork.cycle_id))[
+        "a"
+    ].param_allowed_values
     assert (at_fork["reasoning_effort"], at_fork["model"]) == (
         ["low", "high", "xhigh"],
         ["m", "n"],

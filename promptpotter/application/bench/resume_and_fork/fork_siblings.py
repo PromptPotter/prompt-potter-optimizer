@@ -259,8 +259,8 @@ def operator_start(stores: Stores, payload: ForkCyclePayload, start: CycleStart)
                 update={"origin_params": lay_nodes(params, payload.start.cleared)}
             )
     # Against what the parent's nodes permit, so the child lays over what its parent ran.
-    campaign = stores.campaigns.campaign(hop.campaign_id)
-    start = declare_steered_values(start, permitted_narrowing(stores, campaign, hop))
+    parent = CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop.cycle_id)
+    start = declare_steered_values(start, permitted_narrowing(stores, parent))
     if payload.keep_rounds:
         return start
     # The remainder the parent's dashboard serves, so the fork's caps are the ones on screen.

@@ -1038,13 +1038,14 @@ def resolve_pipeline_at(stores: Stores, campaign_id: str, at: str) -> CampaignPi
 
 
 def permitted_narrowing(
-    stores: Stores, campaign: Campaign, hop: CycleHop | None = None
+    stores: Stores, at: Campaign | CampaignCycle
 ) -> dict[str, NodeSearchNarrowing]:
-    """What each node permits at *hop* (the root's, ``None``): its recorded schema's value spaces
+    """What each node permits *at* a cycle, or a campaign's root: its recorded schema's value spaces
     narrowed by the line, never the campaign's own layer alone, which holds none of the dataset's
     optimizer blocks. A steer outside them is the babysit act (decisions.md § 0005)."""
-    at = Subject(campaign.campaign_id) if hop is None else Subject.of((hop,))
-    return _permitted(_campaign_merge(stores, campaign, at).filtered)
+    if isinstance(at, CampaignCycle):
+        return _permitted(_campaign_merge(stores, at.campaign, Subject.of((at.hop,))).filtered)
+    return _permitted(_campaign_merge(stores, at, Subject(at.campaign_id)).filtered)
 
 
 def _permitted(filtered: PipelineSchema) -> dict[str, NodeSearchNarrowing]:
