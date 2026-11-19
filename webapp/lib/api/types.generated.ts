@@ -3546,9 +3546,9 @@ export interface CampaignConfig {
    * (lineage node value, Best tile, sidebar). DISPLAY config, not search
    * state — the optimizer's selector decides on its own objective, and the
    * campaign's headline is the bench score; this only picks the number the
-   * human READS, client-overridable per session. `ability` shows θ (a logit,
-   * jargon) where the selector stamps one — defaults to `fitness` so θ is
-   * never forced on an operator who didn't ask for it. Rides the
+   * human READS, client-overridable per session. `ability` shows θ where the
+   * selector stamps one, and fitness where it stamps none; under a per-round
+   * resubset fitness is subset-relative, so `ability` leads. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability';
@@ -4269,9 +4269,9 @@ export interface ConfigEdit {
    * (lineage node value, Best tile, sidebar). DISPLAY config, not search
    * state — the optimizer's selector decides on its own objective, and the
    * campaign's headline is the bench score; this only picks the number the
-   * human READS, client-overridable per session. `ability` shows θ (a logit,
-   * jargon) where the selector stamps one — defaults to `fitness` so θ is
-   * never forced on an operator who didn't ask for it. Rides the
+   * human READS, client-overridable per session. `ability` shows θ where the
+   * selector stamps one, and fitness where it stamps none; under a per-round
+   * resubset fitness is subset-relative, so `ability` leads. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability' | null;
@@ -5192,9 +5192,9 @@ export interface CampaignLayer {
    * (lineage node value, Best tile, sidebar). DISPLAY config, not search
    * state — the optimizer's selector decides on its own objective, and the
    * campaign's headline is the bench score; this only picks the number the
-   * human READS, client-overridable per session. `ability` shows θ (a logit,
-   * jargon) where the selector stamps one — defaults to `fitness` so θ is
-   * never forced on an operator who didn't ask for it. Rides the
+   * human READS, client-overridable per session. `ability` shows θ where the
+   * selector stamps one, and fitness where it stamps none; under a per-round
+   * resubset fitness is subset-relative, so `ability` leads. Rides the
    * `composite_fitness_formula` serve path to
    * `dashboard.json::display_metric`; never on `OptSearchPoint`. */
   display_metric: 'fitness' | 'composite' | 'ability' | null;
@@ -5729,7 +5729,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "36140ec582d4dbf7";
+export const SERVED_CONTRACT = "802ad8e8eae29768";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

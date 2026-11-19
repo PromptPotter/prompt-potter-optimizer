@@ -178,12 +178,6 @@ def patch_between(
         lay = rule(path).lay
         if lay in (Lay.KEYS, Lay.CALL) and isinstance(value, Mapping) and isinstance(held, Mapping):
             sub = patch_between(rule, held, value, *path)
-            if (
-                lay is Lay.CALL
-                and value.get("model") != held.get("model")
-                and "route_order" in value
-            ):
-                sub["route_order"] = value["route_order"]
             if sub or key not in under or key in rescoped:
                 out[key] = sub
         elif key not in under or held != value:

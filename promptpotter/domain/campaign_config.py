@@ -350,8 +350,8 @@ class CampaignConfig(StrictModel):
         "first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — "
         "the optimizer's selector decides on its own objective, and the campaign's headline "
         "is the bench score; this only picks the number the human READS, client-overridable "
-        "per session. `ability` shows θ (a logit, jargon) where the selector stamps one — "
-        "defaults to `fitness` so θ is never forced on an operator who didn't ask for it. "
+        "per session. `ability` shows θ where the selector stamps one, and fitness where it "
+        "stamps none; under a per-round resubset fitness is subset-relative, so `ability` leads. "
         "Rides the `composite_fitness_formula` serve path to "
         "`dashboard.json::display_metric`; never on `OptSearchPoint`.",
     )
