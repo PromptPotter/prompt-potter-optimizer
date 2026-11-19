@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { cyclePathUrl } from "@/lib/api";
-import { reportIncident } from "@/lib/diagnostics";
-import { encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";
+import { openLiveStream } from "@/lib/live-stream";
+import { decodeCyclePath, encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/state/workspace";
 import type { ActivityState, ProjectionEnvelope } from "@/lib/api/types";
 
@@ -22,41 +22,26 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
     setActivity(NO_ACTIVITY);
     setConnected(false);
   }
-  // The effect keys on the stable `key` string, not the path array's per-render identity.
-  const pathRef = useRef<CyclePath | null>(path);
-  useEffect(() => {
-    pathRef.current = path;
-  });
 
   const goneAddress = useWorkspace().goneAddress;
   const addressGone = goneAddress?.cause === "gone" && goneAddress.address === key;
 
+  // Keyed on the stable `key` string, not the path array's per-render identity.
   useEffect(() => {
-    const p = pathRef.current;
+    const p = decodeCyclePath(key);
     if (!p || addressGone) return;
     // A frame queued across a reconnect would paint and linger: this feed never re-validates.
     const expectedCycleId = pathLeaf(p).cycleId;
-    const es = new EventSource(cyclePathUrl("cycle-events", p, {}), {
-      withCredentials: true,
-    });
-
-    es.onopen = () => setConnected(true);
-    es.onerror = () => setConnected(false); // EventSource auto-reconnects; re-paints from a fresh snapshot
-
-    es.onmessage = (ev: MessageEvent<string>) => {
-      let env: ProjectionEnvelope;
-      try {
-        env = JSON.parse(ev.data) as ProjectionEnvelope;
-      } catch (e) {
-        // The server serializes every frame, so one that does not parse is an incident, not noise.
-        reportIncident(e, { surface: "cycle-events", address: key });
-        return;
-      }
-      if (env.cycle_id !== expectedCycleId) return;
-      setActivity(env.activity);
-    };
-
-    return () => es.close();
+    return openLiveStream<ProjectionEnvelope>(
+      cyclePathUrl("cycle-events", p, {}),
+      { surface: "cycle-events", address: key },
+      {
+        connected: setConnected,
+        frame: (env) => {
+          if (env.cycle_id === expectedCycleId) setActivity(env.activity);
+        },
+      },
+    );
   }, [key, addressGone]);
 
   return { ...activity, connected };

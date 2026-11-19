@@ -79,7 +79,7 @@ function signature(i: Incident): string {
   return `${i.surface}|${i.kind}|${i.code ?? i.status}|${i.address ?? i.path}`;
 }
 
-interface IncidentContext {
+export interface IncidentContext {
   surface: string;
   address?: string | null;
 }

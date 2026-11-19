@@ -60,3 +60,89 @@ describe("useCommand — a write re-asks no read: the feed says what it moved", 
     });
   }
 });
+
+describe("useCommand — a send's answer is the scope's it was sent from", () => {
+  beforeEach(() => {
+    vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
+  });
+  afterEach(() => {
+    cleanup();
+    clearIncidents();
+    vi.unstubAllGlobals();
+  });
+
+  const deferred = () => {
+    let resolve!: (v: string) => void;
+    let reject!: (e: unknown) => void;
+    const promise = new Promise<string>((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+  const mount = (scope: string) =>
+    renderHook((p: { scope: string }) => useCommand<"write">("test", p), {
+      wrapper,
+      initialProps: { scope },
+    });
+
+  const settles: [string, (d: ReturnType<typeof deferred>) => void][] = [
+    ["landed", (d) => d.resolve("ok")],
+    ["refused", (d) => d.reject(new ApiError(409, "/write"))],
+  ];
+  for (const [answered, answer] of settles) {
+    it(`drops an answer ${answered} after the scope moved, and frees the slot`, async () => {
+      const { result, rerender } = mount("A");
+      const d = deferred();
+      const then = vi.fn();
+      let sent!: Promise<unknown>;
+      act(() => {
+        sent = result.current.run("write", () => d.promise, then);
+      });
+      expect(result.current.pending).toBe("write");
+      rerender({ scope: "B" });
+      expect(result.current.pending).toBeNull();
+      // B's own send is admitted while A's is still in flight.
+      const b = deferred();
+      let sentB!: Promise<unknown>;
+      act(() => {
+        sentB = result.current.run("write", () => b.promise);
+      });
+      expect(result.current.pending).toBe("write");
+      await act(async () => {
+        answer(d);
+        expect(await sent).toEqual({ ok: false, failure: null });
+      });
+      expect(then).not.toHaveBeenCalled();
+      expect(result.current.failure).toBeNull();
+      expect(result.current.pending).toBe("write");
+      await act(async () => {
+        b.resolve("ok");
+        await sentB;
+      });
+      expect(result.current.pending).toBeNull();
+    });
+
+    it(`lands an answer ${answered} on an unmoved scope`, async () => {
+      const { result } = mount("A");
+      const d = deferred();
+      const then = vi.fn();
+      let sent!: Promise<unknown>;
+      act(() => {
+        sent = result.current.run("write", () => d.promise, then);
+      });
+      await act(async () => {
+        answer(d);
+        await sent;
+      });
+      expect(result.current.pending).toBeNull();
+      if (answered === "landed") {
+        expect(then).toHaveBeenCalledWith("ok");
+        expect(result.current.failure).toBeNull();
+      } else {
+        expect(then).not.toHaveBeenCalled();
+        expect(result.current.failure?.verb).toBe("write");
+      }
+    });
+  }
+});

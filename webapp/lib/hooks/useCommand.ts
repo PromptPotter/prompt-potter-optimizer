@@ -1,6 +1,6 @@
 // Never retries: each send mints a fresh idempotency key, so a retry is a second command.
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ApiError, commandMessage, failureKind, type FailureKind } from "@/lib/api";
 import { useAuthGate } from "@/lib/state/auth";
 import { reportIncident } from "@/lib/diagnostics";
@@ -14,13 +14,13 @@ export interface CommandFailure {
   details: Record<string, unknown> | null;
 }
 
-// `failure` is null for an abort and for a send refused while another is in flight.
+// `failure` is null for an abort, a refused double send and an answer whose scope moved.
 type CommandResult<R> = { ok: true; value: R } | { ok: false; failure: CommandFailure | null };
 
 interface CommandSlot<V extends string> {
   pending: V | null;
   failure: (CommandFailure & { verb: V }) | null;
-  /** Never throws. A send while another is in flight is refused as `{ ok: false, failure: null }`. */
+  /** Never throws. A send while another of its scope is in flight is refused as `failure: null`. */
   run<R>(verb: V, send: () => Promise<R>, then?: (r: R) => void): Promise<CommandResult<R>>;
   clear(): void;
 }
@@ -28,10 +28,12 @@ interface CommandSlot<V extends string> {
 const isAbort = (e: unknown) =>
   (e instanceof DOMException || e instanceof Error) && e.name === "AbortError";
 
+const DROPPED = { ok: false, failure: null } as const;
+
 export function useCommand<V extends string>(
   surface: string,
   opts: {
-    /** The subject's identity; a change clears `failure`. */
+    /** The subject's identity: a send's answer lands only on the scope it was sent from. */
     scope?: string | null;
   } = {},
 ): CommandSlot<V> {
@@ -39,32 +41,48 @@ export function useCommand<V extends string>(
   const { onAuthError } = useAuthGate();
   const [pending, setPending] = useState<V | null>(null);
   const [failure, setFailure] = useState<CommandSlot<V>["failure"]>(null);
-  const inFlight = useRef(false);
+  // The send in flight and the scope it was sent from; a moved scope frees the slot.
+  const sent = useRef<{ scope: string | null } | null>(null);
+  const scopeNow = useRef(scope);
+  useEffect(() => {
+    scopeNow.current = scope;
+  });
 
   const [prevScope, setPrevScope] = useState(scope);
   if (scope !== prevScope) {
     setPrevScope(scope);
+    setPending(null);
     setFailure(null);
   }
+
+  // Frees the slot; true when the answer is still the viewed scope's, else it is dropped as an abort.
+  const settle = (mine: { scope: string | null }) => {
+    const lands = sent.current === mine && scopeNow.current === mine.scope;
+    if (sent.current === mine) sent.current = null;
+    if (lands) setPending(null);
+    return lands;
+  };
 
   const run = async <R>(
     verb: V,
     send: () => Promise<R>,
     then?: (r: R) => void,
   ): Promise<CommandResult<R>> => {
-    if (inFlight.current) return { ok: false, failure: null };
-    inFlight.current = true;
+    if (sent.current?.scope === scopeNow.current) return DROPPED;
+    const mine = (sent.current = { scope: scopeNow.current });
     setPending(verb);
     setFailure(null);
+    let landed = false;
     // What the write moved, the feed says: the dispatcher files it on the account's log.
     try {
       const value = await send();
       // Settled before `then`, so a send it chains is admitted, never dropped as a double press.
-      inFlight.current = false;
+      landed = settle(mine);
+      if (!landed) return DROPPED;
       then?.(value);
       return { ok: true, value };
     } catch (e) {
-      if (isAbort(e)) return { ok: false, failure: null };
+      if (!(landed || settle(mine)) || isAbort(e)) return DROPPED;
       onAuthError(e);
       reportIncident(e, { surface: `${surface}:${verb}` });
       const kind = failureKind(e);
@@ -78,9 +96,6 @@ export function useCommand<V extends string>(
       };
       setFailure({ ...f, verb });
       return { ok: false, failure: f };
-    } finally {
-      inFlight.current = false;
-      setPending(null);
     }
   };
 

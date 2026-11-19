@@ -10,6 +10,7 @@ import { operatorMessage } from "@/lib/api/errors";
 import { READ_ROUTES, type FeedFrame } from "@/lib/api/types";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { reportIncident } from "@/lib/diagnostics";
+import { openLiveStream } from "@/lib/live-stream";
 
 export const READ_CACHE_MAX_KEYS = 64;
 export const GONE_CONFIRM_LIMIT = 3;
@@ -369,9 +370,9 @@ export function reaskRead(id: string): void {
 // stood on another version of it, and what the read answers is what the cache keeps. Compared with
 // the version each answer stood on, never the frame before: an answer read before the feed's first
 // frame misses no move between them.
-let feed: EventSource | null = null;
+let closeFeedStream: (() => void) | null = null;
 
-function moved(subject: string, version: string): void {
+function moved({ subject, version }: FeedFrame): void {
   for (const slot of mounted()) {
     const named = descriptorOf(slot).subject;
     if (named === undefined || !subject.startsWith(named)) continue;
@@ -381,32 +382,13 @@ function moved(subject: string, version: string): void {
 }
 
 function openFeed(): void {
-  if (feed !== null || typeof EventSource === "undefined") return;
-  const es = new EventSource(`${API}${READ_ROUTES.feed}`, { withCredentials: true });
-  feed = es;
-  es.onmessage = (ev: MessageEvent<string>) => {
-    let frame: FeedFrame;
-    try {
-      frame = JSON.parse(ev.data) as FeedFrame;
-    } catch (e) {
-      // The server serializes every frame, so one that does not parse is an incident, not noise.
-      reportIncident(e, { surface: "feed" });
-      return;
-    }
-    moved(frame.subject, frame.version);
-  };
-  // A dropped stream reconnects by itself, and its first frames say what moved meanwhile; a
-  // refused one (a 401, a 5xx) is closed for good and reopened on the reconnect beat.
-  es.onerror = () => {
-    if (es.readyState !== EventSource.CLOSED || feed !== es) return;
-    feed = null;
-    setTimeout(openFeed, RECONNECT_POLL_MS);
-  };
+  if (closeFeedStream !== null || typeof EventSource === "undefined") return;
+  closeFeedStream = openLiveStream(`${API}${READ_ROUTES.feed}`, { surface: "feed" }, { frame: moved });
 }
 
 function closeFeed(): void {
-  feed?.close();
-  feed = null;
+  closeFeedStream?.();
+  closeFeedStream = null;
 }
 
 // `read` is the subscriber's newest descriptor: its subject counts, its effects run. The first

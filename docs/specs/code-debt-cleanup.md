@@ -465,21 +465,22 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `webapp/app/styles/foundation/tokens.css`, fields skin in `base.css` alone, and a gate check holds
   the literal count to a falling baseline. **Rides with:** webd. **Re-test:** the check's baseline is 0.
 - **The webapp's live state lands on the wrong subject or the wrong version** (a live-state pass;
-  reported unless ✓): ✓ `useCommand` lands its result on whatever subject is in view (20 of 30 slots
-  unscoped): scope clears the failure only at `useCommand.ts:44-48`, and `then` / `setFailure` /
-  `setPending` land after the scope moved (`:62-81`); feed versions are unordered hashes
+  reported unless ✓): ✓ 20 of 30 `useCommand` slots pass no `scope`, so their answer lands on
+  whatever subject is in view; feed versions are unordered hashes
   (`cycle_reads.py:221-224`, a sha of `repr`), so a stale read reverts a draft edit, an ack shows applied
   before the feed moves, and a second press files a second start-run (root: a monotone version per
-  subject); ✓ the cycle-events `EventSource` never reopens after a non-200 reconnect
-  (`useCycleEvents.ts:43-44`'s `onerror` only sets `connected=false`) while `read-cache.ts:400-404`
-  handles it, so the rule is spelled twice; time-ray pages are not contiguous with the head (earlier
+  subject); time-ray pages are not contiguous with the head (earlier
   pages ride a fixed cursor, `reads.ts:603-626`); reads with no subject break I10 (`useRound` mixes
-  sources, `useRound.ts:40-46`); the feed opens on any subscription, auth or not (`read-cache.ts:415` →
-  `:383-385`); `dropCachedRead` runs while the read has subscribers (`read-cache.ts:300-310`, caller
+  sources, `useRound.ts:40-46`); the feed opens on any subscription, auth or not (`read-cache.ts::subscribe` →
+  `read-cache.ts::openFeed`); `dropCachedRead` runs while the read has subscribers (`read-cache.ts::dropCachedRead`, caller
   `useIngestFlow.ts:374`). **Rides with:** webd.
+- **A caller's throwing `then` reads as the server's refusal** (live-1's report): `useCommand.ts::run`
+  calls `then` inside the send's `try`, so a programmer bug in a caller lands as an operator
+  `failure` with a server failure kind. Action: `then` runs after the send settled and its throw is an
+  incident (`reportIncident`), never a `CommandFailure`; `run` still never throws. **Rides with:** webd.
 - **The served contract has three hand copies** (✓): `commands.ts:103-108` hand-writes `Partial`
   `ConfigOverrides` / `ForkStart` beside the generated `CommandSent`; SSE frames are cast with `as`
-  (`useCycleEvents.ts:49`, `read-cache.ts:390`); the build handshake covers fetches, not streams; and
+  (`live-stream.ts::openLiveStream`); the build handshake covers fetches, not streams; and
   the client decides what Delete files (`CampaignMenu.tsx:44-54` vs `workspace_edits.py:62-77`).
   **Rides with:** webd.
 - **An L4 panel's Leader card is empty** (C0 on a3312e3e1, 390 and 1280): `panes.tsx::LeaderPane`'s
