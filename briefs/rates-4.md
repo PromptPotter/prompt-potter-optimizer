@@ -1,6 +1,6 @@
 # rates-4: a route answer left stale is said; one step's pass has one recorder (cloud)
 
-`briefs/common.md` binds you. Base: **`origin/main` at dispatch** (rates-3 landed there: the rates
+`briefs/common.md` binds you. Base: **`ee8f1e4d1`** (origin/main; rates-3 landed there: the rates
 cache carries its last try, last fetch and standing fault, and the sweep's rates step records
 `RatesFile.unfetched` on `MachineStatusResponse.unswept`). Push to `arc/rates-4`. Two rows of
 `docs/specs/code-debt-cleanup.md` § wave-5 · rates (read their full text); one commit per row at most.

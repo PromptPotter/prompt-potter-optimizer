@@ -2,6 +2,8 @@ You run one CODE chain of PromptPotter's cleanup in a cloud session. Work autono
 
 SPEC: your brief (`briefs/<id>.md` on `origin/brief/wave-5`) names a section of `docs/specs/code-debt-cleanup.md` at your base; every row there is yours unless the brief says otherwise. Root `CLAUDE.md` § Non-negotiables and `docs/developer/refactor-arcs.md` bind you.
 
+BASE FIRST: `git fetch origin` before anything, then base on the commit your brief names (`git cat-file -e <sha>` must succeed and `git merge-base --is-ancestor <sha> origin/main` must hold). Never base on the checkout the session opened in: it can be days stale (small-12 built on a 4-day-old main). Report the base sha and `git log -1 --format=%cd origin/main`.
+
 ENV FIRST (operator-approved): install the uv that `pyproject.toml`'s `required-version` pins (`python3 -m pip install -q --target /tmp/uvpin uv==<pinned>`) and put `/tmp/uvpin/bin` first on PATH; run `npm ci` in `webapp/` so the web lane runs. No other installs. No paid LLM call. Never touch a live server or the box.
 
 ECONOMY: grep before reading, read slices, never re-read a file, keep shell output small (`| tail`). While iterating run only the tests you touched and `python scripts/gate.py --changed` once per link; the full gate and equals-main once, at the tip.

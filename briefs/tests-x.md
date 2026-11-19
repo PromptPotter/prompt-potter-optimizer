@@ -1,6 +1,6 @@
 # tests-x: a fact's store sits under its home — the data root has one source (cloud)
 
-`briefs/common.md` binds you. Base: **`origin/main` at dispatch** (store-3b landed there: io's anchor
+`briefs/common.md` binds you. Base: **the sha the dispatch names, else `ee8f1e4d1`** (origin/main; store-3b landed there: io's anchor
 refuses a write into a deleted campaign, cycle or draft, matched whole from `paths.py::user_data_root()`).
 Push to `arc/tests-x`. Three rows of `docs/specs/code-debt-cleanup.md` (read their full text):
 § wave-5 · store "The data root has two sources" and "A test home is built beside
