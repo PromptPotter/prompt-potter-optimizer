@@ -39,7 +39,6 @@ from promptpotter.application.optimizers.potter.dispatch.bundle import (
     signal,
 )
 from promptpotter.application.optimizers.potter.dispatch.facade import PotterView
-from promptpotter.application.optimizers.potter.knobs import Unbounded
 from promptpotter.application.optimizers.potter.records import ExplorationBudget
 from promptpotter.application.scoring.evaluators import compute_fitness
 from promptpotter.application.scoring.paired import FlippedCells, flipped_keys
@@ -54,6 +53,7 @@ from promptpotter.domain.candidate_diff import (
     same_idea,
 )
 from promptpotter.domain.connector import unit_count, unit_plural
+from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.opt_search_point import Locus, NodePrompt
 from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, overlap_line, triggered_rates
 from promptpotter.domain.paired_reading import ArmKey, LiftSide, PairedReading, level_text
@@ -386,7 +386,7 @@ def _transcript_plan(b: PotterView) -> _TranscriptPlan | None:
     if not rows and not lost:
         return None
     knob = b.transcript_knobs.transcripts
-    shown = None if knob == "unbounded" else knob
+    shown = None if knob == UNBOUNDED else knob
     # Ties rotate by round: the pool's order froze at round 0, so a fixed one serves one head forever.
     latest = b.latest_sample_keys
     fresh = [r for r in rows if r.key in latest]
@@ -412,7 +412,7 @@ def _looping(trace: str) -> bool:
 def _trace_excerpt(trace: str, cap: int | Unbounded) -> str:
     if _looping(trace):
         return "[looping — head and tail only]\n" + _edges_at_line(trace, DEGENERATE_TRACE_CAP)
-    return trace if cap == "unbounded" else _edges_at_line(trace, cap)
+    return trace if cap == UNBOUNDED else _edges_at_line(trace, cap)
 
 
 @signal(

@@ -231,7 +231,7 @@ cfg-2 laid every door's patch through one wire rule and every campaign default i
 and derived the knob couplings from each member's draws and the escalation ladder.
 
 - **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
-  patch through `layer_fold.py::wire_patch`, but L2's steer is read through `L2Memory.steered` /
+  patch through `layer_fold.py::fold_layers` (a null clears), but L2's steer is read through `L2Memory.steered` /
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
   the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleStart`,
   `dict[str, dict[str, Any]]` on `ForkStart`, which carries a null clear and text a `NodeCall` refuses

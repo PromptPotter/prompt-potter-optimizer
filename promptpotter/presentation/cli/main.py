@@ -36,6 +36,7 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.export import EXPORT_TIER_INFO, ExportTier
 from promptpotter.domain.hierarchy import ListingLifecycle
+from promptpotter.domain.layer_fold import UNBOUNDED
 from promptpotter.domain.phases import StopOutcome
 from promptpotter.domain.refusal import Refusal
 from promptpotter.domain.run_mode import OnDivergence
@@ -113,12 +114,12 @@ NO_WAIT = Arg(
 
 
 def _budget_axis(axis: str, cast: Callable[[str], float]) -> Callable[[str], Budget]:
-    """A one-axis Budget, so `none` (the lift) stays apart from an omitted flag's ``None``; a
-    refusal is the model's, in the words REST's body refuses the same text in."""
+    """A one-axis Budget, `unbounded` its lift as on every wire; a refusal is the model's, in the
+    words REST's body refuses the same text in."""
 
     def parse(raw: str) -> Budget:
         try:
-            value: object = None if raw.strip().lower() == "none" else cast(raw)
+            value: object = UNBOUNDED if raw.strip() == UNBOUNDED else cast(raw)
         except ValueError:
             value = raw
         try:
@@ -133,28 +134,28 @@ BUDGET_AXES = (
     Arg(
         CommandPayload.cli_spelling("budget.usd"),
         type=_budget_axis("usd", float),
-        metavar="USD|none",
+        metavar="USD|unbounded",
         help="Campaign USD ceiling (optimizer + backend, every live cycle); 0 halts after the "
-        "current round, `none` leaves only your account's allowance. Omit to leave it as it stands.",
+        "current round, `unbounded` leaves only your account's allowance. Omit to leave it as it stands.",
     ),
     Arg(
         CommandPayload.cli_spelling("budget.tokens"),
         type=_budget_axis("tokens", int),
-        metavar="N|none",
+        metavar="N|unbounded",
         help="Campaign token ceiling (in + out) — the unit that survives an unpriced model; "
         "whichever ceiling trips first halts. Omit to leave it as it stands.",
     ),
     Arg(
         CommandPayload.cli_spelling("budget.rounds"),
         type=_budget_axis("rounds", int),
-        metavar="N|none",
-        help="L1 round cap, read at the next round boundary; `none` lifts it, so the spend "
+        metavar="N|unbounded",
+        help="L1 round cap, read at the next round boundary; `unbounded` lifts it, so the spend "
         "ceiling governs. Omit to leave it as it stands.",
     ),
     Arg(
         CommandPayload.cli_spelling("budget.wall_clock_s"),
         type=_budget_axis("wall_clock_s", float),
-        metavar="S|none",
+        metavar="S|unbounded",
         help="Wall-clock bound in seconds for each launch; a remote cell still open at the edge "
         "is cut. Omit to leave it as it stands.",
     ),

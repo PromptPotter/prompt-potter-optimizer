@@ -2269,22 +2269,23 @@ export interface RunLimits {
   optimizer: OptimizerLimit[];
 }
 
-/** What bounds a run per axis: a named axis binds, a named null lifts, an omitted
- * one inherits. ``usd`` is the ONE axis a head-to-head holds equal across its
- * arms: cells, tokens, rounds and seconds are what each arm's money bought,
- * and differ by arm. */
+/** What bounds a run per axis: a named axis binds, ``unbounded`` lifts (read back
+ * as ``None``, no bound), and an omitted or null one inherits, as a null
+ * clears on every layer. ``usd`` is the ONE axis a head-to-head holds equal
+ * across its arms: cells, tokens, rounds and seconds are what each arm's
+ * money bought, and differ by arm. */
 export interface Budget {
   /** The campaign's USD, in its ceiling meter: one book its live cycles share. */
-  usd?: number | null;
+  usd?: number | null | 'unbounded';
   /** The campaign's billed tokens, shared like `usd`; the axis that still binds
    * where a model has no rate on file. */
-  tokens?: number | null;
+  tokens?: number | null | 'unbounded';
   /** Closed rounds after the origin, per cycle, read at each round boundary; 0
    * measures the origin only. */
-  rounds?: number | null;
+  rounds?: number | null | 'unbounded';
   /** Seconds ONE launch runs, its clock afresh at every launch; a remote cell still
    * open at the edge is cut and the run stops `wall_clock`. */
-  wall_clock_s?: number | null;
+  wall_clock_s?: number | null | 'unbounded';
 }
 
 /** One knob an optimizer declares as bounding its run, which a fork may
@@ -3653,21 +3654,22 @@ export interface OptimizationConfig {
   /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
    * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
    * cycles and checked at the next boundary; ``rounds`` caps one cycle's
-   * closed rounds after the origin (0 measures the origin and stops; null
-   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork start, a standing
-   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
-   * account admits the result whole or refuses the launch. A null axis is
-   * unbounded. ``tokens`` is unset by default: a token is worth a different
-   * amount on every route, so set it only where a backend bills but reports
-   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+   * closed rounds after the origin (0 measures the origin and stops;
+   * ``unbounded`` leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one
+   * launch, cutting a remote cell still open at its edge. A fork start, a
+   * standing ``set-limits`` and a launch flag each lay over it axis by axis,
+   * and the account admits the result whole or refuses the launch. An
+   * ``unbounded`` axis lifts; a null one clears. ``tokens`` is unset by
+   * default: a token is worth a different amount on every route, so set it
+   * only where a backend bills but reports no cost (``unpriced_tokens`` on
+   * the dashboard is the tell). */
   budget: Budget;
   /** Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1
    * life per round that promotes an arm, -1 per round that does not, banked
    * up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm
    * of which reached the election banks nothing. ``None`` → ``budget.rounds``
    * governs. It still caps from above, so a lives run wanting the full bank
-   * sets ``budget: {rounds: null}``. */
+   * sets ``budget: {rounds: unbounded}``. */
   lives: LivesConfig | null;
   /** Stop ``target_hit`` once the declared pick's level over the origin, on the
    * origin's panel, reaches this at its paired interval's lower bound.
@@ -5273,21 +5275,22 @@ export interface OptimizationLayer {
   /** The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the
    * CAMPAIGN's cumulative spend (optimizer + backend), shared by its live
    * cycles and checked at the next boundary; ``rounds`` caps one cycle's
-   * closed rounds after the origin (0 measures the origin and stops; null
-   * leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch,
-   * cutting a remote cell still open at its edge. A fork start, a standing
-   * ``set-limits`` and a launch flag each lay over it axis by axis, and the
-   * account admits the result whole or refuses the launch. A null axis is
-   * unbounded. ``tokens`` is unset by default: a token is worth a different
-   * amount on every route, so set it only where a backend bills but reports
-   * no cost (``unpriced_tokens`` on the dashboard is the tell). */
+   * closed rounds after the origin (0 measures the origin and stops;
+   * ``unbounded`` leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one
+   * launch, cutting a remote cell still open at its edge. A fork start, a
+   * standing ``set-limits`` and a launch flag each lay over it axis by axis,
+   * and the account admits the result whole or refuses the launch. An
+   * ``unbounded`` axis lifts; a null one clears. ``tokens`` is unset by
+   * default: a token is worth a different amount on every route, so set it
+   * only where a backend bills but reports no cost (``unpriced_tokens`` on
+   * the dashboard is the tell). */
   budget: Budget | null;
   /** Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1
    * life per round that promotes an arm, -1 per round that does not, banked
    * up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm
    * of which reached the election banks nothing. ``None`` → ``budget.rounds``
    * governs. It still caps from above, so a lives run wanting the full bank
-   * sets ``budget: {rounds: null}``. */
+   * sets ``budget: {rounds: unbounded}``. */
   lives: _LivesConfigFields | null;
   /** Stop ``target_hit`` once the declared pick's level over the origin, on the
    * origin's panel, reaches this at its paired interval's lower bound.
@@ -5729,7 +5732,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "802ad8e8eae29768";
+export const SERVED_CONTRACT = "79f544bc7fa1e976";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

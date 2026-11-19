@@ -199,7 +199,7 @@ from promptpotter.domain.l4.proxies import (
     inner_cell_facts,
     inner_cell_report,
 )
-from promptpotter.domain.layer_fold import Layer, fold_layers
+from promptpotter.domain.layer_fold import UNBOUNDED, Layer, fold_layers
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
@@ -1084,8 +1084,8 @@ def test_budget_equality_is_over_the_axes_each_names() -> None:
     # A lift is no bound, and an omitted axis no lift.
     for one, other, same in (
         (Budget(usd=1.0), Budget(usd=1.0), True),
-        (Budget(usd=None), Budget(), False),
-        (Budget(usd=1.0, tokens=None), Budget(usd=1.0), False),
+        (Budget(usd=UNBOUNDED), Budget(), False),
+        (Budget(usd=1.0, tokens=UNBOUNDED), Budget(usd=1.0), False),
         (Budget(usd=1.0), Budget(usd=2.0), False),
     ):
         assert (one == other) is same and (hash(one) == hash(other)) is same, (
@@ -1110,10 +1110,10 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key() ->
     held = _held(
         stores,
         spawned,
-        Budget(usd=0.25, tokens=40_000, rounds=None, wall_clock_s=900.0),
+        Budget(usd=0.25, tokens=40_000, rounds=UNBOUNDED, wall_clock_s=900.0),
         reserve=Budget(usd=0.5, tokens=80_000),
         # The operator named the USD axis and LIFTED the rounds cap: a lift stands as a lift.
-        standing=Budget(usd=0.25, rounds=None),
+        standing=Budget(usd=0.25, rounds=UNBOUNDED),
         step_rounds=2,
     )
     hop = CycleHop(campaign_id="ds__000001", cycle_id="cycle_root")
@@ -2066,7 +2066,7 @@ def test_a_mid_run_ceiling_reaches_the_running_book_and_the_loop(built_stores: S
     assert _stopped_on(book) is StopReason.SPEND_BUDGET, (
         "a share another process moved was hidden from the running book"
     )
-    declare(Budget(rounds=None))
+    declare(Budget(rounds=UNBOUNDED))
     bounded, _ = round_bounds(session, config)
     assert bounded.optimization.budget.rounds is None, (
         "a LIFT of the round cap reads as no cap, never a fall back to the config's"
@@ -2112,7 +2112,7 @@ def test_moving_one_ceiling_leaves_the_other_at_its_launch_cap(
     assert moved_book.allotment.usd == pytest.approx(0.50), (
         "$0.50 ceiling, $0.10 of it this cycle's own: the running book binds another share"
     )
-    _change_run_limits(dispatcher, moved, Budget(usd=None))
+    _change_run_limits(dispatcher, moved, Budget(usd=UNBOUNDED))
     assert moved_book.allotment.usd is None, "a lifted ceiling still bounds the running share"
 
 
@@ -2126,7 +2126,7 @@ def test_an_offshoot_takes_the_rounds_its_parent_left_and_names_no_money_of_its_
             ConfigOverrides(budget=Budget(rounds=9, wall_clock_s=60.0)),
             Budget(rounds=9, wall_clock_s=60.0),
         ),
-        (ConfigOverrides(budget=Budget(rounds=None)), Budget(rounds=None)),
+        (ConfigOverrides(budget=Budget(rounds=UNBOUNDED)), Budget(rounds=UNBOUNDED)),
     ):
         assert left.under(overrides).budget == expected, (
             f"{overrides}: an offshoot ran past the rounds its parent left, or over its operator's"
@@ -4350,7 +4350,7 @@ def free_fence() -> _FreeFence:
         "a backend's cells, paid by the box whatever the account holds, left the tier's fence"
     )
     oss = "openai/gpt-oss-20b:nitro"
-    config = _budgeted(Budget(usd=None))
+    config = _budgeted(Budget(usd=UNBOUNDED))
     schema = parse_pipeline_response(
         {
             "nodes": {
@@ -4640,15 +4640,15 @@ def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone() -> None:
         "a money ceiling landed on one cycle, not the campaign every cycle shares"
     )
     # An UNCAP lifts the campaign's ceiling; the account still binds it through the reservation.
-    armed = _change_run_limits(dispatcher, hop, Budget(usd=None))
-    assert armed == Budget(usd=None, tokens=1_000, rounds=3), (
+    armed = _change_run_limits(dispatcher, hop, Budget(usd=UNBOUNDED))
+    assert armed == Budget(usd=UNBOUNDED, tokens=1_000, rounds=3), (
         "the armed ceiling is not what a stop fires at: the campaign's money and the cycle's own"
     )
     lifted, held = (
         metered.campaigns.read_campaign_ceiling(campaign).budget,
         registry.get(job.job_id),
     )
-    assert lifted == Budget(usd=None, tokens=1_000), (
+    assert lifted == Budget(usd=UNBOUNDED, tokens=1_000), (
         "an uncapped campaign ceiling was stored as the account's headroom"
     )
     assert held is not None and cycle_share(metered, held).usd is None, (

@@ -275,12 +275,12 @@ from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells, InnerTaskSpec
 from promptpotter.domain.layer_fold import (
+    UNBOUNDED,
     Lay,
     Layer,
     fold_layers,
     patch_between,
     rules_of,
-    wire_patch,
 )
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
@@ -595,15 +595,6 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     assert {k: v for k, v in drafted_hashes.items() if k != "capo_mutate"} == {
         k: v for k, v in capo_hashes.items() if k != "capo_mutate"
     }, "a prompt edit on one node moved other nodes' hashes"
-    # A reset is the draft's path list; a null laid over an authored field would reset it unseen.
-    with pytest.raises(PayloadInvalidError, match="instruction"):
-        select_optimizer(
-            OptimizerChoice(
-                call_target=BENCH_TARGET,
-                optimizer="capo",
-                nodes={"capo_mutate": ManifestNodeOverlay(config={"instruction": None})},
-            )
-        )
     both = select_optimizer(
         defaulted_config(
             {
@@ -2760,8 +2751,16 @@ def test_a_declaration_lays_back_what_it_dropped_from_the_defaults() -> None:
         },
     ):
         patch = patch_between(rule, under, over)
-        laid = fold_layers(rule, [Layer("d", under), Layer("c", wire_patch(rule, patch))])
+        laid = fold_layers(rule, [Layer("d", under), Layer("c", patch)])
         assert laid.document == over, f"{patch} lays another config than the one it declared"
+    # A raw layer's null clears as a door's does: what is validated is what every mint runs.
+    for knob in ("temperature", "max_tokens", "reasoning_effort", "transcripts"):
+        raw = {"optimization": {"nodes": {"l1_critique": {"config": {knob: None}}}}}
+        config = ConfigLayers(campaign_defaults(), raw).config()
+        declared = declare_run(
+            config, dataset_hash="d", connector="llm_only", bench_defaults_pin="p"
+        )
+        assert effective_config(declared) == config, f"a raw null {knob} ran another value declared"
 
 
 class _Listed(BaseModel):
@@ -2821,18 +2820,18 @@ def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
         return asyncio.run(arm_plans(arming, door_layers, request, rows))
 
     # No dollar cap: a backend holding its own sends prices no cell before a run.
-    mint_arms(arm_of("a", Budget(usd=None, rounds=2)), adopting=None)
+    mint_arms(arm_of("a", Budget(usd=UNBOUNDED, rounds=2)), adopting=None)
     # An arm declared over another budget never joins its head-to-head, and takes no campaign.
     standing = stores.campaigns.list_campaigns(lifecycle="all")
     with pytest.raises(ConflictError):
-        arm_of("b", Budget(usd=None, rounds=3))
+        arm_of("b", Budget(usd=UNBOUNDED, rounds=3))
     assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
         "an arm refused off its head-to-head's record minted a campaign"
     )
     # Two acts on one fresh id each plan off no record: the second to mint is held to the first's
     # record, so one comparison never holds two shared parts.
-    early = arm_of("x", Budget(usd=None, rounds=3), h2h="race")
-    mint_arms(arm_of("y", Budget(usd=None, rounds=2), h2h="race"), adopting=None)
+    early = arm_of("x", Budget(usd=UNBOUNDED, rounds=3), h2h="race")
+    mint_arms(arm_of("y", Budget(usd=UNBOUNDED, rounds=2), h2h="race"), adopting=None)
     declared_race = stores.campaigns.load_head_to_head("race")
     assert declared_race is not None, "a fresh id's first mint declared no record"
     with pytest.raises(ConflictError):
@@ -2849,7 +2848,7 @@ def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
     # An act on an id another act holds is refused before it pays or mints, never queued behind it.
     standing = stores.campaigns.list_campaigns(lifecycle="all")
     with stores.campaigns.head_to_head_held("race"), pytest.raises(ConflictError):
-        mint_arms(arm_of("z", Budget(usd=None, rounds=2), h2h="race"), adopting=None)
+        mint_arms(arm_of("z", Budget(usd=UNBOUNDED, rounds=2), h2h="race"), adopting=None)
     assert stores.campaigns.list_campaigns(lifecycle="all") == standing, (
         "an act on a held head-to-head minted a campaign"
     )
@@ -2867,7 +2866,7 @@ def test_a_replicate_is_numbered_at_the_mint_by_its_treatment_across_every_act(
         request = HeadToHeadRequest(
             head_to_head_id=h2h,
             arms=[ArmRequest(arm_key=key, optimization=sent) for key, sent in arms],
-            budget=Budget(usd=None, rounds=2),
+            budget=Budget(usd=UNBOUNDED, rounds=2),
         )
         minted = mint_arms(
             asyncio.run(arm_plans(arming, door_layers, request, rows)), adopting=None

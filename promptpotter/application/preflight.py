@@ -335,6 +335,6 @@ def refuse_unpriced(unpriced: Sequence[str]) -> None:
         raise PayloadInvalidError(
             f"no rate prices {', '.join(unpriced)}, so a dollar ceiling cannot bound what it "
             "sends. Pick a model the rate table prices, or drop the dollar cap and bound the run "
-            "in tokens (`budget: {usd: null, tokens: N}`).",
+            "in tokens (`budget: {usd: unbounded, tokens: N}`).",
             code="model_unpriced",
         )

@@ -25,11 +25,12 @@ from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.domain.campaign import LifecycleFilter
 from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
 from promptpotter.domain.cycle_paths import HOP_SEP, ID_COMPONENT_PATTERN, UNIT_SEP
+from promptpotter.domain.layer_fold import UNBOUNDED
 from promptpotter.domain.phases import DashboardState, ProducerState, RunPhase
 from promptpotter.domain.pipeline_schema import SCHEMA_DESCRIPTION_PREFIX
 from promptpotter.domain.said import TONES
 from promptpotter.domain.sample import SAMPLE_TAG_DIGITS
-from promptpotter.domain.spend import RATE_PRICED_LABEL
+from promptpotter.domain.spend import RATE_PRICED_LABEL, LiftWord
 from promptpotter.infrastructure.llm.heartbeat import HEARTBEAT_INTERVAL_S
 from promptpotter.infrastructure.run_state import RECENT_STEP_S
 from promptpotter.main import API_ROUTERS, app
@@ -94,7 +95,11 @@ def _emit_type(annotation: typing.Any) -> str:
     origin = typing.get_origin(annotation)
     args = typing.get_args(annotation)
 
-    if origin in (typing.Required, typing.NotRequired, typing.Annotated):
+    if origin is typing.Annotated:
+        # A budget axis's lift crosses as the word, beside the number its type names.
+        lifted = any(isinstance(m, LiftWord) for m in annotation.__metadata__)
+        return _emit_type(args[0]) + (f" | {UNBOUNDED!r}" if lifted else "")
+    if origin in (typing.Required, typing.NotRequired):
         return _emit_type(args[0])
 
     if origin in (typing.Union, types.UnionType):
@@ -479,7 +484,7 @@ def _emit_interface(model: type) -> str:
     if not issubclass(model, BaseModel):
         return _emit_record(model)
     # Not `model_fields[...].annotation`: it can hold a bare `ForwardRef`, which emits `unknown`.
-    hints = typing.get_type_hints(model)
+    hints = typing.get_type_hints(model, include_extras=True)
     omitted = _omitted_unset(model)
     body_lines = [
         _emit_field(name, info, hints.get(name, info.annotation), omittable=name in omitted)

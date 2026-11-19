@@ -82,7 +82,7 @@ export async function startFakeIssuer(
       writeFileSync(
         path.join(dir, "grant.json"),
         JSON.stringify({
-          face: { usd, tokens: null },
+          face: { usd, tokens: "unbounded" },
           granted_at: new Date().toISOString(),
         }),
       );

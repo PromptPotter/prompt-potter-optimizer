@@ -10,7 +10,7 @@ import types
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Annotated, Any, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
 
@@ -26,7 +26,7 @@ class Lay(Enum):
     WHOLE = "whole"
     # A node's call: key by key, and a new model laid without a route drops the old route.
     CALL = "call"
-    # A list keeps, in the layer's order, what both name; a ``None`` layer keeps the fold's.
+    # A list keeps, in the layer's order, what both name.
     SUBSET = "subset"
     # A list gains, in order, what it lacks.
     UNION = "union"
@@ -61,13 +61,9 @@ def untyped_rule(_at: tuple[str, ...]) -> Laid:
     return Laid(Lay.KEYS)
 
 
-class _Clear:
-    def __repr__(self) -> str:
-        return "CLEAR"
-
-
-# A patch value that removes its key, so the layer below shows through.
-CLEAR: Any = _Clear()
+# A knob's "no bound", on every layer and every wire: ``null`` is no value but a clear.
+Unbounded = Literal["unbounded"]
+UNBOUNDED: Unbounded = "unbounded"
 
 
 @dataclass(frozen=True)
@@ -119,7 +115,8 @@ def _laid[N: str](
             _unstamp(stamps, (*at, key), itself=True)
     for key, value in patch.items():
         path = (*at, key)
-        if value is CLEAR:
+        # A null removes its key on every layer, so the layer below shows through.
+        if value is None:
             out.pop(key, None)
             _unstamp(stamps, path, itself=True)
             continue
@@ -155,13 +152,13 @@ def _laid[N: str](
 
 def _only_clears(patch: Mapping[str, object]) -> bool:
     """A container a patch only clears, left empty, goes with it: it reads as never laid."""
-    return all(v is CLEAR or (isinstance(v, Mapping) and _only_clears(v)) for v in patch.values())
+    return all(v is None or (isinstance(v, Mapping) and _only_clears(v)) for v in patch.values())
 
 
 def patch_between(
     rule: Rule, under: Mapping[str, object], over: Mapping[str, object], *at: str
 ) -> dict[str, object]:
-    """The wire patch (`wire_patch`'s form: ``null`` clears) *rule* lays over *under* to make
+    """The patch (``null`` clears) *rule* lays over *under* to make
     *over*: what *over* states beyond *under*, and nothing *under* already holds. A list no
     patch lays (a subset that widens, a union that is not *under*'s plus extras) is refused."""
     out: dict[str, object] = {}
@@ -202,25 +199,13 @@ def _list_laid(lay: Lay, held: list[object], value: list[object]) -> list[object
     return [*held, *(v for v in value if v not in held)]
 
 
-def wire_patch(rule: Rule, sent: Mapping[str, object], *at: str) -> dict[str, object]:
-    """A patch as every door sends it, laid as the fold reads it: an absent key leaves its value,
-    ``null`` is `CLEAR` (the layer below shows through), and ``""`` is the empty string. A value
-    *rule* lays whole is the value, nulls inside it included."""
-    out: dict[str, object] = {}
-    for key, value in sent.items():
-        if value is None:
-            out[key] = CLEAR
-        elif isinstance(value, Mapping) and rule((*at, key)).lay in (Lay.KEYS, Lay.CALL):
-            out[key] = wire_patch(rule, value, *at, key)
-        else:
-            out[key] = value
-    return out
-
-
 def wire_value(raw: str, *, text: bool) -> Any:
     """A value typed in as text, read by its declared type: a field taking text keeps the word,
-    any other reads *raw* as JSON (``null`` the `CLEAR` `wire_patch` lays); every door's typing."""
+    any other reads *raw* as JSON (``null`` the clear), the bare ``unbounded`` its word; every
+    door's typing."""
     if text:
+        return raw
+    if raw == UNBOUNDED:
         return raw
     try:
         return json.loads(raw)

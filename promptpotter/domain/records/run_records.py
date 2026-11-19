@@ -1032,7 +1032,7 @@ class ElectionRecord(Election, CycleRecord):
 
 class StandingBudgetRecord(CycleRecord):
     """A patch of a cycle's standing budget: it names the fields it changes and the rest stand, a
-    named null clearing (`Budget`'s rule). Folded in order of arrival, PHYSICALLY, so a fork never
+    lift spelled ``unbounded`` (`Budget`'s rule). Folded in order of arrival, PHYSICALLY, so a fork never
     inherits one."""
 
     forks_inherit: ClassVar[bool] = False

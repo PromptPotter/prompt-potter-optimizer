@@ -2278,7 +2278,7 @@
       },
       "Budget": {
         "additionalProperties": false,
-        "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.\n``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and\nseconds are what each arm's money bought, and differ by arm.",
+        "description": "What bounds a run per axis: a named axis binds, ``unbounded`` lifts (read back as ``None``,\nno bound), and an omitted or null one inherits, as a null clears on every layer.\n``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and\nseconds are what each arm's money bought, and differ by arm.",
         "properties": {
           "rounds": {
             "anyOf": [
@@ -2288,6 +2288,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
@@ -2301,6 +2305,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
@@ -2314,6 +2322,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
@@ -2327,6 +2339,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
@@ -12260,7 +12276,7 @@
           },
           "budget": {
             "$ref": "#/components/schemas/Budget",
-            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
+            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; ``unbounded`` leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. An ``unbounded`` axis lifts; a null one clears. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
           "call_target": {
             "$ref": "#/components/schemas/CallTarget",
@@ -12341,7 +12357,7 @@
                 "type": "null"
               }
             ],
-            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: null}``."
+            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
           },
           "nodes": {
             "additionalProperties": {
@@ -12423,7 +12439,7 @@
                 "type": "null"
               }
             ],
-            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
+            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; ``unbounded`` leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. An ``unbounded`` axis lifts; a null one clears. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
           "call_target": {
             "anyOf": [
@@ -12553,7 +12569,7 @@
                 "type": "null"
               }
             ],
-            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: null}``."
+            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
           },
           "nodes": {
             "anyOf": [

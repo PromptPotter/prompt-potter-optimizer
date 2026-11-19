@@ -9,14 +9,13 @@ from pydantic import Field
 
 from promptpotter.application.optimizers.nodes import LengthKnobs
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.pool import Access
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import sign_posterior
 
 CellStrata = Literal["none", "dataset"]
-# A knob's "no bound": ``null`` clears on every layer (`layer_fold.py::wire_patch`), never a value.
-Unbounded = Literal["unbounded"]
 
 
 class EscalationLadder(StrEnum):

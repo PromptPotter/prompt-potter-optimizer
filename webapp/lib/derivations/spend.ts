@@ -74,10 +74,11 @@ export function meteredBucketsLine(m: MeteredSpend): string {
   return beside ? `${inside} — beside: ${beside}` : inside;
 }
 
-// The served budget is fully laid over, so an axis it does not name has nothing beneath it.
+// The served budget is fully laid over, so an axis it does not name has nothing beneath it; a
+// lift crosses as the word `unbounded`.
 export function budgetAxis(budget: Budget, axis: keyof Budget): number | null {
   const value = budget[axis];
-  return value === undefined ? null : value;
+  return typeof value === "number" ? value : null;
 }
 
 interface RoundCost {
