@@ -180,7 +180,7 @@ class PipelineParams(FrozenModel):
     def with_nodes(self, nodes: Mapping[str, NodeCall | Mapping[str, object]]) -> Self:
         return self.model_validate({**self._laid_steps, **nodes})
 
-    def filed(self, identity: Mapping[str, Mapping[str, Any]]) -> Self:
+    def filed(self, identity: Mapping[str, Mapping[str, object]]) -> Self:
         """As the archive files a cell of it: each node's *identity* (what keys a cell, never sent)
         laid over what it sends. A point's own params never hold it, so its id is what it sends."""
         laid = self.laid_nodes

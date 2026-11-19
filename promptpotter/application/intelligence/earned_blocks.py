@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, assert_never
 
 from promptpotter.domain.campaign import Campaign
@@ -10,6 +10,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.paired_reading import MemberAddress, PairedReading
+from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import RoundStatement
 from promptpotter.domain.scoring import ANSWER_SPACE_CAP
 from promptpotter.infrastructure.store.archive_queries import (
@@ -33,10 +34,18 @@ class CampaignSurvey:
         self.faulted: dict[str, FileUnreadableError] = {}
 
     def standing(self, hop: CycleHop) -> StandingRounds | None:
+        return self._read(hop, lambda: self._store.standing_rounds(hop, moment=None))
+
+    def instrument(self, hop: CycleHop) -> str | None:
+        """What *hop*'s chain measured on, where it drew a bank."""
+        drawn = self._read(hop, lambda: self._store.last(hop, PartitionRecord))
+        return None if drawn is None else drawn.instrument_id
+
+    def _read[V](self, hop: CycleHop, read: Callable[[], V | None]) -> V | None:
         if hop.campaign_id in self.faulted:
             return None
         try:
-            return self._store.standing_rounds(hop, moment=None)
+            return read()
         except FileUnreadableError as exc:
             # A run says it at its start (`preflight.py::SurveyUnread`).
             self.faulted[hop.campaign_id] = exc

@@ -139,22 +139,12 @@ def refuse_unrunnable(
 
 
 @dataclass(frozen=True)
-class ArmSpec:
-    """An arm as planned: what it runs and its seat; the mint numbers its replicate (`_numbered`)."""
-
-    spec: RunSpec
-    seat: ArmSeat
-
-
-def spec_of(declared: RunDeclaration | ArmSpec) -> RunSpec:
-    return declared.spec if isinstance(declared, ArmSpec) else declared
-
-
-@dataclass(frozen=True)
 class CyclePlan:
     """What a mint writes and a resume checks, every refusal already asked of what the cycle runs."""
 
-    declared: RunDeclaration | ArmSpec
+    spec: RunSpec
+    # An arm is planned on its seat; the mint numbers its replicate (`_numbered`).
+    purpose: Purpose | ArmSeat
     schema: PipelineSchema
     pipeline_params: PipelineParams
     origin: OptSearchPoint
@@ -185,15 +175,9 @@ class CyclePlan:
         )
 
     @property
-    def spec(self) -> RunSpec:
-        return spec_of(self.declared)
-
-    @property
     def declaration(self) -> RunDeclaration:
-        assert isinstance(self.declared, RunDeclaration), (
-            "an arm is declared as its mint numbers it"
-        )
-        return self.declared
+        assert not isinstance(self.purpose, ArmSeat), "an arm is declared as its mint numbers it"
+        return RunDeclaration.of(self.spec, self.purpose)
 
     @property
     def cycle_id(self) -> str:
@@ -218,18 +202,12 @@ class OpenedCycle:
         return self.session.hop
 
 
-def declare(
-    session: Session, campaign_config: CampaignConfig, *, purpose: Purpose
-) -> RunDeclaration:
-    """Every door's ONE declaration."""
-    return RunDeclaration.of(
-        _spec(session, campaign_config, compare=isinstance(purpose, Compare)), purpose
-    )
-
-
-def _spec(session: Session, campaign_config: CampaignConfig, *, compare: bool) -> RunSpec:
-    """A compare run searches prompts alone and is benched."""
-    if compare:
+def run_spec(
+    session: Session, campaign_config: CampaignConfig, purpose: Purpose | ArmSeat
+) -> RunSpec:
+    """Every door's ONE spec; a compare run (an arm, seated or numbered) searches prompts alone and
+    is benched."""
+    if not isinstance(purpose, Optimize):
         campaign_config = campaign_config.model_copy(
             update={
                 "optimizer_narrowing": _prompt_axes_only(session, campaign_config),
@@ -251,7 +229,8 @@ def _spec(session: Session, campaign_config: CampaignConfig, *, compare: bool) -
 
 def resolve_cycle_plan(
     session: Session,
-    declared: RunDeclaration | ArmSpec,
+    spec: RunSpec,
+    purpose: Purpose | ArmSeat,
     dataset: Sequence[Sample],
     *,
     origin_override: dict[str, NodePrompt] | None = None,
@@ -270,9 +249,7 @@ def resolve_cycle_plan(
             if origin_override
             else None
         )
-        cycle = CycleConfig.laid(
-            effective_config(spec_of(declared)), [LaidSpan(start=start, scoring_lock=None)]
-        )
+        cycle = CycleConfig.laid(effective_config(spec), [LaidSpan(start=start, scoring_lock=None)])
     configured = configure_and_apply_pipeline(session, cycle)
     pipeline_params = configured.pipeline_params
     selected = select_optimizer(cycle.config.optimization)
@@ -283,10 +260,11 @@ def resolve_cycle_plan(
         pipeline_params,
         configured.pipeline_schema,
         stores=session.store,
-        connector=spec_of(declared).environment.connector,
+        connector=spec.environment.connector,
     )
     return CyclePlan(
-        declared=declared,
+        spec=spec,
+        purpose=purpose,
         schema=schema,
         pipeline_params=pipeline_params,
         origin=resolve_origin_opt_search_point(
@@ -382,12 +360,13 @@ def _revision_moved(
 
 def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> CyclePlan:
     """*session* is bound to the cycle the resume runs, past the campaign's own refusals."""
-    plan = resolve_cycle_plan(session, campaign.declaration, dataset, resumed=campaign)
+    declared = campaign.declaration
+    plan = resolve_cycle_plan(session, declared, declared.purpose, dataset, resumed=campaign)
     checked = plan
     if session.hop != campaign.root_hop:
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
         root = session.bound(campaign.root_cycle)
-        checked = resolve_cycle_plan(root, campaign.declaration, dataset, resumed=campaign)
+        checked = resolve_cycle_plan(root, declared, declared.purpose, dataset, resumed=campaign)
     if campaign.root_content_hash == checked.origin_hash:
         return plan
     campaigns = session.store.campaigns
@@ -414,8 +393,8 @@ def _differs_line(name: str, declared: object, running: object) -> str:
 
 
 def _arm_of(plan: CyclePlan) -> ArmSeat:
-    assert isinstance(plan.declared, ArmSpec), "an arm is planned on its seat"
-    return plan.declared.seat
+    assert isinstance(plan.purpose, ArmSeat), "an arm is planned on its seat"
+    return plan.purpose
 
 
 def standing_arms(stores: Stores, h2h_id: str) -> dict[str, Campaign]:
@@ -501,8 +480,7 @@ def _numbered(plans: Sequence[CyclePlan], standing: Mapping[str, Campaign]) -> l
     for plan in plans:
         taken[plan.treatment.digest] += 1
         arm = Arm(**dict(_arm_of(plan)), replicate=taken[plan.treatment.digest])
-        declared = RunDeclaration.of(plan.spec, Compare(arm=arm))
-        numbered.append(replace(plan, declared=declared))
+        numbered.append(replace(plan, purpose=Compare(arm=arm)))
     return numbered
 
 
@@ -529,8 +507,12 @@ async def arm_plans(
                 "an arm stops on its budget, never on a fitness: drop the halt fitness",
                 code="arm_halt_refused",
             )
-        declared = ArmSpec(_spec(armed, config, compare=True), request.seat(arm))
-        plans.append(resolve_cycle_plan(armed, declared, dataset, origin_override=origin_override))
+        seat = request.seat(arm)
+        plans.append(
+            resolve_cycle_plan(
+                armed, run_spec(armed, config, seat), seat, dataset, origin_override=origin_override
+            )
+        )
     _held_to_record(
         plans,
         session.store.campaigns.load_head_to_head(request.head_to_head_id),
@@ -631,7 +613,7 @@ def mint(plan: CyclePlan, *, campaign_id: str, adopting: str | None) -> OpenedCy
 def _record_held(plans: Sequence[CyclePlan]) -> Iterator[HeadToHeadRecord | None]:
     """An act's arms hold their head-to-head's record from before anything it pays through their mint."""
     first = plans[0]
-    if not isinstance(first.declared, ArmSpec):
+    if not isinstance(first.purpose, ArmSeat):
         yield None
         return
     with first.session.store.campaigns.head_to_head_held(_arm_of(first).head_to_head_id) as stored:
@@ -643,7 +625,7 @@ def _mint_all(
 ) -> list[OpenedCycle]:
     """Arms join their head-to-head on the framed plans they mint; each campaign id is drawn here, past every refusal."""
     first = plans[0]
-    if isinstance(first.declared, ArmSpec):
+    if isinstance(first.purpose, ArmSeat):
         stores = first.session.store
         standing = standing_arms(stores, _arm_of(first).head_to_head_id)
         record = _held_to_record(plans, stored, standing)
@@ -698,16 +680,16 @@ def _description_to_decompose(
 
 async def mint_framed_cycle(
     session: Session,
-    declaration: RunDeclaration,
+    spec: RunSpec,
     dataset: Sequence[Sample],
     *,
     task_text: str | None,
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> OpenedCycle:
-    """An L4 inner cell mints through ``mint``, so cells never race to decompose."""
-    assert isinstance(declaration.purpose, Optimize), "an arm is planned with its head-to-head"
+    """An optimize run; an arm is planned with its head-to-head, and an L4 inner cell mints
+    through ``mint``, so cells never race to decompose."""
     # Every refusal the mint owes, before the check-in below bills.
-    plan = resolve_cycle_plan(session, declaration, dataset, origin_override=origin_override)
+    plan = resolve_cycle_plan(session, spec, Optimize(), dataset, origin_override=origin_override)
     (minted,) = await _mint_framed(session, [plan], task_text=task_text)
     return minted
 

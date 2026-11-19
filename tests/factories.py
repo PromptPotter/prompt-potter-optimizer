@@ -34,7 +34,7 @@ from promptpotter.application.jobs.launcher.admission import (
     claim_cycle,
     slotless_share,
 )
-from promptpotter.application.jobs.mint import declare, mint_framed_cycle
+from promptpotter.application.jobs.mint import mint_framed_cycle, run_spec
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
@@ -716,6 +716,11 @@ def launched_bank(stores: Stores, world: Router, bank: Sequence[Sample]) -> None
     stores.tenant_datasets.record_cut(source.identity, Bank.of(bank))
 
 
+def declaration_of(session: Session, config: CampaignConfig, purpose: Purpose) -> RunDeclaration:
+    """*config* declared under *purpose*, as a mint numbers an arm."""
+    return RunDeclaration.of(run_spec(session, config, purpose), purpose)
+
+
 async def run_init_round(
     stores: Stores,
     world: Router,
@@ -744,7 +749,7 @@ async def run_init_round(
         dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=entered
     ) as session:
         session, config = laid_session(session, ConfigLayers(campaign_defaults(), raw))
-        declaration = declare(session, config, purpose=Optimize())
+        declaration = run_spec(session, config, Optimize())
 
         async def run(held: HeldBudget) -> tuple[RoundContext, CycleResult]:
             minted = await mint_framed_cycle(

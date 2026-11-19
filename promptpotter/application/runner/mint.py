@@ -43,7 +43,6 @@ from promptpotter.domain.l4.inner_origin import inner_origin_of
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phase_acts import CellFormula, InitClosed, InitOpened
 from promptpotter.domain.phases import CampaignPhase, StopReason
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import PhaseRecord, StandingBudgetRecord
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
@@ -302,9 +301,8 @@ def _banked_instruments(session: Session, survey: CampaignSurvey) -> list[str]:
     for campaign in survey.campaigns:
         if campaign.dataset_name != session.measured_dataset:
             continue
-        drawn = session.store.campaigns.last(campaign.root_hop, PartitionRecord)
-        if drawn is not None:
-            banked.append(drawn.instrument_id)
+        if (instrument := survey.instrument(campaign.root_hop)) is not None:
+            banked.append(instrument)
     return banked
 
 

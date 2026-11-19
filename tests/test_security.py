@@ -43,6 +43,7 @@ from factories import (
     billed_call,
     close_round,
     cycle_result,
+    declaration_of,
     defaulted_config,
     inner_sandbox,
     laid_ledger,
@@ -127,7 +128,6 @@ from promptpotter.application.jobs.launcher.launch import Launched
 from promptpotter.application.jobs.launcher.run_job import JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.mint import (
-    declare,
     fresh_campaign_id,
     mint,
     resolve_cycle_plan,
@@ -3859,8 +3859,8 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
     starting = loop_session(
         stores, pipeline_schema([solve]), rows, dataset=resolve_dataset(stores, "acts")
     )
-    declared = declare(starting, defaulted_config(unframed), purpose=Optimize())
-    plan = resolve_cycle_plan(starting, declared, rows)
+    declared = declaration_of(starting, defaulted_config(unframed), Optimize())
+    plan = resolve_cycle_plan(starting, declared, declared.purpose, rows)
     moved, edit = await drafted("moved")
 
     async def _started(_: object) -> Applier[Launched]:

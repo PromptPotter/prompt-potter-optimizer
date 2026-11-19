@@ -153,9 +153,9 @@ def run_clamp(clamp: DeterminismClamp | None, purpose: Purpose) -> DeterminismCl
 
 
 class Environment(FrozenModel):
-    """What the target runs on and is graded by (``target``: the set keys of its node models, host
-    pins, chain, framing and grader), behind ``connector``, whose identity contributions derive
-    from it and the dataset."""
+    """What the target runs on and is graded by, behind ``connector``, whose identity contributions
+    derive from it and the dataset: ``target`` is its node models', host pins', chain's, framing's
+    and grader's fold patch over the defaults (``null`` clears), as ``RunSpec.loop`` is the loop's."""
 
     connector: str = Field(min_length=1)
     target: dict[str, Any]
@@ -206,7 +206,8 @@ class RunDeclaration(RunSpec):
 
     @classmethod
     def of(cls, spec: RunSpec, purpose: Purpose) -> RunDeclaration:
-        return cls(**dict(spec), purpose=purpose)
+        """*spec*'s own fields: a declaration passed as one lays its spec, never its purpose."""
+        return cls(**{name: getattr(spec, name) for name in RunSpec.model_fields}, purpose=purpose)
 
     @property
     def digest(self) -> str:

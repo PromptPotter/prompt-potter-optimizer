@@ -36,6 +36,7 @@ from factories import (
     arm_state,
     arm_walk,
     backend_client,
+    declaration_of,
     defaulted_config,
     inner_cells,
     inner_sandbox,
@@ -135,7 +136,6 @@ from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     CyclePlan,
     arm_plans,
-    declare,
     mint_arms,
     mint_framed_cycle,
     resolve_cycle_plan,
@@ -1078,7 +1078,7 @@ def test_a_task_text_on_the_unframed_ablation_pays_no_framing_and_writes_none(
     # A check-in here bills and overwrites the dataset's committed framing for every later campaign.
     opened, rows_30, _, _, _ = decl
     built_stores.tenant_datasets.save_task_context("decl", TaskDecomposition(domain="claims"))
-    unframed = declare(opened, _connector_config(task_framing="off"), purpose=Optimize())
+    unframed = declaration_of(opened, _connector_config(task_framing="off"), Optimize())
     asyncio.run(mint_framed_cycle(opened, unframed, rows_30, task_text="Sort these claims."))
     assert committed_task_context(built_stores, opened.dataset) == TaskDecomposition(
         domain="claims"
@@ -2683,7 +2683,7 @@ def decl(built_stores: Stores) -> _Declared:
         dataset=resolve_dataset(stores, "decl"),
     )
     door = _connector_config()
-    return _Declared(opened, rows_30, solve, door, declare(opened, door, purpose=Optimize()))
+    return _Declared(opened, rows_30, solve, door, declaration_of(opened, door, Optimize()))
 
 
 def test_every_door_declares_through_one_seam_as_a_delta_over_todays_defaults(
@@ -2694,33 +2694,33 @@ def test_every_door_declares_through_one_seam_as_a_delta_over_todays_defaults(
     assert effective_config(declared).model_dump() == door.model_dump(), (
         "a seat runs another config than the one it declared"
     )
-    plan = resolve_cycle_plan(opened, declared, rows_30)
+    plan = resolve_cycle_plan(opened, declared, declared.purpose, rows_30)
     for unmeasured in (
         {"optimization": {"budget": {"usd": 9.0, "rounds": 3}}},
         {"display_metric": "composite"},
     ):
-        moved = declare(opened, _connector_config(**copy.deepcopy(unmeasured)), purpose=Optimize())
+        moved = declaration_of(opened, _connector_config(**copy.deepcopy(unmeasured)), Optimize())
         assert (
             moved != declared
-            and resolve_cycle_plan(opened, moved, rows_30).cycle_id == plan.cycle_id
+            and resolve_cycle_plan(opened, moved, moved.purpose, rows_30).cycle_id == plan.cycle_id
         ), f"{unmeasured} — a key that bounds spend or display only — moved the root id"
     assert not declared.budget.named and declared.run_seed is None, (
         "a declaration restated a budget axis or a seed no layer set"
     )
-    armed = declare(
-        opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="a", replicate=1))
+    armed = declaration_of(
+        opened, door, Compare(arm=Arm(head_to_head_id="h", arm_key="a", replicate=1))
     )
-    twin = declare(
-        opened, door, purpose=Compare(arm=Arm(head_to_head_id="h", arm_key="b", replicate=1))
+    twin = declaration_of(
+        opened, door, Compare(arm=Arm(head_to_head_id="h", arm_key="b", replicate=1))
     )
     assert armed.shared_part() == twin.shared_part(), (
         "two arms of one declaration hold different shared parts"
     )
-    arm_plan = resolve_cycle_plan(opened, armed, rows_30)
+    arm_plan = resolve_cycle_plan(opened, armed, armed.purpose, rows_30)
     assert arm_plan.origin_hash == plan.origin_hash, (
         "an arm and a seat over one dataset, partition and environment read different origins"
     )
-    twin_plan = resolve_cycle_plan(opened, twin, rows_30)
+    twin_plan = resolve_cycle_plan(opened, twin, twin.purpose, rows_30)
     run_ids = {plan.cycle_id, arm_plan.cycle_id, twin_plan.cycle_id}
     assert len(run_ids) == 3, (
         "two arms over one content, or an arm and a seat, share a run id every surface keys on"
@@ -2917,7 +2917,7 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
             InnerTasks(inner_benchmark="decl", inner_campaign=unread, tasks=seats).resolve_cells(
                 stores
             )
-    l4 = declare(opened, seat_config, purpose=Optimize())
+    l4 = declaration_of(opened, seat_config, Optimize())
     assert effective_config(l4).model_dump() == seat_config.model_dump(), (
         "an L4 seat runs another config than the one its seat declared"
     )
@@ -2944,10 +2944,10 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     assert sandboxed.campaigns.campaign_root_dir("c").is_relative_to(
         inner_sandboxes_dir(default_projects_root()) / "sandbox"
     ), "an inner run's campaign state left its sandbox for the account's"
-    l4_arm = declare(
+    l4_arm = declaration_of(
         opened,
         seat_config,
-        purpose=Compare(arm=Arm(head_to_head_id="h4", arm_key="a", replicate=1)),
+        Compare(arm=Arm(head_to_head_id="h4", arm_key="a", replicate=1)),
     )
     as_campaign = minted_campaign(
         CycleHop(campaign_id="decl__0000a4", cycle_id="cycle_l4arm"),
@@ -3007,7 +3007,7 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
     # The door's campaign minted, its partition banked, and its session resumed on the root it holds.
     stores = built_stores
     opened, rows_30, _, door, declared = decl
-    plan = resolve_cycle_plan(opened, declared, rows_30)
+    plan = resolve_cycle_plan(opened, declared, declared.purpose, rows_30)
     held_campaign = minted_campaign(
         CycleHop(campaign_id="decl__000001", cycle_id=plan.cycle_id),
         config=door,
@@ -3276,7 +3276,7 @@ def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _De
     # An inner run reads the account's datasets and names none of its banks: the outer's mint does.
     stores = built_stores
     opened, rows_30, solve, door, declared = decl
-    mint_arms([resolve_cycle_plan(opened, declared, rows_30)], adopting=None)
+    mint_arms([resolve_cycle_plan(opened, declared, declared.purpose, rows_30)], adopting=None)
     labelled = stores.tenant_datasets.labels()
     assert "decl" in labelled, "a campaign's mint named no bank"
     sandboxed = spawn.sandbox_stores(
@@ -3297,7 +3297,8 @@ def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _De
     inner = loop_session(
         sandboxed, pipeline_schema([solve]), inner_rows, dataset=resolve_dataset(sandboxed, "decl")
     )
-    inner_plan = resolve_cycle_plan(inner, declare(inner, door, purpose=Optimize()), inner_rows)
+    inner_declared = declaration_of(inner, door, Optimize())
+    inner_plan = resolve_cycle_plan(inner, inner_declared, inner_declared.purpose, inner_rows)
     assert inner_plan.declaration.dataset_hash != labelled["decl"], "the inner cut the same bank"
     mint_arms([inner_plan], adopting=None)
     assert stores.tenant_datasets.labels() == labelled, (

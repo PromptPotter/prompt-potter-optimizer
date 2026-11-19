@@ -12,9 +12,9 @@ from promptpotter.application.initialization.wiring import bind_cycle_session, i
 from promptpotter.application.jobs.launcher.admission import campaign_sends
 from promptpotter.application.jobs.mint import (
     OpenedCycle,
-    declare,
     mint_framed_cycle,
     resolve_resume,
+    run_spec,
 )
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
@@ -108,7 +108,7 @@ class FreshMint:
             session, config = laid_session(session, self.layers)
             yield await mint_framed_cycle(
                 session,
-                declare(session, config, purpose=Optimize()),
+                run_spec(session, config, Optimize()),
                 session.bank.samples,
                 task_text=self.task_text,
             )

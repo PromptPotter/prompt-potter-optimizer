@@ -39,6 +39,7 @@ from factories import (
     backend_client,
     billed_call,
     cycle_result,
+    declaration_of,
     defaulted_config,
     filed,
     filed_under,
@@ -5826,7 +5827,7 @@ def unframed_session(built_stores: Stores) -> _Framing:
         rows,
         dataset=resolve_dataset(stores, "drafted"),
     )
-    declared = mint.declare(framing, defaulted_config(unframed), purpose=Optimize())
+    declared = declaration_of(framing, defaulted_config(unframed), Optimize())
     return _Framing(framing, declared, rows)
 
 
@@ -5864,7 +5865,7 @@ def test_a_mint_that_dies_before_its_commit_leaves_no_campaign_to_list_run_or_bi
     def _dies(*_: object) -> None:
         raise OSError("torn")
 
-    torn_plan = mint.resolve_cycle_plan(framing, declared, rows)
+    torn_plan = mint.resolve_cycle_plan(framing, declared, declared.purpose, rows)
     with monkeypatch.context() as tearing, pytest.raises(OSError, match="torn"):
         tearing.setattr(type(stores.campaigns), "mint_cycle", _dies)
         mint.mint(torn_plan, campaign_id="torn__000001", adopting=None)
