@@ -8,8 +8,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 from pydantic import BaseModel, Field
-from pydantic.fields import FieldInfo
-from pydantic_core import to_jsonable_python
 
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CountKnob
 from promptpotter.domain.campaign import RunDeclaration
@@ -89,43 +87,10 @@ def member_knob_count() -> int:
     return sum(len(_walk(m.knobs, _node_prefix(n))) for n, m in NODE_MEMBERS.table.items())
 
 
-def _models_in(annotation: object) -> Iterator[type[BaseModel]]:
-    """Every model a field can hold, through ``Optional``, unions, ``dict`` values and ``list`` items."""
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        yield annotation
-        return
-    for arg in typing.get_args(annotation):
-        yield from _models_in(arg)
-
-
-def _default_of(field: FieldInfo) -> Any:
-    if field.is_required():
-        return None
-    if field.default_factory is not None:
-        return field.default_factory()  # type: ignore[call-arg]
-    return field.default
-
-
-def _leaf_defaults(
-    model_cls: type[BaseModel], prefix: str, within: frozenset[type[BaseModel]] = frozenset()
-) -> Iterator[tuple[str, Any]]:
-    for name, field in model_cls.model_fields.items():
-        path = f"{prefix}{name}"
-        yield path, _default_of(field)
-        for inner in _models_in(field.annotation):
-            if inner not in within:
-                yield from _leaf_defaults(inner, f"{path}<{inner.__name__}>.", within | {model_cls})
-
-
 def bench_defaults_pin() -> str:
-    """Walked LIVE, so any moved default moves it, `defaults.yaml`'s or a sub-model's; the
-    optimizer's are its ``Treatment.manifest``."""
-    bench = {
-        p: d
-        for p, d in _leaf_defaults(CampaignConfig, "")
-        if not p.startswith("optimization.nodes")
-    }
-    return stable_hash(to_jsonable_python({**bench, "defaults.yaml": campaign_defaults()}))
+    """`defaults.yaml`'s hash: a bench knob's one default (`campaign_config.py` refuses a code
+    default at import); the optimizer's are its ``Treatment.manifest``."""
+    return stable_hash(campaign_defaults())
 
 
 _UNMEASURED = frozenset({Estimand.SPEND, Estimand.DISPLAY})

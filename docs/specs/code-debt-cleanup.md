@@ -724,11 +724,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `machine-status`). Root: it returns its faults to `_recorded` as the sweep does, and the facts read
   the sandbox dir. **Re-test:** `git grep -c "except OSError:" --
   promptpotter/application/jobs/reaper.py` == 0.
-- **The bench-defaults pin walks code defaults that no longer exist** (cfg-3's report):
-  `config_map.py::bench_defaults_pin` hashes `_leaf_defaults(CampaignConfig)` beside `defaults.yaml`;
-  since cfg-3 every value that walk sees is an absence, so it re-keys nothing, and `_models_in` is a
-  second model-tree walker beside the import check in `campaign_config.py`. Root: the pin is
-  `defaults.yaml`'s hash alone. **Re-test:** `git grep -c "_leaf_defaults" -- promptpotter` == 0.
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 

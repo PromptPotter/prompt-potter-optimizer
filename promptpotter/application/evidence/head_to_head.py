@@ -187,7 +187,7 @@ class GuardMember(NamedTuple):
     budget: Budget
     stopping: StoppingRule
     determinism: DeterminismClamp | None
-    # `knobs.py::bench_defaults_pin`; the optimizer's defaults are its treatment, apart by design.
+    # `config_map.py::bench_defaults_pin`; the optimizer's defaults are its treatment, apart by design.
     bench_defaults_pin: str
     optimizer_models: tuple[str, ...]
     human_intervened: bool
