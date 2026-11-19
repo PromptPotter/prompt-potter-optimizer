@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from pydantic import BaseModel
 
@@ -15,7 +15,7 @@ class KindTable[M: BaseModel]:
     one without completes at its declared step. ``every`` is each table built: a load dispatches
     by name through these alone, so the landing key walks them all (`landing.py::loading_modules`)."""
 
-    every: ClassVar[list[KindTable[BaseModel]]] = []
+    every: ClassVar[list[KindTable[Any]]] = []
 
     def __init__(self, what: str) -> None:
         self._what = what

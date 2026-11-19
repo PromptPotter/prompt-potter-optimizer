@@ -7,31 +7,5 @@
   "levi": "27821a1340b3a24b",
   "potter": "79eaba9a311bda14"
  },
- "packages": {
-  "capo": [
-   "capo",
-   "capo-pobb"
-  ],
-  "gepa": [
-   "gepa"
-  ],
-  "levi": [
-   "levi"
-  ],
-  "pools": [
-   "capo",
-   "capo-pobb",
-   "potter"
-  ],
-  "potter": [
-   "capo-pobb",
-   "potter"
-  ],
-  "variation": [
-   "capo",
-   "capo-pobb",
-   "potter"
-  ]
- },
  "estimator": "e0f3be9045708532"
 }

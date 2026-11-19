@@ -96,7 +96,6 @@ from promptpotter.application.optimizers.nodes import (
     BEHAVIOUR_KEYS_FILE,
     NODE_MEMBERS,
     BehaviourKeys,
-    member_package,
     member_package_dir,
 )
 from promptpotter.application.pipeline_resolve import cycle_config
@@ -1814,16 +1813,8 @@ def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
     fingerprint = held.estimator
     if "potter" in names and (nested := home / "potter" / L4 / TRACE).is_file():
         fingerprint = stable_hash(BehaviourTrace.read(nested.parent).inner_half())
-    packages: defaultdict[str, list[str]] = defaultdict(list)
-    for name in sorted(builtin):
-        roster = select_optimizer(bench_choice(name)).member_nodes
-        for package in sorted({p for n in roster if (p := member_package(NODE_MEMBERS.table[n]))}):
-            packages[package].append(name)
     kept = BehaviourKeys(
-        world=WORLD,
-        fingerprints=dict(sorted(fingerprints.items())),
-        packages=dict(sorted(packages.items())),
-        estimator=fingerprint,
+        world=WORLD, fingerprints=dict(sorted(fingerprints.items())), estimator=fingerprint
     )
     text = json.dumps(kept.model_dump(mode="json"), indent=1) + "\n"
     wrote = replace_changed(BEHAVIOUR_KEYS_FILE, text)
