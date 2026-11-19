@@ -16,7 +16,7 @@ from promptpotter.application.jobs.capacity import SlotBound
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
-from promptpotter.domain.campaign import Campaign, ceiling_meter
+from promptpotter.domain.campaign import Campaign, CampaignCycle, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
@@ -88,21 +88,6 @@ from promptpotter.shared.identity import (
     has_capability,
 )
 from promptpotter.shared.worded import Worded
-
-
-class CampaignCycle(NamedTuple):
-    """A launch's address: the campaign its door loaded and a cycle of it, the hop derived."""
-
-    campaign: Campaign
-    cycle_id: str
-
-    @classmethod
-    def loaded(cls, stores: Stores, hop: CycleHop) -> CampaignCycle:
-        return cls(stores.campaigns.campaign(hop.campaign_id), hop.cycle_id)
-
-    @property
-    def hop(self) -> CycleHop:
-        return CycleHop(campaign_id=self.campaign.campaign_id, cycle_id=self.cycle_id)
 
 
 class QuotaExceededError(PotterError):
@@ -819,7 +804,7 @@ def declare_run_budget(
 ) -> tuple[Budget, Budget]:
     """*declared* is the cycle's, its seed laid (`CycleConfig`), so composed BEFORE admission;
     second, the axes an operator named (campaign, cycle, *requested*)."""
-    asked = Budget() if at is None else stores.campaigns.armed_budget(at.campaign, at.hop)
+    asked = Budget() if at is None else stores.campaigns.armed_budget(at)
     asked = asked.over(requested)
     return declared.over(asked), asked
 
@@ -846,7 +831,7 @@ def change_budget(
     first. Whether the ceiling *at*'s cycle runs under, or its overshoot, moved: a change
     restating them moves nothing."""
     campaigns, campaign, hop = stores.campaigns, at.campaign, at.hop
-    armed = campaigns.armed_budget(campaign, hop)
+    armed = campaigns.armed_budget(at)
     change = requested
     with job_registry.admission_gate():
         job = None if (held := campaigns.holder(hop)) is None else held.run
@@ -868,7 +853,7 @@ def change_budget(
         campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=overshoot))
     elif cycle.named:
         campaigns.append(hop, StandingBudgetRecord(budget=cycle))
-    return overshoot is not None or campaigns.armed_budget(campaign, hop) != armed
+    return overshoot is not None or campaigns.armed_budget(at) != armed
 
 
 def _clamped(

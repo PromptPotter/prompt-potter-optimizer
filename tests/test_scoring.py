@@ -120,7 +120,6 @@ from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     paid_pass,
 )
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.optimizer_manifest import bench_choice, select_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
@@ -273,7 +272,13 @@ from promptpotter.domain.bench import (
     PassStop,
     partition_bank,
 )
-from promptpotter.domain.campaign import Arm, Compare, HeadToHeadRecord, Optimize, Purpose
+from promptpotter.domain.campaign import (
+    Arm,
+    Compare,
+    HeadToHeadRecord,
+    Optimize,
+    Purpose,
+)
 from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import (
     ScoreSummary,
@@ -2264,7 +2269,7 @@ def _pause_mid_pass(
         async with paid_pass(
             stores=stores,
             pass_kind=MeasurementRole.BENCH,
-            at=CampaignCycle.loaded(stores, _PEER_HOP),
+            at=stores.campaigns.campaign_cycle(_PEER_HOP),
             declared=Budget(),
             sends=(),
         ):
@@ -2293,7 +2298,7 @@ async def _held_pass(
     async with paid_pass(
         stores=stores,
         pass_kind=MeasurementRole.BENCH,
-        at=CampaignCycle.loaded(stores, _PEER_HOP),
+        at=stores.campaigns.campaign_cycle(_PEER_HOP),
         declared=Budget(),
         sends=(),
         acting=acting,

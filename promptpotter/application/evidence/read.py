@@ -73,7 +73,7 @@ from promptpotter.application.scoring.closed_rounds import (
 from promptpotter.application.scoring.formula.compiler import CompiledExpression
 from promptpotter.application.scoring.paired import MemberRows, as_family
 from promptpotter.domain.arms import Concluded, Proposed, arm_name
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Campaign, CampaignCycle
 from promptpotter.domain.candidate_diff import (
     build_candidate_flat,
     flatten_prompts,
@@ -579,11 +579,7 @@ def _read_subject(at: _Located, spec: Subject) -> _SubjectRead | None:
         head,
         channels,
         cell_channels(head.point.bench),
-        _cycle_facts(
-            at.stores,
-            at.campaign,
-            CycleHop(campaign_id=spec.campaign_id, cycle_id=head.cycle_dir.name),
-        ),
+        _cycle_facts(at.stores, CampaignCycle(at.campaign, head.cycle_dir.name)),
     )
 
 
@@ -807,7 +803,8 @@ def _spend_to_round(by_round: Mapping[int, SpendRollup]) -> dict[str, float]:
     return out
 
 
-def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop) -> _CycleFacts:
+def _cycle_facts(stores: Stores, at: CampaignCycle) -> _CycleFacts:
+    campaign, hop = at.campaign, at.hop
     chain = stores.campaigns.chain(hop)
     scanned = scan_standing_rounds(chain)
     standing, series = scanned.rounds, scanned.level_series
@@ -815,7 +812,7 @@ def _cycle_facts(stores: Stores, campaign: Campaign, hop: CycleHop) -> _CycleFac
     instrument_id = cycle_instrument(stores.campaigns.last(hop, PartitionRecord), standing)
     if instrument_id is None:
         raise NotFoundError(f"cycle {hop.cycle_id} drew no bank, so it names no instrument")
-    opt = cycle_config(stores, campaign, hop).config.optimization
+    opt = cycle_config(stores, at).config.optimization
     scale = (
         None
         if series is None

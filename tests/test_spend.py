@@ -102,7 +102,6 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
-    CampaignCycle,
     QuotaExceededError,
     RateLimitedError,
     account_wallet,
@@ -155,7 +154,7 @@ from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import ArmPosition, CutKind
 from promptpotter.domain.bench import PassRefusal
-from promptpotter.domain.campaign import Optimize, RunDeclaration, ceiling_meter
+from promptpotter.domain.campaign import CampaignCycle, Optimize, RunDeclaration, ceiling_meter
 from promptpotter.domain.campaign_config import (
     CAMPAIGN_RULE,
     CampaignConfig,
@@ -270,6 +269,7 @@ from promptpotter.infrastructure.llm import base, pricing, telemetry
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.capabilities import (
     CAPABILITY_FILE,
+    ensure_model_capabilities,
     resolve_model_capabilities,
 )
 from promptpotter.infrastructure.llm.openai_compat import ChatReply
@@ -465,12 +465,12 @@ def _change_run_limits(
         return applier
 
     asyncio.run(apply())
-    return dispatcher.stores.campaigns.armed_budget(at.campaign, hop)
+    return dispatcher.stores.campaigns.armed_budget(at)
 
 
 def _at(stores: Stores, hop: CycleHop) -> CampaignCycle:
     """*hop* with its campaign as a launch's door loads it."""
-    return CampaignCycle.loaded(stores, hop)
+    return stores.campaigns.campaign_cycle(hop)
 
 
 # 1. What a call costs
@@ -2826,7 +2826,7 @@ def test_an_overshoot_switched_on_before_the_launch_wires_its_cycle_is_served_on
     built_stores.campaigns.mint_cycle(hop)
     built_stores.campaigns.append(hop, StandingBudgetRecord(overshoot=True))
     built_stores.campaigns.append(hop, run_wiring())
-    limits = built_stores.campaigns.run_limits(_at(built_stores, hop).campaign, hop)
+    limits = built_stores.campaigns.run_limits(_at(built_stores, hop))
     assert limits is not None and limits.overshoot, (
         "a standing switch landing before the wiring was dropped from the served limits"
     )
@@ -3141,6 +3141,17 @@ def test_a_malformed_capability_override_refuses_naming_its_file_and_key(tmp_pat
     said = str(refused.value)
     assert CAPABILITY_FILE in said and "gpt-x" in said, (
         f"an override no model types was read past, not refused by file and key: {said}"
+    )
+
+
+async def test_a_fresh_workspaces_first_catalogue_fetch_lands_its_snapshot(
+    offline: Router, tmp_path: Path
+) -> None:
+    offline.catalogue = [{"id": "openai/gpt-x"}]
+    fresh = tmp_path / "projects" / "fresh"
+    assert await ensure_model_capabilities(fresh) == 1, "a fetched catalogue wrote no snapshot"
+    assert await ensure_model_capabilities(fresh) == 0, (
+        "a fresh workspace's snapshot never landed, so every run refetches the catalogue"
     )
 
 
@@ -5241,7 +5252,7 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
     assert len({c.root_content_hash for c in arms.values()}) == 1, (
         "two arms of one head-to-head searched from different origins"
     )
-    ran = {k: cycle_config(stores, c, c.root_hop).config.optimization for k, c in arms.items()}
+    ran = {k: cycle_config(stores, c.root_cycle).config.optimization for k, c in arms.items()}
     assert {k: (o.budget.usd, o.budget.rounds) for k, o in ran.items()} == {
         "capo": (50.0, 1),
         "capo-b3": (50.0, 1),
@@ -5623,7 +5634,7 @@ def test_a_delete_torn_at_its_tree_commits_at_its_tombstone_and_admits_nothing_a
     graded_under = _budgeted(Budget()).model_copy(
         update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}}
     )
-    served = cycle_bench(stores, torn_read, root_hop, graded_under).status
+    served = cycle_bench(stores, CampaignCycle(torn_read, root_hop.cycle_id), graded_under).status
     assert (served.can_run, served.refusal) == (False, PassRefusal.NOT_ACTIVE), (
         "the served bench offers a grade the pass's admission refuses"
     )

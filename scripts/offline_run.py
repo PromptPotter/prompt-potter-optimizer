@@ -383,10 +383,8 @@ def _asker() -> str:
     spawn, stores = scope.spawn, scope.account
     assert isinstance(spawn, InnerSpawnContext) and stores is not None, "an inner run binds both"
     assert scope.determinism is not None, "an inner run binds its clamp"
-    hop = spawn.inside[-1]
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    assert campaign is not None, "an inner run's campaign is minted before it calls"
-    laid = cycle_config(stores, campaign, hop).config.optimization.nodes
+    at = stores.campaigns.campaign_cycle(spawn.inside[-1])
+    laid = cycle_config(stores, at).config.optimization.nodes
     overlay = {node: dict(o.config) for node, o in sorted(laid.items())}
     held = json.dumps([scope.determinism.seed, overlay], sort_keys=True, default=str)
     return hashlib.sha256(held.encode()).hexdigest()[:8]

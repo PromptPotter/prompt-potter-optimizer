@@ -58,7 +58,7 @@ from promptpotter.application.pipeline_resolve import (
     resolve_pipeline_for_campaign,
     steer_verdict,
 )
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.command_events import CommandEffect
@@ -136,7 +136,8 @@ def _typed_steer(overlay: dict[str, Any], schema: PipelineSchema) -> dict[str, N
     return typed
 
 
-def parse_cycle_start(sent: ForkStart, stores: Stores, of: Campaign, hop: CycleHop) -> CycleStart:
+def parse_cycle_start(sent: ForkStart, stores: Stores, at: CampaignCycle) -> CycleStart:
+    of, hop = at.campaign, at.hop
     narrowing: dict[str, NodeSearchNarrowing] = {}
     if sent.node_narrowing:
         # The rows served at *hop*, not the root's: a row's menu is its cycle's own declaration.
@@ -168,7 +169,7 @@ def parse_cycle_start(sent: ForkStart, stores: Stores, of: Campaign, hop: CycleH
         origin_source=OriginSource.FORK_START,
     )
     # Over what *hop* runs, so a knob its parent's start set refuses before a fork is minted.
-    parent = cycle_config(stores, of, hop).config
+    parent = cycle_config(stores, at).config
     select_optimizer(
         CycleConfig.laid(parent, [LaidSpan(start=start, scoring_lock=None)]).config.optimization
     )
@@ -323,7 +324,7 @@ async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier
     dispatcher, payload, at = dispatched.dispatcher, dispatched.payload, dispatched.at
     stores = dispatcher.stores
     _press_admitted(dispatcher, payload)
-    start = parse_cycle_start(payload.start, stores, at.campaign, at.hop)
+    start = parse_cycle_start(payload.start, stores, at)
 
     async def _apply_fork() -> Launched:
         cut = cut_operator_fork(stores, payload, start)

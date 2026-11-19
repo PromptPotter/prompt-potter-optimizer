@@ -122,7 +122,6 @@ class ChargeBook:
 
     def append(self, *lines: ChargeLine) -> None:
         """One fact's *lines* in one locked write, so no crash or other writer lands between them."""
-        self.account_dir.mkdir(parents=True, exist_ok=True)
         raw = "\n".join(line.model_dump_json() for line in lines).encode("utf-8")
         # Durable (`data_root.py::Kind.durable`): a bill line a power loss takes under-charges.
         append_line(self.path, raw, durable=True)

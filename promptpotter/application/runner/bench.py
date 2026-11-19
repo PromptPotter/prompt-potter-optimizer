@@ -57,7 +57,7 @@ from promptpotter.domain.bench import (
     bench_status,
     verify_admission,
 )
-from promptpotter.domain.campaign import Campaign, worked_seconds
+from promptpotter.domain.campaign import Campaign, CampaignCycle, worked_seconds
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.paired_reading import (
@@ -847,44 +847,35 @@ def line_passes(stores: Stores, campaign: Campaign) -> BenchPasses | None:
     return scan_bench_passes(stores.campaigns.line_spans(campaign.root_hop))
 
 
-def cycle_curve(
-    stores: Stores, campaign: Campaign, hop: CycleHop, config: CampaignConfig
-) -> BenchCurve | None:
-    passes = line_passes(stores, campaign)
+def cycle_curve(stores: Stores, at: CampaignCycle, config: CampaignConfig) -> BenchCurve | None:
+    passes = line_passes(stores, at.campaign)
     if passes is None:
         return None
     scorer = scorer_of(config, verifier_graded=False)
-    spans = line_spans(stores, scorer, hop)
+    spans = line_spans(stores, scorer, at.hop)
     budget = line_round_budget(spans, config.optimization.budget.rounds)
     return read_curve(stores, passes, scorer, spans, budget=budget)
 
 
-def read_cycle_bench(stores: Stores, campaign: Campaign, hop: CycleHop) -> BenchScore:
-    return cycle_bench(stores, campaign, hop, cycle_config(stores, campaign, hop).config)
+def read_cycle_bench(stores: Stores, at: CampaignCycle) -> BenchScore:
+    return cycle_bench(stores, at, cycle_config(stores, at).config)
 
 
-def cycle_bench(
-    stores: Stores, campaign: Campaign, hop: CycleHop, config: CampaignConfig
-) -> BenchScore:
+def cycle_bench(stores: Stores, at: CampaignCycle, config: CampaignConfig) -> BenchScore:
     return bench_under(
         stores,
-        campaign,
-        hop,
-        line_passes(stores, campaign),
+        at,
+        line_passes(stores, at.campaign),
         config,
         scorer_of(config, verifier_graded=False),
-        run=live_cycle_run(stores, hop),
+        run=live_cycle_run(stores, at.hop),
     )
 
 
 def bench_line(
-    stores: Stores,
-    campaign: Campaign,
-    hop: CycleHop,
-    config: CampaignConfig,
-    *,
-    run: LiveCycleRun,
+    stores: Stores, at: CampaignCycle, config: CampaignConfig, *, run: LiveCycleRun
 ) -> BenchLine:
+    campaign, hop = at.campaign, at.hop
     holder = stores.campaigns.live_cycle(campaign.root_hop)
     drawn = stores.campaigns.last(hop, PartitionRecord)
     split = config.dataset_split
@@ -904,10 +895,12 @@ def bench_line(
     )
 
 
-def cycle_verify(stores: Stores, campaign: Campaign, hop: CycleHop) -> PassAdmission:
-    """What `verify-candidate` on *hop* is admitted under, as every door serves it."""
+def cycle_verify(stores: Stores, at: CampaignCycle) -> PassAdmission:
+    """What `verify-candidate` on *at* is admitted under, as every door serves it."""
     return verify_admission(
-        inner=stores.inner, refused=_refused(stores, campaign), run=live_cycle_run(stores, hop)
+        inner=stores.inner,
+        refused=_refused(stores, at.campaign),
+        run=live_cycle_run(stores, at.hop),
     )
 
 
@@ -919,15 +912,14 @@ def _refused(stores: Stores, campaign: Campaign) -> CampaignRefusal | None:
 
 def bench_under(
     stores: Stores,
-    campaign: Campaign,
-    hop: CycleHop,
+    at: CampaignCycle,
     passes: BenchPasses | None,
     config: CampaignConfig,
     scorer: Scorer,
     *,
     run: LiveCycleRun,
 ) -> BenchScore:
-    line = bench_line(stores, campaign, hop, config, run=run)
+    line = bench_line(stores, at, config, run=run)
     return read_bench(stores, passes if line.on_live_cycle else None, scorer, line=line)
 
 
@@ -939,12 +931,11 @@ def declare_line_bench(
     selecting: bool,
     ending: StopReason | None,
 ) -> BenchScore:
-    stores, hop = session.store, session.hop
+    stores, at = session.store, session.at
     scorer = scorer_of(config, verifier_graded=False)
     # The index says `selecting` / `ending` only once the run closes; the launch's own word wins.
-    run = live_cycle_run(stores, hop)._replace(selecting=selecting, ending=ending)
-    campaign = session.bound_campaign
-    held = passes if passes is not None else line_passes(stores, campaign)
-    score = bench_under(stores, campaign, hop, held, config, scorer, run=run)
+    run = live_cycle_run(stores, at.hop)._replace(selecting=selecting, ending=ending)
+    held = passes if passes is not None else line_passes(stores, at.campaign)
+    score = bench_under(stores, at, held, config, scorer, run=run)
     append_record(BenchScoredRecord(bench=score))
     return score

@@ -150,7 +150,10 @@ BASELINE = {
     # dashboard's fold (`RoundView.unfiled`, decided by `LiveDashboardState.unfiled`) and frames a
     # 304 on the leaf store, so no client stitches the two; `MeasurementRole.is_proposal` is the
     # one rule of a round's own arms.
-    "package_lines": 111916,
+    # store-2f/2g (+52): a write never re-makes the campaign or cycle a delete removed (`io.py::_created`
+    # walks down from its anchor, known by its place under a workspace), and `CampaignCycle` carries a
+    # launch's pair.
+    "package_lines": 111968,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

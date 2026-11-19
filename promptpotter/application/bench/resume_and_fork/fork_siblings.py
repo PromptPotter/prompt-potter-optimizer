@@ -9,9 +9,14 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.jobs.launcher.admission import destroying
-from promptpotter.application.pipeline_resolve import cycle_config, permitted_narrowing
+from promptpotter.application.pipeline_resolve import (
+    cycle_config,
+    declared_config,
+    permitted_narrowing,
+)
 from promptpotter.application.served_dashboard import fork_remainder
 from promptpotter.domain.arms import ArmState, Proposed
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CycleConfig, LaidSpan
 from promptpotter.domain.command_kinds import ForkCyclePayload
 from promptpotter.domain.cycle_paths import CycleHop
@@ -59,8 +64,11 @@ def _fork_sibling_setup(
     campaign = campaign_store.campaign(child.campaign_id)
     # Decided before anything is written: a refusal here leaves no minted, unstamped child.
     babysat = CycleConfig.laid(
-        cycle_config(stores, campaign, None).config,
-        [*cycle_config(stores, campaign, parent).spans, LaidSpan(start=start, scoring_lock=None)],
+        declared_config(stores, campaign).config,
+        [
+            *cycle_config(stores, CampaignCycle(campaign, parent.cycle_id)).spans,
+            LaidSpan(start=start, scoring_lock=None),
+        ],
     ).steers_outside(permitted_narrowing(stores, campaign))
     parent_dir = campaign_store.cycle_dir(parent)
     new_dir = campaign_store.cycle_dir(child)

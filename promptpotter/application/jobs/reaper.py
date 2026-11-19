@@ -18,7 +18,7 @@ from promptpotter.infrastructure.store.layout import (
     tenant_workspace,
 )
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store, tenant_stores
-from promptpotter.shared.errors import FileUnreadableError, fault_said
+from promptpotter.shared.errors import FileUnreadableError, NotFoundError, fault_said
 
 # Scheduling only: what counts as dead has no clock in it.
 SWEEP_EVERY_S = 900.0
@@ -65,6 +65,8 @@ def _reap(stores: Stores, unread: list[str]) -> int:
                     reaped += 1
             except FileUnreadableError as refusal:
                 unread.append(fault_said(refusal)[0])
+            except NotFoundError:
+                continue
             if (inner := inner_sandbox_store(stores, hop)) is not None:
                 reaped += _reap(inner, unread)
     return reaped

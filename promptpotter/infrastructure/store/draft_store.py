@@ -4,7 +4,13 @@ from pathlib import Path
 
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import WorkspaceDir
-from promptpotter.infrastructure.store.io import HeldLock, rmtree_robust, take_lock, write_bytes
+from promptpotter.infrastructure.store.io import (
+    HeldLock,
+    make_dirs,
+    rmtree_robust,
+    take_lock,
+    write_bytes,
+)
 from promptpotter.infrastructure.store.layout import (
     CycleLayout,
     draft_claim_path,
@@ -94,7 +100,7 @@ class DraftStore:
         source = self.draft_dir(draft_id)
         (source / DRAFT_FILE).unlink(missing_ok=True)
         if source.is_dir():
-            cycle_dir.parent.mkdir(parents=True, exist_ok=True)
+            make_dirs(cycle_dir.parent)
             source.rename(cycle_dir)
 
     def discard(self, claim: DraftClaim) -> None:

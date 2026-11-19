@@ -23,7 +23,6 @@ from promptpotter.application.free_tier import (
     refuse_outside_free_tier,
 )
 from promptpotter.application.jobs.launcher.admission import paid_call
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
@@ -55,6 +54,7 @@ from promptpotter.domain.bench import BankPartition, partition_bank
 from promptpotter.domain.campaign import (
     Arm,
     Campaign,
+    CampaignCycle,
     Compare,
     HeadToHeadRecord,
     Optimize,
@@ -231,7 +231,7 @@ def resolve_cycle_plan(
     schema = session.pipeline_schema
     if resumed is not None:
         assert origin_override is None, "a minted cycle's origin is its line's starts"
-        cycle = cycle_config(session.store, resumed, session.hop)
+        cycle = cycle_config(session.store, CampaignCycle(resumed, session.cycle_id))
     else:
         # The one span the mint writes, so the cycle is what it reads back as.
         start = (
@@ -351,7 +351,7 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
     checked = plan
     if session.hop != campaign.root_hop:
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
-        root = session.bound(CampaignCycle(campaign, campaign.root_cycle_id))
+        root = session.bound(campaign.root_cycle)
         checked = resolve_cycle_plan(root, campaign.declaration, dataset, resumed=campaign)
     if campaign.root_content_hash == checked.origin_hash:
         return plan

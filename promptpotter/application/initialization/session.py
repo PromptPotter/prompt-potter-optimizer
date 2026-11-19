@@ -4,13 +4,12 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.application.scoring.evaluators import SampleEvaluator
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition
-from promptpotter.domain.campaign import Campaign, Optimize, Purpose
+from promptpotter.domain.campaign import Campaign, CampaignCycle, Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams

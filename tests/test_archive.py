@@ -128,6 +128,7 @@ from promptpotter.config.paths import MEASUREMENTS_DIR
 from promptpotter.domain.activity import ActivityFeed
 from promptpotter.domain.arms import ArmPosition, PointContext
 from promptpotter.domain.bench import DatasetSplit, partition_bank
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import (
     start_layer,
 )
@@ -164,6 +165,7 @@ from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
     ConfigOverrides,
+    CycleMintedRecord,
     CycleShareRecord,
     CycleStart,
     CycleSupersededRecord,
@@ -209,9 +211,12 @@ from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import (
     Appended,
     append_jsonl,
+    append_line,
     probe_lock,
     rewrite_lines,
     take_lock,
+    write_json,
+    write_text,
 )
 from promptpotter.infrastructure.store.layout import CycleLayout, campaigns_root_dir_for
 from promptpotter.infrastructure.store.measurement_archive import (
@@ -222,7 +227,10 @@ from promptpotter.infrastructure.store.measurement_archive import (
     standing,
 )
 from promptpotter.infrastructure.store.read_model import LedgerIndex
-from promptpotter.infrastructure.store.session_pointer import read_active_pointer
+from promptpotter.infrastructure.store.session_pointer import (
+    cleanup_stub_fork_if_empty,
+    read_active_pointer,
+)
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
@@ -236,7 +244,7 @@ from promptpotter.shared.errors import (
     ResumeDivergenceError,
     SendRefusedError,
 )
-from promptpotter.shared.identity import SYSTEM_PRINCIPAL
+from promptpotter.shared.identity import SYSTEM_PRINCIPAL, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole
 
 _CAMPAIGN = "testds__20260101-000000"
@@ -806,6 +814,132 @@ def _mint_sibling(
         cut_round=cut_round,
     )
     return child
+
+
+_STEERED = ForkSpec(
+    trigger=ForkTrigger.OPERATOR_STEERED,
+    reason="",
+    issued_by=SYSTEM_PRINCIPAL,
+    from_candidate=RoundArm(round=1, arm=ArmKey("c1")),
+)
+
+
+def _writes_under(
+    stores: Stores, hop: CycleHop, held: CycleEventLog
+) -> dict[str, Callable[[], object]]:
+    """Every way a write lands under a cycle: a held ledger handle, an index write, a lock."""
+    layout = CycleLayout(stores.campaigns.cycle_dir(hop))
+    return {
+        "a held handle's append": lambda: held.append(RunPhaseRecord.stop(StopReason.CRASHED)),
+        "an index write": lambda: write_json(layout.manifest, {}),
+        "a producer lock": lambda: take_lock(layout.producer_lock, wait_s=0),
+    }
+
+
+def test_a_write_past_its_campaigns_delete_answers_not_found_and_makes_no_campaign_dir(
+    built_stores: Stores,
+) -> None:
+    hop, held = _minted(built_stores, "cycle_deleted")
+    assert built_stores.campaigns.delete_campaign(hop.campaign_id, keep_results=False)
+    writes = _writes_under(built_stores, hop, held) | {
+        "a fork mint": lambda: built_stores.campaigns.mint_cycle(
+            hop.model_copy(update={"cycle_id": "c_fork"}),
+            CycleMintedRecord(
+                parent=f"../{hop.cycle_id}", forked_at_offset=0, cut_round=0, fork=_STEERED
+            ),
+        ),
+    }
+    for what, write in writes.items():
+        with pytest.raises(NotFoundError):
+            write()
+        assert not built_stores.campaigns.campaign_root_dir(hop.campaign_id).exists(), (
+            f"{what} after the delete re-made a campaign no manifest names"
+        )
+
+
+def test_a_write_past_its_cycles_cleanup_answers_not_found_and_makes_no_cycle_dir(
+    built_stores: Stores,
+) -> None:
+    root, _ = _minted(built_stores, "cycle_root")
+    stub = _mint_sibling(built_stores.campaigns, root, "cycle_stub", _STEERED, cut_round=0)
+    held = CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(stub)))
+    assert cleanup_stub_fork_if_empty(campaign_store=built_stores.campaigns, hop=stub)[0]
+    for what, write in _writes_under(built_stores, stub, held).items():
+        with pytest.raises(NotFoundError):
+            write()
+        assert not built_stores.campaigns.cycle_dir(stub).exists(), (
+            f"{what} after the cleanup re-made a cycle its campaign no longer lists"
+        )
+
+
+def test_a_write_refuses_only_a_campaign_or_cycle_by_its_place_never_a_dir_so_named(
+    tmp_path: Path,
+) -> None:
+    stores = workspace(tmp_path / "root")
+    tenant = workspace(tmp_path / "tenant", default_identity("campaigns")).campaigns
+    gone_campaign, _ = _minted(stores, "cycle_kept")
+    shutil.rmtree(stores.campaigns.campaign_root_dir(gone_campaign.campaign_id))
+    cut = workspace(tmp_path / "cut")
+    gone_cycle, _ = _minted(cut, "cycle_cut")
+    shutil.rmtree(cut.campaigns.cycle_dir(gone_cycle))
+    beside = cut.campaigns.cycle_dir(_minted(cut, "cycle_beside")[0])
+    writes: dict[str, tuple[Callable[[], object], bool]] = {
+        "a dataset named cycles": (
+            lambda: write_text(
+                stores.tenant_datasets.dataset_dir("cycles") / ".staged" / "f.md", ""
+            ),
+            False,
+        ),
+        "a data root inside a campaigns folder": (
+            lambda: write_json(tmp_path / "campaigns" / "pp" / "projects" / "t" / "x.json", {}),
+            False,
+        ),
+        "a root mint in a tenant named campaigns": (
+            lambda: tenant.mint_cycle(CycleHop(campaign_id="c1", cycle_id="k1")),
+            False,
+        ),
+        "a write under a deleted campaign": (
+            lambda: write_json(stores.campaigns.cycle_dir(gone_campaign) / "r.json", {}),
+            True,
+        ),
+        "an append through '..' into a deleted cycle": (
+            lambda: append_line(
+                beside / ".." / gone_cycle.cycle_id / ".runtime" / "l.jsonl", b"{}"
+            ),
+            True,
+        ),
+    }
+
+    def refused(write: Callable[[], object]) -> bool:
+        try:
+            write()
+        except NotFoundError:
+            return True
+        return False
+
+    assert {what: refused(write) for what, (write, _) in writes.items()} == {
+        what: refuses for what, (_, refuses) in writes.items()
+    }
+    assert not stores.campaigns.campaign_root_dir(gone_campaign.campaign_id).exists()
+    assert not cut.campaigns.cycle_dir(gone_cycle).exists(), "a '..' re-made a deleted cycle"
+
+
+def test_a_write_under_a_level_that_stands_but_is_no_directory_raises_an_os_error(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "file").write_text("")
+    absent = tmp_path / "absent"
+    if sys.platform == "win32":  # a symlink needs a privilege there; a junction does not
+        import _winapi
+
+        absent.mkdir()
+        _winapi.CreateJunction(str(absent), str(tmp_path / "dangling"))
+        absent.rmdir()
+    else:
+        (tmp_path / "dangling").symlink_to(absent)
+    for level in ("file", "dangling"):
+        with pytest.raises(OSError):
+            write_json(tmp_path / level / "a" / "b.json", {})
 
 
 def _emit_round(
@@ -1514,18 +1648,20 @@ def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_it
 
     def steered_fork(hop: CycleHop, model: str) -> CycleHop:
         start = parse_cycle_start(
-            ForkStart(pipeline_overlay={"a": {"model": model}}), stores, campaign, hop
+            ForkStart(pipeline_overlay={"a": {"model": model}}),
+            stores,
+            CampaignCycle(campaign, hop.cycle_id),
         )
         cycle_id = _operator_fork(stores, hop, start, round=2, keep_rounds=True)
         return hop.model_copy(update={"cycle_id": cycle_id})
 
     permitted = permitted_narrowing(stores, campaign)
     babysat = steered_fork(applied, "x")
-    assert cycle_config(stores, campaign, babysat).steers_outside(permitted), (
-        "an unpermitted steer forked clean"
-    )
+    assert cycle_config(stores, CampaignCycle(campaign, babysat.cycle_id)).steers_outside(
+        permitted
+    ), "an unpermitted steer forked clean"
     back = steered_fork(babysat, "m")
-    onward = cycle_config(stores, campaign, back)
+    onward = cycle_config(stores, CampaignCycle(campaign, back.cycle_id))
     assert (onward.start_overlay, onward.steers_outside(permitted), onward.config.scoring) == (
         {"a": {"model": "m"}},
         True,
@@ -1561,13 +1697,13 @@ def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operato
             "cycle_id": _operator_fork(
                 stores,
                 scenario,
-                parse_cycle_start(no_edit, stores, campaign, scenario),
+                parse_cycle_start(no_edit, stores, CampaignCycle(campaign, scenario.cycle_id)),
                 round=2,
                 candidate_id=candidate_key,
             )
         }
     )
-    panel_laid = cycle_config(stores, campaign, panel_fork)
+    panel_laid = cycle_config(stores, CampaignCycle(campaign, panel_fork.cycle_id))
     panel_index = store.load(panel_fork, moment=None)
     assert (panel_laid.start_overlay, panel_laid.steers_outside(permitted)) == (
         candidate_record,
@@ -1597,14 +1733,14 @@ def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_b
             "cycle_id": _operator_fork(
                 stores,
                 scenario,
-                parse_cycle_start(cleared, stores, campaign, scenario),
+                parse_cycle_start(cleared, stores, CampaignCycle(campaign, scenario.cycle_id)),
                 round=2,
                 candidate_id=candidate_key,
                 start=cleared,
             )
         }
     )
-    assert cycle_config(stores, campaign, reset_fork).start_overlay == {
+    assert cycle_config(stores, CampaignCycle(campaign, reset_fork.cycle_id)).start_overlay == {
         "a": {"model": "m", "provider": "p"}
     }, "a cleared field forked with the candidate's value"
 

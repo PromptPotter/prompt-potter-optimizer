@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 from collections.abc import Mapping, Sequence
-from typing import Annotated, Any, Literal, TypedDict, assert_never
+from typing import Annotated, Any, Literal, NamedTuple, TypedDict, assert_never
 
 from pydantic import Field
 
@@ -335,6 +335,10 @@ class Campaign(FrozenModel):
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.root_cycle_id)
 
     @property
+    def root_cycle(self) -> CampaignCycle:
+        return CampaignCycle(self, self.root_cycle_id)
+
+    @property
     def connector(self) -> str:
         """FROZEN at mint: a campaign outlives its dataset dir, so re-pointing a slug must not re-kind it."""
         return self.declaration.environment.connector
@@ -347,3 +351,14 @@ class Campaign(FrozenModel):
     @property
     def origin_id(self) -> str:
         return self.root_content_hash
+
+
+class CampaignCycle(NamedTuple):
+    """A launch's address: the campaign its door loaded and a cycle of it, the hop derived."""
+
+    campaign: Campaign
+    cycle_id: str
+
+    @property
+    def hop(self) -> CycleHop:
+        return CycleHop(campaign_id=self.campaign.campaign_id, cycle_id=self.cycle_id)

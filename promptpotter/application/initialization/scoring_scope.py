@@ -10,7 +10,6 @@ from promptpotter.application.bench.task_context import campaign_framing
 from promptpotter.application.datasets.authored import scorer_of
 from promptpotter.application.initialization.session import ScorerSetup, Session
 from promptpotter.application.initialization.wiring import bind_cycle_session
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.pipeline_resolve import configure_and_apply_pipeline, cycle_config
 from promptpotter.application.preflight import refuse_below_reasoning_floor
 from promptpotter.application.run_phase_control import RunControl
@@ -25,7 +24,7 @@ from promptpotter.application.scoring.evaluators import (
 from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition, partition_bank
-from promptpotter.domain.campaign import Compare, Optimize
+from promptpotter.domain.campaign import CampaignCycle, Compare, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import stop_refused
@@ -133,7 +132,7 @@ async def open_diagnostic(
     the block's, so a pass the loop runs leaves the loop's own standing. *acting* is the command
     the pass acts for, whose `cancel` stops it."""
     hop = at.hop
-    cycle = cycle_config(stores, at.campaign, hop)
+    cycle = cycle_config(stores, at)
     config = cycle.config
     async with bind_cycle_session(stores, at) as bound:
         session = configure_and_apply_pipeline(bound, cycle)

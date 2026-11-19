@@ -20,7 +20,6 @@ from promptpotter.application.initialization.scoring_scope import (
 )
 from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.bench import (
@@ -42,6 +41,7 @@ from promptpotter.application.scoring.search_point_scorer import score_search_po
 from promptpotter.application.views.readout import ReadoutProjection
 from promptpotter.domain.arms import BankedSearchPointError, Concluded, arm_name
 from promptpotter.domain.bench import PASS_REFUSAL_INFO, BenchScore
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -553,7 +553,7 @@ def refuse_unverifiable(stores: Stores, at: CampaignCycle) -> None:
     """An asked verify is admitted exactly where the served answer says so
     (`CycleEntryFacts.verify`), read before its own pass holds the cycle; the loop's own verify
     runs under the loop's hold and asks nothing."""
-    if (refusal := cycle_verify(stores, at.campaign, at.hop).refusal) is not None:
+    if (refusal := cycle_verify(stores, at).refusal) is not None:
         raise DiagnosticError(PASS_REFUSAL_INFO[refusal])
 
 
@@ -563,16 +563,15 @@ class BenchTriggerError(ConflictError):
 
 async def grade_line_bench(*, stores: Stores, at: CampaignCycle, acting: str) -> BenchScore:
     """Admitted exactly where the served status says so (``BenchStatus.can_run``)."""
-    campaign, hop = at.campaign, at.hop
     async with paid_pass(
         stores=stores,
         pass_kind=MeasurementRole.BENCH,
         at=at,
         declared=Budget(),
-        sends=campaign_sends(stores, campaign, hop),
+        sends=campaign_sends(stores, at),
         acting=acting,
     ):
-        status = read_cycle_bench(stores, campaign, hop).status
+        status = read_cycle_bench(stores, at).status
         if status.refusal is not None:
             held = "" if status.held_by is None else f" Holder: {status.held_by}."
             raise BenchTriggerError(PASS_REFUSAL_INFO[status.refusal] + held)

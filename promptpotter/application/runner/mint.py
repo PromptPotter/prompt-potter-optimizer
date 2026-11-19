@@ -21,7 +21,7 @@ from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher.admission import land_job, open_spend_book
-from promptpotter.application.jobs.quota import CampaignCycle, cycle_share, move_campaign_money
+from promptpotter.application.jobs.quota import cycle_share, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.origin import CampaignOrigin, seat_campaign_origin
@@ -36,7 +36,7 @@ from promptpotter.application.runner.inner.tasks import retarget_inner_spawn
 from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.domain.arms import PointContext
-from promptpotter.domain.campaign import RunDeclaration, ceiling_meter
+from promptpotter.domain.campaign import CampaignCycle, RunDeclaration, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of

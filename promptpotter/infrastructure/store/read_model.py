@@ -67,7 +67,12 @@ from promptpotter.infrastructure.store.io import (
     write_bytes,
 )
 from promptpotter.shared.clock import epoch_seconds
-from promptpotter.shared.errors import FileKind, FileUnreadableError, validation_reason
+from promptpotter.shared.errors import (
+    FileKind,
+    FileUnreadableError,
+    NotFoundError,
+    validation_reason,
+)
 
 # Every `CycleRecord` arm: a fold of all of them reads every line, so a line no arm names refuses it.
 _ARM_MODELS = {kind.encode(): arm for kind, arm in RECORDS.registered().items()}
@@ -703,7 +708,7 @@ def _restored(snapshot: Path, joining: dict[_Make, LedgerFold[Any, Any]]) -> _Jo
 def _stash(snapshot: Path, joined: _Joined) -> None:
     try:
         write_bytes(snapshot, pickle.dumps(joined))
-    except (OSError, pickle.PicklingError, TypeError, AttributeError) as exc:
+    except (OSError, NotFoundError, pickle.PicklingError, TypeError, AttributeError) as exc:
         logger.warning("fold snapshot %s not written: %s", snapshot, exc)
 
 

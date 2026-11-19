@@ -7,10 +7,10 @@ from typing import Any, Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.application.jobs.launcher.admission import admitted
-from promptpotter.application.jobs.quota import CampaignCycle, next_launch_budget
+from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
-from promptpotter.domain.campaign import ceiling_meter
+from promptpotter.domain.campaign import CampaignCycle, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.command_kinds import UNARMED, LookaheadAbreast, LookaheadCells
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
@@ -519,7 +519,7 @@ def binding_run_limits(
     stores: Stores, at: CampaignCycle, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    limits = stores.campaigns.run_limits(at.campaign, at.hop)
+    limits = stores.campaigns.run_limits(at)
     return None if limits is None else _binding(stores, at, config, run, limits)
 
 
@@ -616,13 +616,11 @@ def campaign_count(
 
 def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:
     """`armed_caps` read whole off the stores: what `set-limits` answers once it applied."""
-    at = CampaignCycle.loaded(stores, hop)
+    at = stores.campaigns.campaign_cycle(hop)
     run = stores.run_state(hop)
-    config = cycle_config(stores, at.campaign, at.hop).config
+    config = cycle_config(stores, at).config
     # Unwired yet, it stands under what its operator armed, as its first launch will.
-    wired = stores.campaigns.run_limits(at.campaign, at.hop) or RunLimits(
-        budget=stores.campaigns.armed_budget(at.campaign, at.hop)
-    )
+    wired = stores.campaigns.run_limits(at) or RunLimits(budget=stores.campaigns.armed_budget(at))
     limits = _binding(stores, at, config, run, wired)
     return armed_caps(
         stores,
@@ -643,8 +641,8 @@ def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkR
 
 
 def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
-    at = CampaignCycle.loaded(stores, hop)
-    config = cycle_config(stores, at.campaign, at.hop).config
+    at = stores.campaigns.campaign_cycle(hop)
+    config = cycle_config(stores, at).config
     return _remainder(stores, hop, binding_run_limits(stores, at, config, stores.run_state(hop)))
 
 
@@ -833,7 +831,8 @@ def served_dashboard(
     """``at`` replays to that ledger offset: live ``run_phase`` and ``producer``, nothing armed."""
     cycle_path = cycle_dir_for(stores.base_dir, hop)
     run = stores.run_state(hop)
-    campaign = stores.campaigns.campaign(hop.campaign_id)
+    seat = stores.campaigns.campaign_cycle(hop)
+    campaign = seat.campaign
     meter = ceiling_meter(campaign.declaration.purpose)
     # The read's own join, never the checkout's: the campaign's refusal moves no ledger.
     admission = admitted(stores, campaign, run)
@@ -848,7 +847,7 @@ def served_dashboard(
             admission=admission,
             stop=run.stop,
         )
-    folded = stores.campaigns.run_limits(campaign, hop, at=at)
+    folded = stores.campaigns.run_limits(seat, offset=at)
     assert folded is not None, "a folded state stands on its wiring"
     if at is not None:
         return _serve(
@@ -860,8 +859,7 @@ def served_dashboard(
             run_limits=folded,
             standing=None,
         )
-    config = cycle_config(stores, campaign, hop).config
-    seat = CampaignCycle(campaign, hop.cycle_id)
+    config = cycle_config(stores, seat).config
     limits = _binding(stores, seat, config, run, folded)
     remainder = _remainder(stores, hop, limits)
     return _serve(

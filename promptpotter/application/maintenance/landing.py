@@ -66,6 +66,7 @@ from promptpotter.infrastructure.store.data_root import (
     unloadable_why,
 )
 from promptpotter.infrastructure.store.io import (
+    INNER_SANDBOXES_DIR,
     iter_files,
     read_text_optional,
     rmtree_robust,
@@ -75,7 +76,7 @@ from promptpotter.infrastructure.store.io import (
     write_lock_name,
     write_text,
 )
-from promptpotter.infrastructure.store.layout import INNER_SANDBOXES_DIR, CampaignLayout
+from promptpotter.infrastructure.store.layout import CampaignLayout
 from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import (
     DEFINITION_SWAP_DIR,

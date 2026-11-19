@@ -73,6 +73,8 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import (
+    INNER_SANDBOXES_DIR,
+    WORKSPACE_SHAPES,
     complete_lines,
     parse_yaml,
     read_bytes_optional,
@@ -82,7 +84,6 @@ from promptpotter.infrastructure.store.layout import (
     ARCHIVE_HOMES_DIR,
     DRAFTS_DIR,
     HEAD_TO_HEADS_DIR,
-    INNER_SANDBOXES_DIR,
     ROUND_GLOB,
     WORKSPACE_STATE_DIR,
     CampaignLayout,
@@ -153,7 +154,7 @@ class Scope(Enum):
 
     INSTALL = ("",)
     ACCOUNT = (f"{PROJECTS_DIR}/*",)
-    WORKSPACE = (f"{PROJECTS_DIR}/*", f"{INNER_SANDBOXES_DIR}/*/*")
+    WORKSPACE = WORKSPACE_SHAPES
     ARCHIVE_HOME = (f"{PROJECTS_DIR}/*", f"{ARCHIVE_HOMES_DIR}/*")
 
     def __init__(self, *prefixes: str) -> None:

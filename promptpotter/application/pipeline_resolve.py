@@ -59,7 +59,13 @@ from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
 from promptpotter.domain.arms import Concluded
 from promptpotter.domain.bench import partition_bank
-from promptpotter.domain.campaign import Campaign, CampaignRunsWith, RunsWithParam, VendorModels
+from promptpotter.domain.campaign import (
+    Campaign,
+    CampaignCycle,
+    CampaignRunsWith,
+    RunsWithParam,
+    VendorModels,
+)
 from promptpotter.domain.campaign_config import (
     CAMPAIGN_RULE,
     CampaignConfig,
@@ -658,11 +664,24 @@ def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift |
     return None if now == declared else DefaultsDrift(declared=declared, running=now)
 
 
-def cycle_config(stores: Stores, campaign: Campaign, hop: CycleHop | None) -> CycleConfig:
-    """The declaration's effective config under every start of *hop*'s line, the criterion its dials
-    lock on the origin laid on; ``None`` is the declaration alone, which no cycle's start moved."""
+def cycle_config(stores: Stores, at: CampaignCycle) -> CycleConfig:
+    """The declaration's effective config under every start of *at*'s line, the criterion its dials
+    lock on the origin laid on."""
+    return CycleConfig.laid(
+        _declared(stores, at.campaign), stores.campaigns.read_laid_spans(at.hop)
+    )
+
+
+def declared_config(stores: Stores, campaign: Campaign) -> CycleConfig:
+    """The declaration alone, which no start moved, its root's criterion lock laid on."""
+    root_lock = stores.campaigns.last(campaign.root_hop, ScoringLockedRecord)
+    spans = [LaidSpan(start=None, scoring_lock=root_lock)]
+    return CycleConfig.laid(_declared(stores, campaign), spans)
+
+
+def _declared(stores: Stores, campaign: Campaign) -> CampaignConfig:
     try:
-        declared = effective_config(campaign.declaration)
+        return effective_config(campaign.declaration)
     except ValidationError as exc:
         raise FileUnreadableError(
             FileKind.MANIFEST,
@@ -671,11 +690,6 @@ def cycle_config(stores: Stores, campaign: Campaign, hop: CycleHop | None) -> Cy
             ),
             reason=validation_reason(exc, shown=1),
         ) from exc
-    campaigns = stores.campaigns
-    if hop is None:
-        root_lock = campaigns.last(campaign.root_hop, ScoringLockedRecord)
-        return CycleConfig.laid(declared, [LaidSpan(start=None, scoring_lock=root_lock)])
-    return CycleConfig.laid(declared, campaigns.read_laid_spans(hop))
 
 
 @dataclass(frozen=True)
@@ -762,11 +776,11 @@ def _task_fenced(fence: FreeFence | None) -> bool:
 def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _CampaignMerge:
     """Off its mint's records alone, so a campaign outlives its dataset dir; lays no identity:
     what a point is keyed by is the subject's to add."""
-    hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=at.cycle_id or campaign.root_cycle_id)
-    resolved = scan_resolved_run(stores.campaigns.chain(hop))
-    read = _recorded_read(resolved, hop)
+    on = CampaignCycle(campaign, at.cycle_id or campaign.root_cycle_id)
+    resolved = scan_resolved_run(stores.campaigns.chain(on.hop))
+    read = _recorded_read(resolved, on.hop)
     schema = parse_pipeline_response(read.declaration)
-    cycle = cycle_config(stores, campaign, hop)
+    cycle = cycle_config(stores, on)
     cfg = cycle.config
     filtered = _resolve_active_schema(
         schema, exclude=list(cfg.exclude_nodes), narrowing=cfg.optimizer_narrowing
@@ -786,7 +800,7 @@ def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _Campaig
         free=_task_fenced(free_fence(stores, campaign.connector)),
         steer_bound=not has_capability(stores.identity, CAMPAIGN_BABYSIT_CAP),
         knob_layers=cycle.knob_layers(read.knob_layers),
-        hop=hop,
+        hop=on.hop,
         experiment=resolved.experiment,
         endpoint=read.endpoint,
     )
@@ -1140,10 +1154,10 @@ class LineConfig(NamedTuple):
     unread: str | None
 
 
-def line_config(stores: Stores, campaign: Campaign, hop: CycleHop) -> LineConfig:
+def line_config(stores: Stores, at: CampaignCycle) -> LineConfig:
     """Compiles no scorer: a formula's own refusal is the bench's, the one reading that grades."""
     try:
-        config = cycle_config(stores, campaign, hop).config
+        config = cycle_config(stores, at).config
         if not split_scoring_block(config.scoring, judge_instrument=None).per_sample:
             return LineConfig(None, None)
     except _ROOT_UNRESOLVED as exc:
@@ -1153,7 +1167,7 @@ def line_config(stores: Stores, campaign: Campaign, hop: CycleHop) -> LineConfig
 
 def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
     # VALUES, never the ledger's stat: a running root appends there on every sample.
-    cycle = cycle_config(stores, campaign, campaign.root_hop)
+    cycle = cycle_config(stores, campaign.root_cycle)
     read = scan_resolved_run(stores.campaigns.chain(campaign.root_hop)).read
     return (
         stable_hash(cycle.config.model_dump(mode="json")),

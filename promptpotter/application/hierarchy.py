@@ -6,7 +6,6 @@ from pathlib import Path
 
 from promptpotter.application.datasets.draft_campaign import owned_drafts
 from promptpotter.application.jobs.launcher.admission import admitted
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import (
     LineConfig,
@@ -22,6 +21,7 @@ from promptpotter.domain.bench import BenchCurve, BenchScore
 from promptpotter.domain.campaign import (
     LIFECYCLE_STATUS_LABELS,
     Campaign,
+    CampaignCycle,
     CampaignRunsWith,
     Compare,
     LifecycleFilter,
@@ -289,11 +289,12 @@ def cycle_entry(
     bench: BenchScore | None,
     curve: BenchCurve | None,
 ) -> HierarchyCycle:
-    hop = CycleHop(campaign_id=campaign.campaign_id, cycle_id=cycle_dir.name)
+    at = CampaignCycle(campaign, cycle_dir.name)
+    hop = at.hop
     runs_with = root.runs_with
     # The producer as it is now: a moment replays the record, never a process.
     run = stores.run_state(hop)
-    limits = binding_run_limits(stores, CampaignCycle(campaign, hop.cycle_id), line.config, run)
+    limits = binding_run_limits(stores, at, line.config, run)
     # Before its first launch a cycle declares no wiring, so its campaign's declared cap binds.
     cap = (
         (None if runs_with is None else runs_with.budget_rounds)
@@ -346,7 +347,7 @@ def cycle_entry(
         spend=spent,
         bench=bench,
         curve=curve,
-        verify=None if moment is not None else cycle_verify(stores, campaign, hop),
+        verify=None if moment is not None else cycle_verify(stores, at),
     )
     return HierarchyCycle(
         address=Subject(hop.campaign_id, hop.cycle_id, inside=inside).address,
@@ -442,16 +443,17 @@ def campaign_entry(
 ) -> HierarchyCampaign:
     moment = held.moment
     holder = stores.campaigns.live_cycle(campaign.root_hop, moment=moment)
+    live_at = CampaignCycle(campaign, holder.cycle_id)
     root = campaign_runs_with(stores, campaign)
     runs_with = root.runs_with
-    held_line = line_config(stores, campaign, holder)
+    held_line = line_config(stores, live_at)
     bench: BenchScore | None = None
     curve: BenchCurve | None = None
     # The bench passes are read whole, so a replayed moment has no bench reading, as on the dashboard.
     if moment is None and held_line.config is not None:
         try:
-            bench = cycle_bench(stores, campaign, holder, held_line.config)
-            curve = cycle_curve(stores, campaign, holder, held_line.config)
+            bench = cycle_bench(stores, live_at, held_line.config)
+            curve = cycle_curve(stores, live_at, held_line.config)
         except ScoringFormulaError as exc:
             held_line = LineConfig(None, str(exc))
     cycles: dict[str, HierarchyCycle] = {}
@@ -468,7 +470,9 @@ def campaign_entry(
             holder=holder,
             moment=moment,
             root=root,
-            line=held_line if hop == holder else line_config(stores, campaign, hop),
+            line=held_line
+            if hop == holder
+            else line_config(stores, CampaignCycle(campaign, hop.cycle_id)),
             bench=bench if hop == holder else None,
             curve=curve if hop == holder else None,
         )

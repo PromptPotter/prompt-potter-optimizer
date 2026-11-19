@@ -140,7 +140,6 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
     resolve_resume,
 )
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -183,6 +182,7 @@ from promptpotter.application.pipeline_resolve import (
     campaign_config_map,
     cycle_config,
     dataset_pipeline,
+    declared_config,
     defaults_drift,
     draft_config,
     draft_pipeline,
@@ -232,6 +232,7 @@ from promptpotter.domain.bench import (
 from promptpotter.domain.campaign import (
     Arm,
     Campaign,
+    CampaignCycle,
     CampaignRefusedError,
     Compare,
     DeterminismClamp,
@@ -1514,7 +1515,7 @@ def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
     def beside_config() -> CycleConfig:
         campaign = tiered.campaigns.load_campaign("camp-beside")
         assert campaign is not None
-        return cycle_config(tiered, campaign, None)
+        return declared_config(tiered, campaign)
 
     shipped_checkin = (paths.checkin_assets_root() / "pipeline.yaml").read_text(encoding="utf-8")
     for torn_file, torn, door, (code, status, remedy) in (
@@ -2334,21 +2335,20 @@ def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_late
     )
     stores.campaigns.create_campaign(campaign)
     stores.campaigns.mint_cycle(campaign.root_hop)
-    ran = cycle_config(stores, campaign, campaign.root_hop).config
+    ran = cycle_config(stores, campaign.root_cycle).config
     assert (ran.optimization.optimizer, ran.optimization.budget.rounds) == ("potter", 12), (
         "a campaign ran its dataset file's later config instead of the one it froze"
     )
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign.root_hop)))
     ledger.append(ScoringLockedRecord(declared={"dials": "other"}, locked={"per_cell": "0"}))
-    assert cycle_config(stores, campaign, campaign.root_hop).config.scoring == dials, (
+    assert cycle_config(stores, campaign.root_cycle).config.scoring == dials, (
         "a lock declared off other dials governed this campaign"
     )
     locked = {"per_sample": "exact", "per_cell": "correct - 0.1 * cost"}
     ledger.append(ScoringLockedRecord(declared=dials, locked=locked))
-    for hop in (None, campaign.root_hop):
-        assert cycle_config(stores, campaign, hop).config.scoring == locked, (
-            f"{hop}: the criterion its origin locked rides the root's ledger, and every cycle "
-            "runs under it"
+    for read in (declared_config(stores, campaign), cycle_config(stores, campaign.root_cycle)):
+        assert read.config.scoring == locked, (
+            "the criterion its origin locked rides the root's ledger, and every cycle runs under it"
         )
     start = CycleStart(
         optimizer_narrowing={"a": NodeSearchNarrowing(param_keys=[])},
@@ -2356,7 +2356,7 @@ def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_late
     )
     seeded = campaign.root_hop.model_copy(update={"cycle_id": "cycle_seeded"})
     stores.campaigns.mint_cycle(seeded, CycleMintedRecord(start=start))
-    forked = cycle_config(stores, campaign, seeded).config
+    forked = cycle_config(stores, CampaignCycle(campaign, seeded.cycle_id)).config
     assert forked.optimization.budget.rounds == 4, "a start's override did not reach its cycle"
     assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]], (
         "a start's narrowing replaced the nodes it did not name"
@@ -2458,7 +2458,9 @@ def test_a_fork_closes_the_axis_its_operator_closed_on_its_own_menu(
     stores = built_stores
     fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
     fork_start = parse_cycle_start(
-        ForkStart.model_validate({"node_narrowing": {"a": _ROWS}}), stores, steered, fork
+        ForkStart.model_validate({"node_narrowing": {"a": _ROWS}}),
+        stores,
+        CampaignCycle(steered, fork.cycle_id),
     )
     assert fork_start.optimizer_narrowing == {
         "a": NodeSearchNarrowing(
@@ -2482,16 +2484,14 @@ def test_a_seed_never_steers_outside_its_own_menu_or_off_its_keys_type(
                 }
             ),
             stores,
-            steered,
-            fork,
+            CampaignCycle(steered, fork.cycle_id),
         )
     # A steer off its engine key's type is refused typed at the door, never minted.
     with pytest.raises(PayloadInvalidError, match="temperature"):
         parse_cycle_start(
             ForkStart.model_validate({"pipeline_overlay": {"a": {"temperature": '"warm"'}}}),
             stores,
-            steered,
-            fork,
+            CampaignCycle(steered, fork.cycle_id),
         )
 
 
@@ -2908,7 +2908,7 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     stores.campaigns.create_campaign(as_campaign)
     stores.campaigns.mint_cycle(as_campaign.root_hop)
     assert (
-        cycle_config(stores, as_campaign, as_campaign.root_hop).config.model_dump()
+        cycle_config(stores, as_campaign.root_cycle).config.model_dump()
         == effective_config(l4_arm).model_dump()
     ), "an arm runs another config than a campaign declared that way"
 
@@ -2951,7 +2951,7 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
             dataset_hash=opened.bank.dataset_hash,
         ),
     )
-    opened = opened.bound(CampaignCycle(held_campaign, held_campaign.root_cycle_id))
+    opened = opened.bound(held_campaign.root_cycle)
     opened.record_resolved_run()
     resolve_resume(opened, held_campaign, rows_30)
     assert read_active_pointer(stores.base_dir) != held_campaign.root_hop, (
@@ -3164,10 +3164,12 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     )
     # The served bench reads the one refusal its pass's admission raises: no grade is offered.
     holder = stores.campaigns.live_cycle(held_campaign.root_hop)
-    bench_config = cycle_config(stores, held_campaign, holder).config.model_copy(
-        update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}}
-    )
-    bench_read = cycle_bench(stores, held_campaign, holder, bench_config).status
+    bench_config = cycle_config(
+        stores, CampaignCycle(held_campaign, holder.cycle_id)
+    ).config.model_copy(update={"scoring": {"per_sample": "label_match(predicted, ground_truth)"}})
+    bench_read = cycle_bench(
+        stores, CampaignCycle(held_campaign, holder.cycle_id), bench_config
+    ).status
     assert (bench_read.can_run, bench_read.refusal) == (False, PassRefusal.CONNECTOR_MOVED), (
         "the served bench offers a grade on a connector its dataset no longer names"
     )

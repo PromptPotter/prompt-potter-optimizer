@@ -26,6 +26,7 @@ from promptpotter.application.datasets.tabular_ingest import (
 from promptpotter.application.origin_listing import canonical_origin_campaign
 from promptpotter.application.pipeline_resolve import (
     cycle_config,
+    declared_config,
     draft_pipeline,
     draft_served,
 )
@@ -123,7 +124,7 @@ async def draft_from_dataset(
     # laid on its nodes.
     config: dict[str, Any] = {}
     if origin_campaign is not None:
-        declared = cycle_config(stores, origin_campaign, None).config
+        declared = declared_config(stores, origin_campaign).config
         config = declared.model_dump(
             mode="json",
             exclude_unset=True,
@@ -169,7 +170,7 @@ async def draft_from_origin(*, stores: Stores, origin_id: str) -> DraftCampaignW
     if campaign is None:
         raise NotFoundError(f"Origin '{origin_id}' not found", code="command_target_not_found")
     overrides: dict[str, Any] = {}
-    start = cycle_config(stores, campaign, campaign.root_hop).origin
+    start = cycle_config(stores, campaign.root_cycle).origin
     if start is not None:
         overrides["origin_prompts"] = {
             node: dict(prompt.fields) for node, prompt in start.origin_prompts.items()

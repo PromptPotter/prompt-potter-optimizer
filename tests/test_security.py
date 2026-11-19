@@ -125,8 +125,12 @@ from promptpotter.application.jobs.launcher.head_to_head import AdmittedHeadToHe
 from promptpotter.application.jobs.launcher.launch import Launched
 from promptpotter.application.jobs.launcher.run_job import JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
-from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
-from promptpotter.application.jobs.quota import CampaignCycle
+from promptpotter.application.jobs.mint import (
+    declare,
+    fresh_campaign_id,
+    mint,
+    resolve_cycle_plan,
+)
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import LibraryAuthored, library
@@ -2433,7 +2437,7 @@ async def test_a_launch_holds_its_cycle_from_the_moment_it_is_accepted_and_a_ful
         async with paid_pass(
             stores=built_stores,
             pass_kind=MeasurementRole.BENCH,
-            at=CampaignCycle.loaded(built_stores, hop),
+            at=built_stores.campaigns.campaign_cycle(hop),
             declared=Budget(),
             sends=(),
         ):
@@ -2726,6 +2730,35 @@ async def test_the_reaper_takes_a_producer_only_once_it_no_longer_holds_its_cycl
     release_cycle(cycle_dir)
     ended = built_stores.run_state(hop)
     assert (ended.run_phase, ended.producer.state) == (RunPhase.TERMINAL, ProducerState.ABSENT)
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows deletes no cycle under a held lock")
+def test_a_cycle_deleted_between_a_reap_writes_temporary_and_its_replace_leaves_the_sweep_whole(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
+) -> None:
+    campaigns = built_stores.campaigns
+    hops = (held_cycle.hop, held_cycle.hop.model_copy(update={"cycle_id": "cycle-1"}))
+    campaigns.mint_cycle(hops[1])
+    for hop in hops:
+        _running(campaigns.cycle_dir(hop))
+        release_cycle(campaigns.cycle_dir(hop))
+    deleted: list[CycleHop] = []
+    replace = os.replace
+
+    def deleting_first(src: str, dst: str, *args: object, **kwargs: object) -> None:
+        if not deleted:
+            deleted.append(next(h for h in hops if str(campaigns.cycle_dir(h)) in dst))
+            shutil.rmtree(campaigns.cycle_dir(deleted[0]))
+        replace(src, dst, *args, **kwargs)  # type: ignore[arg-type]
+
+    with monkeypatch.context() as patched:
+        patched.setattr(os, "replace", deleting_first)
+        reaped = sweep_dead_cycles(built_stores.projects_root)
+    assert deleted and reaped == 1, "a cycle deleted under the sweep aborted it"
+    assert not campaigns.cycle_dir(deleted[0]).exists(), "the reap re-made the deleted cycle"
+    (kept,) = set(hops) - set(deleted)
+    swept = campaigns.load(kept, moment=None)
+    assert swept is not None and swept.stop_reason is StopReason.PRODUCER_VANISHED
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
@@ -3807,7 +3840,8 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
     start = CommandCall(StartCheckinPayload(draft_id=moved), "start", door=Door.HOST)
     await sender.dispatch(start)
     before = standing("moved")
-    mint(plan, campaign_id="adopted", adopting=moved)
+    campaign_id = fresh_campaign_id(starting)
+    mint(plan, campaign_id=campaign_id, adopting=moved)
     # A Start's answer lost after its mint: its retry answers that launch, its draft gone.
     start_status, acked = folded("start")
     table[("accepted", "a Start retried, its draft minted and closed")] = (
@@ -3818,7 +3852,7 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
         acked,
     )
     assert standing("moved") == before, "its draft's mint moved its command"
-    adopted = stores.subject(CycleHop(campaign_id="adopted", cycle_id=plan.cycle_id))
+    adopted = stores.subject(CycleHop(campaign_id=campaign_id, cycle_id=plan.cycle_id))
     assert first("moved") in {
         e.command_id for e in stores.commands.book().subject_events(adopted)
     }, "a minted draft's command does not read as its cycle's"
@@ -3921,7 +3955,7 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Com
         async with paid_pass(
             stores=stores,
             pass_kind=MeasurementRole.BENCH,
-            at=CampaignCycle.loaded(stores, held),
+            at=stores.campaigns.campaign_cycle(held),
             declared=Budget(),
             sends=(),
         ):

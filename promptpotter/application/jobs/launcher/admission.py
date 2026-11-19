@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.jobs.quota import (
-    CampaignCycle,
     admit_launch,
     call_book,
     check_launch_quotas,
@@ -28,7 +27,12 @@ from promptpotter.application.jobs.registry import JobRegistry, launch_interrupt
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
 from promptpotter.domain.bench import CampaignRefusal
-from promptpotter.domain.campaign import Campaign, CampaignRefusedError, ceiling_meter
+from promptpotter.domain.campaign import (
+    Campaign,
+    CampaignCycle,
+    CampaignRefusedError,
+    ceiling_meter,
+)
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
@@ -388,7 +392,7 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
         if at is not None:
             # Asked again past the wait: the slot door's claim held off an archive or a delete,
             # never a definition moved while the job waited.
-            refuse_campaign(stores, stores.campaigns.campaign(at.hop.campaign_id))
+            refuse_campaign(stores, at.campaign)
 
     await refuse_unreachable(request.connector(stores), request.endpoint(stores))
     declared, asked = declare_run_budget(
@@ -778,7 +782,7 @@ def _open_pass(
             stores.void_inbox(at.hop)
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
             close_dead_bench(stores, at.hop)
-            config = cycle_config(stores, at.campaign, at.hop).config
+            config = cycle_config(stores, at).config
             ceiling = next_launch_budget(config, stores=stores, at=at).only(MONEY_AXES)
             declared = ceiling.over(declared)
         held = admit_and_share(
@@ -824,7 +828,6 @@ def _close_pass(
     return None if taken is None else taken[1]
 
 
-def campaign_sends(stores: Stores, campaign: Campaign, hop: CycleHop) -> tuple[Send, ...]:
-    """What a run or pass on *campaign*'s cycle *hop* sends, under its resolved config and
-    connector."""
-    return sends_on(stores, cycle_config(stores, campaign, hop).config, campaign.connector)
+def campaign_sends(stores: Stores, at: CampaignCycle) -> tuple[Send, ...]:
+    """What a run or pass on *at* sends, under its resolved config and connector."""
+    return sends_on(stores, cycle_config(stores, at).config, at.campaign.connector)

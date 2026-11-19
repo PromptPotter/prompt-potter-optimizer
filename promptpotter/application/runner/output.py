@@ -672,9 +672,7 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
             index,
             rounds,
             hop=hop,
-            hard_samples=cycle_hard_samples(session.store, session.bound_campaign, hop)
-            if rounds
-            else None,
+            hard_samples=cycle_hard_samples(session.store, session.at) if rounds else None,
             p_best=_p_best(layout),
             hard_sample_order=config.hard_sample_order,
             spend_by_round=scan_ledger_spend_by_round(store.chain(hop)),
@@ -782,9 +780,7 @@ def _render_review_md(session: Session, config: CampaignConfig) -> None:
         fitness_ceiling=config.fitness_ceiling,
         optimizer=select_optimizer(config.optimization),
         # Read only once the cycle has ended: nothing renders the headline before then.
-        bench=read_cycle_bench(session.store, session.bound_campaign, session.hop)
-        if index.final is not None
-        else None,
+        bench=read_cycle_bench(session.store, session.at) if index.final is not None else None,
         spend=scan_ledger_spend(store.chain(session.hop)).spend,
     )
     write_text(CycleLayout(cycle_dir).review_md, content)

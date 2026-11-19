@@ -22,7 +22,6 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
     resolve_resume,
 )
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     resolved_overrides,
@@ -40,7 +39,7 @@ from promptpotter.application.runner.inner.tasks import (
     panel_cell,
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import Campaign, CampaignCycle
 from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop

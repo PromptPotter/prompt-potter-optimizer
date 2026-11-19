@@ -50,7 +50,7 @@ def declare_run_stop(
 ) -> None:
     """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second
     record. *detail* is an ending's reason, where its raiser gave one."""
-    limits = session.store.campaigns.run_limits(session.bound_campaign, session.hop)
+    limits = session.store.campaigns.run_limits(session.at)
     assert limits is not None, "a run stops on the wiring it declared"
     budget = limits.budget
     meter = ceiling_meter(session.purpose)

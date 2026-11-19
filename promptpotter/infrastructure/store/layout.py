@@ -11,6 +11,9 @@ from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
+    CAMPAIGNS_DIR,
+    CYCLES_DIR,
+    INNER_SANDBOXES_DIR,
     newest_mtime_ns,
     read_bytes_optional,
     validate_path_component,
@@ -55,7 +58,7 @@ def archive_home(
 
 
 def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:
-    return tenant_root / "campaigns"
+    return tenant_root / CAMPAIGNS_DIR
 
 
 def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
@@ -94,7 +97,7 @@ def head_to_head_path(tenant_root: WorkspaceDir, head_to_head_id: str) -> Path:
 
 
 def campaign_cycles_dir(campaign_root: Path) -> Path:
-    return campaign_root / "cycles"
+    return campaign_root / CYCLES_DIR
 
 
 def cycle_ledgers(campaign_root: Path) -> list[Path]:
@@ -109,10 +112,6 @@ def cycle_ledgers(campaign_root: Path) -> list[Path]:
 def cycle_dir_for(tenant_root: WorkspaceDir, hop: CycleHop) -> Path:
     campaign_root = campaign_root_dir_for(tenant_root, hop.campaign_id)
     return campaign_cycles_dir(campaign_root) / validate_path_component(hop.cycle_id)
-
-
-# Flat, off-registry and hash-keyed: nested in its owning cycle, a sandbox exceeds Windows' MAX_PATH.
-INNER_SANDBOXES_DIR = ".inner"
 
 
 def inner_sandboxes_dir(workspace_projects_root: Path) -> Path:

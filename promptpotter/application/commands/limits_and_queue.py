@@ -13,6 +13,7 @@ from promptpotter.application.commands.dispatcher import (
 from promptpotter.application.jobs import quota
 from promptpotter.application.jobs.launcher.admission import campaign_sends
 from promptpotter.application.served_dashboard import current_caps
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.command_kinds import (
     CancelQueuedRunPayload,
     ChangeRunLimitsPayload,
@@ -50,7 +51,7 @@ async def limits_armed(replaying: Replaying[ChangeRunLimitsPayload]) -> ArmedCap
 
 
 def _change_budget(
-    dispatcher: CommandDispatcher, at: quota.CampaignCycle, change: ChangeRunLimitsPayload
+    dispatcher: CommandDispatcher, at: CampaignCycle, change: ChangeRunLimitsPayload
 ) -> bool:
     stores = dispatcher.stores
     return quota.change_budget(
@@ -60,14 +61,12 @@ def _change_budget(
         job_registry=dispatcher.job_registry,
         at=at,
         # A change naming no money axis reads no config: it sends nothing a clamp asks of.
-        sends=campaign_sends(stores, at.campaign, at.hop)
-        if change.budget.named & MONEY_AXES
-        else (),
+        sends=campaign_sends(stores, at) if change.budget.named & MONEY_AXES else (),
     )
 
 
 async def _apply_change_run_limits(
-    dispatcher: CommandDispatcher, at: quota.CampaignCycle, change: ChangeRunLimitsPayload
+    dispatcher: CommandDispatcher, at: CampaignCycle, change: ChangeRunLimitsPayload
 ) -> None:
     """Clamped to the account FIRST: unclamped, a raise here is the way around the host-wallet gate.
     Settable on every arm of a head-to-head: a change that moves a ceiling the arm runs under moves

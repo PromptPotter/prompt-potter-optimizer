@@ -32,7 +32,7 @@ from promptpotter.application.jobs.mint import (
     declare,
     mint_framed_cycle,
 )
-from promptpotter.application.jobs.quota import CampaignCycle, sends_on
+from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
@@ -160,10 +160,10 @@ async def run_campaign(
                     "no config and no rows to resume it",
                     code="resume_declared",
                 )
-            refuse_campaign(stores, campaign := stores.campaigns.campaign(target.campaign_id))
-            resuming = ExistingCycle(CampaignCycle(campaign, target.cycle_id), budget)
-            config = cycle_config(stores, campaign, target).config
-            connector, measured = campaign.connector, campaign.dataset_name
+            refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(target)).campaign)
+            resuming = ExistingCycle(at, budget)
+            config = cycle_config(stores, at).config
+            connector, measured = at.campaign.connector, at.campaign.dataset_name
         else:
             session = await clients.enter_async_context(
                 _dataset_session(stores, target, program=program, rows=rows)

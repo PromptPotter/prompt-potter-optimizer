@@ -32,9 +32,7 @@ from promptpotter.shared.errors import MINT_FRESH, NextAct, NotFoundError
 
 
 def campaign_scorer(stores: Stores, campaign: Campaign) -> Scorer:
-    return scorer_of(
-        cycle_config(stores, campaign, campaign.root_hop).config, verifier_graded=False
-    )
+    return scorer_of(cycle_config(stores, campaign.root_cycle).config, verifier_graded=False)
 
 
 def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> CellSheet:

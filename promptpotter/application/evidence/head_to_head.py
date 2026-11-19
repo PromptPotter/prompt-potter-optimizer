@@ -8,7 +8,7 @@ from pydantic import Field, computed_field, model_validator
 
 from promptpotter.application.datasets.authored import defaults_config, scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.application.jobs.quota import CampaignCycle, next_launch_budget
+from promptpotter.application.jobs.quota import next_launch_budget
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.bench import (
@@ -31,6 +31,7 @@ from promptpotter.domain.bench import BENCH_HEADLINE, COLUMN_GRADE, BenchColumn,
 from promptpotter.domain.campaign import (
     BenchSet,
     Campaign,
+    CampaignCycle,
     Compare,
     DeterminismClamp,
     HeadToHeadRecord,
@@ -406,7 +407,7 @@ def comparison_grader(campaigns: list[tuple[Stores, Campaign]]) -> Grader:
     graders = {
         scorer.id: scorer
         for scorer in (
-            scorer_of(cycle_config(stores, c, c.root_hop).config, verifier_graded=False)
+            scorer_of(cycle_config(stores, c.root_cycle).config, verifier_graded=False)
             for stores, c in campaigns
         )
     }
@@ -428,8 +429,7 @@ def head_to_head(
         return None
     campaigns = [entry.stores.campaigns.campaign(entry.reading.campaign_id) for entry in entries]
     configs = [
-        cycle_config(e.stores, c, c.root_hop).config
-        for e, c in zip(entries, campaigns, strict=True)
+        cycle_config(e.stores, c.root_cycle).config for e, c in zip(entries, campaigns, strict=True)
     ]
     scorer, record = grader
     read = [
@@ -566,12 +566,13 @@ def _read(
     record: HeadToHeadRecord | None,
 ) -> _Entry:
     reading, stores = entry
-    hop = stores.campaigns.live_cycle(campaign.root_hop)
+    at = CampaignCycle(campaign, stores.campaigns.live_cycle(campaign.root_hop).cycle_id)
+    hop = at.hop
     selected = select_optimizer(config.optimization)
     optimizer_models = sorted({selected.model(node) for node in selected.llm_nodes})
     passes = line_passes(stores, campaign)
     run = live_cycle_run(stores, hop)
-    line = bench_line(stores, campaign, hop, config, run=run)
+    line = bench_line(stores, at, config, run=run)
     bench = read_bench(stores, passes, scorer, line=line)
     origin_pass, selected_pass = (
         (None, None) if passes is None else bench_members(stores, passes, scorer, line=line)
@@ -598,7 +599,7 @@ def _read(
             origin=campaign.root_content_hash,
         )
     )
-    budget = next_launch_budget(config, stores=stores, at=CampaignCycle(campaign, hop.cycle_id))
+    budget = next_launch_budget(config, stores=stores, at=at)
     optimization = config.optimization
     # Live off the line's ledgers once a launch has ended: before one, nothing is banked to read.
     launches = line_launches(stores, campaign)

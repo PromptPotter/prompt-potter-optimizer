@@ -13,7 +13,7 @@ from promptpotter.application.mask.record import (
     MaskRound,
     SpineCycle,
 )
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, declared_config
 from promptpotter.application.scoring.closed_rounds import closed_rounds, cycle_bank
 from promptpotter.application.scoring.formula.compiler import (
     campaign_terms,
@@ -25,11 +25,12 @@ from promptpotter.application.scoring.formula.compiler import (
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.application.scoring.metrics import fold_cells
 from promptpotter.domain.arms import ArmState, Cut, arm_elimination, is_electable
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig, start_layer
 from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.cycle_index import CycleIndex
-from promptpotter.domain.cycle_paths import CycleHop, Lens
+from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.records.run_records import ConfigOverrides
 from promptpotter.domain.results import RoundResult
@@ -195,7 +196,10 @@ def load_mask_record(
         cid = hop.cycle_id
         indexes[cid] = index
         lines[cid] = stores.campaigns.standing_rounds(hop, moment=None)
-        own = scorer_of(cycle_config(stores, campaign, hop).config, verifier_graded=False)
+        own = scorer_of(
+            cycle_config(stores, CampaignCycle(campaign, hop.cycle_id)).config,
+            verifier_graded=False,
+        )
         files[cid] = {
             closed.round: closed for closed in closed_rounds(stores, hop, own, moment=None)
         }
@@ -210,7 +214,7 @@ def load_mask_record(
         terms = campaign_terms(connectors.CONNECTORS.get(campaign.connector))
         formula = realize_dials(
             parse_dials(lens.body, terms),
-            _dial_anchors(cycle_config(stores, campaign, None).config, origin_rows, terms),
+            _dial_anchors(declared_config(stores, campaign).config, origin_rows, terms),
             terms,
         )
     overrides = lens_overrides(formula)
@@ -220,9 +224,10 @@ def load_mask_record(
         # ROWS, never a reading: a fork grades its line's winners under the formula in effect HERE.
         carried: CellSheet | None = None
         crowns = lines[cid].crowns
-        hop = CycleHop(campaign_id=campaign_id, cycle_id=cid)
+        at = CampaignCycle(campaign, cid)
+        hop = at.hop
         scorer = scorer_of(
-            cycle_config(stores, campaign, hop).config.overlaid(start_layer(overrides)),
+            cycle_config(stores, at).config.overlaid(start_layer(overrides)),
             verifier_graded=False,
         )
         # The mask names slots in the bank the cycle drew; its rows pair on keys.

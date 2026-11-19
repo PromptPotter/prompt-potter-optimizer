@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from promptpotter.domain.campaign import (
     Campaign,
+    CampaignCycle,
     CampaignEdit,
     HeadToHeadRecord,
     LifecycleFilter,
@@ -67,6 +68,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.data_root import campaign_row
 from promptpotter.infrastructure.store.io import (
     iter_files,
+    make_dirs,
     prune_empty_dirs,
     rmtree_robust,
     take_lock,
@@ -169,7 +171,7 @@ class CampaignStore:
             if bank.deleted(campaign_id) or any(ledger.is_relative_to(held) for ledger in charged):
                 continue
             root = self.campaign_root_dir(campaign_id)
-            root.parent.mkdir(parents=True, exist_ok=True)
+            make_dirs(root.parent)
             try:
                 root.mkdir()
             except FileExistsError:
@@ -316,6 +318,7 @@ class CampaignStore:
                 f"campaign {campaign.campaign_id} exists; a mint never re-roots it",
                 code="campaign_exists",
             )
+        make_dirs(path.parent)
         write_json(path, campaign.model_dump(mode="json"))
         return path
 
@@ -504,9 +507,12 @@ class CampaignStore:
 
     def mint_cycle(self, hop: CycleHop, minted: CycleMintedRecord | None = None) -> None:
         """THE mint, idempotent by content: a re-mint of what stands is a no-op, another refuses.
-        *minted* defaults to a root's, with no seed."""
+        *minted* defaults to a root's, with no seed, which makes its campaign; a fork's answers its
+        campaign's delete."""
         minted = minted or CycleMintedRecord()
-        self.cycle_dir(hop).mkdir(parents=True, exist_ok=True)
+        if minted.parent is None:
+            make_dirs(self.campaign_root_dir(hop.campaign_id))
+        make_dirs(self.cycle_dir(hop))
         held = scan_cycle_facts(self.ledger(hop)).minted
         if held is None:
             self.append(hop, minted)
@@ -682,21 +688,24 @@ class CampaignStore:
         """Off the campaign's root, which every cycle of it reads."""
         return scan_campaign_ceiling(self.ledger(campaign.root_hop))
 
-    def armed_budget(self, campaign: Campaign, hop: CycleHop) -> Budget:
-        """The axes an operator named: the campaign's money and its cycle *hop*'s own."""
-        return self.read_campaign_ceiling(campaign).budget.over(
-            self.read_standing_budget(hop).budget
+    def campaign_cycle(self, hop: CycleHop) -> CampaignCycle:
+        return CampaignCycle(self.campaign(hop.campaign_id), hop.cycle_id)
+
+    def armed_budget(self, at: CampaignCycle) -> Budget:
+        """The axes an operator named: the campaign's money and its cycle's own."""
+        return self.read_campaign_ceiling(at.campaign).budget.over(
+            self.read_standing_budget(at.hop).budget
         )
 
-    def run_limits(
-        self, campaign: Campaign, hop: CycleHop, *, at: int | None = None
-    ) -> RunLimits | None:
-        """*hop*'s fold to *at*, its campaign's ceiling laid over; ``None`` before its first wiring."""
-        folded = run_limits_at(CycleAt(cycle=CycleDir(self.cycle_dir(hop)), hop=hop, offset=at))
+    def run_limits(self, at: CampaignCycle, *, offset: int | None = None) -> RunLimits | None:
+        """The cycle's fold to *offset*, its campaign's ceiling laid over; ``None`` before its first
+        wiring."""
+        hop = at.hop
+        folded = run_limits_at(CycleAt(cycle=CycleDir(self.cycle_dir(hop)), hop=hop, offset=offset))
         if folded is None:
             return None
         return folded.model_copy(
-            update={"budget": folded.budget.over(self.read_campaign_ceiling(campaign).budget)}
+            update={"budget": folded.budget.over(self.read_campaign_ceiling(at.campaign).budget)}
         )
 
     def chain(self, hop: CycleHop, *, moment: Moment | None = None) -> list[LedgerSpan]:

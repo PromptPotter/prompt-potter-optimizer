@@ -16,9 +16,9 @@ from promptpotter.application.jobs.mint import (
     mint_framed_cycle,
     resolve_resume,
 )
-from promptpotter.application.jobs.quota import CampaignCycle, sends_on
+from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
-from promptpotter.domain.campaign import Optimize
+from promptpotter.domain.campaign import CampaignCycle, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.job import CampaignLaunch
@@ -138,10 +138,10 @@ class ExistingCycle:
         return runnable_definition(resolve_dataset(stores, self.dataset_name)).endpoint
 
     def declared_budget(self, stores: Stores) -> Budget:
-        return cycle_config(stores, self.at.campaign, self.at.hop).config.optimization.budget
+        return cycle_config(stores, self.at).config.optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return campaign_sends(stores, self.at.campaign, self.at.hop)
+        return campaign_sends(stores, self.at)
 
     @asynccontextmanager
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:

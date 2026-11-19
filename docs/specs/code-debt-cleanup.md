@@ -619,22 +619,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   after, across `test_scoring.py` / `test_security.py`. Action: each seat stores its campaign first,
   and `loop_session` reads it. **Re-test:** `git grep -c "minted_campaign(hop)" -- tests/factories.py`
   drops by the seat's one.
-- **A write re-makes a deleted cycle's directories** (load-3's review, probed): load-3 made each mint
-  create its cycle dir and `CycleEventLog.open` refuse a missing one, but `store/io.py::_tmp_beside`
-  (`:248`) and `io.py::_open_lock` (`:486`) `os.makedirs` the whole path, so after a
-  `delete-campaign` a held ledger handle, a `write_json` (`index.json`) or a `take_lock`
-  (`producer.lock`) re-creates `campaigns/<id>/` with no manifest. Doors in the window: set-limits'
-  cycle-axis appends and its arm act outside the admission gate (`quota.py:868/870`,
-  `limits_and_queue.py:78`), `CampaignStore.append` between its `open` and its lock, the reaper's
-  `stores.py::declare_ended`, a fork mint's `store.py:509` `mkdir(parents=True)` after its cut.
-  Root: a write creates its leaf alone, never a chain; the mint doors own every chain. **Re-test:**
-  `<S2>`-style probe: each of the four writers after a delete raises and leaves no `campaigns/<id>/`.
-- **A launch's (campaign, hop) pair is spelled again below `application/`** (load-3's report):
-  `CampaignStore.armed_budget` / `run_limits`, `pipeline_resolve.py::cycle_config` and
-  `admission.py::campaign_sends` take (campaign, hop), where infrastructure cannot import
-  `quota.py::CampaignCycle`. Root: the carrier lives in `domain/` beside `Campaign`.
-  `admission.py:391` re-reads the campaign `at.campaign` holds before `refuse_campaign` (a fresh read
-  under the gate, or a second load: say which). **Rides with:** the next chain owning `admission.py`.
 
 ### batch/31 · box
 
@@ -773,6 +757,42 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `ledger_line`) or a pydantic validator on a row's model can change what loads without moving the
   key. Root: a shape's loading behaviour has no digest beyond its JSON schema. **Rides with:** rel.
   **Re-test:** edit a validator a survivor's model runs; `landing_key()` moves.
+
+### wave-5 · store (what store-2f and store-2g left at their landing)
+
+- **A cycle read still takes (campaign, hop)**: `cycle_reads.py::_closed` and
+  `pipeline_resolve.py::permitted_narrowing` (an optional `hop`) take the pair `CampaignCycle`
+  carries. Action: they take `at: CampaignCycle`. **Re-test:** `git grep -cE "campaign: Campaign, hop:
+  CycleHop" -- promptpotter` == 0.
+- **The campaigns dir is spelled beside its constant**: `landing.py:326`, `data_root.py:651` and
+  `storage_report.py:141` spell `"campaigns"` where `io.py::CAMPAIGNS_DIR` names it. **Re-test:**
+  `git grep -cE "\"campaigns\"" -- promptpotter` == 0.
+- **An anchor is matched from the right** (store-2g): `io.py::_ANCHORS` reads a campaign or cycle at
+  `projects/*/campaigns/<id>` wherever the path ends so, so a data root nested at
+  `…/projects/<x>/campaigns/<D>`, or a dataset slug `projects/a/campaigns/b`, refuses its own first
+  write. Root: the store hands its data root to the io doors and the shape matches whole from it.
+  **Re-test:** both write; a deleted campaign and cycle still refuse.
+- **A draft is re-made after its discard**: a held draft-ledger handle appending after
+  `draft_store.py::discard` re-makes `drafts/<id>/`, and two draft writers bypass `io.py` (`jobs/mint.py:695`'s
+  raw `mkdir(parents=True)`, the CLI export's raw `mkdir` + `write_text` at
+  `presentation/cli/commands/reads.py:173-174`). Root: a draft is a third deleted unit (`_ANCHORS`),
+  and every run-data write goes through the io doors. **Re-test:** an append after a discard raises
+  `NotFoundError`; `git grep -n "\.mkdir(" -- promptpotter` names no run-data path.
+- **A gone unit is said two ways**: a replace whose temporary vanished raises a raw
+  `FileNotFoundError` (`io.py::write_bytes`) where a create answers `NotFoundError`, and
+  `read_model.py::LedgerIndex.shielded` swallows every `Exception` (that one included), then appends its
+  `derived_file_stale` warning INTO the deleted cycle. Root: one "gone" from every io door, and a
+  projection over a gone cycle is skipped, never warned into it. **Re-test:** a fact deleting the
+  cycle between `mkstemp` and the replace reads `NotFoundError`, and no warning row is attempted.
+- **The offline world reads a fault in its own policy as a refused call** (store-2's report): a stale
+  `cycle_config` call raised inside `offline_run.py`'s fake LLM policy (`offline_world.py::FakeLLM.reply`'s
+  `self.says(body)`) and the run halted at `origin_gate` with 0 inner campaigns instead of crashing,
+  so a harness bug reads as a decision. Unverified since `ea020d03f` (a non-wire error raises as
+  itself). Action: a fault inside the policy raises out of the scenario. **Re-test:** a policy raising
+  `KeyError` fails `offline_run.py --against` with that traceback.
+- **A test home is built beside `factories.workspace`** (store-2's report): facts in `test_spend.py` and
+  `test_security.py` built ledgers, locks and homes under paths nothing minted and passed because io
+  made dirs. Root: test homes mint through `factories.workspace`. **Rides with:** tests-x.
 
 ### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
 

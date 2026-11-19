@@ -449,7 +449,6 @@ class CommandLog:
     def file(self, record: CommandRecord) -> None:
         """A filing's id and its key are the log's own: refused inside the write that would land a
         second one, so two calls under one id, or one matched key, never both act."""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         with appending(self.path) as put:
             book = self.book()
             if book.filing(record.command_id) is not None:
@@ -469,7 +468,6 @@ class CommandLog:
             put(_encoded(record))
 
     def append(self, *rows: CommandLogRow) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         append_line(self.path, _encoded(*rows))
 
     def ack(self, command_id: str, status: CommandAckStatus, detail: str = "") -> None:

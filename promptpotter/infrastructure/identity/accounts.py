@@ -119,8 +119,6 @@ class IdentityBundle:
 
 
 def build_identity_bundle(paths: IdentityPaths) -> IdentityBundle:
-    paths.root.mkdir(parents=True, exist_ok=True)
-    paths.sessions_dir.mkdir(parents=True, exist_ok=True)
     config = load_provider_config(paths.provider_config)
     jwks_cache = JWKSCache()
     clients: dict[str, SignInClient] = {}

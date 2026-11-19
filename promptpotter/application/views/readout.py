@@ -112,6 +112,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.io import append_line
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.shared.composite import render_composite_fitness_block
+from promptpotter.shared.errors import NotFoundError
 from promptpotter.shared.measurement_context import MeasurementRole
 
 # A host's readout-line sink. ``None`` is silent; the readout is on disk either way.
@@ -179,7 +180,7 @@ class ReadoutProjection(Projection):
             return
         try:
             append_line(self._readout, _ANSI_RE.sub("", line).encode("utf-8"))
-        except OSError:
+        except (OSError, NotFoundError):
             # Said once, as the ledger's `derived_file_stale`: a readout that just ends reads as a
             # run that stopped.
             self._readout = None

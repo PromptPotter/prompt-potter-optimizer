@@ -14,9 +14,10 @@ from typing import IO, Any, NamedTuple
 
 import yaml
 
+from promptpotter.config.paths import PROJECTS_DIR
 from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.domain.cycle_paths import ID_COMPONENT_RE
-from promptpotter.shared.errors import ConflictError
+from promptpotter.shared.errors import ConflictError, NotFoundError
 
 if sys.platform == "win32":
     import msvcrt
@@ -243,11 +244,51 @@ def _atomic_replace(tmp: str, path: Path) -> None:
         raise last_exc
 
 
+CAMPAIGNS_DIR = "campaigns"
+CYCLES_DIR = "cycles"
+# Flat, off-registry and hash-keyed: nested in its owning cycle, a sandbox exceeds Windows' MAX_PATH.
+INNER_SANDBOXES_DIR = ".inner"
+# A workspace, from the data root: an account's, or an inner sandbox's (`.inner/<key>/<tenant>`).
+WORKSPACE_SHAPES = (f"{PROJECTS_DIR}/*", f"{INNER_SANDBOXES_DIR}/*/*")
+# What a delete removes, by its PLACE under a workspace, never a segment's name: a campaign, or a
+# cycle (`cleanup-empty-cycles` keeps its campaign).
+_ANCHORS = tuple(
+    (f"{workspace}/{CAMPAIGNS_DIR}/*{below}", unit)
+    for workspace in WORKSPACE_SHAPES
+    for below, unit in (("", "campaign"), (f"/{CYCLES_DIR}/*", "cycle"))
+)
+
+
+def make_dirs(directory: Path) -> None:
+    """THE dir maker, by `_created`'s rule."""
+    with contextlib.suppress(FileExistsError):
+        _created(directory, lambda: os.mkdir(_long_path(directory)))
+
+
+def _created[T](path: Path, create: Callable[[], T]) -> T:
+    """*create*, its missing parents made one `mkdir` per level, long-path, never an existence check
+    first, and never its ANCHOR (a campaign or cycle dir, what a delete removes): a delete landing in
+    the walk answers `NotFoundError` naming it, never a re-made campaign or cycle. One climb, one
+    retry: a level that stands but is no directory raises the create's own error."""
+    try:
+        return create()
+    except FileNotFoundError as missing:
+        # Normalized first: a `..` reaches no anchor unseen.
+        parent = Path(os.path.normpath(path)).parent
+        if unit := next((unit for shape, unit in _ANCHORS if parent.match(shape)), None):
+            raise NotFoundError(f"{unit} {parent.name!r} is gone") from None
+        make_dirs(parent)
+        try:
+            return create()
+        except FileNotFoundError:
+            raise missing from None
+
+
 def _tmp_beside(path: Path) -> tuple[int, str]:
-    parent = _long_path(path.parent)
-    os.makedirs(parent, exist_ok=True)
     # Dot-named, which the cycle file listing skips.
-    return tempfile.mkstemp(dir=parent, prefix=".", suffix=".tmp")
+    return _created(
+        path, lambda: tempfile.mkstemp(dir=_long_path(path.parent), prefix=".", suffix=".tmp")
+    )
 
 
 def _synced(f: IO[Any]) -> None:
@@ -479,14 +520,6 @@ class HeldLock:
             _retire(fd, self._name)
 
 
-def _open_lock(name: str) -> int:
-    try:
-        return os.open(name, os.O_RDWR | os.O_CREAT)
-    except FileNotFoundError:
-        os.makedirs(os.path.dirname(name), exist_ok=True)
-        return os.open(name, os.O_RDWR | os.O_CREAT)
-
-
 def refuse_on_event_loop(what: str) -> None:
     """A blocking wait stalls every request the loop serves: its async door offloads it once."""
     try:
@@ -510,7 +543,7 @@ def _poll_lock(path: Path, wait_s: float) -> HeldLock | None:
     name = _long_path(path)
     deadline = time.monotonic() + wait_s
     while True:
-        fd = _open_lock(name)
+        fd = _created(path, lambda: os.open(name, os.O_RDWR | os.O_CREAT))
         if _try_lock(fd):
             # A retired file's waiter holds an unlinked inode: the name is reopened instead.
             if os.fstat(fd).st_nlink:
@@ -609,7 +642,7 @@ def _append_held(name: str, data: bytes, *, durable: bool) -> range:
 def open_append(path: Path | str) -> IO[bytes]:
     """Created 0600, as the atomic writer's `mkstemp` is; `O_BINARY` keeps Windows from translating `\\n`."""
     flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
-    return os.fdopen(os.open(path, flags, 0o600), "ab")
+    return os.fdopen(_created(Path(path), lambda: os.open(_long_path(path), flags, 0o600)), "ab")
 
 
 def _landed(name: str, f: IO[bytes], data: bytes, *, durable: bool) -> range:

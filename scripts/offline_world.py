@@ -406,7 +406,7 @@ def _bundled_rates() -> dict[str, dict[str, Any]]:
 
 class Router:
     """The world: the backend and the n8n harness at their addresses, an LLM on any of its wires
-    and its key check, an empty model catalogue, Harbor's registry once one is published, the
+    and its key check, the model catalogue (empty unless a journey lists one), Harbor's registry once one is published, the
     upstream price list (the bundled floor unless a journey says what it lists), a sign-in provider's token endpoint
     once a journey says what it answers; anything else is named in `unrouted` and refused."""
 
@@ -415,6 +415,8 @@ class Router:
         self.backend = backend
         self.harness = FakeHarness()
         self.registry: list[dict[str, Any]] | None = None
+        # The model catalogue: empty unless a journey lists one, so a run reads the measured profiles.
+        self.catalogue: list[dict[str, Any]] = []
         # Upstream's rows, `provider/model` -> its per-token costs, as `refresh_rates` fetches them:
         # the bundled floor, unless a journey says what upstream lists.
         self.rates: dict[str, dict[str, Any]] = _bundled_rates()
@@ -436,8 +438,7 @@ class Router:
         elif u.path.endswith(LLM_WIRE):
             answered = self.llm.reply(request, json.loads(body))
         elif f"{u.netloc}{u.path}" == "openrouter.ai/api/v1/models":
-            # No model claims a capability, so a run reads the measured profiles alone.
-            answered = _json(200, {"data": []}, request)
+            answered = _json(200, {"data": self.catalogue}, request)
         elif request.method == "GET" and f"{u.scheme}://{u.netloc}{u.path}" in _key_checks():
             # Every key the world holds is one its provider accepts.
             answered = _json(200, {"data": []}, request)

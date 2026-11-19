@@ -19,7 +19,6 @@ from pydantic import TypeAdapter, model_validator
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import RunStart, refuse_campaign
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.run_observers import build_run_observers
@@ -119,7 +118,6 @@ async def spawn_job(held: HeldRun) -> asyncio.Task[None]:
 
 def _start(spec: JobSpec, log_path: Path) -> subprocess.Popen[bytes]:
     """The run's process, its spec on stdin; stdout is `_adoption`'s, stderr the job's log."""
-    log_path.parent.mkdir(parents=True, exist_ok=True)
     with open_append(log_path) as log:
         child = subprocess.Popen(
             [sys.executable, "-X", "utf8", "-m", __spec__.name],
@@ -305,16 +303,14 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     _tell_spawner()
     try:
         # Asked again here, under the claim: the admitting process's answer is a handoff old.
-        refuse_campaign(stores, campaign := stores.campaigns.campaign(spec.hop.campaign_id))
+        refuse_campaign(stores, (at := stores.campaigns.campaign_cycle(spec.hop)).campaign)
     except CampaignRefusedError as refused:
         # The job's refusal, never the cycle's stop: the cycle keeps the one it had.
         await asyncio.to_thread(start.release, refused)
         return StopOutcome.FAILED
     async with AsyncExitStack() as closing:
         try:
-            opened = await closing.enter_async_context(
-                ExistingCycle(CampaignCycle(campaign, spec.hop.cycle_id), Budget()).open(stores)
-            )
+            opened = await closing.enter_async_context(ExistingCycle(at, Budget()).open(stores))
         except BaseException as exc:  # noqa: BLE001
             await asyncio.to_thread(start.release, exc, stamps=spec.hop)
             return StopOutcome.FAILED

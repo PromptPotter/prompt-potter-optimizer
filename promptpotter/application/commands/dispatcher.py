@@ -12,9 +12,9 @@ from pydantic import BaseModel, TypeAdapter
 from promptpotter.application.cycle_addressing import resolve_cycle, resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.jobs.launcher.launch import Inline, LaunchOutcome
-from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.views.render.phase import stop_next_lines
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.command_events import (
     WORKSPACE_SUBJECT,
     CommandAckRecord,
@@ -507,7 +507,7 @@ class CommandDispatcher:
             return await CommandDispatcher(
                 leaf_stores, job_registry=self._attached, inline=self.inline
             )._on_cycle(replace(call, payload=_at_leaf(payload, leaf)), recorded)
-        at = CampaignCycle(self.stores.campaigns.campaign(hop.campaign_id), hop.cycle_id)
+        at = self.stores.campaigns.campaign_cycle(hop)
         if self.stores.campaigns.load(hop, moment=None) is None:
             raise NotFoundError(
                 f"cycle not found: {hop.campaign_id}/{hop.cycle_id}",

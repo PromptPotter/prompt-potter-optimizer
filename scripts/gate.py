@@ -243,6 +243,9 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/jobs/launcher/admission.py::deletable_stubs::CycleBusyError": (
         "a held stub is no deletable one"
     ),
+    "application/jobs/reaper.py::_reap::NotFoundError": (
+        "a cycle deleted under the sweep has no producer to declare ended; its sandbox is an orphan's"
+    ),
     "application/jobs/reaper.py::reclaim_orphan_sandboxes::OSError": (
         "a sandbox it cannot delete is the next sweep's"
     ),
