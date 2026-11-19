@@ -200,6 +200,7 @@ from promptpotter.domain.command_kinds import (
     ReadKind,
     SetApiKeyPayload,
     SetCampaignLabelPayload,
+    SetSampleLookaheadPayload,
     SetUserSettingsPayload,
     SkipSearchpointPayload,
     StartCheckinPayload,
@@ -4745,6 +4746,28 @@ async def test_one_refused_start_run_asked_in_process_is_the_value_every_door_re
         with pytest.raises(SystemExit):
             cli_main.main()
         assert sentence in capsys.readouterr().err, f"`{' '.join(argv)}` was not refused in it"
+
+
+def test_a_union_field_refused_at_every_door_is_one_entry_naming_its_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    queuing = JobRegistry(tmp_path / "queue", capacity=lambda _live: 0)
+    monkeypatch.setattr(app.state, "job_registry", queuing, raising=False)
+    pressed = {"campaign_id": "c", "cycle_id": "y", "cells": "bogus"}
+    with pytest.raises(PayloadInvalidError) as raised:
+        PayloadInvalidError.validating(SetSampleLookaheadPayload, pressed)
+    entries = raised.value.details["errors"]
+    assert [entry["loc"] for entry in entries] == [["cells"]], f"a branch per entry: {entries}"
+    assert "1" in entries[0]["msg"], f"the count's bound went unsaid: {entries}"
+    monkeypatch.setattr(settings_mod.settings, "PROMPTPOTTER_AUTH", "off")
+    signed_in = build_identity_bundle(default_identity_paths())
+    monkeypatch.setattr(app.state, "identity_bundle", signed_in, raising=False)
+    posted = TestClient(app).post(
+        f"/api/v1/commands/{CommandKind.SET_SAMPLE_LOOKAHEAD}",
+        json=pressed,
+        headers={"Idempotency-Key": uuid.uuid4().hex},
+    )
+    assert posted.json()["details"]["errors"] == entries, "REST refused the same field another way"
 
 
 def test_a_webapp_gate_runs_the_engine_checks_it_pulls_in_inside_the_pinned_venv() -> None:

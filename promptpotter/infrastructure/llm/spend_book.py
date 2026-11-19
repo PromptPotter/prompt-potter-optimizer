@@ -194,6 +194,12 @@ def _admits(left: float, each: float | None, reserve: bool) -> int:
     return n if reserve or each is None or left <= 0 else max(n, 1)
 
 
+def _said(count: SpendCount, billed: str) -> str:
+    """`counted`'s parts and the calls still out: the room a send and the stop both read."""
+    out = [f"{usd_text(count.out.usd_amount)} in calls still out"] if count.out.usd else []
+    return ", ".join(part for part in (count.words(billed), *out) if part)
+
+
 class LiveCycle(NamedTuple):
     """The cycle a live book re-reads at each send, through its store."""
 
@@ -367,17 +373,16 @@ class SpendBook:
 
     def counted_words(self) -> str:
         """A ceiling stop's detail: the share and the count it read, by part."""
-        said = self.count().words(CEILING_METER_LABELS[self.meters])
+        said = _said(self.count(), CEILING_METER_LABELS[self.meters])
         return f"the cycle's {money_text(self.allotment)} share counted {said}"
 
     def exhausted(self) -> ErrorCategory | None:
-        allotment = self.allotment
-        if allotment.usd is not None or allotment.tokens is not None:
-            counted = self.count().counted
-            if allotment.usd is not None and counted.usd_amount >= allotment.usd:
-                return ErrorCategory.SPEND_CEILING
-            if allotment.tokens is not None and counted.token_amount >= allotment.tokens:
-                return ErrorCategory.TOKEN_CEILING
+        """The share run out net of the calls still out, the remainder a send's room reads."""
+        share = self.money_left()
+        if share.usd is not None and share.usd <= 0:
+            return ErrorCategory.SPEND_CEILING
+        if share.tokens is not None and share.tokens <= 0:
+            return ErrorCategory.TOKEN_CEILING
         # The reserve is not asked: a run on the account's own keys outlives its coupon, and a
         # send on the box's key past it is refused where it is held (`refuse_unless_room`).
         left = self.clock_left()
@@ -530,10 +535,7 @@ class SpendBook:
             # Only a bounded axis refuses, so the cap it names is set.
             cap = bounds.usd_amount
             left = cap - count.counted.usd_amount - count.out.usd_amount
-            # The room is left past the calls out, too, so they are named beside `counted`'s parts.
-            out = [f"{usd_text(count.out.usd_amount)} in calls still out"] if count.out.usd else []
-            label = CEILING_METER_LABELS["bill" if reserve else self.meters]
-            said = ", ".join(part for part in (count.words(label), *out) if part)
+            said = _said(count, CEILING_METER_LABELS["bill" if reserve else self.meters])
             if left <= 0 or each.usd is None:
                 return f"{what} was not sent: the {usd_text(cap)} {limit} is used up ({said})"
             return (

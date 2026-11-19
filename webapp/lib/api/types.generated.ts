@@ -2413,8 +2413,8 @@ export interface CapReading {
   clamped_by: 'allowance' | null;
 }
 
-/** A spend book's count, by part, each an amount: the ceiling's stop reads
- * `counted`; a send's room reads `out` beside it. */
+/** A spend book's count, by part, each an amount: the ceiling's stop and a send's
+ * room both read `out` beside `counted`. */
 export interface SpendCount {
   /** Sent and billed, or priced off the rate table. */
   billed: Budget;
@@ -5676,7 +5676,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "927e463cc77c3045";
+export const SERVED_CONTRACT = "38ef4a6dd69a7534";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

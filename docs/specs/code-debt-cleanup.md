@@ -807,23 +807,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   and the inner chain. **Re-test:** pause an outer mid inner-round (operator 2026-11-18: seat #001
   of `promptpotter-self.run__54ccef`); the inner row reads its cut sends as unreported, never
   `$0.000`, and the outer's mirror matches.
-- **A payload refusal says no expected form** (small-10's report): `shared/errors.py::PayloadInvalidError`
-  lists pydantic's per-branch union errors ("cells.constrained-int: …; cells.literal['max']: …"), and
-  REST's 422 and every CLI verb read it; only `validating` holds the model's schema, so a CLI-side
-  renderer could not name "≥ 1". Action: `validating` folds each field's errors into one entry naming
-  its expected form from the model's JSON schema, for every door. **Re-test:**
-  `set-sample-lookahead bogus --campaign c --cycle y` in a fresh home reads "cells: a count ≥ 1 or max".
-- **The cap halts on money its served reading omits**: C0 `promptpotter-self.run__265c4d` (2026-11-18)
-  halted `spend_budget` inside round 1 while `dashboard` and `set-limits` served "$1.09 spent" of
-  $2.50. The book counted $1.09 billed + $1.11 unreported (52 lapsed cells, folded by
-  `read_model.py::Money.unreported_holds`: ~37 broken sends, 15 cut by the halt itself) + $0.18 set
-  aside for the bench, $2.38, so the cells still out (each held at its $0.02 bound) tipped it.
-  A send's room fired (`SpendBook.refuse_unless_room`, which counts calls out; `exhausted()` does
-  not, and read under $2.50 even after the halt's own lapses); a halt's words travel as its
-  `StopLoop` since `c1c6c8161`. Action (small-10's reading): `exhausted()` reads the remainder net
-  of the calls out, as `_room` and `refuse_unless_room` do, so a between-samples read also counts
-  the walk's own sends still out. **Rides with:** none yet. **Re-test:** after a cap halt,
-  `exhausted()` and `refuse_unless_room` agree on the book they read.
 - **The wallet read under the admission gate grows with the account's charges** (gate-hold's
   report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
   `campaign_spend` under the gate, admission's last scan that grows with history. Unmeasured.

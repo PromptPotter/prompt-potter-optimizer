@@ -17056,7 +17056,7 @@
       },
       "SpendCount": {
         "additionalProperties": false,
-        "description": "A spend book's count, by part, each an amount: the ceiling's stop reads `counted`; a send's\nroom reads `out` beside it.",
+        "description": "A spend book's count, by part, each an amount: the ceiling's stop and a send's room both\nread `out` beside `counted`.",
         "properties": {
           "billed": {
             "$ref": "#/components/schemas/Budget",

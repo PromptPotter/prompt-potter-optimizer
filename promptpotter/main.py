@@ -259,7 +259,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
         {**error, "loc": error["loc"][1:]} if error["loc"][:1] == ("body",) else error
         for error in exc.errors()
     )
-    return await potter_error_handler(request, PayloadInvalidError.refusing(located))
+    # The route's body model, so a union field refuses in the form `validating` names at every door.
+    body = getattr(request.scope.get("route"), "body_field", None)
+    body = body and body.field_info.annotation
+    model = body if isinstance(body, type) and issubclass(body, BaseModel) else None
+    return await potter_error_handler(request, PayloadInvalidError.refusing(located, model=model))
 
 
 _API = "/api/v1"

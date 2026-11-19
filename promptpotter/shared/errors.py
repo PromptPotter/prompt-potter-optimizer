@@ -374,10 +374,15 @@ class PayloadInvalidError(PotterError):
 
     @classmethod
     def refusing(
-        cls, errors: Iterable[Mapping[str, Any]], *, under: tuple[str, ...] = ()
+        cls,
+        errors: Iterable[Mapping[str, Any]],
+        *,
+        model: type[BaseModel] | None = None,
+        under: tuple[str, ...] = (),
     ) -> PayloadInvalidError:
-        """*under* locates a model validated inside a larger payload."""
-        found = _located(errors, under)
+        """*model* names the form a union field expects, one entry for all its branches; *under*
+        locates a model validated inside a larger payload."""
+        found = _located(errors, under, {} if model is None else model.model_json_schema())
         return cls(_said(found, shown=len(found)), details={"errors": found})
 
     @classmethod
@@ -388,7 +393,7 @@ class PayloadInvalidError(PotterError):
         try:
             return model.model_validate(fields)
         except ValidationError as exc:
-            raise cls.refusing(exc.errors(), under=under) from exc
+            raise cls.refusing(exc.errors(), model=model, under=under) from exc
 
 
 class SlugTakenError(ConflictError):
@@ -404,16 +409,56 @@ class SlugTakenError(ConflictError):
         self.suggested = suggested
 
 
-def _located(errors: Iterable[Mapping[str, Any]], under: tuple[str, ...]) -> list[dict[str, Any]]:
+def _located(
+    errors: Iterable[Mapping[str, Any]], under: tuple[str, ...], schema: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     """Each failing field by its path and rule, never its value (a refused field may be a secret);
-    a validator's own sentence where one raised."""
-    return [
-        {
-            "loc": [*under, *(str(part) for part in error["loc"])],
-            "msg": str(error["ctx"]["error"] if error["type"] == "value_error" else error["msg"]),
-        }
-        for error in errors
-    ]
+    a validator's own sentence where one raised; a union's branches as one entry, its form."""
+    found: list[dict[str, Any]] = []
+    defs = schema.get("$defs", {})
+    for error in errors:
+        depth, field = _field(schema, error["loc"], defs)
+        union = depth < len(error["loc"]) and "anyOf" in field
+        loc = [*under, *(str(part) for part in error["loc"][: depth if union else None])]
+        said = error["ctx"]["error"] if error["type"] == "value_error" else error["msg"]
+        if not union or all(entry["loc"] != loc for entry in found):
+            found.append({"loc": loc, "msg": _form(field, defs) if union else str(said)})
+    return found
+
+
+def _resolved(node: Mapping[str, Any], defs: Mapping[str, Any]) -> Mapping[str, Any]:
+    return defs[node["$ref"].rsplit("/", 1)[-1]] if "$ref" in node else node
+
+
+def _field(
+    schema: Mapping[str, Any], loc: Iterable[object], defs: Mapping[str, Any]
+) -> tuple[int, Mapping[str, Any]]:
+    """How much of *loc* names fields, and the deepest one's schema; past it, a union's branch tag."""
+    node, depth = _resolved(schema, defs), 0
+    for part in loc:
+        branches = [
+            _resolved(branch, defs).get("properties", {}) for branch in node.get("anyOf", [node])
+        ]
+        if not (named := [fields[part] for fields in branches if part in fields]):
+            break
+        node, depth = _resolved(named[0], defs), depth + 1
+    return depth, node
+
+
+def _form(node: Mapping[str, Any], defs: Mapping[str, Any]) -> str:
+    """The form *node* admits, in a reader's words: each branch of a union, a number's bounds."""
+    node = _resolved(node, defs)
+    if "anyOf" in node:
+        return " or ".join(_form(branch, defs) for branch in node["anyOf"])
+    if "const" in node or "enum" in node:
+        return " or ".join(map(str, node.get("enum", [node.get("const")])))
+    kind = node.get("type") or f"a {node.get('title', 'mapping')}"
+    bounds = "".join(f" {sign} {node[k]}" for k, sign in _BOUNDS if k in node)
+    return _NOUNS.get(kind, kind) + bounds
+
+
+_NOUNS = {"integer": "a count", "number": "a number", "string": "a text"}
+_BOUNDS = (("minimum", "≥"), ("exclusiveMinimum", ">"), ("maximum", "≤"), ("exclusiveMaximum", "<"))
 
 
 def _said(found: list[dict[str, Any]], *, shown: int) -> str:
@@ -424,7 +469,7 @@ def _said(found: list[dict[str, Any]], *, shown: int) -> str:
 
 
 def validation_reason(exc: ValidationError, *, shown: int) -> str:
-    return _said(_located(exc.errors(include_input=False, include_url=False), ()), shown=shown)
+    return _said(_located(exc.errors(include_input=False, include_url=False), (), {}), shown=shown)
 
 
 class ServiceUnavailableError(PotterError):

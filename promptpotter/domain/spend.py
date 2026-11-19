@@ -354,8 +354,8 @@ NOTHING_METERED = Budget.amount(0.0, 0)
 
 
 class SpendCount(FrozenModel):
-    """A spend book's count, by part, each an amount: the ceiling's stop reads `counted`; a send's
-    room reads `out` beside it."""
+    """A spend book's count, by part, each an amount: the ceiling's stop and a send's room both
+    read `out` beside `counted`."""
 
     billed: Budget = Field(description="Sent and billed, or priced off the rate table.")
     unreported: Budget = Field(

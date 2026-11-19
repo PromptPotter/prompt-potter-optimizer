@@ -2676,11 +2676,13 @@ def test_every_level_holds_a_sends_whole_bound_whatever_such_sends_billed_before
         ]
         with pytest.raises(SendRefusedError):
             own.hold(worst, _CELL, what="cell", paid_by="host", ledger="cells.jsonl")
-        billed = 0
-        while own.exhausted() is None:
-            own.charges.append(_bill(held.pop(), worst.usd or 0.0))
-            billed += 1
-        assert billed == 4, f"reserve {reserve}: the run stops on reaching its ceiling"
+        # The stop reads the room the refused send read: the calls out fill the share.
+        assert own.exhausted() is ErrorCategory.SPEND_CEILING, (
+            f"reserve {reserve}: no stop at a full room"
+        )
+        for hold in held:
+            own.charges.append(_bill(hold, worst.usd or 0.0))
+        assert own.exhausted() is ErrorCategory.SPEND_CEILING, f"reserve {reserve}: billed, no stop"
 
 
 # Each call's hold is read after the bills before it: the mean moves with every one.
