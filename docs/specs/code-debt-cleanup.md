@@ -829,6 +829,17 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   ids without end. `clean_reask` heals it at a full call's price. Action: attribute one banked
   payload by block, then a tighter prompt bounds the cluster body (CLAUDE.md: the prompt, not a cap).
   **Re-test:** the three banked inputs re-asked under the new prompt finish `stop`.
+- **`l1_generate` re-proposes an arm the race already measured, and its re-race buys no evidence**
+  (census 2026-11-19 over 113 inner cells): 94 arms raced in round r+1 on round r's identical rows,
+  every row cached, 82 of them with a positive in-race lift. Potter keeps no survivors (a round's
+  population is its parent), so each is `l1_generate` at temperature 0 re-emitting a measured arm
+  verbatim (an id is its content) after a round that crowned nothing: a variant slot whose verdict
+  cannot move. Case: `bbh-multistep-arithmetic-8b__2d64a7` round 3 proposal 0 is round 2's
+  `e35a6671e62a0fb4`, +13 over its crown on 150 fixed rows, never crowned. **Held:** the fork, refuse
+  a measured id at the child door (the slot goes to a new idea) or read a re-proposed arm on fresh
+  rows (the re-proposal becomes evidence). Free first: replay that arm against its crown through
+  `candidate_abilities` and `elect_round_winner` at 40, 80 and 120 rows, which prices the second.
+  **Re-test:** no inner round races an arm on rows an earlier round already read it on.
 
 ## Held — no wave-4 chain yet
 
