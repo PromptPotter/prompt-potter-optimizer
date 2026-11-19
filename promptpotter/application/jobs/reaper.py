@@ -9,7 +9,7 @@ from promptpotter.application.jobs.quota import reap_dead_runs
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.config.paths import jobs_dir
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
-from promptpotter.infrastructure.llm.pricing import refresh_route_answers
+from promptpotter.infrastructure.llm.pricing import refresh_rates, refresh_route_answers
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.layout import (
     campaigns_root_dir_for,
@@ -24,7 +24,8 @@ from promptpotter.shared.errors import FileUnreadableError, NotFoundError, fault
 SWEEP_EVERY_S = 900.0
 
 # The periodic steps, each recording its last pass (`JobRegistry.record_pass`), any process's.
-SWEEP_STEP, ROUTE_ANSWERS_STEP = "sweep", "route-answers"
+SWEEP_STEP, ROUTE_ANSWERS_STEP, RATES_STEP = "sweep", "route-answers", "rates"
+_PRICES = ((RATES_STEP, refresh_rates), (ROUTE_ANSWERS_STEP, refresh_route_answers))
 
 
 def reclaim_orphan_sandboxes(projects_root: Path) -> int:
@@ -94,13 +95,13 @@ def sweep(projects_root: Path) -> None:
 
 
 async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY_S) -> None:
-    """The reclaim, then the route answers every process's fetch wrote: this loop is their one
-    refresher (`pricing.refresh_route_answers`). At boot the answers alone, so a restart serves no
-    day-old one; the reclaim waits a tick: every read derives what a dead producer left, so no first
-    page waits on it."""
+    """The reclaim, then the prices: the home's rates, so an API that launches nothing prices off a
+    list at most a day old, and the route answers, whose one refresher this loop is. At boot the
+    prices alone, so a restart serves no day-old one; the reclaim waits a tick: every read derives
+    what a dead producer left, so no first page waits on it."""
     jobs = JobRegistry.attach(jobs_dir(projects_root))
-    refresh = (ROUTE_ANSWERS_STEP, functools.partial(_refreshed, jobs))
-    steps: tuple[tuple[str, Callable[[], None]], ...] = (refresh,)
+    refresh = tuple((name, functools.partial(_refreshed, jobs, name, fn)) for name, fn in _PRICES)
+    steps: tuple[tuple[str, Callable[[], None]], ...] = refresh
     while True:
         for name, step in steps:
             # A raising step must not END the loop, nor skip the other: each would stop for the
@@ -110,9 +111,9 @@ async def periodic_sweep(projects_root: Path, *, interval_s: float = SWEEP_EVERY
             except Exception as fault:  # noqa: BLE001
                 jobs.record_pass(name, [fault_said(fault)[0]])
         await asyncio.sleep(interval_s)
-        steps = ((SWEEP_STEP, functools.partial(sweep, projects_root)), refresh)
+        steps = ((SWEEP_STEP, functools.partial(sweep, projects_root)), *refresh)
 
 
-def _refreshed(jobs: JobRegistry) -> None:
-    refresh_route_answers()
-    jobs.record_pass(ROUTE_ANSWERS_STEP, ())
+def _refreshed(jobs: JobRegistry, step: str, prices: Callable[[], object]) -> None:
+    prices()
+    jobs.record_pass(step, ())

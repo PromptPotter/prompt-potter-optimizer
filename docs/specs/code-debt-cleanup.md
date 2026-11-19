@@ -775,17 +775,18 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `test_security.py` built ledgers, locks and homes under paths nothing minted and passed because io
   made dirs. Root: test homes mint through `factories.workspace`. **Rides with:** tests-x.
 
-### wave-5 · rates (what rates-1 left at its landing)
+### wave-5 · rates (what rates-2 left at its landing)
 
-- **The rates refresh is keyed on the process, the rates on the home** (rates-1's report):
-  `pricing.py::refresh_rates_once` is a `functools.cache` in front of `refresh_rates`, whose file
-  mtime is already the once-a-day key. An API process that launches nothing prices `paid_call`,
-  `paid_pass` and capability reads off a `rates.json` a day stale, a long-lived embedded host never
-  refreshes after its first launch, and a fact fetches or not by what an earlier fact in the
-  process did (`test_security.py:3276` patches `pricing.cache_path` for it). Root: the refresh
-  belongs to the rates file's owner, keyed on the file, and the API's `reaper.py::periodic_sweep`
-  owns it there. **Re-test:** an API process with no launch refreshes a day-old `rates.json`;
-  `git grep -c "cache_clear" -- tests` is 0.
+- **A dead price list is said nowhere** (rates-2's report): `pricing.py::refresh_rates` logs a
+  failed fetch, stamps the rates file fresh and returns `False`; the sweep's `rates` step
+  (`reaper.py::_refreshed`) records a clean pass, and the stamp keeps every later tick clean for a
+  day, so `machine-status` never says upstream is dead and spend prices off a list of unknown age.
+  Root: the refresh answers the fault it hit, and the rates file's age (the last SUCCESSFUL fetch)
+  is a served fact beside the step's pass. **Re-test:** with upstream unreachable, `machine-status`
+  names the rates step's fault and the list's age for as long as it lasts.
+- **The offline world has no dead upstream** (rates-2's report): `offline_world.py` offers no
+  "upstream unreachable" switch and no fetch count, so a fact patches `pricing.UPSTREAM_URL` and
+  reads `Router.unrouted`, a set. **Rides with:** tests-x.
 
 ### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
 

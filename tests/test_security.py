@@ -303,7 +303,6 @@ from promptpotter.infrastructure.identity.oidc import (
 )
 from promptpotter.infrastructure.identity.tokens import MAX_LIVE_TOKENS, ApiToken, mint_token
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm import pricing
 from promptpotter.infrastructure.producer_lock import hold_cycle, minted_producer, release_cycle
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.run_state import derive_run_state
@@ -3266,14 +3265,13 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
 
 @pytest.mark.usefixtures("optimizing_memory")
 async def test_a_process_that_loaded_no_optimizer_still_proves_a_ledger_banking_ones_state(
-    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
+    built_stores: Stores, tmp_path: Path, offline: Router
 ) -> None:
     campaigns, data_root = built_stores.campaigns, built_stores.projects_root.parent
     banked = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle_banked")
-    # The cycle whose bank the close reads opens in a tree of its own: its install and fetched price
-    # list are no files of the landing under proof.
+    # The cycle whose bank the close reads opens in a tree of its own: its install is no file of the
+    # landing under proof.
     beside = workspace(tmp_path.parent / f"{tmp_path.name}-init")
-    monkeypatch.setattr(pricing, "cache_path", lambda: beside.projects_root / "rates.json")
     stored_campaign(built_stores, minted_campaign(banked))
     close_round(
         CycleEventLog.open(CycleDir(campaigns.cycle_dir(banked))),

@@ -7,6 +7,7 @@ import contextlib
 import functools
 import json
 import logging
+import os
 import time
 import urllib.error
 import urllib.request
@@ -120,37 +121,30 @@ def cache_path() -> Path:
 
 
 def refresh_rates(*, force: bool = False) -> bool:
+    """Every process that prices calls it, a launch and the API's sweep: the home's rates file is the
+    once-a-day key, and a failed fetch stamps it too, so a dead upstream costs one timeout a day."""
+    path = cache_path()
     with contextlib.suppress(OSError):
-        if not force and time.time() - cache_path().stat().st_mtime < _TTL_SECONDS:
+        if not force and time.time() - path.stat().st_mtime < _TTL_SECONDS:
             return True
     try:
         with urllib.request.urlopen(UPSTREAM_URL, timeout=_FETCH_TIMEOUT_S) as resp:
             payload = resp.read(_MAX_BODY_BYTES + 1)
         if len(payload) > _MAX_BODY_BYTES:
-            logger.warning(
-                "spend: upstream payload exceeded %d bytes; skipping refresh",
-                _MAX_BODY_BYTES,
-            )
-            return False
+            raise ValueError(f"payload exceeded {_MAX_BODY_BYTES} bytes")
         raw = json.loads(payload.decode("utf-8"))
-    except (urllib.error.URLError, OSError, TimeoutError, json.JSONDecodeError) as exc:
-        logger.warning(
-            "spend: rate refresh from %s failed (%s); using prior cache or bundled floor",
-            UPSTREAM_URL,
-            exc,
-        )
+    except (OSError, ValueError) as exc:
+        logger.warning("spend: rate refresh from %s failed (%s); prior or floor", UPSTREAM_URL, exc)
+        try:
+            os.utime(path)
+        except FileNotFoundError:  # The floor prices alone, as it did.
+            write_text(path, RatesFile(models={}).model_dump_json())
         return False
 
     stripped = _strip_upstream(raw)
-    write_text(cache_path(), stripped.model_dump_json(exclude_none=True))
-    logger.info("spend: refreshed %d model rates → %s", len(stripped.models), cache_path())
+    write_text(path, stripped.model_dump_json(exclude_none=True))
+    logger.info("spend: refreshed %d model rates → %s", len(stripped.models), path)
     return True
-
-
-@functools.cache
-def refresh_rates_once() -> bool:
-    """The process's first launch awaits it, every later one reads what it fetched; no thread."""
-    return refresh_rates()
 
 
 def _read_rates(path: Path | None) -> dict[str, RateBody]:
