@@ -87,7 +87,7 @@ from promptpotter.infrastructure.store.stores import (
 )
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PotterError
-from promptpotter.shared.hashing import normalized_module, stable_hash
+from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.import_walk import import_closure
 from promptpotter.shared.named_rows import walked
 
@@ -516,15 +516,11 @@ def _ran(schema: object, modules: set[str]) -> None:
         modules.add(inspect.unwrap(getattr(schema, "func", schema)).__module__)
 
 
-def _loads(model: object, modules: set[str]) -> None:
-    for one in model.registered().values() if isinstance(model, KindTable) else (model,):
-        _ran(TypeAdapter(one).core_schema, modules)
-
-
-def loading_modules() -> dict[str, Path]:
-    """Every package module whose code a load runs: the import closure of each row's reader and
-    the validators and models its shape builds (a ledger row's every record kind, each state kind
-    a record nests), and of every migration."""
+def loading_modules() -> dict[str, str]:
+    """Every package module whose code a load runs, less its prose: the import closure of each row's reader and
+    the validators and models its shape builds, and of every migration. A load dispatches by name
+    through a `KindTable` alone (a ledger line's record kind, a state kind a record nests), so
+    every table's every kind is walked: the importlib loads that registered them, never."""
     modules: set[str] = set()
     for kind in KINDS:
         if isinstance(kind.shape, TypeAdapter):
@@ -532,8 +528,10 @@ def loading_modules() -> dict[str, Path]:
         elif isinstance(kind.shape, Parsed | FoldedLines):
             # A parsed or a folded row's reader is its shape's first field.
             _ran(kind.shape[0], modules)
-            _loads(kind.shape.model, modules)
-    _loads(STATE_KINDS, modules)
+            if not isinstance(kind.shape.model, KindTable):
+                _ran(TypeAdapter(kind.shape.model).core_schema, modules)
+    for table in KindTable.every:
+        _ran([TypeAdapter(one).core_schema for one in table.registered().values()], modules)
     _ran(list(MIGRATIONS.values()), modules)
     return import_closure(modules)
 
@@ -543,11 +541,7 @@ def landing_key() -> str:
     """Every row's patterns, fate and shape, and the code of every module a load runs, less its
     prose: a helper a validator calls changes what loads as surely as a field does."""
     rows = {kind.name: row_schema(kind) for kind in KINDS}
-    code = {
-        name: normalized_module(path.read_text(encoding="utf-8"))
-        for name, path in loading_modules().items()
-    }
-    return stable_hash({"rows": rows, "code": code}, length=16)
+    return stable_hash({"rows": rows, "code": loading_modules()}, length=16)
 
 
 def _stamp(projects_root: Path) -> Path:

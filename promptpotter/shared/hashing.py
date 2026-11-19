@@ -38,10 +38,14 @@ def _is_prose(stmt: ast.stmt) -> bool:
     )
 
 
-def _normalized_source(tree: ast.AST) -> str:
-    """Documenting, reformatting or relocating a name is free; rebinding one moves the digest."""
+def normalized_tree(tree: ast.Module) -> str:
+    """Documenting, reformatting or relocating a name is free; rebinding one moves the digest.
+    Edits *tree*: its caller is done reading it."""
     bindings: set[tuple[str, str]] = set()
-    for node in ast.walk(tree):
+    # Only a statement holds a body, so no expression is walked.
+    todo: list[ast.AST] = [tree]
+    while todo:
+        node = todo.pop()
         for field in ("body", "orelse", "finalbody"):
             stmts = getattr(node, field, None)
             if isinstance(stmts, list):
@@ -57,6 +61,12 @@ def _normalized_source(tree: ast.AST) -> str:
         body = getattr(node, "body", None)
         if isinstance(body, list) and not body:
             body.append(ast.Pass())
+        todo.extend(
+            child
+            for field in ("body", "orelse", "finalbody", "handlers", "cases")
+            for child in getattr(node, field, None) or ()
+            if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
+        )
     return f"{sorted(bindings)}\n{ast.unparse(tree)}"
 
 
@@ -69,7 +79,7 @@ def module_source_digest(*modules: ModuleType) -> str:
 @functools.cache
 def normalized_module(text: str) -> str:
     """Memoized on the text, never the module: an edit on disk is never answered by an older read."""
-    return _normalized_source(ast.parse(text))
+    return normalized_tree(ast.parse(text))
 
 
 def stable_hash(value: Any, *, length: int = ID_HEX) -> str:
