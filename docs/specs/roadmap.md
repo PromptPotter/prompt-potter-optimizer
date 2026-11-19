@@ -569,13 +569,25 @@ each moving what the loop decides ([`../developer/offline-run.md`](../developer/
 - **Lock in only past an anytime-valid bound**, a mixture likelihood ratio on θ at α/K per arm, reading
   the verdict direction as the election does and the parent pair on cells the parent's grades did not
   choose.
-- **The standing pick's evidence pools across rounds**, and **a near-miss carries forward** into the
-  next round's panel.
+- **The standing pick's evidence pools across rounds.** A near-miss does not carry forward: a round's
+  race buys its evidence up to the round's cap, and a leader short of the bar there is dropped
+  (operator 2026-11-19; the keep in `potter/election.py` goes in W1).
 
 **Closes when** an offline replay elects no pick its later reads as parent contradict, and the pilot's
 equal-arms simulation shows false locks at the stated level. **Open:**
 - **Tie-breaking at budget cap.** Top 2–3 at similar `P(best)`: ship pick-by-point-estimate; design a
   cap-extension policy after seeing how often it fires.
+- **Sample more, or accept the false negative?** At the cap a real lead can be dropped; the bar
+  accepts that, since a false crown costs more than a missed one. The optimum stops where one more
+  row's price exceeds its chance of flipping the verdict times the crown's value, compounded over the
+  rounds that build on it: Bayesian optimal stopping with a sampling cost, a free-boundary problem in
+  continuous time. `pick_value`'s `decision_information_gain` already prices the flip; the missing
+  term is a crown's value in the same currency. First evidence: L4's 40- against 80-row inner race.
+  **Ships as a switch** (operator 2026-11-19), off = today's cap-and-drop, so the paper runs it as an
+  ablation: on, the race keeps reading a near-bar arm while the best value of its next rows exceeds
+  their price. A crown's value is calibrated, as a unit is: the gain a crown bought later rounds in
+  banked campaigns, in rows of price, re-measured as the bank grows. A design chain after W1; the
+  knob lands in a window, since a `defaults.yaml` entry moves the address.
 
 ## Host assistant
 

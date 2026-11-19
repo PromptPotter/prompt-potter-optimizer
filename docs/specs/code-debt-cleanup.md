@@ -15,11 +15,6 @@ row it closes.
 
 ### batch/26 · admit-2 (links 1-5 landed; the rows its cap left)
 
-- **A cycle's hold is released twice on every normal exit**: `runner/entry.py`'s `finally` releases a
-  hold `drain_all` already released, so `run_phase_control.py::ProducerHold.release` keeps a double-release
-  guard. Action: `drain_all` only drains; the release is the `finally`'s and the fork handoff's. This
-  keeps the parent cycle attached through the fork mint, which moves `account_spend`'s holds, so it
-  needs its own proof. **Re-test:** `ProducerHold.release` holds no already-released branch.
 - **A seat refused before it runs keeps its observers**: `runner/inner/spawn.py` (~:364) never releases
   the observers it opened when `admission.py::slotless_share` refuses. Action: the observers open after
   admission, or close on its refusal. **Rides with:** the slotless-doors row below. **Re-test:** a test
@@ -33,12 +28,12 @@ row it closes.
   **Rides with:** admit-2, whose Owns gain `runner/inner/spawn.py::_open_seat`. **Re-test:**
   `git grep -n "slotless_share(" -- promptpotter/application` lists no opener of its own.
 - **A start's release is still hand-rolled at each start site**: `admission.py::RunStart.release` is the
-  one release, but 12 `except BaseException: … release(exc)` blocks across `jobs/launcher/`,
-  `commands/launching.py` and `embedded_run.py` call it by hand, and `jobs/launcher/head_to_head.py::AdmittedHeadToHead.launched`
+  one release, but 8 `except BaseException: … release(exc)` blocks across `jobs/launcher/` and
+  `commands/launching.py`, and `embedded_run.py`'s `to_thread(start.release, exc`, call it by hand, and `jobs/launcher/head_to_head.py::AdmittedHeadToHead.launched`
   and `embedded_run.py::run_head_to_head` each release the arms not yet run after a failure (no arm set
   owns its starts). Action: the one `open_cycle` lifecycle owns the start's release; a context manager is
   the patch, not the root. **Rides with:** admit-2. **Re-test:** `git grep -c "release(exc" -- promptpotter/application`
-  falls from 12.
+  falls from 8.
 - **A fork's cut lands before its admission**: `commands/launching.py` cuts the child
   (`cut_operator_fork`) before `_launch_fork` admits on the request's own hop, so a refusal leaves the
   parent's inert `FORK_CUT` line, because `jobs/quota.py::_new_campaign` counts an unresolved hop as a
@@ -65,8 +60,9 @@ row it closes.
   open their own session but file no `CommandRecord`; `run_campaign` admits through
   `admission.py::slotless_share` and mints itself, because a DSPy `program` is an in-memory object no
   payload carries. Action: `run_campaign` files `mint-campaign` or `start-run` with an `EmbeddedRun`
-  holder, the program held by the filing process. **Rides with:** admit-2. **Re-test:**
-  `git grep -n "slotless_share(" -- promptpotter/application/embedded_run.py` is empty.
+  holder, the program held by the filing process. **Rides with:** admit-2. **Re-test:** an embedded
+  `run_campaign` leaves a `CommandRecord` in the commands log (today `commands/dispatcher.py` builds the
+  only one, and `run_campaign` and `run_head_to_head` file none).
 - **A queued launch dies with the asking process**: the queue wait runs in the caller
   (`jobs/launcher/launch.py`). Action (the operator, 2026-11-11): a queued launch is a job on disk; the
   job file holds the principal's id, never a credential, and `jobs/registry.py::claim_next`'s promoter
@@ -79,7 +75,7 @@ row it closes.
   equals-main, so it lands with a paid L4 re-measure. **Rides with:** admit-2, whose Owns hold
   `spawn.py::_open_seat`. **Re-test:** `git grep -n "mint(\|slotless_share(" -- promptpotter/application/runner/inner/spawn.py`
   lists the admission before the mint.
-- **Three launch faults from a code review (reported; verify each at its line first)**: `jobs/head_to_head.py:178`
+- **Three launch faults from a code review (reported; verify each at its line first)**: `jobs/launcher/head_to_head.py:178`
   leaves a partial mint's arms unstamped, so a retry refuses `arm_taken`; `mint_and_start.py:108` and
   `checkin.py:93` leak the `BackendClient` they open when the mint is refused; ties between
   launches broken on a random `job_id` can refuse two head-to-head arms with one stamp each other
@@ -248,8 +244,9 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
   the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleStart`,
   `dict[str, dict[str, Any]]` on `ForkStart`, which carries a null clear and text a `NodeCall` refuses
-  before the schema types it). Action: one typed node document with knobs a view on it; the steer a
-  named layer. It closes ren 8's node-config census and the pipeline-switch row. **Rides with:** cfg.
+  before the schema types it), and schema, parsing, overlay and knobs each hold a view of the document
+  (~11 modules). Action: one typed node document with knobs a view on it; the steer a named layer. It
+  closes the pipeline-switch row. **Rides with:** cfg.
 - **Potter's demo axis is dead wherever a dataset holds out no demo pool**: the derived coupling
   `l1_generate.shots_without_demo_pool` (`application/config_map.py::_draw_couplings`) now badges every default potter
   campaign, because `defaults.yaml` holds out no `dataset_split.demo` and only justlogic declares one
@@ -303,7 +300,8 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **A rename re-keys every banked L4 cell's treatment**: the cell estimator is the L4 leg's behaviour
   (`nodes.py::BehaviourKeys.cell_estimator`), but `nodes.py::behaviour_key` still hashes each
   optimizer package's source into `InnerTaskSpec.optimizer_treatment`, so ren's renames moved all five
-  treatment digests, every request byte-identical. Root: a treatment keyed by its fingerprint alone.
+  treatment digests, every request byte-identical, and l4-outer-6's `Frontier` → `Parent` re-keyed
+  every banked cell for potter, capo-pobb and gepa. Root: a treatment keyed by its fingerprint alone.
   **Rides with:** bkeys-2. **Re-test:** a rename in `optimizers/potter/` leaves `treatment:potter`
   (`offline_run.py --digests`) unchanged.
 - **The trace hashes a display field** (rec's landing, reported): `MemberAddress.pass_role` has no
@@ -439,9 +437,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
   not a listed entry; it shares a base, not the listed one's acts. **Re-test:** the deep read's
   inner campaign serves no `delete`.
 - **A round's own arms are spelled beside `MeasurementRole.is_proposal`** (live-3f's report):
-  `scoring/passes.py:266`, `domain/run_standing.py:444`, `store/lineage_queries.py:184,203` still
-  write `role != MeasurementRole.PARENT`. Action: each asks `is_proposal`. **Re-test:**
-  `git grep -c "!= MeasurementRole.PARENT" -- promptpotter` is 0.
+  `scoring/passes.py:268`, `domain/arms.py:139`, `domain/run_standing.py:444` and
+  `store/lineage_queries.py:184` still write `role != MeasurementRole.PARENT`, and
+  `resume_and_fork/fork_siblings.py:123` `is not`. Action: each asks `is_proposal`. **Re-test:**
+  `git grep -lE "(!=|is not) MeasurementRole.PARENT" -- promptpotter` names `shared/measurement_context.py` alone.
 
 ### batch/28 · lb
 
@@ -642,15 +641,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **The capo offline bench turns on one seed**: lift +0.700 or none after a draw-order change. Action: it
   reads two seeds. **Rides with:** ts-score 3.
 
-### batch/32 · ren
-
-Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** the old word's
-`git grep -c` for that sense is 0.
-
-- **Node config is one document read through ~11 modules**: schema, parsing, overlay and knobs each
-  hold a view of it after landing 30's one layered read. Action: one model of the node document with
-  knobs a view on it. **Rides with:** cfg (its declared merge rule).
-
 ### batch/32 · rel
 
 - **Vitest's start still meets load from outside the gate lock**: inside a gate it starts beside no
@@ -672,9 +662,9 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   382 of ~10k a 25-s run), an immediate re-open included, which is a silent wrong read. **Held:** a
   design whose reader never reads a present file as absent; the box (Linux) is untouched.
   **Rides with:** rel 2. **Re-test:** the hammer, 0 refused writes and 0 absent reads.
-- **Run data is stat'ed bare outside `store/io.py`**: six
-  `.stat()` sites (`optimizer_manifest.py:96`, `pricing.py:114`, `event_stream.py:49`,
-  `run_state.py:39`, `measurement_archive.py:480`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
+- **Run data is stat'ed bare outside `store/io.py`**: five
+  `.stat()` sites (`optimizer_manifest.py:91`, `event_stream.py:53`,
+  `run_state.py:74`, `measurement_archive.py:475`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
   past `MAX_PATH` reads as absent. Root: the data root spelled once in its long form (`config/paths.py`),
   so every derived path carries it; `scripts/processes.py::long_path` (`a46a02722`, the gate's cache root
   alone) is a second speller beside `store/io.py::_long_path`, and goes with it, or its definition says
@@ -833,9 +823,97 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   124 inner cells, 104 rounds carried a kept leader and 104 of 104 re-read only rows it had read, so
   its verdict cannot move. Case: `bbh-multistep-arithmetic-8b__2d64a7`'s `e35a6671e62a0fb4`, which
   picked on 75 of judge 2's rows and elected by the round's own election on 75 others crowns in 84%
-  of splits. Root: the keep makes the next round read rows its leader has not read. It moves potter's
-  decisions and costs L4 the cached re-reads (up to 2 × 40 paid rows per held round). **Held:** the
-  operator's yes on that cost. **Re-test:** no kept leader races only rows it has read.
+  of splits. Root (operator 2026-11-19): evidence is bought in one place, the round's race, up to the
+  round's cap; a leader short of the bar there is dropped, a false negative the bar accepts. The keep
+  goes, its `ranked` branch with it; a round that crowns nothing hands on its parent alone. It moves
+  potter's decisions (W1 · potter-w1). Whether to read past the cap is the roadmap's open "Sample
+  more, or accept the false negative?". **Re-test:** `git grep -c _kept_for_a_fresh_read -- promptpotter`
+  is 0.
+
+### wave-5 · drift (the 2026-11-19 backbone hunt)
+
+These land in the re-key windows, `W1` (keys, address, cell key and archive row, one wipe) and `W2`
+(ledger record shapes), each row naming its window and chain.
+
+- **Served words are written to the ledger, and two digests read them: a banked proposal's and the
+  behaviour keys'**: `domain/paired_reading.py::Estimate` dumps three `@computed_field`s (`band`,
+  `point`, `text`; its module allows one) and reads back on `extra="ignore"`: 14,201 desk
+  `sample_scored` records carry them, and six other kinds. `results.py::round_document_digest` hashes
+  them into `consumed` (`round.py::operator_arms`, `resume.py::_stale_generation`) and
+  `offline_run.py::LEDGER_KEYS` keeps `election.fit` whole, so a `lift_text` edit stales every banked
+  proposal and re-keys `behaviour_keys.json`. New beside "The trace hashes a display field": the stored
+  form, and `consumed`, which no trace filter reaches. Root: a stored model holds facts, a served one
+  words them. **Window:** W1 · bkeys-3. **Re-test:** an `Estimate`'s `model_dump(mode="json")` holds no `band`, `point` or `text`.
+- **An inner campaign's id is 24 bits of its content**: `runner/inner/spawn.py::inner_campaign_id`
+  cuts `stable_hash([spec.key(), resolved_overrides(overrides)], length=6)`, and `_open_seat` lets the
+  campaign that exists decide, so two `(cell, arm edit)` pairs on one id continue one campaign
+  (`_continue_inner_campaign`: a drift refusal or a divergence fork, never a fresh mint). One desk
+  sandbox holds 92 inner campaigns (birthday bound ~0.03 %, ~3 % at 1,000 cells; no collision seen),
+  and the id is what `InnerRunAddress.campaign_id` files in the archive. Root: a content-derived id is
+  cut at the width its population needs (12 hex, as a root cycle id); every inner campaign directory
+  renames. **Window:** W1 · l4-key, with the row below. **Re-test:** `git grep -n "length=6" -- promptpotter/application/runner/inner/spawn.py` is empty.
+- **An archived answer carries its run's vocabulary and its run's address, and both are run data**:
+  the CACHE row's `domain/l4/inner_facts.py::InnerCellFacts` holds `stop_reason: StopReason`, a
+  `floor_reason` sentence and `run: InnerRunAddress`, so a `StopReason` rename fails every archived
+  cell that stopped on it; `domain/sample.py::FiledAnswer.filed_by` is `CycleHop | None` (11,997 desk
+  rows unstamped, `archive_maintenance.py::_UNSTAMPED`), carries no `Job.workspace`, and on 48,589 of
+  111,614 stamped rows names a wiped campaign. New beside "`floor_reason` and the bench read different
+  rounds" and "The abort knob and the floor disagree": those say what it says, this that it is filed. Root: an archived cell holds what was measured, not its run's enum or
+  address; one strict reshape with "An archived answer's outputs are read off today's backend", a row
+  that no longer fits dropped. **Window:** W1 · l4-key. **Re-test:** `git grep -nE "StopReason|filed_by: CycleHop \| None" -- promptpotter/domain/l4/inner_facts.py promptpotter/domain/sample.py` is empty.
+- **The archive is a cache no landing proves: its row reads tolerant, its nested facts strict**:
+  `store/data_root.py::_ARCHIVE_SHAPES` proves a cell file by `Parsed(answer_of, FiledAnswer)`, deaf
+  to undeclared keys (`domain/scoring.py::MeasuredCell.from_wire`) over an open `cell_report`, while
+  `domain/l4/proxies.py::inner_facts_of` reads `InnerCellFacts` on `extra="forbid"`: on the desk
+  `FiledAnswer` loads 123,611 of 123,611 rows and `inner_facts_of` raises on 50 of 325 L4 outer cells
+  (four `cell_report.inner` generations; 6,582 rows keep a retired `source`). New beside "An archived
+  L4 outer cell carries no `floored`": the proof stops at `FiledAnswer`, so no landing says it. Root:
+  the row's `Shape` is its one strict reader, nested reports typed by their connector; a row that no
+  longer loads is dropped at the landing, said. **Window:** W1 · l4-key, last. **Re-test:** does `compact-archive inventory` on a copy of the desk root read every L4 outer cell without a `ValidationError`?
+- **A race decision names its own cells and copies its rivals'**: `potter/race.py::_RaceDecision`
+  holds `candidate_cells` (keys, re-read at replay) beside `prior_histories` (every rival's per-cell
+  `fitness`/`objective` by value), since `resume_and_fork/replayers.py::ReplayContext` holds "ONE round
+  and no history". On the desk 147 `decision` records are 13.1 of 111.5 MB of ledger, and
+  `prior_histories` averages 87.6 KB a record against 1.1 KB for the arm's cells; the record is named
+  three ways (`ResumeCheckpointRecord`, `"decision"`, an `inputs_ref` holding inputs whole). Root: a
+  decision records addresses and its replay reads every side through the one scorer it runs; a
+  run-data wipe, and `offline_run.py::LEDGER_KEYS` keeps `inputs_ref` whole, so the behaviour keys
+  move. **Window:** W1 · potter-w1 (else W3). **Re-test:** `git grep -n "prior_histories" -- promptpotter` is empty; open: does a rival-only re-grade reach `elimination_cut`'s replay?
+- **An unset lever is spelled two ways in the reply-cache key**: `store/llm_reuse_cache.py::hash_call`
+  hashes `temperature`, `json_schema`, `seed`, `max_tokens` and `reasoning_effort` always (a `None`
+  included), but `route_order` and `top_p` "only when set: an unconditional `null` re-keys every
+  banked reply", so the key's shape records the order its levers were added: a compatibility rule
+  inside an identity. `optimizer_reuse` and `judge_reuse` are CACHE, so once users hold paid replies it
+  can never be normalized. Root: the key hashes the request as sent, by one rule (set fields, nulls
+  dropped); every banked reply misses once. **Window:** W1 · cache key, a file-disjoint link beside
+  W1's C0 re-ask. **Re-test:** `git grep -n "if request\." -- promptpotter/infrastructure/store/llm_reuse_cache.py` is empty.
+- **The neutral round envelope stores one backend's ranking report and a second copy of its cells**:
+  `domain/results.py::RoundOutcome.diagnostics` is a `round_diagnostics.py::RoundDiagnostics`
+  (`rank_buckets`, `top_k_accuracy`, `near_misses`, per-sample `rank` / `gt_in_*`) that
+  `bench/round_analysis.py` writes and `bench/node_context.py:319` copies across a restatement for one
+  reader, `potter/dispatch/facade.py:304` → `injections/panels.py:147`. On the desk's 40 `round_closed`
+  records the first three are empty and `samples` repeats the head arm's 2,131 cells (483 KB); it is
+  inside `round_document_digest`, so a diagnostic edit moves `consumed`. Root: a report derived from
+  cells is computed by the optimizer that reads it; potter folds it at render, its text byte-identical.
+  **Window:** W2 · rec-2, after W1 (it edits `optimizers/potter/`). **Re-test:** `git grep -n "RoundDiagnostics" -- promptpotter/domain/results.py` is empty.
+- **A tombstone's `cycle_id` names a sandbox, and its stop is one sentence**:
+  `domain/records/run_records.py::TrailTombstoneRecord.cycle_id` is a cycle, `""` for a whole-campaign
+  bank, or a sandbox id (`campaign_store/store.py::delete_inner_sandbox` banks `cycle_id=sandbox.name`;
+  the desk workspace ledger holds `inner_002c6600f3e2fcc1`, and `""` on 5 of 6 tombstones), and
+  `SpendTombstoneRecord` takes the same `Subject` (`account_trail.py::bank_before_removal`).
+  `BankedStop.subject` flattens the stopped run's address, `StopReason` and cause into one sentence no
+  reader parses back. Root: a record that outlives its subject stores the subject's typed address
+  (`inside` chain + hop) and a `StopReading`'s facts, worded at the read. **Window:** W2 · rec-2.
+  **Re-test:** `git grep -n "cycle_id=sandbox.name" -- promptpotter` is empty and `BankedStop` holds no `str` subject.
+- **A job is a survivor that carries how its run ended**: `store/data_root.py::INSTALL_KINDS` keeps
+  `Kind("job", …, _SURVIVOR, …)` for the daily quota, but `domain/job.py::Job` holds `ending:
+  StopReason | None`, `refusal: Refusal | None` (a served message, `details`, `next_acts`), `lapse`,
+  `stepped` and a five-arm `holder`, so a `StopReason`, `Refusal`, `NextAct` or holder rename is a
+  survivor migration or a refused landing (two of the five migrations are jobs': `panel_hole_ending.py`,
+  `live_jobs_index.py`); `ending` and `refusal`'s readers (`admission.py:144`,
+  `machine_status.py:297-301`) read a released job. Root: a survivor's model imports no run-data enum
+  and no served-words model; the ending, refusal and lapse go to run data, in a one-shot migration
+  (decisions.md § 0011). **Window:** W2 · surv, before "A queued launch dies with the asking process". **Re-test:** the model `Kind("job", …)` loads holds no `StopReason`, `Refusal` or `JobLapse` field.
 
 ## Held — no wave-4 chain yet
 
@@ -854,11 +932,16 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `infrastructure/run_scope.py::InnerSpawnContext`, which carries the spawner's fields but not its
   `Stores`, so it cannot call the reader). Action: the spawn context carries the spawner's `Stores`,
   and the writer builds through the one builder, its existence checks off. **Held:** none claims it. **Re-test:** `git grep -n "def inner_sandbox_store\|def sandbox_stores" -- promptpotter`.
-- **The outer prompt ranks on θ, not the scored term**: Shape: `potter/dispatch/injections/panels.py`'s
-  "weakest first" and "worse than the origin beyond their own error bar" read `mean_round_delta`, which
-  is in-sample and scores nothing, because `held_out_lift` carries no SE. Action: serve the held-out
-  lift's SE (a binomial 20-row bench a pass) and rank and separate on it; θ stays a column.
-  **Held:** a served SE. **Re-test:** `git grep -n "mean_round_delta" -- promptpotter/application/optimizers/potter/dispatch/injections/panels.py`.
+- **The outer reads θ beside a held-out lift that carries no SE**: Shape: no panel ranks on θ
+  (`potter/dispatch/injections/panels.py::_transcript_plan` sorts on `grade.fitness`), but the
+  in-sample θ lift (`InnerCellFacts.mean_round_delta`, which scores nothing) rides
+  `domain/l4/proxies.py` as the cell's `lift` term (`_FACT_OF_KEY`) and as `_level`, the level
+  `panel_precision` reads, and reaches the outer prompt in each cell's reply
+  (`runner/inner/spawn.py`: `D{delta}` beside `B{held_out_lift}`), while
+  `OuterSampleProxies.held_out_lift` has no SE to separate on. Action: serve the held-out lift's SE
+  (a binomial 20-row bench a pass) and rank and separate on it; θ stays a column. **Held:** a served
+  SE. **Re-test:** `OuterSampleProxies.model_fields` holds an SE beside `held_out_lift` (today
+  `floored`, `held_out_lift`).
 - **"Which benchmark a row measures" is spelled twice**: Shape: `potter/members.py::_strata` reads
   `measured_dataset or ""` where every other reader takes `Sample.measured_dataset` raw (None = the
   filed one), and `BenchScope` partitions by benchmark under the word `RulerScope` owns. Action:
@@ -890,11 +973,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   subject is mandatory, L2's `rendered_prompt` rides the share (`family.yaml` sizes it at 21,000 for
   a subject that grows `length_budget` a round). Action: decide whether the subject joins L2's
   mandatory set. **Rides with:** the next l4-outer link. **Re-test:** L2's subject survives any share.
-- **A member's treatment digest re-keys on a rename**: it hashes the member's source files, so a
-  refactor that moves no decision (l4-outer-6's `Frontier` → `Parent`) re-keys every banked L4 cell
-  for potter, capo-pobb and gepa. Action: the digest hashes what the member decides, not its text.
-  **Re-test:** a pure rename in `potter/members.py` leaves `--digests` unmoved.
 - **A machine's cell ceiling is counted twice**: `infrastructure/backend.py::MachineSlots` (a
   file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
   in-process count per backend. Action: one count of one machine fact, reaching both. **Rides
-  with:** the rows above. **Re-test:** `git grep -c "class MachineSlots" -- promptpotter` is 0.
+  with:** store-5a. **Re-test:** `git grep -c "class MachineSlots" -- promptpotter` is 0.
