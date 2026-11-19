@@ -2665,8 +2665,9 @@ async def test_the_reaper_takes_a_producer_only_once_it_no_longer_holds_its_cycl
     ledger = await asyncio.to_thread(_running, cycle_dir)
     os.utime(ledger, (0, 0))
     registry = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 0)
-    reaped = await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root)
-    assert reaped == 0, "a quiet held producer was reaped"
+    await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root)
+    quiet = campaigns.load(hop, moment=None)
+    assert quiet is not None and quiet.stop_reason is None, "a quiet held producer was reaped"
     assert built_stores.mark_producer_vanished(hop) is False
     with pytest.raises(ConflictError):
         await asyncio.to_thread(hold_cycle, cycle_dir)
@@ -2696,13 +2697,13 @@ async def test_the_reaper_takes_a_producer_only_once_it_no_longer_holds_its_cycl
         "a pause landed after the reaper's read was ended vanished"
     )
     campaigns.append(hop, RunPhaseRecord(state=Running()))
-    assert await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root) == 1
+    await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root)
     swept = campaigns.load(hop, moment=None)
     assert swept is not None and swept.stop_reason is StopReason.PRODUCER_VANISHED
     assert built_stores.inbox(hop).pause is None, "a reaped cycle's pause still stood"
-    assert await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root) == 0, (
-        "one dead producer was swept twice"
-    )
+    ended_ledger = campaigns.ledger(hop).read_bytes()
+    await asyncio.to_thread(sweep_dead_cycles, built_stores.projects_root)
+    assert campaigns.ledger(hop).read_bytes() == ended_ledger, "one dead producer was swept twice"
     # A finished run still writing its last files holds the cycle against a delete.
     await asyncio.to_thread(hold_cycle, cycle_dir)
     finishing = built_stores.run_state(hop)
@@ -2734,9 +2735,11 @@ def test_a_cycle_deleted_between_a_reap_writes_temporary_and_its_replace_leaves_
 
     with monkeypatch.context() as patched:
         patched.setattr(os, "replace", deleting_first)
-        reaped = sweep_dead_cycles(built_stores.projects_root)
+        sweep_dead_cycles(built_stores.projects_root)
     # The first replace is a projection's, past the ending's append: that cycle was reaped, then deleted.
-    assert deleted and reaped == 2, "a cycle deleted under the sweep aborted it"
+    assert deleted, "the sweep reaped no cycle"
+    unswept = JobRegistry.attach(jobs_dir(built_stores.projects_root)).unswept()
+    assert unswept == [], f"a cycle deleted under the sweep aborted it: {unswept}"
     assert not campaigns.cycle_dir(deleted[0]).exists(), "the reap re-made the deleted cycle"
     (kept,) = set(hops) - set(deleted)
     swept = campaigns.load(kept, moment=None)
@@ -3992,9 +3995,12 @@ async def test_a_loop_command_accepted_by_its_act_is_taken_by_its_loop_or_voided
     )
     await sender.dispatch(skipped)
     release_cycle(looped_dir)
-    assert await asyncio.to_thread(sweep_dead_cycles, stores.projects_root) == 2, (
-        "a dead loop's cycle was not reaped"
-    )
+    await asyncio.to_thread(sweep_dead_cycles, stores.projects_root)
+    for dead in (ended_hop, looped):
+        reaped = stores.campaigns.load(dead, moment=None)
+        assert reaped is not None and reaped.stop_reason is StopReason.PRODUCER_VANISHED, (
+            f"{dead.campaign_id}: a dead loop's cycle was not reaped"
+        )
     await seen(("voided", "its loop ended without taking it"), "loop-left", None)
     owed = {
         ("accepted", "standing for its loop"): ("accepted", "working", refused, "replayed", 1),

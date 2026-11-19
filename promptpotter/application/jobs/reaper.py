@@ -59,22 +59,21 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
     return reclaimed
 
 
-def _reap(stores: Stores, unread: list[str]) -> int:
+def _reap(stores: Stores) -> list[str]:
     """Each cycle of *stores*, then each sandbox one of its cycles owns: none nests by path. A
-    cycle it cannot read is named in *unread*, and the rest are reaped all the same."""
-    reaped = 0
+    cycle it cannot read is a fault it returns, and the rest are reaped all the same."""
+    unread: list[str] = []
     for campaign_id in stores.campaigns.list_campaign_ids():
         for hop in stores.campaigns.campaign_cycle_hops(campaign_id):
             try:
-                if stores.mark_producer_vanished(hop):
-                    reaped += 1
+                stores.mark_producer_vanished(hop)
             except FileUnreadableError as refusal:
                 unread.append(fault_said(refusal)[0])
             except NotFoundError:
                 continue
             if (inner := inner_sandbox_store(stores, hop)) is not None:
-                reaped += _reap(inner, unread)
-    return reaped
+                unread += _reap(inner)
+    return unread
 
 
 def _recorded(projects_root: Path, step: str, run: Callable[[], list[str]]) -> None:
@@ -87,23 +86,19 @@ def _recorded(projects_root: Path, step: str, run: Callable[[], list[str]]) -> N
     JobRegistry.attach(jobs_dir(projects_root)).record_pass(step, faults)
 
 
-def sweep_dead_cycles(projects_root: Path) -> int:
+def sweep_dead_cycles(projects_root: Path) -> None:
     """Every launch's, and the server's tick: each cycle it could not read stands in
     `machine-status` until a pass reads it."""
-    reaped = 0
-
-    def reap() -> list[str]:
-        nonlocal reaped
-        unread: list[str] = []
-        reaped = sum(
-            _reap(tenant_stores(projects_root, WorkspaceDir(tenant)), unread)
+    _recorded(
+        projects_root,
+        SWEEP_STEP,
+        lambda: [
+            fault
             for tenant in sorted(projects_root.iterdir() if projects_root.is_dir() else ())
             if campaigns_root_dir_for(WorkspaceDir(tenant)).is_dir()
-        )
-        return unread
-
-    _recorded(projects_root, SWEEP_STEP, reap)
-    return reaped
+            for fault in _reap(tenant_stores(projects_root, WorkspaceDir(tenant)))
+        ],
+    )
 
 
 def sweep(projects_root: Path) -> None:

@@ -727,11 +727,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 
 ### wave-5 · rates (what rates-4 left at its landing)
 
-- **A sweep's reap is observed by its count** (rates-4's report): `reaper.py::sweep_dead_cycles`
-  returns a reaped count no production code reads, only tests (`tests/test_security.py`), so it keeps
-  a `nonlocal` closure to hand `_recorded` its faults. Root: the facts read the reaped cycles'
-  `stop_reason`, and the sweep returns its faults. **Re-test:** `git grep -c "nonlocal" --
-  promptpotter/application/jobs/reaper.py` == 0.
 - **A route outage is remembered per process** (rates-4's report): `pricing.py::_ROUTE_OUTAGE` is a
   process-global memo keyed by path, so only the process that met an outage holds back; another
   re-fetches within `_OUTAGE_MEMO_S`. Root: the outage is a fact of the route answer on disk (its
