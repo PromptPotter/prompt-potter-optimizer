@@ -73,7 +73,7 @@ from promptpotter.domain.command_events import CommandLanded, draft_subject, sub
 from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import PipelineParams, moved_leaves
 from promptpotter.domain.pipeline_schema import CapabilityMenu, NodeSearchNarrowing, PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.partition import PartitionRecord
@@ -282,6 +282,7 @@ def resolve_cycle_plan(
             partition,
             dataset_hash=session.bank.dataset_hash,
             instrument_id=configured.instrument_id,
+            cell_identity=configured.cell_identity,
         ),
         cycle=cycle,
         session=configured,
@@ -299,8 +300,15 @@ class ConfigDriftError(ConflictError):
         drift: DefaultsDrift | None,
         capabilities_moved: list[str],
         revision_moved: str | None,
+        identity_moved: list[str],
     ) -> None:
+        # What moved under an unmoved origin: each alone refuses, as a moved origin does.
+        self.moved = bool(capabilities_moved or revision_moved or identity_moved)
         causes: list[str] = []
+        if identity_moved:
+            causes.append(
+                f"the identity its cells were graded under moved at {', '.join(identity_moved)}"
+            )
         if drift is not None:
             moved = ", ".join(drift.moved())
             causes.append(f"what its declaration is a delta over moved since the mint ({moved})")
@@ -316,8 +324,8 @@ class ConfigDriftError(ConflictError):
             "not its declaration"
         )
         super().__init__(
-            f"campaign {campaign.campaign_id} no longer resolves to the origin it was minted on "
-            f"(stored {campaign.root_content_hash}, now {current_hash}): {cause}. Its "
+            f"campaign {campaign.campaign_id} no longer runs as it was minted (origin stored "
+            f"{campaign.root_content_hash}, now {current_hash}): {cause}. Its "
             "measurements may not apply. Revert the edit, or start a fresh campaign on "
             f"{campaign.dataset_name} — this one is preserved.",
             details={
@@ -327,6 +335,7 @@ class ConfigDriftError(ConflictError):
                 "defaults_pin_moved": drift is not None,
                 "capabilities_moved": capabilities_moved,
                 "backend_revision_moved": revision_moved is not None,
+                "identity_moved": identity_moved,
             },
             # A fresh campaign on the same dataset, which every door words.
             next_acts=(
@@ -337,14 +346,7 @@ class ConfigDriftError(ConflictError):
 
 def _capabilities_moved(recorded: CapabilityMenu, running: CapabilityMenu) -> list[str]:
     """``provider/model`` whose answered capability moved; an empty *recorded* menu names none."""
-    if not recorded:
-        return []
-    return sorted(
-        f"{provider}/{model}"
-        for provider in {*recorded, *running}
-        for model in {*recorded.get(provider, {}), *running.get(provider, {})}
-        if recorded.get(provider, {}).get(model) != running.get(provider, {}).get(model)
-    )
+    return moved_leaves(recorded, running, joint="/") if recorded else []
 
 
 def _revision_moved(
@@ -367,12 +369,11 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
         root = session.bound(campaign.root_cycle)
         checked = resolve_cycle_plan(root, declared, declared.purpose, dataset, resumed=campaign)
-    if campaign.root_content_hash == checked.origin_hash:
-        return plan
     campaigns = session.store.campaigns
     recorded = scan_resolved_run(campaigns.chain(campaign.root_hop))
     wired = campaigns.last(campaign.root_hop, RunWiringRecord)
-    raise ConfigDriftError(
+    drawn = campaigns.last(campaign.root_hop, PartitionRecord)
+    drift = ConfigDriftError(
         campaign,
         current_hash=checked.origin_hash,
         drift=defaults_drift(campaign, running=checked.treatment),
@@ -382,7 +383,13 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
         revision_moved=_revision_moved(
             None if wired is None else wired.backend_revision, checked.session.backend_revision
         ),
+        identity_moved=[]
+        if drawn is None
+        else moved_leaves(drawn.cell_identity, checked.session.cell_identity),
     )
+    if campaign.root_content_hash == checked.origin_hash and not drift.moved:
+        return plan
+    raise drift
 
 
 def _differs_line(name: str, declared: object, running: object) -> str:
@@ -412,6 +419,7 @@ def _record_of(plan: CyclePlan) -> HeadToHeadRecord:
         head_to_head_id=_arm_of(plan).head_to_head_id,
         created_at=utcnow_iso(),
         origin=plan.origin_hash,
+        cell_identity=plan.drawn.cell_identity,
         shared=plan.spec.shared_part(),
         # Every arm reads this one version, so no arm's election moves another's scale.
         ruler_version=plan.session.store.ruler.version(),
@@ -431,12 +439,16 @@ def _refuse_off_record(
     ]
     if record.origin != plan.origin_hash:
         differs.append("origin")
-    if differs:
+    identity = moved_leaves(record.cell_identity, plan.drawn.cell_identity)
+    if differs or identity:
         running = {**shared.model_dump(mode="json"), "origin": plan.origin_hash}
         stood = {**record.shared.model_dump(mode="json"), "origin": record.origin}
+        lines = [_differs_line(n, stood[n], running[n]) for n in differs]
+        lines += [f"cell identity {leaf}" for leaf in identity]
+        differs += identity
         raise ConflictError(
             f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} differs from {stood_by} on "
-            f"{'; '.join(_differs_line(n, stood[n], running[n]) for n in differs)}, so it would "
+            f"{'; '.join(lines)}, so it would "
             "not be graded on that bench set. Nothing was minted: declare the arms alike, or name "
             "a new head-to-head id.",
             code="arm_off_bench_set",

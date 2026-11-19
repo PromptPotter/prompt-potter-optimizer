@@ -11,7 +11,7 @@ from pydantic import Field
 from promptpotter.domain.bench import CampaignRefusal, DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import CellSet
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import CellIdentity, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamSource
 from promptpotter.domain.records.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, CeilingMeter
@@ -280,6 +280,8 @@ class HeadToHeadRecord(FrozenModel):
     head_to_head_id: str
     created_at: str
     origin: str
+    # What every arm's cells are graded under (`PartitionRecord.cell_identity`), beside its origin.
+    cell_identity: CellIdentity
     shared: SharedPart
     # The tenant ruler's version at open: every arm reads it plus its own lines, never another arm's.
     ruler_version: int = Field(ge=0)

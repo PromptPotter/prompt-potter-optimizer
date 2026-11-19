@@ -5793,6 +5793,14 @@
           "bench_rows": {
             "$ref": "#/components/schemas/CellSet"
           },
+          "cell_identity": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cell Identity",
+            "type": "object"
+          },
           "dataset_hash": {
             "title": "Dataset Hash",
             "type": "string"
@@ -5832,6 +5840,7 @@
         "required": [
           "dataset_hash",
           "instrument_id",
+          "cell_identity",
           "split",
           "search_ids",
           "bench_ids",

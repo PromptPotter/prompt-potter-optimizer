@@ -444,10 +444,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
   launch against a backend one contract behind fails at the probe, naming both numbers;
   `connectors/termnorm.py` probes `/version`.
-- **A moved capability or backend revision alone passes a resume**: it is a drift cause only when the
-  origin hash also mismatches (`jobs/mint.py::resolve_resume`, `::_revision_moved`). Action: a resume
-  refuses a moved capability or backend revision. **Rides with:** xconn 3. **Re-test:** a resume after a
-  backend revision bump is refused naming it.
 - **TermNorm words a warning's step into its message** (`research_pipeline.py`), though `StepWarning`
   carries the step as a field. Fixed only on TermNorm's `xconn` branch (11b1dbe); master (ce4f15b) and
   the box still word it (master `research_pipeline.py:278`). Action: the message is the fault alone.

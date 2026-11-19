@@ -62,6 +62,7 @@ from factories import (
 from offline_world import LLM_ONLY_NODE, Router
 from pydantic import BaseModel, Field, ValidationError
 
+from promptpotter.application import pipeline_resolve
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
     admission_failures,
@@ -176,6 +177,7 @@ from promptpotter.application.optimizers.variation.members import Cross, LocusCr
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
+    JUDGE_INSTRUMENT_KEY,
     DraftPipeline,
     ParamLayers,
     ServedPipeline,
@@ -320,6 +322,7 @@ from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
     ArmActRecord,
+    BackendRevision,
     ConfigOverrides,
     CycleMintedRecord,
     CycleStart,
@@ -3062,6 +3065,7 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
         PartitionRecord.of(
             partition_bank(rows_30, door.dataset_split, seed=0),
             dataset_hash=opened.bank.dataset_hash,
+            cell_identity={},
             instrument_id=opened.bank.dataset_hash,
         ),
     )
@@ -3185,6 +3189,40 @@ def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
         resolve_resume(recut, held_campaign, rows_30[:-1])
     assert refused.value.details["capabilities_moved"] == ["/m"], (
         "a resume past a moved capability snapshot blamed only the dataset"
+    )
+    with pytest.raises(ConfigDriftError):
+        resolve_resume(opened, held_campaign, rows_30)
+
+
+def test_a_resume_under_a_moved_cell_identity_or_backend_revision_refuses_naming_it(
+    decl: _Declared, held: _Held, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The origin hashes what it sends alone, so only the drawn record sees a moved grader.
+    opened, held_campaign = held
+    real = pipeline_resolve.identity_layer
+
+    def regraded(*args: Any, **kwargs: Any) -> dict[str, dict[str, Any]]:
+        out = real(*args, **kwargs)
+        out.setdefault(opened.pipeline_schema.active_steps[-1], {})[JUDGE_INSTRUMENT_KEY] = "moved"
+        return out
+
+    with monkeypatch.context() as moved:
+        moved.setattr(pipeline_resolve, "identity_layer", regraded)
+        with pytest.raises(ConfigDriftError) as refused:
+            resolve_resume(opened, held_campaign, decl.rows_30)
+    assert refused.value.details["identity_moved"] == [
+        f"{opened.pipeline_schema.active_steps[-1]}.{JUDGE_INSTRUMENT_KEY}"
+    ], "a resume under another grader than its cells were graded by ran, or named another leaf"
+    ran = BackendRevision(expected="r1", reported="r1", unread=None)
+    running = select_optimizer(effective_config(decl.declared).optimization)
+    declare_run_wiring(
+        replace(opened, backend_revision=ran), effective_config(decl.declared), selected=running
+    )
+    bumped = replace(opened, backend_revision=ran.model_copy(update={"reported": "r2"}))
+    with pytest.raises(ConfigDriftError) as refused:
+        resolve_resume(bumped, held_campaign, decl.rows_30)
+    assert refused.value.details["backend_revision_moved"], (
+        "a resume on a backend that moved its revision under an unmoved origin ran"
     )
 
 
@@ -4399,7 +4437,9 @@ def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
     bank, _, _ = _split_bank()
     l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
     cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
-    back = PartitionRecord.of(cell_drawn, dataset_hash="d", instrument_id="d").restored(bank)
+    back = PartitionRecord.of(
+        cell_drawn, dataset_hash="d", cell_identity={}, instrument_id="d"
+    ).restored(bank)
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"
     )
@@ -4419,6 +4459,7 @@ def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stor
         PartitionRecord.of(
             partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0),
             dataset_hash=drawn_bank.dataset_hash,
+            cell_identity={},
             instrument_id=drawn_bank.dataset_hash,
         ),
     )

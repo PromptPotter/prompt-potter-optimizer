@@ -36,10 +36,9 @@ class CampaignSurvey:
     def standing(self, hop: CycleHop) -> StandingRounds | None:
         return self._read(hop, lambda: self._store.standing_rounds(hop, moment=None))
 
-    def instrument(self, hop: CycleHop) -> str | None:
-        """What *hop*'s chain measured on, where it drew a bank."""
-        drawn = self._read(hop, lambda: self._store.last(hop, PartitionRecord))
-        return None if drawn is None else drawn.instrument_id
+    def drawn(self, hop: CycleHop) -> PartitionRecord | None:
+        """What *hop*'s chain measured on and was graded under, where it drew a bank."""
+        return self._read(hop, lambda: self._store.last(hop, PartitionRecord))
 
     def _read[V](self, hop: CycleHop, read: Callable[[], V | None]) -> V | None:
         if hop.campaign_id in self.faulted:

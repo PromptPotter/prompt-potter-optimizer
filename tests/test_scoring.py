@@ -4895,7 +4895,10 @@ def _evidence_campaign(
         stores.campaigns.append(
             cycle,
             PartitionRecord.of(
-                partition, dataset_hash=held.dataset_hash, instrument_id=held.dataset_hash
+                partition,
+                dataset_hash=held.dataset_hash,
+                cell_identity={},
+                instrument_id=held.dataset_hash,
             ),
         )
         ledgers[cycle] = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(cycle)))
@@ -5706,6 +5709,7 @@ def declared_head_to_heads() -> _Declared:
                 head_to_head_id=h2h_id,
                 created_at="",
                 origin="origin",
+                cell_identity={},
                 shared=alike,
                 ruler_version=0,
             )
@@ -5925,6 +5929,7 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
             head_to_head_id="seeds",
             created_at="",
             origin="origin",
+            cell_identity={},
             shared=declared.shared_part(),
             ruler_version=0,
         )

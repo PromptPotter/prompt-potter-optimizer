@@ -27,6 +27,24 @@ if TYPE_CHECKING:
 # Where the laid document names the chain beside its nodes: the wire's spelling, and the dump's.
 STEPS_KEY = "steps"
 
+# Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.filed`).
+CellIdentity = dict[str, dict[str, Any]]
+
+
+def moved_leaves(
+    recorded: Mapping[str, Mapping[str, object]],
+    running: Mapping[str, Mapping[str, object]],
+    *,
+    joint: str = ".",
+) -> list[str]:
+    """``outer{joint}inner`` of every leaf *running* moved, added or dropped against *recorded*."""
+    return sorted(
+        f"{outer}{joint}{inner}"
+        for outer in {*recorded, *running}
+        for inner in {*recorded.get(outer, {}), *running.get(outer, {})}
+        if recorded.get(outer, {}).get(inner) != running.get(outer, {}).get(inner)
+    )
+
 
 class _Roster(Enum):
     """Which roster an engine call key joins; a key carries its rosters on its `NodeCall` field."""
