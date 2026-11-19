@@ -1284,6 +1284,7 @@ _TREE = ("",)
 _ENGINE = ("!webapp/",)
 _GATE = ("scripts/gate.py", "scripts/last_green.py", "scripts/processes.py")
 _GENERATED_TYPES = "webapp/lib/api/types.generated.ts"
+_ESTIMATE_WORDS = "webapp/lib/__tests__/estimate-words.generated.json"
 _GENERATED_MARKS = "webapp/components/ui/vendor-marks.generated.ts"
 _WEBAPP_READS = ("webapp/", "tests/fixtures/", *_GATE)
 _ENGINE_RUNTIME = (*ENGINE_RUNTIME, *_GATE)
@@ -1624,8 +1625,8 @@ CHECKS: tuple[Check, ...] = (
         _probe("scripts/build_ts_types.py", _rewrote),
         mb=190,  # 153
         tier="commit",
-        reads=(*_ENGINE_RUNTIME, "scripts/build_ts_types.py", _GENERATED_TYPES),
-        writes=(_GENERATED_TYPES,),
+        reads=(*_ENGINE_RUNTIME, "scripts/build_ts_types.py", _GENERATED_TYPES, _ESTIMATE_WORDS),
+        writes=(_GENERATED_TYPES, _ESTIMATE_WORDS),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
     Check(

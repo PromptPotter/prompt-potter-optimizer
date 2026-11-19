@@ -6,7 +6,6 @@ import { cx } from "@/lib/cx";
 import { Said } from "@/components/ui";
 import { ChannelDetail } from "./ChannelDetail";
 import { HeadlineBadges, HeadlineFacts, Metric, Swatch, benchLead } from "./channel-parts";
-import type { MetricFormat } from "@/lib/format";
 import {
   channelInk,
   channelLevel,
@@ -19,7 +18,7 @@ export interface ChannelProps {
   item: CompareItem;
   ownNote: boolean;
   points: readonly CladogramChannel[];
-  spec: MetricFormat & { axis_label: string };
+  spec: { axis_label: string };
   run: HierarchyCampaign | null;
 }
 
@@ -69,7 +68,7 @@ function ChannelIdRow({
   item: CompareItem;
   run: HierarchyCampaign | null;
   ink: string | null;
-  spec: MetricFormat & { axis_label: string };
+  spec: { axis_label: string };
   withdrawn: boolean;
 }) {
   const { remove } = useCompareSelection();

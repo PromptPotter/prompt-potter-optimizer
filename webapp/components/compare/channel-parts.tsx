@@ -17,7 +17,7 @@ import {
   type LineStep,
 } from "@/lib/derivations";
 import { cx } from "@/lib/cx";
-import { fmtBand, fmtDuration, fmtLift, fmtPoint, fmtUnit, fmtUsd, PLACEHOLDER, sideTone } from "@/lib/format";
+import { fmtBand, fmtDuration, fmtLift, fmtMetric, fmtUnit, fmtUsd, PLACEHOLDER, sideTone } from "@/lib/format";
 import { Badge, Term } from "@/components/ui";
 
 interface MetricFigure {
@@ -28,7 +28,7 @@ interface MetricFigure {
 
 function StepLift({ lift }: { lift: MeasuredLift | null }) {
   if (lift === null) return null;
-  return <span className={sideTone(lift.side)}> {fmtPoint(lift.estimate)}</span>;
+  return <span className={sideTone(lift.side)}> {fmtMetric(lift.estimate)}</span>;
 }
 
 export function MainLine({ steps }: { steps: readonly LineStep[] }) {
@@ -54,7 +54,7 @@ export function MainLine({ steps }: { steps: readonly LineStep[] }) {
             <span className="cmp-line-round">R{reading.arm.round}</span>
             <span className="cmp-line-label">{s.node.label}</span>
             <span className="cmp-line-score">
-              {fmtPoint(reading.own?.fitness) ?? PLACEHOLDER}
+              {fmtMetric(reading.own?.fitness)}
               <StepLift lift={liftOf(reading.vs_reference)} />
             </span>
             <span className="cmp-line-change" title={reading.changes_description || undefined}>
@@ -95,7 +95,7 @@ export function benchLead(row: HeadToHeadRow | null): {
             band: bench === null ? "" : READING_STATE_INFO[bench.status.state].sentence,
           }
         : {
-            value: fmtPoint(level) ?? PLACEHOLDER,
+            value: fmtMetric(level),
             band: `${s.headline} ${fmtBand(level) ?? PLACEHOLDER} · ${s.n}/${bench.bench_size} rows`,
           },
     lift:
@@ -103,7 +103,7 @@ export function benchLead(row: HeadToHeadRow | null): {
         ? { value: PLACEHOLDER, band: "" }
         : lift.read
           ? {
-              value: fmtPoint(lift.lift.estimate),
+              value: fmtMetric(lift.lift.estimate),
               band: fmtBand(lift.lift.estimate) ?? PLACEHOLDER,
               tone: sideTone(lift.lift.side),
             }
@@ -132,8 +132,7 @@ function ElectedOn({ election }: { election: HeadToHeadRow["election"] }) {
   if (!election) return PLACEHOLDER;
   const ability = election.ability;
   if (election.reads_on === "ability" && ability) {
-    return fmtPoint(ability.theta) ?? "θ unread";
-
+    return ability.theta ? fmtMetric(ability.theta) : "θ unread";
   }
   if (election.reads_on === election.elects_on) return election.reads_on;
   return `${election.reads_on} · θ ${ability?.caveat ?? "unread"}`;

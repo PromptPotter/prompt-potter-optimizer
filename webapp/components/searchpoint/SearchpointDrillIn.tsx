@@ -10,7 +10,7 @@ import type { PipelineAt } from "@/lib/hooks/useConnector";
 import type { ReadFailure } from "@/lib/read-cache";
 import { liftOf, NOT_SEPARABLE, type ObserveConfig } from "@/lib/derivations";
 import { FailureLine, Said, Term } from "@/components/ui";
-import { fmtEstimate, fmtPoint, fmtUnit, PLACEHOLDER, sideTone } from "@/lib/format";
+import { fmtEstimate, fmtMetric, fmtUnit, PLACEHOLDER, sideTone } from "@/lib/format";
 import { NodeSurface } from "@/components/node-surface/NodeSurface";
 
 export function SearchpointDrillIn({
@@ -89,7 +89,7 @@ export function SearchpointDrillIn({
                   benchPass?.failed_as != null
                     ? <FailedPass state={benchPass.failed_as} />
                     : benchPass != null
-                    ? `${fmtPoint(benchPass.level) ?? PLACEHOLDER} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
+                    ? `${fmtMetric(benchPass.level)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
                       ? `${PLACEHOLDER} of ${bench?.n}`
                       : `${fmtEstimate(bench.level)} of ${bench.n}`

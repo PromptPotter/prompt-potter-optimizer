@@ -941,8 +941,7 @@ export interface Measurand {
 /** THE estimate off cells — a level or a lift, in its unit, with its two-sided
  * 95% interval. It holds facts alone, so a stored or hashed estimate never
  * reads a word; a surface words it where it prints it (`text`, or `band`, the
- * interval alone; the browser's `webapp/lib/format.ts::fmtEstimate`), never a
- * bound of its own. */
+ * interval alone), never a bound of its own. */
 export interface Estimate {
   value: number;
   /** The 95% interval on `value`; both bounds are null where the estimate has no
@@ -5729,7 +5728,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "046fc9286632ec75";
+export const SERVED_CONTRACT = "1226538f7edf5d86";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

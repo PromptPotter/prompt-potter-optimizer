@@ -446,8 +446,7 @@ _Z95 = NormalDist().inv_cdf(0.975)
 class Estimate(FrozenModel):
     """THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.
     It holds facts alone, so a stored or hashed estimate never reads a word; a surface words it
-    where it prints it (`text`, or `band`, the interval alone; the browser's
-    `webapp/lib/format.ts::fmtEstimate`), never a bound of its own."""
+    where it prints it (`text`, or `band`, the interval alone), never a bound of its own."""
 
     value: float
     ci_lo: float | None = Field(

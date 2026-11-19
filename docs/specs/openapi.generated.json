@@ -6854,7 +6854,7 @@
       },
       "Estimate": {
         "additionalProperties": false,
-        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nIt holds facts alone, so a stored or hashed estimate never reads a word; a surface words it\nwhere it prints it (`text`, or `band`, the interval alone; the browser's\n`webapp/lib/format.ts::fmtEstimate`), never a bound of its own.",
+        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nIt holds facts alone, so a stored or hashed estimate never reads a word; a surface words it\nwhere it prints it (`text`, or `band`, the interval alone), never a bound of its own.",
         "properties": {
           "ci_hi": {
             "anyOf": [
