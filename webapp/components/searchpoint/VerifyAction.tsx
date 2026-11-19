@@ -45,15 +45,14 @@ export function VerifyAction({
   const scope = path && encodeCyclePath(path);
   const cmd = useCommand<"verify-candidate">("verify-candidate", scope);
   const stop = useCommand<"cancel">("cancel", scope);
-  const [acting, setActing] = useState<string | null>(null);
+  // A press is the candidate's it was pressed on: another cycle or candidate paints none of it.
+  const here = `${scope}\n${candidate.arm}`;
+  const [acting, setActing] = useState<{ at: string; id: string } | null>(null);
   const [strategy, setStrategy] = useState<VerifyStrategy>("random");
   const [samples, setSamples] = useState("");
-  const [saturated, setSaturated] = useState<Saturated | null>(null);
-  const [prevArm, setPrevArm] = useState(candidate.arm);
-  if (candidate.arm !== prevArm) {
-    setPrevArm(candidate.arm);
-    setSaturated(null);
-  }
+  const [saturated, setSaturated] = useState<{ at: string; answer: Saturated } | null>(null);
+  const stopping = acting?.at === here ? acting.id : null;
+  const said = saturated?.at === here ? saturated.answer : null;
   const sending = cmd.pending !== null;
   const { readings, passes, unit } = useVerify(path);
   // The served admission, the one the command is refused by; null under a moment.
@@ -70,7 +69,7 @@ export function VerifyAction({
     if (!path) return;
     setSaturated(null);
     const commandId = mintCommandId();
-    setActing(commandId);
+    setActing({ at: here, id: commandId });
     void cmd
       .run(
         "verify-candidate",
@@ -85,9 +84,9 @@ export function VerifyAction({
             },
             commandId,
           ),
-        (answer) => setSaturated("kind" in answer ? answer : null),
+        (answer) => setSaturated("kind" in answer ? { at: here, answer } : null),
       )
-      .finally(() => setActing(null));
+      .finally(() => setActing((a) => (a?.id === commandId ? null : a)));
   }
 
   return (
@@ -104,10 +103,10 @@ export function VerifyAction({
             {busy ? "Verifying…" : `Verify ${candidate.label}`}
           </Button>
         </HoverCard>
-        {acting && (
+        {stopping && (
           <HoverCard content="Stop at the next cell; what it measured is read and kept.">
             <Button
-              onClick={() => void stop.run("cancel", () => commands.cancel({ command_id: acting }))}
+              onClick={() => void stop.run("cancel", () => commands.cancel({ command_id: stopping }))}
               disabled={stop.pending !== null}
             >
               Stop
@@ -168,8 +167,8 @@ export function VerifyAction({
       )}
       <FailureLine failure={cmd.failure} />
       <FailureLine failure={stop.failure} />
-      {!busy && saturated && (
-        <p className="verify-action-note">{filled(VERIFY_WORDS.saturated, saturated)}</p>
+      {!busy && said && (
+        <p className="verify-action-note">{filled(VERIFY_WORDS.saturated, said)}</p>
       )}
       {!busy && last?.failed_as != null && (
         <p className="verify-action-note error">

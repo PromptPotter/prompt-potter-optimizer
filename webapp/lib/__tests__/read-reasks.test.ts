@@ -180,4 +180,16 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
     await settle();
     expect(asked).toEqual({ ...once, hierarchy: 2, top: 2, evidence: 2, cells: 2, coupon: 2 });
   });
+
+  it("opens for a signed-in account only: an anonymous subscription asks no feed (I5)", async () => {
+    clearReadCache(false);
+    FakeFeed.opened = [];
+    mounted.push(subscribe(() => couponRead() as unknown as ReadDescriptor<unknown>, () => {}));
+    await vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS * 3);
+    expect(FakeFeed.opened).toHaveLength(0);
+    clearReadCache(true);
+    expect(FakeFeed.opened).toHaveLength(1);
+    clearReadCache(false);
+    expect(FakeFeed.opened[0]!.readyState).toBe(FakeFeed.CLOSED);
+  });
 });

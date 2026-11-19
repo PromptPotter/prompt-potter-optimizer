@@ -17,8 +17,11 @@ export function ApplyScenarioPanel({
   divergentRound: number | null;
   nextRound: number;
 }) {
-  const cmd = useCommand<"apply-scenario">("apply-scenario", path && encodeCyclePath(path));
-  const [done, setDone] = useState(false);
+  const scope = path && encodeCyclePath(path);
+  const cmd = useCommand<"apply-scenario">("apply-scenario", scope);
+  // The fork is the cycle's and criterion's it was applied on: another paints its own button.
+  const here = `${scope}\n${criterion}`;
+  const [doneAt, setDoneAt] = useState<string | null>(null);
 
   if (!criterion || !path) return null;
   const at = divergentRound ?? nextRound;
@@ -35,7 +38,7 @@ export function ApplyScenarioPanel({
           start: { config_overrides: { scoring: { per_cell: criterion } } },
           keep_rounds: true,
         }),
-      () => setDone(true),
+      () => setDoneAt(here),
     );
 
   return (
@@ -65,7 +68,7 @@ export function ApplyScenarioPanel({
         Budget and sample look-ahead are the only two that move a running cycle in place.
       </p>
       <FailureLine failure={cmd.failure} lead="apply:" />
-      {done ? (
+      {doneAt === here ? (
         <p className="note-info">
           Forked at round {at}. The sidebar follows the new branch as it comes up.
         </p>

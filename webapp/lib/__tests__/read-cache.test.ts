@@ -4,6 +4,7 @@ import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import {
   READ_CACHE_MAX_KEYS,
   clearReadCache,
+  dropCachedRead,
   reaskRead,
   readName,
   readResult,
@@ -148,6 +149,17 @@ describe("read cache — subscribers", () => {
     lands[0]!(7);
     await settle();
     expect(readResult(read)).toEqual({ status: "ready", data: 7 });
+  });
+
+  it("re-asks a dropped read its subscribers still show, and lands the fresh answer", async () => {
+    let answer = 1;
+    const read = at("d", async () => ({ kind: "ok" as const, data: answer, validator: null }));
+    watch(read);
+    await settle();
+    answer = 2;
+    dropCachedRead(read.id);
+    await settle();
+    expect(readResult(read)).toEqual({ status: "ready", data: 2 });
   });
 
   it("lands a new subscriber's body past the bound, every older id still live", async () => {

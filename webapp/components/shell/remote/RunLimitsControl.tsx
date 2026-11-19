@@ -55,15 +55,19 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
   const viewedPath = viewed?.path ?? null;
   const [drafts, setDrafts] = useState<Drafts>(() => draftsOf(caps));
   // Never remounted on a unit switch: unseeded, `apply()` writes the prior cycle's caps on the new.
-  const key = capsKey(caps);
+  const address = viewed?.address ?? null;
+  const key = `${address}|${capsKey(caps)}`;
+  const [confirmingHalt, setConfirmingHalt] = useState(false);
   const [prevKey, setPrevKey] = useState(key);
   if (key !== prevKey) {
     setPrevKey(key);
     setDrafts(draftsOf(caps));
+    setConfirmingHalt(false);
   }
-  const cmd = useCommand<"set-limits">("run-limits", viewed?.address ?? null);
-  const [confirmingHalt, setConfirmingHalt] = useState(false);
-  const [note, setNote] = useState<string | null>(null);
+  const cmd = useCommand<"set-limits">("run-limits", address);
+  // An answer is the cycle's it was sent on: it outlives a re-read of the caps, not a moved view.
+  const [note, setNote] = useState<{ at: string | null; text: string } | null>(null);
+  const said = note?.at === address ? note.text : null;
   const pending = cmd.pending !== null;
   const disabled = !viewedPath;
 
@@ -88,7 +92,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
     const r = await cmd.run("set-limits", () =>
       commands["set-limits"]({ ...cycleAddress(viewedPath), ...change }),
     );
-    if (r.ok) setNote(applied);
+    if (r.ok) setNote({ at: address, text: applied });
   };
 
   // Quotes NO number: the rows re-read what armed, a clamp by the allowance on its own row.
@@ -201,7 +205,7 @@ export function RunLimitsControl({ caps, overshoot, overshot }: Props) {
           {pending ? "Setting…" : "Set caps"}
         </button>
       </div>
-      {note ? <small className="run-limits-note">{note}</small> : null}
+      {said ? <small className="run-limits-note">{said}</small> : null}
       <FailureLine failure={cmd.failure} />
       <Dialog
         open={confirmingHalt}

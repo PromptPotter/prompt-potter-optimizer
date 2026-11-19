@@ -469,17 +469,14 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `webapp/app/styles/foundation/tokens.css`, fields skin in `base.css` alone, and a gate check holds
   the literal count to a falling baseline. **Rides with:** webd. **Re-test:** the check's baseline is 0.
 - **The webapp's live state lands on the wrong subject or the wrong version** (a live-state pass,
-  reported): view state a surface holds for its subject is not keyed by address
-  (`VerifyAction.tsx:48`'s `acting` and `saturated` reset on `candidate.arm` alone, so its stop and
-  saturated note paint on another cycle; `ApplyScenarioPanel.tsx:21`'s `done` survives a moved
-  `path`; cmd-2's report, the shape `useRunControl`'s `pausedAt` closed); feed versions are unordered hashes
+  reported): feed versions are unordered hashes
   (`cycle_reads.py:221-224`, a sha of `repr`), so a stale read reverts a draft edit, an ack shows applied
   before the feed moves, and a second press files a second start-run (root: a monotone version per
   subject); time-ray pages are not contiguous with the head (earlier
   pages ride a fixed cursor, `reads.ts:603-626`); reads with no subject break I10 (`useRound` mixes
-  sources, `useRound.ts:40-46`); the feed opens on any subscription, auth or not (`read-cache.ts::subscribe` →
-  `read-cache.ts::openFeed`); `dropCachedRead` runs while the read has subscribers (`read-cache.ts::dropCachedRead`, caller
-  `useIngestFlow.ts:374`). **Rides with:** webd.
+  sources, `useRound.ts:40-46`); `useCampaignForest.ts:121`'s `cleanupAcked` is set by the
+  cleanup's answer and never keyed by `campaignId`, so another campaign reads the cleanup as done
+  (live-2's grep; key it as `VerifyAction`'s press state is). **Rides with:** webd.
 - **The served contract has three hand copies** (✓): `commands.ts:103-108` hand-writes `Partial`
   `ConfigOverrides` / `ForkStart` beside the generated `CommandSent`; SSE frames are cast with `as`
   (`live-stream.ts::openLiveStream`); the build handshake covers fetches, not streams; and

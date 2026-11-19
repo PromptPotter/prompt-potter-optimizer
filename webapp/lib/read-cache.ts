@@ -297,7 +297,7 @@ export function readResult<T, B>(read: ReadDescriptor<T, B> | null): ReadResult<
   return slotFor(read as unknown as AnyRead).result as ReadResult<T>;
 }
 
-// The address's body is forgotten: whoever reads it next asks.
+// The address's body is forgotten: whoever reads it next asks, a subscriber at once.
 export function dropCachedRead(id: string): void {
   const slot = slots.get(id);
   if (!slot) return;
@@ -308,14 +308,19 @@ export function dropCachedRead(id: string): void {
   }
   slot.entry = null;
   changed(slot);
+  ask(slot, true);
 }
 
 // An identity flip: every body, kept body, verdict, flight and feed version belongs to the last
 // identity. A mounted read is re-asked under the new one; signed out, an auth read is left to
-// `useRead`'s gate.
+// `useRead`'s gate. The account's feed is the signed-in identity's alone: an anon page opens none (I5).
 export function clearReadCache(signedIn: boolean): void {
   keeps.clear();
-  closeFeed();
+  closeFeedStream?.();
+  closeFeedStream =
+    signedIn && typeof EventSource !== "undefined"
+      ? openLiveStream(`${API}${READ_ROUTES.feed}`, { surface: "feed" }, { frame: moved })
+      : null;
   for (const slot of [...slots.values()]) {
     supersede(slot);
     if (slot.subs.size === 0) {
@@ -330,7 +335,6 @@ export function clearReadCache(signedIn: boolean): void {
     changed(slot);
     if (signedIn || !descriptorOf(slot).auth) ask(slot, false);
   }
-  if (mounted().length > 0) openFeed();
 }
 
 function mounted(): Slot[] {
@@ -381,20 +385,9 @@ function moved({ subject, version }: FeedFrame): void {
   }
 }
 
-function openFeed(): void {
-  if (closeFeedStream !== null || typeof EventSource === "undefined") return;
-  closeFeedStream = openLiveStream(`${API}${READ_ROUTES.feed}`, { surface: "feed" }, { frame: moved });
-}
-
-function closeFeed(): void {
-  closeFeedStream?.();
-  closeFeedStream = null;
-}
-
 // `read` is the subscriber's newest descriptor: its subject counts, its effects run. The first
 // subscriber of an id asks; the others share its flight and body.
 export function subscribe(read: () => AnyRead, notify: () => void): () => void {
-  openFeed();
   const slot = slotFor(read());
   const sub: Sub = { read, notify };
   const first = slot.subs.size === 0;
