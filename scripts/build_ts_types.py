@@ -512,7 +512,7 @@ _WORDS_PATH = REPO / "webapp" / "lib" / "__tests__" / "estimate-words.generated.
 # Exact binary ties at every unit's digits (1/40 as a rate, 0.125, 1250 tokens), −0, compact steps.
 _WORDED_VALUES = (
     *(0.0, -0.0, 1 / 40, 0.125, -0.125, 0.0125, -0.0125, 0.0625, 0.5, 1.5, 2.5, 1 / 3),
-    *(1250.0, -2500.0, 999.5, 1_250_000.0, -1_250_000.0),
+    *(0.25, -0.25, 1 / 32, -1 / 32, 1250.0, -2500.0, 999.5, 1_250_000.0, -1_250_000.0),
 )
 
 

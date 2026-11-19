@@ -111,6 +111,7 @@ from promptpotter.config.paths import (
 )
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import Settings
+from promptpotter.domain.arm_reading import ScoreboardRow
 from promptpotter.domain.bench import BenchScore, BenchTrigger
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -1590,17 +1591,16 @@ def _id_map(ledger: list[dict[str, Any]], rounds: list[dict[str, Any]]) -> dict[
     """Each arm key by the label of its FIRST walk; a parent no round walked by the round reading it."""
     ids: dict[str, str] = {}
     for d in rounds:
-        for row in d.get("scoreboard") or []:
-            arm = row["reading"]["arm"]
-            if arm["label"] != "parent":
-                ids.setdefault(arm["key"], arm["label"])
+        for row in _ranked(d):
+            if row.reading.arm.label != "parent":
+                ids.setdefault(row.reading.arm.key, row.reading.arm.label)
     for r in _proposed(ledger):
         lineage = r["state"]["individual"].get("lineage") or {}
         for pid in lineage.get("parent_ids") or []:
             ids.setdefault(pid, f"parent@R{r.get('round')}")
     for d in rounds:
-        for row in d.get("scoreboard") or []:
-            ids.setdefault(row["reading"]["arm"]["key"], f"parent@R{d.get('round')}")
+        for row in _ranked(d):
+            ids.setdefault(row.reading.arm.key, f"parent@R{d.get('round')}")
     return ids
 
 
@@ -1644,7 +1644,7 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
     out["election"] = {k: election.get(k) for k in ELECTION_KEYS}
     health = d.get("health") or {}
     out["health"] = {k: health.get(k) for k in ("grade", "cause")}
-    readings = [r["reading"] for r in d.get("scoreboard") or []]
+    readings = [row.reading for row in _ranked(d)]
     out["arms"] = {
         ids.get(key, key): {
             **{k: arm.get(k) for k in ARM_KEYS},
@@ -1653,7 +1653,7 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
         for key, arm in (d.get("arms") or {}).items()
     }
     out["folds"] = {ids.get(k, k): v for k, v in (d.get("folds") or {}).items()}
-    out["scoreboard_order"] = [ids.get(r["arm"]["key"], r["arm"]["label"]) for r in readings]
+    out["scoreboard_order"] = [ids.get(r.arm.key, r.arm.label) for r in readings]
     out["cells"] = {ids.get(k, k): _cells(v) for k, v in (d.get("cells") or {}).items()}
     return out
 
@@ -1733,15 +1733,15 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
-def _round_file(path: Path) -> dict[str, Any]:
-    """A round file as it stands, with the rank its arms read in: a round file stores facts."""
-    d = json.loads(path.read_text(encoding="utf-8"))
-    ranked = RoundOutcome.model_validate({k: d[k] for k in RoundOutcome.model_fields}).ranked()
-    return {**d, "scoreboard": [row.model_dump(mode="json") for row in ranked]}
+def _ranked(d: dict[str, Any]) -> list[ScoreboardRow]:
+    """The rank a round file's arms read in: it stores facts, the rank is `RoundOutcome.ranked`."""
+    return RoundOutcome.model_validate({k: d[k] for k in RoundOutcome.model_fields}).ranked()
 
 
 def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
-    rounds = [_round_file(p) for p in sorted((cycle / "rounds").glob("*.json"))]
+    rounds = [
+        json.loads(p.read_text(encoding="utf-8")) for p in sorted((cycle / "rounds").glob("*.json"))
+    ]
     ledger = _jsonl(cycle / ".runtime" / "ledger.jsonl")
     folded = read_cycle_index(cycle, moment=None)
     assert folded is not None, f"{cycle.name} ran without minting its cycle"

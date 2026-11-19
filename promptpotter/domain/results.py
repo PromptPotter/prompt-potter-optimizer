@@ -104,7 +104,7 @@ class Election(FrozenModel):
     leading: ArmKey | None = Field(
         description="The ONE arm this round is read off, as its selector named it and never "
         "re-ranked: the selection where there is one, on a held round the challenger that came "
-        "closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. "
+        "closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. "
         "`null` where the selector could read no arm. NOT whose numbers the headline carries: "
         "that is `ended_on`."
     )
@@ -116,7 +116,7 @@ class Election(FrozenModel):
     # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
     electable: int
     fit: dict[ArmKey, ArmFit] = Field(default_factory=dict)
-    # `Selector.elects_on`: the column of `scoreboard` the round was WON on.
+    # `Selector.elects_on`: the column of `RoundView.candidates` the round was WON on.
     elects_on: DisplayMetric
     # The selector's own reason; ``None`` on the origin round, which chose between nobody.
     verdict_reason: str | None = None
