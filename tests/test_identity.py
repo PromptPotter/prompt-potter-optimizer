@@ -4583,8 +4583,9 @@ def test_the_answer_tally_and_the_theta_l1_reads_are_the_parents_rows_never_the_
     assert "yes 3 (75%)" in tally and "yes 7" not in tally, (
         f"the answer tally counts rows the parent never answered: {tally}"
     )
-    judging = seated.cycle.difficulty.judging
-    theta, frontier = judging.frontier(own), judging.frontier([*own, *origin[4:]])
+    judging, scorer = seated.cycle.difficulty.judging, seated.cycle.session.state.scoring.scorer
+    theta = judging.frontier(scorer.graded(own))
+    frontier = judging.frontier(scorer.graded([*own, *origin[4:]]))
     assert theta is not None and frontier is not None and theta.theta != frontier.theta, "vacuous"
     measurand = DispatchHub.render("measurand", view)
     assert f"θ {theta.theta:+.3f}" in measurand, f"L1 is told another arm's θ: {measurand}"

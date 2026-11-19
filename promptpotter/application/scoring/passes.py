@@ -59,7 +59,7 @@ from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import PhaseRecord, VerifySaturated
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import MAX_PASS_ROWS, CellSheet, Scorer, WalkedCell
+from promptpotter.domain.scoring import MAX_PASS_ROWS, ROW_GRADES, CellSheet, Scorer, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import (
@@ -83,7 +83,7 @@ from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, DiagnosticError, NextAct
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
-from promptpotter.shared.statistics import paired_mean_t
+from promptpotter.shared.statistics import difference_interval, paired_mean_t
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -130,15 +130,17 @@ def pick_fresh(
     return [*placed, *rng.sample(unplaced, len(unplaced))][:n]
 
 
-def _held(
-    strategy: VerifyStrategy, n_fresh: int, fresh: Estimate | None, recorded: Estimate | None
-) -> bool | None:
+def _held(strategy: VerifyStrategy, fresh: CellSheet, recorded: CellSheet) -> bool | None:
+    """The 95% band of fresh − recorded reaches 0: the fresh cells cannot tell the level fell."""
     if strategy != "random":
         return None
-    if n_fresh < 2 or fresh is None or recorded is None or fresh.ci_hi is None:
-        return None
-    # The tolerance absorbs the float error of two means taken over different row counts.
-    return fresh.ci_hi + 1e-9 >= recorded.value
+    fitness = ROW_GRADES["fitness"]
+    band = difference_interval(
+        list(fresh.column(fitness).values()),
+        list(recorded.column(fitness).values()),
+        binary="fitness" in fresh.two_valued,
+    )
+    return None if band is None else band[1] >= 0.0
 
 
 def verify_member(
@@ -204,7 +206,7 @@ def verify_reading(
             scope=RoleScope.REPORT,
             instrument_id=measured.instrument_id,
         ),
-        held=_held(strategy, fresh_level.n, fresh_level.fitness, recorded_level.fitness),
+        held=_held(strategy, fresh, recorded),
     )
 
 

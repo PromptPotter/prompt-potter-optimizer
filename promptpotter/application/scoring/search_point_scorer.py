@@ -162,7 +162,7 @@ class _ArchiveRecorder:
     entry: ArchiveEntry
 
     def sheet(self, results: Sequence[GradedCell]) -> CellSheet:
-        return CellSheet(self.session.state.scoring.scorer.id, tuple(results))
+        return self.session.state.scoring.scorer.graded(results)
 
     def scores(self, results: Sequence[GradedCell]) -> ScoreSummary:
         return compute_composite_fitness(
@@ -262,7 +262,7 @@ async def score_search_points[K: Hashable](
 
 def _halted(walk: Walk, halt: BaseException) -> ScoredWalk:
     """The rows it took before *halt*: a spent ceiling is kept by its walk (`keep_cut`) instead."""
-    sheet = CellSheet(walk.ctx.scorer.id, tuple(walk.results))
+    sheet = walk.ctx.scorer.graded(walk.results)
     return ScoredWalk(sheet, walk.ctx.recorder.scores(walk.results), None, None, halt)
 
 
@@ -345,5 +345,5 @@ def close_walk(walk: Walk) -> ScoredWalk:
     results = outcome.results
     scores = walk.ctx.recorder.scores(results)
     stopped = None if len(results) == walk.n else outcome.ended_on
-    sheet = CellSheet(walk.ctx.scorer.id, tuple(results))
+    sheet = walk.ctx.scorer.graded(results)
     return ScoredWalk(sheet, scores, _walk_stop_signal(outcome), stopped)

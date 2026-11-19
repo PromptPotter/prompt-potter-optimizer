@@ -45,6 +45,7 @@ from promptpotter.domain.scoring import (
 )
 from promptpotter.shared.measurement_context import RoleScope
 from promptpotter.shared.statistics import (
+    declared_two_valued,
     discordant_counts,
     holm_adjusted,
     p_floor,
@@ -83,7 +84,7 @@ def grade_measurands(scorer: Scorer) -> list[Measurand]:
             kind=MeasurandKind.GRADE,
             key=key,
             scorer_id=scorer.id,
-            binary=column.binary,
+            binary=key in scorer.two_valued,
             unit=scorer.fitness_unit if column.unit is None else column.unit,
         )
         for key, column in ROW_GRADES.items()
@@ -293,7 +294,7 @@ def read_arms(
     pairs = [(x, y) for xs, ys in zip(*by_cell, strict=True) for x in xs for y in ys]
     return ArmsReading(
         differences,
-        _lift(measurand, means[0], means[1], spec),
+        mean_lift(measurand, means[0], means[1], spec),
         paired_diff_posterior(means[1], means[0])[1],
         paired_diff_posterior([y for _, y in pairs], [x for x, _ in pairs])[1],
     )
@@ -340,8 +341,8 @@ class _Reader:
         self._grade: GradeColumn | None = None
         if measurand.kind is MeasurandKind.GRADE:
             grade = ROW_GRADES.get(measurand.key)
-            if grade is None or grade.binary is not measurand.binary:
-                raise ValueError(f"{measurand.key!r} is not a grade a row carries as declared")
+            if grade is None:
+                raise ValueError(f"{measurand.key!r} is not a grade a row carries")
             self._grade = grade
         else:
             self._expression = compile_expression(measurand.key, source="paired measurand")
@@ -376,7 +377,7 @@ def origin_floor(rows: CellSheet) -> ConstantFloor | None:
         kind=MeasurandKind.GRADE,
         key="fitness",
         scorer_id=rows.scorer_id,
-        binary=fitness.binary,
+        binary="fitness" in rows.two_valued,
         unit="score",
     )
     against, own = [constant.score(c) for c in paired], [fitness.read(c) for c in paired]
@@ -384,11 +385,14 @@ def origin_floor(rows: CellSheet) -> ConstantFloor | None:
     return ConstantFloor(label=constant.label, floor=constant.share, lift=lift)
 
 
-def mean_lift(measurand: Measurand, a_values: list[float], b_values: list[float]) -> MeasuredLift:
-    """*b_values* are means over several passes, so no row is 0 or 1: the t reads it, never the sign test."""
-    return _lift(
-        measurand.model_copy(update={"binary": False}), a_values, b_values, ROUND_LIFT_SPEC
-    )
+def mean_lift(
+    measurand: Measurand,
+    a_values: list[float],
+    b_values: list[float],
+    spec: EstimatorSpec = ROUND_LIFT_SPEC,
+) -> MeasuredLift:
+    """The values are means over several passes, so no row is 0 or 1: the t reads it, never the sign test."""
+    return _lift(measurand.model_copy(update={"binary": False}), a_values, b_values, spec)
 
 
 def _lift(
@@ -400,9 +404,9 @@ def _lift(
     assert lo is not None and hi is not None and p is not None
     floor = p_floor(b_values, a_values)
     if measurand.binary:
-        if not {*a_values, *b_values} <= {0.0, 1.0}:
-            raise ValueError(f"measurand {measurand.key!r} is declared binary and is not")
-        gained, lost = discordant_counts(b_values, a_values)
+        gained, lost = discordant_counts(
+            declared_two_valued(b_values), declared_two_valued(a_values)
+        )
         flips = FlipCounts(gained=gained, lost=lost, unchanged=n - gained - lost)
         # Exact McNemar on the cells that flipped, never the t: 7 gained, 1 lost is 0.070, not 0.030.
         p = min(1.0, 2.0 * sign_test_p(max(gained, lost), min(gained, lost)))

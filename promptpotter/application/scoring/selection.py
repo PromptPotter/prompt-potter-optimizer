@@ -16,7 +16,7 @@ from promptpotter.domain.crowning_bar import BarSubject, CrowningBar, LiftPrior,
 from promptpotter.domain.paired_reading import ArmKey, Estimate, MeasurandUnit
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler, clears, p_better
-from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradeColumn, GradedCell
+from promptpotter.domain.scoring import ROW_GRADES, CellGrade, CellSheet, GradedCell
 from promptpotter.shared.statistics import (
     bounded_mean_interval,
     discordant_counts,
@@ -24,12 +24,12 @@ from promptpotter.shared.statistics import (
 )
 
 
-def level_band(sheet: CellSheet, column: GradeColumn, unit: MeasurandUnit) -> Estimate | None:
-    values = list(sheet.column(column).values())
+def level_band(sheet: CellSheet, grade: CellGrade, unit: MeasurandUnit) -> Estimate | None:
+    values = list(sheet.column(ROW_GRADES[grade]).values())
     if not values:
         return None
     level = sum(values) / len(values)
-    lo, hi = bounded_mean_interval(values, binary=column.binary) or (None, None)
+    lo, hi = bounded_mean_interval(values, binary=grade in sheet.two_valued) or (None, None)
     return Estimate(
         value=level, ci_lo=lo, ci_hi=hi, n=len(values), se=None, unit=unit, form="level"
     )

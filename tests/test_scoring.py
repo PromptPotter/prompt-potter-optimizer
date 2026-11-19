@@ -217,6 +217,7 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.formula.matchers import MATCHERS
 from promptpotter.application.scoring.judges.grounding import ANSWER_GROUNDING
+from promptpotter.application.scoring.judges.registry import two_valued_terms
 from promptpotter.application.scoring.metrics import compute_composite_fitness, fold_cells
 from promptpotter.application.scoring.paired import (
     MemberRows,
@@ -1186,6 +1187,29 @@ def test_the_scorer_id_names_the_grading_function(
     assert auto_scorer_id(per_sample, per_cell, judge_instrument=None) != before, (
         "the miss share is half the grading function"
     )
+
+
+def test_a_formula_is_two_valued_by_its_expression_over_what_emits() -> None:
+    # A two-valued fitness takes φ = 1 and an exact band; read as graded, φ is FITTED on 0/1 cells.
+    stage = JudgeStage(model="m", provider="openai")
+    judges = {
+        "answer": JudgeSpec(name="simpleqa", stages=[stage]),
+        "grounded": JudgeSpec(name=ANSWER_GROUNDING.name, stages=[stage]),
+    }
+    emitters = two_valued_terms(judges) | {"env_reward"}
+    assert two_valued_terms(judges) == {"answer"}, "a judge scoring 0.5 is graded"
+    for formula, two_valued in (
+        ("label_match(predicted, ground_truth)", True),
+        ("answer", True),
+        ("max(0.0, min(1.0, env_reward))", True),
+        ("label_match(predicted, ground_truth) * em_match(predicted, ground_truth)", True),
+        ("0.0 if error else 1.0", True),
+        ("0.5 * label_match(predicted, ground_truth)", False),
+        ("grounded", False),
+        ("rr(ground_truth_rank)", False),
+    ):
+        scorer = scorer_of(formula, two_valued_terms=emitters)
+        assert ("fitness" in scorer.two_valued) is two_valued, formula
 
 
 # 2. Composite fitness and coverage
@@ -3736,7 +3760,9 @@ def _line_read(
             member(label, grades),
             bank,
             scope=RoleScope.REPORT,
-            measurands=grade_measurands(dataclasses.replace(scorer_of(), id="s")),
+            measurands=grade_measurands(
+                dataclasses.replace(scorer_of(per_cell="0.6 * fitness"), id="s")
+            ),
             spec=ROUND_LIFT_SPEC,
         )
 
@@ -4738,7 +4764,7 @@ def _reference_reading(
     cut: CutKind | None,
 ) -> PairedReading:
     bank = samples(len(reference), "t")
-    scorer = scorer_of()
+    scorer = scorer_of(per_cell="0.6 * fitness")
 
     def rows(grades: Sequence[float | None]) -> CellSheet:
         return sheet(
@@ -4988,24 +5014,30 @@ def test_the_paired_t_matches_ttest_rel_and_brackets_the_evidence_it_tests() -> 
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_level_band_covers_its_level_at_the_ends_of_its_support() -> None:
-    def band(grades: list[float], column: str) -> tuple[float | None, float | None]:
-        level = level_band(sheet(measurements(grades)), ROW_GRADES[column], "rate")
+    def band(grades: list[float], declared: bool) -> tuple[float | None, float | None]:
+        # `label_match` declares its fitness two-valued; a bare sheet's scorer declares nothing.
+        cells = measurements(grades)
+        level = level_band(
+            scorer_of().graded(cells) if declared else sheet(cells), "fitness", "rate"
+        )
         assert level is not None
         return level.ci_lo, level.ci_hi
 
     # scipy `beta.ppf(0.025, 20, 1)`, the exact Clopper-Pearson bound; the Wald-t read 0.974.
-    assert band([1.0] * 20, "hit") == pytest.approx((0.831566, 1.0), abs=1e-6)
-    assert band([0.0] * 6, "hit") == pytest.approx((0.0, 0.459258), abs=1e-6)
-    for column in ("hit", "fitness"):
+    assert band([1.0] * 20, True) == pytest.approx((0.831566, 1.0), abs=1e-6), (
+        "a two-valued scorer's fitness band read its column's binariness, never its scorer's"
+    )
+    assert band([0.0] * 6, True) == pytest.approx((0.0, 0.459258), abs=1e-6)
+    for declared in (True, False):
         covered = 0.0
         for k in range(21):
-            lo, hi = band([1.0] * k + [0.0] * (20 - k), column)
+            lo, hi = band([1.0] * k + [0.0] * (20 - k), declared)
             assert lo is not None and hi is not None
             covered += comb(20, k) * 0.95**k * 0.05 ** (20 - k) * (lo <= 0.95 <= hi)
         assert covered >= 0.95, (
-            f"{column}: the band covered p = 0.95 at n = 20 {covered:.0%} of the time"
+            f"declared={declared}: the band covered p = 0.95 at n = 20 {covered:.0%} of the time"
         )
-    assert band([1.0], "fitness") == (None, None), "one graded cell brackets nothing"
+    assert band([1.0], False) == (None, None), "one graded cell brackets nothing"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -5116,7 +5148,7 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     fold = fold_cells(cells, "rate")
     assert (fold.total, fold.fitness) == (4, 0.75)
     assert fold.composite_fitness == pytest.approx(sum(worth.values()) / 4)
-    level = level_band(cells, ROW_GRADES["fitness"], "rate")
+    level = level_band(cells, "fitness", "rate")
     assert level is not None and level.value == fold.fitness
     assert {key: row.grade.fitness for key, row in twice.by_key().items()} == standing
     once = member_rows("once", measurements(list(by_slot.values())), four)
@@ -5134,7 +5166,7 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     assert ungraded.sheet.column(ROW_GRADES["fitness"]) == {
         four[sid].key: grade for sid, grade in by_slot.items() if sid < 3
     }
-    level = level_band(ungraded.sheet, ROW_GRADES["fitness"], "rate")
+    level = level_band(ungraded.sheet, "fitness", "rate")
     assert level is not None and level.value == pytest.approx(2 / 3)
     short = _read_pair(once, ungraded, four).coverage
     assert short is not None and short.scored == 3, "an unscored cell left the pair"
@@ -5279,7 +5311,7 @@ def test_c0_is_topped_up_on_a_scope_the_line_drew_never_paired_on_its_own_scope_
             dataset_hash=None,
         ),
         sample_keys=[s.key for s in seated],
-        scorer=dataclasses.replace(scorer_of(), id="s"),
+        scorer=dataclasses.replace(scorer_of(per_cell="0.6 * fitness"), id="s"),
         instrument_id="i",
     ).lift("fitness")
     assert on_bench is not None and on_bench.estimate.value == pytest.approx(0.5), (
@@ -5301,8 +5333,11 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
             seed=1,
         )
 
+    # Its sheets carry the declaration of the scorer that reads them: fitness two-valued.
+    scorer = dataclasses.replace(scorer_of(per_cell="0.6 * fitness"), id="s")
+
     def keyed(rows: list[GradedCell]) -> CellSheet:
-        return sheet((_keyed(row, f"k{row.key}") for row in rows), "s")
+        return scorer.graded(_keyed(row, f"k{row.key}") for row in rows)
 
     recorded = keyed(measurements([1.0] * 20))
     fresh = keyed(measurements([1.0, 0.0] * 5, range(100, 110)))
@@ -5311,11 +5346,13 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
     c0 = ArmName(key=ArmKey("c0"), round=0, label="C0")
 
-    def verified(pass_: VerifyPass, fresh_rows: CellSheet = fresh) -> Any:
+    def verified(
+        pass_: VerifyPass, fresh_rows: CellSheet = fresh, recorded: CellSheet = recorded
+    ) -> Any:
         arm = c0 if pass_.arm.round == 0 else pass_.arm
         return verify_reading(
             pass_,
-            scorer=dataclasses.replace(scorer_of(), id="s"),
+            scorer=scorer,
             fresh=fresh_rows,
             recorded=recorded,
             measured=verify_member(
@@ -5339,6 +5376,14 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
         "the recorded level sits above the fresh band, so the round's claim did not survive"
     )
     assert verified(banked(), keyed(measurements([1.0] * 10, range(100, 110)))).held is True
+    # 14/20 against 20/20 is Fisher's p 0.020: two bands overlapping is a ~0.6% test, not a 5% one.
+    for hits, held in ((14, False), (19, True)):
+        fell = keyed(measurements([1.0] * hits + [0.0] * (20 - hits), range(100, 120)))
+        assert verified(banked(), fell).held is held, f"{hits}/20 fresh against 20/20 recorded"
+    # A level recorded on four cells is a wide band, never a point the fresh band must reach.
+    assert verified(banked(), recorded=keyed(measurements([1.0] * 4))).held is True, (
+        "a verify compared the fresh band against the recorded level's point"
+    )
     hard = verified(banked("hard"))
     assert hard.held is None, (
         "hard picks sit below the level whatever the candidate is worth: no verdict from the level"
@@ -5917,6 +5962,24 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
     assert quoted.ability.theta.value == 0.42
 
     assert any(note.startswith("potter_s1, gepa_s1 elected") for note in matrix.notes)
+
+
+def test_a_two_valued_scorers_headline_separates_under_the_bar_its_paired_test_separates() -> None:
+    bank = samples(12, "t")
+
+    def member(name: str, grades: list[float]) -> MemberRows:
+        rows = [measurement(i, g, objective=g) for i, g in enumerate(grades)]
+        return member_rows(name, rows, bank)
+
+    measurands = grade_measurands(dataclasses.replace(scorer_of(), id="s"))
+    lift = _read_pair(
+        member("c0", [0.0] * 11 + [1.0]), member("c1", [1.0] * 12), bank, measurands=measurands
+    ).headline
+    assert lift is not None and lift.flips is not None, "a matcher's 0/1 fitness read as graded"
+    assert lift.side == "above"
+    for statistic in ("sign_test", "e_process"):
+        bar = CrowningBar(statistic=statistic, admission=BAR_ADMISSION)
+        assert bar.separates(lift), f"{statistic} refused 11 gained, 0 lost its paired test took"
 
 
 # 8. A bare-answer backend — the n8n eval harness

@@ -10,7 +10,7 @@ from promptpotter.domain.cell_fold import CellFold, ScoreSummary, field_accuracy
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results_health import is_degraded, is_deprecated
-from promptpotter.domain.scoring import ROW_GRADES, CellSheet, GradedCell, Scorer
+from promptpotter.domain.scoring import CellSheet, GradedCell, Scorer
 from promptpotter.domain.spend import TokenAccount
 
 # Meaned whatever the formula reads; `errored`/`degraded` are reported as rates.
@@ -29,8 +29,8 @@ def _channel_means(scoreable: Sequence[GradedCell], names: Iterable[str]) -> dic
 
 
 def fold_cells(sheet: CellSheet, fitness_unit: MeasurandUnit) -> CellFold:
-    fitness = level_band(sheet, ROW_GRADES["fitness"], fitness_unit)
-    composite = level_band(sheet, ROW_GRADES["objective"], "score")
+    fitness = level_band(sheet, "fitness", fitness_unit)
+    composite = level_band(sheet, "objective", "score")
     return CellFold(
         total=len(sheet.scoreable),
         fitness=None if fitness is None else fitness.value,
@@ -60,7 +60,7 @@ def compute_composite_fitness(
         cached=sum(1 for cell in sheet if cell.facts.cached),
         evaluators=evaluator_values,
         fitness_terms=sorted(terms & evaluator_values.keys()),
-        fitness_band=level_band(sheet, ROW_GRADES["fitness"], scorer.fitness_unit),
+        fitness_band=level_band(sheet, "fitness", scorer.fitness_unit),
         tokens=TokenAccount.from_measured_rows(cell.facts for cell in sheet),
     )
 

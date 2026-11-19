@@ -462,7 +462,7 @@ def subject_evidence(
     rows = [r.model_copy(update={"levels": levels[r.key]}) for r in rows]
 
     members = {key: _member(wanted[key], found.head, found.cycle) for key, found in reads.items()}
-    measurand = metric_measurand(spec_metric, grader.scorer.id)
+    measurand = metric_measurand(spec_metric, grader.scorer)
     unranked: list[RankedEdit] = []
     if include_ranking:
         for row in (r for r in rows if r.kind == "campaign"):
@@ -969,7 +969,7 @@ def _campaign_edits(
                     _member_rows(
                         address.path,
                         acc.arm,
-                        CellSheet(cycle.scorer.id, tuple(acc.cells.values())),
+                        cycle.scorer.graded(acc.cells.values()),
                         origin.rows.instrument_id,
                     ),
                     masked=False,

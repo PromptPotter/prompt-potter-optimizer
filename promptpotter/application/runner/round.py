@@ -900,7 +900,7 @@ async def _walk_population(
     # A prior's caught-up cells are its round reading's rows, so the race and the election read one sheet.
     for key, cells in ({} if pool is None else pool.caught).items():
         if key in concluded:
-            taken = CellSheet(rows[key].scorer_id, tuple(cells))
+            taken = replace(rows[key], cells=tuple(cells))
             rows[key] = rows[key].merged(taken)
             ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]

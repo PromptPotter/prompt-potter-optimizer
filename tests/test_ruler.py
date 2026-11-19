@@ -37,6 +37,7 @@ from pydantic import TypeAdapter
 
 from promptpotter.application.bench.difficulty import (
     DifficultyView,
+    JudgingRuler,
     calibrate_delta_ruler,
     judging_ruler,
     ruler_clock,
@@ -154,8 +155,10 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
         p = 1.0 / (1.0 + np.exp(-(theta - np.array([ruler[c] for c in cells]))))
         return dict(zip(cells, (rng.random(len(cells)) < p).astype(float).tolist(), strict=True))
 
-    def theta_of(responses: dict[str, float], scale: Any) -> tuple[float, float]:
-        read = fit_theta(responses, scale)
+    def theta_of(
+        responses: dict[str, float], scale: Any, *, binary: bool = True
+    ) -> tuple[float, float]:
+        read = fit_theta(responses, scale, binary=binary)
 
         assert read is not None, "an arm with cells on the ruler carried no θ"
         return read
@@ -172,10 +175,10 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
     assert abs(same_easy - same_hard) < 0.5, "one ability read differently on two subsets"
 
     # A sample absent from a WARM ruler enters no θ: δ=0 is a position on the scale, not neutral.
-    assert fit_theta({"99": 1.0}, ruler) is None, "a cell off the ruler carried a θ"
-    assert fit_theta({**able, "99": 0.0}, ruler) == fit_theta(able, ruler), (
-        "an off-ruler cell moved θ"
-    )
+    assert fit_theta({"99": 1.0}, ruler, binary=True) is None, "a cell off the ruler carried a θ"
+    assert fit_theta({**able, "99": 0.0}, ruler, binary=True) == fit_theta(
+        able, ruler, binary=True
+    ), "an off-ruler cell moved θ"
     assert theta_of({"99": 1.0}, None)[0] > 0.0, (
         "a COLD ruler reads plain logit-fitness: one hit is θ > 0"
     )
@@ -183,19 +186,33 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
     # θ_se is dispersion-corrected: a GRADED response varies less about its mean than Bernoulli.
     graded = {f"{sid}.{i}": 0.5 + 0.02 * i for i, sid in enumerate(easy * 6)}
     spread = {f"{sid}.{i}": float(i % 2) for i, sid in enumerate(easy * 6)}
-    assert theta_of(graded, ruler)[1] < theta_of(spread, ruler)[1], (
+    assert theta_of(graded, ruler, binary=False)[1] < theta_of(spread, ruler)[1], (
         "a graded response was read as noisy as a coin flip"
     )
-    # Hits far below θ and misses far above, as a δ fit on these rows reads them: φ would be ≪ 1.
-    separated = {f"{s}.{i}": float(s in easy) for i, s in enumerate([*easy, *hard] * 6)}
-    for binary in (measure(0.8, easy, n=60), separated):
-        bin_theta, bin_se = theta_of(binary, ruler)
-        p_hat = 1.0 / (1.0 + np.exp(-(bin_theta - np.array([ruler[k] for k in binary]))))
-        bern_se = 1.0 / np.sqrt(float(np.sum(p_hat * (1 - p_hat))) + 1 / 1.5**2)
-        assert abs(bin_se - bern_se) < 0.15 * bern_se, "φ moved the SE of a dichotomous dataset"
+    # Hits far below θ and misses far above: φ fitted on them is ≪ 1. Through `frontier`, a sheet
+    # under `label_match` holds φ = 1 by its scorer's declaration; the same cells under `rr` fit it.
+    separated = [(f"{s}.{i}", float(s in easy)) for i, s in enumerate([*easy, *hard] * 6)]
+    cells = [measurement(n, y, objective=y, sample_key=k) for n, (k, y) in enumerate(separated)]
+    stamp = RulerStamp(
+        id="v", version=0, own=None, scope=RulerScope(scorer="s", dataset="ds"), excluded=()
+    )
+    judging = JudgingRuler(_anchored(ruler), stamp)
+    rate, score = (
+        judging.frontier(scorer_of(formula).graded(cells))
+        for formula in ("label_match(predicted, ground_truth)", "rr(ground_truth_rank)")
+    )
+    assert rate is not None and score is not None and score.se < 0.8 * rate.se, (
+        "θ_se read one φ under a two-valued scorer and a graded one"
+    )
+    # φ is the scorer's declaration, never read off the values: a 0.999 for a 1.0 is still Bernoulli.
+    hits = {f"{sid}.{i}": float(i % 3 != 0) for i, sid in enumerate(easy * 4)}
+    nudged = theta_of({**hits, next(k for k, y in hits.items() if y): 0.999}, ruler)[1]
+    assert abs(nudged - theta_of(hits, ruler)[1]) < 0.01 * nudged, (
+        "a 0.999 re-read φ off the values"
+    )
 
     flat = {f"{sid}.{i}": 0.5 for i, sid in enumerate(easy * 6)}
-    assert theta_of(flat, ruler)[1] > 0.1, (
+    assert theta_of(flat, ruler, binary=False)[1] > 0.1, (
         "no residual spread read as infinite confidence: every gate would fire"
     )
 
@@ -212,8 +229,8 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
 
     # Every δ sits five logits from the θ=0 seed, where an undamped `grad / info` step limit-cycles.
     far = dict.fromkeys(map(str, range(20)), 5.55)
-    parent_theta, parent_se = theta_of(dict.fromkeys(far, 0.20), far)
-    better_theta, better_se = theta_of(dict.fromkeys(far, 0.45), far)
+    parent_theta, parent_se = theta_of(dict.fromkeys(far, 0.20), far, binary=False)
+    better_theta, better_se = theta_of(dict.fromkeys(far, 0.45), far, binary=False)
 
     assert 2.0 < parent_theta < better_theta < 7.0 and parent_theta < 5.55, (
         parent_theta,
@@ -504,7 +521,9 @@ def test_a_theta_off_the_judging_scale_is_withheld_and_its_caveat_names_why() ->
     # A child on cells the judging scale does not carry stays off it until its round folds.
     fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
     child = {sid: float(sid == "7") for sid in ("7", "8", "9")}
-    assert fit_theta(child, fitted.entries()) is None, "a child read on unlinked cells carried a θ"
+    assert fit_theta(child, fitted.entries(), binary=True) is None, (
+        "a child read on unlinked cells carried a θ"
+    )
     tied = _anchored({"1": 0.0, "2": 0.0, "3": 3.0})
     for scale, read_on, expected in (
         (fitted, ["1", "2", "3"], None),
@@ -557,6 +576,7 @@ def traced(tmp_path: Path) -> _Traced:
         ranking=None,
         fields=None,
         fitness_unit="score",
+        two_valued=frozenset({"hit"}),
         terms=frozenset(),
         fitness=lambda _row, _grade: 0.0,
         objective=None,

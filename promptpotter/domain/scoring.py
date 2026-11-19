@@ -553,6 +553,8 @@ class CellSheet:
     """A cell's STANDING row is its last scored row, else its last; statistics read the scored."""
 
     scorer_id: str
+    # Its scorer's declaration (`Scorer.two_valued`): every reader past the scorer reads it here.
+    two_valued: frozenset[RowGrade]
     cells: tuple[GradedCell, ...] = ()
 
     def __len__(self) -> int:
@@ -569,7 +571,7 @@ class CellSheet:
 
     def standing(self) -> CellSheet:
         """Folded AFTER the grade, so the replicate rule can read it."""
-        return CellSheet(self.scorer_id, tuple(self.by_key().values()))
+        return replace(self, cells=tuple(self.by_key().values()))
 
     def _standing[K](self, key: Callable[[GradedCell], K]) -> dict[K, GradedCell]:
         held: dict[K, GradedCell] = {}
@@ -591,7 +593,7 @@ class CellSheet:
         return {cell.key: column.read(cell) for cell in self.scoreable}
 
     def where(self, keep: Callable[[GradedCell], bool]) -> CellSheet:
-        return CellSheet(self.scorer_id, tuple(cell for cell in self.cells if keep(cell)))
+        return replace(self, cells=tuple(cell for cell in self.cells if keep(cell)))
 
     def merged(self, later: CellSheet) -> CellSheet:
         """*later* wins each cell both scored."""
@@ -599,12 +601,12 @@ class CellSheet:
             return self
         if not self.cells:
             return later
-        if self.scorer_id != later.scorer_id:
+        if (self.scorer_id, self.two_valued) != (later.scorer_id, later.two_valued):
             raise ValueError(
                 f"cells graded under {later.scorer_id!r} cannot join a sheet graded under "
                 f"{self.scorer_id!r}"
             )
-        return CellSheet(self.scorer_id, (*self.cells, *later.cells))
+        return replace(self, cells=(*self.cells, *later.cells))
 
     def addresses(self) -> list[WalkedCell]:
         return [address for cell in self.cells if (address := cell.address) is not None]
@@ -625,7 +627,7 @@ class CellSheet:
         )
 
 
-NO_CELLS = CellSheet("")
+NO_CELLS = CellSheet("", frozenset())
 
 
 @dataclass(frozen=True)
@@ -636,6 +638,9 @@ class Scorer:
     per_cell: str | None
     # What the mean per-cell fitness reads in: a rate where ``per_sample`` IS one matcher's call.
     fitness_unit: MeasurandUnit
+    # The grades this scorer DECLARES two-valued, never read off the values it graded: ``hit``
+    # always, and each grade its formulas emit 0/1 on (`matchers.py::fitness_scale_of`).
+    two_valued: frozenset[RowGrade]
     # Every name either formula reads: the round means each one a cell answers.
     terms: frozenset[str]
     # The one matcher ``per_sample`` calls, which decides what a prediction's answer is.
@@ -675,7 +680,11 @@ class Scorer:
         )
 
     def sheet(self, facts: Iterable[MeasuredCell]) -> CellSheet:
-        return CellSheet(self.id, tuple(self.grade(cell) for cell in facts))
+        return self.graded(self.grade(cell) for cell in facts)
+
+    def graded(self, cells: Iterable[GradedCell]) -> CellSheet:
+        """Cells this scorer already graded, under its declaration."""
+        return CellSheet(self.id, self.two_valued, tuple(cells))
 
     @property
     def cell_formula(self) -> str:
@@ -684,6 +693,8 @@ class Scorer:
 
 
 CellGrade = Literal["fitness", "objective"]
+# What a graded row answers with: its stamped grades, and ``hit`` read off its fitness.
+RowGrade = Literal["fitness", "objective", "hit"]
 
 
 DEFAULT_SCORER_ID = "default_hit"
@@ -716,10 +727,9 @@ def is_hit(fitness: float | None) -> bool:
 
 
 class GradeColumn(NamedTuple):
-    """One number a graded row answers with: whether it is two-valued, and the unit it is in."""
+    """One number a graded row answers with, and the unit it is in; whether it is two-valued is
+    its scorer's declaration (`Scorer.two_valued`)."""
 
-    # DECLARED, never read off the values: a formula grading every cell 0 or 1 may grade the next 0.5.
-    binary: bool
     # ``None``: the grading scorer's ``fitness_unit``.
     unit: MeasurandUnit | None
     read: Callable[[GradedCell], float]
@@ -740,13 +750,13 @@ def _stamped(cell: GradedCell, grade: CellGrade) -> float:
 
 
 ROW_GRADES: dict[str, GradeColumn] = {
-    "fitness": GradeColumn(False, None, lambda cell: _stamped(cell, "fitness")),
-    "objective": GradeColumn(False, "score", lambda cell: _stamped(cell, "objective")),
-    # The one column every scorer's rows carry two-valued, by construction of `is_hit`.
-    "hit": GradeColumn(True, "rate", lambda cell: float(is_hit(_stamped(cell, "fitness")))),
+    "fitness": GradeColumn(None, lambda cell: _stamped(cell, "fitness")),
+    "objective": GradeColumn("score", lambda cell: _stamped(cell, "objective")),
+    # Two-valued under every scorer, by construction of `is_hit`: each declares it.
+    "hit": GradeColumn("rate", lambda cell: float(is_hit(_stamped(cell, "fitness")))),
 }
 
-assert set(ROW_GRADES) - {"hit"} == set(get_args(CellGrade))
+assert set(ROW_GRADES) == set(get_args(RowGrade)) > set(get_args(CellGrade))
 
 
 class ScoringSpec(NamedTuple):

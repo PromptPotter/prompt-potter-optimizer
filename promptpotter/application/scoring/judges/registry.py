@@ -66,6 +66,12 @@ def judge_instrument(specs: Mapping[str, JudgeSpec]) -> str | None:
     )
 
 
+def two_valued_terms(specs: Mapping[str, JudgeSpec]) -> frozenset[str]:
+    """The terms whose judge's score set is 0 and 1 alone: its verdict is a hit or a miss."""
+    scores = {term: set(JUDGES.get(spec.name).to_score.values()) for term, spec in specs.items()}
+    return frozenset(term for term, s in scores.items() if s and s <= {0.0, 1.0})
+
+
 async def _compute(
     *,
     result: MeasuredCell,

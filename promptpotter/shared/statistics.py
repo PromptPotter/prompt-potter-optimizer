@@ -128,6 +128,42 @@ def paired_diff_posterior(
     return (mean_d, se_d, n)
 
 
+def declared_two_valued(values: Sequence[float]) -> Sequence[float]:
+    """*values*, which a declaration calls 0/1: a value between is a wrong declaration, refused."""
+    if not set(values) <= {0.0, 1.0}:
+        raise ValueError("values declared two-valued are not: the declaration is wrong")
+    return values
+
+
+def _wilson(k: int, n: int, z: float) -> tuple[float, float]:
+    p, z2 = k / n, z * z
+    center, half = p + z2 / (2 * n), z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
+    return (center - half) / (1 + z2 / n), (center + half) / (1 + z2 / n)
+
+
+def difference_interval(
+    a: Sequence[float], b: Sequence[float], *, binary: bool, alpha: float = 0.05
+) -> tuple[float, float] | None:
+    """The band of ``mean(a) - mean(b)`` over INDEPENDENT cells: Newcombe's hybrid score interval
+    where the values are DECLARED binary, else Welch's. ``None`` where a side is too short for one."""
+    na, nb = len(a), len(b)
+    if min(na, nb) < (1 if binary else 2):
+        return None
+    d = sum(a) / na - sum(b) / nb
+    if binary:
+        z = NormalDist().inv_cdf(1 - alpha / 2)
+        ka, kb = int(sum(declared_two_valued(a))), int(sum(declared_two_valued(b)))
+        (la, ua), (lb, ub) = _wilson(ka, na, z), _wilson(kb, nb, z)
+        pa, pb = ka / na, kb / nb
+        return d - math.hypot(pa - la, ub - pb), d + math.hypot(ua - pa, pb - lb)
+    va, vb = _sd(list(a)) ** 2 / na, _sd(list(b)) ** 2 / nb
+    if va + vb == 0.0:
+        return d, d
+    df = (va + vb) ** 2 / (va**2 / (na - 1) + vb**2 / (nb - 1))
+    half = _t_ppf(1 - alpha / 2, df) * math.sqrt(va + vb)
+    return d - half, d + half
+
+
 def bounded_mean_interval(
     values: Sequence[float], *, binary: bool, alpha: float = 0.05
 ) -> tuple[float, float] | None:
@@ -139,7 +175,7 @@ def bounded_mean_interval(
         return None
     a, b = min(0.0, *values), max(1.0, *values)
     if binary:
-        k = round(mean * n)
+        k = int(sum(declared_two_valued(values)))
 
         def accepted(mu: float) -> bool:
             above = k == 0 or _beta_cdf(mu, k, n - k + 1) > alpha / 2

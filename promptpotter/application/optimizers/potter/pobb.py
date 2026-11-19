@@ -65,8 +65,8 @@ class PoBBStop(StopSignal):
 
 
 def race_sheet(cells: Iterable[GradedCell]) -> CellSheet:
-    """An arm's rows as the race holds them; never filed, so it carries no scorer."""
-    return CellSheet("", tuple(cells))
+    """An arm's rows as the race holds them; never filed, so it carries no scorer and no declaration."""
+    return CellSheet("", frozenset(), tuple(cells))
 
 
 def graded_sheet(grades: Mapping[str, Mapping[str, object]]) -> CellSheet:

@@ -1646,10 +1646,11 @@ export interface VerifyReading {
    * on outside the bench — the fresh ones and the overlap pass's included.
    * `same_individual` on the origin itself. */
   vs_origin: PairedReading;
-  /** Whether the fresh cells leave the recorded hit rate standing: its level sits
-   * at or below the fresh band's upper bound. `None`: `hard` picks sit below
-   * the level whatever the candidate is worth, and under two fresh cells have
-   * no band; read `vs_origin` there. */
+  /** Whether the fresh cells leave the recorded hit rate standing: the 95% band of
+   * fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness,
+   * else Welch's). `None`: `hard` picks sit below the level whatever the
+   * candidate is worth, and a side too short for that band (no cell two-
+   * valued, under two graded) has none; read `vs_origin` there. */
   held: boolean | null;
 }
 
@@ -5696,7 +5697,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "66c600eeb65e8595";
+export const SERVED_CONTRACT = "1ef597e9b5915459";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

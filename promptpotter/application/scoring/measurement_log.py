@@ -354,7 +354,7 @@ def cycle_hard_samples(stores: Stores, at: CampaignCycle) -> HardSamples:
     cells: list[GradedCell] = []
     for rr in rounds:
         cells = merge_known_outcomes(cells, rr.results)
-    frontier = None if judging is None else judging.frontier(cells)
+    frontier = None if judging is None else judging.frontier(scorer.graded(cells))
     return build_hard_samples(
         build_observations(rounds),
         None if judging is None else judging.ruler,

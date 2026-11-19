@@ -46,6 +46,11 @@ def responses_of(sheet: CellSheet) -> dict[str, float]:
     return {cell.key: graded_response(cell) for cell in sheet.scoreable}
 
 
+def responses_binary(sheet: CellSheet) -> bool:
+    """Whether `graded_response` reads 0/1 on *sheet*: its scorer's declaration, never the values."""
+    return "objective" in sheet.two_valued
+
+
 _INIT_SIGMA_THETA = 1.5
 _INIT_SIGMA_DELTA = 2.0
 
@@ -234,42 +239,39 @@ def fit_theta(
     responses: Mapping[str, float],
     delta: Ruler | None,
     *,
+    binary: bool,
     center: float = 0.0,
 ) -> tuple[float, float] | None:
     """``delta=None`` is the cold ruler (θ = logit-fitness); a cell off a live ruler enters no fit, never at δ=0.
-    The prior is N(*center*, 1.5²): centred on a bar, it sits on the lift, never on each side apart."""
+    The prior is N(*center*, 1.5²): centred on a bar, it sits on the lift, never on each side apart.
+    *binary* is the scorer's declaration that the responses are 0/1 (`CellSheet.two_valued`)."""
     graded = _cell_parameters(responses.keys(), delta)
     rows = [(*graded[key], y) for key, y in responses.items() if key in graded]
-    return _fit_one(rows, center=center, max_iter=50, tol=1e-4) if rows else None
-
-
-def _fit_one(
-    rows: Sequence[tuple[float, float, float]], *, center: float, max_iter: int, tol: float
-) -> tuple[float, float]:
+    if not rows:
+        return None
     inv_var = 1.0 / (_INIT_SIGMA_THETA * _INIT_SIGMA_THETA)
     d_arr = np.fromiter((d for d, _, _ in rows), dtype=np.float64)
     a_arr = np.fromiter((a for _, a, _ in rows), dtype=np.float64)
     h_arr = np.fromiter((y for _, _, y in rows), dtype=np.float64)
     theta = center
-    for _ in range(max_iter):
+    for _ in range(50):
         p = logistic(a_arr * (theta - d_arr))
         grad = float(np.sum(a_arr * (h_arr - p))) - inv_var * (theta - center)
         info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
         step = float(_newton_step(grad, info))
         theta += step
-        if abs(step) < tol:
+        if abs(step) < 1e-4:
             break
     p = logistic(a_arr * (theta - d_arr))
     info = float(np.sum(a_arr * a_arr * p * (1.0 - p))) + inv_var
     # Never a pooled φ̄: that makes an arm's SE depend on which arms shared its round.
-    phi = _dispersion(h_arr, p, dof=max(len(rows) - 1, 1))
+    # A declared Bernoulli's variance IS p(1−p): φ = 1, never read off how close the values sit to 0/1.
+    phi = 1.0 if binary else _dispersion(h_arr, p, dof=max(len(rows) - 1, 1))
     return theta, float(np.sqrt(phi) / np.sqrt(max(info, 1e-9)))
 
 
 def _dispersion(y: NDArray[np.floating[Any]], p: NDArray[np.floating[Any]], *, dof: int) -> float:
-    """Pearson φ, shrunk toward 1 — and exactly 1 where every response is 0/1: a Bernoulli's variance IS p(1−p)."""
-    if np.all((y == 0.0) | (y == 1.0)):
-        return 1.0
+    """Pearson φ of a graded response, shrunk toward 1."""
     misfit = float(np.sum((y - p) ** 2 / np.clip(p * (1.0 - p), 1e-6, None)))
     return (misfit + _EB_NU0 * _EB_S0_SQ) / (dof + _EB_NU0)
 
@@ -514,17 +516,18 @@ def candidate_abilities(
 ) -> RoundAbilities:
     """``parent_results`` is the parent RE-SCORED on this round's panel, never C0's banked rows."""
     entries = ruler.entries() if ruler is not None else None
-    parent = responses_of(parent_results)
+    parent, binary = responses_of(parent_results), responses_binary(parent_results)
     abilities = RoundAbilities(theta={}, theta_se={}, bar={}, cells={})
     for cid, sheet in results_by_id.items():
         own = theta_cells(responses_of(sheet), parent, ruler)
         bar_cells = parent if entries is not None else {k: parent[k] for k in own}
         # Both sides centred on the parent's own read: the prior sits on the lift, never on each side.
-        center = 0.0 if (first := fit_theta(bar_cells, entries)) is None else first[0]
-        if (read := fit_theta(own, entries, center=center)) is None:
+        first = fit_theta(bar_cells, entries, binary=binary)
+        center = 0.0 if first is None else first[0]
+        if (read := fit_theta(own, entries, binary=responses_binary(sheet), center=center)) is None:
             continue
         (abilities.theta[cid], abilities.theta_se[cid]), abilities.cells[cid] = read, len(own)
-        if (against := fit_theta(bar_cells, entries, center=center)) is not None:
+        if (against := fit_theta(bar_cells, entries, binary=binary, center=center)) is not None:
             abilities.bar[cid] = against
     return abilities
 

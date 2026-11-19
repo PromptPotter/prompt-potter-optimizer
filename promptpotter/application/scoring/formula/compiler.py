@@ -13,7 +13,7 @@ from typing import Any, NamedTuple
 from promptpotter.application.scoring.formula.matchers import (
     MATCHERS,
     backend_rank,
-    fitness_unit_of,
+    fitness_scale_of,
     matcher_of,
 )
 from promptpotter.connectors.protocol import Connector
@@ -27,6 +27,7 @@ from promptpotter.domain.scoring import (
     Grade,
     GradedCell,
     MeasuredCell,
+    RowGrade,
     Scorer,
     ScoringFormulaError,
     ScoringSpec,
@@ -396,8 +397,10 @@ def compile_scorer(
     *,
     verifier_graded: bool,
     judge_instrument: str | None = None,
+    two_valued_terms: frozenset[str],
 ) -> Scorer:
-    """``verifier_graded`` has no default: ``False`` would read as armed wherever a caller forgot it."""
+    """``verifier_graded`` has no default: ``False`` would read as armed wherever a caller forgot it.
+    ``two_valued_terms``: the terms a judge declares 0/1 (`fitness_scale_of`)."""
     if not per_sample:
         raise ScoringFormulaError(
             "compile_scorer: scoring formula is required. "
@@ -423,12 +426,14 @@ def compile_scorer(
         value = compiled.evaluate(cell_namespace(facts, grade), f"query {query!r}")
         return _unit(value)
 
-    unit = fitness_unit_of(per_sample)
+    unit, two_valued = fitness_scale_of(per_sample, two_valued_terms)
+    declared: frozenset[RowGrade] = frozenset({"hit", "fitness"} if two_valued else {"hit"})
     if not per_cell:
         return Scorer(
             id=scorer_id,
             per_cell=None,
             fitness_unit=unit,
+            two_valued=declared | {"objective"} if two_valued else declared,
             terms=compiled.names,
             matcher=matcher,
             span=span,
@@ -454,6 +459,8 @@ def compile_scorer(
         id=scorer_id,
         per_cell=per_cell,
         fitness_unit=unit,
+        # A composite charges a hit its costs: the objective is graded whatever the matcher.
+        two_valued=declared,
         terms=compiled.names | composite.names,
         matcher=matcher,
         span=span,

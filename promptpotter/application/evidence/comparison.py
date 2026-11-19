@@ -63,12 +63,16 @@ def pair_subjects(a: SubjectMember, b: SubjectMember, measurand: Measurand) -> P
     )
 
 
-def metric_measurand(spec: MetricSpec, scorer_id: str) -> Measurand:
+def metric_measurand(spec: MetricSpec, scorer: Scorer) -> Measurand:
+    """Only the core `fitness` channel IS a grade, and reads its declaration; a connector's report
+    key of a grade's name, or an expression, is graded."""
+    kind = MeasurandKind.EXPR if spec.key == CUSTOM_METRIC_KEY else MeasurandKind.CHANNEL
+    fitness = kind is MeasurandKind.CHANNEL and spec.expression == "fitness"
     return Measurand(
-        kind=MeasurandKind.EXPR if spec.key == CUSTOM_METRIC_KEY else MeasurandKind.CHANNEL,
+        kind=kind,
         key=spec.expression,
-        scorer_id=scorer_id,
-        binary=False,
+        scorer_id=scorer.id,
+        binary=fitness and "fitness" in scorer.two_valued,
         unit=spec.unit,
     )
 
@@ -270,7 +274,7 @@ def _pairwise(
         [pair_subjects(members[a], members[b], measurand) for a, b in pairs],
         f"pairwise:{measurand.key}",
     )
-    (hit,) = (m for m in grade_measurands(scorer) if m.binary)
+    (hit,) = (m for m in grade_measurands(scorer) if m.key == "hit")
     out: list[PairwiseComparison] = []
     for (a, b), reading in zip(pairs, readings, strict=True):
         flips = flipped_keys(members[a].rows.by_key(), members[b].rows.by_key())

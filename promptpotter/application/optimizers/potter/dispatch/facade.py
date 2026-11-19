@@ -347,7 +347,7 @@ class PotterView:
     @functools.cached_property
     def parent_ability(self) -> AbilityReading | None:
         """θ on the parent's own rows: the side of every contrast an edit is judged against."""
-        return self.ctx.read(Ruler).difficulty.judging.frontier(self.parent_rows)
+        return self.ctx.read(Ruler).difficulty.judging.frontier(self.ctx.read(Parent).own_rows)
 
     # -- the evidence
     @functools.cached_property

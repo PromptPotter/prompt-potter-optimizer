@@ -352,7 +352,7 @@ def pair_on_bench(
 def own_level(sheet: CellSheet, fitness_unit: MeasurandUnit) -> OwnLevel:
     def column(name: BenchColumn) -> Estimate | None:
         unit = fitness_unit if name == "fitness" else "score"
-        return level_band(sheet, ROW_GRADES[COLUMN_GRADE[name]], unit)
+        return level_band(sheet, COLUMN_GRADE[name], unit)
 
     return OwnLevel(
         fitness=column("fitness"),

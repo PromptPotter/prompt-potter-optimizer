@@ -361,22 +361,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `EstimatorSpec.kind`: the measurand's declaration already picks the paired test, and a kind would be
   a second door to it. **Rides with:** rk-dec. **Re-test:** the chain's census lists the estimate
   readings; one remains.
-- **φ's binariness is inferred from the values** (`rasch.py::_dispersion`) against the DECLARED rule
-  (`paired_reading.py::Measurand.binary`; one 0.999 for 1.0 cuts θ SE 0.546 → 0.324), but the response
-  θ reads (`objective`) is declared graded on every scorer (`scoring.py::ROW_GRADES`), so reading the
-  declaration fits φ on every binary dataset, whose δ-on-the-same-rows residuals read φ = 0.10 (θ_se
-  0.28 where the information gives 0.89: the election crowns on noise). Root: the scorer declares
-  whether its objective is two-valued (no `per_cell` cost term on a hit), and `fit_theta` takes that
-  declaration. The same missing declaration has two more holders:
-  - `evidence/comparison.py::metric_measurand` hard-codes `binary=False` (`MetricSpec` declares none);
-  - `crowning_bar.py::CrowningBar.separates` never separates a graded measurand.
-
-  **Rides with:** readings' successor. **Re-test:** a 0.999 for a 1.0 moves θ_se < 1%, and
-  `git grep -c "binary=False" -- promptpotter/application/evidence/comparison.py` is 0.
-- **A verify compares against a point**: `VerifyReading.held` reads the recorded level as known, but
-  the recorded level carries no band. Root: the record keeps the level's `Estimate`, and the verify
-  reads both bands. **Re-test:** a verify whose recorded level has a wide band is never "held" on a
-  point comparison.
 - **The warm gate counts no se_δ**: θ now reads each δ under its SE (`DeltaRuler.entries`), but the
   young-ruler joint MAP still shrinks δ̂ inward (slope 0.30 at 3 individuals per cell) and the warm
   gate warms on row counts alone.
@@ -787,6 +771,35 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **The offline world has no dead upstream** (rates-2's report): `offline_world.py` offers no
   "upstream unreachable" switch and no fetch count, so a fact patches `pricing.UPSTREAM_URL` and
   reads `Router.unrouted`, a set. **Rides with:** tests-x.
+
+### wave-5 · readings (what readings-4 and readings-5 left at their landing)
+
+- **A connector's two-valued term reaches no scorer** (readings-5's report): `authored.py::scorer_of`
+  compiles from `CampaignConfig` alone, which names no connector, so a `CellTerm` or observation
+  declaration cannot reach `matchers.py::fitness_scale_of`; harbor's `env_reward` is
+  `float(reward)` of a panel's `reward_key`, two-valued only per task, so
+  `max(0.0, min(1.0, env_reward))` still fits φ. Root: a connector declares the shape of its
+  observation keys (per panel where it varies), and the scorer compiles with the campaign's
+  connector. **Re-test:** the clamp under harbor reads two-valued in `Scorer.two_valued`.
+- **A merge drops a sheet's declaration** (readings-4's and its review's): `cell_fold.py::merge_known_outcomes`
+  returns `list[GradedCell]`, so `node_context.py`, `bench/cycle.py::pooled_theta`,
+  `measurement_log.py` and `evidence/read.py` re-wrap through a separately fetched scorer (correct
+  only while the scorer is locked at round 0's close). Root: the merge takes and returns sheets.
+  **Re-test:** `git grep -c "scorer.graded(" -- promptpotter` drops by 4.
+- **`read_arms` forces the t at one replicate per side** (readings-4's review): `paired.py::read_arms`
+  goes through `mean_lift`, which forces `binary=False`, where at one replicate the means are 0/1
+  and the declaration calls for McNemar; its docstring ("no row is 0 or 1") is false there. Root:
+  `mean_lift` reads the declaration where the replicate means are single cells. **Re-test:** a
+  1-replicate arm pair under `label_match` reads `flips`.
+- **A constant graded read is its own band** (readings-5's report): `statistics.py::difference_interval`'s
+  Welch arm returns the point (d, d) when both sides have zero variance, so a constant fresh read
+  below a constant recorded read fails a verify with certainty. Root: the graded difference is
+  bounded by the support as `bounded_mean_interval` is. **Re-test:** five fresh 0.79s against five
+  recorded 0.80s read held.
+- **A verify reads its comparison twice** (readings-5's report): `passes.py::verify_reading` computes
+  the levels (`own_level`) and `_held` off the fitness column separately. Root: `VerifyReading`
+  carries the difference band as its own `Estimate`, which `held` reads. **Re-test:** one reader of
+  the fitness column in `verify_reading`.
 
 ### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
 

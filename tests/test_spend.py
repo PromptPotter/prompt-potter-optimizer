@@ -811,6 +811,7 @@ _HIT = Scorer(
     ranking=None,
     fields=None,
     fitness_unit="score",
+    two_valued=frozenset({"hit"}),
     terms=frozenset(),
     fitness=lambda _row, _grade: 1.0,
     objective=None,
@@ -909,10 +910,10 @@ async def _walk(
         """A parent measured on none of the round's cells, so every cell owes it one catch-up call."""
 
         def __init__(self) -> None:
-            self.priors = {ArmKey("parent"): CellSheet("", ())}
+            self.priors = {ArmKey("parent"): CellSheet("", frozenset())}
 
         def catch_up(self, key: ArmKey, cells: Sequence[GradedCell]) -> None:
-            self.priors[key] = self.priors[key].merged(CellSheet("", tuple(cells)))
+            self.priors[key] = self.priors[key].merged(CellSheet("", frozenset(), tuple(cells)))
 
     parent = ArmKey("parent")
     priors = CatchUpPool(

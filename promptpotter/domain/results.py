@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import Any, Literal
 
 from pydantic import ConfigDict, Field, computed_field
@@ -339,11 +340,12 @@ class InRunCells:
         folded = individual_cells(walks, individual_id, scope)
         if not folded:
             return NO_CELLS
-        return CellSheet(folded[0][2], tuple(cell for _, cell, _ in folded)).standing()
+        return replace(folded[0][2], cells=tuple(cell for _, cell, _ in folded)).standing()
 
 
-type _SampleCell = tuple[str, GradedCell, str]
+# The sheet it was read from: its scorer and that scorer's declaration ride the cell.
+type _SampleCell = tuple[str, GradedCell, CellSheet]
 
 
 def _by_sample(sheet: CellSheet) -> list[_SampleCell]:
-    return [(cell.key, cell, sheet.scorer_id) for cell in sheet]
+    return [(cell.key, cell, sheet) for cell in sheet]

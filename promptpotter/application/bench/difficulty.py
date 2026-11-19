@@ -10,6 +10,7 @@ from promptpotter.application.intelligence.rasch import (
     fit_theta,
     graded_response,
     graduate_ruler_model,
+    responses_binary,
 )
 from promptpotter.domain.arms import Concluded
 from promptpotter.domain.campaign_config import CampaignConfig
@@ -64,13 +65,14 @@ class JudgingRuler(NamedTuple):
         cells = [cell.key for cell in rows if cell.scored]
         return theta_caveat(self.ruler, cells, prior_dominated=is_prior_dominated(rows))
 
-    def frontier(self, results: Iterable[GradedCell]) -> AbilityReading | None:
+    def frontier(self, sheet: CellSheet) -> AbilityReading | None:
         """The SOLE stamping site: θ, its scale and its caveat are minted together."""
-        results = list(results)
+        results = list(sheet)
         scored = [cell for cell in results if cell.scored]
         ruler = self.ruler
         responses = {cell.key: graded_response(cell) for cell in scored}
-        theta = fit_theta(responses, ruler.entries() if ruler is not None else None)
+        entries = ruler.entries() if ruler is not None else None
+        theta = fit_theta(responses, entries, binary=responses_binary(sheet))
         # The flat scale carries every cell.
         on = [c.key for c in scored if ruler is None or c.key in ruler.delta]
         if theta is None or not on:

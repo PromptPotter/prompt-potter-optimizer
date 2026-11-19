@@ -162,7 +162,13 @@ from promptpotter.domain.ruler import (
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import LineOutlay, RunStanding
 from promptpotter.domain.sample import ArchiveEntry, Bank, Sample, sample_key
-from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer, WalkedCell
+from promptpotter.domain.scoring import (
+    CellSheet,
+    GradedCell,
+    MeasuredCell,
+    Scorer,
+    WalkedCell,
+)
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.domain.spend import (
     Budget,
@@ -291,8 +297,9 @@ def measurements(
 
 
 def sheet(cells: Iterable[GradedCell], scorer_id: str = "test") -> CellSheet:
-    """Each cell under the grade it already carries: no formula runs."""
-    return CellSheet(scorer_id, tuple(cells))
+    """Each cell under the grade it already carries, by a scorer known by its id alone, which
+    declares what every scorer does (`hit`); a fact holding its scorer reads `scorer.graded`."""
+    return CellSheet(scorer_id, frozenset({"hit"}), tuple(cells))
 
 
 def score_summary(
@@ -472,8 +479,11 @@ def scorer_of(
     per_cell: str | None = None,
     *,
     verifier_graded: bool = False,
+    two_valued_terms: frozenset[str] = frozenset(),
 ) -> Scorer:
-    return compile_scorer(per_sample, per_cell, verifier_graded=verifier_graded)
+    return compile_scorer(
+        per_sample, per_cell, verifier_graded=verifier_graded, two_valued_terms=two_valued_terms
+    )
 
 
 type Configs = list[tuple[str, dict[str, Any]]]

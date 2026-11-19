@@ -159,7 +159,18 @@ BASELINE = {
     # webd-3 link 1 (+8): `hierarchy.py::DeleteAct`, the listing serving what Delete files in its
     # payload's own words, so the dialog decides nothing; `campaign_lifecycle` folded in (−9).
     # rates-2 (−5): the refresh keys on the home's rates file, which a failed fetch stamps too.
-    "package_lines": 111979,
+    # readings-3 (+21): `Matcher.two_valued` on each matcher and `Scorer.two_valued`, the grades a
+    # scorer declares 0/1, read by `grade_measurands`, and `read_arms`' replicate means read graded.
+    # readings-4 (+14): `CellSheet.two_valued`, the declaration θ and `metric_measurand` read past the
+    # scorer (`Scorer.graded` builds it, `responses_binary` reads it), in place of φ off the values;
+    # +3: a verify reads the recorded level's band, which a level under two cells lacks.
+    # readings-5 link 1 (+28): `matchers.py::_emits_two_valued`, a formula's two-valuedness derived
+    # over what emits (a matcher, a judge's score set: `registry.py::two_valued_terms`).
+    # link 2 (+4): `RowGrade`, the grades a scorer declares, `hit` among them (`GradeColumn.binary` went).
+    # link 3 (+37): `statistics.py::difference_interval` (Newcombe's hybrid score, Welch's), the
+    # verify's band of fresh − recorded, and `declared_two_valued`, the one check of a declaration.
+    # link 4 (+4): `metric_measurand` maps the core `fitness` channel to its grade, nothing else.
+    "package_lines": 112090,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

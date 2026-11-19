@@ -276,7 +276,8 @@ class Cycle:
         held = self.measured_pool().get(individual_id)
         memo = (self.difficulty.stamp, individual_id)
         if memo not in self._pool_theta:
-            read = None if held is None else self.difficulty.judging.frontier(held[1])
+            judging, scorer = self.difficulty.judging, self.session.state.scoring.scorer
+            read = None if held is None else judging.frontier(scorer.graded(held[1]))
             self._pool_theta[memo] = None if read is None or read.caveat else read.theta
         return self._pool_theta[memo]
 

@@ -12,7 +12,7 @@ from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.search_point_scorer import close_walk, open_walk
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.store.command_log import LookaheadWindow
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -92,7 +92,7 @@ class CatchUpPool:
             if backfill is not None:
                 cells = taken[cid] = backfill[1]()
                 self._race.catch_up(cid, cells)
-                self._scored(cid).update(c.key for c in CellSheet("", tuple(cells)).scoreable)
+                self._scored(cid).update(c.key for c in cells if c.scored)
                 self.caught.setdefault(cid, []).extend(cells)
         return CaughtUp(self._member, taken) if taken else None
 

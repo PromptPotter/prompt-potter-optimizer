@@ -18,7 +18,8 @@ they never disagree about what "better" means.
 comparison must say so: trying several metrics and keeping the tightest is a comparison no column
 prices. `p` is null where nothing was tested (below two shared cells) — not a test that returned 1.00.
 **The floor gates the claim**: `p_value` is `max(p, p_floor)`, `p` the exact two-sided sign test
-(McNemar) on a measurand declared binary and Student-t on a graded one, and `side` is `spans` wherever
+(McNemar) on a measurand declared binary (a grade, by its scorer: `scoring.py::Scorer.two_valued`)
+and Student-t on a graded one, and `side` is `spans` wherever
 `p_value` reaches `alpha` (`paired_reading.py::interval_side`). `min_detectable_effect` (the
 head-to-head's at Holm's first step) and `panel_precision` serve reads only. A level's band is
 `shared/statistics.py::bounded_mean_interval`: Clopper-Pearson on a binary column, else a t on the
@@ -61,7 +62,7 @@ variance and OVERSTATES a graded response's uncertainty — measured against θ�
 ×1.02 binary, ×1.51 reciprocal-rank-of-20, ×4.66 on the L4 outer composite (which left the outer
 election unable to crown). `fit_theta` scales the SE by `√φ`, the Pearson dispersion off
 the fit's residuals (Wedderburn 1974) — **an estimate, not a knob**, shrunk toward 1.0 by an
-inverse-gamma prior so `φ→0` cannot report infinite confidence. **A sheet whose every response is exactly 0 or 1 takes `φ = 1`** (`rasch.py::_dispersion`): its residuals against a δ fit on the same rows read as
+inverse-gamma prior so `φ→0` cannot report infinite confidence. **A sheet whose scorer declares its objective two-valued takes `φ = 1`** (`scoring.py::CellSheet.two_valued`, never read off the values: a 0.999 for a 1.0 is still Bernoulli): its residuals against a δ fit on the same rows read as
 underdispersion (measured `φ = 0.10`, θ_se 0.28 where the information gives 0.89).
 
 **1PL by default; a dataset graduates to 2PL where it wins held-out CV** (`enable_2pl_graduation`, on).

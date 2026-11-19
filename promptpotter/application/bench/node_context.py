@@ -350,14 +350,14 @@ class Parent(CycleRead):
         return self._cycle.parent_point
 
     @property
-    def own_rows(self) -> list[GradedCell]:
+    def own_rows(self) -> CellSheet:
         """Each sample's latest cell of the parent ITSELF, its origin-panel top-ups included, never
         one another individual answered."""
         key = ArmKey(self._cycle.parent.id)
         rows: list[GradedCell] = []
         for rr in self._cycle.rounds:
             rows = merge_known_outcomes(rows, rr.raced(key))
-        return rows
+        return self._cycle.session.state.scoring.scorer.graded(rows)
 
     @property
     def fitness(self) -> FitnessFact | None:

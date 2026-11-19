@@ -155,7 +155,8 @@ class VerifyReading(FrozenModel):
         "`same_individual` on the origin itself."
     )
     held: bool | None = Field(
-        description="Whether the fresh cells leave the recorded hit rate standing: its level sits "
-        "at or below the fresh band's upper bound. `None`: `hard` picks sit below the level whatever "
-        "the candidate is worth, and under two fresh cells have no band; read `vs_origin` there."
+        description="Whether the fresh cells leave the recorded hit rate standing: the 95% band of "
+        "fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness, else Welch's). "
+        "`None`: `hard` picks sit below the level whatever the candidate is worth, and a side too "
+        "short for that band (no cell two-valued, under two graded) has none; read `vs_origin` there."
     )

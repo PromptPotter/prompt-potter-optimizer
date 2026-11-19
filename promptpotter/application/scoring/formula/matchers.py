@@ -354,6 +354,8 @@ class Matcher(NamedTuple):
     # Where the truth sits in a ranking `score` reads of its own, and its width; `None` where it
     # reads none, so its cells carry the backend's (`backend_rank`).
     ranking: Callable[[MeasuredCell], tuple[int | None, int]] | None
+    # DECLARED: `score` answers 0 or 1, never between, so its mean is a share of hits.
+    two_valued: bool
     # Each graded field's verdict, by name; `None` where `score` grades one answer.
     fields: Callable[[str, str], dict[str, bool]] | None = None
 
@@ -361,7 +363,7 @@ class Matcher(NamedTuple):
 _LAST_LINE = frozenset({Presumption.LAST_LINE_ANSWER})
 
 MATCHERS: dict[str, Matcher] = {
-    "rr": Matcher(_rr, None, "", frozenset(), _ranking_rank),
+    "rr": Matcher(_rr, None, "", frozenset(), _ranking_rank, False),
     "gsm8k_match": Matcher(
         _gsm8k_match,
         _number_answer(extract_gsm8k_number),
@@ -369,6 +371,7 @@ MATCHERS: dict[str, Matcher] = {
         "the text). End with the final number on its own line as '#### 42'.",
         _LAST_LINE,
         None,
+        True,
     ),
     "aime_match": Matcher(
         _aime_match,
@@ -378,6 +381,7 @@ MATCHERS: dict[str, Matcher] = {
         "\\boxed{42}.",
         _LAST_LINE,
         None,
+        True,
     ),
     "label_match": Matcher(
         _label_match,
@@ -389,6 +393,7 @@ MATCHERS: dict[str, Matcher] = {
         "reasoning and scores as a miss; the bold lets scoring isolate it.",
         _LAST_LINE,
         None,
+        True,
     ),
     "em_match": Matcher(
         _em_match,
@@ -401,6 +406,7 @@ MATCHERS: dict[str, Matcher] = {
         "word or a dropped one scores as a miss.",
         _LAST_LINE,
         None,
+        True,
     ),
     "math_match": Matcher(
         _math_match,
@@ -413,6 +419,7 @@ MATCHERS: dict[str, Matcher] = {
         "equals sign inside the box.",
         _LAST_LINE,
         None,
+        True,
     ),
     "fields_match": Matcher(
         _fields_match,
@@ -423,6 +430,7 @@ MATCHERS: dict[str, Matcher] = {
         "answer meaning not stated. The score is the share of graded fields right.",
         frozenset(),
         None,
+        False,
         _field_hits,
     ),
     "list_rr": Matcher(
@@ -435,6 +443,7 @@ MATCHERS: dict[str, Matcher] = {
         "the list makes its own line an item and pushes the real ones down.",
         frozenset(),
         _line_rank,
+        False,
     ),
     "meeting_plan_match": Matcher(
         _meeting_plan_match,
@@ -449,6 +458,7 @@ MATCHERS: dict[str, Matcher] = {
         "the gold plan's count, so end with 'SOLUTION:' and the itinerary alone.",
         frozenset(),
         None,
+        True,
     ),
     "blocksworld_plan_match": Matcher(
         _blocksworld_plan_match,
@@ -462,15 +472,37 @@ MATCHERS: dict[str, Matcher] = {
         "'[PLAN END]', with nothing else between the markers.",
         frozenset(),
         None,
+        True,
     ),
 }
 
 
-def fitness_unit_of(per_sample: str) -> MeasurandUnit:
-    """A rate where the formula IS one matcher's call, its mean that matcher's share; else a score."""
+def _emits_two_valued(node: ast.expr, emitters: frozenset[str]) -> bool:
+    """Over what EMITS: a declared emitter, the constants 0 and 1, and a clamp, product or
+    conditional of those; anything else is graded."""
+    if isinstance(node, ast.Constant):
+        return node.value in (0, 1)
+    if isinstance(node, ast.Name):
+        return node.id in emitters
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
+        return _emits_two_valued(node.left, emitters) and _emits_two_valued(node.right, emitters)
+    if isinstance(node, ast.IfExp):
+        return _emits_two_valued(node.body, emitters) and _emits_two_valued(node.orelse, emitters)
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+        return False
+    if (matcher := MATCHERS.get(node.func.id)) is not None:
+        return matcher.two_valued
+    clamp = node.func.id in ("min", "max") and not node.keywords
+    return clamp and all(_emits_two_valued(arg, emitters) for arg in node.args)
+
+
+def fitness_scale_of(per_sample: str, emitters: frozenset[str]) -> tuple[MeasurandUnit, bool]:
+    """A rate where the formula IS one matcher's call, its mean that matcher's share, else a score;
+    two-valued where its expression over what emits (the matchers, and ``emitters``: the terms a
+    judge or connector declares 0/1) is."""
     body = ast.parse(per_sample, mode="eval").body
     called = body.func.id if isinstance(body, ast.Call) and isinstance(body.func, ast.Name) else ""
-    return "rate" if called in MATCHERS else "score"
+    return ("rate" if called in MATCHERS else "score"), _emits_two_valued(body, emitters)
 
 
 def matcher_of(per_sample: str | None) -> str | None:
