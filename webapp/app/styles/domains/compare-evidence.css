@@ -34,7 +34,7 @@
 }
 .l4-effect-ci {
   color: var(--color-text-secondary);
-  margin-left: 8px;
+  margin-left: var(--space-8);
   font-size:var(--text-sm);
 }
 /* A side's served tone (`format.ts::sideTone`) is the element's colour: text and `currentColor` marks take it. */

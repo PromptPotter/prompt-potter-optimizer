@@ -24,7 +24,7 @@
 
 .bnode-kind {
   display: inline-block;
-  margin-right: 6px;
+  margin-right: var(--space-6);
   padding: 1px var(--space-6);
   font-size:var(--text-xs);
   text-transform: uppercase;

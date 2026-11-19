@@ -395,7 +395,7 @@
 }
 .cmp-button {
   border-color: var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--border-radius-md);
   padding: var(--space-4) var(--space-10);
 }
 .cmp-link[disabled] {
@@ -430,7 +430,7 @@
 }
 .cmp-tag {
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--border-radius-sm);
   padding: 0 var(--space-4);
   color: var(--color-text-secondary);
   font-size: var(--text-xs);
@@ -483,12 +483,11 @@
   width: min(28rem, 100%);
   padding: var(--space-6) var(--space-8);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--border-radius-md);
   background: var(--color-background-secondary);
   color: var(--color-text-primary);
   font-family: var(--font-mono);
-  /* 16px literal: iOS focus-zoom, the sanctioned raw-px exception. */
-  font-size: 16px;
+  font-size: var(--input-text-floor);
 }
 .cmp-expr-bad {
   border-color: var(--color-danger);
@@ -510,7 +509,7 @@
 .l4-factor-pick select {
   padding: var(--space-4) var(--space-8);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--border-radius-md);
   background: var(--color-background-secondary);
   color: var(--color-text-primary);
   font-family: var(--font-mono);

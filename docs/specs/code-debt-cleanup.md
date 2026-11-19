@@ -416,12 +416,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
   every served response field to a webapp reader, or to its model naming why not (as `Verb.unspelled` /
   `terminal_only` do for the CLI), on a baseline that only falls. **Rides with:** webd. **Re-test:**
   the check's baseline is 0.
-- **Sizes are literals beside the tokens**: 992 literal `px` / `rem` sizes across 45 non-token CSS files,
-  and font literals in the charts (`CostStrip`, `EvidenceCharts`, `FitnessChart`), against the
-  tokens rule; form fields are skinned outside `base.css` (`scoring.css:18`, `chat.css:24`,
-  `onboarding.css:44`). Action: each size reads a token of
-  `webapp/app/styles/foundation/tokens.css`, fields skin in `base.css` alone, and a gate check holds
-  the literal count to a falling baseline. **Rides with:** webd. **Re-test:** the check's baseline is 0.
+- **Form fields are skinned outside `base.css`** (`scoring.css:17`, `chat.css:23`, `onboarding.css:44`),
+  against `webapp/app/CLAUDE.md`'s one-skin rule. Action: fields skin in `base.css` alone.
+  **Rides with:** webd. **Re-test:** no `border:` on an `input` / `select` / `textarea` selector
+  outside `foundation/base.css`.
 - **The webapp's live state lands on the wrong subject or the wrong version** (a live-state pass,
   reported): feed versions are unordered hashes
   (`application/cycle_reads.py::feed_versions`, a sha of `repr`), so a stale read reverts a draft
@@ -501,10 +499,16 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### batch/29 · tv-2 (what tv-2 left at its landing)
 
-- **The main workspace follows the exhibit too, and its run controls 404 there** (tv-2's report): a
-  follower's pause and stop reach a run they may not act on (I3). Action: the controls read the
-  follow's `said.key` and offer no act on an exhibit. **Re-test:** follow the exhibit as a
-  non-host; the workspace offers no run control.
+- **A reader with no capability is offered acts, and each one 404s** (tv-2's report; webd-4's
+  review): the exhibit's reader is built with no capability (`application/exhibit.py::
+  exhibit_stores`), yet `jobs/launcher/admission.py::admitted` serves it `offers: "pause"`, and every
+  other served act (a decision gate's, verify / held-out / cancel, steer-fork, apply-scenario,
+  bank-snippet, lineage cleanup and delete) is drawn from facts that never read the reader (I3). A
+  client gate keyed on the follow leaks on the first pin: the read alone knows whose stores it came
+  from. Action: a served read names the acts ITS reader may take, from the one capability map the
+  dispatcher gates on (`shared/identity.py`), and every act surface of the five entry points reads
+  that. **Re-test:** follow the exhibit as a non-host, pinned and followed, at a decision gate: the
+  served read names no act and no act renders.
 - **The account feed never re-asks an exhibit's reads when the host's store moves**: a follower's
   view stands still. Action: the feed's subject includes the exhibit's. **Re-test:** the host's
   round closes; the follower's dashboard moves without a reload.

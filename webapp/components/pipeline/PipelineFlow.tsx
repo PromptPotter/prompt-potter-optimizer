@@ -14,7 +14,7 @@ import { useViewedNode, useWorkspace } from "@/lib/state/workspace";
 import { useConnector } from "@/lib/hooks/useConnector";
 import { interiorNodes, layoutGrid, nodeModel, rowHopD, wrapAt } from "@/lib/derivations";
 import { reportIncident } from "@/lib/diagnostics";
-import { getCss } from "@/lib/theme";
+import { cssPx } from "@/lib/theme";
 import { FailureLine, Icon, pressable } from "@/components/ui";
 import { cx } from "@/lib/cx";
 
@@ -141,7 +141,7 @@ function PipelineBox({ view, layer, compact }: BoxProps) {
   const boxW = useWidth(boxRef);
   const measured = boxW != null;
   // Read once the box is mounted: every cell is sized off the label font.
-  const fontPx = useMemo(() => (measured ? parseFloat(getCss("--text-xs")) : null), [measured]);
+  const fontPx = useMemo(() => (measured ? cssPx("--text-xs") : null), [measured]);
   const interior = interiorNodes(view);
   const RADIUS = compact ? 5.5 : 7;
   const GUTTER = compact ? 33 : 14;

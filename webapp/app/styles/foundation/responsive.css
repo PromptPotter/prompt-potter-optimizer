@@ -36,8 +36,7 @@
   .chat-messages{padding:var(--space-8);gap:var(--space-10)}
   .chat-msg{max-width:88%;font-size:var(--text-base);padding:var(--space-8) var(--space-12)}
   .chat-input-row{padding:var(--space-8);gap:var(--space-6)}
-  /* 16px literal suppresses iOS focus-zoom; a token merely equal to 16 would take the suppressor with it. */
-  .chat-input{font-size:16px;min-height:44px;padding-left:var(--space-8);padding-right:var(--space-8)}
+  .chat-input{padding-left:var(--space-8);padding-right:var(--space-8)}
   .toggle-row{padding:var(--space-6) 0;gap:var(--space-10)}
   .toggle-row .name{font-size:var(--text-base)}
 
@@ -68,6 +67,6 @@
   input[type="search"],
   select,
   textarea{
-    font-size:max(16px,1em);
+    font-size:max(var(--input-text-floor),1em);
   }
 }

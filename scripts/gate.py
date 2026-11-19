@@ -522,6 +522,89 @@ def _undiffable(_: Selection) -> Outcome:
     )
 
 
+_TOKENS_CSS = _WEBAPP / "app/styles/foundation/tokens.css"
+# A size token's family and the properties its literal value stands in for (this table is the rule
+# `webapp/app/CLAUDE.md`'s tokens line points at); a fluid step names no literal, and a breakpoint is
+# a literal by rule (`@media` reads no token).
+_SIZE_FAMILIES = {
+    "--text-": r"font-size",
+    "--input-text-floor": r"font-size",
+    "--space-": r"(margin|padding)(-[a-z]+)*|(row-|column-)?gap",
+    "--border-radius-": r"border(-[a-z]+)*-radius",
+    "--touch-target-min": r"(min-)?(width|height|inline-size|block-size)",
+    "--reading-measure": r"(max-)?(width|inline-size)",
+    "--box-min": r"(min-)?(width|inline-size)|flex-basis",
+}
+_SIZE_LITERAL = re.compile(r"(?<![\w.#-])-?(\d*\.?\d+)(px|rem)\b")
+_CSS_DECL = re.compile(r"(--)?([a-z-]+)\s*:\s*([^;{}]+)")
+_CSS_SILENT = re.compile(r"/\*.*?\*/|@(media|container|supports)[^{]*", re.DOTALL)
+# A TS size in px: a chart font's `font: { size: N }`, a canvas `ctx.font = `Npx …``, a style key's
+# number (`marginTop: 6`, its property `margin-top`).
+_TS_SIZE = re.compile(
+    r"\bfont\s*:\s*\{[^}]*?\bsize\s*:\s*(?P<font>\d+)\b"
+    r"|\bfont\s*=\s*`[^`]*?(?P<canvas>\d+)px"
+    r"|\b(?P<key>[a-z]+(?:[A-Z][a-z]+)*)\s*:\s*-?(?P<num>\d*\.?\d+)\b(?![.%\w])"
+)
+
+
+def _size_tokens(_: Selection) -> Outcome:
+    """A literal size a token of `tokens.css` names is refused beside it, in CSS and in TS: it reads
+    the token, a negative one as `calc(-1 * var(--token))`. Read by value, so not seen: a literal
+    laundered through a local custom property (`--pad: 8px`), and rem, which scales with the
+    reader's font size where a px token does not."""
+    named: dict[tuple[str, str], list[str]] = {}
+    for m in re.finditer(r"(--[a-z0-9-]+)\s*:\s*([^;{}]+?)\s*;", _TOKENS_CSS.read_text("utf-8")):
+        token, value = m.groups()
+        family = next((f for f in _SIZE_FAMILIES if token.startswith(f)), None)
+        if family is not None and _SIZE_LITERAL.fullmatch(value):
+            named.setdefault((family, value), []).append(token)
+
+    def tokens_of(prop: str, size: str) -> list[str]:
+        return [
+            t
+            for (family, value), ts in named.items()
+            if value == size and re.fullmatch(_SIZE_FAMILIES[family], prop)
+            for t in ts
+        ]
+
+    hits = []
+    for path in _sources(_WEBAPP / "app", "*.css") + _sources(_WEBAPP / "components", "*.css"):
+        if path == _TOKENS_CSS:
+            continue
+        text = path.read_text("utf-8")
+        # Blanked, not cut: an offset still names its line.
+        body = _CSS_SILENT.sub(lambda m: re.sub(r"[^\n]", " ", m.group()), text)
+        for decl in _CSS_DECL.finditer(body):
+            custom, prop, value = decl.groups()
+            for lit in [] if custom else _SIZE_LITERAL.finditer(value):
+                if tokens := tokens_of(prop, lit.group(1) + lit.group(2)):
+                    line = body.count("\n", 0, decl.start(3) + lit.start()) + 1
+                    rel = path.relative_to(REPO).as_posix()
+                    hits.append(f"{rel}:{line}: {prop}:{lit.group()} reads {' or '.join(tokens)}")
+    for path in (
+        p
+        for root in ("app", "components", "lib")
+        for p in _sources(_WEBAPP / root, "*.ts", "*.tsx")
+        if "__tests__" not in p.parts
+    ):
+        text = path.read_text("utf-8")
+        for m in _TS_SIZE.finditer(text):
+            if m["key"] is not None:
+                prop = re.sub(r"[A-Z]", lambda c: "-" + c.group().lower(), m["key"])
+                size = m["num"]
+            else:
+                prop, size = "font-size", m["font"] or m["canvas"]
+            if tokens := tokens_of(prop, f"{size}px"):
+                line = text.count("\n", 0, m.start()) + 1
+                rel = path.relative_to(REPO).as_posix()
+                hits.append(f"{rel}:{line}: {prop}:{size}px reads {' or '.join(tokens)}")
+    return (
+        (1, "a literal size a token names — read the token:\n" + "\n".join(hits))
+        if hits
+        else (0, "")
+    )
+
+
 _INSTRUCTION_MAX_WORDS = 7000
 _INSTRUCTION_CHAIN_MAX_BYTES = 72_000
 _INSTRUCTION_FILES = ("*CLAUDE.md", ".claude/skills/*.md")
@@ -1617,6 +1700,14 @@ CHECKS: tuple[Check, ...] = (
     ),
     # "py" so it runs without `webapp/node_modules`, which is routinely absent.
     Check("undiffable", "py", _undiffable, mb=0, tier="commit", reads=_TREE),
+    Check(
+        "size-tokens",
+        "py",
+        _size_tokens,
+        mb=0,
+        tier="commit",
+        reads=("webapp/app/", "webapp/components/", *_GATE),
+    ),
     # A regenerator reads what it imports and its own output, so none reads another's: no cycle.
     Check(
         "ts-types",

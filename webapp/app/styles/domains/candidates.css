@@ -53,7 +53,7 @@
 .ability-help p{margin:0 0 var(--space-8)}
 .ability-help p:last-child{margin-bottom:0}
 .ability-help strong{color:var(--color-text-primary)}
-.ability-help-calib{padding-top:6px;border-top:0.5px solid var(--color-border);color:var(--color-text-secondary)}
+.ability-help-calib{padding-top:var(--space-6);border-top:0.5px solid var(--color-border);color:var(--color-text-secondary)}
 /* Footnotes: under the chart and smaller than its labels, never louder than the bars. */
 .fitness-notes{margin-top:var(--space-6)}
 .fitness-notes .said{font-size:var(--text-xs);margin-bottom:var(--space-4)}
@@ -67,4 +67,5 @@
   .cand-card.mask-open .fitness-chart-wrap{grid-column:1;grid-row:2;align-self:start}
   .cand-card.mask-open .fitness-mask{grid-column:2;grid-row:1 / span 2;align-self:stretch;min-width:0;margin-top:0}
 }
+.rank-candidates{margin-top:var(--space-6)}
 .mask-apply{margin-top:var(--space-12);padding-top:var(--space-12);border-top:0.5px solid var(--color-border);display:flex;flex-direction:column;gap:var(--space-6);align-items:flex-start}

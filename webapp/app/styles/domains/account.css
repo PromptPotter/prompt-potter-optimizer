@@ -1,4 +1,4 @@
-.account-trigger{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;margin-left:6px;transition:background 120ms,color 120ms}
+.account-trigger{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:var(--color-background-secondary);border:0.5px solid var(--color-border);color:var(--color-text-secondary);cursor:pointer;margin-left:var(--space-6);transition:background 120ms,color 120ms}
 .account-trigger:hover{background:var(--color-background-hover);color:var(--color-text-primary)}
 .account-frame{display:flex;background:var(--color-background-primary);border:0.5px solid var(--color-border);border-radius:var(--border-radius-lg);width:100%;height:min(720px,86vh);overflow:hidden;font-size:var(--text-base)}
 .account-nav{flex:0 0 212px;border-right:0.5px solid var(--color-border);padding:var(--space-18) var(--space-12);background:var(--color-background-secondary);display:flex;flex-direction:column;gap:var(--space-18);overflow-y:auto}
@@ -22,7 +22,7 @@
 .account-row > :first-child{flex:0 0 170px}
 .account-row > :last-child{flex:1 1 260px;min-width:0}
 .account-row:last-child{border-bottom:0}
-.account-label{font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary);padding-top:4px}
+.account-label{font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary);padding-top:var(--space-4)}
 .account-row-main{display:flex;flex-direction:column;gap:var(--space-10)}
 .account-provider-icon{flex-shrink:0;color:var(--color-text-secondary)}
 
@@ -85,7 +85,7 @@
 .account-key-provider{flex:1 1 7rem;font-family:var(--font-mono);font-size:var(--text-sm);font-weight:600;color:var(--color-text-primary)}
 .account-key-held{flex:999 1 10rem;display:flex;align-items:baseline;gap:var(--space-8);min-width:0}
 .account-key-held code{font-family:var(--font-mono);font-size:var(--text-base);color:var(--color-text-primary)}
-.account-key-input{flex:999 1 14rem;min-width:0;font-size:16px}
+.account-key-input{flex:999 1 14rem;min-width:0;font-size:var(--input-text-floor)}
 .account-token-mint{display:flex;flex-wrap:wrap;align-items:center;gap:var(--space-8) var(--space-12);margin-bottom:var(--space-10)}
 .account-token-minted{display:flex;flex-direction:column;gap:var(--space-6);margin:0 0 var(--space-10);padding:var(--space-10) var(--space-12);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md)}
 .account-token-minted code{font-family:var(--font-mono);font-size:var(--text-sm);overflow-wrap:anywhere;user-select:all}
@@ -116,7 +116,7 @@
 .activity-chart-head{display:flex;flex-direction:column;gap:0;align-items:flex-start;line-height:1.15}
 .activity-chart-head h4{margin:0;font-size:var(--text-sm);font-weight:500;color:var(--color-text-secondary);text-transform:uppercase;letter-spacing:0.05em}
 .activity-chart-total{font-size:var(--text-3xl);font-weight:600;color:var(--color-text-primary);font-variant-numeric:tabular-nums}
-.activity-chart-body{margin-top:4px}
+.activity-chart-body{margin-top:var(--space-4)}
 .activity-chart-svg{width:100%;height:90px;display:block}
 .activity-chart-empty{margin:var(--space-6) 0 var(--space-4) 0}
 
@@ -148,7 +148,7 @@
 .about-unit-disclosure-inner p{margin:var(--space-8) 0 0;font-size:var(--text-sm);line-height:1.55;color:var(--color-text-secondary)}
 .about-unit-disclosure-inner strong{color:var(--color-text-primary);font-weight:600}
 .about-unit-manifest-controls{display:flex;align-items:center;gap:var(--space-14)}
-.about-unit-code{margin:var(--space-10) 0 0;padding:var(--space-12) var(--space-14);border:0.5px solid var(--color-border);border-radius:6px;background:var(--color-background-secondary);font-family:var(--font-mono);font-size:var(--text-xs);line-height:1.55;color:var(--color-text-primary);max-height:280px;overflow:auto;white-space:pre;user-select:text}
+.about-unit-code{margin:var(--space-10) 0 0;padding:var(--space-12) var(--space-14);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary);font-family:var(--font-mono);font-size:var(--text-xs);line-height:1.55;color:var(--color-text-primary);max-height:280px;overflow:auto;white-space:pre;user-select:text}
 @media (prefers-reduced-motion: reduce){
   .about-unit-caret,.about-unit-disclosure{transition:none}
 }

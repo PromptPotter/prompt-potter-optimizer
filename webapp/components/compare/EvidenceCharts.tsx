@@ -16,7 +16,7 @@ import { cx } from "@/lib/cx";
 import { fmtMetric, PLACEHOLDER } from "@/lib/format";
 
 import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
-import { getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
+import { cssPx, getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
 
 ensureChartRegistered();
 
@@ -34,7 +34,7 @@ function axisScales(title: string, stacked: boolean) {
         text: title,
         align: "end" as const,
         color: getCss("--color-text-secondary"),
-        font: { size: 11 },
+        font: { size: cssPx("--text-xs") },
       },
     },
   };

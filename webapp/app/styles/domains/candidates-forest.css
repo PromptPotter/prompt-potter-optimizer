@@ -15,9 +15,9 @@
 .lineage-inherit-link{background:transparent;border:0;color:var(--color-accent);cursor:pointer;font:inherit;font-style:italic;text-decoration:underline;padding:0}
 .lineage-inherit-link:hover{color:var(--color-text-primary)}
 
-.family-cladogram{margin-top:8px}
+.family-cladogram{margin-top:var(--space-8)}
 .family-cladogram-viewport{max-height:60vh;overflow:auto;resize:vertical}
-.family-cladogram-forest{margin-top:6px}
+.family-cladogram-forest{margin-top:var(--space-6)}
 .family-cladogram-forest:first-of-type{margin-top:0}
 .family-cladogram-svg{display:block;font-family:var(--font-mono)}
 .family-cladogram-branch{stroke:var(--color-text-secondary);stroke-width:1;opacity:0.55}

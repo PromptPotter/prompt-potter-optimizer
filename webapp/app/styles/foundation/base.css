@@ -6,8 +6,8 @@
 /* A chart's canvas carries its last measured width inline until its resize lands a frame later; capped, a box that narrows never lays out wider for it. */
 canvas{max-width:100%}
 /* The ONE field look: a surface sizes a field, never re-skins it. */
-input:not([type=checkbox],[type=radio],[type=file],[type=range]),select,textarea{font:inherit;padding:1px var(--space-4);border:1px solid var(--color-border);border-radius:6px;background:Field;color:FieldText}
-fieldset{padding:var(--space-4) var(--space-8);border:1px solid var(--color-border);border-radius:6px}
+input:not([type=checkbox],[type=radio],[type=file],[type=range]),select,textarea{font:inherit;padding:1px var(--space-4);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:Field;color:FieldText}
+fieldset{padding:var(--space-4) var(--space-8);border:1px solid var(--color-border);border-radius:var(--border-radius-md)}
 }
 
 body{font-family:var(--font-sans);background:var(--color-background-tertiary);color:var(--color-text-primary);font-size:var(--text-base)}

@@ -22,17 +22,17 @@
 .subject-flip-line:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:3px}
 .subject-lift-card{--hovercard-max-w:280px}
 .subject-lift-note{margin:0;font-size:var(--text-xs);line-height:1.45;color:var(--color-text-secondary)}
-.subject-lift-note+.subject-lift-note{margin-top:4px}
+.subject-lift-note+.subject-lift-note{margin-top:var(--space-4)}
 
 .subject-diff>summary{cursor:pointer;display:flex;flex-direction:column;gap:2px;list-style:revert}
-.subject-diff>summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:4px}
+.subject-diff>summary:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:var(--border-radius-sm)}
 .subject-diff-label{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .subject-diff-changes{display:flex;flex-wrap:wrap;gap:3px var(--space-10);font-size:var(--text-sm);line-height:1.45;color:var(--color-text-primary)}
 .subject-diff-group{display:flex;align-items:baseline;gap:var(--space-4);min-width:0}
 .subject-diff-key{flex:0 0 auto;font-size:var(--text-xs);color:var(--color-text-secondary)}
 .subject-diff-node{font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-text-secondary)}
 .subject-diff-verdict{font-size:var(--text-xs);line-height:1.4;color:var(--color-text-secondary)}
-.subject-diff[open]>summary{margin-bottom:6px}
+.subject-diff[open]>summary{margin-bottom:var(--space-6)}
 
 .subject-facts{display:flex;flex-wrap:wrap;align-items:baseline;gap:0 var(--space-4);font-size:var(--text-xs);line-height:1.6;color:var(--color-text-secondary)}
 .subject-fact-note{margin:0;white-space:pre-wrap}

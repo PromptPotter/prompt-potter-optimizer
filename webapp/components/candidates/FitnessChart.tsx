@@ -1,7 +1,7 @@
 import { memo, useMemo } from "react";
 import { Chart } from "react-chartjs-2";
 import { ensureChartRegistered, lineLook, lineMotion } from "@/lib/chart";
-import { getCss, useThemeVersion } from "@/lib/theme";
+import { cssPx, getCss, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
 import { liftOf } from "@/lib/derivations";
 import type { CandidateBar } from "@/lib/types";
@@ -84,7 +84,7 @@ const barCapsPlugin: Plugin<
     if (w != null && w >= 0) {
       const topY = topOf(w);
       if (Number.isFinite(topY)) {
-        ctx.font = `12px ${mono}`;
+        ctx.font = `${getCss("--text-sm")} ${mono}`;
         ctx.fillStyle = getCss("--color-accent");
         const capY = counts[w] != null ? topY - 15 : topY - 4;
         ctx.fillText(
@@ -525,21 +525,21 @@ export const FitnessChart = memo(function FitnessChart({
       target.style.cursor = elements[0] ? "pointer" : "default";
     },
     scales: {
-      x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === standingIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : 11, family: getCss("--font-mono"), weight: t.index === standingIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
-      y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: 11 }, stepSize: 0.2 } },
+      x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === standingIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : cssPx("--text-xs"), family: getCss("--font-mono"), weight: t.index === standingIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
+      y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: cssPx("--text-xs") }, stepSize: 0.2 } },
       // Declared only while θ shows: the right gutter shifts every dendrogram fraction.
       ...(showAbility
         ? {
             y1: {
               position: "right" as const,
               grid: { display: false },
-              ticks: { font: { size: 11 } },
+              ticks: { font: { size: cssPx("--text-xs") } },
               title: {
                 display: true,
                 text: "[θ]",
                 align: "end" as const,
                 color: getCss("--color-text-secondary"),
-                font: { size: 11 },
+                font: { size: cssPx("--text-xs") },
               },
             },
           }

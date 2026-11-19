@@ -5,7 +5,7 @@
 .login-container h1{font-size:var(--text-4xl);margin:0 0 var(--space-8);letter-spacing:-0.02em}
 .login-sub{color:var(--color-text-secondary);margin:0 0 var(--space-24)}
 .login-buttons{display:flex;flex-direction:column;gap:var(--space-12);width:100%}
-.login-button{display:flex;align-items:center;justify-content:center;gap:var(--space-10);width:100%;padding:var(--space-12) var(--space-16);border:0.5px solid var(--color-border);border-radius:6px;background:var(--color-background-primary);color:var(--color-text-primary);text-decoration:none;font-weight:500;font-size:var(--text-md);transition:background 120ms}
+.login-button{display:flex;align-items:center;justify-content:center;gap:var(--space-10);width:100%;padding:var(--space-12) var(--space-16);border:0.5px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-primary);color:var(--color-text-primary);text-decoration:none;font-weight:500;font-size:var(--text-md);transition:background 120ms}
 .login-button:hover{background:var(--color-background-hover)}
 .login-button .google-mark{flex-shrink:0}
 

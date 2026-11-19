@@ -49,7 +49,7 @@ export function FitnessRankSummary({
           </div>
         </>
       )}
-      <div style={{ marginTop: 6 }}>
+      <div className="rank-candidates">
         candidates: {views.map((b, i) => {
           const move = b.reading ? b.node.facts.lens_rank_move : null;
           const mark = move ? MOVE_MARK[move] : { glyph: PLACEHOLDER, cls: "rank-flat" };

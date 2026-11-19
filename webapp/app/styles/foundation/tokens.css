@@ -43,7 +43,8 @@
   --safe-bottom:env(safe-area-inset-bottom,0px);
   --safe-left:env(safe-area-inset-left,0px);
 
-  /* Text inputs do NOT read this scale — iOS focus-zoom sets their 16px floor in responsive.css. */
+  /* Text inputs do NOT read this scale: below 16px, iOS zooms the page on their focus. */
+  --input-text-floor:16px;
   --text-xs:11px;
   --text-sm:12px;
   --text-base:13px;

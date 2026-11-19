@@ -5,6 +5,11 @@ export function getCss(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
+// A px token's number, for a canvas that cannot read `var()`.
+export function cssPx(name: string): number {
+  return parseFloat(getCss(name));
+}
+
 // `--chart-series-1..8` in `foundation/tokens.css`.
 const SERIES_SLOTS = 8;
 

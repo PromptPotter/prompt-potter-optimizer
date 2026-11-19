@@ -55,7 +55,7 @@
 .snippet-glyph{flex:0 0 auto;width:22px;height:22px;fill:var(--color-accent)}
 .snippet-search{position:relative;flex:1 1 auto;min-width:0;display:flex}
 .snippet-search svg{position:absolute;left:var(--space-6);top:50%;width:16px;height:16px;transform:translateY(-50%);fill:none;stroke:var(--color-text-secondary);stroke-width:2;stroke-linecap:round;pointer-events:none}
-.snippet-library-search{width:100%;min-width:0;font-size:16px;padding-left:calc(var(--space-6) * 2 + 16px)}
+.snippet-library-search{width:100%;min-width:0;font-size:var(--input-text-floor);padding-left:calc(var(--space-6) * 2 + 16px)}
 .snippet-facets{display:flex;gap:var(--space-4);overflow-x:auto;scrollbar-width:none}
 .snippet-facet{padding:2px var(--space-6);font-size:var(--text-xs);white-space:nowrap}
 .snippet-facet.is-on{color:var(--color-accent);font-weight:600}
@@ -103,7 +103,7 @@
 .schema-field-add{grid-column:add}
 .schema-field-remove{grid-column:remove}
 .schema-add{align-self:flex-start}
-.setup-preview{display:flex;flex-direction:column;gap:var(--space-12);padding:var(--space-12) var(--space-14);border-radius:6px;border:0.5px solid var(--color-border);background:var(--color-background-secondary)}
+.setup-preview{display:flex;flex-direction:column;gap:var(--space-12);padding:var(--space-12) var(--space-14);border-radius:var(--border-radius-md);border:0.5px solid var(--color-border);background:var(--color-background-secondary)}
 .setup-preview-head{display:flex;align-items:baseline;justify-content:space-between;gap:var(--space-8);flex-wrap:wrap}
 .setup-preview-title{font-size:var(--text-xs);font-weight:600;text-transform:uppercase;letter-spacing:0.04em;color:var(--color-text-primary)}
 .setup-preview-sub{font-size:var(--text-xs);color:var(--color-text-secondary)}
@@ -136,7 +136,7 @@ textarea.config-input{resize:vertical;line-height:1.45;white-space:pre}
 .model-card-row{display:flex;gap:var(--space-4);min-width:0}
 .model-card-row dd{margin:0;min-width:0;color:var(--color-text-secondary);overflow-wrap:anywhere}
 /* Needs a BOX for its separator, which `display:contents` denies, so it re-reads the two columns through `subgrid`. */
-.config-node-row{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center;justify-items:start;padding-bottom:8px;margin-bottom:2px;border-bottom:0.5px solid var(--color-border)}
+.config-node-row{grid-column:1/-1;display:grid;grid-template-columns:subgrid;align-items:center;justify-items:start;padding-bottom:var(--space-8);margin-bottom:2px;border-bottom:0.5px solid var(--color-border)}
 @media (max-width:640px){
   .prompt-editor-grid{grid-template-columns:minmax(0,1fr)}
   .schema-fields{grid-template-columns:[name] minmax(0,1fr) [type] 5.5rem [lock] auto [answer] auto [add] auto [remove] auto;column-gap:var(--space-4)}

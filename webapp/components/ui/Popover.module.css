@@ -16,7 +16,7 @@
   padding: var(--space-4) 0;
   background: var(--color-background-secondary);
   border: 0.5px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--border-radius-md);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   display: flex;
   flex-direction: column;
