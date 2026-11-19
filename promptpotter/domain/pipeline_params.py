@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 # Where the laid document names the chain beside its nodes: the wire's spelling, and the dump's.
 STEPS_KEY = "steps"
 
-# Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.filed`).
+# Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.keyed_by`).
 CellIdentity = dict[str, dict[str, Any]]
 
 
@@ -198,7 +198,7 @@ class PipelineParams(FrozenModel):
     def with_nodes(self, nodes: Mapping[str, NodeCall | Mapping[str, object]]) -> Self:
         return self.model_validate({**self._laid_steps, **nodes})
 
-    def filed(self, identity: Mapping[str, Mapping[str, object]]) -> Self:
+    def keyed_by(self, identity: Mapping[str, Mapping[str, object]]) -> Self:
         """As the archive files a cell of it: each node's *identity* (what keys a cell, never sent)
         laid over what it sends. A point's own params never hold it, so its id is what it sends."""
         laid = self.laid_nodes

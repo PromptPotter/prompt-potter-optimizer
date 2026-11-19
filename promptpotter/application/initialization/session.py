@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.application.scoring.evaluators import SampleEvaluator
-from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition
 from promptpotter.domain.campaign import Campaign, CampaignCycle, Optimize, Purpose
@@ -41,7 +40,6 @@ class ScorerSetup:
     """Built whole by `scoring_scope.py::scorer_setup`; `{}` judges declares none, never "keep"."""
 
     scorer: Scorer
-    display_metric: DisplayMetric
     partition: BankPartition
     degradation_checks: tuple[StopRule, ...]
     # One per declared term, built once per run so every judge validation precedes spend.
@@ -102,7 +100,7 @@ class Session:
     # Where `dataset_name` resolved at init; `None` where a session measures no definition.
     dataset: ResolvedDataset | None = None
     pipeline_params: PipelineParams = field(default_factory=PipelineParams)
-    # Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.filed`).
+    # Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.keyed_by`).
     cell_identity: dict[str, dict[str, Any]] = field(default_factory=dict)
     # The campaign its launch's door loaded, and its cycle bound: written by `bound` alone, so a
     # fork is a new session, never a moved field.
@@ -190,7 +188,9 @@ class Session:
 
     @property
     def instrument_id(self) -> str:
-        return instrument_of(self.bank.dataset_hash, self.pipeline_params.filed(self.cell_identity))
+        return instrument_of(
+            self.bank.dataset_hash, self.pipeline_params.keyed_by(self.cell_identity)
+        )
 
     def points(self, framing: TaskDecomposition) -> PointContext:
         return PointContext(

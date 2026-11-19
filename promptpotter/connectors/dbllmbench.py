@@ -38,8 +38,9 @@ from promptpotter.infrastructure.docker_host import (
     producer_scratch,
     run_cell_container,
 )
+from promptpotter.infrastructure.llm.base import sent_effort
 from promptpotter.infrastructure.llm.capabilities import sent_llm_bound
-from promptpotter.infrastructure.llm.openai_compat import cell_gateway_body, sent_effort
+from promptpotter.infrastructure.llm.openai_compat import cell_gateway_body
 from promptpotter.infrastructure.llm.registry import openai_compat_spec
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.shared.errors import (

@@ -605,7 +605,6 @@ def loop_session(
     )
     session.state.scoring = ScorerSetup(
         scorer=scorer or scorer_of(),
-        display_metric="fitness",
         partition=partition
         or BankPartition(defaulted_config().dataset_split, tuple(samples), (), ()),
         degradation_checks=(),

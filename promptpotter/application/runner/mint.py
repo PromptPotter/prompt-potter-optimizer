@@ -324,7 +324,7 @@ async def _enter_init(
         session.store, session.bank.dataset_hash, session.pipeline_params
     )
     # An L4 cell's instrument names its inner origin; another's is its bank alone.
-    inner = inner_origin_of(session.pipeline_params.filed(session.cell_identity))
+    inner = inner_origin_of(session.pipeline_params.keyed_by(session.cell_identity))
     instrument = None if inner is None else session.instrument_id
     warnings = run_preflight_checks(
         config,

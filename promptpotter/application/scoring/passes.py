@@ -297,7 +297,7 @@ async def verify_candidate(
         sp_hash = jsp.sp_hash(schema)
         # Carries the prompt: keyed on config alone, candidates sharing a model read as one.
         predicate: dict[str, dict[str, Any]] = dict(
-            schema.node_configs(jsp.pipeline_params.filed(session.cell_identity))
+            schema.node_configs(jsp.pipeline_params.keyed_by(session.cell_identity))
         )
 
         # By sample key under every bank: a re-cut bank re-measures none of the rows it kept.

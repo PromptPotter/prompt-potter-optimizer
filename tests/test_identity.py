@@ -473,10 +473,11 @@ def test_the_judge_a_cell_is_graded_by_moves_its_archive_key_and_no_arm_id() -> 
 
     sent = ParamLayers(schema=schema, workspace=None).fold().params
 
+    def identity(judges: dict[str, JudgeSpec]) -> dict[str, dict[str, Any]]:
+        return identity_layer(None, None, None, judges, schema.active_steps, base_url="")
+
     def sp_hash(judges: dict[str, JudgeSpec]) -> str:
-        # The point sends `sent` under every judge, so its id never moves; its cells' key does.
-        identity = identity_layer(None, None, None, judges, schema.active_steps, base_url="")
-        return schema.sp_hash(sent.filed(identity))
+        return schema.sp_hash(sent.keyed_by(identity(judges)))
 
     def judge(name: str, model: str) -> JudgeSpec:
         return JudgeSpec(
@@ -500,6 +501,21 @@ def test_the_judge_a_cell_is_graded_by_moves_its_archive_key_and_no_arm_id() -> 
         sp_hash({"grounded": judge("simpleqa", "a"), "answer": judge("sealqa", "a")})
         == hashes["two_steps"]
     ), "declaration order must not re-cut the measurement key"
+    # The point sends `sent` under every judge: its cells file apart, its arm id stays.
+    point = PointContext(schema=schema, framing=TaskDecomposition(), demo=[]).job(
+        OptSearchPoint().configured(sent, schema)
+    )
+    a, b = (
+        archive_entry(
+            point,
+            dataset_hash="bank",
+            pipeline_schema=schema,
+            cell_identity=identity({"answer": judge("sealqa", model)}),
+        )
+        for model in ("a", "b")
+    )
+    assert a.prompt_fields_id == b.prompt_fields_id, "a judge moved the arm id: what it sends"
+    assert a.config_key != b.config_key, "two judges filed their cells under one archive address"
 
 
 def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
@@ -873,6 +889,18 @@ def test_the_determinism_clamp_outranks_every_other_layer_and_keys_the_bank(
     assert len(list(banked.glob("*.json"))) == 4, (
         "the second route replayed the first route's banked answer"
     )
+
+
+def test_the_default_effort_rung_and_an_empty_route_key_as_the_request_that_asks_neither() -> None:
+    # Neither is sent: keyed apart, one wire request banks two answers and a replay misses its own.
+    def asked(**lever: Any) -> str:
+        sent = ChatRequest(messages=[{"role": "user", "content": "q"}], model="m", **lever)
+        return hash_call(sent, provider="p")
+
+    levers: list[dict[str, Any]] = [{"reasoning_effort": "default"}, {"route_order": []}]
+    for lever in levers:
+        assert asked(**lever) == asked(), f"{lever} keyed apart from the request that omits it"
+    assert asked(reasoning_effort="none") != asked(), "reasoning OFF keyed as the omitted rung"
 
 
 def test_a_reply_is_keyed_by_the_schema_sent_and_a_miss_is_bought_once(tmp_path: Path) -> None:
