@@ -15,10 +15,6 @@ campaign:
   bench_trigger: manual
   optimization:
     optimizer: potter
-    # No shots by default: no split here holds out a demo pool, so a dataset that wants them names
-    # its pool and its `k_max` (justlogic does).
-    nodes:
-      l1_generate: {config: {k_max: 0}}
     # The bench runs every optimizer on one model, so a head-to-head compares optimizers alone:
     # head-to-head jl-optmodel-1 measured MiniMax ~20x faster per call than `qwen/qwen3.7-flash`
     # at no measured loss in held-out lift (docs/research/benchmarks.md); its host is the

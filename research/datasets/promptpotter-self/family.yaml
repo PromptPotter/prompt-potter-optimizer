@@ -147,7 +147,8 @@ panel:
       determinism: {temperature: 0.0}
       nodes:
         adaptive_queue: {config: {sp_budget_round: 40, per_round_resubset: false}}
-        l1_generate: {config: {n_variants: 3}}
+        # justlogic's own `k_max: 5` would open shots over the `demo: 0` above.
+        l1_generate: {config: {n_variants: 3, k_max: 0}}
   #
   # A panel spans THREE benchmarks, two search seats each, so an edit that helps one task family
   # and hurts another reads as the mixture it is. Each inner campaign reads its own benchmark's δ

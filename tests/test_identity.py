@@ -1894,7 +1894,7 @@ def test_a_switch_drops_the_knobs_the_old_optimizer_was_edited_on(
 ) -> None:
     # A knob edit on the basis's optimizer, then a switch: the knob addressed the old one.
     pinned, schema = _PINNED, _chain_schema()
-    optimization = {k: v for k, v in campaign_defaults()["optimization"].items() if k != "nodes"}
+    optimization = campaign_defaults()["optimization"]
     write_yaml(
         built_stores.tenant_datasets.dataset_dir("cap") / DEFINITION_FILE,
         {
