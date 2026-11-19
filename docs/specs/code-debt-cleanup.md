@@ -686,11 +686,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-- **A reader's helper body is not keyed** (land-order's report): `landing.py::landing_key` hashes
-  each reader's and migration's own source, so a helper a reader calls (the record validators behind
-  `ledger_line`) or a pydantic validator on a row's model can change what loads without moving the
-  key. Root: a shape's loading behaviour has no digest beyond its JSON schema. **Rides with:** rel.
-  **Re-test:** edit a validator a survivor's model runs; `landing_key()` moves.
 
 ### wave-5 · store (what store-2f, store-2g and store-3b left at their landing)
 
