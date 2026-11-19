@@ -8,7 +8,6 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any
 
-import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -28,6 +27,7 @@ from promptpotter.infrastructure.llm.json_parse import (
 )
 from promptpotter.infrastructure.llm.openai_compat import OpenAICompatibleClient
 from promptpotter.infrastructure.llm.registry import default_routes
+from promptpotter.infrastructure.llm.send_failure import FailedSendError
 from promptpotter.infrastructure.llm.send_pacing import (
     SEND_ATTEMPTS,
     SendBudget,
@@ -318,7 +318,8 @@ def _failed_record(
 ) -> LLMCallRecord:
     """The reply text a failure carries: the last rung's where the repair ladder ran out, a refusal's body."""
     parse = failure if isinstance(failure, OptimizerPromptParseError) else None
-    refused = failure.response.text if isinstance(failure, httpx.HTTPStatusError) else None
+    sent = failure.outcome if isinstance(failure, FailedSendError) else None
+    refused = None if sent is None or sent.status is None else sent.detail
     said = {
         "error": f"{type(failure).__name__}: {failure}",
         "content": refused if parse is None else parse.raw,

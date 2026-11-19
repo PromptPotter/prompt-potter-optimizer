@@ -401,6 +401,7 @@ from promptpotter.domain.verification import (
 from promptpotter.domain.wounds import ValidationReason, fatal_validation_failures
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
+from promptpotter.infrastructure.llm.send_failure import FailedSendError
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     require_spend_book,
@@ -4303,12 +4304,12 @@ def test_an_optimizer_call_whose_send_raises_leaves_its_record_and_still_raises(
     ) as (cycle, ledger):
         offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
         generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-        with pytest.raises(httpx.HTTPStatusError):
+        with pytest.raises(FailedSendError):
             asyncio.run(member.propose(generating, node_contract.Proposals([])))
         record = scan_last([LedgerSpan(ledger.path)], LLMCallRecord)
     assert record is not None and record.node == "l1_generate", "the failed call left no record"
     assert (
-        "HTTPStatusError" in record.payload["error"] and "refused" in record.payload["content"]
+        "FailedSendError" in record.payload["error"] and "refused" in record.payload["content"]
     ), "the record names no failure, or drops the refusal's body"
     assert record.payload["template_fields"] and record.payload["response_schema"], (
         "the record cannot rebuild the request that failed"

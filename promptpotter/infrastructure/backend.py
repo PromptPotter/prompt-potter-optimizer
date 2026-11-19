@@ -22,7 +22,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.docker_host import claim_machine, machine_step
 from promptpotter.infrastructure.llm.base import KEEPALIVE_OPTIONS
 from promptpotter.infrastructure.llm.pricing import priced_pair
-from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
     HELD_POLL_S,
     Backpressure,
@@ -298,12 +298,13 @@ class BackendClient:
             )
         if bound is None:
             raise RuntimeError("a remote cell is held whole, so it needs the bound its nodes serve")
-        resp, data, spent = await self._post_until_answered(
+        outcome, data, spent = await self._post_until_answered(
             query, payload, bound=bound, billed=billed
         )
-        resp.raise_for_status()
+        if outcome.failure is not None:
+            raise FailedSendError(outcome)
         if data is None:
-            raise ValueError(f"backend answered HTTP {resp.status_code} with no answer to read")
+            raise ValueError(f"backend answered HTTP {outcome.status} with no answer to read")
         return data, spent
 
     async def _in_process_until_admitted[S](
@@ -345,12 +346,12 @@ class BackendClient:
         *,
         bound: SendBound,
         billed: CellBilling[S],
-    ) -> tuple[httpx.Response, dict[str, Any] | None, S]:
+    ) -> tuple[SendOutcome, dict[str, Any] | None, S]:
         client = self.http
         sends = _CellSends(query, drawn_budget())
         while True:
             wait: float | None = None
-            unreachable: httpx.TransportError | None = None
+            unreachable: tuple[httpx.TransportError, SendOutcome] | None = None
             async with self.backpressure.send() as ticket:
                 with admitted(
                     CELL, bound, model=None, provider=None, paid_by=self._connector.cell_payer
@@ -367,7 +368,7 @@ class BackendClient:
                         outcome = failed_send(exc)
                         admission.close(outcome)
                         if not outcome.sent:
-                            unreachable = exc
+                            unreachable = exc, outcome
                         else:
                             wait = sends.wait_after(outcome)
                             sends.warn(
@@ -378,7 +379,7 @@ class BackendClient:
                                 final=wait is None,
                             )
                             if wait is None:
-                                raise
+                                raise FailedSendError(outcome) from exc
                     else:
                         sends.down_since = None
                         outcome = replied(
@@ -402,10 +403,10 @@ class BackendClient:
                             self.backpressure.eased(ticket)
                         wait = await self._resend_wait(client, resp, outcome, sends)
             if unreachable is not None:
-                await self._wait_out_outage(unreachable, sends)
+                await self._wait_out_outage(*unreachable, sends)
                 continue
             if wait is None:
-                return resp, data, spent
+                return outcome, data, spent
             if wait:
                 await held_wait(wait, "backend")
 
@@ -438,7 +439,9 @@ class BackendClient:
             wait = 0.0
         return wait
 
-    async def _wait_out_outage(self, unreachable: httpx.TransportError, sends: _CellSends) -> None:
+    async def _wait_out_outage(
+        self, unreachable: httpx.TransportError, outcome: SendOutcome, sends: _CellSends
+    ) -> None:
         error_class = unreachable.__class__.__name__
         if sends.down_since is None:
             sends.down_since = loop_now()
@@ -450,7 +453,7 @@ class BackendClient:
             sends.warn("transport_error", wait_s=_OUTAGE_WAIT_S, error_class=error_class)
         if not await self._reachable_within(sends.down_since):
             sends.warn("transport_error", wait_s=0.0, error_class=error_class, final=True)
-            raise unreachable
+            raise FailedSendError(outcome) from unreachable
 
     async def _in_process_cell[S](
         self,

@@ -270,9 +270,6 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/scoring/paired.py::_Reader.__call__::ScoringFormulaError": (
         "a cell its measurand cannot read pairs with nothing"
     ),
-    "application/scoring/sample_measurement.py::_answered_nothing::ValueError": (
-        "a body that is not JSON answered no gradeable miss: the status error stands"
-    ),
     "domain/cycle_paths.py::Subject.parse_address::ValueError": (
         "a step that is no round number parses as the next form"
     ),

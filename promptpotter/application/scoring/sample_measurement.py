@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import functools
+import json
 import re
 import time
 from collections.abc import Mapping
@@ -10,8 +11,6 @@ from dataclasses import replace
 from enum import StrEnum
 from statistics import fmean
 from typing import Any
-
-import httpx
 
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
@@ -45,7 +44,7 @@ from promptpotter.domain.spend import CellPrice, StepUsage, TokenAccount
 from promptpotter.infrastructure.backend import CellBilling
 from promptpotter.infrastructure.llm.base import hold_ceiling
 from promptpotter.infrastructure.llm.heartbeat import CellBeat, heartbeat
-from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.spend_book import (
     FRAMING_TOKENS,
     Billed,
@@ -439,27 +438,25 @@ def _error_result(
     )
 
 
-def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
-    body_text = (exc.response.text or "").strip()
-    if not body_text:
-        return ""
+def _said_detail(said: str) -> object:
+    """The ``detail`` a backend's refusal body names, else the body's own text."""
     try:
-        body = exc.response.json()
+        body = json.loads(said)
     except ValueError:
-        return body_text[:300]
+        return said.strip()[:300]
     detail = body.get("detail") if isinstance(body, dict) else None
-    if isinstance(detail, dict):
-        provider = detail.get("upstream_provider") or "?"
-        model = detail.get("upstream_model") or "?"
-        msg = detail.get("upstream_message") or detail.get("error_code") or "?"
-        ustatus = detail.get("upstream_status")
-        prefix = f"upstream={provider}:{model}"
-        if ustatus is not None:
-            prefix = f"{prefix} {ustatus}"
-        return f"{prefix} :: {msg}"
-    if isinstance(detail, str):
-        return detail[:300]
-    return body_text[:300]
+    return detail if isinstance(detail, dict | str) else said.strip()[:300]
+
+
+def _upstream(said: str) -> str:
+    if not isinstance(detail := _said_detail(said), dict):
+        return str(detail)[:300]
+    upstream = (
+        f"upstream={detail.get('upstream_provider') or '?'}:{detail.get('upstream_model') or '?'}"
+    )
+    if (ustatus := detail.get("upstream_status")) is not None:
+        upstream = f"{upstream} {ustatus}"
+    return f"{upstream} :: {detail.get('upstream_message') or detail.get('error_code') or '?'}"
 
 
 # The model ANSWERED and left nothing gradeable: a measured MISS of this configuration, never a hole.
@@ -468,24 +465,11 @@ _OUTPUT_FAILURE_CODES = frozenset(
 )
 
 
-def _answered_nothing(exc: httpx.HTTPStatusError) -> dict[str, Any] | None:
-    try:
-        body = exc.response.json()
-    except ValueError:
-        return None
-    detail = body.get("detail") if isinstance(body, dict) else None
+def _answered_nothing(said: str) -> dict[str, Any] | None:
+    detail = _said_detail(said)
     if not isinstance(detail, dict) or detail.get("error_code") not in _OUTPUT_FAILURE_CODES:
         return None
     return {"step_tokens": detail.get("step_tokens") or {}}
-
-
-_HTTP_FAILURE_WORDS: dict[ErrorCategory, str] = {
-    ErrorCategory.PROVIDER_CREDIT: "provider credit refused",
-    ErrorCategory.PROVIDER_THROTTLED: "provider throttled",
-    ErrorCategory.CLIENT: "caller config rejected by backend",
-    ErrorCategory.PARAMETER_REFUSED: "a request parameter refused by the endpoint",
-    ErrorCategory.SERVER: "backend transient error",
-}
 
 
 def _without_identity(
@@ -561,17 +545,7 @@ async def measure_sample(
         # A refused send is refused for every cell after it: a stop, never a row.
         raise
     except Exception as exc:  # noqa: BLE001 -- any fault of the cell is its row
-        if (row := _known_failure(sample, exc)) is not None:
-            return row
-        # Named by TYPE: a bare `TimeoutError()` has no message.
-        failure = f"{type(exc).__name__}: {exc}"
-        outcome = failed_send(exc)
-        return _error_result(
-            sample,
-            failure,
-            category=outcome.failure or ErrorCategory.UNKNOWN,
-            refused_parameter=outcome.refused_parameter,
-        )
+        return _failed_row(sample, exc)
 
 
 async def _send_cell(
@@ -623,8 +597,8 @@ async def _send_cell(
                         await attempt_bounds(session, calls),
                     ),
                 )
-            except httpx.HTTPStatusError as exc:
-                if (answered := _answered_nothing(exc)) is None:
+            except FailedSendError as exc:
+                if (answered := _answered_nothing(exc.outcome.detail)) is None:
                     raise
                 data, spent = answered, _reply_spend(answered, pairs)
     finally:
@@ -681,25 +655,23 @@ def _candidate_and_sample_facts(
     return facts
 
 
-def _known_failure(sample: Sample, exc: Exception) -> MeasuredCell | None:
+def _failed_row(sample: Sample, exc: Exception) -> MeasuredCell:
     if isinstance(exc, CellUnscoreableError):
         return _error_result(sample, str(exc), category=exc.category)
     # Never a backend 429: `BackendClient.run_query` answers each with the run's backpressure.
+    carried = isinstance(exc, FailedSendError)
     outcome = failed_send(exc)
     category = outcome.failure or ErrorCategory.UNKNOWN
-    if isinstance(exc, httpx.HTTPStatusError):
-        upstream = _extract_upstream_detail(exc)
-        error_msg = (
-            f"HTTP {exc.response.status_code} — {_HTTP_FAILURE_WORDS[category]}"
-            f"{f' :: {upstream}' if upstream else ''}"
-        )
-        return _error_result(
-            sample, error_msg, category=category, refused_parameter=outcome.refused_parameter
-        )
-    if category is ErrorCategory.CONNECTION:
-        error_msg = f"{type(exc).__name__}: {exc} — Backend may be down or unreachable."
-        return _error_result(sample, error_msg, category=category)
-    return None
+    # Named by TYPE: a bare `TimeoutError()` has no message.
+    error_msg = outcome.detail if carried else f"{type(exc).__name__}: {exc}"
+    if carried and outcome.status is not None:
+        upstream = _upstream(outcome.detail)
+        error_msg = f"HTTP {outcome.status} {category}{f' :: {upstream}' if upstream else ''}"
+    elif category is ErrorCategory.CONNECTION:
+        error_msg = f"{error_msg} — Backend may be down or unreachable."
+    return _error_result(
+        sample, error_msg, category=category, refused_parameter=outcome.refused_parameter
+    )
 
 
 def compare_rerun(

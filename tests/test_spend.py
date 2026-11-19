@@ -277,6 +277,7 @@ from promptpotter.infrastructure.llm.pricing import (
     Rate,
     RateCeiling,
 )
+from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
     SEND_ATTEMPTS,
     SendBudget,
@@ -2672,6 +2673,46 @@ def test_a_remote_cell_open_at_the_runs_wall_clock_is_cut_on_it(
     )
 
 
+@pytest.mark.usefixtures("run_bound")
+def test_a_cell_row_carries_the_category_its_sends_close_decided(
+    tmp_path: Path, offline: Router
+) -> None:
+    offline.backend.faults = {"/matches": [httpx.Response(503, json={"detail": "down"})] * 12}
+    remote = backend_client(tmp_path / "jobs")
+    session = loop_session(
+        workspace(tmp_path / "down"), pipeline_schema([]), [], scorer=_HIT, client=remote
+    )
+
+    async def downed_cell() -> MeasuredCell:
+        async with contextlib.aclosing(remote):
+            with scoped(book=spend_book(None, usd_reserve=None)):
+                return await measure_sample(
+                    Sample(id=0, query="q", ground_truth="a"), session, PipelineParams()
+                )
+
+    row = jumping_clock(downed_cell())
+    assert row.error_category == ErrorCategory.SERVER, (
+        f"a 5xx past its resends reached the row as {row.error_category}, not the close's SERVER"
+    )
+
+
+def test_a_credit_refusal_is_the_providers_on_any_4xx() -> None:
+    # Anthropic refuses for credit with a 400, OpenRouter with a 402 or 403, OpenAI with a 429: never
+    # the prompt's, and never a throttle a backoff ends.
+    request = httpx.Request("POST", "https://provider.invalid/v1/chat/completions")
+    for status, said in (
+        (400, "Your credit balance is too low"),
+        (402, "This request requires more credits"),
+        (403, "Key limit exceeded"),
+        (429, '{"error": {"code": "insufficient_quota"}}'),
+    ):
+        reply = httpx.Response(status, text=said, request=request)
+        refused = httpx.HTTPStatusError(str(status), request=request, response=reply)
+        assert failed_send(refused).failure is ErrorCategory.PROVIDER_CREDIT, (
+            f"a {status} credit refusal was charged to the prompt"
+        )
+
+
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_every_level_holds_a_sends_whole_bound_whatever_such_sends_billed_before() -> None:
     worst = SendBound(input_tokens=0, output_tokens=1000, usd=0.125)
@@ -3264,7 +3305,7 @@ def test_one_unit_of_work_resends_from_one_budget_whichever_loop_asks(offline: R
     async def two_rungs() -> None:
         with scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)):
             for _rung in range(2):
-                with pytest.raises(httpx.HTTPStatusError):
+                with pytest.raises(FailedSendError):
                     await keyed_client("openai").chat(
                         ChatRequest([{"role": "user", "content": "x"}], "gpt-x", max_tokens=10),
                         label=CallLabel("down", "optimizer"),
@@ -3344,9 +3385,13 @@ def test_a_backend_cell_is_never_sent_again_while_it_may_still_bill(
                 billed=cell_billing(pipeline_schema([]), {}, {"n": attempt}),
             )
 
-    for ends in (httpx.ReadTimeout, CellSendRefusedError):
-        with _billing_on(cell_ledger, wallet), pytest.raises(ends):
+    for ends in (FailedSendError, CellSendRefusedError):
+        with _billing_on(cell_ledger, wallet), pytest.raises(ends) as ended:
             jumping_clock(remote_cell())
+        if isinstance(ended.value, FailedSendError):
+            assert ended.value.outcome.failure is ErrorCategory.CONNECTION, (
+                f"the read timeout ended the cell as {ended.value.outcome.failure}"
+            )
     posts = offline.backend.asked.count("/matches")
     assert posts == 4, (
         f"{posts} POSTs — a read timeout is NEVER resent: the backend still works it, and a "
@@ -3741,7 +3786,7 @@ def test_an_agent_whose_sends_died_on_a_5xx_never_measured_the_prompt(offline: R
         seam = harbor._AgentModel(NodeCall(model="gpt-x", provider="openai", max_tokens=100), 1000)
         with (
             scoped(send_budget=SendBudget(None, attempts=SEND_ATTEMPTS)),
-            pytest.raises(httpx.HTTPStatusError),
+            pytest.raises(FailedSendError),
         ):
             await seam.call("turn")
         return seam

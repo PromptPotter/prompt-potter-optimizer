@@ -37,7 +37,7 @@ from promptpotter.infrastructure.llm.json_parse import (
     parse_response_content,
 )
 from promptpotter.infrastructure.llm.pricing import PriceTier, RateCeiling
-from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import (
     OPENAI_RPM_HEADER,
     OPENAI_TPM_HEADER,
@@ -57,7 +57,11 @@ from promptpotter.infrastructure.llm.spend_book import (
     booked_sum,
 )
 from promptpotter.shared.answer_text import truncate
-from promptpotter.shared.errors import ErrorCategory, SendRefusedError, validation_reason
+from promptpotter.shared.errors import (
+    ErrorCategory,
+    SendRefusedError,
+    validation_reason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -379,7 +383,6 @@ class OpenAICompatibleClient:
             "tools",
         }
     )
-    CREDIT_REFUSAL_STATUSES = frozenset({402, 403})
 
     def __init__(
         self,
@@ -445,7 +448,7 @@ class OpenAICompatibleClient:
                     try:
                         headers, reply = await send()
                     except Exception as exc:
-                        outcome = failed_send(exc, credit_statuses=self.CREDIT_REFUSAL_STATUSES)
+                        outcome = failed_send(exc)
                         admission.close(outcome)
                         booked = booked_sum(booked, admission.booked_usd)
                         if outcome.failure is ErrorCategory.PROVIDER_CREDIT:
@@ -461,7 +464,11 @@ class OpenAICompatibleClient:
                             continue
                         wait = budget.resend_wait() if outcome.resendable else None
                         if wait is None:
-                            raise
+                            # The wire's failure carries its close; a typed refusal, the model's
+                            # missing remedy or a bug raises as itself.
+                            if not isinstance(exc, httpx.HTTPError):
+                                raise
+                            raise FailedSendError(outcome) from exc
                         logger.warning(
                             "%s: %s on %s (attempt %d/%d); waiting %.1fs",
                             self._provider_name,

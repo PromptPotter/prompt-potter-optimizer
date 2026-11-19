@@ -112,23 +112,23 @@ class SendOutcome(NamedTuple):
     headers: object | None = None
     # Said with ``PARAMETER_REFUSED`` alone: the request parameter whose value the endpoint refused.
     refused_parameter: str | None = None
+    status: int | None = None
 
 
 _NAMED_PARAMETER = {key: re.compile(rf"\b{key}\b") for key in sorted(PARAM_SCOPE_KEYS)}
 
 
-def _status_failure(
-    status: int, said: str, credit_statuses: frozenset[int] | None
-) -> tuple[ErrorCategory | None, str | None]:
-    """The failure a reply's status and words say, and the parameter a refusal of one names."""
+def _status_failure(status: int, said: str) -> tuple[ErrorCategory | None, str | None]:
+    """The failure a reply's status and words say, and the parameter a refusal of one names. Credit
+    words read on any 4xx, a 429 included: OpenRouter refuses with a 402 or 403, Anthropic with a
+    400, OpenAI with a 429 that no backoff ends."""
     if 200 <= status < 300:
         return None, None
+    if 400 <= status < 500 and status != 408 and is_provider_credit_refusal(said):
+        return ErrorCategory.PROVIDER_CREDIT, None
     if status == 429:
         return ErrorCategory.PROVIDER_THROTTLED, None
     if 400 <= status < 500 and status != 408:
-        credit = credit_statuses is None or status in credit_statuses
-        if credit and is_provider_credit_refusal(said):
-            return ErrorCategory.PROVIDER_CREDIT, None
         named = (key for key, pattern in _NAMED_PARAMETER.items() if pattern.search(said))
         if (parameter := next(named, None)) is not None:
             return ErrorCategory.PARAMETER_REFUSED, parameter
@@ -148,10 +148,9 @@ def replied(
     headers: object | None,
     said: str,
     reported: ReportedSpend | None = None,
-    credit_statuses: frozenset[int] | None = None,
     answered_on: frozenset[int] = frozenset(),
 ) -> SendOutcome:
-    failure, parameter = _status_failure(status, said, credit_statuses)
+    failure, parameter = _status_failure(status, said)
     # ``answered_on``: the statuses a relay answers a model that DID generate with, so may bill.
     refused = 400 <= status < 500 and status != 408 and status not in answered_on
     return SendOutcome(
@@ -163,6 +162,7 @@ def replied(
         detail=said,
         headers=headers,
         refused_parameter=parameter,
+        status=status,
     )
 
 

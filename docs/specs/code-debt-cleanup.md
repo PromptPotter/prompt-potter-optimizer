@@ -225,12 +225,6 @@ row it closes.
 passes-5 landed a pause standing for its hold and one reader of a reply's usage; holders-3 `reindex`'s
 plan/apply pair and a temporary locked through its replace. Left:
 
-- **A send's error category is decided twice**: `spend_book.py::_status_failure` classifies at the
-  send's close, and the cell classifies the raised exception again (`sample_measurement.py::_known_failure`,
-  `measure_sample`'s except, `harbor.py::_AgentModel.call`). Root: the send raises a typed failure
-  carrying its `SendOutcome`, which changes what `openai_compat`'s client raises for every caller
-  (`judges/call.py` catches `httpx.HTTPError`; `infrastructure/backend.py::run_query`'s `raise_for_status` builds a
-  fresh exception after the send closed). **Rides with:** the chain owning the client's raise contract.
 - **`_peer_cycle` seats an origin reading the archive does not hold** (usage-1's report):
   `tests/test_scoring.py::_peer_cycle`'s `measured_origin` builds round 0's seated sheet from the
   bare `_measure`, never `score_search_point`, so the reading names rows no cell file backs and no
@@ -238,6 +232,16 @@ plan/apply pair and a temporary locked through its replace. Left:
   Root: seat the origin through the walk that files it. **Rides with:** the chain owning
   `tests/factories.py::seat`. **Re-test:** a noise floor through `_peer_cycle` alone reads its
   round-0 rows.
+- **Two senders still classify after their close** (err-1's report and review):
+  `connectors/dspy_module.py::_settle` closes its admission with `failed_send(failure)`, then
+  re-raises the raw litellm exception, which `sample_measurement.py::_failed_row` classifies again;
+  `connectors/harbor.py::_infrastructure_failure` matches credit words in a trial's text on a send
+  our client already closed. Both agree today (one rule since err-1), so this is a second mechanism,
+  not a wrong answer. `openai_compat.py::FaultedReplyError` subclasses `httpx.HTTPStatusError` only
+  so `failed_send` can read its `status_code`. Root: a send raises
+  `send_failure.py::FailedSendError` carrying its close, whichever sender. **Re-test:**
+  `git grep -c "failed_send(" -- promptpotter/application promptpotter/connectors` == 0 outside a
+  close.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 

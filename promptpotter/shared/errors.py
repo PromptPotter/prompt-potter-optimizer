@@ -86,9 +86,10 @@ def cell_failure(
     return CellSendRefusedError(message, category=category, spent=spent)
 
 
-# OpenRouter's three (HTTP 402 / 403) and Anthropic's, which arrives as an HTTP 400.
+# OpenRouter's three (HTTP 402 / 403), Anthropic's (an HTTP 400) and OpenAI's (an HTTP 429).
 _PROVIDER_CREDIT_REFUSAL = re.compile(
     r"requires more credits|[Ii]nsufficient credits|Key limit exceeded|credit balance is too low"
+    r"|insufficient_quota|exceeded your current quota"
 )
 
 

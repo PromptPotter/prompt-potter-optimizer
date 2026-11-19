@@ -12,9 +12,18 @@ from promptpotter.shared.errors import (
 )
 
 
-def failed_send(
-    exc: BaseException, *, credit_statuses: frozenset[int] | None = None
-) -> SendOutcome:
+class FailedSendError(Exception):
+    """A send closed failed; ``outcome`` is what its close decided, the category every reader takes."""
+
+    def __init__(self, outcome: SendOutcome) -> None:
+        said = outcome.detail[:500]
+        super().__init__(said if outcome.status is None else f"HTTP {outcome.status}: {said}")
+        self.outcome = outcome
+
+
+def failed_send(exc: BaseException) -> SendOutcome:
+    if isinstance(exc, FailedSendError):
+        return exc.outcome
     if isinstance(exc, SendRefusedError):
         return SendOutcome(sent=False, may_have_billed=False, failure=exc.category, detail=str(exc))
     if isinstance(exc, UngeneratedRequestError):
@@ -31,7 +40,6 @@ def failed_send(
             headers=getattr(resp, "headers", None),
             said=body if isinstance(body, str) else str(exc),
             reported=None,
-            credit_statuses=credit_statuses,
         )
     left = not _never_sent(exc)
     broke = _connection_broke(exc)

@@ -6,12 +6,11 @@ import uuid
 from collections.abc import Callable, Mapping
 from contextlib import suppress
 
-import httpx
-
 from promptpotter.domain.judges import JudgeStage, JudgeVerdict
 from promptpotter.domain.scoring import NO_RESULT, MeasuredCell
 from promptpotter.infrastructure.llm.base import ChatRequest, LLMResponse
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat, silence_detail
+from promptpotter.infrastructure.llm.send_failure import FailedSendError
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget
 from promptpotter.infrastructure.llm.spend_book import CallLabel
 from promptpotter.infrastructure.llm.telemetry import current_round
@@ -43,7 +42,7 @@ async def ask(stage: JudgeStage, prompt: str, *, judge: str) -> tuple[str, str]:
         except SendRefusedError as exc:
             # `spent` is empty: `measure_sample` bills the backend spend before any judge runs.
             raise CellSendRefusedError(str(exc), category=exc.category, spent={}) from exc
-        except (httpx.HTTPError, UngeneratedRequestError, ValueError) as exc:
+        except (FailedSendError, UngeneratedRequestError, ValueError) as exc:
             raise _ProviderFailedError(exc) from exc
 
     try:
