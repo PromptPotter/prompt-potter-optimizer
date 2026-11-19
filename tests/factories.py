@@ -35,7 +35,7 @@ from promptpotter.application.jobs.launcher.admission import (
     slotless_share,
 )
 from promptpotter.application.jobs.mint import declare, mint_framed_cycle
-from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.jobs.quota import CampaignCycle, sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -583,7 +583,7 @@ def loop_session(
             dataset_name if dataset_name is not None else "" if dataset is None else dataset.name
         ),
         dataset=dataset,
-        campaign_id="" if hop is None else hop.campaign_id,
+        campaign=None if hop is None else minted_campaign(hop),
         cycle_id="" if hop is None else hop.cycle_id,
         drawn=None if hop is None else partition,
         state=LaunchState(control=RunControl() if control is None else control),
@@ -750,7 +750,7 @@ async def run_init_round(
             config,
             stores=stores,
             holder=EmbeddedRun(session.measured_dataset),
-            hop=None,
+            at=None,
             requested=Budget(),
             step_rounds=None,
             sends=sends_on(stores, config, declaration.environment.connector),
@@ -1050,7 +1050,7 @@ async def inner_seat(
                 opened.cycle.config,
                 stores=session.store,
                 holder=InnerRun(LAUNCHED_DATASET),
-                hop=session.hop,
+                at=CampaignCycle(session.bound_campaign, session.hop),
                 sends=(),
                 run=lambda held: launched_round(
                     session, opened.cycle, opened.optimizer, held, round_num=round_num

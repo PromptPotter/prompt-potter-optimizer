@@ -101,6 +101,7 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.jobs.launcher.run_job import HeldRun, JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.quota import (
+    CampaignCycle,
     QuotaExceededError,
     RateLimitedError,
     account_wallet,
@@ -153,7 +154,7 @@ from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import ArmPosition, CutKind
 from promptpotter.domain.bench import PassRefusal
-from promptpotter.domain.campaign import Optimize, RunDeclaration
+from promptpotter.domain.campaign import Optimize, RunDeclaration, ceiling_meter
 from promptpotter.domain.campaign_config import (
     CAMPAIGN_RULE,
     CampaignConfig,
@@ -453,9 +454,8 @@ def _change_run_limits(
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget, overshoot=overshoot
     )
-    dispatched = DispatchedToCycle(
-        dispatcher, payload, "limits", minted_campaign(hop), hop, door=Door.HOST
-    )
+    campaign = dispatcher.stores.campaigns.campaign(hop.campaign_id)
+    dispatched = DispatchedToCycle(dispatcher, payload, "limits", campaign, hop, door=Door.HOST)
 
     async def apply() -> Applier[ArmedCaps]:
         applier = await change_run_limits(dispatched)
@@ -463,8 +463,12 @@ def _change_run_limits(
         return applier
 
     asyncio.run(apply())
-    campaigns = dispatcher.stores.campaigns
-    return campaigns.armed_budget(hop)
+    return dispatcher.stores.campaigns.armed_budget(campaign, hop)
+
+
+def _at(stores: Stores, hop: CycleHop) -> CampaignCycle:
+    """*hop* with its campaign as a launch's door loads it."""
+    return CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop)
 
 
 # 1. What a call costs
@@ -2152,7 +2156,7 @@ def shared_ceiling(tmp_path: Path, built_stores: Stores) -> _SharedCeiling:
                 stores=built_stores,
                 job_registry=shared,
                 job=job,
-                hop=fork,
+                at=_at(built_stores, fork),
                 step_rounds=None,
                 sends=_CELLS,
             )
@@ -2245,7 +2249,7 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
             _budgeted(Budget(usd=1.0)),
             stores=built_stores,
             holder=EmbeddedRun("ds1"),
-            hop=fork_c,
+            at=_at(built_stores, fork_c),
             requested=Budget(),
             step_rounds=None,
             sends=_CELLS,
@@ -2327,7 +2331,11 @@ def test_a_launch_landing_mid_reshare_waits_it_out(
 
     def raise_to_three() -> None:
         change_budget(
-            Budget(usd=3.0), stores=built_stores, job_registry=shared, hop=race[0], sends=()
+            Budget(usd=3.0),
+            stores=built_stores,
+            job_registry=shared,
+            at=_at(built_stores, race[0]),
+            sends=(),
         )
 
     def launch_b() -> None:
@@ -2503,7 +2511,7 @@ def test_sharing_divides_the_campaigns_ceiling_never_what_the_account_admits(
         stores=delegate,
         job_registry=shared,
         job=claim,
-        hop=claimed,
+        at=_at(delegate, claimed),
         step_rounds=None,
         sends=_CELLS,
     )
@@ -2764,7 +2772,7 @@ def test_an_overshoot_switched_on_before_the_launch_wires_its_cycle_is_served_on
     built_stores.campaigns.mint_cycle(hop)
     built_stores.campaigns.append(hop, StandingBudgetRecord(overshoot=True))
     built_stores.campaigns.append(hop, run_wiring())
-    limits = built_stores.campaigns.run_limits(hop)
+    limits = built_stores.campaigns.run_limits(*_at(built_stores, hop))
     assert limits is not None and limits.overshoot, (
         "a standing switch landing before the wiring was dropped from the served limits"
     )
@@ -4482,15 +4490,18 @@ def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(tmp_path: Path) 
     assert standing.budget == Budget(rounds=3), (
         "the standing record is written WHOLE: a spend move must carry the round cap it did not touch"
     )
-    assert metered.campaigns.read_campaign_ceiling(campaign.root_hop).budget == Budget(
-        tokens=1_000
-    ), "a money ceiling landed on one cycle, not the campaign every cycle shares"
+    assert metered.campaigns.read_campaign_ceiling(campaign).budget == Budget(tokens=1_000), (
+        "a money ceiling landed on one cycle, not the campaign every cycle shares"
+    )
     # An UNCAP lifts the campaign's ceiling; the account still binds it through the reservation.
     armed = _change_run_limits(dispatcher, hop, Budget(usd=None))
     assert armed == Budget(usd=None, tokens=1_000, rounds=3), (
         "the armed ceiling is not what a stop fires at: the campaign's money and the cycle's own"
     )
-    lifted, held = metered.campaigns.read_campaign_ceiling(hop).budget, registry.get(job.job_id)
+    lifted, held = (
+        metered.campaigns.read_campaign_ceiling(campaign).budget,
+        registry.get(job.job_id),
+    )
     assert lifted == Budget(usd=None, tokens=1_000), (
         "an uncapped campaign ceiling was stored as the account's headroom"
     )
@@ -4551,10 +4562,15 @@ def test_a_moved_ceiling_counts_every_cycles_spend_against_the_campaign_once(
     # A changed ceiling is admitted as a launch is: dollars its cells cannot be held to refuse.
     with pytest.raises(BudgetUnenforceableError):
         change_budget(
-            Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_UNPRICED_CELLS
+            Budget(usd=5.0),
+            stores=forker,
+            job_registry=registry,
+            at=_at(forker, fork),
+            sends=_UNPRICED_CELLS,
         )
-    change_budget(Budget(usd=5.0), stores=forker, job_registry=registry, hop=fork, sends=_CELLS)
-    caps = forker.campaigns.read_campaign_ceiling(fork).budget
+    at = _at(forker, fork)
+    change_budget(Budget(usd=5.0), stores=forker, job_registry=registry, at=at, sends=_CELLS)
+    caps = forker.campaigns.read_campaign_ceiling(at.campaign).budget
     _, relaunched = admit_launch(
         declared=Budget(),
         user=allowance,
@@ -4657,7 +4673,7 @@ def test_the_served_spend_cap_reads_the_count_its_books_stop_reads(tmp_path: Pat
         hold_id=job,
         headroom=Budget(),
         metered_on=ledger.path,
-        meters=stores.campaigns.ceiling_meter_of(hop.campaign_id),
+        meters=ceiling_meter(Optimize()),
         opened=0.0,
     )
     assert book.exhausted() is ErrorCategory.SPEND_CEILING, "vacuous — the lapse never tipped it"
@@ -4693,7 +4709,7 @@ def test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it(tmp_pa
         Lapse(hold_id=cell, bound=bound),
     ):
         stores.charges.append(record)
-    meters = stores.campaigns.ceiling_meter_of(hop.campaign_id)
+    meters = ceiling_meter(Optimize())
     book = SpendBook(
         declared=Budget(),
         share=Budget(usd=0.5),
@@ -4762,7 +4778,13 @@ def test_of_two_set_limits_raises_the_second_reads_the_wallet_after_the_firsts_r
 
     def raise_on(at: CycleHop) -> None:
         try:
-            change_budget(Budget(usd=0.20), stores=racer, job_registry=racing, hop=at, sends=_CELLS)
+            change_budget(
+                Budget(usd=0.20),
+                stores=racer,
+                job_registry=racing,
+                at=_at(racer, at),
+                sends=_CELLS,
+            )
         except QuotaExceededError as exc:
             raises.append(exc)
 
@@ -4809,10 +4831,16 @@ def test_set_limits_inside_a_launchs_admission_window_answers_its_limits_or_a_ty
     claim_cycle(starter, at, job.job_id)
     assert job.holds_spend and not job.admitted, "the launch is not inside its admission window"
     with pytest.raises(RateLimitedError) as waiting:
-        change_budget(Budget(usd=0.5), stores=starter, job_registry=registry, hop=at, sends=_CELLS)
+        change_budget(
+            Budget(usd=0.5),
+            stores=starter,
+            job_registry=registry,
+            at=_at(starter, at),
+            sends=_CELLS,
+        )
     assert waiting.value.code == "launch_contended", "a raise in the window read another refusal"
     assert change_budget(
-        Budget(rounds=3), stores=starter, job_registry=registry, hop=at, sends=_CELLS
+        Budget(rounds=3), stores=starter, job_registry=registry, at=_at(starter, at), sends=_CELLS
     )
     assert starter.campaigns.read_standing_budget(at).budget.rounds == 3, "the rounds did not land"
 
@@ -4835,7 +4863,9 @@ def test_a_run_its_own_key_pays_holds_none_of_the_coupon(tmp_path: Path) -> None
     claim_cycle(own, at, job.job_id)
     _admitted(own, registry, job.job_id, Budget(usd=0.0))
     hold_moved(own, at, Budget(usd=0.0))
-    change_budget(Budget(usd=0.5), stores=own, job_registry=registry, hop=at, sends=_OWN_ONLY)
+    change_budget(
+        Budget(usd=0.5), stores=own, job_registry=registry, at=_at(own, at), sends=_OWN_ONLY
+    )
     assert _reserve_of(own, job.job_id).usd == 0.0, (
         "a raise on a run no send of which draws the coupon reserved the coupon for it"
     )

@@ -15,7 +15,6 @@ from promptpotter.domain.campaign import (
     CampaignEdit,
     HeadToHeadRecord,
     LifecycleFilter,
-    ceiling_meter,
 )
 from promptpotter.domain.campaign_config import LaidSpan
 from promptpotter.domain.cycle_index import CycleIndex
@@ -290,9 +289,6 @@ class CampaignStore:
 
     def cycle_metered(self, hop: CycleHop, meter: CeilingMeter) -> Budget:
         return _ledger_meters([self.ledger(hop)])[meter]
-
-    def ceiling_meter_of(self, campaign_id: str) -> CeilingMeter:
-        return ceiling_meter(self.campaign(campaign_id).declaration.purpose)
 
     def campaign_walk_spans(self, campaign_id: str) -> list[LedgerSpan]:
         """Each cycle's whole chain, so a cycle lifted from another tree remembers its prefix."""
@@ -681,21 +677,25 @@ class CampaignStore:
         """Read live by the book at each send, so a running change binds its next one."""
         return scan_standing_budget(self.ledger(hop))
 
-    def read_campaign_ceiling(self, hop: CycleHop) -> CampaignCeilingRecord:
-        """Off any cycle of the campaign: each reads its root's, which its manifest names."""
-        return scan_campaign_ceiling(self.ledger(self.campaign(hop.campaign_id).root_hop))
+    def read_campaign_ceiling(self, campaign: Campaign) -> CampaignCeilingRecord:
+        """Off the campaign's root, which every cycle of it reads."""
+        return scan_campaign_ceiling(self.ledger(campaign.root_hop))
 
-    def armed_budget(self, hop: CycleHop) -> Budget:
-        """The axes an operator named: the campaign's money and the cycle's own."""
-        return self.read_campaign_ceiling(hop).budget.over(self.read_standing_budget(hop).budget)
+    def armed_budget(self, campaign: Campaign, hop: CycleHop) -> Budget:
+        """The axes an operator named: the campaign's money and its cycle *hop*'s own."""
+        return self.read_campaign_ceiling(campaign).budget.over(
+            self.read_standing_budget(hop).budget
+        )
 
-    def run_limits(self, hop: CycleHop, *, at: int | None = None) -> RunLimits | None:
-        """The cycle's fold to *at*, its line's root ceiling laid over; ``None`` before its first wiring."""
+    def run_limits(
+        self, campaign: Campaign, hop: CycleHop, *, at: int | None = None
+    ) -> RunLimits | None:
+        """*hop*'s fold to *at*, its campaign's ceiling laid over; ``None`` before its first wiring."""
         folded = run_limits_at(CycleAt(cycle=CycleDir(self.cycle_dir(hop)), hop=hop, offset=at))
         if folded is None:
             return None
         return folded.model_copy(
-            update={"budget": folded.budget.over(self.read_campaign_ceiling(hop).budget)}
+            update={"budget": folded.budget.over(self.read_campaign_ceiling(campaign).budget)}
         )
 
     def chain(self, hop: CycleHop, *, moment: Moment | None = None) -> list[LedgerSpan]:

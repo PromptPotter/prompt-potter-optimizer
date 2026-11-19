@@ -2947,7 +2947,7 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
             dataset_hash=opened.bank.dataset_hash,
         ),
     )
-    opened = opened.bound(held_campaign.root_hop, purpose=Optimize())
+    opened = opened.bound(held_campaign.root_hop, campaign=held_campaign)
     opened.record_resolved_run()
     resolve_resume(opened, held_campaign, rows_30)
     assert read_active_pointer(stores.base_dir) != held_campaign.root_hop, (
@@ -2980,7 +2980,9 @@ def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(
         "a moved bench defaults pin drifted nothing, or blamed another part"
     )
     for on_disk, served_drift in ((stale, drift), (held_campaign, None)):
-        declare_run_wiring(opened, effective_config(declared), campaign=on_disk, selected=running)
+        declare_run_wiring(
+            replace(opened, campaign=on_disk), effective_config(declared), selected=running
+        )
         served = fold_at(root_cut)
         assert served is not None and served.defaults_drift == served_drift, (
             "a launch past moved bench defaults served no drift, or one on its own served one"
@@ -3183,7 +3185,7 @@ def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
     partition = stores.campaigns.last(held_campaign.root_hop, PartitionRecord)
     assert partition is not None, "the held campaign banked no partition"
     stores.campaigns.append(steered_hop, partition)
-    steered_fork = opened.bound(steered_hop, purpose=Optimize())
+    steered_fork = opened.bound(steered_hop, campaign=held_campaign)
     steered_fork.record_resolved_run()
     resolve_resume(steered_fork, held_campaign, rows_30)
     with pytest.raises(ConfigDriftError):
@@ -3207,7 +3209,7 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     launched = effective_config(declared)
     # The wiring a launch declares before its observers build.
     selected = select_optimizer(launched.optimization)
-    declare_run_wiring(opened, launched, campaign=held_campaign, selected=selected)
+    declare_run_wiring(opened, launched, selected=selected)
     address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
 
     def pause(key: str) -> str:
@@ -3357,7 +3359,7 @@ def test_a_stop_declared_inside_its_run_scope_reaches_dashboard_json(
     hop = held_campaign.root_hop
     launched = effective_config(decl.declared)
     selected = select_optimizer(launched.optimization)
-    declare_run_wiring(opened, launched, campaign=held_campaign, selected=selected)
+    declare_run_wiring(opened, launched, selected=selected)
     root_dir = CycleDir(stores.campaigns.cycle_dir(hop))
     with scoped(ledger=CycleEventLog.open(root_dir)):
         stores.declare_stop(hop, RunPhaseRecord.stop(StopReason.ROUNDS_BUDGET))
@@ -3394,9 +3396,7 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
     opened, held_campaign = held
     launched = effective_config(decl.declared)
     ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
-    declare_run_wiring(
-        opened, launched, campaign=held_campaign, selected=select_optimizer(launched.optimization)
-    )
+    declare_run_wiring(opened, launched, selected=select_optimizer(launched.optimization))
     observers = build_run_observers(session=opened, campaign_config=launched)
     with scoped(account=stores):
         book = spend_book(1.0, metered_on=ledger.path)
@@ -3444,7 +3444,7 @@ def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
     launched = effective_config(decl.declared)
     CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
     selected = select_optimizer(launched.optimization)
-    declare_run_wiring(opened, launched, campaign=held_campaign, selected=selected)
+    declare_run_wiring(opened, launched, selected=selected)
     queue = JobRegistry(stores.jobs_dir, capacity=lambda _live: 0)
     address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
 
@@ -4241,7 +4241,7 @@ def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stor
     relabelled = built_stores.tenant_datasets.labelled("recut")
     assert relabelled is not None
     resumed = loop_session(built_stores, pipeline_schema([]), list(relabelled.samples))
-    resumed = resumed.bound(hop, purpose=Optimize())
+    resumed = resumed.bound(hop, campaign=minted_campaign(hop))
     assert resumed.bank == drawn_bank, (
         "a resume after a re-cut switched its cycle onto the new bank"
     )

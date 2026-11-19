@@ -13,7 +13,7 @@ from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.scoring.closed_rounds import RoundFileProjection
 from promptpotter.application.served_dashboard import campaign_count
 from promptpotter.application.views.readout import ReadoutProjection, StatusFn
-from promptpotter.domain.campaign import Campaign, ceiling_meter
+from promptpotter.domain.campaign import ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.phases import (
@@ -50,7 +50,7 @@ def declare_run_stop(
 ) -> None:
     """Declared where the run ENDS, never at the checkpoint that raised it: a second site, a second
     record. *detail* is an ending's reason, where its raiser gave one."""
-    limits = session.store.campaigns.run_limits(session.hop)
+    limits = session.store.campaigns.run_limits(session.bound_campaign, session.hop)
     assert limits is not None, "a run stops on the wiring it declared"
     budget = limits.budget
     meter = ceiling_meter(session.purpose)
@@ -77,11 +77,11 @@ def declare_run_wiring(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    campaign: Campaign,
     selected: SelectedOptimizer,
 ) -> None:
     """The one writer of ``RunWiringRecord``, on the cycle *session* is bound to: a mint's, a
     launch's or a fork's."""
+    campaign = session.bound_campaign
     session.store.campaigns.append(
         session.hop,
         RunWiringRecord(

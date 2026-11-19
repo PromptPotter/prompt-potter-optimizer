@@ -16,6 +16,7 @@ from promptpotter.application.jobs.capacity import SlotBound
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.config.settings import settings
+from promptpotter.domain.campaign import Campaign, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cycle_paths import CycleHop, WorkspaceDir
 from promptpotter.domain.job import (
@@ -87,6 +88,13 @@ from promptpotter.shared.identity import (
     has_capability,
 )
 from promptpotter.shared.worded import Worded
+
+
+class CampaignCycle(NamedTuple):
+    """A launch's cycle and the campaign its door loaded, which every ceiling read takes."""
+
+    campaign: Campaign
+    hop: CycleHop
 
 
 class QuotaExceededError(PotterError):
@@ -714,14 +722,14 @@ def _refuse_unshared(
 
 
 def _reshare_campaign_ceiling(
-    moved: Budget, *, stores: Stores, job_registry: JobRegistry, campaign_id: str
+    moved: Budget, *, stores: Stores, job_registry: JobRegistry, campaign: Campaign
 ) -> None:
     """Oldest first, each live cycle from what the rest hold; never refuses, a share running short."""
-    jobs = _live_on(stores, job_registry, campaign_id)
+    jobs = _live_on(stores, job_registry, campaign.campaign_id)
     if not jobs or not moved.named:
         return
-    meter = stores.campaigns.ceiling_meter_of(campaign_id)
-    spent = stores.campaigns.metered_spend(campaign_id, meter)
+    meter = ceiling_meter(campaign.declaration.purpose)
+    spent = stores.campaigns.metered_spend(campaign.campaign_id, meter)
     own = {job.job_id: stores.campaigns.cycle_metered(job.hop, meter) for job in jobs}
     # Read before any moves: each cycle is re-shared from what the rest held going in.
     held = {job.job_id: cycle_share(stores, job) for job in jobs}
@@ -743,7 +751,7 @@ def hold_moved(stores: Stores, hop: CycleHop, allotment: Budget) -> None:
 
 
 def move_campaign_money(
-    money: Budget, *, asked: Budget, stores: Stores, job_registry: JobRegistry, campaign_id: str
+    money: Budget, *, asked: Budget, stores: Stores, job_registry: JobRegistry, campaign: Campaign
 ) -> None:
     """THE move of a campaign's ceiling: stored as armed (``None`` lifts) beside what was *asked*
     of the axes it moves, then re-shared."""
@@ -751,8 +759,7 @@ def move_campaign_money(
     if not money.named:
         return
     with job_registry.admission_gate():
-        campaign = stores.campaigns.campaign(campaign_id)
-        prior = stores.campaigns.read_campaign_ceiling(campaign.root_hop)
+        prior = stores.campaigns.read_campaign_ceiling(campaign)
         standing = CampaignCeilingRecord(
             budget=prior.budget.over(money), asked=prior.asked.over(asked.only(money.named))
         )
@@ -760,7 +767,7 @@ def move_campaign_money(
             return
         stores.campaigns.append(campaign.root_hop, standing)
         _reshare_campaign_ceiling(
-            money, stores=stores, job_registry=job_registry, campaign_id=campaign_id
+            money, stores=stores, job_registry=job_registry, campaign=campaign
         )
 
 
@@ -799,22 +806,21 @@ def declare_run_budget(
     declared: Budget,
     *,
     stores: Stores,
-    hop: CycleHop | None,
+    at: CampaignCycle | None,
     requested: Budget,
 ) -> tuple[Budget, Budget]:
     """*declared* is the cycle's, its seed laid (`CycleConfig`), so composed BEFORE admission;
     second, the axes an operator named (campaign, cycle, *requested*)."""
-    asked = Budget()
-    if hop is not None:
-        asked = stores.campaigns.armed_budget(hop)
+    asked = Budget() if at is None else stores.campaigns.armed_budget(*at)
     asked = asked.over(requested)
     return declared.over(asked), asked
 
 
-def next_launch_budget(config: CampaignConfig, *, stores: Stores, hop: CycleHop) -> Budget:
-    return declare_run_budget(
-        config.optimization.budget, stores=stores, hop=hop, requested=Budget()
-    )[0]
+def next_launch_budget(config: CampaignConfig, *, stores: Stores, at: CampaignCycle) -> Budget:
+    declared, _ = declare_run_budget(
+        config.optimization.budget, stores=stores, at=at, requested=Budget()
+    )
+    return declared
 
 
 def change_budget(
@@ -823,16 +829,16 @@ def change_budget(
     overshoot: bool | None = None,
     stores: Stores,
     job_registry: JobRegistry,
-    hop: CycleHop,
+    at: CampaignCycle,
     sends: tuple[Send, ...],
 ) -> bool:
     """Set-limits is an admission of the changed ceiling: the wallet read, the clamp, the reserve
     and the hold run under the one gate a launch admits under, so no admission between them goes
     unseen. Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land
-    first. Whether the ceiling *hop* runs under, or its overshoot, moved: a change restating them
-    moves nothing."""
-    campaigns = stores.campaigns
-    armed = campaigns.armed_budget(hop)
+    first. Whether the ceiling *at*'s cycle runs under, or its overshoot, moved: a change
+    restating them moves nothing."""
+    campaigns, (campaign, hop) = stores.campaigns, at
+    armed = campaigns.armed_budget(*at)
     change = requested
     with job_registry.admission_gate():
         job = None if (held := campaigns.holder(hop)) is None else held.run
@@ -845,11 +851,7 @@ def change_budget(
                 hold = money_on(stores.charges.path).holds[job.job_id]
                 hold_run(stores, job.job_id, hold.bound.over(reserve), parent=hold.parent)
         move_campaign_money(
-            change,
-            asked=requested,
-            stores=stores,
-            job_registry=job_registry,
-            campaign_id=hop.campaign_id,
+            change, asked=requested, stores=stores, job_registry=job_registry, campaign=campaign
         )
     cycle = change.only(CYCLE_AXES)
     if overshoot == campaigns.read_standing_budget(hop).overshoot:
@@ -858,7 +860,7 @@ def change_budget(
         campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=overshoot))
     elif cycle.named:
         campaigns.append(hop, StandingBudgetRecord(budget=cycle))
-    return overshoot is not None or campaigns.armed_budget(hop) != armed
+    return overshoot is not None or campaigns.armed_budget(*at) != armed
 
 
 def _clamped(

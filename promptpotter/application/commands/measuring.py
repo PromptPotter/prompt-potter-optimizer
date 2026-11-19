@@ -29,7 +29,7 @@ async def verify_candidate(
             pass_kind=MeasurementRole.VERIFY,
             hop=hop,
             declared=Budget(),
-            sends=campaign_sends(stores, hop),
+            sends=campaign_sends(stores, dispatched.campaign, hop),
             acting=dispatched.command_id,
         ):
             return await passes.verify_candidate(

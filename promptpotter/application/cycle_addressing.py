@@ -201,24 +201,13 @@ def resolve_cycle_id(stores: Stores, campaign_id: str, hint: str | None) -> str:
 
 @dataclass
 class SessionCtx:
-    store: Stores
-    campaign: Campaign
-    cycle_id: str
+    """A terminal verb's cycle, loaded by the dispatcher its command goes through, never here."""
 
-    @property
-    def campaign_id(self) -> str:
-        return self.campaign.campaign_id
+    store: Stores
+    campaign_id: str
+    cycle_id: str
 
     @property
     def hop(self) -> CycleHop:
         """Derived, never stored: ``cycle_id`` is reassigned IN PLACE when a verb forks."""
         return CycleHop(campaign_id=self.campaign_id, cycle_id=self.cycle_id)
-
-
-def load_session(store: Stores, hop: CycleHop) -> SessionCtx:
-    try:
-        campaign = named_campaign(store, hop.campaign_id)
-    except NotFoundError as refused:
-        refused.next_acts = (MINT_FRESH,)
-        raise
-    return SessionCtx(store, campaign, hop.cycle_id)

@@ -7,7 +7,7 @@ from typing import Any, Literal, NamedTuple
 from pydantic import Field
 
 from promptpotter.application.jobs.launcher.admission import admitted
-from promptpotter.application.jobs.quota import next_launch_budget
+from promptpotter.application.jobs.quota import CampaignCycle, next_launch_budget
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.backend import ServedBackpressure
 from promptpotter.domain.campaign import ceiling_meter
@@ -516,20 +516,24 @@ class _Present(NamedTuple):
 
 
 def binding_run_limits(
-    stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState
+    stores: Stores, at: CampaignCycle, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    limits = stores.campaigns.run_limits(hop)
-    return None if limits is None else _binding(stores, hop, config, run, limits)
+    limits = stores.campaigns.run_limits(*at)
+    return None if limits is None else _binding(stores, at, config, run, limits)
 
 
 def _binding(
-    stores: Stores, hop: CycleHop, config: CampaignConfig | None, run: RunState, limits: RunLimits
+    stores: Stores,
+    at: CampaignCycle,
+    config: CampaignConfig | None,
+    run: RunState,
+    limits: RunLimits,
 ) -> RunLimits:
     """A next launch keeps the run's optimizer limits under the budget it would be admitted at."""
     if config is not None and not run.producer.appending:
         return limits.model_copy(
-            update={"budget": next_launch_budget(config, stores=stores, hop=hop)}
+            update={"budget": next_launch_budget(config, stores=stores, at=at)}
         )
     return limits
 
@@ -567,22 +571,23 @@ def _caps(
 
 def armed_caps(
     stores: Stores,
-    hop: CycleHop,
+    at: CampaignCycle,
     *,
     limits: RunLimits,
     run: RunState,
-    meter: CeilingMeter,
     rounds_closed: int,
 ) -> ArmedCaps:
     """THE caps as they bind now, each against its own book: the spend book's count, this cycle's
     rounds closed after the origin, the clock of the launch in flight."""
+    campaign, hop = at
+    meter = ceiling_meter(campaign.declaration.purpose)
     held = stores.campaigns.holder(hop) if run.producer.appending else None
     job = None if held is None else held.run
     started = None if job is None else epoch_seconds(job.started_at)
     return _caps(
         limits,
         meter,
-        asked=stores.campaigns.read_campaign_ceiling(hop).asked,
+        asked=stores.campaigns.read_campaign_ceiling(campaign).asked,
         used={
             "rounds": rounds_closed,
             "wall_clock_s": None if started is None else max(0.0, time.time() - started),
@@ -611,19 +616,17 @@ def campaign_count(
 
 def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:
     """`armed_caps` read whole off the stores: what `set-limits` answers once it applied."""
-    campaign = stores.campaigns.campaign(hop.campaign_id)
+    at = CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop)
     run = stores.run_state(hop)
-    config = cycle_config(stores, campaign, hop).config
+    config = cycle_config(stores, *at).config
     # Unwired yet, it stands under what its operator armed, as its first launch will.
-    wired = stores.campaigns.run_limits(hop) or RunLimits(budget=stores.campaigns.armed_budget(hop))
-    limits = _binding(stores, hop, config, run, wired)
-    meter = ceiling_meter(campaign.declaration.purpose)
+    wired = stores.campaigns.run_limits(*at) or RunLimits(budget=stores.campaigns.armed_budget(*at))
+    limits = _binding(stores, at, config, run, wired)
     return armed_caps(
         stores,
-        hop,
+        at,
         limits=limits,
         run=run,
-        meter=meter,
         rounds_closed=_remainder(stores, hop, limits).rounds_closed,
     )
 
@@ -638,8 +641,9 @@ def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkR
 
 
 def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
-    config = cycle_config(stores, stores.campaigns.campaign(hop.campaign_id), hop).config
-    return _remainder(stores, hop, binding_run_limits(stores, hop, config, stores.run_state(hop)))
+    at = CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop)
+    config = cycle_config(stores, *at).config
+    return _remainder(stores, hop, binding_run_limits(stores, at, config, stores.run_state(hop)))
 
 
 def _lookahead(
@@ -842,7 +846,7 @@ def served_dashboard(
             admission=admission,
             stop=run.stop,
         )
-    folded = stores.campaigns.run_limits(hop, at=at)
+    folded = stores.campaigns.run_limits(campaign, hop, at=at)
     assert folded is not None, "a folded state stands on its wiring"
     if at is not None:
         return _serve(
@@ -855,7 +859,8 @@ def served_dashboard(
             standing=None,
         )
     config = cycle_config(stores, campaign, hop).config
-    limits = _binding(stores, hop, config, run, folded)
+    seat = CampaignCycle(campaign, hop)
+    limits = _binding(stores, seat, config, run, folded)
     remainder = _remainder(stores, hop, limits)
     return _serve(
         state,
@@ -872,12 +877,7 @@ def served_dashboard(
             and stores.campaigns.holder(hop) is None,
             fork_remainder=remainder,
             caps=armed_caps(
-                stores,
-                hop,
-                limits=limits,
-                run=run,
-                meter=meter,
-                rounds_closed=remainder.rounds_closed,
+                stores, seat, limits=limits, run=run, rounds_closed=remainder.rounds_closed
             ),
             overshot=money_on(stores.charges.path).overshot.get(
                 stores.charges.held_on(CycleLayout(cycle_path).ledger), NO_OVERSHOOT

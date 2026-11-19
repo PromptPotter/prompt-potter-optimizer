@@ -32,9 +32,10 @@ async def change_run_limits(
 ) -> Applier[ArmedCaps]:
     """Answers the caps as ARMED, each against its own book: a clamp is said where it was made."""
     dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload
+    at = quota.CampaignCycle(dispatched.campaign, hop)
 
     async def _apply() -> ArmedCaps:
-        await _apply_change_run_limits(dispatcher, hop, change)
+        await _apply_change_run_limits(dispatcher, at, change)
         return await asyncio.to_thread(current_caps, dispatcher.stores, hop)
 
     return Applier(_apply)
@@ -50,7 +51,7 @@ async def limits_armed(replaying: Replaying[ChangeRunLimitsPayload]) -> ArmedCap
 
 
 def _change_budget(
-    dispatcher: CommandDispatcher, hop: CycleHop, change: ChangeRunLimitsPayload
+    dispatcher: CommandDispatcher, at: quota.CampaignCycle, change: ChangeRunLimitsPayload
 ) -> bool:
     stores = dispatcher.stores
     return quota.change_budget(
@@ -58,22 +59,22 @@ def _change_budget(
         overshoot=change.overshoot,
         stores=stores,
         job_registry=dispatcher.job_registry,
-        hop=hop,
+        at=at,
         # A change naming no money axis reads no config: it sends nothing a clamp asks of.
-        sends=campaign_sends(stores, hop) if change.budget.named & MONEY_AXES else (),
+        sends=campaign_sends(stores, *at) if change.budget.named & MONEY_AXES else (),
     )
 
 
 async def _apply_change_run_limits(
-    dispatcher: CommandDispatcher, hop: CycleHop, change: ChangeRunLimitsPayload
+    dispatcher: CommandDispatcher, at: quota.CampaignCycle, change: ChangeRunLimitsPayload
 ) -> None:
     """Clamped to the account FIRST: unclamped, a raise here is the way around the host-wallet gate.
     Settable on every arm of a head-to-head: a change that moves a ceiling the arm runs under moves
     it alone, off its head-to-head's budget, so the act is its exit (decisions.md § 0009); a change
     restating the ceilings it stands under leaves the arm in its comparison."""
-    moved = await asyncio.to_thread(_change_budget, dispatcher, hop, change)
+    moved = await asyncio.to_thread(_change_budget, dispatcher, at, change)
     if moved:
-        await asyncio.to_thread(dispatcher.stores.campaigns.act, hop, ArmAct.SET_LIMITS)
+        await asyncio.to_thread(dispatcher.stores.campaigns.act, at.hop, ArmAct.SET_LIMITS)
 
 
 async def set_concurrent_cycles(

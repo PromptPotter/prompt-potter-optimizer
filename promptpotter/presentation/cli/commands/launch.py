@@ -30,7 +30,7 @@ from promptpotter.application.commands import (
 )
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import dispatch_start_checkin
-from promptpotter.application.cycle_addressing import SessionCtx, cycle_target, load_session
+from promptpotter.application.cycle_addressing import SessionCtx, cycle_target
 from promptpotter.application.datasets.authored import (
     campaign_file_block,
 )
@@ -763,7 +763,8 @@ def cmd_resume(args: argparse.Namespace) -> Coroutine[Any, Any, CommandResult]:
 async def _resume(args: argparse.Namespace) -> CommandResult:
     setup_logging(style="full" if args.verbose else "cli")
     stores = local_stores(tenant=args.tenant)
-    ctx = load_session(stores, cycle_target(stores, args.campaign, args.cycle))
+    target = cycle_target(stores, args.campaign, args.cycle)
+    ctx = SessionCtx(stores, target.campaign_id, target.cycle_id)
 
     payload = _payload(args, ctx.hop)
     if isinstance(payload, ForkCyclePayload) and payload.start.pipeline_overlay:

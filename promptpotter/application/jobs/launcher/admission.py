@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
 from promptpotter import connectors
 from promptpotter.application.account import account_of
 from promptpotter.application.jobs.quota import (
+    CampaignCycle,
     admit_launch,
     call_book,
     check_launch_quotas,
@@ -27,7 +28,7 @@ from promptpotter.application.jobs.registry import JobRegistry, launch_interrupt
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
 from promptpotter.domain.bench import CampaignRefusal
-from promptpotter.domain.campaign import Campaign, CampaignRefusedError
+from promptpotter.domain.campaign import Campaign, CampaignRefusedError, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleHop
@@ -381,17 +382,17 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
     """The request's config is resolved IN here, after the queue wait, so the budget admitted is the one the run starts under."""
     stores, job_registry, job = start.stores, start.job_registry, start.job
     # A fresh mint has no cycle yet: nothing to claim, and no seed or standing ceiling to read.
-    hop = None if request.hop == UNRESOLVED_HOP else request.hop
+    at = request.at
     if job.queued:
         await job_registry.await_claim(job.job_id)
-        if hop is not None:
+        if at is not None:
             # Asked again past the wait: the slot door's claim held off an archive or a delete,
             # never a definition moved while the job waited.
-            refuse_campaign(stores, stores.campaigns.campaign(hop.campaign_id))
+            refuse_campaign(stores, stores.campaigns.campaign(at.hop.campaign_id))
 
     await refuse_unreachable(request.connector(stores), request.endpoint(stores))
     declared, asked = declare_run_budget(
-        request.declared_budget(stores), stores=stores, hop=hop, requested=request.budget
+        request.declared_budget(stores), stores=stores, at=at, requested=request.budget
     )
     # Offloaded: the wallet read scans every cycle ledger and must not block the event loop.
     held = await asyncio.to_thread(
@@ -401,7 +402,7 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
         stores=stores,
         job_registry=job_registry,
         job=job,
-        hop=hop,
+        at=at,
         step_rounds=request.step_rounds,
         sends=request.sends(stores),
     )
@@ -415,16 +416,15 @@ def admit_and_share(
     stores: Stores,
     job_registry: JobRegistry,
     job: Job,
-    hop: CycleHop | None,
+    at: CampaignCycle | None,
     step_rounds: int | None,
     sends: tuple[Send, ...],
     enclosing: SpendBook | None = None,
 ) -> HeldBudget:
     """THE admission of every run and pass, sending *sends*, and its hold on the account; an inner
     run is admitted against what its *enclosing* book has left, whose hold binds what it sends."""
-    meter: CeilingMeter = (
-        "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
-    )
+    hop = None if at is None else at.hop
+    meter: CeilingMeter = "bill" if at is None else ceiling_meter(at.campaign.declaration.purpose)
     with job_registry.admission_gate():
         if enclosing is None:
             admitted, reserve = admit_launch(
@@ -445,8 +445,8 @@ def admit_and_share(
             # The enclosing book's room is spendable from NOW, on top of what the campaign spent.
             spent = (
                 NOTHING_METERED
-                if hop is None
-                else stores.campaigns.metered_spend(hop.campaign_id, meter)
+                if at is None
+                else stores.campaigns.metered_spend(at.campaign.campaign_id, meter)
             )
             room = enclosing.money_left().bound_over(spent)
             admitted, reserve = declared.over(_within(declared, room)), Budget()
@@ -458,14 +458,10 @@ def admit_and_share(
             stores, job.job_id, reserve, parent=None if enclosing is None else draws_on(enclosing)
         )
         job_registry.move(job.job_id, LaunchMove.ADMIT)
-        if hop is not None:
-            hold_moved(stores, hop, allotment)
+        if at is not None:
+            hold_moved(stores, at.hop, allotment)
             move_campaign_money(
-                asked,
-                asked=asked,
-                stores=stores,
-                job_registry=job_registry,
-                campaign_id=hop.campaign_id,
+                asked, asked=asked, stores=stores, job_registry=job_registry, campaign=at.campaign
             )
     return HeldBudget(
         admitted=admitted,
@@ -498,7 +494,7 @@ def admit_arms(
                         stores=stores,
                         job_registry=job_registry,
                         job=job,
-                        hop=None,
+                        at=None,
                         step_rounds=None,
                         sends=sends,
                     ),
@@ -578,14 +574,15 @@ def admit_slotless(
     *,
     stores: Stores,
     holder: EmbeddedRun | InnerRun,
-    hop: CycleHop | None,
+    at: CampaignCycle | None,
     requested: Budget,
     step_rounds: int | None,
     sends: tuple[Send, ...],
 ) -> tuple[RunStart, HeldBudget]:
     """THE admission with no slot, taken BEFORE anything paid: the job ASKED, then ADMITTED under
-    its hold (HELD on *hop*); a refusal releases it. An inner run's share is of what the
+    its hold (HELD on *at*'s cycle); a refusal releases it. An inner run's share is of what the
     enclosing run's book has left at its spawn. It waits on the gate: an async door offloads it."""
+    hop = None if at is None else at.hop
     enclosing = run_scope().book if isinstance(holder, InnerRun) else None
     if isinstance(holder, InnerRun) and enclosing is None:
         raise RuntimeError("an inner run spawns only under its enclosing run's book")
@@ -605,7 +602,7 @@ def admit_slotless(
         claim_cycle(stores, hop, start.job_id)
     try:
         declared, asked = declare_run_budget(
-            config.optimization.budget, stores=stores, hop=hop, requested=requested
+            config.optimization.budget, stores=stores, at=at, requested=requested
         )
         held = admit_and_share(
             declared,
@@ -613,7 +610,7 @@ def admit_slotless(
             stores=stores,
             job_registry=job_registry,
             job=start.job,
-            hop=hop,
+            at=at,
             step_rounds=step_rounds,
             sends=sends,
             enclosing=enclosing,
@@ -629,7 +626,7 @@ async def slotless_share[S](
     *,
     stores: Stores,
     holder: InnerRun,
-    hop: CycleHop,
+    at: CampaignCycle,
     sends: tuple[Send, ...],
     run: SharedRun[S],
 ) -> tuple[S, CycleResult]:
@@ -640,7 +637,7 @@ async def slotless_share[S](
         config,
         stores=stores,
         holder=holder,
-        hop=hop,
+        at=at,
         requested=Budget(),
         step_rounds=None,
         sends=sends,
@@ -770,25 +767,28 @@ def _open_pass(
     start = RunStart(stores, job_registry, job)
     holding: ProducerHold | None = None
     try:
+        at = None if hop is None else CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop)
         meters: CeilingMeter = (
-            "bill" if hop is None else stores.campaigns.ceiling_meter_of(hop.campaign_id)
+            "bill" if at is None else ceiling_meter(at.campaign.declaration.purpose)
         )
-        if hop is not None:
+        if at is not None:
             holding = ProducerHold(
-                stores, hop, scoring_pass=True, acting=() if acting is None else (acting,)
+                stores, at.hop, scoring_pass=True, acting=() if acting is None else (acting,)
             )
             # What a producer gone since was asked stands no more, as a launch's RUNNING record voids it.
-            stores.void_inbox(hop)
+            stores.void_inbox(at.hop)
             # The cycle's own file, never a bound ledger: the bracket is scanned there alone.
-            close_dead_bench(stores, hop)
-            declared = _campaign_ceiling(stores, hop).over(declared)
+            close_dead_bench(stores, at.hop)
+            config = cycle_config(stores, at.campaign, at.hop).config
+            ceiling = next_launch_budget(config, stores=stores, at=at).only(MONEY_AXES)
+            declared = ceiling.over(declared)
         held = admit_and_share(
             declared,
             Budget(),
             stores=stores,
             job_registry=job_registry,
             job=job,
-            hop=hop,
+            at=at,
             step_rounds=None,
             sends=sends,
         )
@@ -825,13 +825,7 @@ def _close_pass(
     return None if taken is None else taken[1]
 
 
-def _campaign_ceiling(stores: Stores, hop: CycleHop) -> Budget:
-    config = cycle_config(stores, stores.campaigns.campaign(hop.campaign_id), hop).config
-    return next_launch_budget(config, stores=stores, hop=hop).only(MONEY_AXES)
-
-
-def campaign_sends(stores: Stores, hop: CycleHop) -> tuple[Send, ...]:
-    """What a run or pass on *hop* sends, under its campaign's resolved config and connector."""
-    campaign = stores.campaigns.campaign(hop.campaign_id)
-    config = cycle_config(stores, campaign, hop).config
-    return sends_on(stores, config, campaign.connector)
+def campaign_sends(stores: Stores, campaign: Campaign, hop: CycleHop) -> tuple[Send, ...]:
+    """What a run or pass on *campaign*'s cycle *hop* sends, under its resolved config and
+    connector."""
+    return sends_on(stores, cycle_config(stores, campaign, hop).config, campaign.connector)

@@ -32,6 +32,7 @@ from promptpotter.application.scoring.closed_rounds import (
 )
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
 from promptpotter.domain.arms import Cut, Measuring, Proposed, arm_name
+from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.cells import (
@@ -330,11 +331,10 @@ def _drawn_rows(
     return rows
 
 
-def cycle_hard_samples(stores: Stores, hop: CycleHop) -> HardSamples:
+def cycle_hard_samples(stores: Stores, campaign: Campaign, hop: CycleHop) -> HardSamples:
     """A cycle's scale, folded off its ledger: its closed rounds read on the last election's stamp, re-fit."""
     if not cycle_dir_for(stores.base_dir, hop).exists():
         raise NotFoundError(f"Cycle '{hop.campaign_id}/{hop.cycle_id}' not found")
-    campaign = stores.campaigns.campaign(hop.campaign_id)
     scorer = campaign_scorer(stores, campaign)
     knobs = cycle_config(stores, campaign, hop).config.optimization
     rounds = closed_rounds(stores, hop, scorer, moment=None)
@@ -454,12 +454,13 @@ def _leaderboard_page(
         candidates, rows = _dataset_cells(art_store, graded_under, bank, wanted)
     else:
         drawn = art_store.campaigns.last(hop, PartitionRecord)
-        view = cycle_hard_samples(art_store, hop)
+        campaign = art_store.campaigns.campaign(hop.campaign_id)
+        view = cycle_hard_samples(art_store, campaign, hop)
         members = frozenset() if drawn is None else drawn.bank_ids
         selected = _selected(view, members, max_unmeasured, limit)
         shown = _drawn_rows(cells, drawn, selected)
         wanted = {shown[sid].key: sid for sid in selected}
-        graded_under = campaign_scorer(art_store, art_store.campaigns.campaign(hop.campaign_id))
+        graded_under = campaign_scorer(art_store, campaign)
         candidates, rows = _cycle_cells(art_store, hop, graded_under, wanted, cells.at)
 
     resolved, ranked = rank_hard_samples(

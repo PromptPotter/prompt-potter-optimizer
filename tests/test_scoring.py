@@ -177,8 +177,8 @@ from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner import bench as line_bench
 from promptpotter.application.runner.bench import (
     LineSpan,
-    bank_campaign_result,
     bench_selection,
+    launch_clock_record,
     line_launches,
     line_round_budget,
     pair_on_bench,
@@ -405,6 +405,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     require_spend_book,
 )
+from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
 from promptpotter.infrastructure.projections.live_dashboard import (
     LiveDashboardProjection,
@@ -3086,7 +3087,7 @@ def test_a_member_whose_point_moved_banks_its_pass_refused_and_the_roster_grades
                 trigger="every_adoption",
             )
         )
-        folded = line_bench.line_passes(session.store, session.hop.campaign_id)
+        folded = line_bench.line_passes(session.store, session.bound_campaign)
         assert folded is not None and folded.refused == banked.refused == {
             moved: "moved under it"
         }, "the moved member's refusal was not banked on its pass"
@@ -4934,12 +4935,14 @@ def _evidence_campaign(
             )
         )
     with scoped(ledger=ledgers[hop]):
-        bank_campaign_result(
-            stores,
-            hop,
-            clock=LaunchClock(started_at=started, monotonic=0.0),
-            finished_at=f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
-            optimizer_phases=frozenset(),
+        append_record(
+            launch_clock_record(
+                stores,
+                stores.campaigns.line(root),
+                LaunchClock(started_at=started, monotonic=0.0),
+                f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
+                frozenset(),
+            )
         )
     campaign = stores.campaigns.load_campaign(cid)
     assert campaign is not None and len(line_launches(stores, campaign)) == 1

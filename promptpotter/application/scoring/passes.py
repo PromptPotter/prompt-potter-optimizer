@@ -562,15 +562,16 @@ class BenchTriggerError(ConflictError):
 
 async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
     """Admitted exactly where the served status says so (``BenchStatus.can_run``)."""
+    campaign = stores.campaigns.campaign(hop.campaign_id)
     async with paid_pass(
         stores=stores,
         pass_kind=MeasurementRole.BENCH,
         hop=hop,
         declared=Budget(),
-        sends=campaign_sends(stores, hop),
+        sends=campaign_sends(stores, campaign, hop),
         acting=acting,
     ):
-        status = read_cycle_bench(stores, stores.campaigns.campaign(hop.campaign_id), hop).status
+        status = read_cycle_bench(stores, campaign, hop).status
         if status.refusal is not None:
             held = "" if status.held_by is None else f" Holder: {status.held_by}."
             raise BenchTriggerError(PASS_REFUSAL_INFO[status.refusal] + held)
@@ -620,7 +621,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                     # The pass banked itself stopped, so the line's reading over it is the answer.
                     if not session.state.control.paused(stop):
                         raise
-                    banked = line_passes(stores, hop.campaign_id)
+                    banked = line_passes(stores, session.bound_campaign)
                 score = declare_line_bench(
                     session,
                     config,
@@ -634,8 +635,7 @@ async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
                 # The verb's own clock and cost; each pass it sent banked itself as it was graded.
                 if banked is not None:
                     bank_campaign_result(
-                        stores,
-                        hop,
+                        session,
                         clock=clock,
                         finished_at=utcnow_iso(),
                         optimizer_phases=optimizer.phases,

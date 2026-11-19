@@ -36,7 +36,7 @@ from promptpotter.application.runner.inner.tasks import retarget_inner_spawn
 from promptpotter.application.scoring.query_loop import NEXT_CELL
 from promptpotter.application.scoring.sample_measurement import cell_bound, measured_cell_price
 from promptpotter.domain.arms import PointContext
-from promptpotter.domain.campaign import Campaign, RunDeclaration, ceiling_meter
+from promptpotter.domain.campaign import RunDeclaration, ceiling_meter
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
@@ -86,7 +86,6 @@ class PreparedRun:
     origin: CampaignOrigin
     campaign_config: CampaignConfig
     dataset: list[Sample]
-    campaign: Campaign
     resumed_ending: StopReason | None
     # The launch's one selection, which every cycle of its line runs.
     optimizer: SelectedOptimizer
@@ -128,9 +127,8 @@ async def open_launch(
         }
     )
     session.state.held = budget
-    campaign = campaigns.campaign(session.campaign_id)
     # Declared before origin scoring; the record is the readout, the arming below the enforcement.
-    declare_run_wiring(session, campaign_config, campaign=campaign, selected=optimizer)
+    declare_run_wiring(session, campaign_config, selected=optimizer)
     # A fresh mint was admitted before its campaign existed: its ceiling is stored here, off the
     # loop, under the gate.
     await asyncio.to_thread(
@@ -139,7 +137,7 @@ async def open_launch(
         asked=budget.standing,
         stores=session.store,
         job_registry=JobRegistry.attach(session.store.jobs_dir),
-        campaign_id=session.hop.campaign_id,
+        campaign=session.bound_campaign,
     )
     stand_held_budget(session.store, session.hop, budget)
 
@@ -160,7 +158,6 @@ async def open_launch(
         origin=seat_campaign_origin(session, dataset, campaign_config, cycle=cycle),
         campaign_config=campaign_config,
         dataset=dataset,
-        campaign=campaign,
         resumed_ending=scan_cycle_facts(campaigns.ledger(session.hop)).resumed_ending,
         optimizer=optimizer,
     )
@@ -235,15 +232,10 @@ async def onto_fork(
     """THE in-process move onto a fork, a rebase's and a divergence's: the take, the bind, the
     held share, the wiring and *parent*'s release. Taken and rebased off the loop: both wait
     on a gate."""
-    session = session.bound(cut.child, purpose=session.purpose)
+    session = session.bound(cut.child, campaign=session.bound_campaign)
     observers = await asyncio.to_thread(_rebased_observers, session, cut, parent, prep)
     # A fork's config is already admitted, so it is wired as its observers open.
-    declare_run_wiring(
-        session,
-        prep.campaign_config,
-        campaign=prep.campaign,
-        selected=prep.optimizer,
-    )
+    declare_run_wiring(session, prep.campaign_config, selected=prep.optimizer)
     # The line's every emit lands on the cycle it moved onto, under the launch's one scope.
     rescope(ledger=CycleEventLog.open(observers.cycle_dir))
     arm_run_controls(session, observers)

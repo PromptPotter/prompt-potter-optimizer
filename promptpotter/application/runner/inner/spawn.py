@@ -22,6 +22,7 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
     resolve_resume,
 )
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
     resolved_overrides,
@@ -214,7 +215,7 @@ def _continue_inner_campaign(
             "producer owns it, and two runs writing one cycle is not a measurement",
             spent={},
         )
-    bound = session.bound(hop, purpose=campaign.declaration.purpose)
+    bound = session.bound(hop, campaign=campaign)
     try:
         plan = resolve_resume(bound, campaign, train_data)
     except ConfigDriftError as refused:
@@ -312,7 +313,7 @@ async def _run_inner_campaign(
                 config,
                 stores=session.store,
                 holder=InnerRun(cell.spec.inner_dataset),
-                hop=session.hop,
+                at=CampaignCycle(session.bound_campaign, session.hop),
                 sends=(),
                 run=lambda held: run_optimization(
                     opened.train_data,

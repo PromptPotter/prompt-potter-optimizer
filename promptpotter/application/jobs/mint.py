@@ -350,7 +350,7 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
     checked = plan
     if session.hop != campaign.root_hop:
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
-        root = session.bound(campaign.root_hop, purpose=session.purpose)
+        root = session.bound(campaign.root_hop, campaign=campaign)
         checked = resolve_cycle_plan(root, campaign.declaration, dataset, resumed=campaign)
     if campaign.root_content_hash == checked.origin_hash:
         return plan
@@ -564,8 +564,6 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     # read of the cycle, and what the origin hash was taken under, before the campaign is visible.
     campaigns.mint_cycle(hop, CycleMintedRecord(start=plan.cycle.own_start))
     campaigns.append(hop, plan.drawn)
-    session = session.bound(hop, purpose=declaration.purpose)
-    session.record_resolved_run()
     campaign = Campaign(
         campaign_id=hop.campaign_id,
         dataset_name=session.measured_dataset,
@@ -576,7 +574,9 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
         declaration=declaration,
         lifecycle_status="active",
     )
-    declare_run_wiring(session, plan.cycle.config, campaign=campaign, selected=plan.optimizer)
+    session = session.bound(hop, campaign=campaign)
+    session.record_resolved_run()
+    declare_run_wiring(session, plan.cycle.config, selected=plan.optimizer)
     # The mint's commit, last: a mint that dies before it leaves no campaign to list.
     campaigns.create_campaign(campaign)
     # The name labels the bank its newest campaign declares, an L4 inner cell's as every other.

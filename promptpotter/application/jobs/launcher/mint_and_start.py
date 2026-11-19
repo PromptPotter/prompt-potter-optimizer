@@ -16,13 +16,13 @@ from promptpotter.application.jobs.mint import (
     mint_framed_cycle,
     resolve_resume,
 )
-from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.jobs.quota import CampaignCycle, sends_on
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
 from promptpotter.domain.campaign import Campaign, Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch
+from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.store.dataset_access import (
@@ -67,8 +67,8 @@ class FreshMint:
     task_text: str | None
 
     @property
-    def hop(self) -> CycleHop:
-        return UNRESOLVED_HOP
+    def at(self) -> None:
+        return None
 
     @property
     def step_rounds(self) -> None:
@@ -125,6 +125,10 @@ class ExistingCycle:
     step_rounds: int | None = None
 
     @property
+    def at(self) -> CampaignCycle:
+        return CampaignCycle(self.campaign, self.hop)
+
+    @property
     def dataset_name(self) -> str:
         return self.campaign.dataset_name
 
@@ -143,7 +147,7 @@ class ExistingCycle:
         return cycle_config(stores, self.campaign, self.hop).config.optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return campaign_sends(stores, self.hop)
+        return campaign_sends(stores, self.campaign, self.hop)
 
     @asynccontextmanager
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:

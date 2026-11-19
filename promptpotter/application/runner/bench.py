@@ -707,27 +707,23 @@ async def bench_selection(
     return banked
 
 
-def _line(stores: Stores, hop: CycleHop) -> list[CycleHop] | None:
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
-    if campaign is None:
-        return None
-    line = stores.campaigns.line(campaign.root_hop)
-    return line if line[-1] == hop else None
+def _line(session: Session) -> list[CycleHop] | None:
+    line = session.store.campaigns.line(session.bound_campaign.root_hop)
+    return line if line[-1] == session.hop else None
 
 
 def bank_campaign_result(
-    stores: Stores,
-    hop: CycleHop,
+    session: Session,
     *,
     clock: LaunchClock,
     finished_at: str,
     optimizer_phases: frozenset[str],
 ) -> None:
     """Once per launch, on the cycle holding the line as it ends: a rebased parent banks none."""
-    line = _line(stores, hop)
+    line = _line(session)
     if line is None:
         return
-    append_record(launch_clock_record(stores, line, clock, finished_at, optimizer_phases))
+    append_record(launch_clock_record(session.store, line, clock, finished_at, optimizer_phases))
 
 
 def launch_clock_record(
@@ -760,7 +756,7 @@ def line_outlay(session: Session, phases: frozenset[str]) -> LineOutlay:
     each ended launch and of this one to now."""
     stores, clock = session.store, session.state.clock
     assert clock is not None, "a closing round's launch is on a line"
-    campaign = stores.campaigns.campaign(session.hop.campaign_id)
+    campaign = session.bound_campaign
     line = stores.campaigns.line(campaign.root_hop)
     closing = launch_clock_record(stores, line, clock, utcnow_iso(), phases)
     return LineOutlay(
@@ -786,9 +782,9 @@ async def bench_origin(
     origin_id: str,
 ) -> BenchPasses | None:
     stores, hop = session.store, session.hop
-    if _line(stores, hop) is None:
+    if _line(session) is None:
         return None
-    held = line_passes(stores, hop.campaign_id)
+    held = line_passes(stores, session.bound_campaign)
     if held is not None and held.origin.answers(
         origin_sp.sp_hash(session.pipeline_schema),
         [s.key for s in session.state.scoring.partition.bench],
@@ -846,18 +842,15 @@ def live_cycle_run(stores: Stores, hop: CycleHop) -> LiveCycleRun:
     )
 
 
-def line_passes(stores: Stores, campaign_id: str) -> BenchPasses | None:
+def line_passes(stores: Stores, campaign: Campaign) -> BenchPasses | None:
     """The line's OWN ledgers: a root cut from another tree graded its prefix in another epoch."""
-    campaign = stores.campaigns.load_campaign(campaign_id)
-    if campaign is None:
-        return None
     return scan_bench_passes(stores.campaigns.line_spans(campaign.root_hop))
 
 
 def cycle_curve(
     stores: Stores, campaign: Campaign, hop: CycleHop, config: CampaignConfig
 ) -> BenchCurve | None:
-    passes = line_passes(stores, campaign.campaign_id)
+    passes = line_passes(stores, campaign)
     if passes is None:
         return None
     scorer = scorer_of(config, verifier_graded=False)
@@ -877,7 +870,7 @@ def cycle_bench(
         stores,
         campaign,
         hop,
-        line_passes(stores, campaign.campaign_id),
+        line_passes(stores, campaign),
         config,
         scorer_of(config, verifier_graded=False),
         run=live_cycle_run(stores, hop),
@@ -950,7 +943,7 @@ def declare_line_bench(
     scorer = scorer_of(config, verifier_graded=False)
     # The index says `selecting` / `ending` only once the run closes; the launch's own word wins.
     run = live_cycle_run(stores, hop)._replace(selecting=selecting, ending=ending)
-    campaign = stores.campaigns.load_campaign(hop.campaign_id)
+    campaign = session.campaign
     if campaign is None or not hop.cycle_id:
         split = config.dataset_split
         line = BenchLine(
@@ -967,7 +960,7 @@ def declare_line_bench(
         )
         score = read_bench(stores, None, scorer, line=line)
     else:
-        held = passes if passes is not None else line_passes(stores, hop.campaign_id)
+        held = passes if passes is not None else line_passes(stores, campaign)
         score = bench_under(stores, campaign, hop, held, config, scorer, run=run)
     append_record(BenchScoredRecord(bench=score))
     return score

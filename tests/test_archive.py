@@ -2617,12 +2617,11 @@ def test_a_halts_own_words_are_the_stop_its_run_serves_and_its_chat_says(
         ((unpriced.value, "acme/unpriced-1"), (aborted, "l2: the backend's index is gone"))
     ):
         hop = CycleHop(campaign_id=f"halted{n}__20260101-000000", cycle_id=f"halted{n}")
-        campaign = minted_campaign(hop)
-        stored_campaign(stores, campaign)
+        stored_campaign(stores, minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
         cycle = seat(stores, hop=hop).cycle
         session, config, selected = cycle.session, cycle.config, cycle.optimizer
-        declare_run_wiring(session, config, campaign=campaign, selected=selected)
+        declare_run_wiring(session, config, selected=selected)
         observers = build_run_observers(session=session, campaign_config=config)
         start_launch(session)
         try:

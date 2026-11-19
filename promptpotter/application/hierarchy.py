@@ -6,6 +6,7 @@ from pathlib import Path
 
 from promptpotter.application.datasets.draft_campaign import owned_drafts
 from promptpotter.application.jobs.launcher.admission import admitted
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.pipeline_resolve import (
     LineConfig,
@@ -292,7 +293,7 @@ def cycle_entry(
     runs_with = root.runs_with
     # The producer as it is now: a moment replays the record, never a process.
     run = stores.run_state(hop)
-    limits = binding_run_limits(stores, hop, line.config, run)
+    limits = binding_run_limits(stores, CampaignCycle(campaign, hop), line.config, run)
     # Before its first launch a cycle declares no wiring, so its campaign's declared cap binds.
     cap = (
         (None if runs_with is None else runs_with.budget_rounds)

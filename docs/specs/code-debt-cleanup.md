@@ -101,32 +101,6 @@ row it closes.
 
 ### batch/26 · money
 
-- **A resume loads its campaign 4×**: the door, `CampaignStore.ceiling_meter_of` (from
-  `launcher/admission.py::admit_and_share`), `CampaignStore.armed_budget` (from
-  `quota.py::declare_run_budget`) and `runner/mint.py::open_launch`. No launch carries the door's
-  `Campaign` past admission: `admit_slotless` and `admit_and_share` take a hop, and neither
-  `Session` (its `purpose` only) nor `CycleConfig` holds the campaign it was laid over. Action: the
-  door's `Campaign` rides the launch (the session, or `CycleConfig` beside its `config`), and the
-  store's ceiling reads take it. load-1's census (launch-path loads at `e3393717e`): embedded resume
-  4, CLI and REST resume 8, CLI `new` 3, embedded `new` 1; the carrier (`Session.bound`,
-  `CycleConfig.laid`, `armed_budget` / `ceiling_meter_of` / `admit_and_share`) is called from
-  `initialization/wiring.py`, `pipeline_resolve.py::cycle_config`, `jobs/mint.py`,
-  `served_dashboard.py`, `tests/test_spend.py`, `tests/factories.py` and `tests/test_identity.py`,
-  so a half inside a narrower Owns is a second mechanism. Suggested shape: `Session.bound(hop, *,
-  campaign)` with `purpose` derived, `open_launch` reads `session.campaign`, and admission and the
-  ceiling reads take the `Campaign`. **Rides with:** one chain owning all of the above beside
-  `store.py`, `quota.py`, `admission.py`, `session.py`, `runner/mint.py`. **Re-test:** one
-  `load_campaign` per inline resume (a patched loader around `embedded_run.py::run_campaign`) and
-  CLI resume's launch path 8 → 1.
-- **A terminal or REST resume reloads its campaign at every hop of the dispatch** (load-1's
-  report): `cycle_addressing.py::load_session`, `dispatcher.py::_on_cycle`,
-  `admission.py::request_jobs`, `admission.py::campaign_sends` and `store.py::run_limits` →
-  `read_campaign_ceiling` each load it; `ExistingCycle.campaign` already holds it. Action: they read
-  it. **Rides with:** the row above. **Re-test:** the row above's CLI count.
-- **A run's projections re-read the manifest per round** (load-1's report): `output.py::_render_*`,
-  `measurement_log.py::cycle_hard_samples`, `bench.py` (`_line`, `line_passes`, `line_outlay`,
-  `declare_line_bench`) and `earned_blocks`' `list_campaigns` load it 16 times in a one-round
-  resume (20 in all). **Re-test:** whole-run loads 20 → ≤ 5.
 - **A connector's name is looked up again where its `Connector` is held** (served-1's report):
   `free_tier.py::free_fence`, `pipeline_resolve.py::laid_config` and
   `jobs/launcher/admission.py::refuse_unreachable` take a `str`, so callers in
@@ -640,6 +614,30 @@ and derived the knob couplings from each member's draws and the escalation ladde
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
   harness names the release it runs against, and a fix to it targets that release. **Rides with:** the
   next chain touching `paper/bbeh-comparison/`.
+- **A cycle's directory is minted by whichever append reaches it first** (load-2's review):
+  `ledger.py::CycleEventLog.open` mkdirs `parents=True`, and no mint creates `cycles/<id>/` itself.
+  Set-limits racing `delete-campaign` (no keep_results) appends after the rmtree: the scans default
+  on the missing ledger, the append re-creates `campaigns/<id>/cycles/…` with no manifest, hidden
+  from `iter_campaign_dirs` and walked by `cycle_hops`. A state the system enters and never
+  reports; main had the window, load-2's carried `Campaign` widened it. Action: each mint door (root,
+  fork, inner sandbox, draft) creates its cycle dir; `open` mkdirs `.runtime/` only, so
+  `CampaignStore.append` on a vanished cycle answers not-found. **Re-test:** a delete between a
+  door's load and its append leaves no `campaigns/<id>/` and the command answers not-found.
+- **A launch's address is taken from two sources** (load-2's review):
+  `Session.bound(hop, *, campaign)` reads the partition off `hop` and the campaign id off `campaign`,
+  `quota.py::CampaignCycle(campaign, hop)` likewise, and nothing checks they agree;
+  `CampaignCycle` is a third (campaign, hop) pair beside `ExistingCycle` and `DispatchedToCycle`.
+  Action: one pair, (campaign, cycle id), the hop derived. **Re-test:** no `(campaign, hop)`
+  constructor left; `git grep -c "CampaignCycle(" == 0` or one carrier.
+- **Two pass paths load the campaign twice, and an unbound session is guarded three ways**
+  (load-2's review): `scoring/passes.py:565` beside `admission.py:770`; `output.py::_render_cycle_log_md`
+  raises a bare `RuntimeError` while its sibling returns, `runner/bench.py::declare_line_bench` keeps a
+  `campaign is None` arm, and only test sessions built with `hop=None` reach either. Action: the pass
+  carries its door's `Campaign`; tests bind a hop and the guards go. Tests left by the same landing:
+  `factories.py::loop_session` seats a synthetic `minted_campaign(hop)` disk does not hold,
+  `test_spend.py:4674/4710` hard-code `ceiling_meter(Optimize())`, and nothing calls
+  `bank_campaign_result` now. **Re-test:** one load per pass; `git grep -c "campaign is None" --
+  promptpotter/application/runner` == 0.
 
 ### batch/31 · box
 

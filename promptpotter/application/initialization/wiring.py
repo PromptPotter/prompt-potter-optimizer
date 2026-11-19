@@ -257,4 +257,4 @@ async def bind_cycle_session(
         connectors.CONNECTORS.get(campaign.connector),
         identity=stores.identity,
     ) as session:
-        yield session.bound(hop, purpose=campaign.declaration.purpose)
+        yield session.bound(hop, campaign=campaign)

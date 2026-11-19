@@ -203,8 +203,7 @@ def _finalize_run(
     if not rebasing:
         # Before either declaration: a reader seeing the run stopped finds its clock banked.
         bank_campaign_result(
-            session.store,
-            session.hop,
+            session,
             clock=session.state.launch_clock(),
             finished_at=cycle_result.finished_at,
             optimizer_phases=selected.phases,

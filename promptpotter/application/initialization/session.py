@@ -9,7 +9,7 @@ from promptpotter.application.scoring.evaluators import SampleEvaluator
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import BankPartition
-from promptpotter.domain.campaign import Optimize, Purpose
+from promptpotter.domain.campaign import Campaign, Optimize, Purpose
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.pipeline_params import PipelineParams
@@ -104,11 +104,10 @@ class Session:
     pipeline_params: PipelineParams = field(default_factory=PipelineParams)
     # Per node, the `pipeline_params` keys hashed into identity and never sent to a backend.
     identity_keys: dict[str, frozenset[str]] = field(default_factory=dict)
-    campaign_id: str = ""
-    # Written by `bound` alone: a fork is a new session, never a moved field.
+    # The campaign its launch's door loaded, and its cycle bound: written by `bound` alone, so a
+    # fork is a new session, never a moved field.
+    campaign: Campaign | None = None
     cycle_id: str = ""
-    # The bound campaign's declared purpose; a session binding none optimizes.
-    purpose: Purpose = field(default_factory=Optimize)
     # What the bound cycle's chain drew; `None` exactly where no cycle is bound.
     drawn: BankPartition | None = None
     state: LaunchState = field(default_factory=LaunchState)
@@ -130,8 +129,8 @@ class Session:
         self.store.campaigns.act(self.hop, act)
         self.state.human_intervened |= act.babysits
 
-    def bound(self, hop: CycleHop, *, purpose: Purpose) -> Session:
-        """*purpose* is the campaign's declaration's; the bank and partition are what *hop*'s chain drew."""
+    def bound(self, hop: CycleHop, *, campaign: Campaign) -> Session:
+        """*hop* is a cycle of *campaign*; the bank and partition are what its chain drew."""
         drawn = self.store.campaigns.last(hop, PartitionRecord)
         if drawn is None:
             raise ConflictError(
@@ -152,12 +151,26 @@ class Session:
             )
         return replace(
             self,
-            campaign_id=hop.campaign_id,
+            campaign=campaign,
             cycle_id=hop.cycle_id,
-            purpose=purpose,
             bank=bank,
             drawn=drawn.restored(bank.samples),
         )
+
+    @property
+    def campaign_id(self) -> str:
+        return "" if self.campaign is None else self.campaign.campaign_id
+
+    @property
+    def bound_campaign(self) -> Campaign:
+        if self.campaign is None:
+            raise RuntimeError("this session is bound to no campaign: `bound` binds one.")
+        return self.campaign
+
+    @property
+    def purpose(self) -> Purpose:
+        """The bound campaign's declared purpose; a session binding none optimizes."""
+        return Optimize() if self.campaign is None else self.campaign.declaration.purpose
 
     @property
     def hop(self) -> CycleHop:

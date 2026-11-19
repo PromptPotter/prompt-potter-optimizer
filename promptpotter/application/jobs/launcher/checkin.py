@@ -36,8 +36,7 @@ from promptpotter.application.pipeline_resolve import (
 )
 from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch
+from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.wallet import Send
@@ -64,8 +63,8 @@ class CheckinStart:
     served: ServedPipeline
 
     @property
-    def hop(self) -> CycleHop:
-        return UNRESOLVED_HOP
+    def at(self) -> None:
+        return None
 
     @property
     def step_rounds(self) -> None:

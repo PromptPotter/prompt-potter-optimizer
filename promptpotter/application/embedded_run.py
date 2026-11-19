@@ -180,7 +180,7 @@ async def run_campaign(
             config,
             stores=stores,
             holder=EmbeddedRun(measured),
-            hop=None if resuming is None else resuming.hop,
+            at=None if resuming is None else resuming.at,
             requested=budget,
             step_rounds=step_rounds,
             sends=sends_on(stores, config, connector),

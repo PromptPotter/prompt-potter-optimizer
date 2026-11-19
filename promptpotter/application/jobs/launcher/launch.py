@@ -67,7 +67,7 @@ async def hold(request: LaunchRequest, start: RunStart, mode: RunMode) -> HeldRu
     try:
         held = await admit_and_hold(request, start)
         opened = await closing.enter_async_context(request.open(start.stores))
-        if request.hop == UNRESOLVED_HOP:
+        if request.at is None:
             stamps = opened.hop
             await asyncio.to_thread(start.land, opened.hop, held)
         return HeldRun.of(start, opened, held, closing, mode)
@@ -138,7 +138,7 @@ def admit(
         stores=stores,
         job_registry=job_registry,
         holder=request.holder,
-        hop=request.hop,
+        hop=UNRESOLVED_HOP if request.at is None else request.at.hop,
     )
     if inline is not None and job.queued and inline.no_wait:
         refuse_as_busy(job_registry, job)

@@ -672,7 +672,9 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
             index,
             rounds,
             hop=hop,
-            hard_samples=cycle_hard_samples(session.store, hop) if rounds else None,
+            hard_samples=cycle_hard_samples(session.store, session.bound_campaign, hop)
+            if rounds
+            else None,
             p_best=_p_best(layout),
             hard_sample_order=config.hard_sample_order,
             spend_by_round=scan_ledger_spend_by_round(store.chain(hop)),
@@ -684,11 +686,10 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
 
 
 def _render_campaign_log_md(session: Session) -> None:
-    store, campaign_id = session.store.campaigns, session.campaign_id
-    campaign = store.load_campaign(campaign_id)
+    store, campaign = session.store.campaigns, session.campaign
     if campaign is None:
         return
-    root = campaign.root_hop
+    campaign_id, root = campaign.campaign_id, campaign.root_hop
     index = store.load(root, moment=None)
     if not index:
         return
@@ -728,7 +729,7 @@ def _render_export(session: Session, config: CampaignConfig) -> None:
     index = store.load(hop, moment=None)
     series = store.standing_rounds(hop, moment=None).level_series
     rounds = _banked_rounds(session, hop)
-    campaign = store.load_campaign(session.campaign_id)
+    campaign = session.campaign
     bench = scan_closed_bench(store.ledger(hop))
     if (
         index is None
@@ -771,7 +772,7 @@ def _render_review_md(session: Session, config: CampaignConfig) -> None:
     if not index or not rounds:
         return
     cycle_dir = store.cycle_dir(session.hop)
-    campaign = store.load_campaign(session.campaign_id)
+    campaign = session.campaign
     framing = campaign_framing(session.store, config, session.dataset)
     content = render_review_md(
         index,

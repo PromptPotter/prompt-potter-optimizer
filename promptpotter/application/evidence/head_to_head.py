@@ -8,7 +8,7 @@ from pydantic import Field, computed_field, model_validator
 
 from promptpotter.application.datasets.authored import defaults_config, scorer_of
 from promptpotter.application.evidence.subjects import SubjectReading
-from promptpotter.application.jobs.quota import next_launch_budget
+from promptpotter.application.jobs.quota import CampaignCycle, next_launch_budget
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.bench import (
@@ -569,7 +569,7 @@ def _read(
     hop = stores.campaigns.live_cycle(campaign.root_hop)
     selected = select_optimizer(config.optimization)
     optimizer_models = sorted({selected.model(node) for node in selected.llm_nodes})
-    passes = line_passes(stores, campaign.campaign_id)
+    passes = line_passes(stores, campaign)
     run = live_cycle_run(stores, hop)
     line = bench_line(stores, campaign, hop, config, run=run)
     bench = read_bench(stores, passes, scorer, line=line)
@@ -598,7 +598,7 @@ def _read(
             origin=campaign.root_content_hash,
         )
     )
-    budget = next_launch_budget(config, stores=stores, hop=hop)
+    budget = next_launch_budget(config, stores=stores, at=CampaignCycle(campaign, hop))
     optimization = config.optimization
     # Live off the line's ledgers once a launch has ended: before one, nothing is banked to read.
     launches = line_launches(stores, campaign)
