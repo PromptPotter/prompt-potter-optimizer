@@ -55,6 +55,7 @@ from promptpotter.infrastructure.llm.spend_book import (
     admitted,
     answered,
     booked_sum,
+    replied,
 )
 from promptpotter.shared.answer_text import truncate
 from promptpotter.shared.errors import (
@@ -154,7 +155,6 @@ class ChatReply(BaseModel):
 
 class _ReplyFault(TypedDict):
     code: int
-    message: str
 
 
 class _FaultReply(TypedDict):
@@ -167,18 +167,6 @@ class _FaultReply(TypedDict):
 _REPLY: TypeAdapter[_FaultReply | ChatReply] = TypeAdapter(
     Annotated[_FaultReply | ChatReply, Field(union_mode="left_to_right")]
 )
-
-
-class FaultedReplyError(httpx.HTTPStatusError):
-    """``status_code`` is the envelope's: `send_failure.py` classifies the send by it."""
-
-    def __init__(self, reply: httpx.Response, fault: _ReplyFault) -> None:
-        super().__init__(
-            f"HTTP {fault['code']} inside a 200 from {reply.url}: {fault['message'][:500]}",
-            request=reply.request,
-            response=reply,
-        )
-        self.status_code = fault["code"]
 
 
 def _plus(a: TokenAccount | None, b: TokenAccount | None) -> TokenAccount | None:
@@ -695,7 +683,9 @@ class OpenAICompatibleClient:
                 return None, generated
             said = _REPLY.validate_json(reply.content)
             if not isinstance(said, ChatReply):
-                raise FaultedReplyError(reply, said["error"])
+                # The envelope's status, not the 200 it rode: the close reads the fault by it.
+                code = said["error"]["code"]
+                raise FailedSendError(replied(code, headers=reply.headers, said=reply.text))
             return reply.headers, said
 
         response, booked = await self._admitted_send(

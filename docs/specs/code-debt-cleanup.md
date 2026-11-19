@@ -232,16 +232,6 @@ plan/apply pair and a temporary locked through its replace. Left:
   Root: seat the origin through the walk that files it. **Rides with:** the chain owning
   `tests/factories.py::seat`. **Re-test:** a noise floor through `_peer_cycle` alone reads its
   round-0 rows.
-- **Two senders still classify after their close** (err-1's report and review):
-  `connectors/dspy_module.py::_settle` closes its admission with `failed_send(failure)`, then
-  re-raises the raw litellm exception, which `sample_measurement.py::_failed_row` classifies again;
-  `connectors/harbor.py::_infrastructure_failure` matches credit words in a trial's text on a send
-  our client already closed. Both agree today (one rule since err-1), so this is a second mechanism,
-  not a wrong answer. `openai_compat.py::FaultedReplyError` subclasses `httpx.HTTPStatusError` only
-  so `failed_send` can read its `status_code`. Root: a send raises
-  `send_failure.py::FailedSendError` carrying its close, whichever sender. **Re-test:**
-  `git grep -c "failed_send(" -- promptpotter/application promptpotter/connectors` == 0 outside a
-  close.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 

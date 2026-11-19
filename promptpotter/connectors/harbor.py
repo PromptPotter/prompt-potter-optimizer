@@ -62,11 +62,12 @@ from promptpotter.infrastructure.docker_host import (
 from promptpotter.infrastructure.llm.base import ChatMessage, ChatRequest
 from promptpotter.infrastructure.llm.capabilities import context_window, sent_llm_bound
 from promptpotter.infrastructure.llm.registry import openai_compat_spec, providers
-from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import SEND_ATTEMPTS, SendBudget, drawn_budget
 from promptpotter.infrastructure.llm.spend_book import (
     Billed,
     CallLabel,
+    SendOutcome,
     admitted,
     answered,
     reservation_left,
@@ -83,6 +84,7 @@ from promptpotter.shared.errors import (
     NextAct,
     PayloadInvalidError,
     SendRefusedError,
+    UngeneratedRequestError,
     cell_failure,
     is_provider_credit_refusal,
 )
@@ -855,14 +857,19 @@ def _trial_failures(result: TrialResult) -> list[tuple[str, str]]:
     ]
 
 
-def _infrastructure_failure(result: TrialResult) -> tuple[str, ErrorCategory] | None:
-    for kind, detail in _trial_failures(result):
-        # An installed agent's provider speaks only through the harness's words.
+def _credit_refusal(result: TrialResult) -> tuple[str, ErrorCategory] | None:
+    """An installed agent's provider speaks only through the harness's words; ours, at its close."""
+    for _, detail in _trial_failures(result):
         if is_provider_credit_refusal(detail):
             return (
                 f"the provider account is out of credit: {detail[:300]}",
                 ErrorCategory.PROVIDER_CREDIT,
             )
+    return None
+
+
+def _infrastructure_failure(result: TrialResult) -> tuple[str, ErrorCategory] | None:
+    for kind, detail in _trial_failures(result):
         if kind in _HARNESS_TIMEOUTS or _HARNESS_NETWORK_FAILURE.search(detail):
             return detail[:300], ErrorCategory.CONNECTION
     for log in _trial_root(result).rglob("test-stdout.txt"):
@@ -1178,9 +1185,9 @@ class _AgentModel:
         # A refusal is raised again on every later call: terminus-2 retries a failed query, and
         # would answer around a send we refused.
         self._ended: SendRefusedError | None = None
-        # The last send's fault no answer has followed: terminus-2 retries it, and a trial
-        # ending on it never measured the prompt.
-        self._fault: Exception | None = None
+        # The close of the last send's fault no answer has followed: terminus-2 retries it, and
+        # a trial ending on it never measured the prompt.
+        self._fault: SendOutcome | None = None
 
     async def call(
         self,
@@ -1214,13 +1221,16 @@ class _AgentModel:
         except ContextOverflowError as exc:
             # terminus-2 summarizes its history on this, and resends.
             raise ContextLengthExceededError(str(exc)) from exc
+        except SendRefusedError as exc:
+            self._ended = exc
+            raise
         except Exception as exc:
-            if failed_send(exc).may_have_billed:
+            self._fault = exc.outcome if isinstance(exc, FailedSendError) else None
+            # A refusal before generation bills nothing; a fault past the reply may have.
+            if not isinstance(exc, UngeneratedRequestError) and (
+                self._fault is None or self._fault.may_have_billed
+            ):
                 self._cost = None
-            if isinstance(exc, SendRefusedError):
-                self._ended = exc
-            else:
-                self._fault = exc
             raise
         self._fault = None
         self._answered += 1
@@ -1261,15 +1271,12 @@ class _AgentModel:
 
     def failure(self, result: TrialResult) -> tuple[str, ErrorCategory] | None:
         """What ended the episode that was never the prompt's doing; our own refusal raises."""
-        if self._ended is not None:
-            outcome = failed_send(self._ended)
-            if outcome.failure not in _NOT_THE_PROMPT:
-                raise self._ended
-            return outcome.detail[:300], outcome.failure
-        if self._fault is not None and (
-            (outcome := failed_send(self._fault)).failure in _NOT_THE_PROMPT
-        ):
-            return outcome.detail[:300], outcome.failure
+        if (ended := self._ended) is not None:
+            if ended.category not in _NOT_THE_PROMPT:
+                raise ended
+            return str(ended)[:300], ended.category
+        if (fault := self._fault) is not None and fault.failure in _NOT_THE_PROMPT:
+            return fault.detail[:300], fault.failure
         if self._client.pushback(self._model) is not None and any(
             kind == "AgentTimeoutError" for kind, _ in _trial_failures(result)
         ):
@@ -1343,11 +1350,10 @@ async def _attempt(episode: _Episode) -> _Ran:
                 await _reuse_task_image(
                     trial.agent_environment, episode.tools, proxied=episode.cached
                 )
-        if installed:
-            result = await _installed_run(trial, episode)
-            return _Ran(result, time.monotonic() - start, _trial_tokens(result), None, None)
-        result = await trial.run()
+        result = await (_installed_run(trial, episode) if installed else trial.run())
         elapsed = time.monotonic() - start
+        if installed:
+            return _Ran(result, elapsed, _trial_tokens(result), None, _credit_refusal(result))
         if model is None:
             return _Ran(result, elapsed, None, None, None)
         return _Ran(result, elapsed, model.spent, model.cost_usd, model.failure(result))

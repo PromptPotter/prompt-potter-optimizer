@@ -23,7 +23,7 @@ from promptpotter.domain.spend import StepUsage, TokenAccount
 from promptpotter.infrastructure.llm.base import hold_ceiling, send_bound
 from promptpotter.infrastructure.llm.capabilities import sent_llm_bound
 from promptpotter.infrastructure.llm.openai_compat import ReportedUsage
-from promptpotter.infrastructure.llm.send_failure import failed_send
+from promptpotter.infrastructure.llm.send_failure import FailedSendError, failed_send
 from promptpotter.infrastructure.llm.send_pacing import drawn_budget, held_wait
 from promptpotter.infrastructure.llm.spend_book import (
     Admission,
@@ -220,6 +220,9 @@ class _ProgramCalls:
                     spent=self.step_tokens(),
                 )
             ) from failure
+        if outcome.status is not None:
+            # The reply's failure carries its close; the program's own fault raises as itself.
+            raise FailedSendError(outcome) from failure
         return False
 
     def _on_loop(self, step: Coroutine[Any, Any, Any]) -> Any:

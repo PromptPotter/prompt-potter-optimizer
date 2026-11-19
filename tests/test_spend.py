@@ -3648,10 +3648,22 @@ def test_a_dspy_cell_resends_a_5xx_once_and_reads_a_providers_failure_as_a_hole(
             CellSendRefusedError,
             ErrorCategory.PROVIDER_CREDIT,
         ),
+        (
+            lm15.InvalidRequestError("Your credit balance is too low", status=400),
+            CellSendRefusedError,
+            ErrorCategory.PROVIDER_CREDIT,
+        ),
     ):
         with pytest.raises(raised) as hole:
             dspy_cell(1, fail)
         assert hole.value.category is category, f"{fail!r}: a provider's failure scored a cell"
+    # The cell ends on what the send's close decided, never a second reading of the raw error.
+    with pytest.raises(FailedSendError) as refused:
+        dspy_cell(1, lm15.InvalidRequestError("unknown field", status=400))
+    assert (refused.value.outcome.status, refused.value.outcome.failure) == (
+        400,
+        ErrorCategory.CLIENT,
+    ), "a 4xx the close read as the configuration's ended the cell as another category"
 
 
 class _AgentCells(NamedTuple):
