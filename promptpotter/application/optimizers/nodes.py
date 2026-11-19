@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bench.cycle import ReadArm, RoundContext
     from promptpotter.application.bench.node_context import NodeContext
     from promptpotter.application.config_map import CouplingSeverity
+    from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
     from promptpotter.application.scoring.query_loop import BlockRace
 
@@ -461,6 +462,8 @@ class MeasuredRound:
     # Each filed arm's fold of those rows (`scoring/metrics.py::arm_folds`); none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
     fit: dict[ArmKey, ArmFit]
+    # The electable arms' θ over `raced` against the parent: the one fit the election reads.
+    abilities: RoundAbilities
     electable: list[ArmKey]
     coverage_floor: int
     cut: StopLoop | None

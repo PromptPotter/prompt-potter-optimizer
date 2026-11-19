@@ -112,6 +112,7 @@ from promptpotter.application.initialization.scoring_scope import scorer_setup
 from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.rasch import (
+    RoundAbilities,
     candidate_abilities,
     responses_of,
     theta_lift_over_parent,
@@ -1508,6 +1509,20 @@ def _level_parent() -> tuple[Any, CellSheet]:
     return delta_ruler(dict.fromkeys(range(28), 0.0)), sheet(measurements([1.0] * 14 + [0.0] * 14))
 
 
+def _elect(
+    keys: list[ArmKey],
+    rows: dict[ArmKey, CellSheet],
+    parent: CellSheet,
+    coverage_floor: int,
+    ruler: Any,
+    *,
+    bar: CrowningBar,
+) -> tuple[ArmKey | None, RoundAbilities]:
+    """The election on the fit the round measures of the same rows."""
+    abilities = candidate_abilities({key: rows[key] for key in keys}, parent, ruler)
+    return elect_round_winner(keys, rows, parent, coverage_floor, abilities, bar=bar), abilities
+
+
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     ruler = _easy_low_hard_high()
@@ -1521,7 +1536,7 @@ def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
         ArmKey("able_on_hard"): sheet(able_on_hard),
     }
     assert sum(r.hit for r in weak_on_easy) > sum(r.hit for r in able_on_hard)
-    winner_id, abilities = elect_round_winner(
+    winner_id, abilities = _elect(
         list(by_id),
         by_id,
         sheet(measurement(i, float(i < 20)) for i in range(40)),
@@ -1537,9 +1552,9 @@ def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     )
     one_cell = {ArmKey("one"): sheet(measurement(i, float(i < 7)) for i in range(20))}
     parent_six = sheet(measurement(i, float(i < 6)) for i in range(20))
-    assert elect_round_winner(list(one_cell), one_cell, parent_six, 6, spread, bar=bar)[0] is (
-        None
-    ), "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
+    assert _elect(list(one_cell), one_cell, parent_six, 6, spread, bar=bar)[0] is (None), (
+        "one discordant cell of 20 promoted: a lift its own paired evidence cannot carry"
+    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -1560,21 +1575,21 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     assert p["deep"] > p["shallow"], "so it demonstrated less"
     deep_key, shallow_key = ArmKey("deep"), ArmKey("shallow")
     thin_arms = {deep_key: deep, shallow_key: shallow}
-    assert elect_round_winner(list(thin_arms), thin_arms, half, 6, flat, bar=bar)[0] == ("deep"), (
+    assert _elect(list(thin_arms), thin_arms, half, 6, flat, bar=bar)[0] == ("deep"), (
         "a thin arm won"
     )
-    assert elect_round_winner([shallow_key], {shallow_key: shallow}, half, 6, flat, bar=bar)[0] == (
+    assert _elect([shallow_key], {shallow_key: shallow}, half, 6, flat, bar=bar)[0] == (
         "shallow"
     ), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
     behind = sheet(measurements([1.0] * 4 + [0.0] * 2))
     behind_lift = theta_lift_over_parent(candidate_abilities({"b": behind}, half, flat), "b")
     assert behind_lift is not None and behind_lift.value > 0.0
-    assert (
-        elect_round_winner([ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, bar=bar)[0] is None
-    ), "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
+    assert _elect([ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, bar=bar)[0] is None, (
+        "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
+    )
     swapped = sheet(measurement(i, float(0 < i < 20 or i == 20)) for i in range(40))
     assert (
-        elect_round_winner(
+        _elect(
             [ArmKey("s")],
             {ArmKey("s"): swapped},
             sheet(measurement(i, float(i < 20)) for i in range(40)),
@@ -1586,9 +1601,9 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
     longer, terse_parent = _charged_by_length()
     level = delta_ruler(dict.fromkeys(range(34), 0.0))
-    assert elect_round_winner(
-        [ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, bar=bar
-    )[0] == ("l"), "a cost term's tie-break was counted as a verdict lost"
+    assert _elect([ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, bar=bar)[0] == (
+        "l"
+    ), "a cost term's tie-break was counted as a verdict lost"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -1621,7 +1636,7 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
         deep_key: sheet(measurements([1.0] * 18 + [0.0] * 10)),  # further off, on the whole panel
         ArmKey("thin"): sheet(measurements([1.0] * 3)),  # the highest θ, under the floor
     }
-    held_id, held_abilities = elect_round_winner(list(arms), arms, twenty, 6, flat, bar=bar)
+    held_id, held_abilities = _elect(list(arms), arms, twenty, 6, flat, bar=bar)
     reads = readable_lifts(list(arms), 6, held_abilities)
     assert held_id is None, "no arm cleared the bar"
     assert held_abilities.theta["thin"] > held_abilities.bar["thin"][0], (

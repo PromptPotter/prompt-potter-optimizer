@@ -6,7 +6,6 @@ from typing import NamedTuple
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.rasch import (
     RoundAbilities,
-    candidate_abilities,
     graded_response,
     theta_cells,
     theta_lift_over_parent,
@@ -107,19 +106,13 @@ def elect_round_winner(
     rows: Mapping[ArmKey, CellSheet],
     parent_results: CellSheet,
     coverage_floor: int,
-    ruler: DeltaRuler | None,
+    abilities: RoundAbilities,
     *,
     bar: CrowningBar,
-) -> tuple[ArmKey | None, RoundAbilities]:
+) -> ArmKey | None:
     """ADMISSION is the crowning *bar* over every readable arm at once; under ``posterior`` that is
     raw θ above the parent's by more than a fit resolves AND ``P(θ_cand > θ_parent)``, bounded by
     the discordant cells, past the admission. The RANK is the unbounded posterior."""
-
-    abilities = candidate_abilities(
-        {key: rows[key] for key in keys if key in rows},
-        parent_results,
-        ruler,
-    )
     reads = readable_lifts(keys, coverage_floor, abilities)
     verdicts = bar.read(bar_subjects(reads, rows, parent_results, bar.admission))
     best_rank: tuple[float, int] = (0.0, 0)
@@ -131,7 +124,7 @@ def elect_round_winner(
         if rank > best_rank:
             best_rank = rank
             winner = key
-    return winner, abilities
+    return winner
 
 
 def banked_lift_prior(survey: CampaignSurvey, dataset: str) -> LiftPrior | None:

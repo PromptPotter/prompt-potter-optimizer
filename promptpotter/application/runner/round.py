@@ -640,7 +640,7 @@ async def measure_population(
             continue
         electable.append(key)
 
-    # Fixed δ decouples the arms, so this is the fit `elect_round_winner` takes of the same rows.
+    # Fixed δ decouples the arms; the election reads this fit, never one of its own.
     abilities = candidate_abilities(
         {key: raced[key] for key in electable}, raced[parent.key], ruler
     )
@@ -669,6 +669,7 @@ async def measure_population(
             cycle.session.pipeline_schema,
         ),
         fit=fit,
+        abilities=abilities,
         electable=electable,
         coverage_floor=coverage_floor,
         cut=cut,

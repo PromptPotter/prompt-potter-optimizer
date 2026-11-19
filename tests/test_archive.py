@@ -82,6 +82,7 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_version,
 )
 from promptpotter.application.initialization.session import LaunchClock
+from promptpotter.application.intelligence.rasch import candidate_abilities
 from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Admitted, Inline
 from promptpotter.application.jobs.registry import JobRegistry
@@ -1279,6 +1280,9 @@ def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
             },
             folds={},
             fit={},
+            abilities=candidate_abilities(
+                {walked_child: arm}, bar, electing.cycle.difficulty.ruler
+            ),
             electable=[walked_child],
             coverage_floor=1,
             cut=None,

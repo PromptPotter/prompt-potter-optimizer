@@ -580,8 +580,9 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     declare_run_wiring(session, plan.cycle.config, selected=plan.optimizer)
     # The mint's commit, last: a mint that dies before it leaves no campaign to list.
     campaigns.create_campaign(campaign)
-    # The name labels the bank its newest campaign declares, an L4 inner cell's as every other.
-    session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
+    # The name labels the bank its newest campaign declares; a sandbox's datasets are the account's.
+    if not session.store.inner:
+        session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
     return session
 
 

@@ -790,7 +790,14 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   standing by construction (`CellSheet.merged` folds), or `frontier` reads `standing()`. **Re-test:**
   `frontier` over a merge of two reads of one cell fits one row.
 
-### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
+### wave-5 · l4 (what l4-measure, l1-cite and small-12b left at their landing)
+
+- **A fit keyed by `str` beside arms keyed by `ArmKey`** (small-12b's report):
+  `intelligence/rasch.py::candidate_abilities` takes `Mapping[str, CellSheet]` where every caller
+  holds `ArmKey` keys; mapping keys are invariant, so a caller holding a dict rebuilds it as a
+  comprehension (`potter/election.py::RoundWinner.replay`, `tests/test_scoring.py::_elect`). Action:
+  the fit is keyed by `ArmKey`. **Held:** none claims it. **Re-test:** `git grep -n "for k in
+  self.arms}, raced" -- promptpotter` == 0.
 
 - **The outer's edit menu offers fields of inner nodes that never fire**: inner `l3_plan` made 0
   calls and `l2_context` 1 across six inner runs (L4 audit C, 2026-11-15), yet both stay editable.
@@ -868,13 +875,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `infrastructure/run_scope.py::InnerSpawnContext`, which carries the spawner's fields but not its
   `Stores`, so it cannot call the reader). Action: the spawn context carries the spawner's `Stores`,
   and the writer builds through the one builder, its existence checks off. **Held:** none claims it. **Re-test:** `git grep -n "def inner_sandbox_store\|def sandbox_stores" -- promptpotter`.
-- **Two fits of one reading**: `runner/round.py::measure_population` and
-  `scoring/selection.py` both fit `candidate_abilities` over the same rows. Action: the election takes
-  the measured abilities. **Held:** none claims it. **Re-test:** `git grep -n "candidate_abilities(" -- promptpotter`.
-- **A sandbox writes account labels**: an inner mint relabels the account's dataset label from inside
-  a sandbox (`jobs/mint.py::mint`, `tenant_datasets.relabel`); benign only while `dataset_hash` covers
-  the whole dataset. Action: a sandboxed mint writes no account label. **Held:** none claims it.
-  **Re-test:** an inner mint leaves the account's label file untouched.
 - **The outer prompt ranks on θ, not the scored term**: Shape: `potter/dispatch/injections/panels.py`'s
   "weakest first" and "worse than the origin beyond their own error bar" read `mean_round_delta`, which
   is in-sample and scores nothing, because `held_out_lift` carries no SE. Action: serve the held-out

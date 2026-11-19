@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping, Sequence
 
 from promptpotter.application.bench.node_context import Bounds, Lineage, NodeContext, Replay, Ruler
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.intelligence.rasch import RoundAbilities
+from promptpotter.application.intelligence.rasch import RoundAbilities, candidate_abilities
 from promptpotter.application.optimizers.nodes import MeasuredRound, Selection
 from promptpotter.application.optimizers.potter.knobs import ElectionKnobs
 from promptpotter.application.scoring.selection import (
@@ -14,7 +14,6 @@ from promptpotter.application.scoring.selection import (
 )
 from promptpotter.domain.crowning_bar import CrowningBar
 from promptpotter.domain.paired_reading import ArmKey, Estimate
-from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.scoring import CellSheet
 
 
@@ -84,21 +83,23 @@ class RoundWinner(Replayed, kind="round_winner"):
     parent: ArmKey
 
     def elect(
-        self, raced: Callable[[ArmKey], CellSheet], ruler: DeltaRuler | None
-    ) -> tuple[ArmKey | None, RoundAbilities]:
-        """On the rows and the ruler the round's race read."""
+        self, raced: Callable[[ArmKey], CellSheet], abilities: RoundAbilities
+    ) -> ArmKey | None:
+        """On the rows the round's race read and their fit against the parent."""
         return elect_round_winner(
             self.arms,
             {key: raced(key) for key in self.arms},
             raced(self.parent),
             self.coverage_floor,
-            ruler,
+            abilities,
             bar=self.bar,
         )
 
     def replay(self, ctx: ReplayContext) -> ArmKey | None:
         """The parent is the reference the round BANKED, never a panel rebuilt here: that one re-elects differently."""
-        return self.elect(ctx.round_data.raced, ctx.ruler)[0]
+        raced = ctx.round_data.raced
+        fit = candidate_abilities({k: raced(k) for k in self.arms}, raced(self.parent), ctx.ruler)
+        return self.elect(raced, fit)
 
 
 def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
@@ -111,7 +112,8 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
         bar=ctx.read(Bounds).crowning_bar(ctx.knobs(ElectionKnobs).admission),
         parent=measured.parent.key,
     )
-    selected, abilities = inputs.elect(measured.raced.__getitem__, ruler)
+    abilities = measured.abilities
+    selected = inputs.elect(measured.raced.__getitem__, abilities)
 
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)

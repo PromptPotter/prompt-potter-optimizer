@@ -3178,6 +3178,41 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     write_yaml(decl_definition, as_minted)
 
 
+def test_a_sandboxed_mint_moves_no_account_label(
+    tmp_path: Path, built_stores: Stores, decl: _Declared
+) -> None:
+    # An inner run reads the account's datasets and names none of its banks: the outer's mint does.
+    stores = built_stores
+    opened, rows_30, solve, door, declared = decl
+    mint_arms([resolve_cycle_plan(opened, declared, rows_30)], adopting=None)
+    labelled = stores.tenant_datasets.labels()
+    assert "decl" in labelled, "a campaign's mint named no bank"
+    sandboxed = spawn.sandbox_stores(
+        InnerSpawnContext(
+            inner_sandbox_root=tmp_path / "sandbox",
+            identity=stores.identity,
+            shared_root=stores.shared_root,
+            install_datasets_root=stores.install_datasets_root,
+            research_datasets_root=stores.research_datasets_root,
+            inside=(CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"),),
+            enclosing=(),
+            acting=(),
+            purpose=Optimize(),
+            ruler=0,
+        )
+    )
+    inner_rows = rows_30[:-1]
+    inner = loop_session(
+        sandboxed, pipeline_schema([solve]), inner_rows, dataset=resolve_dataset(sandboxed, "decl")
+    )
+    inner_plan = resolve_cycle_plan(inner, declare(inner, door, purpose=Optimize()), inner_rows)
+    assert inner_plan.declaration.dataset_hash != labelled["decl"], "the inner cut the same bank"
+    mint_arms([inner_plan], adopting=None)
+    assert stores.tenant_datasets.labels() == labelled, (
+        "an inner mint moved the account's label off the bank its outer named"
+    )
+
+
 def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
     built_stores: Stores, decl: _Declared, held: _Held
 ) -> None:
