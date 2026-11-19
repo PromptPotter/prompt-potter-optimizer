@@ -3867,7 +3867,7 @@ def test_the_bar_applies_on_the_theta_scale_only() -> None:
             best=HighWater(composite_fitness=comp, series=series, theta_round=rnd),
             escalation_ladder=EscalationLadder.FULL,
             l2_patience=9,
-            l3_patience=None,
+            l3_patience="unbounded",
             admission=0.85,
         )
         return asked.l2.stall_count, asked.l2.comparator

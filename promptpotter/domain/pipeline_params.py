@@ -88,8 +88,9 @@ class NodeCall(FrozenModel):
     def _keeps_order(cls, laid: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
         if not isinstance(laid, Mapping):
             return handler(laid)
-        # A null call key is unset: equality and the digest read one shape.
-        laid = {k: v for k, v in laid.items() if v is not None or k not in cls.model_fields}
+        # A null key is unset, a backend's as a call key (null clears on every layer): equality
+        # and the digest read one shape.
+        laid = {k: v for k, v in laid.items() if v is not None}
         call = handler(laid)
         call._laid = _LaidOrder(laid)
         return call

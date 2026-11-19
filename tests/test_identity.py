@@ -2732,6 +2732,17 @@ def test_a_declaration_lays_back_what_it_dropped_from_the_defaults() -> None:
     for over in (
         {"judges": {"kept": {"model": "a"}}, "optimization": under["optimization"]},
         {"judges": under["judges"], "optimization": {"optimizer": "capo", "nodes": {}}},
+        # A knob's "no bound" is a value the patch keeps, never the null that clears.
+        {
+            "judges": under["judges"],
+            "optimization": {
+                "optimizer": "potter",
+                "nodes": {
+                    "l1_generate": {"config": {"k": 1}},
+                    "l1_critique": {"config": {"transcripts": "unbounded"}},
+                },
+            },
+        },
     ):
         patch = patch_between(rule, under, over)
         laid = fold_layers(rule, [Layer("d", under), Layer("c", wire_patch(rule, patch))])
@@ -4638,7 +4649,11 @@ def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_o
         bank=bank,
         origin=(OptSearchPoint(), lambda _s: sheet(missed)),
         optimization={
-            "nodes": {"l1_critique": {"config": {"transcripts": None, "transcript_chars": None}}}
+            "nodes": {
+                "l1_critique": {
+                    "config": {"transcripts": "unbounded", "transcript_chars": "unbounded"}
+                }
+            }
         },
     )
     run_init(RoundContext(seated.cycle, 0))
