@@ -21,8 +21,8 @@ import { draftRead } from "@/lib/api/reads";
 import { checkinThreadKey, useThreads } from "@/lib/state/chat-thread";
 import { useCommand, type CommandFailure } from "@/lib/hooks/useCommand";
 import { useQueuedStart } from "@/lib/hooks/useQueuedStart";
-import { readyData, useRead } from "@/lib/hooks/useRead";
-import { type ReadFailure, dropCachedRead } from "@/lib/read-cache";
+import { readyData, shownData, useRead } from "@/lib/hooks/useRead";
+import { type ReadFailure, dropCachedRead, readResult } from "@/lib/read-cache";
 type OnMinted = (selection: { campaignId: string; cycleId: string }) => void;
 
 type IngestPhase =
@@ -52,6 +52,10 @@ type IngestPhase =
 
 /** The check-in the workspace views: a draft id, `NEW_CHECKIN` before one is minted, null off one. */
 export type CheckinSubject = string | null;
+
+// A draft edit; one built from what the draft holds (a list toggled) is a function of the served
+// draft, evaluated at its turn in the write queue, never a value fixed at the press.
+export type DraftEdit = DraftPatch | ((served: DraftCampaignWire) => DraftPatch);
 export const NEW_CHECKIN = "";
 
 // The draft in review as its read serves it, beside the last resolver turn's proposals.
@@ -87,7 +91,7 @@ export interface IngestFlow {
   // A `discard-draft` its row sent landed: the flow lets go of that draft and its thread.
   discarded: (draftId: string) => void;
   submitContext: () => void;
-  applyPatch: (patch: DraftPatch) => void;
+  applyPatch: (edit: DraftEdit) => void;
   uploadAnswerTerms: (file: File) => void;
   buildAnswerTermsFromColumn: (column: string) => void;
   rerunCheckin: () => void;
@@ -186,7 +190,7 @@ export function useIngestFlow({
     onDraft(id);
   };
 
-  // Functional updates, so overlapping patches cannot write a stale snapshot back.
+  // The served draft's one landing; functional, so a stage moved meanwhile keeps its own.
   const commitDraftUpdate = (updated: DraftCampaignWire) =>
     setPhase((p) =>
       p.stage === "ready" && p.draft.draft_id === updated.draft_id ? { ...p, draft: updated } : p,
@@ -228,20 +232,15 @@ export function useIngestFlow({
       commands["resolve-origin"]({ draft_id: draft.draft_id, rerun }),
     );
     if (!alive()) return;
-    // A refused turn lands in review on the draft as it stood; its failure prints beside Start.
-    const resolved = r.ok ? r.value.draft : draft;
-    const resolution = r.ok ? r.value.resolution.last_resolution : null;
-    const degradedCause = r.ok ? r.value.resolution.degraded_cause : null;
-    if (degradedCause) say(degradedCause, "warn");
-    say(resolution?.recap || resolution?.assessment || resolved.recap);
+    // The ack answers once the draft's read stands on the turn, so the read is what lands; a
+    // refused turn lands in review on the draft as served, its failure printed beside Start.
+    const now = shownData(readResult(draftRead(draft.draft_id)));
+    if (!now) return setPhase({ stage: "reopening" });
+    const turn = r.ok ? now.resolution : null;
+    if (turn?.degraded_cause) say(turn.degraded_cause, "warn");
+    say(turn?.last_resolution?.recap || turn?.last_resolution?.assessment || now.draft.recap);
     // Even a complete draft lands in review: a launch spends money, so no path here mints.
-    setPhase({
-      stage: "ready",
-      draft: resolved,
-      resolution,
-      raised: r.ok ? r.value.resolution.raised : [],
-      degradedCause,
-    });
+    setPhase(review(now));
   };
 
   // A fresh draft lands as a reopened one does: its read's `resolution_pending` decides a turn.
@@ -321,9 +320,10 @@ export function useIngestFlow({
       setPhase({ stage: "idle" });
       return;
     }
+    // Landed as a fresh draft is, by its read.
     hold(r.value.draft_id);
     say("Opened the origin — edit anything below, then Start.");
-    setPhase({ stage: "ready", draft: r.value, resolution: null, raised: [], degradedCause: null });
+    setPhase({ stage: "reopening" });
   };
 
   // A reload's thread, told from what the draft serves: each line is its state, never a memory.
@@ -393,17 +393,21 @@ export function useIngestFlow({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase.stage, draftNow]);
 
-  // Every draft write rides this queue: Start awaits its tail, so no edit escapes the launch.
+  // Every draft write rides this queue: Start awaits its tail, so no edit escapes the launch. A
+  // write's answer lands nothing: it answers once the draft's read stands on it (`commands.ts::acked`),
+  // so *send* is built at its turn from the served draft, which then holds every earlier write.
   const mutateDraft = (
     verb: "edit" | "library",
-    send: () => Promise<DraftCampaignWire>,
+    id: string,
+    send: (served: DraftCampaignWire) => Promise<DraftCampaignWire>,
   ): Promise<DraftCampaignWire | null> => {
     const alive = begin();
     setPendingPatches((n) => n + 1);
     const landed = draftWrites.current.then(async () => {
-      const r = await writing.run(verb, send, commitDraftUpdate);
+      const served = shownData(readResult(draftRead(id)));
+      const r = served && (await writing.run(verb, () => send(served.draft)));
       setPendingPatches((n) => n - 1);
-      return r.ok && alive() ? r.value : null;
+      return r?.ok && alive() ? r.value : null;
     });
     draftWrites.current = landed;
     return landed;
@@ -417,29 +421,34 @@ export function useIngestFlow({
     const id = phase.draft.draft_id;
     setInputText("");
     echo(text);
-    const updated = await mutateDraft("edit", () =>
+    const updated = await mutateDraft("edit", id, () =>
       commands["edit-draft-campaign"]({ draft_id: id, patch: { raw_task_description: text } }),
     );
     if (updated) await runCheckin(updated);
   };
 
-  const applyPatch = (patch: DraftPatch) => {
+  const applyPatch = (edit: DraftEdit) => {
     if (phase.stage !== "ready") return;
     const id = phase.draft.draft_id;
-    void mutateDraft("edit", () => commands["edit-draft-campaign"]({ draft_id: id, patch }));
+    void mutateDraft("edit", id, (served) =>
+      commands["edit-draft-campaign"]({
+        draft_id: id,
+        patch: typeof edit === "function" ? edit(served) : edit,
+      }),
+    );
   };
 
   const uploadAnswerTerms = async (file: File) => {
     if (phase.stage !== "ready" || busy) return;
     const id = phase.draft.draft_id;
-    const updated = await mutateDraft("library", () => postUploadAnswerTerms(id, file));
+    const updated = await mutateDraft("library", id, () => postUploadAnswerTerms(id, file));
     if (updated) say(`Answer terms attached — ${updated.answer_terms_size} targets.`);
   };
 
   const buildAnswerTermsFromColumn = async (column: string) => {
     if (phase.stage !== "ready" || busy) return;
     const id = phase.draft.draft_id;
-    const updated = await mutateDraft("library", () =>
+    const updated = await mutateDraft("library", id, () =>
       postBuildAnswerTermsFromColumn(id, column),
     );
     if (updated)

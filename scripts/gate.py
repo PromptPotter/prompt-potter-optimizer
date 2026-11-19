@@ -270,6 +270,9 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/scoring/paired.py::_Reader.__call__::ScoringFormulaError": (
         "a cell its measurand cannot read pairs with nothing"
     ),
+    "application/cycle_reads.py::_store_stats::FileNotFoundError": (
+        "a store deleted under the feed's walk is a subject gone, its command already filed"
+    ),
     "domain/cycle_paths.py::Subject.parse_address::ValueError": (
         "a step that is no round number parses as the next form"
     ),

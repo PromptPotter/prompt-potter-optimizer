@@ -1,5 +1,6 @@
 import { encodeDescend, pathRoot, type CyclePath } from "../ids";
-import { API, send, toApiError } from "./client";
+import { reached } from "@/lib/read-cache";
+import { API, send, toApiError, versionsSaid } from "./client";
 import { mintIdempotencyKey } from "./errors";
 import type {
   BrowserKind,
@@ -29,9 +30,18 @@ function json<K extends JsonKind>(kind: K) {
       },
       body: JSON.stringify(payload),
     });
-    if (!r.ok) throw await toApiError(r);
-    return (await r.json()) as CommandResponses[K];
+    return acked<CommandResponses[K]>(r);
   };
+}
+
+// A command is answered once the reads it moved stand where its write left them: so "applied"
+// renders the served state, and a second press meets a send still in flight, never a second filing.
+async function acked<T>(r: Response): Promise<T> {
+  if (!r.ok) throw await toApiError(r);
+  const body = (await r.json()) as T;
+  const produced = versionsSaid(r);
+  if (produced !== undefined) await reached(produced);
+  return body;
 }
 
 // A file goes up as the form its route reads, so it has no JSON body to type.
@@ -44,8 +54,7 @@ async function ingestUpload(file: File, slug?: string): Promise<CommandResponses
     headers: { "Idempotency-Key": mintIdempotencyKey() },
     body: form,
   });
-  if (!r.ok) throw await toApiError(r);
-  return (await r.json()) as CommandResponses["ingest-upload"];
+  return acked<CommandResponses["ingest-upload"]>(r);
 }
 
 // Every kind whose `Press` claims the browser door, each by its one sender: tsc fails a claimed

@@ -47,9 +47,9 @@ describe("the contract check on every API answer", () => {
     const frames: unknown[] = [];
     openLiveStream("/api/v1/feed", { surface: "feed" }, { frame: (f) => frames.push(f) });
     const [feed] = FakeStream.opened;
-    feed?.send({ subject: "account", version: "v" });
+    feed?.send({ subject: "account", version: { process: "p1", n: 1 } });
     expect(client.buildIsStale()).toBe(false);
-    feed?.send({ subject: "account", version: "v" }, `${SERVED_CONTRACT}-moved`);
+    feed?.send({ subject: "account", version: { process: "p1", n: 1 } }, `${SERVED_CONTRACT}-moved`);
     expect(client.buildIsStale()).toBe(true);
     expect(frames).toHaveLength(2);
   });

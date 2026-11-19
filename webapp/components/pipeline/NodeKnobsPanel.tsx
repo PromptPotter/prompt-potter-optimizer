@@ -4,6 +4,7 @@ import { configMapRead, optimizerRosterRead } from "@/lib/api";
 import {
   type ConfigKnob,
   type ConfigMapResponse,
+  type DraftCampaignWire,
   type DraftPatch,
   type ManifestNodeOverlay,
   type NodeConfigParam,
@@ -24,6 +25,7 @@ import {
   promptFieldLabel,
 } from "@/lib/derivations";
 import { useConnector } from "@/lib/hooks/useConnector";
+import type { DraftEdit } from "@/lib/hooks/useIngestFlow";
 import { useWorkspace } from "@/lib/state/workspace";
 import {
   Badge,
@@ -41,16 +43,42 @@ import { fmtValue } from "@/lib/format";
 
 type OnChange = ((patch: Record<string, ManifestNodeOverlay>) => void) | undefined;
 type OnReset = ((node: string, key: string) => void) | undefined;
+type OnToggle = ((pool: string, list: PoolList, item: string) => void) | undefined;
+type PoolList = "active" | "packs";
+
+function held(pool: PoolRow, list: PoolList): string[] {
+  return list === "active" ? pool.active : pool.packs.filter((p) => p.on).map((p) => p.name);
+}
+
+// A pool's list toggled by one item, built at the write's turn from the pool the served draft holds
+// then: a second press inside the first's ack builds on the first, never on the list a chip drew.
+// A pool the served draft no longer serves takes no toggle.
+export function poolToggle(
+  pool: string,
+  list: PoolList,
+  item: string,
+): (served: DraftCampaignWire) => DraftPatch {
+  return (served) => {
+    const now = served.pipeline.optimizer_setup.pools.find((p) => p.pool === pool);
+    if (!now) return {};
+    const was = held(now, list);
+    const next = was.includes(item) ? was.filter((p) => p !== item) : [...was, item];
+    return { config: { optimization: { nodes: { [now.initializer]: { config: { [list]: next } } } } } };
+  };
+}
 
 // The entry chips a pool shows before its "show all": a demo pool's split runs to dozens.
 const ENTRIES_INLINE = 8;
 const ENTRIES_FIRST = 10;
 
-export function NodeKnobsPanel({ onApply }: { onApply?: (patch: DraftPatch) => void } = {}) {
+export function NodeKnobsPanel({ onApply }: { onApply?: (edit: DraftEdit) => void } = {}) {
   const editable = onApply != null;
   // A SPARSE patch: the server merges it onto the draft's overlay key by key.
   const onChange: OnChange = onApply
     ? (patch) => onApply({ config: { optimization: { nodes: patch } } })
+    : undefined;
+  const onToggle: OnToggle = onApply
+    ? (pool, list, item) => onApply(poolToggle(pool, list, item))
     : undefined;
   // `null`, the wire's clear: the draft's own value dropped, so the layer below shows through.
   const onReset: OnReset = onApply
@@ -89,6 +117,7 @@ export function NodeKnobsPanel({ onApply }: { onApply?: (patch: DraftPatch) => v
       setBy={knobLayers(readyData(mapRead))}
       onChange={onChange}
       onReset={onReset}
+      onToggle={onToggle}
     />
   );
 }
@@ -114,6 +143,7 @@ function KnobGroups({
   setBy,
   onChange,
   onReset,
+  onToggle,
 }: {
   optimizer: string;
   setup: OptimizerSetup;
@@ -121,6 +151,7 @@ function KnobGroups({
   setBy: Map<string, KnobSource>;
   onChange: OnChange;
   onReset: OnReset;
+  onToggle: OnToggle;
 }) {
   const declared = declaredLabel(entry);
   const layerOf = (node: string, key: string) =>
@@ -187,7 +218,7 @@ function KnobGroups({
             </span>
           ))}
         </p>
-        <CandidateBorrows pools={setup.pools} onChange={onChange} />
+        <CandidateBorrows pools={setup.pools} onToggle={onToggle} />
       </section>
       {rest.length > 0 ? (
         <details className="mech-all">
@@ -302,7 +333,7 @@ function counted(n: number, noun: { one: string; many: string }): string {
 }
 
 // Each pool is drawn at the arm's prompt parts it fills; one serving neither a fill nor a pack renders nothing.
-function CandidateBorrows({ pools, onChange }: { pools: PoolRow[]; onChange: OnChange }) {
+function CandidateBorrows({ pools, onToggle }: { pools: PoolRow[]; onToggle: OnToggle }) {
   const shown = pools.filter(
     (p) => p.fills.length > 0 || p.packs.length > 0 || p.refused.length > 0,
   );
@@ -311,18 +342,15 @@ function CandidateBorrows({ pools, onChange }: { pools: PoolRow[]; onChange: OnC
     <div className="mech-borrow">
       <p className="mech-borrow-lead">Each arm&apos;s prompt may borrow</p>
       {shown.map((pool) => (
-        <PoolInPlace key={pool.pool} pool={pool} onChange={onChange} />
+        <PoolInPlace key={pool.pool} pool={pool} onToggle={onToggle} />
       ))}
     </div>
   );
 }
 
-function PoolInPlace({ pool, onChange }: { pool: PoolRow; onChange: OnChange }) {
+function PoolInPlace({ pool, onToggle }: { pool: PoolRow; onToggle: OnToggle }) {
   const noun = POOL_SOURCE_INFO[pool.source];
-  const named = pool.packs.filter((p) => p.on).map((p) => p.name);
-  const setPacks = onChange
-    ? (packs: string[]) => onChange({ [pool.initializer]: { config: { packs } } })
-    : undefined;
+  const named = held(pool, "packs");
   const closed = pool.drawn_by.some((d) => d.access === "closed");
   return (
     <div className="mech-borrow-pool">
@@ -344,10 +372,8 @@ function PoolInPlace({ pool, onChange }: { pool: PoolRow; onChange: OnChange }) 
               <Chip
                 key={p.name}
                 on={p.on}
-                disabled={!setPacks}
-                onClick={() =>
-                  setPacks?.(p.on ? named.filter((n) => n !== p.name) : [...named, p.name])
-                }
+                disabled={!onToggle}
+                onClick={() => onToggle?.(pool.pool, "packs", p.name)}
               >
                 <span className="mech-offer">
                   {p.name} <small>{p.entries}</small>
@@ -383,14 +409,7 @@ function PoolInPlace({ pool, onChange }: { pool: PoolRow; onChange: OnChange }) 
       {pool.offered.length > 0 ? (
         <details className="mech-fold">
           <summary>Pick {noun.many}</summary>
-          <PoolPicker
-            pool={pool}
-            onActive={
-              onChange
-                ? (active) => onChange({ [pool.initializer]: { config: { active } } })
-                : undefined
-            }
-          />
+          <PoolPicker pool={pool} onToggle={onToggle} />
           <ul className="mech-pool-readers" aria-label="Read by">
             {pool.drawn_by.map((d) => (
               <li key={`${d.switch.node}.${d.switch.knob}`}>
@@ -419,27 +438,17 @@ function fillTeaching(pool: PoolRow, f: PoolFill, part: string, closed: boolean)
 }
 
 // A lit chip is a path in play, lit from the served `active`; the last one stays lit, since a pool keeps at least one.
-function PoolPicker({
-  pool,
-  onActive,
-}: {
-  pool: PoolRow;
-  onActive: ((active: string[]) => void) | undefined;
-}) {
+function PoolPicker({ pool, onToggle }: { pool: PoolRow; onToggle: OnToggle }) {
   const noun = POOL_SOURCE_INFO[pool.source];
   const [all, setAll] = useState(false);
-  const toggle = (path: string) =>
-    onActive?.(
-      pool.active.includes(path) ? pool.active.filter((p) => p !== path) : [...pool.active, path],
-    );
   const chip = (o: PoolOffer) => {
     const on = pool.active.includes(o.path);
     return (
       <Chip
         key={o.path}
         on={on}
-        disabled={!onActive || (on && pool.active.length === 1)}
-        onClick={() => toggle(o.path)}
+        disabled={!onToggle || (on && pool.active.length === 1)}
+        onClick={() => onToggle?.(pool.pool, "active", o.path)}
       >
         <span
           className={cx(

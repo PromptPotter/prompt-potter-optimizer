@@ -4775,7 +4775,15 @@ export interface StampedFeedFrame {
   contract: string;
   /** `account`, `machine`, or `store:` and a store's hops. */
   subject: string;
-  version: string;
+  version: FeedVersion;
+}
+
+/** Only moves forward: `n` is its owner's count of moves at the subject's last,
+ * so a subject a walk finds again resumes past every version it was served;
+ * another `process` is a restart, never older. */
+export interface FeedVersion {
+  process: string;
+  n: number;
 }
 
 /** What a command whose applied form answers nothing returns: the record it
@@ -5735,7 +5743,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "6cac0d3589aee814";
+export const SERVED_CONTRACT = "4bdec1024222e867";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

@@ -64,7 +64,7 @@ from factories import (
     stored_campaign,
     workspace,
 )
-from fastapi import BackgroundTasks, FastAPI, Request
+from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -124,7 +124,7 @@ from promptpotter.application.jobs.launcher.checkin import CheckinStart
 from promptpotter.application.jobs.launcher.head_to_head import AdmittedHeadToHead, CheckinArms
 from promptpotter.application.jobs.launcher.launch import Launched
 from promptpotter.application.jobs.launcher.run_job import JobSpec
-from promptpotter.application.jobs.machine_status import machine_status
+from promptpotter.application.jobs.machine_status import machine_status, machine_version
 from promptpotter.application.jobs.mint import (
     declare,
     fresh_campaign_id,
@@ -319,6 +319,7 @@ from promptpotter.infrastructure.store.data_root import Fate, classify
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE, resolve_dataset
 from promptpotter.infrastructure.store.io import (
     append_jsonl,
+    rmtree_robust,
     take_lock,
     write_bytes,
     write_json,
@@ -330,6 +331,7 @@ from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
     campaign_root_dir_for,
+    campaigns_root_dir_for,
     cycle_dir_for,
     draft_dirs,
     inner_sandbox_dir,
@@ -339,7 +341,12 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
 from promptpotter.infrastructure.store.private_root import DataRootExposedError, hold_private
 from promptpotter.infrastructure.store.session_pointer import save_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, descend_store, tenant_stores
+from promptpotter.infrastructure.store.stores import (
+    Stores,
+    build_stores,
+    descend_store,
+    tenant_stores,
+)
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
     USER_FILE,
@@ -362,6 +369,7 @@ from promptpotter.presentation.api.middleware.oidc import (
 )
 from promptpotter.presentation.api.middleware.visits import OutsideVisitsMiddleware
 from promptpotter.presentation.api.routers import auth
+from promptpotter.presentation.api.routers import commands as commands_api
 from promptpotter.presentation.api.routers.reads import reads_router
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.presentation.cli.commands.measure import cmd_held_out
@@ -1665,6 +1673,173 @@ def test_the_hosts_delegate_acts_in_the_hosts_tenant_and_is_not_the_host(
     )
     assert not is_host(identity_of_session(_session_of("sub-1"), signed_in)), (
         "the host's delegate read as the host: it would skip the coupon, the rate limit and the tier"
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_host_and_its_delegate_read_one_version_of_each_subject(tmp_path: Path) -> None:
+    # Each serves the other's view of the machine (the queue, the refusals, `sees_all`): a version
+    # counted from a view moves on every feed tick of either tab, so every ack waits on a re-read.
+    host = IdentityContext(user_id=UserId("ada"), tenant_id=TenantId("ada"), host=True)
+    delegate = IdentityContext(
+        user_id=UserId("ada"), tenant_id=TenantId("ada"), claims={"principal": "sub-1"}
+    )
+    readers = [
+        build_stores(who, projects_root=default_projects_root(), install_datasets_root=tmp_path)
+        for who in (host, delegate)
+    ]
+    registry, _, _ = _held_slot(tmp_path)
+    ws = WorkspaceDir(tmp_path)
+    registry.request_slot(
+        user_id="ada", principal_id="ada", workspace=ws, holder=CampaignLaunch("ds1")
+    )
+    stood = {cycle_reads.feed_versions(s, registry)["machine"] for s in (*readers, *readers)}
+    assert len(stood) == 1, "a host and its delegate counted one unmoved machine apart"
+    [before] = stood
+    registry.request_slot(
+        user_id="ada", principal_id="sub-1", workspace=ws, holder=CampaignLaunch("ds2")
+    )
+    moved = {cycle_reads.feed_versions(s, registry)["machine"] for s in (*readers, *readers)}
+    assert moved == {before.model_copy(update={"n": before.n + 1})}, (
+        "one write did not move every reader of the machine to one next version"
+    )
+
+
+def _sandboxed(stores: Stores) -> tuple[CycleHop, Path, str]:
+    """A campaign whose cycle holds an inner sandbox: the hop, the sandbox, its feed subject."""
+    hop = CycleHop(campaign_id="camp-b", cycle_id="cyc-1")
+    stored_campaign(stores, minted_campaign(hop))
+    stores.campaigns.mint_cycle(hop)
+    return hop, inner_sandbox(stores, hop.campaign_id, hop.cycle_id), "store:camp-b::cyc-1"
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_filed_command_answers_its_result_when_a_store_vanishes_under_its_ack(
+    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A 500 for an applied write is a press filed again: the double-filing the ack exists to close.
+    hop, sandbox, subject = _sandboxed(built_stores)
+    route = next(r for r in commands_api.commands_router.routes if r.name == "rename-campaign")  # type: ignore[attr-defined]
+    payload = SetCampaignLabelPayload(campaign_id=hop.campaign_id, label="renamed")
+    scandir = os.scandir
+    sandbox_campaigns = str(
+        campaigns_root_dir_for(WorkspaceDir(sandbox / str(built_stores.tenant_id)))
+    )
+
+    def deleted_under_the_walk(path: str = ".") -> object:
+        # The sandbox goes between the walk finding it and listing it.
+        if str(path) == sandbox_campaigns:
+            rmtree_robust(sandbox)
+        return scandir(path)
+
+    response = Response()
+    with monkeypatch.context() as m:
+        m.setattr(os, "scandir", deleted_under_the_walk)
+        answer = asyncio.run(
+            route.endpoint(  # type: ignore[attr-defined]
+                response=response,
+                job_registry=JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1),
+                stores=built_stores,
+                payload=payload,
+                key="rename-once",
+            )
+        )
+    assert not sandbox.exists(), "guard: the sandbox vanished under the walk"
+    assert answer is not None, "a filed command answered nothing"
+    assert built_stores.campaigns.campaign(hop.campaign_id).label == "renamed", "guard: filed"
+    said = json.loads(response.headers[cycle_reads.FEED_VERSIONS_HEADER])
+    assert subject not in said, "the ack named a sandbox the walk found gone"
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_queued_start_moves_the_read_its_start_control_gates_on(
+    built_stores: Stores, held_cycle: _HeldCycle
+) -> None:
+    # A press is pressable again once its ack settles: only if the read it gates on stood past the
+    # write: a queued launch moves the store its run phase is read from, and reads as queued there.
+    hop = held_cycle.hop
+    registry = JobRegistry(built_stores.jobs_dir, capacity=lambda _live: 0)
+    gated = "store:"
+    before = cycle_reads.feed_versions(built_stores, registry, gated)[gated]
+    (queued,) = request_jobs(
+        stores=built_stores, job_registry=registry, holder=CampaignLaunch("ds1"), hop=hop
+    )
+    assert queued.queued, "guard: the machine is full"
+    after = cycle_reads.feed_versions(built_stores, registry, gated)[gated]
+    assert after.n > before.n, "a queued launch left the store its Start control reads unmoved"
+    assert built_stores.run_state(hop).run_phase is RunPhase.QUEUED, (
+        "the read past a queued launch still reads the run as startable"
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_deleted_campaigns_subjects_leave_the_count(built_stores: Stores, tmp_path: Path) -> None:
+    hop, sandbox, subject = _sandboxed(built_stores)
+    jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
+    assert subject in cycle_reads.feed_versions(built_stores, jobs), "guard"
+    rmtree_robust(sandbox)
+    rmtree_robust(built_stores.campaigns.campaign_root_dir(hop.campaign_id))
+    assert subject not in cycle_reads.feed_versions(built_stores, jobs), "guard"
+    counted = {s for owned in cycle_reads._OWNED.values() for s in owned.held}
+    assert subject not in counted, (
+        "a deleted campaign's subject stays counted for the process's life"
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_one_write_moves_a_subject_once_however_its_observers_interleave(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A reader holding stats from before the write, counted after one holding stats from after it,
+    # labels the older stats newer: the feed then sends two moves, and every mounted read re-asks.
+    stores = build_stores(
+        _who("ada-id"), projects_root=default_projects_root(), install_datasets_root=tmp_path
+    )
+    registry, _, _ = _held_slot(tmp_path)
+    before = cycle_reads.feed_versions(stores, registry, "machine")["machine"]
+    taken, go = threading.Event(), threading.Event()
+    real_stats = machine_version
+    lock = cycle_reads._COUNTING
+
+    def paused(*args: object, **kwargs: object) -> tuple[object, ...]:
+        stats = real_stats(*args, **kwargs)  # type: ignore[arg-type]
+        if threading.current_thread() is not threading.main_thread() and not taken.is_set():
+            taken.set()
+            go.wait()
+        return stats
+
+    class Announcing:
+        """The second observer reaching the count releases the first, wherever that one stands."""
+
+        def __enter__(self) -> None:
+            if threading.current_thread() is threading.main_thread():
+                go.set()
+            lock.acquire()
+
+        def __exit__(self, *_: object) -> None:
+            lock.release()
+
+    monkeypatch.setattr(cycle_reads, "machine_version", paused)
+    monkeypatch.setattr(cycle_reads, "_COUNTING", Announcing())
+    first: list[cycle_reads.FeedVersion] = []
+    observer = threading.Thread(
+        target=lambda: first.append(
+            cycle_reads.feed_versions(stores, registry, "machine")["machine"]
+        )
+    )
+    observer.start()
+    taken.wait()
+    registry.request_slot(
+        user_id="ada-id",
+        principal_id="ada-id",
+        workspace=WorkspaceDir(tmp_path),
+        holder=CampaignLaunch("ds2"),
+    )
+    second = cycle_reads.feed_versions(stores, registry, "machine")["machine"]
+    observer.join()
+    settled = cycle_reads.feed_versions(stores, registry, "machine")["machine"]
+    assert [v.n for v in (*first, second, settled)] == [before.n, before.n + 1, before.n + 1], (
+        "one write moved the machine twice: an observer's older stats were counted as newer"
     )
 
 

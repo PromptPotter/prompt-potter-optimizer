@@ -11,8 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import json
-import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import PurePosixPath
@@ -27,9 +25,11 @@ from promptpotter.application.caller import Caller
 from promptpotter.application.cycle_reads import (
     FEED_SUBJECT_HEADER,
     FEED_VERSIONS_HEADER,
+    SERVING_PROCESS,
     StampedEnvelope,
     StampedFeedFrame,
     feed_versions,
+    feed_versions_said,
     stamped_frames,
 )
 from promptpotter.application.hierarchy import entries_version, hierarchy_version
@@ -58,9 +58,6 @@ from promptpotter.presentation.api.middleware.headers import served_contract
 from promptpotter.shared.named_rows import returned
 
 reads_router = APIRouter(tags=["Reads"])
-
-# A restart may serve new code over unchanged inputs, so no ETag outlives its process.
-_PROCESS = os.urandom(8).hex()
 
 
 def _weak(digest: str) -> str:
@@ -92,7 +89,9 @@ def _conditional(
     request: Request, version: tuple[object, ...], build: Callable[[], BaseModel]
 ) -> Response:
     """A 304 before *build* runs: an input or query value left out of *version* goes stale."""
-    etag = _weak(hashlib.sha256("\x1f".join(map(repr, (_PROCESS, *version))).encode()).hexdigest())
+    etag = _weak(
+        hashlib.sha256("\x1f".join(map(repr, (SERVING_PROCESS, *version))).encode()).hexdigest()
+    )
     if client_has_etag(request.headers.get("if-none-match"), etag):
         return Response(status_code=304, headers={"ETag": etag})
     return _model_json(build(), headers={"ETag": etag})
@@ -221,7 +220,7 @@ def _endpoint(params: type[ReadParams], framing: _Framing | None) -> Callable[..
         stood = (
             None
             if named is None
-            else await off_loop(feed_versions, caller.stores, caller.jobs, named)
+            else await off_loop(feed_versions_said, caller.stores, caller.jobs, named)
         )
         if framing is None:
             answered: object = await read.answered(caller)
@@ -229,7 +228,7 @@ def _endpoint(params: type[ReadParams], framing: _Framing | None) -> Callable[..
             answered = await off_loop(framing.respond, _Asked(request, caller), read)
         if stood is not None:
             framed = answered if isinstance(answered, Response) else response
-            framed.headers[FEED_VERSIONS_HEADER] = json.dumps(stood, separators=(",", ":"))
+            framed.headers[FEED_VERSIONS_HEADER] = stood
         return answered
 
     keyword = inspect.Parameter.KEYWORD_ONLY

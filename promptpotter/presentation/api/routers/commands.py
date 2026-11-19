@@ -4,7 +4,7 @@ import inspect
 from dataclasses import replace
 from typing import Annotated
 
-from fastapi import APIRouter, File, Form, Header, UploadFile
+from fastapi import APIRouter, File, Form, Header, Response, UploadFile
 from fastapi.routing import APIRoute
 
 from promptpotter.application.commands import workspace_edits
@@ -14,7 +14,9 @@ from promptpotter.application.commands.dispatcher import (
     command_answer,
 )
 from promptpotter.application.commands.launching import launched
+from promptpotter.application.cycle_reads import FEED_VERSIONS_HEADER, feed_versions_said
 from promptpotter.application.datasets.draft_build import DraftCampaignWire
+from promptpotter.application.read_workers import off_loop
 from promptpotter.domain.command_kinds import (
     COMMAND_ID_CHARS,
     PAYLOAD_MODEL_FOR_KIND,
@@ -42,6 +44,7 @@ commands_router = APIRouter(prefix="/commands", tags=["Commands"])
     name=CommandKind.INGEST_UPLOAD,
 )
 async def ingest_upload(
+    response: Response,
     stores: StoresDep,
     key: IdempotencyKeyDep,
     file: Annotated[
@@ -60,10 +63,19 @@ async def ingest_upload(
         "slug": slug,
     }
     payload = PayloadInvalidError.validating(IngestUploadPayload, fields)
-    outcome = await CommandDispatcher(stores).answer(
+    dispatcher = CommandDispatcher(stores)
+    outcome = await dispatcher.answer(
         workspace_edits.ingest_upload, CommandCall(payload, key, door=Door.API)
     )
+    await _stamped(response, dispatcher)
     return outcome.result
+
+
+async def _stamped(response: Response, dispatcher: CommandDispatcher) -> None:
+    """The ack names the versions its write produced (`read-cache.ts::reached`)."""
+    response.headers[FEED_VERSIONS_HEADER] = await off_loop(
+        feed_versions_said, dispatcher.stores, dispatcher.job_registry
+    )
 
 
 # The id a caller files under, so it names the act's `cancel` before the act answers; absent,
@@ -80,6 +92,7 @@ class _Dispatching:
     def __init__(self, model: type[CommandPayload], answers: object | None) -> None:
         keyword = inspect.Parameter.KEYWORD_ONLY
         params = [
+            inspect.Parameter("response", keyword, annotation=Response),
             inspect.Parameter("job_registry", keyword, annotation=JobRegistryDep),
             inspect.Parameter("stores", keyword, annotation=StoresDep),
             inspect.Parameter("payload", keyword, annotation=model),
@@ -94,6 +107,7 @@ class _Dispatching:
     async def __call__(
         self,
         *,
+        response: Response,
         job_registry: JobRegistryDep,
         stores: StoresDep,
         payload: CommandPayload,
@@ -107,6 +121,7 @@ class _Dispatching:
         outcome = await dispatcher.dispatch(call)
         if self.answers is LaunchAnswer:
             outcome = replace(outcome, result=await launched(outcome, dispatcher, call.door))
+        await _stamped(response, dispatcher)
         return outcome.answer
 
 

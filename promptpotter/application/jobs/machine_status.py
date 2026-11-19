@@ -8,6 +8,7 @@ from pydantic import Field
 from promptpotter.application.account import account_or_opening
 from promptpotter.application.jobs.capacity import SlotBound, resolve_run_capacity
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.config.paths import LIVE_JOBS_INDEX, UNSWEPT_DIR
 from promptpotter.config.settings import settings
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import (
@@ -23,6 +24,7 @@ from promptpotter.domain.phases import QUEUE_STARTS_ITSELF, RunPhase
 from promptpotter.domain.said import Said, Tone
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.identity.accounts import is_host
+from promptpotter.infrastructure.store.read_model import file_sig
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.identity import IdentityContext, acting_principal
 
@@ -242,6 +244,22 @@ def served_machine_status(stores: Stores, jobs: JobRegistry) -> MachineStatusRes
     """As its caller is served it: their own limit read beside the machine's."""
     limit = account_or_opening(stores).max_concurrent_cycles
     return machine_status(jobs, identity=stores.identity, account_limit=limit)
+
+
+def machine_version(stores: Stores, jobs: JobRegistry) -> tuple[object, ...]:
+    """Stats only, the same for every reader of the account's machine (never its served view): the
+    job files, the live index, the unswept steps, the landing, the capacity and the account's limit."""
+    jobs_dir = jobs.jobs_dir
+    return (
+        *(
+            (path.name, file_sig(path))
+            for path in sorted((*jobs_dir.glob("*.json"), *jobs_dir.glob(f"{UNSWEPT_DIR}/*.json")))
+        ),
+        file_sig(jobs_dir / LIVE_JOBS_INDEX),
+        jobs.landing(),
+        resolve_run_capacity(len(jobs.list_running())),
+        account_or_opening(stores).max_concurrent_cycles,
+    )
 
 
 def machine_status(

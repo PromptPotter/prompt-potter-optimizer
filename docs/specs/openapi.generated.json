@@ -7444,6 +7444,26 @@
         "title": "FactorReading",
         "type": "object"
       },
+      "FeedVersion": {
+        "additionalProperties": false,
+        "description": "Only moves forward: `n` is its owner's count of moves at the subject's last, so a subject a\nwalk finds again resumes past every version it was served; another `process` is a restart,\nnever older.",
+        "properties": {
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "process": {
+            "title": "Process",
+            "type": "string"
+          }
+        },
+        "required": [
+          "process",
+          "n"
+        ],
+        "title": "FeedVersion",
+        "type": "object"
+      },
       "FieldGap": {
         "additionalProperties": false,
         "description": "One origin field that still blocks mint — also the ``422 origin_incomplete`` body's ``details.gaps``.",
@@ -17175,8 +17195,7 @@
             "type": "string"
           },
           "version": {
-            "title": "Version",
-            "type": "string"
+            "$ref": "#/components/schemas/FeedVersion"
           }
         },
         "required": [

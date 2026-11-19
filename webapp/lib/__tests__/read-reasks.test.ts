@@ -8,7 +8,7 @@ import {
   userSettingsRead,
 } from "@/lib/api/reads";
 import { FEED_SUBJECT_HEADER, FEED_VERSIONS_HEADER } from "@/lib/api/types";
-import { FakeStream } from "@/lib/__tests__/fake-stream";
+import { FakeStream, feedVersion } from "@/lib/__tests__/fake-stream";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { clearReadCache, subscribe, type ReadDescriptor } from "@/lib/read-cache";
 import { couponStatus, dash } from "@/lib/test-fixtures";
@@ -39,7 +39,7 @@ const SUBJECTS = ["account", "store:", "store:c1::root", "store:c2::root", "mach
 describe("the feed re-asks exactly the reads whose subject moved, and no read asks on a clock", () => {
   let asked: Record<Name, number>;
   // Each subject at the version the server reads it at: an answer says those its subject names.
-  let at: Record<string, string>;
+  let at: Record<string, number>;
   const mounted: (() => void)[] = [];
   const once = Object.fromEntries(NAMES.map((n) => [n, 1])) as Record<Name, number>;
 
@@ -49,13 +49,15 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
     clearReadCache(true);
     vi.useFakeTimers();
     asked = Object.fromEntries(NAMES.map((n) => [n, 0])) as Record<Name, number>;
-    at = Object.fromEntries(SUBJECTS.map((s) => [s, "v1"]));
+    at = Object.fromEntries(SUBJECTS.map((s) => [s, 1]));
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       const name = nameOf(url);
       asked[name] += 1;
       const named = (init?.headers as Record<string, string> | undefined)?.[FEED_SUBJECT_HEADER];
       const stood = Object.fromEntries(
-        Object.entries(at).filter(([subject]) => named !== undefined && subject.startsWith(named)),
+        Object.entries(at)
+          .filter(([subject]) => named !== undefined && subject.startsWith(named))
+          .map(([subject, n]) => [subject, feedVersion(n)]),
       );
       const headers = named === undefined ? {} : { [FEED_VERSIONS_HEADER]: JSON.stringify(stood) };
       if (name === "coupon") return Response.json(couponStatus(), { headers });
@@ -107,12 +109,12 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
   });
 
   it("re-asks on the hello a read whose answer stood before a move it names", async () => {
-    at["store:"] = "v0";
+    at["store:"] = 0;
     const reads = [hierarchyRead(), userSettingsRead()] as unknown as ReadDescriptor<unknown>[];
     for (const read of reads) mounted.push(subscribe(() => read, () => {}));
     await settle();
     // The account's store moves after both answered, before the feed's first frame.
-    at["store:"] = "v1";
+    at["store:"] = 1;
     hello();
     await settle();
     expect([asked.hierarchy, asked.settings]).toEqual([2, 1]);
@@ -123,29 +125,29 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
 
   it("re-asks every read of the account's store on its move, a settled evidence and the settings not", async () => {
     await mount();
-    feed().frame("store:", "v2");
+    feed().frame("store:", 2);
     await settle();
     expect(asked).toEqual({ ...once, hierarchy: 2, top: 2, evidence: 2, cells: 2, coupon: 2 });
   });
 
   it("re-asks an inner run's dashboard on its own sandbox's move alone", async () => {
     await mount();
-    feed().frame("store:c1::root", "v2");
+    feed().frame("store:c1::root", 2);
     await settle();
     expect(asked).toEqual({ ...once, hierarchy: 2, top: 2, inner: 2, evidence: 2, cells: 2, coupon: 2 });
   });
 
   it("re-asks the account's own reads on what it filed, and nothing a run moves", async () => {
     await mount();
-    feed().frame("account", "v2");
+    feed().frame("account", 2);
     await settle();
     expect(asked).toEqual({ ...once, settings: 2 });
   });
 
   it("is a hint, never the body: a repeated or replayed version re-asks nothing", async () => {
     await mount();
-    feed().frame("store:", "v1");
-    feed().frame("account", "v1");
+    feed().frame("store:", 1);
+    feed().frame("account", 1);
     await settle();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(asked).toEqual(once);
@@ -158,8 +160,8 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
     refused.onerror?.();
     await vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS);
     expect(FakeStream.opened).toHaveLength(2);
-    feed().frame("account", "v1");
-    feed().frame("store:", "v3");
+    feed().frame("account", 1);
+    feed().frame("store:", 3);
     await settle();
     expect(asked).toEqual({ ...once, hierarchy: 2, top: 2, evidence: 2, cells: 2, coupon: 2 });
   });

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
+import os
+import threading
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic import Field
@@ -12,7 +13,7 @@ from pydantic_core import to_json
 from promptpotter.application.caller import Caller
 from promptpotter.application.hierarchy import entries_version
 from promptpotter.application.hierarchy_subtree import subtree_cycle
-from promptpotter.application.jobs.machine_status import served_machine_status
+from promptpotter.application.jobs.machine_status import machine_version
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.scoring.closed_rounds import campaign_scorer, closed_round
 from promptpotter.application.served_dashboard import WarmingDashboard, served_dashboard
@@ -34,7 +35,7 @@ from promptpotter.domain.hierarchy import HierarchySteps
 from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.strict_model import StrictModel
+from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.projections.event_stream import CycleLedgerTail
 from promptpotter.infrastructure.projections.live_dashboard import fold_at
@@ -260,49 +261,99 @@ FEED_VERSIONS_HEADER = "X-Feed-Versions"
 _STORE = "store:"
 
 
+# This process's name, which a version and every validator it answers carry: a restart counts afresh.
+SERVING_PROCESS = os.urandom(8).hex()
+
+
+class FeedVersion(FrozenModel):
+    """Only moves forward: `n` is its owner's count of moves at the subject's last, so a subject a
+    walk finds again resumes past every version it was served; another `process` is a restart,
+    never older."""
+
+    process: str
+    n: int
+
+
 class FeedFrame(StrictModel):
     """One subject moved: re-ask every read that names it. A hint, never the body."""
 
     subject: str = Field(description="`account`, `machine`, or `store:` and a store's hops.")
-    version: str
+    version: FeedVersion
 
 
 class StampedFeedFrame(FeedFrame, FrameStamp):
     """A feed frame as the stream serves it."""
 
 
-def _store_subjects(stores: Stores) -> Iterator[tuple[str, Stores]]:
-    yield f"{_STORE}{encode_cycle_path(stores.inside)}", stores
-    for campaign_id in stores.campaigns.list_campaign_ids():
-        for hop in stores.campaigns.campaign_cycle_hops(campaign_id):
-            if (inner := inner_sandbox_store(stores, hop)) is not None:
-                yield from _store_subjects(inner)
+def _store_stats(stores: Stores, named: str) -> Iterator[tuple[str, tuple[object, ...]]]:
+    """Each store subject *named* covers, at its stats; one deleted under the walk is gone, never a
+    raise: the command whose ack walks it was already filed."""
+    subject = f"{_STORE}{encode_cycle_path(stores.inside)}"
+    try:
+        stats = entries_version([stores]) if subject.startswith(named) else None
+        hops = stores.campaigns.cycle_hops()
+    except FileNotFoundError:
+        return
+    if stats is not None:
+        yield subject, stats
+    for hop in hops:
+        if (inner := inner_sandbox_store(stores, hop)) is not None:
+            yield from _store_stats(inner, named)
 
 
-def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[str, str]:
-    """Each subject *named* covers, by prefix (every one by default), at its version: stats and
-    the slots, never a fold."""
-    held: dict[str, tuple[object, ...]] = {}
-    if named.startswith(_STORE) or _STORE.startswith(named):
-        held |= {
-            subject: entries_version([store])
-            for subject, store in _store_subjects(stores)
-            if subject.startswith(named)
-        }
-    if "account".startswith(named):
-        # What the account filed: an edit, a setting, a draft turn. A run's appends do not move it.
-        held["account"] = (file_sig(stores.commands.path), stores.drafts.version())
-    if "machine".startswith(named):
-        held["machine"] = (served_machine_status(stores, jobs).model_dump_json(),)
-    return {
-        subject: hashlib.sha256(repr(version).encode()).hexdigest()[:16]
-        for subject, version in held.items()
-    }
+@dataclass
+class _Owned:
+    """One owner's count of moves, and each subject of it the last walk found, at its stats and `n`:
+    one no walk finds any more leaves."""
+
+    moves: int = 0
+    held: dict[str, tuple[tuple[object, ...], int]] = field(default_factory=dict)
+
+    def counted(self, named: str, found: dict[str, tuple[object, ...]]) -> dict[str, FeedVersion]:
+        for gone in [s for s in self.held if s.startswith(named) and s not in found]:
+            del self.held[gone]
+        for subject, stats in found.items():
+            if (was := self.held.get(subject)) is None or was[0] != stats:
+                self.moves += 1
+                self.held[subject] = (stats, self.moves)
+        return {s: FeedVersion(process=SERVING_PROCESS, n=self.held[s][1]) for s in found}
+
+
+# Keyed by what owns a subject (the account's store; the registry and the account's limit for
+# `machine`), so every reader of it shares one count; walked and counted under one lock, so one
+# write moves a subject once.
+_OWNED: dict[str, _Owned] = {}
+_COUNTING = threading.Lock()
+
+
+def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[str, FeedVersion]:
+    """Each subject *named* covers, by prefix (every one by default), at its version, counted from
+    stats that are the same for every reader of it, never a fold or a reader's view."""
+    owner = str(stores.base_dir)
+    with _COUNTING:
+        found: dict[str, tuple[object, ...]] = {}
+        if named.startswith(_STORE) or _STORE.startswith(named):
+            found |= dict(_store_stats(stores, named))
+        if "account".startswith(named):
+            # What the account filed: an edit, a setting, a draft turn. A run's appends do not move it.
+            found["account"] = (file_sig(stores.commands.path), stores.drafts.version())
+        versions = _OWNED.setdefault(owner, _Owned()).counted(named, found)
+        if "machine".startswith(named):
+            machine = {"machine": machine_version(stores, jobs)}
+            versions |= _OWNED.setdefault(f"{jobs.jobs_dir}\x1f{owner}", _Owned()).counted(
+                named, machine
+            )
+    return versions
+
+
+def feed_versions_said(stores: Stores, jobs: JobRegistry, named: str = "") -> str:
+    """What a read stands on, or a command's write produced (`read-cache.ts::reached`)."""
+    return to_json(feed_versions(stores, jobs, named)).decode()
 
 
 async def feed_frames(caller: Caller) -> AsyncIterator[FeedFrame]:
     """Every subject once, then each move: the server writes every ledger, so it says what moved."""
-    sent: dict[str, str] = {}
+    sent: dict[str, FeedVersion] = {}
     async for _ in _signed_ticks(caller, _FEED_TICK_S):
         moved = await asyncio.to_thread(feed_versions, caller.stores, caller.jobs)
         for subject, version in moved.items():

@@ -9,7 +9,7 @@ import {
   type DraftCampaignWire,
   type DraftReopenResponse,
 } from "@/lib/api/types";
-import { FakeStream } from "@/lib/__tests__/fake-stream";
+import { FakeStream, feedVersion } from "@/lib/__tests__/fake-stream";
 import { ThreadProvider } from "@/lib/state/chat-thread";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { useQueuedStart } from "@/lib/hooks/useQueuedStart";
@@ -24,7 +24,7 @@ describe("a queued Start follows its whole command reading on the feed", () => {
   let served: Pick<CommandReading, "status" | "said"> & { hop: CycleHop | null };
   let asked: number;
   // The account's store at the version the server reads it at, which the command's answer stood on.
-  let store: string;
+  let store: number;
 
   const reading = (): CommandReading => ({
     command_id: "cmd_1",
@@ -61,14 +61,14 @@ describe("a queued Start follows its whole command reading on the feed", () => {
     vi.useFakeTimers();
     served = { status: "working", said: "the check-in's run: queued", hop: null };
     asked = 0;
-    store = "v1";
+    store = 1;
     vi.stubGlobal("fetch", async (url: string) => {
       const path = new URL(url, "http://x").pathname;
       if (path.endsWith("/auth/me")) return Response.json({ tenant_id: "t", user_id: "u" });
       if (path.endsWith("/commands/cmd_1")) {
         asked += 1;
         return Response.json(reading(), {
-          headers: { [FEED_VERSIONS_HEADER]: JSON.stringify({ "store:": store }) },
+          headers: { [FEED_VERSIONS_HEADER]: JSON.stringify({ "store:": feedVersion(store) }) },
         });
       }
       throw new Error(`unrouted: ${url}`);
@@ -85,7 +85,7 @@ describe("a queued Start follows its whole command reading on the feed", () => {
     const { view, feed } = await followed();
     // A slot frees: the job names its cycle, and the minted run's appends move the store.
     served = { status: "working", said: "the check-in's run: running", hop: minted };
-    store = "v2";
+    store = 2;
     act(() => feed.frame("store:", store));
     await settle();
     expect(asked).toBe(2);
@@ -103,10 +103,10 @@ describe("a queued Start follows its whole command reading on the feed", () => {
       FakeStream.opened = [];
       served = { status: "working", said: "the check-in's run: queued", hop: null };
       asked = 0;
-      store = "v1";
+      store = 1;
       const { view, feed } = await followed();
       served = { ...ending, hop: null };
-      store = `end${at}`;
+      store = 2 + at;
       act(() => feed.frame("store:", store));
       await settle();
       expect(asked).toBe(2);
@@ -127,8 +127,8 @@ describe("a reopened queued Start follows the Start's own command, as the tab th
   let command: Pick<CommandReading, "status" | "said"> & { hop: CycleHop | null };
   // The Start holding the draft as its reopen serves it; past the mint the draft is closed (404).
   let held: DraftReopenResponse["start"] | "closed";
-  let store: string;
-  const stood = () => ({ [FEED_VERSIONS_HEADER]: JSON.stringify({ "store:": store }) });
+  let store: number;
+  const stood = () => ({ [FEED_VERSIONS_HEADER]: JSON.stringify({ "store:": feedVersion(store) }) });
   const flowWrapper = ({ children }: { children: ReactNode }) =>
     createElement(AuthProvider, null, createElement(ThreadProvider, null, children));
 
@@ -159,7 +159,7 @@ describe("a reopened queued Start follows the Start's own command, as the tab th
     vi.useFakeTimers();
     command = { status: "working", said: "the check-in's run: queued", hop: null };
     held = { stage: "queued", command_id: "cmd_1" };
-    store = "v1";
+    store = 1;
     vi.stubGlobal("fetch", async (url: string) => {
       const path = new URL(url, "http://x").pathname;
       if (path.endsWith("/auth/me")) return Response.json({ tenant_id: "t", user_id: "u" });
@@ -207,7 +207,7 @@ describe("a reopened queued Start follows the Start's own command, as the tab th
     const { view, feed } = await reopened(onMint);
     command = { status: "working", said: "the check-in's run: running", hop: minted };
     held = "closed";
-    store = "v2";
+    store = 2;
     act(() => feed.frame("store:", store));
     for (let i = 0; i < 4; i += 1) await settle();
     expect(onMint).toHaveBeenCalledWith({ campaignId: "camp_new", cycleId: "cyc_1" });
@@ -220,7 +220,7 @@ describe("a reopened queued Start follows the Start's own command, as the tab th
     const said = "the check-in's run: the backend did not answer its probe";
     command = { status: "failed", said, hop: null };
     held = null;
-    store = "v2";
+    store = 2;
     act(() => feed.frame("store:", store));
     for (let i = 0; i < 4; i += 1) await settle();
     expect(onMint).not.toHaveBeenCalled();

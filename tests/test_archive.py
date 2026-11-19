@@ -2213,9 +2213,12 @@ def test_a_supersede_ends_its_parent_only_where_no_producer_holds_it(
     assert subtree_version(stores, listed.address) != validator, (
         "an archive write left the subtree's validator standing: its BENCH chip goes stale behind a 304"
     )
-    assert feed_versions(stores, feed_jobs)["store:"] != fed, (
-        "the feed left the store standing on an archive write: no browser re-asks the BENCH chip"
+    moved = feed_versions(stores, feed_jobs)["store:"]
+    assert moved.process == fed.process and moved.n > fed.n, (
+        "the feed's store version did not move forward on an archive write: a browser keeps the "
+        "BENCH chip it holds, or lands an older read over a newer one"
     )
+    assert feed_versions(stores, feed_jobs)["store:"] == moved, "an unmoved store moved its version"
     picked = line_cycle.facts.standing.selection
     assert picked is not None, "guard"
     [line_drawn] = [

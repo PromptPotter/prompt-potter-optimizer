@@ -7,7 +7,7 @@ import {
   type FeedVersions,
 } from "@/lib/api/client";
 import { operatorMessage } from "@/lib/api/errors";
-import { READ_ROUTES, type StampedFeedFrame } from "@/lib/api/types";
+import { READ_ROUTES, type FeedVersion, type StampedFeedFrame } from "@/lib/api/types";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { reportIncident } from "@/lib/diagnostics";
 import { openLiveStream } from "@/lib/live-stream";
@@ -94,11 +94,16 @@ interface Slot {
   result: ReadResult<unknown>;
   // The feed versions its last answer stood on; null where none said them.
   stood: FeedVersions | null;
-  // Each frame that came while it flew: its landing re-asks where it stood on another version.
-  owed: Map<string, string>;
+  // Each frame that came while it flew: its landing re-asks where it stood behind one.
+  owed: Map<string, FeedVersion>;
 }
 
 const IDLE: ReadResult<never> = { status: "idle" };
+
+// A subject's version only moves forward within its serving process; another is a restart, never older.
+function ahead(version: FeedVersion, held: FeedVersion | undefined): boolean {
+  return held === undefined || version.process !== held.process || version.n > held.n;
+}
 
 // Insertion order is recency.
 const slots = new Map<string, Slot>();
@@ -251,10 +256,11 @@ async function fly(slot: Slot, read: AnyRead, flight: Flight): Promise<unknown> 
       slot.flight = null;
       const owed = [...slot.owed];
       slot.owed.clear();
-      if (slot.subs.size > 0 && followed(slot) !== undefined && owed.some(([subject, version]) => slot.stood?.[subject] !== version)) {
+      if (slot.subs.size > 0 && followed(slot) !== undefined && owed.some(([subject, version]) => ahead(version, slot.stood?.[subject]))) {
         ask(slot, true);
       }
     }
+    settleReached();
   }
 }
 
@@ -327,7 +333,7 @@ export function clearReadCache(signedIn: boolean): void {
   closeFeedStream?.();
   closeFeedStream =
     signedIn && typeof EventSource !== "undefined"
-      ? openLiveStream(`${API}${READ_ROUTES.feed}`, { surface: "feed" }, { frame: moved })
+      ? openLiveStream<StampedFeedFrame>(`${API}${READ_ROUTES.feed}`, { surface: "feed" }, { frame: moved })
       : null;
   for (const slot of [...slots.values()]) {
     supersede(slot);
@@ -343,6 +349,7 @@ export function clearReadCache(signedIn: boolean): void {
     changed(slot);
     if (signedIn || !descriptorOf(slot).auth) ask(slot, false);
   }
+  settleReached();
 }
 
 function mounted(): Slot[] {
@@ -379,18 +386,47 @@ export function reaskRead(id: string): void {
 
 // The server says what moved (`GET /feed`): each subject at its version, then each move. A frame is
 // a hint, never the body: it re-asks every mounted read whose subject it starts and whose answer
-// stood on another version of it, and what the read answers is what the cache keeps. Compared with
-// the version each answer stood on, never the frame before: an answer read before the feed's first
-// frame misses no move between them.
+// stood behind it, and what the read answers is what the cache keeps. Compared with the version
+// each answer stood on, never the frame before: an answer read before the feed's first frame misses
+// no move between them.
 let closeFeedStream: (() => void) | null = null;
 
-function moved({ subject, version }: StampedFeedFrame): void {
+function moved({ subject, version }: Pick<StampedFeedFrame, "subject" | "version">): void {
   for (const slot of mounted()) {
     const named = followed(slot);
     if (named === undefined || !subject.startsWith(named)) continue;
     if (slot.flight) slot.owed.set(subject, version);
-    else if (slot.stood?.[subject] !== version) ask(slot, true);
+    else if (ahead(version, slot.stood?.[subject])) ask(slot, true);
   }
+}
+
+function owes(slot: Slot, produced: FeedVersions): boolean {
+  const named = followed(slot);
+  return (
+    slot.flight !== null &&
+    named !== undefined &&
+    Object.entries(produced).some(([s, v]) => s.startsWith(named) && ahead(v, slot.stood?.[s]))
+  );
+}
+
+const reaching = new Set<() => boolean>();
+
+function settleReached(): void {
+  for (const done of [...reaching]) if (done()) reaching.delete(done);
+}
+
+// What a command's write produced (its ack's `FEED_VERSIONS_HEADER`), told as the feed tells a
+// move: every mounted read behind it is re-asked, and this resolves once none still flies behind it.
+export function reached(produced: FeedVersions): Promise<void> {
+  for (const [subject, version] of Object.entries(produced)) moved({ subject, version });
+  return new Promise((resolve) => {
+    const done = (): boolean => {
+      if (mounted().some((slot) => owes(slot, produced))) return false;
+      resolve();
+      return true;
+    };
+    if (!done()) reaching.add(done);
+  });
 }
 
 // `read` is the subscriber's newest descriptor: its subject counts, its effects run. The first
@@ -411,5 +447,6 @@ export function subscribe(read: () => AnyRead, notify: () => void): () => void {
     if (slot.subs.size === 0) supersede(slot);
     syncRetry();
     evict();
+    settleReached();
   };
 }

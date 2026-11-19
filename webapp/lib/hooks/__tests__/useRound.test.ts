@@ -12,7 +12,7 @@ import { InWorkspace as wrapper } from "@/lib/test-utils/in-workspace";
 const path = [{ campaignId: "c1", cycleId: "root" }];
 
 // The account's feed, driven by the test: a live claim stamps the store's version every tick.
-const tick = (version: string): void =>
+const tick = (version: number): void =>
   FakeStream.opened.findLast((f) => f.readyState !== FakeStream.CLOSED)?.frame("store:", version);
 
 const A = { key: "a", label: "C1.0" };
@@ -87,16 +87,16 @@ describe("useRound — a round reads the round read alone, in flight and filed",
     const { result } = renderHook(() => useRound(path, 1), { wrapper });
     await settle();
     const opened = asked.length;
-    tick("t1");
+    tick(1);
     await settle();
     expect(asked.length).toBe(opened + 1);
 
     served = FILED;
-    tick("t2");
+    tick(2);
     await settle();
     expect(result.current.unfiled).toBe(false);
     const filed = asked.length;
-    for (const version of ["t3", "t4", "t5"]) {
+    for (const version of [3, 4, 5]) {
       tick(version);
       await settle();
     }

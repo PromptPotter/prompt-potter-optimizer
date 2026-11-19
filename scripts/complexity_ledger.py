@@ -197,7 +197,11 @@ BASELINE = {
     # store-5a (+5): a population's signature carries a scoped task's own walk counts, so a round
     # close reloads only the populations it moved; `LastOf`, a declared fold, where `last_fold`
     # made record classes in module globals.
-    "package_lines": 112198,
+    # feed-version (+61 over 112198): a subject's version only moves forward (`cycle_reads.py::FeedVersion`,
+    # one count per owner from stats such as `machine_status.py::machine_version`'s, never a reader's
+    # view, walked and counted under one lock, a vanished store gone and a subject no walk finds
+    # dropped) and a command's ack names the versions its write produced.
+    "package_lines": 112259,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

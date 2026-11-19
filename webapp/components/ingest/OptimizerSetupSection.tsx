@@ -1,7 +1,7 @@
 import { optimizerRosterRead } from "@/lib/api";
-import type { DraftPatch } from "@/lib/api/types";
 import { BRAND } from "@/lib/brand";
 import { useConnector } from "@/lib/hooks/useConnector";
+import type { DraftEdit } from "@/lib/hooks/useIngestFlow";
 import { shownData, useRead } from "@/lib/hooks/useRead";
 import { heldRead } from "@/lib/read-cache";
 import { useWorkspace } from "@/lib/state/workspace";
@@ -10,7 +10,7 @@ import { PipelineFlow } from "@/components/pipeline/PipelineFlow";
 import { NodeKnobsPanel } from "@/components/pipeline/NodeKnobsPanel";
 
 // Reads the connector read its knobs panel and graph read: a check-in's draft is its transport.
-export function OptimizerSetupSection({ onApply }: { onApply: (patch: DraftPatch) => void }) {
+export function OptimizerSetupSection({ onApply }: { onApply: (edit: DraftEdit) => void }) {
   const pipeline = shownData(useConnector());
   const optimizer = pipeline?.optimizer ?? null;
   const setup = pipeline?.optimizer_setup ?? null;

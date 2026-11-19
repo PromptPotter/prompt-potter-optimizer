@@ -3,6 +3,7 @@ import {
   FEED_VERSIONS_HEADER,
   SERVED_CONTRACT,
   type ErrorEnvelope,
+  type FeedVersion,
   type NextAct,
 } from "@/lib/api/types";
 
@@ -117,8 +118,14 @@ export async function jpost<T>(
   return (await r.json()) as T;
 }
 
-// Each feed subject a read's answer stood on, at its version (`FEED_VERSIONS_HEADER`).
-export type FeedVersions = Readonly<Record<string, string>>;
+// Each feed subject a read's answer stood on, or a command's write produced, at its version
+// (`FEED_VERSIONS_HEADER`).
+export type FeedVersions = Readonly<Record<string, FeedVersion>>;
+
+export function versionsSaid(r: Response): FeedVersions | undefined {
+  const said = r.headers.get(FEED_VERSIONS_HEADER);
+  return said === null ? undefined : (JSON.parse(said) as FeedVersions);
+}
 
 // `stood` is absent where the read named no subject, or its server said none.
 export type Conditional<T> =
@@ -137,8 +144,8 @@ export async function jgetIfNoneMatch<T>(
   if (validator) headers["If-None-Match"] = validator;
   if (subject !== undefined) headers[FEED_SUBJECT_HEADER] = subject;
   const r = await send(url, { headers, signal: signal ?? null });
-  const said = r.headers.get(FEED_VERSIONS_HEADER);
-  const stood = said === null ? {} : { stood: JSON.parse(said) as FeedVersions };
+  const said = versionsSaid(r);
+  const stood = said === undefined ? {} : { stood: said };
   if (r.status === 304) return { kind: "not_modified", ...stood };
   if (!r.ok) throw await toApiError(r);
   return { kind: "ok", data: (await r.json()) as T, validator: r.headers.get("ETag"), ...stood };

@@ -64,6 +64,7 @@ from factories import (
     stored_campaign,
     workspace,
 )
+from fastapi import Response
 from offline_world import NOT_A_KEY, PROVIDER_KEYS, Hang, Router, Said, completion
 from pydantic import BaseModel, Field, SecretStr, ValidationError
 
@@ -5326,7 +5327,13 @@ def test_a_head_to_head_is_one_door_that_prices_admits_and_answers_its_arms_whol
     route = next(r for r in commands_api.commands_router.routes if r.name == "head-to-head")  # type: ignore[attr-defined]
     answers = [
         asyncio.run(
-            route.endpoint(job_registry=registry, stores=stores, payload=funded, key="duel-2-once")  # type: ignore[attr-defined]
+            route.endpoint(  # type: ignore[attr-defined]
+                response=Response(),
+                job_registry=registry,
+                stores=stores,
+                payload=funded,
+                key="duel-2-once",
+            )
         )
         for _ in range(2)
     ]

@@ -202,13 +202,19 @@ row it closes.
   subtree's version (`hierarchy_subtree.py`) covers its whole store, so any run's append re-asks every
   mounted tree. Action: one version per subject, kept by the append door and the sweep, so no tick walks
   a store; every writer stamps it (the ledger ingress, drafts, archive, ruler, commands,
-  definitions). **Rides with:** a version chain of its own. **Re-test:** `git grep -n "entries_version(" -- promptpotter/application/cycle_reads.py` is empty.
+  definitions). With it, a command's ack names only what its write moved, where it now walks every
+  subject (`commands.py`'s stamp calls `feed_versions_said` with no subject named), so under a live
+  run every press waits on a re-read of every store read; and `reads.ts::draftRead` follows its own
+  draft, where it follows bare `store:`, so an inner sandbox's append re-asks it. **Rides with:** a
+  version chain of its own. **Re-test:** `git grep -n "entries_version(" -- promptpotter/application/cycle_reads.py`
+  is empty; an `edit-draft-campaign` ack's `X-Feed-Versions` names `account` alone; `draftRead`'s
+  subject is not `store:`.
   Beside it (a hot-path pass, ✓ unless reported): `read_model.py:224`'s `LEDGER_INDEX_MAX` = 256, so past
   256 cycles (one 20-round L4 campaign is ~240 inner campaigns) the feed's `_store_subjects` walk misses
   every tick and each miss re-folds with `model_validate_json` per line; reported, every `store:`-subject
-  read re-runs `feed_versions` over all stores (`reads.py:214-232`), `read-cache` re-asks ~9 reads per
-  sandbox frame, `machine_status` re-reads the job files four ways per tick (`list_running`, `queue_order` twice,
-  `list_launched_today`; `machine_status.py:220,225,262`), `entries_version` parses every
+  read re-runs `feed_versions` over all stores (`presentation/api/routers/reads.py::_endpoint`), `read-cache` re-asks ~9 reads per
+  sandbox frame, the machine's version stats every job file and reads the live index per tick
+  (`machine_status.py::machine_version`), `entries_version` parses every
   manifest, and archive-wide signatures serve as read versions (`evidence/read.py:551-554`,
   `measurement_log.py:271-280`), so any run's archive write invalidates every evidence and cells view.
   The same root: a writer-stamped version per subject.
@@ -420,11 +426,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   against `webapp/app/CLAUDE.md`'s one-skin rule. Action: fields skin in `base.css` alone.
   **Rides with:** webd. **Re-test:** no `border:` on an `input` / `select` / `textarea` selector
   outside `foundation/base.css`.
-- **The webapp's live state lands on the wrong subject or the wrong version** (a live-state pass,
-  reported): feed versions are unordered hashes
-  (`application/cycle_reads.py::feed_versions`, a sha of `repr`), so a stale read reverts a draft
-  edit, an ack shows applied before the feed moves, and a second press files a second start-run
-  (root: a monotone version per subject). **Rides with:** webd.
 - **An inner campaign serves a Delete no door presses** (webd-3's report): `domain/hierarchy.py::SubtreeCampaign`
   subclasses `HierarchyCampaign`, so an inner campaign in the deep read inherits its
   `delete: DeleteAct` (`delete-campaign`), which nothing may file for it. Root: the subtree entry is
