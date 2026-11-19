@@ -77,11 +77,11 @@ from promptpotter.domain.verification import (
 )
 from promptpotter.infrastructure.store.layout import CycleLayout
 from promptpotter.infrastructure.store.read_model import (
+    LastOf,
     LedgerFold,
     LedgerIndex,
     LedgerSpan,
     RecordClasses,
-    last_fold,
     money_on,
     scan_last,
 )
@@ -719,18 +719,13 @@ class _Timeline:
 
 
 LedgerIndex.readers(
-    *map(
-        last_fold,
-        (
-            CampaignCeilingRecord,
-            CycleMintedRecord,
-            CycleShareRecord,
-            PartitionRecord,
-            RunPhaseRecord,
-            RunWiringRecord,
-            ScoringLockedRecord,
-        ),
-    ),
+    LastOf(CampaignCeilingRecord),
+    LastOf(CycleMintedRecord),
+    LastOf(CycleShareRecord),
+    LastOf(PartitionRecord),
+    LastOf(RunPhaseRecord),
+    LastOf(RunWiringRecord),
+    LastOf(ScoringLockedRecord),
     _ResolvedRun,
     _ArmActs,
     _LaunchClocks,
@@ -752,7 +747,7 @@ def _view[V](ledger_path: Path, fold: Callable[[], LedgerFold[Any, V]]) -> V:
 def scan_each_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> list[R | None]:
     """Each span's own last *record*, ``None`` where it holds none, the earliest span's first."""
     return [
-        cast("R | None", LedgerIndex.of(span.path).view(last_fold(record), span.until))
+        cast("R | None", LedgerIndex.of(span.path).view(LastOf(record), span.until))
         for span in spans
     ]
 

@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from bisect import bisect_right
 from collections import OrderedDict, deque
 from collections.abc import Callable, Hashable, Iterable, Sequence
+from dataclasses import dataclass
 from functools import cache, partial
 from io import BytesIO
 from itertools import islice
@@ -157,7 +158,8 @@ RecordClasses = tuple[type[StrictModel], ...]
 class LedgerFold[R: StrictModel, V](Protocol):
     """`feed` takes a line VALIDATED as one of `records`; `value` is a snapshot."""
 
-    records: ClassVar[RecordClasses]
+    @property
+    def records(self) -> RecordClasses: ...
 
     def feed(self, record: R) -> None: ...
 
@@ -450,13 +452,13 @@ class LedgerIndex(_LedgerTail):
 
     _registry: ClassVar[OrderedDict[Path, LedgerIndex]] = OrderedDict()
     # Every fold a reader declares (`readers`), whichever index it is read on.
-    _readers: ClassVar[list[type[Any]]] = []
+    _readers: ClassVar[list[type[Any] | LastOf]] = []
     # The declared folds that write nothing: every index folds them together.
     _screened: ClassVar[list[_Make]] = []
     _registry_lock: ClassVar[threading.Lock] = threading.Lock()
 
     @classmethod
-    def readers(cls, *folds: type[Any]) -> None:
+    def readers(cls, *folds: type[Any] | LastOf) -> None:
         """The roster every reader of a ledger declares its folds on, a `Projection` by subclassing."""
         with cls._registry_lock:
             cls._readers.extend(fold for fold in folds if fold not in cls._readers)
@@ -718,9 +720,8 @@ def _stash(snapshot: Path, joined: _Joined) -> None:
 
 
 class _Last:
-    records: ClassVar[RecordClasses]
-
-    def __init__(self) -> None:
+    def __init__(self, records: RecordClasses) -> None:
+        self.records = records
         self._found: StrictModel | None = None
 
     def feed(self, record: StrictModel) -> None:
@@ -730,20 +731,26 @@ class _Last:
         return self._found
 
 
-@cache
-def last_fold(record: type[StrictModel]) -> type[_Last]:
-    """The fold holding a ledger's last *record*, held by its name here, as a fold snapshot
-    pickles it."""
-    made = type(f"_Last{record.__name__}", (_Last,), {"records": (record,)})
-    globals()[made.__name__] = made
-    return made
+@dataclass(frozen=True)
+class LastOf:
+    """Makes the fold holding a ledger's last *record*: a value, so a fold snapshot pickles it by
+    its record and the key it loads equals the one asked."""
+
+    record: type[StrictModel]
+
+    @property
+    def records(self) -> RecordClasses:
+        return (self.record,)
+
+    def __call__(self) -> _Last:
+        return _Last(self.records)
 
 
 def scan_last[R: StrictModel](spans: Iterable[LedgerSpan], record: type[R]) -> R | None:
     """The last *record* the spans hold, a later span's over an earlier one's."""
     found: R | None = None
     for span in spans:
-        own = LedgerIndex.of(span.path).view(last_fold(record), span.until)
+        own = LedgerIndex.of(span.path).view(LastOf(record), span.until)
         found = found if own is None else cast("R", own)
     return found
 

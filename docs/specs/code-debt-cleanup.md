@@ -367,10 +367,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   readers (`Narration.fold`, `StandingArm.fold`, the live board's rows) need the scorer's evaluators,
   which no domain fold holds. Action: the readers fold `StandingArm.cells` through
   `metrics.py::compute_composite_fitness` in `application/`, and the field goes (run data wiped).
-- **Generated `last` record classes live in module globals so a snapshot can pickle them** (rec's
-  landing): `store/read_model.py::last_fold` builds a class at runtime and registers it with
-  `globals()[made.__name__] = made`. Action: the last-wins records become declared classes, and the
-  registration goes. **Re-test:** `git grep -c "globals()\[" -- promptpotter/infrastructure/store/read_model.py` is 0.
 
 ### webd (the edge tail, after lw)
 
