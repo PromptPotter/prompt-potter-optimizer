@@ -270,7 +270,10 @@ and derived the knob couplings from each member's draws and the escalation ladde
 - **The cycle index reads its chain beside the store's**: `projections/cycle_index.py::read_cycle_index`
   takes a bare cycle dir and spells `ledger_chain(CycleDir(...))` itself, since the store imports it
   (`CampaignStore.load`) and so it cannot read `CampaignStore.chain`. Action: the index fold is
-  handed its hop's chain, `CycleIndexProjection` keyed by hop. **Rides with:** hubs.
+  handed its hop's chain, `CycleIndexProjection` keyed by hop. Built and reverted by store-5a:
+  `fold_cycle_index(hop, chain)` with `CampaignStore.load` = it over `self.chain(hop, moment=…)`,
+  blocked only by `scripts/offline_run.py`'s two `read_cycle_index(<dir>)` calls. **Rides with:**
+  the next chain owning `scripts/offline_run.py`.
   **Re-test:** `git grep -c "ledger_chain(CycleDir(" -- promptpotter` sums to at most 1.
 
 ### layers (alone, after valid, before the behaviour keys)
@@ -834,6 +837,11 @@ and derived the knob couplings from each member's draws and the escalation ladde
   and a bare `npx playwright test` does not refuse it (the gate rebuilds first). Root: the walk
   server refuses a bundle older than its sources. **Re-test:** a walk run on a stale build fails at
   start, naming the build.
+- **The walk's server reaches the network for model capabilities** (store-5a's report): a cloud
+  full gate went red on `playwright` once and green on its rerun with no web change, its WebServer
+  logging "model capability refresh failed … 403 Forbidden". Root: the walk world serves a pinned
+  capability answer and makes no outbound call. **Re-test:** the walk server makes no outbound
+  request (a refusing proxy changes no walk result).
 
 ### wave-5 · drift (the 2026-11-19 backbone hunt)
 
@@ -980,5 +988,10 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   mandatory set. **Rides with:** the next l4-outer link. **Re-test:** L2's subject survives any share.
 - **A machine's cell ceiling is counted twice**: `infrastructure/backend.py::MachineSlots` (a
   file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
-  in-process count per backend. Action: one count of one machine fact, reaching both. **Rides
-  with:** store-5a. **Re-test:** `git grep -c "class MachineSlots" -- promptpotter` is 0.
+  in-process count per backend. The two count different subjects: `infrastructure/backend.py::_SENDING` this
+  process's calls by `(connector, base_url)`, which `query_loop.py`'s `room()`/`freed()` schedule
+  from; `MachineSlots` containers across processes by `connector.name`, by file locks a probe
+  cannot read machine-wide (POSIX `fcntl` locks are per-process). Decided (2026-11-19): for a
+  machine-held connector the in-process count gives way and arming waits on the pool, one count of
+  one fact. **Rides with:** a store or spend lane. **Re-test:** no machine-held connector's arming
+  reads `_SENDING`.

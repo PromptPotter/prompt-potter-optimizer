@@ -194,7 +194,10 @@ BASELINE = {
     # names its headline's column (`Election.ended_on`), the one an unfiltered spread reads.
     # store-4 (+7): `io.py::refuse_off_workspace` matches a store's workspace to `WORKSPACE_SHAPES`
     # through the anchor's own `_place` (one compare, `_plain` folded in).
-    "package_lines": 112193,
+    # store-5a (+5): a population's signature carries a scoped task's own walk counts, so a round
+    # close reloads only the populations it moved; `LastOf`, a declared fold, where `last_fold`
+    # made record classes in module globals.
+    "package_lines": 112198,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
