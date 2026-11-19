@@ -24,6 +24,7 @@ import {
   type ValueType,
 } from "@/lib/derivations";
 import { readGap } from "@/lib/hooks/useRead";
+import { useStableContent } from "@/lib/stable";
 import type { ReadResult } from "@/lib/read-cache";
 import { useNodeSchema, type PipelineAt } from "@/lib/hooks/useConnector";
 import type { NodeScope } from "@/lib/address";
@@ -60,10 +61,8 @@ export function NodeConfigEditor(props: {
   } = props;
   const { read, config: declared, isSingleNode } = useNodeSchema(pipelineAt, scope);
   const nodeId = node ?? "";
-  const base = useMemo(
-    () => configRows(declared, overlay, mode, node),
-    [declared, overlay, mode, node],
-  );
+  // Keyed on its content: an answer whose base holds the same values keeps an edit in flight.
+  const base = useStableContent(useMemo(() => configRows(declared, overlay, mode, node), [declared, overlay, mode, node]));
   const [rows, setRows] = useState<ConfigRow[]>(base);
   const [touched, setTouched] = useState<ReadonlySet<string>>(() => new Set());
   // The steer fork's seed lands async (`useRound`); an earlier edit must not mask it.

@@ -8,7 +8,8 @@ import { useSelection } from "@/lib/state/selection";
 import { useSearchpointCopy } from "@/lib/hooks/useSearchpointCopy";
 import { useWorkspace } from "@/lib/state/workspace";
 import type { ObserveState } from "@/lib/address";
-import { CopyButton, Empty, FailureLine, Loading, SegmentedControl } from "@/components/ui";
+import { readGap } from "@/lib/hooks/useRead";
+import { CopyButton, Empty, FailureLine, Loading, ReadState, SegmentedControl } from "@/components/ui";
 import { RoundFacts, RoundVerdict } from "./RoundFacts";
 import { SubjectDiff } from "./SubjectDiff";
 import { SubjectFlips } from "./SubjectFlips";
@@ -17,7 +18,7 @@ import { SubjectSignals } from "./SubjectSignals";
 import { WinnerStanding } from "./WinnerStanding";
 
 export function SubjectBox() {
-  const { dash } = useViewedDashboard();
+  const { read } = useViewedDashboard();
   const { setObserve } = useSelection();
   const subject = useObserveSubject();
   const { point, reading } = subject;
@@ -37,7 +38,9 @@ export function SubjectBox() {
     datasetName: null,
   });
 
-  if (!dash?.cycle_id) return null;
+  // I1: until the viewed cycle's dashboard lands, the card says why it shows no leader.
+  const gap = readGap(read);
+  if (gap) return <ReadState read={gap} subject="the viewed run's leader">{() => null}</ReadState>;
   return (
     <div className="subject-box">
       <SubjectSignals origin={evidence.origin} shown={evidence.shown} compare={evidence.compare} />

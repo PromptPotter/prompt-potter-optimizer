@@ -5,8 +5,6 @@ import type {
   BrowserKind,
   CommandPayloads,
   CommandResponses,
-  ConfigOverrides as WireConfigOverrides,
-  ForkStart as WireForkStart,
   VerifyReading,
 } from "@/lib/api/types";
 
@@ -102,12 +100,9 @@ export function cycleAddress(path: CyclePath): {
     ...(descend ? { descend } : {}),
   };
 }
-// Absent inherits the parent; a present value is ABSOLUTE for the fork.
-export type ConfigOverrides = Partial<WireConfigOverrides>;
+// The fork's start as sent (`CommandSent`): absent inherits the parent, a present value is ABSOLUTE.
+export type ForkStart = NonNullable<CommandPayloads["fork-cycle"]["start"]>;
 // The reconcile dialog's subset: the policy knobs break search comparability, so it sets none.
-export type RunLimitOverrides = Partial<Pick<WireConfigOverrides, "budget" | "nodes">>;
-export type ForkStart = Partial<Omit<WireForkStart, "config_overrides">> & {
-  config_overrides?: ConfigOverrides;
-};
+export type RunLimitOverrides = Pick<NonNullable<ForkStart["config_overrides"]>, "budget" | "nodes">;
 // Per press, never draft state: a reopened check-in must not show a budget nobody re-entered.
 export type StartCheckinOptions = Omit<CommandPayloads["start-checkin"], "draft_id">;

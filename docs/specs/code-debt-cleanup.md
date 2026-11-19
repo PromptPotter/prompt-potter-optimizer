@@ -468,26 +468,26 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (`application/cycle_reads.py::feed_versions`, a sha of `repr`), so a stale read reverts a draft
   edit, an ack shows applied before the feed moves, and a second press files a second start-run
   (root: a monotone version per subject). **Rides with:** webd.
-- **The served contract has three hand copies** (✓): `commands.ts:103-108` hand-writes `Partial`
-  `ConfigOverrides` / `ForkStart` beside the generated `CommandSent`; SSE frames are cast with `as`
-  (`live-stream.ts::openLiveStream`); the build handshake covers fetches, not streams; and
-  the client decides what Delete files (`CampaignMenu.tsx:44-54` vs `workspace_edits.py:62-77`).
-  **Rides with:** webd.
-- **An L4 panel's Leader card is empty** (C0 on a3312e3e1, 390 and 1280): `panes.tsx::LeaderPane`'s
-  `SubjectBox` draws nothing for an origin-only outer campaign and no line says why (I1). **Rides
-  with:** webd. **Re-test:** that card names the origin or says why it has no leader.
+- **The served contract has two hand copies** (✓): SSE frames are cast with `as`
+  (`live-stream.ts::openLiveStream`) and the build handshake (`X-Served-Contract`) covers fetches, not
+  streams, which `EventSource` cannot read a header of: each frame carries the stamp, a server change in
+  `application/cycle_reads.py::feed_frames` and the cycle tail; and the client decides what Delete
+  files (`CampaignMenu.tsx:44-63` picks `discard-draft` vs `delete-campaign` and words what goes, vs
+  `workspace_edits.py:64-78`): the listing entry (`domain/hierarchy.py`) serves it; Delete's dialog
+  words what the server removes (`CampaignMenu.tsx:175`, "the shared measurement cache survives") and
+  ignores `keep_results` (webd-1's report). **Rides with:** webd.
+- **A mock misses a module another test file loaded** (live-3's and webd-1's reports):
+  `webapp/vitest.config.ts:11` runs `isolate: false`, so a `vi.mock` of a module an earlier file
+  imported silently reaches the real one. Action: facts mount real providers, and the gate refuses
+  `vi.mock` of `@/lib/hooks/*` / `@/lib/state/*`. **Re-test:** the gate's count of such mocks is 0.
+- **A bare campaign link says it opens nothing, then opens it** (webd-1's report): a deep link
+  `#<campaign id>` shows the masthead's "This link opens nothing" while `openHash` opens the campaign.
+  Root: the banner and `openHash` read the address two ways; one parser serves both. **Re-test:** a
+  bare campaign link opens with no banner.
 - **A round's own arms are spelled beside `MeasurementRole.is_proposal`** (live-3f's report):
   `scoring/passes.py:266`, `domain/run_standing.py:444`, `store/lineage_queries.py:184,203` still
   write `role != MeasurementRole.PARENT`. Action: each asks `is_proposal`. **Re-test:**
   `git grep -c "!= MeasurementRole.PARENT" -- promptpotter` is 0.
-- **A steer editor resets on its base's identity** (live-3f's report): `NodeConfigEditor.tsx:71`
-  resets its rows when `base` is a new object, so a steer edit on a round in flight resets on each
-  answer. Action: the base keys on its content. **Re-test:** an edit survives a new answer whose
-  base holds the same values.
-- **A read picks its freshness off its own last answer** (live-3f's report): `useRound.ts:35` peeks
-  `readResult` to choose `roundRead`'s `once` vs `byEtag`. Action: a `final(body)` on
-  `ReadDescriptor`, owned by `read-cache.ts`, stops a read once its answer says it is final.
-  **Re-test:** no hook imports `readResult` to pick a descriptor.
 
 ### batch/28 · lb
 

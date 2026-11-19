@@ -11,7 +11,7 @@ import {
   type ObserveConfig,
 } from "../derivations";
 import type { CyclePath } from "../ids";
-import { readResult, type ReadResult } from "../read-cache";
+import type { ReadResult } from "../read-cache";
 import { useMomentAt } from "@/lib/state/workspace";
 import { shownData, useRead } from "./useRead";
 
@@ -31,9 +31,7 @@ const NO_ARMS: ServedArm[] = [];
 // The round read alone, filed or in flight: the server merges the two into one series.
 export function useRound(path: CyclePath | null, round: number | null): Round {
   const at = useMomentAt(path);
-  // The round's last answer says whether it still follows its store: once filed, it reads once.
-  const held = path && round != null ? shownData(readResult(roundRead(path, round, at))) : null;
-  const read = useRead(path && round != null ? roundRead(path, round, at, held?.unfiled ?? true) : null);
+  const read = useRead(path && round != null ? roundRead(path, round, at) : null);
   const doc = shownData(read);
   const arms = doc?.candidates ?? NO_ARMS;
   const unfiled = doc?.unfiled ?? false;

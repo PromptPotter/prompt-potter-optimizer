@@ -52,6 +52,8 @@ export interface ReadDescriptor<T, B = T> {
   // The feed subject whose move re-asks it, by prefix (`FeedFrame.subject`: `store:` and the hops
   // above the store it reads, or `machine`); absent, it reads once.
   subject?: string;
+  // An answer that says it is final: the read stops following its subject (a filed round).
+  final?: (body: B) => boolean;
   // While this stays the same, a re-keyed read shows the last body the key landed as `kept`.
   keep?: string;
   // A body that is not the answer yet (a warming dashboard): the read stays `loading` on it.
@@ -121,6 +123,12 @@ function resultOf(slot: Slot): ReadResult<unknown> {
   if (slot.failure) return { status: "failed", failure: slot.failure, kept };
   if (own) return heldRead(own.data);
   return { status: "loading", kept };
+}
+
+// The subject a read still follows: none once its answer says it is final.
+function followed(slot: Slot): string | undefined {
+  const read = descriptorOf(slot);
+  return slot.entry && read.final?.(slot.entry.data) ? undefined : read.subject;
 }
 
 function changed(slot: Slot): void {
@@ -243,7 +251,7 @@ async function fly(slot: Slot, read: AnyRead, flight: Flight): Promise<unknown> 
       slot.flight = null;
       const owed = [...slot.owed];
       slot.owed.clear();
-      if (slot.subs.size > 0 && owed.some(([subject, version]) => slot.stood?.[subject] !== version)) {
+      if (slot.subs.size > 0 && followed(slot) !== undefined && owed.some(([subject, version]) => slot.stood?.[subject] !== version)) {
         ask(slot, true);
       }
     }
@@ -378,7 +386,7 @@ let closeFeedStream: (() => void) | null = null;
 
 function moved({ subject, version }: FeedFrame): void {
   for (const slot of mounted()) {
-    const named = descriptorOf(slot).subject;
+    const named = followed(slot);
     if (named === undefined || !subject.startsWith(named)) continue;
     if (slot.flight) slot.owed.set(subject, version);
     else if (slot.stood?.[subject] !== version) ask(slot, true);

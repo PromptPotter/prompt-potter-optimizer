@@ -342,17 +342,11 @@ export function cycleFileRead(
   return once("file", cyclePathUrl("cycle-file", path, {}, { scope, path: filePath }));
 }
 
-export function roundRead(
-  path: CyclePath,
-  round: number,
-  at: number | null = null,
-  unfiled = true,
-): ReadDescriptor<RoundView> {
+export function roundRead(path: CyclePath, round: number, at: number | null = null): ReadDescriptor<RoundView> {
   const url = cyclePathUrl("cycle-round", path, { round_num: String(round) }, at == null ? {} : { at: String(at) });
-  // In flight it moves with its store. Filed, it reads once: its rows re-read the archive
+  // In flight it moves with its store. Filed, it is final: its rows re-read the archive
   // (`closed_rounds.py::walked_rows`), so no close stamps it, and a live store's version moves per tick.
-  if (!unfiled) return { ...once<RoundView>("round", url), auth: true };
-  return { ...byEtag<RoundView>("round", url), auth: true, subject: storeOf(path) };
+  return { ...byEtag<RoundView>("round", url), auth: true, subject: storeOf(path), final: (view) => !view.unfiled };
 }
 
 export function roundAuditRead(path: CyclePath, round: number): ReadDescriptor<RoundAudit | null> {
