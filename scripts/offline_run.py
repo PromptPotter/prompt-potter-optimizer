@@ -134,6 +134,7 @@ from promptpotter.domain.phases import RunPhase, StopOutcome, StopReason, stop_r
 from promptpotter.domain.pipeline_manifest import prompt_key
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.run_records import CycleStart, OriginGatePass
+from promptpotter.domain.results import RoundOutcome
 from promptpotter.domain.ruler import RulerOwn
 from promptpotter.domain.run_mode import OnDivergence, RunMode
 from promptpotter.domain.sample import Bank, Sample
@@ -1732,10 +1733,15 @@ def _jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
 
 
+def _round_file(path: Path) -> dict[str, Any]:
+    """A round file as it stands, with the rank its arms read in: a round file stores facts."""
+    d = json.loads(path.read_text(encoding="utf-8"))
+    ranked = RoundOutcome.model_validate({k: d[k] for k in RoundOutcome.model_fields}).ranked()
+    return {**d, "scoreboard": [row.model_dump(mode="json") for row in ranked]}
+
+
 def extract(cycle: Path, bench: BenchScore | None) -> dict[str, Any]:
-    rounds = [
-        json.loads(p.read_text(encoding="utf-8")) for p in sorted((cycle / "rounds").glob("*.json"))
-    ]
+    rounds = [_round_file(p) for p in sorted((cycle / "rounds").glob("*.json"))]
     ledger = _jsonl(cycle / ".runtime" / "ledger.jsonl")
     folded = read_cycle_index(cycle, moment=None)
     assert folded is not None, f"{cycle.name} ran without minting its cycle"
