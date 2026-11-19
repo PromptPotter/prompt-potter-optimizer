@@ -199,6 +199,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     campaign_defaults,
     install_dataset,
     resolve_dataset,
+    runnable_definition,
 )
 from promptpotter.infrastructure.store.io import write_json, write_yaml
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
@@ -720,7 +721,7 @@ def launched_bank(stores: Stores, world: Router, bank: Sequence[Sample]) -> None
 
 def declaration_of(session: Session, config: CampaignConfig, purpose: Purpose) -> RunDeclaration:
     """*config* declared under *purpose*, as a mint numbers an arm."""
-    return RunDeclaration.of(run_spec(session, config, purpose), purpose)
+    return RunDeclaration(spec=run_spec(session, config, purpose), purpose=purpose)
 
 
 async def run_init_round(
@@ -751,12 +752,11 @@ async def run_init_round(
         dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=entered
     ) as session:
         session, config = laid_session(session, ConfigLayers(campaign_defaults(), raw))
-        declaration = run_spec(session, config, Optimize())
 
         async def run(held: HeldBudget) -> tuple[RoundContext, CycleResult]:
             minted = await mint_framed_cycle(
                 session,
-                declaration,
+                config,
                 session.bank.samples,
                 task_text=None,
             )
@@ -773,7 +773,11 @@ async def run_init_round(
             at=None,
             requested=Budget(),
             step_rounds=None,
-            sends=sends_on(stores, config, declaration.environment.connector),
+            sends=sends_on(
+                stores,
+                config,
+                runnable_definition(resolve_dataset(stores, LAUNCHED_DATASET)).connector,
+            ),
         )
         try:
             ctx, ended = await run(held)
@@ -865,14 +869,14 @@ def minted_campaign(
         treatment=select_optimizer(config.optimization).treatment(
             frozenset(Presumption), PackShelf(account=None)
         ),
-        declaration=RunDeclaration.of(
-            declare_run(
+        declaration=RunDeclaration(
+            spec=declare_run(
                 config,
                 dataset_hash=fields.pop("dataset_hash", "bank"),
                 connector=fields.pop("connector", "termnorm"),
                 bench_defaults_pin=bench_defaults_pin(),
             ),
-            purpose,
+            purpose=purpose,
         ),
         **fields,
     )

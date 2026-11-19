@@ -193,7 +193,7 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
             dataset_name=campaign.dataset_name,
-            dataset_hash=campaign.declaration.dataset_hash,
+            dataset_hash=campaign.declaration.spec.dataset_hash,
             treatment=campaign.treatment,
             models=models,
             ledger_offset=offset,

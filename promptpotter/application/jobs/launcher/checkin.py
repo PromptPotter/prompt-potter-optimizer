@@ -22,7 +22,6 @@ from promptpotter.application.jobs.mint import (
     mint,
     refuse_unrunnable,
     resolve_cycle_plan,
-    run_spec,
 )
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import (
@@ -94,8 +93,8 @@ class CheckinStart:
             session, config = laid_session(opened.session, opened.layers)
             plan = resolve_cycle_plan(
                 session,
-                run_spec(session, config, optimize := Optimize()),
-                optimize,
+                config,
+                Optimize(),
                 session.bank.samples,
                 origin_override=opened.origin_override,
             )

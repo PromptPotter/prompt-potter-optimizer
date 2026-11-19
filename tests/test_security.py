@@ -93,6 +93,7 @@ from promptpotter.application.commands.dispatcher import Applier, CommandCall, C
 from promptpotter.application.commands.launching import launch_cancels
 from promptpotter.application.cycle_addressing import cycle_target, followed_cycle
 from promptpotter.application.cycle_files import FileScope, read_cycle_file
+from promptpotter.application.datasets.authored import effective_config
 from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.datasets.tabular_ingest import IngestError
@@ -3860,7 +3861,7 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
         stores, pipeline_schema([solve]), rows, dataset=resolve_dataset(stores, "acts")
     )
     declared = declaration_of(starting, defaulted_config(unframed), Optimize())
-    plan = resolve_cycle_plan(starting, declared, declared.purpose, rows)
+    plan = resolve_cycle_plan(starting, effective_config(declared.spec), declared.purpose, rows)
     moved, edit = await drafted("moved")
 
     async def _started(_: object) -> Applier[Launched]:

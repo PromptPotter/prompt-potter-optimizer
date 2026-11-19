@@ -177,7 +177,7 @@ class CyclePlan:
     @property
     def declaration(self) -> RunDeclaration:
         assert not isinstance(self.purpose, ArmSeat), "an arm is declared as its mint numbers it"
-        return RunDeclaration.of(self.spec, self.purpose)
+        return RunDeclaration(spec=self.spec, purpose=self.purpose)
 
     @property
     def cycle_id(self) -> str:
@@ -229,27 +229,34 @@ def run_spec(
 
 def resolve_cycle_plan(
     session: Session,
-    spec: RunSpec,
+    config: CampaignConfig,
     purpose: Purpose | ArmSeat,
     dataset: Sequence[Sample],
     *,
     origin_override: dict[str, NodePrompt] | None = None,
-    resumed: Campaign | None = None,
 ) -> CyclePlan:
-    """What a cycle RUNS: its line's starts, the origin among them, as the configure lays them. A
-    *resumed* campaign's session is bound to one of its cycles, which the caller loaded once."""
+    """What a cycle to mint RUNS: *config* declared for *purpose* (`run_spec`), its origin among
+    its line's starts."""
+    spec = run_spec(session, config, purpose)
+    # The one span the mint writes, so the cycle is what it reads back as.
+    start = (
+        CycleStart(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
+        if origin_override
+        else None
+    )
+    cycle = CycleConfig.laid(effective_config(spec), [LaidSpan(start=start, scoring_lock=None)])
+    return _planned(session, spec, purpose, dataset, cycle)
+
+
+def _planned(
+    session: Session,
+    spec: RunSpec,
+    purpose: Purpose | ArmSeat,
+    dataset: Sequence[Sample],
+    cycle: CycleConfig,
+) -> CyclePlan:
+    """What *cycle* RUNS, as the configure lays it."""
     schema = session.pipeline_schema
-    if resumed is not None:
-        assert origin_override is None, "a minted cycle's origin is its line's starts"
-        cycle = cycle_config(session.store, CampaignCycle(resumed, session.cycle_id))
-    else:
-        # The one span the mint writes, so the cycle is what it reads back as.
-        start = (
-            CycleStart(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
-            if origin_override
-            else None
-        )
-        cycle = CycleConfig.laid(effective_config(spec), [LaidSpan(start=start, scoring_lock=None)])
     configured = configure_and_apply_pipeline(session, cycle)
     pipeline_params = configured.pipeline_params
     selected = select_optimizer(cycle.config.optimization)
@@ -363,12 +370,16 @@ def _revision_moved(
 def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> CyclePlan:
     """*session* is bound to the cycle the resume runs, past the campaign's own refusals."""
     declared = campaign.declaration
-    plan = resolve_cycle_plan(session, declared, declared.purpose, dataset, resumed=campaign)
-    checked = plan
+
+    def resumed(bound: Session) -> CyclePlan:
+        """*bound* is bound to one of the campaign's cycles, which the caller loaded once."""
+        cycle = cycle_config(bound.store, CampaignCycle(campaign, bound.cycle_id))
+        return _planned(bound, declared.spec, declared.purpose, dataset, cycle)
+
+    plan = checked = resumed(session)
     if session.hop != campaign.root_hop:
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
-        root = session.bound(campaign.root_cycle)
-        checked = resolve_cycle_plan(root, declared, declared.purpose, dataset, resumed=campaign)
+        checked = resumed(session.bound(campaign.root_cycle))
     campaigns = session.store.campaigns
     recorded = scan_resolved_run(campaigns.chain(campaign.root_hop))
     wired = campaigns.last(campaign.root_hop, RunWiringRecord)
@@ -521,9 +532,7 @@ async def arm_plans(
             )
         seat = request.seat(arm)
         plans.append(
-            resolve_cycle_plan(
-                armed, run_spec(armed, config, seat), seat, dataset, origin_override=origin_override
-            )
+            resolve_cycle_plan(armed, config, seat, dataset, origin_override=origin_override)
         )
     _held_to_record(
         plans,
@@ -606,7 +615,9 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     campaigns.create_campaign(campaign)
     # The name labels the bank its newest campaign declares; a sandbox's datasets are the account's.
     if not session.store.inner:
-        session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
+        session.store.tenant_datasets.relabel(
+            session.measured_dataset, declaration.spec.dataset_hash
+        )
     return session
 
 
@@ -692,7 +703,7 @@ def _description_to_decompose(
 
 async def mint_framed_cycle(
     session: Session,
-    spec: RunSpec,
+    config: CampaignConfig,
     dataset: Sequence[Sample],
     *,
     task_text: str | None,
@@ -701,7 +712,7 @@ async def mint_framed_cycle(
     """An optimize run; an arm is planned with its head-to-head, and an L4 inner cell mints
     through ``mint``, so cells never race to decompose."""
     # Every refusal the mint owes, before the check-in below bills.
-    plan = resolve_cycle_plan(session, spec, Optimize(), dataset, origin_override=origin_override)
+    plan = resolve_cycle_plan(session, config, Optimize(), dataset, origin_override=origin_override)
     (minted,) = await _mint_framed(session, [plan], task_text=task_text)
     return minted
 

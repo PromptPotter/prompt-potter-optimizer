@@ -14,11 +14,10 @@ from promptpotter.application.jobs.mint import (
     OpenedCycle,
     mint_framed_cycle,
     resolve_resume,
-    run_spec,
 )
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
-from promptpotter.domain.campaign import CampaignCycle, Optimize
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
 from promptpotter.domain.job import CampaignLaunch
@@ -108,7 +107,7 @@ class FreshMint:
             session, config = laid_session(session, self.layers)
             yield await mint_framed_cycle(
                 session,
-                run_spec(session, config, Optimize()),
+                config,
                 session.bank.samples,
                 task_text=self.task_text,
             )

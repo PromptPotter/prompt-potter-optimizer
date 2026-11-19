@@ -79,7 +79,7 @@ from promptpotter.application.commands.dispatcher import (
     DispatchedToCycle,
 )
 from promptpotter.application.commands.limits_and_queue import change_run_limits
-from promptpotter.application.datasets.authored import ConfigLayers
+from promptpotter.application.datasets.authored import ConfigLayers, effective_config
 from promptpotter.application.datasets.draft_campaign import new_draft
 from promptpotter.application.datasets.loaders import archive_entry
 from promptpotter.application.datasets.startability import offered_dataset
@@ -5850,7 +5850,11 @@ def test_a_framing_paid_before_its_cycle_exists_stays_billed_past_its_refused_mi
 
     monkeypatch.setattr(mint, "commit_task_framing", framed)
     with pytest.raises(PayloadInvalidError):
-        asyncio.run(mint.mint_framed_cycle(framing, declared, rows, task_text="frame this"))
+        asyncio.run(
+            mint.mint_framed_cycle(
+                framing, effective_config(declared.spec), rows, task_text="frame this"
+            )
+        )
     assert not draft_dirs(stores.campaigns.workspace), "an unminted framing left its ledger"
     assert account_usd() == pytest.approx(with_draft + 0.03), "a refused mint un-spent its framing"
 
@@ -5865,7 +5869,9 @@ def test_a_mint_that_dies_before_its_commit_leaves_no_campaign_to_list_run_or_bi
     def _dies(*_: object) -> None:
         raise OSError("torn")
 
-    torn_plan = mint.resolve_cycle_plan(framing, declared, declared.purpose, rows)
+    torn_plan = mint.resolve_cycle_plan(
+        framing, effective_config(declared.spec), declared.purpose, rows
+    )
     with monkeypatch.context() as tearing, pytest.raises(OSError, match="torn"):
         tearing.setattr(type(stores.campaigns), "mint_cycle", _dies)
         mint.mint(torn_plan, campaign_id="torn__000001", adopting=None)

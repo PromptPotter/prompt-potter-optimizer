@@ -113,8 +113,10 @@ def _measured(loop: Mapping[str, Any], prefix: tuple[str, ...]) -> dict[str, Any
 
 def measured_address(declaration: RunDeclaration) -> dict[str, Any]:
     """What a root id addresses: the declaration less its budget, defaults pin and spend- or display-only keys."""
-    dumped = declaration.model_dump(mode="json", exclude={"budget", "bench_defaults_pin", "loop"})
-    return {**dumped, "loop": _measured(declaration.loop, ())}
+    spec = declaration.spec
+    dumped = spec.model_dump(mode="json", exclude={"budget", "bench_defaults_pin", "loop"})
+    purpose = declaration.model_dump(mode="json", include={"purpose"})
+    return {**dumped, **purpose, "loop": _measured(spec.loop, ())}
 
 
 # Gravest first: an ill-defined statistic, a silent waste, knobs that co-move.

@@ -5700,7 +5700,7 @@ def declared_head_to_heads() -> _Declared:
         purpose=Compare(arm=Arm(head_to_head_id="any", arm_key="any", replicate=1)),
     ).declaration
     for h2h_id in ("real4", "real5", "real6", "real7", "real8"):
-        alike = declared.shared_part()
+        alike = declared.spec.shared_part()
         if h2h_id == "real8":
             # Declared over defaults its arms no longer run under.
             alike = alike.model_copy(update={"bench_defaults_pin": "moved"})
@@ -5930,7 +5930,7 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
             created_at="",
             origin="origin",
             cell_identity={},
-            shared=declared.shared_part(),
+            shared=declared.spec.shared_part(),
             ruler_version=0,
         )
     )

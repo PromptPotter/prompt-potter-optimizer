@@ -18,7 +18,6 @@ from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.errors import ConflictError
-from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 
@@ -198,20 +197,12 @@ class RunSpec(FrozenModel):
         )
 
 
-class RunDeclaration(RunSpec):
+class RunDeclaration(FrozenModel):
     """What a campaign, an L4 seat and a head-to-head arm each ARE: its spec and its purpose."""
 
+    spec: RunSpec
     # Part of what an arm IS, so two arms of one content never share a run id.
     purpose: Purpose
-
-    @classmethod
-    def of(cls, spec: RunSpec, purpose: Purpose) -> RunDeclaration:
-        """*spec*'s own fields: a declaration passed as one lays its spec, never its purpose."""
-        return cls(**{name: getattr(spec, name) for name in RunSpec.model_fields}, purpose=purpose)
-
-    @property
-    def digest(self) -> str:
-        return stable_hash(self.model_dump(mode="json"))
 
 
 # The loop keys every arm of a head-to-head runs alike.
@@ -362,7 +353,7 @@ class Campaign(FrozenModel):
     @property
     def connector(self) -> str:
         """FROZEN at mint: a campaign outlives its dataset dir, so re-pointing a slug must not re-kind it."""
-        return self.declaration.environment.connector
+        return self.declaration.spec.environment.connector
 
     @property
     def active(self) -> bool:

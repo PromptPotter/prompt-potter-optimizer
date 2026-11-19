@@ -618,7 +618,7 @@ def _read(
         budget=budget,
         stopping=optimization.stopping,
         determinism=optimization.determinism,
-        bench_defaults_pin=campaign.declaration.bench_defaults_pin,
+        bench_defaults_pin=campaign.declaration.spec.bench_defaults_pin,
         optimizer_models=tuple(optimizer_models),
         human_intervened=reading.human_intervened,
         left_comparison=tuple(stores.campaigns.arm_acts(hop.campaign_id)),
@@ -637,7 +637,7 @@ def _read(
             budget=budget,
             stopping=optimization.stopping,
             determinism=optimization.determinism,
-            bench_defaults_pin=campaign.declaration.bench_defaults_pin,
+            bench_defaults_pin=campaign.declaration.spec.bench_defaults_pin,
             spend_metered=None
             if spend is None
             else MeteredSpend.of(spend, ceiling_meter(campaign.declaration.purpose)),

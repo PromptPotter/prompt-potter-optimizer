@@ -20,7 +20,6 @@ from promptpotter.application.jobs.mint import (
     mint,
     resolve_cycle_plan,
     resolve_resume,
-    run_spec,
 )
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -272,9 +271,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
             )
             if campaign is None:
                 minted = mint(
-                    resolve_cycle_plan(
-                        session, run_spec(session, config, ctx.purpose), ctx.purpose, train_data
-                    ),
+                    resolve_cycle_plan(session, config, ctx.purpose, train_data),
                     campaign_id=cell.campaign_id,
                     adopting=None,
                 )

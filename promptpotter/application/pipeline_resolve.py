@@ -635,7 +635,7 @@ def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
     """The one answer to whether what the declaration is a delta over moved since its mint."""
     declared = DefaultsPin(
-        bench=campaign.declaration.bench_defaults_pin, treatment=campaign.treatment
+        bench=campaign.declaration.spec.bench_defaults_pin, treatment=campaign.treatment
     )
     now = DefaultsPin(bench=bench_defaults_pin(), treatment=running)
     return None if now == declared else DefaultsDrift(declared=declared, running=now)
@@ -658,7 +658,7 @@ def declared_config(stores: Stores, campaign: Campaign) -> CycleConfig:
 
 def _declared(stores: Stores, campaign: Campaign) -> CampaignConfig:
     try:
-        return effective_config(campaign.declaration)
+        return effective_config(campaign.declaration.spec)
     except ValidationError as exc:
         raise FileUnreadableError(
             FileKind.MANIFEST,

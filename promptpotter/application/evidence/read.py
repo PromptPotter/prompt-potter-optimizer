@@ -249,7 +249,7 @@ def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
     return [
         c.campaign_id
         for c in stores.campaigns.list_campaigns(lifecycle="all")
-        if digest is not None and c.declaration.dataset_hash == digest
+        if digest is not None and c.declaration.spec.dataset_hash == digest
     ]
 
 
