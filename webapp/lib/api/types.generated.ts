@@ -3054,8 +3054,9 @@ export interface MetricSpec {
   label: string;
   expression: string;
   unit: 'rate' | 'score' | 'theta' | 'seconds' | 'usd' | 'tokens' | 'rank' | 'rounds';
-  /** Each value is a difference off an origin, so it reads signed, as a lift does */
-  lift: boolean;
+  /** `lift` where each value is a difference off an origin, so it reads signed;
+   * worded as an `Estimate` of this form is */
+  form: 'level' | 'lift';
   higher_is_better: boolean | null;
   description: string;
   /** What to CALL this metric's axis: the label, plus the unit only where the unit
@@ -5728,7 +5729,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "7cb72928f0f50a36";
+export const SERVED_CONTRACT = "ea48e0381b2513d9";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

@@ -148,8 +148,10 @@ export function fmtLift(unit: MeasurandUnit, v: number | null | undefined): stri
 // An estimate is served as facts alone (`paired_reading.py::Estimate`); `fmtMetric`, `fmtBand`
 // and `fmtEstimate` word it as its `point`, `band` and `text` do (the fixture
 // `estimate-words.generated.json` holds them to Python's words).
-// The value of an estimate in its unit: only a lift earns a sign.
-export function fmtMetric(e: Pick<Estimate, "unit" | "form" | "value"> | null | undefined): string {
+// The value of an estimate, or of a metric's cell, in its unit: only a lift earns a sign.
+export function fmtMetric(
+  e: (Pick<Estimate, "unit" | "form"> & { value: number | null | undefined }) | null | undefined,
+): string {
   if (e == null) return PLACEHOLDER;
   return e.form === "lift" ? fmtLift(e.unit, e.value) : fmtUnit(e.unit, e.value);
 }

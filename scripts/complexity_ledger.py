@@ -204,9 +204,13 @@ BASELINE = {
     # hashes the code a load runs (`landing.py::loading_modules`). bkeys-4 (+90): that code is the
     # import closure of what a load calls, one walk the gate's scripts share
     # (`shared/import_walk.py`, moved out of `scripts/last_green.py`); +10, a plugin manifest keys
-    # its own code and its built-in members' fingerprints (`nodes.py::behaviour_key`); −16, a
-    # round file stores facts (`RoundResult` dumps no computed field).
-    "package_lines": 112340,
+    # its own code and its built-in members' fingerprints; −16, a round file stores facts
+    # (`RoundResult` dumps no computed field). bkeys-4 fix (+31): a file is walked from its own
+    # tree (`import_walk.py::_tree`) and hashed off the walk's one parse; the walk reads every
+    # `KindTable` (`kinds.py::KindTable.every`); a plugin's built-in package keys by the one
+    # built-in reaching it, derived live beside `select_optimizer`
+    # (`optimizer_manifest.py::behaviour_key`).
+    "package_lines": 112371,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
