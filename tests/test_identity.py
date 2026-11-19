@@ -59,7 +59,7 @@ from factories import (
     workspace,
 )
 from offline_world import LLM_ONLY_NODE, Router
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
@@ -251,6 +251,7 @@ from promptpotter.domain.campaign_config import (
     CycleConfig,
     LaidSpan,
     OptimizerChoice,
+    refuse_code_defaults,
 )
 from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
@@ -3010,6 +3011,18 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
         "a resume moved the latest launch before its run held the cycle"
     )
     return _Held(opened, held_campaign)
+
+
+def test_a_factory_default_deep_in_the_tree_refuses_as_a_plain_one_does() -> None:
+    class Leaf(BaseModel):
+        held: list[int] = Field(default_factory=list)
+        listed: list[int] = Field(default_factory=lambda: [1])
+
+    class Root(BaseModel):
+        leaves: dict[str, Leaf | None] = Field(default_factory=dict)
+
+    with pytest.raises(RuntimeError, match=r"\['Leaf\.listed'\] default in code"):
+        refuse_code_defaults(Root)
 
 
 def test_a_manifest_over_moved_defaults_runs_on_them_and_says_so(

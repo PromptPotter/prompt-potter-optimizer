@@ -728,12 +728,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   laid over `defaults.yaml` by `fold_layers`; it reshapes the measured address every root id hashes
   (wipes run data, moves root ids). **Re-test:** `git grep -cE "\*\*defaults\." --
   promptpotter/application/datasets/authored.py` == 0 (now 2).
-- **The code-default refusal cannot see a factory default** (the cfg-4 landing): the import check in
-  `domain/campaign_config.py` reads `model_json_schema()`, which carries no `default_factory`'s value,
-  so `Field(default_factory=lambda: ["x"])` anywhere in the tree is a code default it passes and, since
-  cfg-4, one `bench_defaults_pin` never hashes. Today every factory yields `[]` or `{}` (8 fields over
-  the 12 models). Root: the one walk reads the default pydantic applies, a factory's included.
-  **Re-test:** a sub-model field `Field(default_factory=lambda: [1])` raises at import.
 
 ### wave-5 · webapp (what the responsive walk showed at the w5i landing)
 

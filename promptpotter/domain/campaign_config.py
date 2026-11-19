@@ -4,9 +4,9 @@ import functools
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, get_args
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.bench import BenchTrigger, DatasetSplit
@@ -428,16 +428,35 @@ class CampaignConfig(StrictModel):
 CAMPAIGN_RULE = rules_of(CampaignConfig)
 
 
-# A knob anywhere in a campaign document defaults in `defaults.yaml` or nowhere: a code default
-# would be a second source for one number. The schema's `$defs` are every model the tree nests.
-_SCHEMA = CampaignConfig.model_json_schema()
-if _defaulted := sorted(
-    f"{model}.{name}"
-    for model, held in [("CampaignConfig", _SCHEMA), *_SCHEMA["$defs"].items()]
-    for name, field in held.get("properties", {}).items()
-    if field.get("default") not in (None, [], {})
-):
-    raise RuntimeError(f"{_defaulted} default in code: `defaults.yaml` is a knob's one default.")
+def refuse_code_defaults(root: type[BaseModel]) -> None:
+    """A knob anywhere in *root*'s tree defaults in `defaults.yaml` or nowhere: a code default, a
+    factory's value included, would be a second source for one number. Only an absence passes."""
+    if defaulted := sorted(
+        f"{model.__name__}.{name}"
+        for model in _nested_models(root, {})
+        for name, field in model.model_fields.items()
+        if not field.is_required()
+        and field.get_default(call_default_factory=True, validated_data={}) not in (None, [], {})
+    ):
+        raise RuntimeError(f"{defaulted} default in code: `defaults.yaml` is a knob's one default.")
+
+
+def _nested_models(
+    annotation: object, seen: dict[type[BaseModel], None]
+) -> dict[type[BaseModel], None]:
+    annotation = getattr(annotation, "__value__", annotation)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        if annotation not in seen:
+            seen[annotation] = None
+            for field in annotation.model_fields.values():
+                _nested_models(field.annotation, seen)
+    else:
+        for arg in get_args(annotation):
+            _nested_models(arg, seen)
+    return seen
+
+
+refuse_code_defaults(CampaignConfig)
 
 
 def start_layer(overrides: ConfigOverrides) -> Layer[str]:
