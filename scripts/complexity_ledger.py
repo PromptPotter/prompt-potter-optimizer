@@ -156,7 +156,9 @@ BASELINE = {
     # webd-2 link 1 (+30): `cycle_reads.py::stamped_frames` and `FrameStamp`, the served contract on
     # every stream frame (an `EventSource` reads no header), and the two stamped frame models served.
     # rates-1 (−6): a launch awaits `pricing.py::refresh_rates_once`, no refresh thread per mint.
-    "package_lines": 111976,
+    # webd-3 link 1 (+8): `hierarchy.py::DeleteAct`, the listing serving what Delete files in its
+    # payload's own words, so the dialog decides nothing; `campaign_lifecycle` folded in (−9).
+    "package_lines": 111984,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

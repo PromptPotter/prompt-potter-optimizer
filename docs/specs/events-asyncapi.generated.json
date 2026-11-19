@@ -6390,7 +6390,7 @@
       },
       "ProjectionEnvelope": {
         "additionalProperties": false,
-        "description": "One outbound SSE frame, whose receiver treats an unknown field as a drift signal.",
+        "description": "One outbound SSE frame; the served contract it is stamped with hashes its schema.",
         "properties": {
           "activity": {
             "$ref": "#/components/schemas/ActivityState",

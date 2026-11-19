@@ -453,7 +453,9 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `indistinct_efforts`); `ReadKind.HEAD_TO_HEAD_PRICE` is the one read no webapp
   source calls, so a head-to-head launch never shows its price. Accumulated data reaches the dashboard
   (operator), so each field is shown or deleted server-side; request fields of kinds the browser does
-  not press (`from_round`, `keep_results`, …) come out of the count first. Action: a gate check holds
+  not press (`from_round`, …) come out of the count first. A stream frame's
+  `ProjectionEnvelope.payload` is `dict[str, Any]`, outside the contract's shape, and
+  `useCycleEvents.ts` reads only its `cycle_id` and `activity` (webd-3's report). Action: a gate check holds
   every served response field to a webapp reader, or to its model naming why not (as `Verb.unspelled` /
   `terminal_only` do for the CLI), on a baseline that only falls. **Rides with:** webd. **Re-test:**
   the check's baseline is 0.
@@ -468,22 +470,11 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (`application/cycle_reads.py::feed_versions`, a sha of `repr`), so a stale read reverts a draft
   edit, an ack shows applied before the feed moves, and a second press files a second start-run
   (root: a monotone version per subject). **Rides with:** webd.
-- **The served contract has two hand copies** (✓; its stream half closed by webd-2): the client
-  decides what Delete files (`CampaignMenu.tsx:44-63` picks `discard-draft` vs `delete-campaign` and words what goes, vs
-  `workspace_edits.py:64-78`): the listing entry (`domain/hierarchy.py`) serves it; Delete's dialog
-  words what the server removes (`CampaignMenu.tsx:175`, "the shared measurement cache survives") and
-  ignores `keep_results` (webd-1's report). **Rides with:** webd.
-- **A campaign's own address opens nothing** (webd-2's report): `#<campaign id>`, the hierarchy's
-  address for a campaign, is refused as malformed by `address.ts::parseAddress`, which reads only a
-  cycle hop (`campaign::cycle`); the banner IS `openHash`'s refusal (the campaign seemed to open
-  because the followed active run was it). Action: a deep link may name a campaign and opens its
-  served `facts.live_cycle`, or nothing mints such a link: decide by who mints one. **Re-test:**
-  `#<campaign id>` opens that campaign's line with no banner.
-- **A frame's guard reads its stamp alone** (webd-2's report): `live-stream.ts::stamped` checks only
-  `contract`, so a matching contract stands for the rest of the frame's shape, and
-  `projection_envelope.py:33` says the receiver treats an unknown field as drift, which no client does.
-  Root: one generated parse of a served shape, a fetch's and a frame's. **Rides with:** the served
-  contract row's Delete half.
+- **An inner campaign serves a Delete no door presses** (webd-3's report): `domain/hierarchy.py::SubtreeCampaign`
+  subclasses `HierarchyCampaign`, so an inner campaign in the deep read inherits its
+  `delete: DeleteAct` (`delete-campaign`), which nothing may file for it. Root: the subtree entry is
+  not a listed entry; it shares a base, not the listed one's acts. **Re-test:** the deep read's
+  inner campaign serves no `delete`.
 - **A round's own arms are spelled beside `MeasurementRole.is_proposal`** (live-3f's report):
   `scoring/passes.py:266`, `domain/run_standing.py:444`, `store/lineage_queries.py:184,203` still
   write `role != MeasurementRole.PARENT`. Action: each asks `is_proposal`. **Re-test:**

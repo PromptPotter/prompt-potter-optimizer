@@ -544,6 +544,7 @@ export interface HierarchyCampaign {
   span: HierarchySpan;
   entry_kind: 'campaign';
   facts: CampaignFacts;
+  delete: DeleteAct;
   /** Its cycles to `?depth=`, root first; none at depth 0. */
   children: HierarchyCycle[];
 }
@@ -683,6 +684,15 @@ export interface VendorModels {
   /** Full ids, de-duplicated, routing suffix kept: it routes and bills, so it names
    * a different run. */
   models: string[];
+}
+
+/** What a listed campaign's Delete files, worded by its kind's own payload. */
+export interface DeleteAct {
+  kind: 'delete-campaign' | 'discard-draft';
+  /** The payload's own sentence: what the act removes and keeps. */
+  says: string;
+  /** What pressing `keep_results` spares; null where the act takes no such choice. */
+  keep_results: string | null;
 }
 
 /** One cycle's run — root, fork or inner — as the listing serves it. */
@@ -1163,7 +1173,7 @@ export interface PassAdmission {
 
 /** An open check-in, listed as a campaign: no Start has minted it, so it has no
  * cycle, cycle, line or run. Its `address` is the draft id Start mints from
- * and `discard-draft` deletes. */
+ * and its `delete` discards. */
 export interface UnstartedCampaign {
   /** Server-minted and stable: the key of every row and every open set. A cycle's
    * is its `CyclePath` on the wire (`encodeCyclePath`). */
@@ -1182,6 +1192,7 @@ export interface UnstartedCampaign {
   lines: Said[];
   entry_kind: 'unstarted';
   span: HierarchySpan;
+  delete: DeleteAct;
 }
 
 /** One window of a family's chronology, oldest-first: a cycle, its forks and
@@ -1248,6 +1259,7 @@ export interface SubtreeCampaign {
   span: HierarchySpan;
   entry_kind: 'campaign';
   facts: SubtreeCampaignFacts;
+  delete: DeleteAct;
   /** Its cycles, root first. */
   children: SubtreeCycle[];
 }
@@ -4951,7 +4963,8 @@ export interface CompactArchivePayload {
   apply: boolean;
 }
 
-/** Remove a campaign for good; its measurements still cache-hit for siblings. */
+/** Delete a campaign for good; other campaigns still reuse its cached
+ * measurements. */
 export interface DeleteCampaignPayload {
   /** The campaign acted on, by its id or a prefix naming one, resolved by the
    * dispatcher for every door; the root of a `descend` chain is named by its
@@ -4959,8 +4972,8 @@ export interface DeleteCampaignPayload {
   campaign_id: string;
   /** Recorded with the command. */
   reason: string;
-  /** Spare the keepsake tier (manifest, reports, the shallow loop trace); drop only
-   * the resume, audit and mirror tiers. */
+  /** Keep its manifest, reports and summary trace; delete only what resuming,
+   * auditing and mirroring it needs. */
   keep_results: boolean;
 }
 
@@ -4974,7 +4987,7 @@ export interface DeleteCyclePayload {
   cycle_id: string;
 }
 
-/** Close an open check-in without minting; its check-in calls stay billed to the
+/** Discard an open check-in for good; what its calls cost stays billed to the
  * workspace. */
 export interface DiscardDraftPayload {
   draft_id: string;
@@ -5683,7 +5696,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "d72c98a7b38a5e3e";
+export const SERVED_CONTRACT = "66c600eeb65e8595";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

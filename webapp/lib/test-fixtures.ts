@@ -479,6 +479,7 @@ export function subtreeCampaign(
     state: hierarchyState(),
     span: { opened_at: "", last_at: "" },
     entry_kind: "campaign",
+    delete: { kind: "delete-campaign", says: "Remove a campaign for good.", keep_results: null },
     children: [],
     facts: {
       label: null,

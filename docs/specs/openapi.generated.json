@@ -5875,9 +5875,47 @@
         "title": "DefaultsPin",
         "type": "object"
       },
+      "DeleteAct": {
+        "additionalProperties": false,
+        "description": "What a listed campaign's Delete files, worded by its kind's own payload.",
+        "properties": {
+          "keep_results": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What pressing `keep_results` spares; null where the act takes no such choice.",
+            "title": "Keep Results"
+          },
+          "kind": {
+            "enum": [
+              "delete-campaign",
+              "discard-draft"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "says": {
+            "description": "The payload's own sentence: what the act removes and keeps.",
+            "title": "Says",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "says",
+          "keep_results"
+        ],
+        "title": "DeleteAct",
+        "type": "object"
+      },
       "DeleteCampaignPayload": {
         "additionalProperties": false,
-        "description": "Remove a campaign for good; its measurements still cache-hit for siblings.",
+        "description": "Delete a campaign for good; other campaigns still reuse its cached measurements.",
         "properties": {
           "campaign_id": {
             "description": "The campaign acted on, by its id or a prefix naming one, resolved by the dispatcher for every door; the root of a `descend` chain is named by its full id.",
@@ -5888,7 +5926,7 @@
           },
           "keep_results": {
             "default": false,
-            "description": "Spare the keepsake tier (manifest, reports, the shallow loop trace); drop only the resume, audit and mirror tiers.",
+            "description": "Keep its manifest, reports and summary trace; delete only what resuming, auditing and mirroring it needs.",
             "title": "Keep Results",
             "type": "boolean"
           },
@@ -5997,7 +6035,7 @@
       },
       "DiscardDraftPayload": {
         "additionalProperties": false,
-        "description": "Close an open check-in without minting; its check-in calls stay billed to the workspace.",
+        "description": "Discard an open check-in for good; what its calls cost stays billed to the workspace.",
         "properties": {
           "draft_id": {
             "maxLength": 128,
@@ -8691,6 +8729,14 @@
             },
             "title": "Children",
             "type": "array"
+          },
+          "delete": {
+            "$ref": "#/components/schemas/DeleteAct",
+            "default": {
+              "keep_results": "Keep its manifest, reports and summary trace; delete only what resuming, auditing and mirroring it needs.",
+              "kind": "delete-campaign",
+              "says": "Delete a campaign for good; other campaigns still reuse its cached measurements."
+            }
           },
           "entry_kind": {
             "const": "campaign",
@@ -17925,6 +17971,14 @@
             "title": "Children",
             "type": "array"
           },
+          "delete": {
+            "$ref": "#/components/schemas/DeleteAct",
+            "default": {
+              "keep_results": "Keep its manifest, reports and summary trace; delete only what resuming, auditing and mirroring it needs.",
+              "kind": "delete-campaign",
+              "says": "Delete a campaign for good; other campaigns still reuse its cached measurements."
+            }
+          },
           "entry_kind": {
             "const": "campaign",
             "default": "campaign",
@@ -18638,12 +18692,19 @@
       },
       "UnstartedCampaign": {
         "additionalProperties": false,
-        "description": "An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, cycle,\nline or run. Its `address` is the draft id Start mints from and `discard-draft` deletes.",
+        "description": "An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, cycle,\nline or run. Its `address` is the draft id Start mints from and its `delete` discards.",
         "properties": {
           "address": {
             "description": "Server-minted and stable: the key of every row and every open set. A cycle's is its `CyclePath` on the wire (`encodeCyclePath`).",
             "title": "Address",
             "type": "string"
+          },
+          "delete": {
+            "$ref": "#/components/schemas/DeleteAct",
+            "default": {
+              "kind": "discard-draft",
+              "says": "Discard an open check-in for good; what its calls cost stays billed to the workspace."
+            }
           },
           "entry_kind": {
             "const": "unstarted",

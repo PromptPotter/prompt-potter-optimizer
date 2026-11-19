@@ -853,12 +853,12 @@ class UnarchiveCampaignPayload(
 
 
 class DeleteCampaignPayload(ReasonedPayload, CampaignPayload, kind=CommandKind.DELETE_CAMPAIGN):
-    """Remove a campaign for good; its measurements still cache-hit for siblings."""
+    """Delete a campaign for good; other campaigns still reuse its cached measurements."""
 
     keep_results: bool = Field(
         default=False,
-        description="Spare the keepsake tier (manifest, reports, the shallow loop trace); drop only "
-        "the resume, audit and mirror tiers.",
+        description="Keep its manifest, reports and summary trace; delete only what resuming, "
+        "auditing and mirroring it needs.",
     )
 
 
@@ -881,7 +881,7 @@ class DraftPayload(DraftAddressedPayload):
 
 
 class DiscardDraftPayload(DraftAddressedPayload, kind=CommandKind.DISCARD_DRAFT):
-    """Close an open check-in without minting; its check-in calls stay billed to the workspace."""
+    """Discard an open check-in for good; what its calls cost stays billed to the workspace."""
 
 
 class CancelQueuedRunPayload(CommandPayload, kind=CommandKind.CANCEL_QUEUED):

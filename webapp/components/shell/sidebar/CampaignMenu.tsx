@@ -5,11 +5,12 @@ import { tagValue } from "@/lib/derivations";
 import { useCommand } from "@/lib/hooks/useCommand";
 import { useIngest } from "@/lib/state/ingest-flow";
 import { useWorkspace } from "@/lib/state/workspace";
-import { Button, Dialog, FailureLine, Menu, MenuItem } from "@/components/ui";
+import { Button, Dialog, FailureLine, Menu, MenuItem, Switch } from "@/components/ui";
 
 export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
   const cmd = useCommand<"archive" | "unarchive" | "rename" | "delete">("campaign-menu", campaign.address);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [keepResults, setKeepResults] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState("");
   const renameFormId = useId();
@@ -41,10 +42,11 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
     );
   };
 
+  // The listing serves what Delete files: the dialog presses it and decides nothing.
+  const act = campaign.delete;
   const runDelete = () => {
     setConfirmDelete(false);
-    // An unstarted campaign is a check-in: its draft is discarded, and the flow lets go of it.
-    if (unstarted) {
+    if (act.kind === "discard-draft") {
       void cmd.run(
         "delete",
         () => commands["discard-draft"]({ draft_id: campaign.address }),
@@ -54,7 +56,7 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
     }
     void cmd.run(
       "delete",
-      () => commands["delete-campaign"]({ campaign_id: campaign.address }),
+      () => commands["delete-campaign"]({ campaign_id: campaign.address, keep_results: keepResults }),
       // Lets go of the view BEFORE the re-poll rather than discovering it by 404.
       () => {
         if (viewedCampaignId === campaign.address) navigate(null);
@@ -158,7 +160,7 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
       </Dialog>
       <Dialog
         open={confirmDelete}
-        title={unstarted ? "Delete this unstarted campaign?" : "Delete this campaign?"}
+        title={`Delete "${campaign.label}"?`}
         onClose={() => setConfirmDelete(false)}
         footer={
           <>
@@ -169,11 +171,13 @@ export function CampaignMenu({ campaign }: { campaign: ListedCampaign }) {
           </>
         }
       >
-        <p>
-          {unstarted
-            ? `This permanently removes the "${campaign.label}" check-in — its setup and its upload — from disk. There is no recovery. What the check-in cost stays on the account.`
-            : `This permanently removes "${campaign.label}" — its cycles, rounds, and telemetry — from disk. There is no recovery. The shared measurement cache survives, so other campaigns still cache-hit. (To archive instead of delete, use Archive — it hides the campaign from the list and keeps everything on disk, restorable later.)`}
-        </p>
+        <p>{act.says}</p>
+        {act.keep_results !== null && (
+          <p>
+            <Switch label="Keep its results" checked={keepResults} onChange={() => setKeepResults(!keepResults)} />
+            Keep its results: {act.keep_results}
+          </p>
+        )}
       </Dialog>
     </>
   );

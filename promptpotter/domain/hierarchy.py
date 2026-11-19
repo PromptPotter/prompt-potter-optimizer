@@ -9,6 +9,7 @@ from pydantic import Field
 from promptpotter.domain.arm_reading import ArmReading, DisplayMetric
 from promptpotter.domain.bench import BenchCurve, BenchScore, PassAdmission
 from promptpotter.domain.campaign import CampaignRunsWith, LifecycleStatus
+from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CommandKind
 from promptpotter.domain.cycle_index import CycleIndex, RunStatus
 from promptpotter.domain.opt_search_point import Variation
 from promptpotter.domain.paired_reading import ArmKey
@@ -32,6 +33,7 @@ type TagKind = Literal[
     "verdict",
 ]
 type RankMove = Literal["up", "down", "unchanged"]
+DeleteKind = Literal[CommandKind.DELETE_CAMPAIGN, CommandKind.DISCARD_DRAFT]
 
 
 class CandidateStanding(StrEnum):
@@ -392,6 +394,22 @@ class _HierarchyEntry(_HierarchyNode):
         return next((t for t in self.tags if t.kind == kind), None)
 
 
+class DeleteAct(FrozenModel):
+    """What a listed campaign's Delete files, worded by its kind's own payload."""
+
+    kind: DeleteKind
+    says: str = Field(description="The payload's own sentence: what the act removes and keeps.")
+    keep_results: str | None = Field(
+        description="What pressing `keep_results` spares; null where the act takes no such choice."
+    )
+
+    @classmethod
+    def of(cls, kind: DeleteKind) -> DeleteAct:
+        payload = PAYLOAD_MODEL_FOR_KIND[kind]
+        keep = payload.model_fields.get("keep_results")
+        return cls(kind=kind, says=str(payload.__doc__), keep_results=keep and keep.description)
+
+
 class _RunEntry(_HierarchyEntry):
     """What only a level with a run of its own carries."""
 
@@ -421,6 +439,7 @@ class HierarchyCampaign(_RunEntry):
 
     entry_kind: Literal["campaign"] = "campaign"
     facts: CampaignFacts
+    delete: DeleteAct = DeleteAct.of(CommandKind.DELETE_CAMPAIGN)
     children: Sequence[HierarchyCycle] = Field(
         description="Its cycles to `?depth=`, root first; none at depth 0."
     )
@@ -518,10 +537,11 @@ def entries_under(entry: HierarchyEntry) -> Iterator[HierarchyEntry]:
 
 class UnstartedCampaign(_HierarchyEntry):
     """An open check-in, listed as a campaign: no Start has minted it, so it has no cycle, cycle,
-    line or run. Its `address` is the draft id Start mints from and `discard-draft` deletes."""
+    line or run. Its `address` is the draft id Start mints from and its `delete` discards."""
 
     entry_kind: Literal["unstarted"] = "unstarted"
     span: HierarchySpan
+    delete: DeleteAct = DeleteAct.of(CommandKind.DISCARD_DRAFT)
 
 
 # What a listing filter picks: a stored lifecycle, or the open check-ins no manifest holds.

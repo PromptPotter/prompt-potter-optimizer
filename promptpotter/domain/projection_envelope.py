@@ -30,7 +30,7 @@ def bearing_record(record: CycleRecord) -> NarratedRecord | None:
 
 
 class ProjectionEnvelope(FrozenModel):
-    """One outbound SSE frame, whose receiver treats an unknown field as a drift signal."""
+    """One outbound SSE frame; the served contract it is stamped with hashes its schema."""
 
     kind: ProjectionKind = Field(
         description="Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot.",

@@ -108,7 +108,7 @@ describe("parseAddress tolerates what a person types", () => {
 
 describe("parseAddress refuses what is not an address", () => {
   const bad = [
-    "#/a__b",
+    "#/a__b", // a campaign alone: nothing mints one, a link names its cycle
     "#/a__b::cycle_x/r3", // a pick names its arm; a round alone is `;round=`
     "#/a__b::cycle_x/sp_9f2",
     "#/a__b::cycle_x/r3/sp_9f2/leftover",
