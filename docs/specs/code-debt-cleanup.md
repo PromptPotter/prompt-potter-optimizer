@@ -805,12 +805,17 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   (`infrastructure/backend.py`); an inner node's calls sit on its run's ledger only
   (`runner/inner/transcript.py`). **Re-test:** a C0 on `promptpotter-self/run` offers no
   `l3_plan` field until one inner run calls it.
-- **An inner run a bench pass spawns files all its own calls as `bench`**: the spawner's
-  `run_scope().filed_as` survives into the inner scope (`runner/inner/tasks.py:412`), so inner
-  cycle_8a2bda4c4c97 reads `{bench: 12}` on the offline world. Action: `enter_inner_cell` carries the
-  spawner's kind on `InstrumentMode` and clears `filed_as`; `arm_spend_book` reads `enclosed_as` off
-  the mode. **Rides with:** the outer chain (`runner/inner/**`). **Re-test:** the `--l4 --straight
-  --bench-trigger every_adoption` leg's inner ledger files no call as `bench`.
+- **A nested spend book is wired beside the cell that nests it** (inner-1's report):
+  `run_observers.py::RunObservers.arm_spend_book` reads none of `self`, so a fact repeats its
+  `enclosed_as` line instead of calling it; `tests/factories.py::spend_book(enclosing=…)` nests a book a
+  second way; `spend_book.py::_ENCLOSED = "backend"` is what a nested book falls back to where its
+  spawner's pass names no kind; `RunScope.depth` / `InstrumentMode.depth` restate `instrument is not
+  None` at `MAX_INSTRUMENT_DEPTH = 1`. Root: `enter_inner_cell` nests the book (enclosing book and
+  kind together, every spawning pass naming its kind), and depth goes. **Held:** `_ENCLOSED` is also
+  the hold tree's kind for a nested cell's hold with no resource (`SpendBook._filed`, `_out`), where
+  an outer search's inner cell IS its backend: decide what names that kind before cutting it.
+  **Re-test:** `factories.spend_book` takes no `enclosing`; `InstrumentMode` carries no `depth`; the
+  nested-replay fact calls the production nesting.
 - **A cycle's sidebar spend reads its ledger alone, so a cut send reads $0.000**:
   `hierarchy.py:302-308` builds the cycle row from `scan_ledger_spend` and passes `None` as
   unreported (`_spend_row("spend", …, None)`). A send a pause cuts is already filed at the cut as a

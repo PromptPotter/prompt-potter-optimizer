@@ -117,13 +117,12 @@ class RunObservers:
     def arm_spend_book(self, book: SpendBook) -> None:
         book.ledger = billing_ledger("the run's book")
         # A nested run (an L4 inner cell) admits each send against its own book AND its root's.
-        if run_scope().depth > 0:
-            # Still the spawner's scope: its book, and the kind its pass files a cell as.
-            enclosing = run_scope()
-            if enclosing.book is None:
+        if (mode := run_scope().instrument) is not None:
+            # Still the spawner's book; the kind its pass files a cell as rides the mode.
+            if (enclosing := run_scope().book) is None:
                 raise RuntimeError("a nested run spends only under its enclosing run's book")
-            book.enclosing = enclosing.book
-            book.enclosed_as = enclosing.filed_as or book.enclosed_as
+            book.enclosing = enclosing
+            book.enclosed_as = mode.enclosed_as or book.enclosed_as
         rescope(book=book)
 
     def drain_all(self) -> None:

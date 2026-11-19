@@ -19,7 +19,7 @@ from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.spend import TokenUsageKind
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.shared.identity import IdentityContext
-from promptpotter.shared.measurement_context import InstrumentMode, MeasuredPass
+from promptpotter.shared.measurement_context import MeasuredPass
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.send_pacing import SendBudget
@@ -61,6 +61,16 @@ class InnerSpawnContext:
     ruler: int
     # Resolved ONCE at publish: a per-cell read lets an edit split one run's cells.
     cells: InnerCells | None = None
+
+
+@dataclass(frozen=True)
+class InstrumentMode:
+    """``root_round`` is the depth-0 run's round the cell spends under: its bills land on that ledger,
+    filed as ``enclosed_as``, the spawner's kind; the cell's own ledger files each call as itself."""
+
+    depth: int
+    root_round: int | None
+    enclosed_as: TokenUsageKind | None
 
 
 @dataclass(frozen=True)

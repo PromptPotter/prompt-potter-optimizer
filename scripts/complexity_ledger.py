@@ -174,7 +174,9 @@ BASELINE = {
     # whole from the data root (`io.py::_plain`), so a nested root and a slug `projects/a/campaigns/b` write.
     # store-3b (+5): `io.py::claim_dir`, a campaign's exclusive create through io; `_created` answers
     # "gone" only where the unit is absent. `cycle_reads.py::write_export` (+1): an export follows the umask.
-    "package_lines": 112110,
+    # inner-1 (+7): `InstrumentMode.enclosed_as`, the spawner's kind off the inner's `filed_as`; the
+    # type moved to `run_scope.py` (`shared/` names no domain kind); +5 is one import's wrap.
+    "package_lines": 112117,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

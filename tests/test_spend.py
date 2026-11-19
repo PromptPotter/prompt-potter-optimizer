@@ -123,6 +123,7 @@ from promptpotter.application.run_phase_control import FlightGauge, RunControl, 
 from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
+from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.mint import stand_held_budget
 from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
@@ -311,7 +312,13 @@ from promptpotter.infrastructure.projections.live_dashboard import (
     LiveDashboardProjection,
     WaitingOn,
 )
-from promptpotter.infrastructure.run_scope import InnerSpawnContext, rescope, run_scope, scoped
+from promptpotter.infrastructure.run_scope import (
+    InnerSpawnContext,
+    InstrumentMode,
+    rescope,
+    run_scope,
+    scoped,
+)
 from promptpotter.infrastructure.store.account_spend import (
     account_bill,
     bank_spend,
@@ -383,7 +390,7 @@ from promptpotter.shared.identity import (
     UserId,
     default_identity,
 )
-from promptpotter.shared.measurement_context import InstrumentMode, MeasuredPass, MeasurementRole
+from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
 
 
 @pytest.fixture
@@ -1649,7 +1656,7 @@ async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
 
 async def test_an_inner_run_spawns_no_inner_campaign() -> None:
     async def _from_inside() -> None:
-        with scoped(instrument=InstrumentMode(depth=1, root_round=0)):
+        with scoped(instrument=InstrumentMode(depth=1, root_round=0, enclosed_as=None)):
             await spawn.run_inner_cycle(Sample(id=0, query="q", ground_truth=None), {})
 
     with pytest.raises(CellUnscoreableError) as refused:
@@ -3082,7 +3089,9 @@ def test_a_settled_call_leaves_the_money_fold_at_the_next_line(tmp_path: Path) -
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(tmp_path: Path) -> None:
+def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(
+    tmp_path: Path, built_stores: Stores
+) -> None:
     root = CycleEventLog(tmp_path / "root.jsonl")
     book = spend_book(0.05, meters="search_incurred", metered_on=root.path)
     book.ledger = root
@@ -3106,16 +3115,33 @@ def test_a_nested_runs_replay_is_metered_on_its_roots_ledger(tmp_path: Path) -> 
     assert money_on(root.path).metered["search_incurred"].usd_amount == pytest.approx(0.01), (
         "a nested run's replay reached its root's search-incurred meter at another price"
     )
-    # Spawned by the root's bench pass: the bench's price, never the search's.
-    inner.enclosed_as = "bench"
-    with _billing_on(CycleEventLog(tmp_path / "benched.jsonl"), inner):
-        telemetry.emit_replay_usage(
-            node="cell",
-            usage=TokenAccount(input=10, output=5),
-            duration_s=0.0,
-            price=price,
-            served_by=None,
+    # Spawned by the root's bench pass: the bench's price on the root, the call's own kind inside.
+    benched = CycleEventLog(tmp_path / "benched.jsonl")
+    with scoped(filed_as="bench"), scoped():
+        enter_inner_cell(
+            _inner_seat(built_stores, inner_cells("potter"))[0], built_stores.campaigns, "c"
         )
+        mode = run_scope().instrument
+        assert mode is not None
+        inner.enclosed_as = mode.enclosed_as or inner.enclosed_as  # as `arm_spend_book` arms it
+        with _billing_on(benched, inner):
+            telemetry.emit_replay_usage(
+                node="cell",
+                usage=TokenAccount(input=10, output=5),
+                duration_s=0.0,
+                price=telemetry.call_price(
+                    "optimizer",
+                    TokenAccount(input=10, output=5),
+                    model=None,
+                    provider=None,
+                    cost_usd=0.01,
+                    recorded=None,
+                ),
+                served_by=None,
+            )
+    assert [r.price.kind for r in _token_bills(benched)] == ["optimizer"], (
+        "an inner run filed its own call as the bench pass that spawned it"
+    )
     by_kind = scan_ledger_spend([LedgerSpan(root.path)]).spend.by_kind
     assert money_on(root.path).metered["search_incurred"].usd_amount == pytest.approx(0.01), (
         "a nested run a bench pass spawned was metered as the search's spend"

@@ -7,14 +7,6 @@ from dataclasses import dataclass
 MAX_INSTRUMENT_DEPTH = 1
 
 
-@dataclass(frozen=True)
-class InstrumentMode:
-    """``root_round`` is the depth-0 run's round the cell spends under: its bills land on that ledger."""
-
-    depth: int
-    root_round: int | None
-
-
 class MeasurementRole(enum.StrEnum):
     """Why a scoring pass ran, stamped on every answer it files: provenance an id cannot carry."""
 

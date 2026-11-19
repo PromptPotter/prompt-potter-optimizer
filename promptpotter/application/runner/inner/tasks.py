@@ -40,14 +40,19 @@ from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
-from promptpotter.infrastructure.run_scope import UNBOUND, InnerSpawnContext, rescope, run_scope
+from promptpotter.infrastructure.run_scope import (
+    UNBOUND,
+    InnerSpawnContext,
+    InstrumentMode,
+    rescope,
+    run_scope,
+)
 from promptpotter.infrastructure.store.archive_queries import ArmOf, CampaignWalks
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeline, resolve_dataset
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, DatasetAccessError, PayloadInvalidError
-from promptpotter.shared.measurement_context import InstrumentMode
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
@@ -413,7 +418,8 @@ def enter_inner_cell(ctx: InnerSpawnContext, campaigns: CampaignStore, campaign_
     # INSIDE the cell's own task, or the mode leaks to the spawner; before the cell's run binds its
     # own round, so this still reads the spawner's: the root's, as the spawner is the root.
     spawner = run_scope()
-    rescope(instrument=InstrumentMode(depth=spawner.depth + 1, root_round=spawner.round))
+    mode = InstrumentMode(spawner.depth + 1, root_round=spawner.round, enclosed_as=spawner.filed_as)
+    rescope(instrument=mode, filed_as=None)
     return ArmOf(CampaignWalks(campaigns, campaign_id), ctx.ruler)
 
 
