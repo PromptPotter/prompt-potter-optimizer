@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { cx } from "@/lib/cx";
 import { Chip } from "./Chip";
 import { IconMore } from "./icons";
@@ -24,9 +24,10 @@ const picks = (target: EventTarget) => {
   return hit !== null && !hit.hasAttribute("aria-expanded");
 };
 
-// A header's trailing actions: in the row on a wide screen, behind its one ⋯ on a phone, so the
+// A header's trailing actions: in the row in a wide column, behind its one ⋯ in a narrow one, so the
 // header stays ONE row. `menu` is the ⋯'s own items, under the folded actions; without it the ⋯ is
-// a phone's alone. A pick inside closes the ⋯.
+// a narrow column's alone. A pick inside closes the ⋯. The column's width is CSS's alone (a
+// container query), so the ⋯ reads off the row whether it hid the actions.
 export function ToolbarFold({
   label,
   hint,
@@ -40,6 +41,8 @@ export function ToolbarFold({
   actions: ReactNode;
   menu?: ReactNode;
 }) {
+  const inline = useRef<HTMLSpanElement>(null);
+  const [folded, setFolded] = useState(false);
   return (
     <>
       <span className={cx(!menu && s.phoneOnly)}>
@@ -52,7 +55,10 @@ export function ToolbarFold({
               expanded={open}
               ariaLabel={label}
               title={hint}
-              onClick={toggle}
+              onClick={() => {
+                setFolded(inline.current !== null && getComputedStyle(inline.current).display === "none");
+                toggle();
+              }}
             >
               <IconMore />
             </Chip>
@@ -63,9 +69,11 @@ export function ToolbarFold({
             // down unmounts the pick before it fires, and a deferred one leaves the fold up over it. It
             // hears its buttons' clicks, which a key press on one fires too, and is no control itself.
             <div role="presentation" onClick={(e) => picks(e.target) && close()}>
-              <div className={s.folded} role="group" aria-label={label}>
-                {actions}
-              </div>
+              {folded && (
+                <div className={s.folded} role="group" aria-label={label}>
+                  {actions}
+                </div>
+              )}
               {menu && (
                 <div className={m.menu} role="menu">
                   {menu}
@@ -75,7 +83,9 @@ export function ToolbarFold({
           )}
         </Popover>
       </span>
-      <span className={s.inline}>{actions}</span>
+      <span ref={inline} className={s.inline}>
+        {actions}
+      </span>
     </>
   );
 }

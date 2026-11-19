@@ -371,19 +371,33 @@ export async function noSidewaysScroll(page: Page) {
 }
 
 /** A tap lands on the control drawn there: nothing else sits at a visible button's centre, and on a
- *  touch screen no button is under the 44px floor (`responsive.css`). */
+ *  touch screen no button is under the 44px floor (`responsive.css`). A cover is read again two frames
+ *  after the scroll: an open panel follows its trigger a frame later (`ui/overlay.ts::useAnchored`),
+ *  so the scroll's own frame shows it where no user sees it. */
 export async function everyTapLands(page: Page) {
   const touch = base.info().project.use.hasTouch === true;
-  const wrong = await page.evaluate((touch) => {
+  const wrong = await page.evaluate(async (touch) => {
+    const settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const cover = (b: HTMLButtonElement) => {
+      b.scrollIntoView({ block: "center", inline: "nearest" });
+      const r = b.getBoundingClientRect();
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      return top && !b.contains(top) ? `${top.tagName.toLowerCase()}.${[...top.classList].join(".")}` : null;
+    };
     const out: string[] = [];
     for (const b of document.querySelectorAll("button")) {
       if (!b.checkVisibility()) continue;
-      b.scrollIntoView({ block: "center", inline: "nearest" });
-      const r = b.getBoundingClientRect();
       const name = (b.getAttribute("aria-label") || b.textContent || "").trim().slice(0, 30);
+      let over = cover(b);
+      const r = b.getBoundingClientRect();
       if (touch && (r.width < 43.5 || r.height < 43.5)) out.push(`"${name}" is ${Math.round(r.width)}x${Math.round(r.height)}`);
-      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
-      if (top && !b.contains(top)) out.push(`"${name}" is under ${top.tagName.toLowerCase()}.${[...top.classList].join(".")}`);
+      if (over) {
+        await settle();
+        cover(b);
+        await settle();
+        over = cover(b);
+      }
+      if (over) out.push(`"${name}" is under ${over}`);
     }
     return out;
   }, touch);

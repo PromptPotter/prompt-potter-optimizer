@@ -1,10 +1,11 @@
-.shell{--sidebar-width:200px;--nav-dock-h:0px;--remote-dock-h:0px;--remote-dock-lift:0px;position:relative;display:flex;height:var(--vh-full);min-height:700px}
+.shell{--sidebar-width:200px;--nav-dock-h:0px;--remote-dock-h:0px;--remote-dock-lift:0px;--pane-foot:calc(var(--remote-dock-h) + var(--remote-dock-lift) + var(--safe-bottom));position:relative;display:flex;height:var(--vh-full);min-height:700px}
 /* A spacer ITEM, not padding: Chrome omits a flex container's end padding from scrollable overflow. */
-.content::after{content:"";display:block;flex:0 0 auto;height:calc(var(--remote-dock-h) + var(--remote-dock-lift) + var(--safe-bottom))}
-.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+.content::after{content:"";display:block;flex:0 0 auto;height:var(--pane-foot)}
+/* `.main` and each `.view` are the `column` a header's fold and a pane's phone layout read (`Toolbar.module.css`). */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;container:column / inline-size}
 .view-tabs{display:flex;flex:0 0 auto;padding:var(--space-6) var(--space-18);border-bottom:0.5px solid var(--color-border);overflow-x:auto;scrollbar-width:thin}
 .views{flex:1;display:flex;min-height:0;overflow-x:auto;scroll-snap-type:x mandatory}
-.view{flex:1 0 var(--box-min);min-width:0;min-height:0;display:flex;flex-direction:column;scroll-snap-align:start}
+.view{flex:1 0 var(--box-min);min-width:0;min-height:0;display:flex;flex-direction:column;scroll-snap-align:start;container:column / inline-size}
 .view + .view{border-left:0.5px solid var(--color-border)}
 .view-head{flex:0 0 auto;display:flex;align-items:center;justify-content:space-between;gap:var(--space-8);padding-inline:var(--space-14) var(--space-6);border-bottom:0.5px solid var(--color-border);font-size:var(--text-xs);letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-secondary)}
 .skip-link{position:absolute;left:8px;top:-48px;z-index:1000;padding:var(--space-8) var(--space-14);background:var(--color-accent);color:var(--color-text-on-accent);border-radius:var(--border-radius-md);font-size:var(--text-base);text-decoration:none;transition:top .15s ease}
@@ -215,6 +216,11 @@
 /* A flow swap, not position:fixed, so the alert banner stays mounted on both screens. */
 @media (max-width:880px){
   .shell{flex-direction:column;min-height:0}
+  /* The remote is a full-width bar here, so the panes END above it: a foot spacer clears only a pane's
+     end, and a pane shorter than the bar (a 390px-tall landscape) drew its first row under it. */
+  .shell{--pane-foot:0px}
+  .views{margin-bottom:calc(var(--remote-dock-h) + var(--safe-bottom))}
+  .shell:has(> .main > .view-tabs) .views{margin-bottom:var(--remote-dock-h)}
   .shell > .main{order:1;min-height:0}
   .shell > .sidebar{order:2;width:100%;max-width:100%;flex:1;min-height:0;border-right:0;border-top:0.5px solid var(--color-border);padding-top:max(var(--space-8),var(--safe-top))}
   .shell:not(.mobile-list) > .sidebar{display:none}

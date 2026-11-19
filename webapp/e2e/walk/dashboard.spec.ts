@@ -27,11 +27,12 @@ test.describe("dashboard", () => {
   });
 
   test("a served object in scope can be copied", async ({ page }) => {
-    // A phone folds the card's trailing actions behind its ⋯ (`ToolbarFold`, at `--bp-sm`).
-    if (page.viewportSize()!.width <= 640) {
-      await page.getByRole("button", { name: "More candidate options" }).click();
-    }
+    // A narrow column folds the card's trailing actions behind its ⋯ (`ToolbarFold`, at `--bp-sm`),
+    // drawn in the same row as them: once the ⋯ is up, an unfolded copy is up too.
+    const more = page.getByRole("button", { name: "More candidate options" });
+    await expect(more).toBeVisible();
     const copy = page.getByRole("button", { name: /Copy this run's candidates/ });
+    if ((await copy.filter({ visible: true }).count()) === 0) await more.click();
     await expect(copy.filter({ visible: true })).toBeVisible();
   });
 

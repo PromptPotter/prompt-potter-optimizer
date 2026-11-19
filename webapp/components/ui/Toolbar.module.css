@@ -20,17 +20,17 @@
   min-width: 8px;
 }
 
-/* The fold's one switch, at the phone breakpoint (`--bp-sm`). */
+/* The fold's one switch: its column (`.main`, `.view`) at the phone breakpoint (`--bp-sm`), so a
+   header in a narrow view of a wide screen folds too. The ⋯ shows the actions this hid. */
 .inline {
   display: contents;
 }
 
-.folded,
 .phoneOnly {
   display: none;
 }
 
-@media (max-width: 640px) {
+@container column (max-width: 640px) {
   .inline {
     display: none;
   }
@@ -38,17 +38,17 @@
   .phoneOnly {
     display: contents;
   }
+}
 
-  .folded {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--space-6);
-    padding: var(--space-4) var(--space-8);
-  }
+.folded {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-6);
+  padding: var(--space-4) var(--space-8);
+}
 
-  .folded + * {
-    border-top: 0.5px solid var(--color-border);
-  }
+.folded + * {
+  border-top: 0.5px solid var(--color-border);
 }
 }

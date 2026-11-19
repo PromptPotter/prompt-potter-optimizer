@@ -719,17 +719,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (wipes run data, moves root ids). **Re-test:** `git grep -cE "\*\*defaults\." --
   promptpotter/application/datasets/authored.py` == 0 (now 2).
 
-### wave-5 · webapp (what the responsive walk showed at the w5i landing)
-
-- **A control sits under the remote-control bar at landscape-844** (rates-6's and cfg-4's reports): on
-  the cloud's Linux, `e2e/walk/responsive.spec.ts` `[touch] landscape-844 › every view fits its
-  viewport` fails at every run of `land/w5i` 1df1293af ("a tap lands off the control drawn there":
-  `"Error" is under div.remote-control`); it passes on Windows, so a font width decides it. Once on
-  Windows the same test at desktop-1440 read a pane scrolling sideways (`div.content +51px`,
-  `div.card.cand-card +70px`). Root: unread; the bar's height reaches the panes through
-  `useShellHeight("--remote-dock-h")` and `.content::after`. **Re-test:** the responsive spec,
-  `--repeat-each 10` on `walk` and `touch`, green on Linux.
-
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
 - **A connector's two-valued term reaches no scorer** (readings-5's report): `authored.py::scorer_of`
