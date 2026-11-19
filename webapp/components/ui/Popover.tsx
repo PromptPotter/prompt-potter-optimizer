@@ -1,14 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ReactNode,
-} from "react";
+import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { cx } from "@/lib/cx";
-import { EDGE, room, vertical } from "./overlay";
+import { EDGE, room, useAnchored, vertical } from "./overlay";
 import s from "./Popover.module.css";
 
 type Align = "left" | "right";
@@ -44,15 +37,11 @@ export function Popover({
   over = false,
   className,
 }: Props) {
-  const [anchor, setAnchor] = useState<HTMLDivElement | null>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
-  const [at, setAt] = useState<CSSProperties | null>(null);
+  const { setTrigger, at, show, close } = useAnchored(
+    useCallback((r: DOMRect) => place(r, align, over), [align, over]),
+  );
   const open = at !== null;
-  const close = useCallback(() => setAt(null), []);
-  const toggle = useCallback(() => {
-    const r = anchor?.getBoundingClientRect();
-    setAt((prev) => (prev || !r ? null : place(r, align, over)));
-  }, [anchor, align, over]);
+  const toggle = open ? close : show;
 
   // Inside is the React tree, not the DOM: a popover opened in this panel portals out of it, and its
   // press still bubbles here first (React's root listens below `document`).
@@ -65,35 +54,26 @@ export function Popover({
     if (!open) return;
     pressed.current = false;
     const onDoc = () => {
-      if (!pressed.current) setAt(null);
+      if (!pressed.current) close();
       pressed.current = false;
     };
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAt(null);
-    };
-    const follow = (e: Event) => {
-      if (e.target instanceof Node && panelRef.current?.contains(e.target)) return;
-      const r = anchor?.getBoundingClientRect();
-      if (r) setAt(place(r, align, over));
+      if (e.key === "Escape") close();
     };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", follow, true);
-    window.addEventListener("resize", follow);
     return () => {
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", follow, true);
-      window.removeEventListener("resize", follow);
     };
-  }, [open, anchor, align, over]);
+  }, [open, close]);
 
   return (
-    <div className={cx(s.wrap, className)} ref={setAnchor} onMouseDownCapture={press}>
+    <div className={cx(s.wrap, className)} ref={setTrigger} onMouseDownCapture={press}>
       {renderTrigger({ open, toggle })}
       {at &&
         createPortal(
-          <div ref={panelRef} className={s.panel} style={at} onMouseDownCapture={press}>
+          <div className={s.panel} style={at} onMouseDownCapture={press}>
             {children({ close })}
           </div>,
           document.body,

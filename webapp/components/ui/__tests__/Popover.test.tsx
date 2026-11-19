@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Popover } from "../Popover";
 
@@ -56,6 +56,20 @@ describe("Popover", () => {
     expect(panel.style.left).toBe("8px");
     expect(panel.style.bottom).toBe("42px");
     expect(panel.style.top).toBe("");
+  });
+
+  // A header loading above the trigger moves it with neither a scroll nor a resize event.
+  it("follows its trigger when the page moves it without a scroll", async () => {
+    const rect = vi
+      .spyOn(HTMLElement.prototype, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(10, 40, 50, 20));
+    render(<Harness />);
+    fireEvent.click(screen.getByText(/trigger/));
+    const panel = screen.getByText("item").parentElement!;
+    expect(panel.style.top).toBe("62px");
+    rect.mockReturnValue(new DOMRect(10, 120, 50, 20));
+    await waitFor(() => expect(panel.style.top).toBe("142px"));
+    rect.mockRestore();
   });
 
   it("closes when content calls close()", () => {

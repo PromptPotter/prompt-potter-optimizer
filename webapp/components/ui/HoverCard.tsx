@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { HOVER_CLOSE_GRACE_MS } from "@/lib/cadence";
 import { cx } from "@/lib/cx";
-import { EDGE, room, vertical } from "./overlay";
+import { EDGE, room, useAnchored, vertical } from "./overlay";
 import { ownPress } from "./press";
 import s from "./HoverCard.module.css";
 
@@ -44,31 +44,26 @@ export function HoverCard({
   focusable?: boolean;
   children: ReactNode;
 }) {
-  const ref = useRef<HTMLElement | null>(null);
-  const setRef = useCallback((n: HTMLElement | null) => {
-    ref.current = n;
-  }, []);
+  const { trigger, setTrigger, at, show: place, close } = useAnchored(anchor);
   const cardRef = useRef<HTMLDivElement>(null);
   const timer = useRef(0);
   const pressed = useRef(false);
-  const [at, setAt] = useState<CSSProperties | null>(null);
   const open = at !== null;
 
   const within = useCallback(
-    (n: Node | null) => !!n && (!!ref.current?.contains(n) || !!cardRef.current?.contains(n)),
-    [],
+    (n: Node | null) => !!n && (!!trigger.current?.contains(n) || !!cardRef.current?.contains(n)),
+    [trigger],
   );
 
   const show = useCallback(() => {
     window.clearTimeout(timer.current);
-    const r = ref.current?.getBoundingClientRect();
-    if (r) setAt(anchor(r));
-  }, []);
+    place();
+  }, [place]);
 
   // Never immediate: a pointer crossing the GAP is over neither half for a moment.
   const hide = useCallback(() => {
-    timer.current = window.setTimeout(() => setAt(null), HOVER_CLOSE_GRACE_MS);
-  }, []);
+    timer.current = window.setTimeout(close, HOVER_CLOSE_GRACE_MS);
+  }, [close]);
 
   // A held button is a drag-select in flight, so the release below closes it instead of this.
   const leave = useCallback(
@@ -81,7 +76,7 @@ export function HoverCard({
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setAt(null);
+      if (e.key === "Escape") close();
     };
     const onUp = (e: PointerEvent) => {
       if (!within(e.target as Node)) hide();
@@ -92,14 +87,14 @@ export function HoverCard({
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("pointerup", onUp);
     };
-  }, [open, hide, within]);
+  }, [open, close, hide, within]);
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
   const Wrap = layout === "block" ? "div" : "span";
   return (
     <Wrap
-      ref={setRef}
+      ref={setTrigger}
       className={s[layout]}
       tabIndex={focusable ? 0 : undefined}
       // Hover is a mouse's: a touch browser's compat mouseenter after a tap opens nothing.

@@ -154,6 +154,25 @@ describe("HoverCard", () => {
     expect(card.style.bottom).toBe("48px");
   });
 
+  // Tapped open, it stays up while the page scrolls or a header loads above its trigger.
+  it("follows its trigger when the page moves it", () => {
+    const rect = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockReturnValue(new DOMRect(0, 100, 200, 20));
+    render(
+      <HoverCard content={<span>on disk</span>}>
+        <button type="button">row</button>
+      </HoverCard>,
+    );
+    hover(wrapOf("row"));
+    const card = screen.getByRole("note");
+    expect(card.style.top).toBe("100px");
+    rect.mockReturnValue(new DOMRect(0, 300, 200, 20));
+    settle();
+    expect(card.style.top).toBe("300px");
+    rect.mockRestore();
+  });
+
   it("dismisses on Escape", () => {
     render(
       <HoverCard content={<span>meta</span>}>
