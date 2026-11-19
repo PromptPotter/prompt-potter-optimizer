@@ -103,6 +103,7 @@ campaign:
       l1_generate:
         config:
           n_variants: 3
+          k_max: 5
       pobb:
         config:
           epsilon: 0.3

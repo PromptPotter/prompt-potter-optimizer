@@ -97,7 +97,7 @@ from promptpotter.domain.bench import (
     bench_status,
     partition_bank,
 )
-from promptpotter.domain.campaign import Campaign, Optimize, Purpose
+from promptpotter.domain.campaign import Campaign, Optimize, Purpose, RunDeclaration
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
@@ -858,12 +858,14 @@ def minted_campaign(
         treatment=select_optimizer(config.optimization).treatment(
             frozenset(Presumption), PackShelf(account=None)
         ),
-        declaration=declare_run(
-            config,
-            purpose=purpose,
-            dataset_hash=fields.pop("dataset_hash", "bank"),
-            connector=fields.pop("connector", "termnorm"),
-            bench_defaults_pin=bench_defaults_pin(),
+        declaration=RunDeclaration.of(
+            declare_run(
+                config,
+                dataset_hash=fields.pop("dataset_hash", "bank"),
+                connector=fields.pop("connector", "termnorm"),
+                bench_defaults_pin=bench_defaults_pin(),
+            ),
+            purpose,
         ),
         **fields,
     )

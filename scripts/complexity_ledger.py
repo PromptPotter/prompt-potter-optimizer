@@ -197,7 +197,10 @@ BASELINE = {
     # store-5a (+5): a population's signature carries a scoped task's own walk counts, so a round
     # close reloads only the populations it moved; `LastOf`, a declared fold, where `last_fold`
     # made record classes in module globals.
-    "package_lines": 112198,
+    # addr-3 (+59, provisional: its fix pass hunts it down): a run declaration is a fold patch over
+    # `defaults.yaml` (`layer_fold.py::patch_between`), an arm is planned on its seat and numbered
+    # once at the mint (`RunSpec` / `ArmSeat`).
+    "package_lines": 112257,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
