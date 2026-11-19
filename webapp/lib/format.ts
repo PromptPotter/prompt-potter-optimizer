@@ -1,4 +1,5 @@
 import {
+  type Estimate,
   type MeasuredLift,
   type MeasuredUnit,
   type MetricSpec,
@@ -130,6 +131,29 @@ function signedIn(unit: MeasurandUnit, v: number): string {
 export function fmtLift(unit: MeasurandUnit, v: number | null | undefined): string {
   if (!finite(v)) return PLACEHOLDER;
   return `${signedIn(unit, v)}${NBSP}${UNIT_FORMATS[unit].lift_word}`;
+}
+
+// An estimate is served as facts alone (`paired_reading.py::Estimate`); these word it as its
+// `point`, `band` and `text` do. A missing estimate words as `null`, for the caller's placeholder.
+export function fmtPoint(e: Estimate): string;
+export function fmtPoint(e: Estimate | null | undefined): string | null;
+export function fmtPoint(e: Estimate | null | undefined): string | null {
+  if (e == null) return null;
+  return e.form === "lift" ? fmtLift(e.unit, e.value) : fmtUnit(e.unit, e.value);
+}
+
+export function fmtBand(e: Estimate | null | undefined): string | null {
+  if (e == null || e.ci_lo === null || e.ci_hi === null) return null;
+  if (e.form === "level") return `[${fmtUnit(e.unit, e.ci_lo)}, ${fmtUnit(e.unit, e.ci_hi)}]`;
+  return `[${signedIn(e.unit, e.ci_lo)},${NBSP}${signedIn(e.unit, e.ci_hi)}]`;
+}
+
+export function fmtEstimate(e: Estimate): string;
+export function fmtEstimate(e: Estimate | null | undefined): string | null;
+export function fmtEstimate(e: Estimate | null | undefined): string | null {
+  if (e == null) return null;
+  const band = fmtBand(e);
+  return band === null ? fmtPoint(e) : `${fmtPoint(e)} ${band}`;
 }
 
 

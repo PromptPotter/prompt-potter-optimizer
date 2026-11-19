@@ -145,8 +145,6 @@ export function estimate(
   [lo, hi]: [number | null, number | null] = [null, null],
   over: Partial<Estimate> = {},
 ): Estimate {
-  const band = lo === null || hi === null ? null : `[${lo}, ${hi}]`;
-  const point = String(value);
   return {
     value,
     ci_lo: lo,
@@ -155,9 +153,6 @@ export function estimate(
     se: null,
     unit: "rate",
     form: "level",
-    point,
-    band,
-    text: band === null ? point : `${point} ${band}`,
     ...over,
   };
 }
@@ -180,7 +175,7 @@ export function pairedReading(
     family: null,
   });
   const member = (id: string): NonNullable<PairedReading["a"]> => ({
-    address: { path: [], individual_id: id, arm: null, pass_role: null },
+    address: { path: [], individual_id: id, arm: null },
     n: 10,
     bought: 0,
   });

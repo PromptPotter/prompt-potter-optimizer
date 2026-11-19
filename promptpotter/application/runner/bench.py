@@ -317,7 +317,6 @@ def _bench_member(path: CyclePath, read: _PassReading, *, instrument_id: str) ->
             path=path,
             individual_id=bench_pass.arm.key,
             arm=None,
-            pass_role=MeasurementRole.BENCH,
         ),
         sheet=read.sheet,
         bought=sum(1 for *_, replayed in bench_pass.cells if not replayed),

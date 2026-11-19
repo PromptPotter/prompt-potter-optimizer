@@ -157,7 +157,6 @@ def verify_member(
             individual_id=arm.key,
             arm=arm,
             # A fold over every pass report scope may see, so no one pass names it.
-            pass_role=None,
         ),
         sheet=sheet,
         bought=bought,

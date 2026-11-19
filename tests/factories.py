@@ -1293,7 +1293,6 @@ def member_rows(
             path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
             individual_id=individual,
             arm=None,
-            pass_role=None,
         )
         if address is None
         else address,

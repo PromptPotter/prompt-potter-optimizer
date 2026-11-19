@@ -599,7 +599,6 @@ def _member_rows(path: CyclePath, arm: ArmName, sheet: CellSheet, instrument_id:
             path=path,
             individual_id=arm.key,
             arm=arm,
-            pass_role=None,
         ),
         sheet=sheet,
         bought=0,

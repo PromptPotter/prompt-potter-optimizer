@@ -1,6 +1,6 @@
 import type { HeadToHead } from "@/lib/api/types";
 import { GuardBadge } from "./GuardBadge";
-import { sideTone, fmtPValue, PLACEHOLDER } from "@/lib/format";
+import { fmtEstimate, fmtPValue, PLACEHOLDER, sideTone } from "@/lib/format";
 
 import { DataTable, Said, type Column } from "@/components/ui";
 
@@ -63,7 +63,7 @@ const CONTRAST_COLUMNS: readonly Column<ArmContrast>[] = [
     width: "minmax(10rem, 2fr)",
     cell: ({ lift }) =>
       lift ? (
-        <span className={sideTone(lift.side)}>{lift.estimate.text}</span>
+        <span className={sideTone(lift.side)}>{fmtEstimate(lift.estimate)}</span>
       ) : (
         <span className="l4-dim">under two rows</span>
       ),

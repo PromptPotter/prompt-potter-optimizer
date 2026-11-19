@@ -502,7 +502,6 @@ class _OriginPanelPairs:
             individual_id=step.opt_sp.id,
             arm=step.arm,
             # A fold over every pass report scope may see, so no one pass names it.
-            pass_role=None,
         )
 
     def _member(
@@ -777,11 +776,10 @@ class ReferencePairs:
         return read_pair(
             a=self._member(
                 against,
-                MeasurementRole.PARENT if reference is None else reference.state.role,
                 NO_CELLS if reference is None else reference.rows,
                 cut=reference is not None and walked_short(reference.state),
             ),
-            b=self._member(arm.key, arm.state.role, arm.rows, cut=walked_short(arm.state)),
+            b=self._member(arm.key, arm.rows, cut=walked_short(arm.state)),
             cell_set=CellSetName.REFERENCE_CELLS,
             cells=self.declared,
             masked=False,
@@ -795,7 +793,6 @@ class ReferencePairs:
     def _member(
         self,
         key: ArmKey,
-        role: MeasurementRole,
         rows: CellSheet,
         *,
         cut: bool,
@@ -805,7 +802,6 @@ class ReferencePairs:
                 path=self.path,
                 individual_id=key,
                 arm=self.names.get(key),
-                pass_role=role,
             ),
             sheet=rows,
             bought=fresh_cells(rows),

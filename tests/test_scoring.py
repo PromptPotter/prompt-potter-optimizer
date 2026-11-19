@@ -3768,7 +3768,7 @@ def _line_read(
             ],
             bank,
             scope=RoleScope.REPORT,
-            address=MemberAddress(path=(hop,), individual_id=arm.key, arm=arm, pass_role=None),
+            address=MemberAddress(path=(hop,), individual_id=arm.key, arm=arm),
         )
 
     def read(

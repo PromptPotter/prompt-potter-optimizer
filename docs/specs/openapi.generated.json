@@ -6853,21 +6853,9 @@
         "type": "object"
       },
       "Estimate": {
-        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nEvery surface prints `text`, or `band` (the interval alone); none prints a bound of its own.",
+        "additionalProperties": false,
+        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nIt holds facts alone, so a stored or hashed estimate never reads a word; a surface words it\nwhere it prints it (`text`, or `band`, the interval alone; the browser's\n`webapp/lib/format.ts::fmtEstimate`), never a bound of its own.",
         "properties": {
-          "band": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "SERVED: the interval alone, its bounds in the unit `point` names; null with no spread.",
-            "readOnly": true,
-            "title": "Band"
-          },
           "ci_hi": {
             "anyOf": [
               {
@@ -6911,12 +6899,6 @@
             "description": "The cells it was read on; null where none was counted.",
             "title": "N"
           },
-          "point": {
-            "description": "SERVED: the value alone, as a person reads it in its unit.",
-            "readOnly": true,
-            "title": "Point",
-            "type": "string"
-          },
           "se": {
             "anyOf": [
               {
@@ -6928,12 +6910,6 @@
             ],
             "description": "Its standard error; null where none was taken.",
             "title": "Se"
-          },
-          "text": {
-            "description": "SERVED: `point`, then `band` where there is one; no surface prints an estimate of its own.",
-            "readOnly": true,
-            "title": "Text",
-            "type": "string"
           },
           "unit": {
             "$ref": "#/components/schemas/MeasurandUnit"
@@ -6950,10 +6926,7 @@
           "n",
           "se",
           "unit",
-          "form",
-          "band",
-          "point",
-          "text"
+          "form"
         ],
         "title": "Estimate",
         "type": "object"
@@ -10932,17 +10905,6 @@
             "title": "Individual Id",
             "type": "string"
           },
-          "pass_role": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/MeasurementRole"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Which pass, where the same individual is read by more than one."
-          },
           "path": {
             "description": "The cycle the member was read in, root to leaf.",
             "items": {
@@ -10956,8 +10918,7 @@
         "required": [
           "path",
           "individual_id",
-          "arm",
-          "pass_role"
+          "arm"
         ],
         "title": "MemberAddress",
         "type": "object"
