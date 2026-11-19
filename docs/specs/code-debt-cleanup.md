@@ -297,13 +297,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### bkeys-2 (what bkeys left at its landing)
 
-- **A rename re-keys every banked L4 cell's treatment**: the cell estimator is the L4 leg's behaviour
-  (`nodes.py::BehaviourKeys.cell_estimator`), but `nodes.py::behaviour_key` still hashes each
-  optimizer package's source into `InnerTaskSpec.optimizer_treatment`, so ren's renames moved all five
-  treatment digests, every request byte-identical, and l4-outer-6's `Frontier` → `Parent` re-keyed
-  every banked cell for potter, capo-pobb and gepa. Root: a treatment keyed by its fingerprint alone.
-  **Rides with:** bkeys-2. **Re-test:** a rename in `optimizers/potter/` leaves `treatment:potter`
-  (`offline_run.py --digests`) unchanged.
 - **The trace hashes a display field** (rec's landing, reported): `MemberAddress.pass_role` has no
   reader but rides the round-file readings the trace hashes, so deleting it moves the behaviour keys.
   Root: the behaviour key reads the decisions, not the display fields nor their spelling: ren's renames
