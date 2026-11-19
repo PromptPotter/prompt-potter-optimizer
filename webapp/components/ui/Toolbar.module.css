@@ -20,15 +20,6 @@
   min-width: 8px;
 }
 
-/* A coarse pointer's 44px hit area overhangs a 24px icon chip (`responsive.css`): the row is that
-   tall and holds the inline overhang at both ends, so no control grows the row's scroll box. */
-@media (pointer: coarse) {
-  .bar {
-    min-block-size: var(--touch-target-min);
-    padding-inline: calc((var(--touch-target-min) - 24px) / 2);
-  }
-}
-
 /* The fold's one switch, at the phone breakpoint (`--bp-sm`). */
 .inline {
   display: contents;

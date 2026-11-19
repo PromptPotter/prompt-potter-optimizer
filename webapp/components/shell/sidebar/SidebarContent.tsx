@@ -31,20 +31,20 @@ export function SidebarContent() {
   const datasetNames = useMemo(() => [...new Set(listed.map(datasetOf))].sort(), [listed]);
 
   return (
-    <div className="unit-library">
-      <div className="unit-library-head">
+    <div className="sidebar-tree">
+      <div className="sidebar-tree-head">
         <span>Campaigns</span>
         <SidebarFilterPopover datasetNames={datasetNames} />
       </div>
       {isFiltered(filter) && (
-        <div className="unit-library-active-filter">
-          <span className="unit-library-active-filter-text">
+        <div className="sidebar-tree-active-filter">
+          <span className="sidebar-tree-active-filter-text">
             {filter.lifecycle === "archived" && <span>Archived</span>}
             {filter.dataset != null && <span>{filter.dataset}</span>}
           </span>
           <button
             type="button"
-            className="unit-library-active-filter-clear"
+            className="sidebar-tree-active-filter-clear"
             onClick={clearListedFilter}
             title="Clear filters"
             aria-label="Clear filters"
@@ -55,35 +55,35 @@ export function SidebarContent() {
       )}
       {status !== "authed" ? (
         status === "loading" ? (
-          <Loading className="unit-library-note">loading…</Loading>
+          <Loading className="sidebar-tree-note">loading…</Loading>
         ) : (
           <SignInPrompt
-            className="unit-library-note"
+            className="sidebar-tree-note"
             message="Sign in to see your campaigns."
           />
         )
       ) : (
         !loaded &&
         (failure !== null ? (
-          <FailureLine failure={failure} className="unit-library-note" />
+          <FailureLine failure={failure} className="sidebar-tree-note" />
         ) : (
-          <Loading className="unit-library-note">loading…</Loading>
+          <Loading className="sidebar-tree-note">loading…</Loading>
         ))
       )}
       {loaded && shown.length === 0 && filter.lifecycle === "archived" && (
-        <Empty className="unit-library-note" title="No archived campaigns">
+        <Empty className="sidebar-tree-note" title="No archived campaigns">
           Archive a campaign from its <code>⋯</code> menu to declutter the active list. Archives
           are reversible from this tab.
         </Empty>
       )}
       {loaded && shown.length === 0 && filter.lifecycle !== "archived" && (
-        <Empty className="unit-library-note" title="No campaigns yet">
+        <Empty className="sidebar-tree-note" title="No campaigns yet">
           Hit <strong>+ New campaign</strong> above. Bring the data your pipeline gets wrong — the
           Potter reads it, sets up the first run, and starts improving.
         </Empty>
       )}
       {loaded && shown.length > 0 && (
-        <ul className="unit-library-list">
+        <ul className="sidebar-tree-list">
           <ForestRows entries={shown} />
         </ul>
       )}

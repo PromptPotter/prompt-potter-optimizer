@@ -21,9 +21,12 @@ describe("pruneStore", () => {
     expect(pruneStore(store, NOW)).toEqual({});
   });
 
-  it("drops a record written by an older version rather than migrating it", () => {
-    const store = { a: view({ v: 0 }) };
-    expect(pruneStore(store, NOW)).toEqual({});
+  it("starts a reshaped field at its default and keeps every other axis", () => {
+    const store = { a: { ...view({ expandedLanes: ["x::y|cand"] }), opened: "row", toggled: ["row"] } };
+    const kept = pruneStore(store, NOW).a;
+    expect(kept?.opened).toEqual([]);
+    expect(kept?.expandedLanes).toEqual(["x::y|cand"]);
+    expect(kept).not.toHaveProperty("toggled");
   });
 
   it("evicts least-recently-viewed first once over the cap", () => {
@@ -64,7 +67,6 @@ describe("viewMemoryCodec", () => {
         "expandedLanes",
         "opened",
         "treeFreed",
-        "v",
         "viewedPick",
         "viewedPath",
       ].sort(),

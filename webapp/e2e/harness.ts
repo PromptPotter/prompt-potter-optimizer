@@ -354,7 +354,7 @@ export async function showSidebar(page: Page) {
 
 /** Back from a phone's list screen: the viewed campaign's row reopens the views it left. */
 export async function hideSidebar(page: Page) {
-  const row = page.locator('.mobile-list .unit-library-item[aria-current="true"]');
+  const row = page.locator('.mobile-list .sidebar-tree-item[aria-current="true"]');
   if (await row.isVisible()) await press(row);
 }
 
@@ -368,4 +368,24 @@ export async function noSidewaysScroll(page: Page) {
       .map((el) => `${el.tagName.toLowerCase()}.${[...el.classList].join(".")} +${el.scrollWidth - el.clientWidth}px`),
   );
   expect(over, "a pane scrolls sideways").toEqual([]);
+}
+
+/** A tap lands on the control drawn there: nothing else sits at a visible button's centre, and on a
+ *  touch screen no button is under the 44px floor (`responsive.css`). */
+export async function everyTapLands(page: Page) {
+  const touch = base.info().project.use.hasTouch === true;
+  const wrong = await page.evaluate((touch) => {
+    const out: string[] = [];
+    for (const b of document.querySelectorAll("button")) {
+      if (!b.checkVisibility()) continue;
+      b.scrollIntoView({ block: "center", inline: "nearest" });
+      const r = b.getBoundingClientRect();
+      const name = (b.getAttribute("aria-label") || b.textContent || "").trim().slice(0, 30);
+      if (touch && (r.width < 43.5 || r.height < 43.5)) out.push(`"${name}" is ${Math.round(r.width)}x${Math.round(r.height)}`);
+      const top = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+      if (top && !b.contains(top)) out.push(`"${name}" is under ${top.tagName.toLowerCase()}.${[...top.classList].join(".")}`);
+    }
+    return out;
+  }, touch);
+  expect(wrong, "a tap lands off the control drawn there").toEqual([]);
 }

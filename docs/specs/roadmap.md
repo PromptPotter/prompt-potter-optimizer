@@ -110,8 +110,8 @@ before more L4, so run data stops migrating; the edge tail follows over the week
   Every treatment digest re-keys.
 - **landed 53:** mob 2: on a phone a card header folds its trailing actions into ⋯ (operator,
   2026-11-13), the masthead id and setup line placed by it, and the phone walk's back step. **mob-3**
-  queues behind the webapp-free chains: a one-row toolbar's hit area held to its row, and the walk
-  server's world named by the gate, not a hand-set hash.
+  queues behind the webapp-free chains: the walk server's world named by the gate, not a hand-set
+  hash.
 - **landed 54:** passes-5 and holders-3: a pause stands for the hold it was filed against, one reader
   of a reply's usage, `origin_replicates` tested in a run; `reindex` plans unless `--apply`, and an
   atomic write's temporary stays locked through its replace. Every `Extra` names a declared extra.

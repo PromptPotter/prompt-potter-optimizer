@@ -12,6 +12,7 @@ import {
   type PoolFill,
   type PoolOffer,
   type PoolRow,
+  KNOB_SOURCE_SET_BY,
   POOL_SOURCE_INFO,
 } from "@/lib/api/types";
 import {
@@ -92,17 +93,10 @@ export function NodeKnobsPanel({ onApply }: { onApply?: (patch: DraftPatch) => v
   );
 }
 
-type KnobLayer = ConfigKnob["source"];
+type KnobSource = ConfigKnob["source"];
 
-const LAYER_WORDS: Partial<Record<KnobLayer, string>> = {
-  dataset: "by the dataset",
-  campaign: "by this campaign",
-  free_tier: "by the free tier",
-  start: "by a steer",
-};
-
-function knobLayers(map: ConfigMapResponse | null | undefined): Map<string, KnobLayer> {
-  const out = new Map<string, KnobLayer>();
+function knobLayers(map: ConfigMapResponse | null | undefined): Map<string, KnobSource> {
+  const out = new Map<string, KnobSource>();
   for (const group of map?.groups ?? []) {
     for (const knob of group.knobs) out.set(knob.path, knob.source);
   }
@@ -124,7 +118,7 @@ function KnobGroups({
   optimizer: string;
   setup: OptimizerSetup;
   entry: OptimizerRoster["optimizers"][number] | undefined;
-  setBy: Map<string, KnobLayer>;
+  setBy: Map<string, KnobSource>;
   onChange: OnChange;
   onReset: OnReset;
 }) {
@@ -241,7 +235,7 @@ export function KnobItem({
   knob: NodeConfigParam;
   declaredLabel: string;
   // The config map's layer behind a campaign's value; a draft's setup has none.
-  setBy?: KnobLayer | undefined;
+  setBy?: KnobSource | undefined;
   showNode?: boolean;
   onChange: OnChange;
   onReset: (() => void) | undefined;
@@ -290,7 +284,7 @@ export function KnobItem({
         <p className="mech-row-default">
           <span>
             Changed from {declaredLabel} {fmtValue(k.declared)}
-            {setBy && LAYER_WORDS[setBy] ? ` ${LAYER_WORDS[setBy]}` : null}
+            {setBy && KNOB_SOURCE_SET_BY[setBy] ? ` ${KNOB_SOURCE_SET_BY[setBy]}` : null}
           </span>
           {onReset ? (
             <Button variant="ghost" className="mech-reset" onClick={onReset}>

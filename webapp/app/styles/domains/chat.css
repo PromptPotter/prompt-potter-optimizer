@@ -33,7 +33,6 @@
 .chat-send:disabled{opacity:.5;cursor:not-allowed}
 @media (pointer:coarse){
   .chat-input{font-size:var(--text-xl);min-height:44px}
-  .chat-attach,.chat-send{min-height:44px}
   .chat-tools-wrap{margin:0 var(--space-4) 0 0}
   .chat-tools{padding:0 var(--space-4)}
 }

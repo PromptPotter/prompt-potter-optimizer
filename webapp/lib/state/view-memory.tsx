@@ -3,16 +3,12 @@ import { useLocalStorage } from "@/lib/hooks/useLocalStorage";
 import { STORAGE_KEYS } from "@/lib/storage-keys";
 import { ownerOfAddress } from "@/lib/ids";
 
-// Bumping this DROPS every stored record rather than migrating it.
-const RECORD_VERSION = 6;
-
 const TTL_MS = 14 * 24 * 60 * 60 * 1000;
 
 const MAX_CAMPAIGNS = 24;
 
 // Ids, flags and UI keys only — never a measurement.
 export interface CampaignView {
-  v: number;
   at: number;
   // Sidebar rows the operator opened: every row starts closed.
   opened: string[];
@@ -32,7 +28,6 @@ const EMPTY_STORE: Store = {};
 
 export function emptyView(): CampaignView {
   return {
-    v: RECORD_VERSION,
     at: 0,
     opened: [],
     viewedPath: null,
@@ -43,11 +38,30 @@ export function emptyView(): CampaignView {
   };
 }
 
-export function pruneStore(store: Readonly<Record<string, CampaignView | null>>, now: number): Store {
-  const fresh = Object.entries(store).filter(
-    (e): e is [string, CampaignView] =>
-      e[1] !== null && e[1].v === RECORD_VERSION && now - e[1].at < TTL_MS,
-  );
+// A field is read by its shape alone, and one whose meaning changes takes a new name: reshaping one
+// axis keeps the others (the old field is never read, the new one starts at its default).
+const strings = (x: unknown) => Array.isArray(x) && x.every((s) => typeof s === "string");
+const key = (x: unknown) => x === null || typeof x === "string";
+const SHAPE: { readonly [K in keyof CampaignView]: (x: unknown) => boolean } = {
+  at: (x) => typeof x === "number",
+  opened: strings,
+  viewedPath: key,
+  viewedPick: key,
+  treeFreed: (x) => typeof x === "boolean",
+  expandedLanes: strings,
+  expandedForLane: key,
+};
+
+function readView(raw: unknown): CampaignView | null {
+  if (typeof raw !== "object" || raw === null || !SHAPE.at((raw as { at?: unknown }).at)) return null;
+  const kept = Object.entries(raw).filter(([k, x]) => k in SHAPE && SHAPE[k as keyof CampaignView](x));
+  return { ...emptyView(), ...Object.fromEntries(kept) };
+}
+
+export function pruneStore(store: Readonly<Record<string, unknown>>, now: number): Store {
+  const fresh = Object.entries(store)
+    .map(([owner, raw]) => [owner, readView(raw)] as const)
+    .filter((e): e is readonly [string, CampaignView] => e[1] !== null && now - e[1].at < TTL_MS);
   fresh.sort((a, b) => b[1].at - a[1].at);
   return Object.fromEntries(fresh.slice(0, MAX_CAMPAIGNS));
 }
@@ -57,7 +71,7 @@ export const viewMemoryCodec = {
   deserialize: (raw: string): Store => {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return EMPTY_STORE;
-    return pruneStore(parsed as Record<string, CampaignView | null>, Date.now());
+    return pruneStore(parsed as Record<string, unknown>, Date.now());
   },
 };
 
@@ -102,7 +116,6 @@ export function ViewMemoryProvider({ children }: { children: ReactNode }) {
         [owner]: {
           ...(prev[owner] ?? emptyView()),
           ...patch,
-          v: RECORD_VERSION,
           at: Date.now(),
         },
       }));

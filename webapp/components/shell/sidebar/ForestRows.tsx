@@ -58,20 +58,20 @@ function OriginRow({ group }: { group: RootGroup }) {
   if (campaigns.length === 1) return <ListedRow campaign={campaigns[0]!} />;
   return (
     <>
-      <div className="unit-library-family origin-row">
-        <span className="unit-library-item origin-label">
+      <div className="sidebar-tree-family origin-row">
+        <span className="sidebar-tree-item origin-label">
           <HoverCard
             content={`${campaigns.length} campaigns start from this same specification (${rootCycleId}), so their origin scores pool.`}
             focusable
           >
-            <span className="unit-library-name">
+            <span className="sidebar-tree-name">
               spec {label}
-              <span className="unit-library-kind">{campaigns.length} runs</span>
+              <span className="sidebar-tree-kind">{campaigns.length} runs</span>
             </span>
           </HoverCard>
         </span>
       </div>
-      <ul className="unit-library-children">
+      <ul className="sidebar-tree-children">
         {campaigns.map((campaign) => (
           <li key={campaign.address}>
             <ListedRow campaign={campaign} />
@@ -96,10 +96,10 @@ function UnstartedRow({ campaign }: { campaign: UnstartedCampaign }) {
   const selected = checkin?.draftId === campaign.address;
   return (
     <RowHoverCard card={campaign}>
-      <div className={cx("unit-library-family", selected && "selected")}>
+      <div className={cx("sidebar-tree-family", selected && "selected")}>
         <button
           type="button"
-          className="unit-library-item"
+          className="sidebar-tree-item"
           onClick={() => navigate({ draftId: campaign.address })}
           aria-current={selected ? "true" : undefined}
         >
@@ -131,7 +131,7 @@ function RunRow({ campaign }: { campaign: HierarchyCampaign }) {
 function RunSubtree({ address }: { address: string }) {
   const tree = useLineageTree(address, true);
   return (
-    <ReadState read={tree} subject="its candidates" className="inner-library-empty">
+    <ReadState read={tree} subject="its candidates" className="sidebar-tree-empty">
       {(root) => <CampaignBody body={root} />}
     </ReadState>
   );
@@ -168,11 +168,11 @@ function CampaignRow({
   return (
     <>
       <RowHoverCard card={campaign}>
-        <div className={cx("unit-library-family", selected && "selected", archived && "archived")}>
+        <div className={cx("sidebar-tree-family", selected && "selected", archived && "archived")}>
           {opens ? <Twist open={open} onClick={() => nodes.toggle(campaign.address)} /> : null}
           <button
             type="button"
-            className="unit-library-item"
+            className="sidebar-tree-item"
             onClick={() => navigate({ path: pathOfAddress(campaign.facts.root) }, { resume: true })}
             aria-current={selected ? "true" : undefined}
             disabled={archived}
@@ -190,7 +190,7 @@ function CampaignRow({
 function CampaignBody({ body }: { body: SubtreeCampaign }) {
   const cycles = body.children;
   return (
-    <ul className="unit-library-children">
+    <ul className="sidebar-tree-children">
       {cycles.length === 1 ? (
         <CycleBody cycle={cycles[0]!} />
       ) : (
@@ -212,11 +212,11 @@ function CycleRow({ cycle }: { cycle: SubtreeCycle }) {
   return (
     <>
       <RowHoverCard card={cycle}>
-        <div className={cx("unit-library-family", selected && "selected")}>
+        <div className={cx("sidebar-tree-family", selected && "selected")}>
           <Twist open={open} onClick={() => nodes.toggle(cycle.address)} />
           <button
             type="button"
-            className="unit-library-item"
+            className="sidebar-tree-item"
             onClick={() => navigate({ path: pathOfAddress(cycle.address) }, { resume: true })}
             aria-current={selected ? "true" : undefined}
           >
@@ -225,7 +225,7 @@ function CycleRow({ cycle }: { cycle: SubtreeCycle }) {
         </div>
       </RowHoverCard>
       {open && (
-        <ul className="unit-library-children">
+        <ul className="sidebar-tree-children">
           <CycleBody cycle={cycle} />
         </ul>
       )}
@@ -239,7 +239,7 @@ function CycleBody({ cycle }: { cycle: SubtreeCycle }) {
   const { live, retired } = splitRetired(rows);
   return (
     <>
-      {rows.length === 0 && <li className="inner-library-empty">Never ran</li>}
+      {rows.length === 0 && <li className="sidebar-tree-empty">Never ran</li>}
       {live.map((cand) => (
         <li key={cand.address}>
           <CandidateRow cand={cand} />
@@ -263,7 +263,7 @@ function Twist({ open, onClick }: { open: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
-      className="unit-library-twist"
+      className="sidebar-tree-twist"
       onClick={onClick}
       aria-label={open ? "Collapse" : "Expand"}
       aria-expanded={open}
@@ -276,9 +276,9 @@ function Twist({ open, onClick }: { open: boolean; onClick: () => void }) {
 function CycleRowLabel({ cycle }: { cycle: SubtreeCycle }) {
   const lift = figureOf(cycle, "lift")?.value ?? PLACEHOLDER;
   return (
-    <span className="unit-library-row">
-      <span className="unit-library-name">{cycle.label}</span>
-      <span className="unit-library-meta unit-library-meta-marked">
+    <span className="sidebar-tree-row">
+      <span className="sidebar-tree-name">{cycle.label}</span>
+      <span className="sidebar-tree-meta sidebar-tree-meta-marked">
         <PhaseMark entry={cycle} />
         <span title={lift}>{lift}</span>
       </span>
@@ -294,21 +294,21 @@ function RetiredGroupRow({ cycle, group }: { cycle: SubtreeCycle; group: Retired
   const [first] = group.candidates;
   return (
     <>
-      <div className="unit-library-family retired">
+      <div className="sidebar-tree-family retired">
         <Twist open={open} onClick={() => nodes.toggle(key)} />
-        <span className="unit-library-item">
-          <span className="unit-library-row">
-            <span className="unit-library-name">
-              <span className="unit-library-kind">⑂ {tagLabel(first ?? null, "superseded")}</span>
+        <span className="sidebar-tree-item">
+          <span className="sidebar-tree-row">
+            <span className="sidebar-tree-name">
+              <span className="sidebar-tree-kind">⑂ {tagLabel(first ?? null, "superseded")}</span>
             </span>
-            <span className="unit-library-meta">
-              <span className="unit-library-status">{`${n} attempt${n === 1 ? "" : "s"}`}</span>
+            <span className="sidebar-tree-meta">
+              <span className="sidebar-tree-status">{`${n} attempt${n === 1 ? "" : "s"}`}</span>
             </span>
           </span>
         </span>
       </div>
       {open && (
-        <ul className="unit-library-children">
+        <ul className="sidebar-tree-children">
           {group.candidates.map((cand) => (
             <li key={cand.address}>
               <CandidateRow cand={cand} />
@@ -332,26 +332,26 @@ function CandidateRow({ cand }: { cand: HierarchyCandidate }) {
   return (
     <>
       <RowHoverCard card={cand}>
-        <div className={cx("unit-library-family", selected && "selected", retired && "retired")}>
+        <div className={cx("sidebar-tree-family", selected && "selected", retired && "retired")}>
           {inner.length > 0 ? <Twist open={open} onClick={() => nodes.toggle(cand.address)} /> : null}
           <button
             type="button"
-            className="unit-library-item candidate-label"
+            className="sidebar-tree-item candidate-label"
             onClick={() => pick(cand)}
             aria-pressed={selected}
           >
-            <span className="unit-library-row">
-              <span className="unit-library-name">
+            <span className="sidebar-tree-row">
+              <span className="sidebar-tree-name">
                 {cand.label}
-                {elected && <span className="unit-library-kind">{tagLabel(cand, "verdict")}</span>}
+                {elected && <span className="sidebar-tree-kind">{tagLabel(cand, "verdict")}</span>}
               </span>
-              {headline && <span className="unit-library-meta">{headline.value}</span>}
+              {headline && <span className="sidebar-tree-meta">{headline.value}</span>}
             </span>
           </button>
         </div>
       </RowHoverCard>
       {open && inner.length > 0 && (
-        <ul className="unit-library-children">
+        <ul className="sidebar-tree-children">
           {inner.map((campaign) => (
             <li key={campaign.address}>
               <InnerCampaignRow campaign={campaign} />

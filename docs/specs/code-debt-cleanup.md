@@ -463,39 +463,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `scoring/passes.py:266`, `domain/run_standing.py:444`, `store/lineage_queries.py:184,203` still
   write `role != MeasurementRole.PARENT`. Action: each asks `is_proposal`. **Re-test:**
   `git grep -c "!= MeasurementRole.PARENT" -- promptpotter` is 0.
-- **One version drops every axis of view memory**: `lib/state/view-memory.tsx::RECORD_VERSION` covers
-  the sidebar's opened rows and the dashboard's lanes and pick alike, so a reshape of one wipes the
-  others (the closed-by-default sidebar did). Action: a version per axis, or the axes in separate
-  records. **Rides with:** webd. **Re-test:** a bump for the sidebar keeps `expandedLanes`.
-- **The campaign tree is named a "unit library"**: every sidebar class is `unit-library-*` (and
-  `inner-library-empty`), a name that stopped describing its contents. Action: one rename across
-  `shell.css`, the sidebar TSX and the e2e walk. **Rides with:** webd. **Re-test:**
-  `git grep -c "unit-library" -- webapp` is 0.
-- **A second icon mechanism**: `shell/sidebar/Sidebar.tsx`'s footer hand-draws four `<svg>`s beside
-  `ui/Icon`, which takes no `className` (the theme toggle's `.sun` / `.moon`) or fill. Action: `Icon`
-  carries both, and every sidebar glyph rides it. **Rides with:** webd. **Re-test:**
-  `git grep -c "<svg" -- webapp/components/shell/sidebar` is 0.
-- **A touch hit area takes its neighbour's tap**: `app/styles/foundation/responsive.css`'s
-  `(pointer:coarse)` rule grows every `button::before` to 44px around its centre ("a hit area, never
-  layout"), so a control closer than 44px to the next has its tap taken by the later sibling's
-  `::before`. Measured 2026-11-19 at 390px: the open sidebar tree loses 10 of 72 centres (21px rows,
-  so tapping C0's ▶ opened C1.1), the docked remote's areas take the list row above the dock, and a
-  masthead `.figure-door` loses to the value below it; with the `::before` off, none is lost. A site
-  patch holds the tree rows alone (`shell.css`: `.unit-library-family` min-height under
-  `(pointer:coarse)`). `54b705c5b` made the hit area out of a 44px layout floor that needed opt-outs
-  (run card, round axis, `ValueList`) and broke the Candidates header. Action: one control-size token
-  in `tokens.css` that every compact control reads, 44px on a coarse pointer; the `::before`, the
-  Toolbar's coarse reserve and the patch go. **Held:** a decision (each compact surface's phone
-  layout). **Re-test:** a `touch` walk spec: no visible button's own centre resolves
-  (`elementFromPoint`) to another button.
-- **A fold opens over its own trigger**: on a phone the account tabs' `ui/Toolbar` fold covers its ⋯
-  button, so a second tap on ⋯ opens "Preferences". Action: the fold opens clear of its trigger.
-  **Rides with:** the touch hit area. **Re-test:** two taps on ⋯ close the fold.
-- **A served closed set worded in the browser, past the probe**: `pipeline/NodeKnobsPanel.tsx`'s
-  `LAYER_WORDS` words `ConfigKnob.source`; its `_WORDS` suffix escapes `webapp/lib/CLAUDE.md`'s
-  word-table probe. Action: the server words each source (`shared/worded.py::Worded`), the table
-  goes, and the probe gains `_WORDS`. **Rides with:** webd. **Re-test:**
-  `git grep -cE "^const [A-Z_]+_WORDS" -- webapp` is 0.
 
 ### batch/28 · lb
 

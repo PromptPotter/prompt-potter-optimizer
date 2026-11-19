@@ -31,14 +31,14 @@ export function SidebarFilterPopover({ datasetNames }: { datasetNames: string[] 
       renderTrigger={({ open, toggle }) => (
         <button
           type="button"
-          className={cx("unit-library-filter-btn", (open || active) && "on")}
+          className={cx("sidebar-tree-filter-btn", (open || active) && "on")}
           onClick={toggle}
           aria-expanded={open}
           aria-label="Filter campaigns"
           title="Filter campaigns"
         >
           {FILTER_GLYPH}
-          {active && <span className="unit-library-filter-dot" aria-hidden="true" />}
+          {active && <span className="sidebar-tree-filter-dot" aria-hidden="true" />}
         </button>
       )}
     >
@@ -78,13 +78,13 @@ function FilterPanel({ datasetNames }: { datasetNames: string[] }) {
             aria-label="Filter datasets by name"
           />
           <div
-            className="unit-library-filter sidebar-filter-datasets"
+            className="sidebar-tree-filter sidebar-filter-datasets"
             role="group"
             aria-label="Filter by dataset"
           >
             <button
               type="button"
-              className={cx("unit-library-filter-chip", dataset == null && "active")}
+              className={cx("sidebar-tree-filter-chip", dataset == null && "active")}
               onClick={() => setListedFilter({ dataset: null })}
             >
               All datasets
@@ -93,7 +93,7 @@ function FilterPanel({ datasetNames }: { datasetNames: string[] }) {
               <button
                 key={d}
                 type="button"
-                className={cx("unit-library-filter-chip", dataset === d && "active")}
+                className={cx("sidebar-tree-filter-chip", dataset === d && "active")}
                 onClick={() => setListedFilter({ dataset: dataset === d ? null : d })}
                 title={d}
               >

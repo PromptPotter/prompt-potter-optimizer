@@ -51,7 +51,7 @@ test("a seat cell drills into the inner run that measured it", async ({ page, re
   // The row's name opens on its model's vendor mark, then the label.
   const row = page.getByRole("button", { name: new RegExp(`(^|\\s)${escape(name)}(\\s|$)`) }).first();
   // No row opens itself (`view-memory.tsx::useNodeToggle`): the viewed campaign is opened down to its cells.
-  const viewed = page.locator(".unit-library-family.selected");
+  const viewed = page.locator(".sidebar-tree-family.selected");
   await expect(viewed).toBeVisible({ timeout: 60_000 });
   const own = viewed.getByRole("button", { name: "Expand" });
   if (await own.count()) await own.click();

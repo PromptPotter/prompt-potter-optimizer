@@ -1,6 +1,6 @@
 # webapp/app — CLAUDE.md
 
-**The barrel order IS the cascade**: `app/styles/index.css` is the only stylesheet `app/mount.tsx` imports (`foundation/`, then `domains/`, then the cross-cutting tail); never a `globals.css`. <!-- probe: git grep -cE "\.css" -- webapp/app/mount.tsx <= 1 --> Every `components/ui/*.module.css` sits in `@layer ui`, so a call-site class beats a primitive default.
+**The barrel order IS the cascade**: `app/styles/index.css` is the only stylesheet `app/mount.tsx` imports (`foundation/`, then `domains/`, then the cross-cutting tail); never a `globals.css`. <!-- probe: git grep -cE "\.css" -- webapp/app/mount.tsx <= 1 --> Every `components/ui/*.module.css` sits in `@layer ui`, so a call-site class beats a primitive default. **On a touch screen a control owns a 44px box** (`foundation/responsive.css`, important in `ui.reset` so no surface's own size undercuts it): a tap lands on the control drawn there, never on a neighbour.
 
 **Type, space and colour come from tokens, never a literal** (greys exempt; `16px` on a touch text input, sub-4px hairlines); a categorical ink comes from `theme.ts`. **A field is skinned once, in `foundation/base.css`; a box states no width or height of its own.**
 

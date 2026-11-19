@@ -4,20 +4,24 @@ export function Icon({
   size,
   viewBox = "0 0 24 24",
   strokeWidth,
+  className,
   children,
 }: {
   size?: number | undefined;
   viewBox?: string;
-  strokeWidth: number;
+  // Absent: a filled glyph, painted in the text colour.
+  strokeWidth?: number;
+  className?: string;
   children: ReactNode;
 }) {
   return (
     <svg
+      className={className}
       width={size}
       height={size}
       viewBox={viewBox}
-      fill="none"
-      stroke="currentColor"
+      fill={strokeWidth === undefined ? "currentColor" : "none"}
+      stroke={strokeWidth === undefined ? "none" : "currentColor"}
       strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"

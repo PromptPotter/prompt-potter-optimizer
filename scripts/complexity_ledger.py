@@ -184,9 +184,9 @@ BASELINE = {
     # the dirs on the path as given; `permitted_narrowing` takes `at: Campaign | CampaignCycle`.
     # rates-4 (+14): `refresh_route_answers` returns each row it left with the answer it keeps and
     # its age; `reaper.py::_recorded` is a step's one recorder, the reclaim's own step `orphans`.
-    # sidebar-closed (+2): `ConfigKnob.set_by_layer` serves which sources a layer set, so the
-    # webapp's `RowHoverCard.tsx::UNSET_SOURCES` closed set goes.
-    "package_lines": 112147,
+    # sidebar-closed (+12): `config_map.py::KNOB_SOURCE_SET_BY` words each knob source and says
+    # which no layer set, so the webapp's `UNSET_SOURCES` and `LAYER_WORDS` go.
+    "package_lines": 112157,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

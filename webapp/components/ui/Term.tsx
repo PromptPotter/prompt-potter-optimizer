@@ -6,13 +6,15 @@ export function Term({
   children,
   content,
   className,
+  layout = "inline",
 }: {
   children: ReactNode;
   content: ReactNode;
   className?: string | undefined;
+  layout?: "inline" | "control";
 }) {
   return (
-    <HoverCard content={content} focusable>
+    <HoverCard content={content} layout={layout} focusable>
       <span className={className ? `${s.hint} ${className}` : s.hint}>
         {children}
       </span>

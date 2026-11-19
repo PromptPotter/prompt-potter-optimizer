@@ -32,13 +32,14 @@ const anchor = (r: DOMRect): CSSProperties => {
 export function HoverCard({
   content,
   className,
-  block = false,
+  layout = "inline",
   focusable = false,
   children,
 }: {
   content: ReactNode;
   className?: string;
-  block?: boolean;
+  // `control`: the frame stands alone as a tap target, never inside running text.
+  layout?: "inline" | "block" | "control";
   // The trigger takes focus itself, for children that hold no control of their own.
   focusable?: boolean;
   children: ReactNode;
@@ -95,11 +96,11 @@ export function HoverCard({
 
   useEffect(() => () => window.clearTimeout(timer.current), []);
 
-  const Wrap = block ? "div" : "span";
+  const Wrap = layout === "block" ? "div" : "span";
   return (
     <Wrap
       ref={setRef}
-      className={block ? s.block : s.wrap}
+      className={s[layout]}
       tabIndex={focusable ? 0 : undefined}
       // Hover is a mouse's: a touch browser's compat mouseenter after a tap opens nothing.
       onPointerEnter={(e) => {

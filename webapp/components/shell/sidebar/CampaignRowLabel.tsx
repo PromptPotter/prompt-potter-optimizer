@@ -13,7 +13,7 @@ export function PhaseMark({ entry }: { entry: HierarchyCampaign | HierarchyCycle
   const mark = STATUS_MARK_INFO[entry.state.status.mark];
   return (
     <span
-      className={`unit-library-mark tone-${mark.tone}`}
+      className={`sidebar-tree-mark tone-${mark.tone}`}
       role="img"
       aria-label={figureOf(entry, "state")?.value ?? undefined}
     >
@@ -30,24 +30,24 @@ export function CampaignRowLabel({ campaign }: { campaign: ListedCampaign }) {
     started === null ? tagLabel(campaign, "lifecycle") : figureOf(started, "rounds")?.value;
   const sub = [rounds, fmtAgo(campaign.span.last_at)].filter(Boolean).join(" · ");
   return (
-    <span className="unit-library-row">
-      <span className="unit-library-name unit-library-name-split">
+    <span className="sidebar-tree-row">
+      <span className="sidebar-tree-name sidebar-tree-name-split">
         {vendors.length > 0 && (
-          <span className="unit-library-vendors">
+          <span className="sidebar-tree-vendors">
             {vendors.map((v) => (
               <VendorLogo key={v.value} vendor={v.value} />
             ))}
           </span>
         )}
-        <span className="unit-library-name-head">{campaign.label}</span>
+        <span className="sidebar-tree-name-head">{campaign.label}</span>
       </span>
-      <span className="unit-library-meta unit-library-meta-marked">
+      <span className="sidebar-tree-meta sidebar-tree-meta-marked">
         {started && <PhaseMark entry={started} />}
-        <span className="unit-library-spend">{figureOf(campaign, "spend_lifetime")?.value}</span>
+        <span className="sidebar-tree-spend">{figureOf(campaign, "spend_lifetime")?.value}</span>
       </span>
       {sub && (
         <span
-          className={cx("unit-library-sub", vendors.length > 0 && "unit-library-sub-indent")}
+          className={cx("sidebar-tree-sub", vendors.length > 0 && "sidebar-tree-sub-indent")}
           title={sub}
         >
           {sub}

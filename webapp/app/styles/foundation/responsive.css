@@ -36,7 +36,6 @@
   .chat-messages{padding:var(--space-8);gap:var(--space-10)}
   .chat-msg{max-width:88%;font-size:var(--text-base);padding:var(--space-8) var(--space-12)}
   .chat-input-row{padding:var(--space-8);gap:var(--space-6)}
-  .chat-attach,.chat-send{width:44px;height:44px}
   /* 16px literal suppresses iOS focus-zoom; a token merely equal to 16 would take the suppressor with it. */
   .chat-input{font-size:16px;min-height:44px;padding-left:var(--space-8);padding-right:var(--space-8)}
   .toggle-row{padding:var(--space-6) 0;gap:var(--space-10)}
@@ -44,24 +43,19 @@
 
   .account-frame{height:auto;min-height:0;max-height:calc(var(--vh-full) - 32px)}
   .account-tab-body{padding:var(--space-18) var(--space-16) var(--space-14);gap:var(--space-12)}
-  .login-button{padding:var(--space-14) var(--space-16);min-height:44px;font-size:var(--text-md)}
+  .login-button{padding:var(--space-14) var(--space-16);font-size:var(--text-md)}
 }
 
 @media (pointer:coarse){
   .hs-mini-btn.resizable::after{opacity:1}
 }
 
-/* Gated on (pointer:coarse), not width: a touchscreen laptop gets the 44px floor too. A hit area,
-   never layout; a button that unsets `all` re-declares `position:relative`, or it spans its ancestor. */
+/* Gated on (pointer:coarse), not width: a touchscreen laptop gets the 44px floor too. The floor is the
+   control's own box, so a tap lands on the control drawn there; important in the bottom layer, so no
+   surface's own size undercuts it. */
 @layer ui.reset {
   @media (pointer:coarse){
-    button,
-    :is(.figure-value,.connector) > [tabindex]{position:relative}
-    button::before,
-    :is(.figure-value,.connector) > [tabindex]::before{
-      content:"";position:absolute;inset:50% auto auto 50%;translate:-50% -50%;
-      inline-size:max(100%,var(--touch-target-min));block-size:max(100%,var(--touch-target-min));
-    }
+    button{min-block-size:var(--touch-target-min)!important;min-inline-size:var(--touch-target-min)!important}
   }
 }
 

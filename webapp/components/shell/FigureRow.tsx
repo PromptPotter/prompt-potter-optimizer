@@ -30,7 +30,13 @@ export function Figure({
       <dt>{opens ? <FigureDoor label={label} family={opens} /> : label}</dt>
       <dd className="figure-value">
         {marked && <span className="phase-dot" aria-hidden="true" />}
-        {hover ? <Term content={hover}>{value}</Term> : value}
+        {hover ? (
+          <Term content={hover} layout="control">
+            {value}
+          </Term>
+        ) : (
+          value
+        )}
       </dd>
       {/* Clamped: a served reason can be a provider's whole error; its card repeats it whole. */}
       {sub && (

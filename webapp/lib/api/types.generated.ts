@@ -4406,8 +4406,6 @@ export interface ConfigKnob {
    * campaign (the operator's edit; any set bench knob), and on an optimizer
    * node's knob dataset, free_tier or seed */
   source: 'default' | 'dataset' | 'campaign' | 'free_tier' | 'start' | 'manifest';
-  /** True unless `source` is default or manifest */
-  set_by_layer: boolean;
 }
 
 export interface ConfigCoupling {
@@ -5702,7 +5700,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "ee05954205d5cc39";
+export const SERVED_CONTRACT = "7091703d118147bb";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5967,6 +5965,16 @@ export const COUPLING_SEVERITY_INFO: Record<'collision' | 'inert' | 'info', Coup
   "collision": { tone: "danger" },
   "inert": { tone: "attention" },
   "info": { tone: "quiet" },
+};
+
+// Mirror of application/config_map.py::KNOB_SOURCE_SET_BY, in display order.
+export const KNOB_SOURCE_SET_BY: Record<'default' | 'dataset' | 'campaign' | 'free_tier' | 'start' | 'manifest', string | null> = {
+  "default": null,
+  "dataset": "by the dataset",
+  "campaign": "by this campaign",
+  "free_tier": "by the free tier",
+  "start": "by a steer",
+  "manifest": null,
 };
 
 // Mirror of application/datasets/origin_readiness.py::SETUP_STEP_TITLES, in display order.
@@ -6541,6 +6549,7 @@ export const LEAF_INFO: Record<Leaf, LeafInfo> = {
 export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object, readonly string[]>([
   [SIGN_IN_REFUSAL_INFO, ["state_invalid_or_expired", "code_exchange_failed", "provider_returned_error", "callback_missing_params", "signin_unavailable", "accounts_full"]],
   [COUPLING_SEVERITY_INFO, ["collision", "inert", "info"]],
+  [KNOB_SOURCE_SET_BY, ["default", "dataset", "campaign", "free_tier", "start", "manifest"]],
   [SETUP_STEP_TITLES, ["optimizer", "data", "scoring", "pipeline", "head_to_head", "run"]],
   [GUARD_DIFFERENCE_INFO, ["instrument_id", "dataset_hash", "split", "bench_rows", "scorer_id", "models", "origin", "budget", "defaults", "optimizer_models", "human_intervened", "origin_reading"]],
   [GUARD_STATE_INFO, ["controlled", "uncontrolled", "differs"]],

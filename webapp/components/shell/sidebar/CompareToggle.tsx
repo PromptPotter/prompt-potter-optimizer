@@ -7,7 +7,7 @@ export function CompareToggle({ campaign }: { campaign: HierarchyCampaign }) {
   return (
     <button
       type="button"
-      className="unit-library-compare"
+      className="sidebar-tree-compare"
       aria-pressed={on}
       title={on ? "On the Compare board — click to take it off" : "Compare this campaign"}
       aria-label={on ? "Remove from the comparison" : "Add to the comparison"}

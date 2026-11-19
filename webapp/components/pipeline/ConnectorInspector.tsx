@@ -121,7 +121,7 @@ export function ConnectorInspector() {
   // The dot is the card's trigger, not a control of its own: a tap opens the card.
   return (
     <div className={cx("connector", stateCls)}>
-      <HoverCard content={pop} className={cx("connector-pop", stateCls)} focusable>
+      <HoverCard content={pop} className={cx("connector-pop", stateCls)} layout="control" focusable>
         <span
           className="connector-dot"
           role="img"

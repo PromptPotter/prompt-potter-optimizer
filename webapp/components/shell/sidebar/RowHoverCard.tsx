@@ -2,11 +2,12 @@ import { Fragment, useState, type ReactNode } from "react";
 import { CopyButton, HoverCard } from "@/components/ui";
 import { readyData, useRead } from "@/lib/hooks/useRead";
 import { campaignStorageRead, configMapRead } from "@/lib/api";
-import type {
-  ConfigKnob,
-  ConfigMapResponse,
-  HierarchyEntry,
-  UnstartedCampaign,
+import {
+  KNOB_SOURCE_SET_BY,
+  type ConfigKnob,
+  type ConfigMapResponse,
+  type HierarchyEntry,
+  type UnstartedCampaign,
 } from "@/lib/api/types";
 import { LeafSplit } from "@/components/account/LeafSplit";
 import { SummaryBlock } from "@/components/chat/SummaryBlock";
@@ -19,7 +20,7 @@ function declaredKnobs(map: ConfigMapResponse): ConfigKnob[] {
   for (const group of map.groups) {
     for (const knob of group.knobs) {
       const scalar = knob.value == null || typeof knob.value !== "object";
-      if (knob.set_by_layer && scalar) byPath.set(knob.path, knob);
+      if (KNOB_SOURCE_SET_BY[knob.source] !== null && scalar) byPath.set(knob.path, knob);
     }
   }
   return [...byPath.values()];
@@ -37,7 +38,7 @@ export function RowHoverCard({
   children: ReactNode;
 }) {
   return (
-    <HoverCard block className="rowhover-shell" content={<EntryBody entry={card} />}>
+    <HoverCard layout="block" className="rowhover-shell" content={<EntryBody entry={card} />}>
       {children}
     </HoverCard>
   );

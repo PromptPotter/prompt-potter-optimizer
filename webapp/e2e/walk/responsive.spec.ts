@@ -4,6 +4,8 @@ import {
   open,
   ready,
   noSidewaysScroll,
+  everyTapLands,
+  press,
   showSidebar,
   DASHBOARD_VIEWS,
 } from "../harness";
@@ -24,12 +26,14 @@ for (const vp of WIDTHS) {
     test("the zero-campaign shell fits its viewport", async ({ page }) => {
       await open(page);
       await noSidewaysScroll(page);
+      await everyTapLands(page);
     });
 
     test("every view fits its viewport", async ({ page, rich }) => {
       for (const views of ["", DASHBOARD_VIEWS, "/compare", "/samples/files", "/samples/spend"]) {
         await open(page, `${rich.addr}${views}`);
         await noSidewaysScroll(page);
+        await everyTapLands(page);
       }
     });
 
@@ -37,6 +41,24 @@ for (const vp of WIDTHS) {
       await open(page, "#/account=storage");
       await ready(page);
       await noSidewaysScroll(page);
+      await everyTapLands(page);
+      // A phone's tabs fold behind ⋯: open, every tap in it lands, and ⋯ again closes it.
+      const fold = page.getByRole("button", { name: "Account tabs" });
+      if (await fold.isVisible()) {
+        await press(fold);
+        await everyTapLands(page);
+        await press(fold);
+        await expect(fold).toHaveAttribute("aria-expanded", "false");
+      }
+    });
+
+    test("every tap on the opened campaign list lands on its row", async ({ page, rich }) => {
+      void rich; // skips a world with no campaign row to open
+      await open(page);
+      await showSidebar(page);
+      const twist = page.locator(".sidebar-tree-twist").first();
+      if (await twist.count()) await press(twist);
+      await everyTapLands(page);
     });
 
     // A sidebar row is its card's trigger, and on a phone the row spans the screen: no side of it has room.
@@ -44,7 +66,7 @@ for (const vp of WIDTHS) {
       void rich; // skips a world with no campaign row to hover
       await open(page);
       await showSidebar(page);
-      await page.locator(".unit-library-family").first().hover();
+      await page.locator(".sidebar-tree-family").first().hover();
       const card = page.getByRole("note");
       await expect(card).toBeVisible();
       const box = (await card.boundingBox())!;
