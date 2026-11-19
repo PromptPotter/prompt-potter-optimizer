@@ -79,6 +79,21 @@ const eslintConfig = defineConfig([
     plugins: { local: { rules: { "title-is-a-label": titleIsALabel } } },
     rules: { "local/title-is-a-label": "error" },
   },
+  // `vitest.config.ts` isolates no file, so a mock misses a module another file loaded first: a fact
+  // mounts the real providers (`lib/test-utils/in-workspace.ts`) and serves their reads off `fetch`.
+  {
+    files: ["**/__tests__/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.name='vi'][callee.property.name=/^(mock|doMock)$/][arguments.0.value=/^@\\/lib\\/(hooks|state)\\//]",
+          message: "Mount the real provider (lib/test-utils/in-workspace.ts), never a mock of a hook or a state module.",
+        },
+      ],
+    },
+  },
   globalIgnores([
     "out/**",
     // Playwright writes and removes it while the gate's lint walks the tree.

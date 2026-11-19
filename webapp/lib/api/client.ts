@@ -14,13 +14,17 @@ export function buildIsStale(): boolean {
   return serverMovedOn;
 }
 
+// Every answer and every stream frame names the contract it was served under; one other than this
+// tab's is only noted, never acted on here: a reload would drop an ingest draft or a command in flight.
+export function noteServedContract(serving: string | null): void {
+  if (serving && serving !== SERVED_CONTRACT) serverMovedOn = true;
+}
+
 // The ONE door to the API: every call is uncached, and every answer is checked against the contract
 // this tab was built against.
 export async function send(url: string, init: RequestInit = {}): Promise<Response> {
   const r = await fetch(url, { cache: "no-store", ...init });
-  const serving = r.headers.get("X-Served-Contract");
-  // Only noted, never acted on here: a reload would drop an ingest draft or a command in flight.
-  if (serving && serving !== SERVED_CONTRACT) serverMovedOn = true;
+  noteServedContract(r.headers.get("X-Served-Contract"));
   return r;
 }
 

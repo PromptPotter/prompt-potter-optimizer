@@ -31,6 +31,7 @@ from promptpotter.application.cycle_addressing import (
 from promptpotter.application.cycle_files import FileContentResponse, FileScope, FilesResponse
 from promptpotter.application.cycle_reads import (
     FamilyRay,
+    FeedFrame,
     RoundView,
     ViewedCycle,
     cycle_event_frames,
@@ -128,6 +129,7 @@ from promptpotter.domain.hierarchy import (
     HierarchySteps,
     ListingLifecycle,
 )
+from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.scoring import SampleStatus
 from promptpotter.domain.strict_model import StrictModel
@@ -527,14 +529,14 @@ class CycleEventsParams(
     first tick its caller's session or token no longer stands.
     """
 
-    def answer(self, caller: Caller) -> AsyncIterator[str]:
+    def answer(self, caller: Caller) -> AsyncIterator[ProjectionEnvelope]:
         return cycle_event_frames(caller, self.viewed(caller))
 
 
 class FeedParams(ReadParams, read=ReadKind.FEED, route="/feed"):
     """What moved, over SSE: a ``FeedFrame`` hints a re-ask; each read's body is the truth."""
 
-    def answer(self, caller: Caller) -> AsyncIterator[str]:
+    def answer(self, caller: Caller) -> AsyncIterator[FeedFrame]:
         return feed_frames(caller)
 
 

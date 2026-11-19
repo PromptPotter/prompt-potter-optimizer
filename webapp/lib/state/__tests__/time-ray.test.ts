@@ -1,29 +1,14 @@
 // @vitest-environment jsdom
-import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FakeStream } from "@/lib/__tests__/fake-stream";
+import { DEFAULT_VIEWS, NO_KEYS, formatAddress } from "@/lib/address";
 import { stepsRead } from "@/lib/api/reads";
 import { clearReadCache, reaskRead } from "@/lib/read-cache";
-import { AuthProvider } from "@/lib/state/auth";
 import { useTimeRay } from "@/lib/state/poll";
+import { InWorkspace as wrapper } from "@/lib/test-utils/in-workspace";
 
 const path = [{ campaignId: "c1", cycleId: "root" }];
-
-vi.mock("@/lib/state/workspace", () => ({
-  useWorkspace: () => ({ viewed: { path, address: "c1/root" } }),
-}));
-
-const wrapper = ({ children }: { children: ReactNode }) => createElement(AuthProvider, null, children);
-
-class QuietFeed {
-  static CLOSED = 2;
-  readyState = 1;
-  onmessage = null;
-  onerror = null;
-  close(): void {
-    this.readyState = QuietFeed.CLOSED;
-  }
-}
 
 // The served ray: steps 0..length-1 by offset, windowed newest-first before an opaque cursor.
 let length = 500;
@@ -45,18 +30,23 @@ describe("useTimeRay — what is shown never slides as the head moves", () => {
   beforeEach(() => {
     length = 700;
     paged = [];
-    vi.stubGlobal("EventSource", QuietFeed);
+    vi.stubGlobal("EventSource", FakeStream);
     vi.stubGlobal("fetch", async (url: string) => {
       if (url.endsWith("/auth/me")) return Response.json({ tenant_id: "t", user_id: "u" });
+      // The workspace's own reads (the listing, the active pointer) answer nothing here.
+      if (!url.includes("limit=")) return new Response(null, { status: 404 });
       const before = new URL(url, "http://x").searchParams.get("before");
       if (before !== null) paged.push(before);
       return serve(url);
     });
+    // The cycle the ray reads is the one the link pins.
+    window.history.replaceState(null, "", formatAddress({ subject: { path }, views: DEFAULT_VIEWS, keys: NO_KEYS }));
     vi.useFakeTimers();
     clearReadCache(true);
   });
   afterEach(() => {
     cleanup();
+    window.history.replaceState(null, "", window.location.pathname);
     clearReadCache(true);
     vi.unstubAllGlobals();
     vi.useRealTimers();

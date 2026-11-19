@@ -7412,27 +7412,6 @@
         "title": "FactorReading",
         "type": "object"
       },
-      "FeedFrame": {
-        "additionalProperties": false,
-        "description": "One subject moved: re-ask every read that names it. A hint, never the body.",
-        "properties": {
-          "subject": {
-            "description": "`account`, `machine`, or `store:` and a store's hops.",
-            "title": "Subject",
-            "type": "string"
-          },
-          "version": {
-            "title": "Version",
-            "type": "string"
-          }
-        },
-        "required": [
-          "subject",
-          "version"
-        ],
-        "title": "FeedFrame",
-        "type": "object"
-      },
       "FieldGap": {
         "additionalProperties": false,
         "description": "One origin field that still blocks mint — also the ``422 origin_incomplete`` body's ``details.gaps``.",
@@ -14433,95 +14412,6 @@
         "title": "ProducerState",
         "type": "string"
       },
-      "ProjectionEnvelope": {
-        "additionalProperties": false,
-        "description": "One outbound SSE frame, whose receiver treats an unknown field as a drift signal.",
-        "properties": {
-          "activity": {
-            "$ref": "#/components/schemas/ActivityState",
-            "description": "The run's current state as of this frame — what it is doing and what still holds. Whole on every frame, so a client renders the newest one and folds nothing."
-          },
-          "cycle_id": {
-            "description": "Target cycle the frame describes; redundant with the channel address but stamped per-frame for fan-in demux.",
-            "title": "Cycle Id",
-            "type": "string"
-          },
-          "kind": {
-            "description": "Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot.",
-            "enum": [
-              "account_event",
-              "arm",
-              "arm_act",
-              "backend_warning",
-              "bank_partition",
-              "bench_scored",
-              "campaign_ceiling",
-              "cell_beat",
-              "cycle_final",
-              "cycle_minted",
-              "cycle_share",
-              "cycle_superseded",
-              "decision",
-              "election",
-              "error",
-              "flight",
-              "fork_graded",
-              "health",
-              "hold",
-              "launch_clock",
-              "llm_call",
-              "llm_call_progress",
-              "llm_call_start",
-              "pass_graded",
-              "phase",
-              "priced_key",
-              "provider_eased",
-              "provider_hold",
-              "race_catch_up",
-              "race_standing",
-              "resolved_run",
-              "round_closed",
-              "round_entered",
-              "round_proposed",
-              "round_restated",
-              "round_warning",
-              "run_phase",
-              "run_wiring",
-              "sample_scored",
-              "sample_started",
-              "scoring_locked",
-              "spawned",
-              "spend_tombstone",
-              "standing_budget",
-              "token_usage",
-              "trail_tombstone",
-              "stream_snapshot"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
-          "payload": {
-            "additionalProperties": true,
-            "description": "Per-kind body. For record-derived kinds, the record's model_dump; for stream_snapshot, the cycle's served dashboard.",
-            "title": "Payload",
-            "type": "object"
-          },
-          "sequence": {
-            "description": "Ledger offset at append. Live-tail frames carry the record's offset; the leading stream_snapshot frame carries the offset captured at subscribe time.",
-            "minimum": 0.0,
-            "title": "Sequence",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "kind",
-          "cycle_id",
-          "sequence",
-          "activity"
-        ],
-        "title": "ProjectionEnvelope",
-        "type": "object"
-      },
       "PromptPart": {
         "description": "A prompt field a snippet suits, one name for a target and an optimizer prompt alike: a drop elsewhere is shown, never refused.",
         "enum": [
@@ -17131,6 +17021,128 @@
           }
         },
         "title": "SpendRollup",
+        "type": "object"
+      },
+      "StampedEnvelope": {
+        "additionalProperties": false,
+        "description": "A cycle tail's frame as the stream serves it.",
+        "properties": {
+          "activity": {
+            "$ref": "#/components/schemas/ActivityState",
+            "description": "The run's current state as of this frame — what it is doing and what still holds. Whole on every frame, so a client renders the newest one and folds nothing."
+          },
+          "contract": {
+            "description": "The served contract (`X-Served-Contract`), compared as a fetch's answer is.",
+            "title": "Contract",
+            "type": "string"
+          },
+          "cycle_id": {
+            "description": "Target cycle the frame describes; redundant with the channel address but stamped per-frame for fan-in demux.",
+            "title": "Cycle Id",
+            "type": "string"
+          },
+          "kind": {
+            "description": "Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot.",
+            "enum": [
+              "account_event",
+              "arm",
+              "arm_act",
+              "backend_warning",
+              "bank_partition",
+              "bench_scored",
+              "campaign_ceiling",
+              "cell_beat",
+              "cycle_final",
+              "cycle_minted",
+              "cycle_share",
+              "cycle_superseded",
+              "decision",
+              "election",
+              "error",
+              "flight",
+              "fork_graded",
+              "health",
+              "hold",
+              "launch_clock",
+              "llm_call",
+              "llm_call_progress",
+              "llm_call_start",
+              "pass_graded",
+              "phase",
+              "priced_key",
+              "provider_eased",
+              "provider_hold",
+              "race_catch_up",
+              "race_standing",
+              "resolved_run",
+              "round_closed",
+              "round_entered",
+              "round_proposed",
+              "round_restated",
+              "round_warning",
+              "run_phase",
+              "run_wiring",
+              "sample_scored",
+              "sample_started",
+              "scoring_locked",
+              "spawned",
+              "spend_tombstone",
+              "standing_budget",
+              "token_usage",
+              "trail_tombstone",
+              "stream_snapshot"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "description": "Per-kind body. For record-derived kinds, the record's model_dump; for stream_snapshot, the cycle's served dashboard.",
+            "title": "Payload",
+            "type": "object"
+          },
+          "sequence": {
+            "description": "Ledger offset at append. Live-tail frames carry the record's offset; the leading stream_snapshot frame carries the offset captured at subscribe time.",
+            "minimum": 0.0,
+            "title": "Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "contract",
+          "kind",
+          "cycle_id",
+          "sequence",
+          "activity"
+        ],
+        "title": "StampedEnvelope",
+        "type": "object"
+      },
+      "StampedFeedFrame": {
+        "additionalProperties": false,
+        "description": "A feed frame as the stream serves it.",
+        "properties": {
+          "contract": {
+            "description": "The served contract (`X-Served-Contract`), compared as a fetch's answer is.",
+            "title": "Contract",
+            "type": "string"
+          },
+          "subject": {
+            "description": "`account`, `machine`, or `store:` and a store's hops.",
+            "title": "Subject",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "contract",
+          "subject",
+          "version"
+        ],
+        "title": "StampedFeedFrame",
         "type": "object"
       },
       "StartBlock": {

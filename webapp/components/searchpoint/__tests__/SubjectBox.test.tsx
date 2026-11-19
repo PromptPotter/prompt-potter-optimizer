@@ -2,9 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_VIEWS, NO_KEYS, formatAddress } from "@/lib/address";
 import { clearReadCache } from "@/lib/read-cache";
-import { AuthProvider } from "@/lib/state/auth";
-import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/state/workspace";
+import { InWorkspace } from "@/lib/test-utils/in-workspace";
 import { SubjectBox } from "../SubjectBox";
 
 describe("SubjectBox — the Leader card says why it shows no leader (I1)", () => {
@@ -30,13 +28,9 @@ describe("SubjectBox — the Leader card says why it shows no leader (I1)", () =
 
   it("names its failure where the viewed run's dashboard is not read", async () => {
     render(
-      <AuthProvider>
-        <ViewMemoryProvider>
-          <WorkspaceProvider>
-            <SubjectBox />
-          </WorkspaceProvider>
-        </ViewMemoryProvider>
-      </AuthProvider>,
+      <InWorkspace>
+        <SubjectBox />
+      </InWorkspace>,
     );
     expect(await screen.findByText(/Could not load the viewed run's leader/)).toBeTruthy();
   });

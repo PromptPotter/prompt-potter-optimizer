@@ -1,17 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { clearReadCache } from "@/lib/read-cache";
-import { AuthProvider } from "@/lib/state/auth";
-import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/state/workspace";
 import { armedCaps } from "@/lib/test-fixtures";
+import { InWorkspace, anonymous } from "@/lib/test-utils/in-workspace";
 import { RunLimitsControl } from "../RunLimitsControl";
 
 // A spend read against another book than its cap's, or a clamp left unsaid, misleads a spend.
 describe("the finishing criteria read each cap against its own book", () => {
   beforeEach(() => {
     clearReadCache(true);
-    vi.stubGlobal("fetch", async () => new Response(null, { status: 401 }));
+    vi.stubGlobal("fetch", anonymous);
   });
 
   it("meters only a capped axis, and says what the allowance clamped", () => {
@@ -38,13 +36,9 @@ describe("the finishing criteria read each cap against its own book", () => {
       },
     ]);
     render(
-      <AuthProvider>
-        <ViewMemoryProvider>
-          <WorkspaceProvider>
-            <RunLimitsControl caps={caps} overshoot={false} overshot={null} />
-          </WorkspaceProvider>
-        </ViewMemoryProvider>
-      </AuthProvider>,
+      <InWorkspace>
+        <RunLimitsControl caps={caps} overshoot={false} overshot={null} />
+      </InWorkspace>,
     );
     const meters = screen.getAllByRole("meter");
     expect(meters.map((m) => m.getAttribute("aria-label"))).toEqual(["Spend used"]);

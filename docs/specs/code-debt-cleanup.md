@@ -468,22 +468,22 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (`application/cycle_reads.py::feed_versions`, a sha of `repr`), so a stale read reverts a draft
   edit, an ack shows applied before the feed moves, and a second press files a second start-run
   (root: a monotone version per subject). **Rides with:** webd.
-- **The served contract has two hand copies** (✓): SSE frames are cast with `as`
-  (`live-stream.ts::openLiveStream`) and the build handshake (`X-Served-Contract`) covers fetches, not
-  streams, which `EventSource` cannot read a header of: each frame carries the stamp, a server change in
-  `application/cycle_reads.py::feed_frames` and the cycle tail; and the client decides what Delete
-  files (`CampaignMenu.tsx:44-63` picks `discard-draft` vs `delete-campaign` and words what goes, vs
+- **The served contract has two hand copies** (✓; its stream half closed by webd-2): the client
+  decides what Delete files (`CampaignMenu.tsx:44-63` picks `discard-draft` vs `delete-campaign` and words what goes, vs
   `workspace_edits.py:64-78`): the listing entry (`domain/hierarchy.py`) serves it; Delete's dialog
   words what the server removes (`CampaignMenu.tsx:175`, "the shared measurement cache survives") and
   ignores `keep_results` (webd-1's report). **Rides with:** webd.
-- **A mock misses a module another test file loaded** (live-3's and webd-1's reports):
-  `webapp/vitest.config.ts:11` runs `isolate: false`, so a `vi.mock` of a module an earlier file
-  imported silently reaches the real one. Action: facts mount real providers, and the gate refuses
-  `vi.mock` of `@/lib/hooks/*` / `@/lib/state/*`. **Re-test:** the gate's count of such mocks is 0.
-- **A bare campaign link says it opens nothing, then opens it** (webd-1's report): a deep link
-  `#<campaign id>` shows the masthead's "This link opens nothing" while `openHash` opens the campaign.
-  Root: the banner and `openHash` read the address two ways; one parser serves both. **Re-test:** a
-  bare campaign link opens with no banner.
+- **A campaign's own address opens nothing** (webd-2's report): `#<campaign id>`, the hierarchy's
+  address for a campaign, is refused as malformed by `address.ts::parseAddress`, which reads only a
+  cycle hop (`campaign::cycle`); the banner IS `openHash`'s refusal (the campaign seemed to open
+  because the followed active run was it). Action: a deep link may name a campaign and opens its
+  served `facts.live_cycle`, or nothing mints such a link: decide by who mints one. **Re-test:**
+  `#<campaign id>` opens that campaign's line with no banner.
+- **A frame's guard reads its stamp alone** (webd-2's report): `live-stream.ts::stamped` checks only
+  `contract`, so a matching contract stands for the rest of the frame's shape, and
+  `projection_envelope.py:33` says the receiver treats an unknown field as drift, which no client does.
+  Root: one generated parse of a served shape, a fetch's and a frame's. **Rides with:** the served
+  contract row's Delete half.
 - **A round's own arms are spelled beside `MeasurementRole.is_proposal`** (live-3f's report):
   `scoring/passes.py:266`, `domain/run_standing.py:444`, `store/lineage_queries.py:184,203` still
   write `role != MeasurementRole.PARENT`. Action: each asks `is_proposal`. **Re-test:**

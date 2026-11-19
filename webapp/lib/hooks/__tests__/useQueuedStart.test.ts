@@ -9,29 +9,12 @@ import {
   type DraftCampaignWire,
   type DraftReopenResponse,
 } from "@/lib/api/types";
+import { FakeStream } from "@/lib/__tests__/fake-stream";
 import { ThreadProvider } from "@/lib/state/chat-thread";
 import { useIngestFlow } from "@/lib/hooks/useIngestFlow";
 import { useQueuedStart } from "@/lib/hooks/useQueuedStart";
 import { clearReadCache } from "@/lib/read-cache";
 import { AuthProvider } from "@/lib/state/auth";
-
-// The browser's `EventSource`, driven by the test: the server's frames.
-class FakeFeed {
-  static CLOSED = 2;
-  static opened: FakeFeed[] = [];
-  readyState = 1;
-  onmessage: ((ev: MessageEvent<string>) => void) | null = null;
-  onerror: (() => void) | null = null;
-  constructor(readonly url: string) {
-    FakeFeed.opened.push(this);
-  }
-  close(): void {
-    this.readyState = FakeFeed.CLOSED;
-  }
-  frame(subject: string, version: string): void {
-    this.onmessage?.({ data: JSON.stringify({ subject, version }) } as MessageEvent<string>);
-  }
-}
 
 const wrapper = ({ children }: { children: ReactNode }) => createElement(AuthProvider, null, children);
 const settle = () => act(() => vi.advanceTimersByTimeAsync(0));
@@ -62,7 +45,7 @@ describe("a queued Start follows its whole command reading on the feed", () => {
     await settle();
     expect(asked).toBe(1);
     expect(view.result.current).toEqual({ stage: "waiting" });
-    const [feed] = FakeFeed.opened;
+    const [feed] = FakeStream.opened;
     if (!feed) throw new Error("no feed opened");
     act(() => feed.frame("store:", store));
     // Nothing asks on a clock: a queued launch waits on the feed alone.
@@ -72,8 +55,8 @@ describe("a queued Start follows its whole command reading on the feed", () => {
   };
 
   beforeEach(() => {
-    FakeFeed.opened = [];
-    vi.stubGlobal("EventSource", FakeFeed);
+    FakeStream.opened = [];
+    vi.stubGlobal("EventSource", FakeStream);
     clearReadCache(true);
     vi.useFakeTimers();
     served = { status: "working", said: "the check-in's run: queued", hop: null };
@@ -117,7 +100,7 @@ describe("a queued Start follows its whole command reading on the feed", () => {
     for (const [at, ending] of endings.entries()) {
       cleanup();
       clearReadCache(true);
-      FakeFeed.opened = [];
+      FakeStream.opened = [];
       served = { status: "working", said: "the check-in's run: queued", hop: null };
       asked = 0;
       store = "v1";
@@ -164,14 +147,14 @@ describe("a reopened queued Start follows the Start's own command, as the tab th
     );
     for (let i = 0; i < 4; i += 1) await settle();
     expect(view.result.current.phase).toEqual({ stage: "queued" });
-    const [feed] = FakeFeed.opened;
+    const [feed] = FakeStream.opened;
     if (!feed) throw new Error("no feed opened");
     return { view, feed };
   };
 
   beforeEach(() => {
-    FakeFeed.opened = [];
-    vi.stubGlobal("EventSource", FakeFeed);
+    FakeStream.opened = [];
+    vi.stubGlobal("EventSource", FakeStream);
     clearReadCache(true);
     vi.useFakeTimers();
     command = { status: "working", said: "the check-in's run: queued", hop: null };

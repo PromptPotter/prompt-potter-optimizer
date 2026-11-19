@@ -152,8 +152,10 @@ BASELINE = {
     # one rule of a round's own arms.
     # store-2f/2g (+52): a write never re-makes the campaign or cycle a delete removed (`io.py::_created`
     # walks down from its anchor, known by its place under a workspace), and `CampaignCycle` carries a
-    # launch's pair.
-    "package_lines": 111968,
+    # launch's pair. A read's validator is `file_sig`, never an mtime alone (−16).
+    # webd-2 link 1 (+30): `cycle_reads.py::stamped_frames` and `FrameStamp`, the served contract on
+    # every stream frame (an `EventSource` reads no header), and the two stamped frame models served.
+    "package_lines": 111982,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -223,7 +225,8 @@ BASELINE = {
     # l4-outer (+1): `Target.transcript`, a row's one transcript source, its inner run on L4.
     "p_reads": 323,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
-    "test_files": 7,
+    # webd-2 (+1): `test_stream_stamp.py`, its brief's own file, since store-2f lands in the others.
+    "test_files": 8,
     # Test functions over 150 lines across them: each holds one fact (`tests/CLAUDE.md`).
     "test_functions_over_150": 0,
     # Top-level class names the package defines twice, private ones included: one name, two things.

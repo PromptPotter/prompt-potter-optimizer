@@ -7,7 +7,7 @@ import {
   type FeedVersions,
 } from "@/lib/api/client";
 import { operatorMessage } from "@/lib/api/errors";
-import { READ_ROUTES, type FeedFrame } from "@/lib/api/types";
+import { READ_ROUTES, type StampedFeedFrame } from "@/lib/api/types";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { reportIncident } from "@/lib/diagnostics";
 import { openLiveStream } from "@/lib/live-stream";
@@ -49,7 +49,7 @@ export interface ReadDescriptor<T, B = T> {
   // A 404 is this read's ordinary empty answer: it lands as a null body, answered like any other —
   // no incident, no gone verdict.
   expects?: null extends B ? "gone" : never;
-  // The feed subject whose move re-asks it, by prefix (`FeedFrame.subject`: `store:` and the hops
+  // The feed subject whose move re-asks it, by prefix (`StampedFeedFrame.subject`: `store:` and the hops
   // above the store it reads, or `machine`); absent, it reads once.
   subject?: string;
   // An answer that says it is final: the read stops following its subject (a filed round).
@@ -384,7 +384,7 @@ export function reaskRead(id: string): void {
 // frame misses no move between them.
 let closeFeedStream: (() => void) | null = null;
 
-function moved({ subject, version }: FeedFrame): void {
+function moved({ subject, version }: StampedFeedFrame): void {
   for (const slot of mounted()) {
     const named = followed(slot);
     if (named === undefined || !subject.startsWith(named)) continue;

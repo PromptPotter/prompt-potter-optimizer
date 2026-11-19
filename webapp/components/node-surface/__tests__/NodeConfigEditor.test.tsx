@@ -3,35 +3,29 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { campaignPipelineRead } from "@/lib/api/reads";
 import { clearReadCache, reaskRead } from "@/lib/read-cache";
-import { AuthProvider } from "@/lib/state/auth";
-import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/state/workspace";
 import { configParam } from "@/lib/test-fixtures";
+import { InWorkspace } from "@/lib/test-utils/in-workspace";
 import { NodeConfigEditor } from "../NodeConfigEditor";
 
 const AT = { campaignId: "c", subject: "cycle:c/y" };
 
 const editor = (): ReactNode => (
-  <AuthProvider>
-    <ViewMemoryProvider>
-      <WorkspaceProvider>
-        <NodeConfigEditor
-          mode="search-space"
-          pipelineAt={AT}
-          scope="target"
-          overlay={{}}
-          node="n"
-          readOnly={false}
-          compact={undefined}
-          modelCapabilities={undefined}
-          onApply={() => {}}
-          onNarrowing={undefined}
-          onChange={undefined}
-          keysAskedElsewhere={undefined}
-        />
-      </WorkspaceProvider>
-    </ViewMemoryProvider>
-  </AuthProvider>
+  <InWorkspace>
+    <NodeConfigEditor
+      mode="search-space"
+      pipelineAt={AT}
+      scope="target"
+      overlay={{}}
+      node="n"
+      readOnly={false}
+      compact={undefined}
+      modelCapabilities={undefined}
+      onApply={() => {}}
+      onNarrowing={undefined}
+      onChange={undefined}
+      keysAskedElsewhere={undefined}
+    />
+  </InWorkspace>
 );
 
 describe("NodeConfigEditor — a steer edit keys on its base's content", () => {

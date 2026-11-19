@@ -27,8 +27,10 @@ from promptpotter.application.caller import Caller
 from promptpotter.application.cycle_reads import (
     FEED_SUBJECT_HEADER,
     FEED_VERSIONS_HEADER,
-    FeedFrame,
+    StampedEnvelope,
+    StampedFeedFrame,
     feed_versions,
+    stamped_frames,
 )
 from promptpotter.application.hierarchy import entries_version, hierarchy_version
 from promptpotter.application.hierarchy_subtree import subtree_version
@@ -51,8 +53,8 @@ from promptpotter.application.read_params import (
 )
 from promptpotter.application.read_workers import off_loop
 from promptpotter.domain.command_kinds import ReadKind
-from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.presentation.api.deps import CallerDep, read_input
+from promptpotter.presentation.api.middleware.headers import served_contract
 from promptpotter.shared.named_rows import returned
 
 reads_router = APIRouter(tags=["Reads"])
@@ -156,7 +158,7 @@ def _export(asked: _Asked, read: CycleExportParams) -> Response:
 
 def _events(asked: _Asked, read: CycleEventsParams | FeedParams) -> Response:
     # LF is the contract (the default is CRLF); X-Accel-Buffering is the header sse-starlette omits.
-    frames = read.answer(asked.caller)
+    frames = stamped_frames(read.answer(asked.caller), served_contract(asked.request.app))
     return EventSourceResponse(frames, sep="\n", headers={"X-Accel-Buffering": "no"})
 
 
@@ -198,10 +200,10 @@ _FRAMED: dict[ReadKind, _Framing] = {
     # Its model documents one frame of the stream.
     ReadKind.CYCLE_EVENTS: _Framing(
         _events,
-        {"response_class": EventSourceResponse, "response_model": ProjectionEnvelope},
+        {"response_class": EventSourceResponse, "response_model": StampedEnvelope},
     ),
     ReadKind.FEED: _Framing(
-        _events, {"response_class": EventSourceResponse, "response_model": FeedFrame}
+        _events, {"response_class": EventSourceResponse, "response_model": StampedFeedFrame}
     ),
     ReadKind.EVIDENCE: _Framing(_evidence),
     ReadKind.CAMPAIGN_PIPELINE: _Framing(_hashed),

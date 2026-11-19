@@ -3,7 +3,7 @@ import { cyclePathUrl } from "@/lib/api";
 import { openLiveStream } from "@/lib/live-stream";
 import { decodeCyclePath, encodeCyclePath, pathLeaf, type CyclePath } from "@/lib/ids";
 import { useWorkspace } from "@/lib/state/workspace";
-import type { ActivityState, ProjectionEnvelope } from "@/lib/api/types";
+import type { ActivityState, StampedEnvelope } from "@/lib/api/types";
 
 interface CycleEventsState extends ActivityState {
   connected: boolean;
@@ -32,7 +32,7 @@ export function useCycleEvents(path: CyclePath | null): CycleEventsState {
     if (!p || addressGone) return;
     // A frame queued across a reconnect would paint and linger: this feed never re-validates.
     const expectedCycleId = pathLeaf(p).cycleId;
-    return openLiveStream<ProjectionEnvelope>(
+    return openLiveStream<StampedEnvelope>(
       cyclePathUrl("cycle-events", p, {}),
       { surface: "cycle-events", address: key },
       {

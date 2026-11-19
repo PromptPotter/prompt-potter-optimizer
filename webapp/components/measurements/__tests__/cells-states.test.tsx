@@ -3,9 +3,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { PairwiseComparison } from "@/lib/api/types";
 import { clearReadCache } from "@/lib/read-cache";
-import { AuthProvider } from "@/lib/state/auth";
-import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/state/workspace";
+import { InWorkspace } from "@/lib/test-utils/in-workspace";
 import { cycleTags, pairedReading, subtreeCampaign, subtreeCycle } from "@/lib/test-fixtures";
 import { SubjectFlips } from "@/components/searchpoint/SubjectFlips";
 import { MeasurementsPane } from "../MeasurementsPane";
@@ -19,13 +17,7 @@ function serveNoSlice(): void {
 }
 
 function view(pane: ReactNode) {
-  return render(
-    <AuthProvider>
-      <ViewMemoryProvider>
-        <WorkspaceProvider>{pane}</WorkspaceProvider>
-      </ViewMemoryProvider>
-    </AuthProvider>,
-  );
+  return render(<InWorkspace>{pane}</InWorkspace>);
 }
 
 describe("a cells read's answer, as its panes say it", () => {

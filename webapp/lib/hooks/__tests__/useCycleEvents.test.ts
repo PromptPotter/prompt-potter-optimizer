@@ -1,35 +1,22 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FakeStream } from "@/lib/__tests__/fake-stream";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { useCycleEvents } from "@/lib/hooks/useCycleEvents";
+import { clearReadCache } from "@/lib/read-cache";
+import { InWorkspace, anonymous } from "@/lib/test-utils/in-workspace";
 
-vi.mock("@/lib/state/workspace", () => ({ useWorkspace: () => ({ goneAddress: null }) }));
-
-// The browser's `EventSource`, driven by the test: the server's snapshot, a refusal.
-class FakeTail {
-  static CLOSED = 2;
-  static opened: FakeTail[] = [];
-  readyState = 1;
-  onopen: (() => void) | null = null;
-  onmessage: ((ev: MessageEvent<string>) => void) | null = null;
-  onerror: (() => void) | null = null;
-  constructor(readonly url: string) {
-    FakeTail.opened.push(this);
-  }
-  close(): void {
-    this.readyState = FakeTail.CLOSED;
-  }
-  snapshot(cycleId: string, line: string): void {
-    const activity = { status: { text: line }, notices: [], decision: null };
-    this.onmessage?.({ data: JSON.stringify({ cycle_id: cycleId, activity }) } as MessageEvent<string>);
-  }
-}
+// The server's snapshot of a cycle, its activity's line.
+const snapshot = (tail: FakeStream, cycleId: string, line: string): void =>
+  tail.send({ cycle_id: cycleId, activity: { status: { text: line }, notices: [], decision: null } });
 
 describe("useCycleEvents — a refused tail reopens on the reconnect beat", () => {
   beforeEach(() => {
-    FakeTail.opened = [];
-    vi.stubGlobal("EventSource", FakeTail);
+    FakeStream.opened = [];
+    vi.stubGlobal("EventSource", FakeStream);
+    vi.stubGlobal("fetch", anonymous);
+    clearReadCache(false);
     vi.useFakeTimers();
   });
   afterEach(() => {
@@ -40,12 +27,12 @@ describe("useCycleEvents — a refused tail reopens on the reconnect beat", () =
 
   it("reopens a CLOSED stream after the beat and re-reads its snapshot", async () => {
     const path = [{ campaignId: "c1", cycleId: "root" }];
-    const { result, unmount } = renderHook(() => useCycleEvents(path));
-    expect(FakeTail.opened).toHaveLength(1);
-    const first = FakeTail.opened[0]!;
+    const { result, unmount } = renderHook(() => useCycleEvents(path), { wrapper: InWorkspace });
+    expect(FakeStream.opened).toHaveLength(1);
+    const first = FakeStream.opened[0]!;
     act(() => {
       first.onopen?.();
-      first.snapshot("root", "before");
+      snapshot(first, "root", "before");
     });
     expect(result.current.connected).toBe(true);
     expect(result.current.status).toEqual({ text: "before" });
@@ -54,24 +41,24 @@ describe("useCycleEvents — a refused tail reopens on the reconnect beat", () =
     act(() => first.onerror?.());
     expect(result.current.connected).toBe(false);
     await act(() => vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS));
-    expect(FakeTail.opened).toHaveLength(1);
+    expect(FakeStream.opened).toHaveLength(1);
 
     // A refused one is closed for good and reopened on the beat.
     act(() => {
-      first.readyState = FakeTail.CLOSED;
+      first.readyState = FakeStream.CLOSED;
       first.onerror?.();
     });
     await act(() => vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS));
-    expect(FakeTail.opened).toHaveLength(2);
-    const second = FakeTail.opened[1]!;
+    expect(FakeStream.opened).toHaveLength(2);
+    const second = FakeStream.opened[1]!;
     act(() => {
       second.onopen?.();
-      second.snapshot("root", "after");
+      snapshot(second, "root", "after");
     });
     expect(result.current.connected).toBe(true);
     expect(result.current.status).toEqual({ text: "after" });
 
     unmount();
-    expect(second.readyState).toBe(FakeTail.CLOSED);
+    expect(second.readyState).toBe(FakeStream.CLOSED);
   });
 });

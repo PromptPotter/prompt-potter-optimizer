@@ -4,9 +4,7 @@ import { DEFAULT_VIEWS, NO_KEYS, formatAddress } from "@/lib/address";
 import { ThreadProvider } from "@/lib/state/chat-thread";
 import { IngestFlowProvider } from "@/lib/state/ingest-flow";
 import { clearReadCache } from "@/lib/read-cache";
-import { AuthProvider } from "@/lib/state/auth";
-import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/state/workspace";
+import { InWorkspace } from "@/lib/test-utils/in-workspace";
 import { CriticalAlertBanner } from "../CriticalAlertBanner";
 
 const GONE = "This campaign no longer exists";
@@ -30,17 +28,13 @@ function serve(routes: Record<string, unknown>): void {
 
 function view() {
   return render(
-    <AuthProvider>
-      <ViewMemoryProvider>
-        <WorkspaceProvider>
-          <ThreadProvider>
-            <IngestFlowProvider>
-              <CriticalAlertBanner />
-            </IngestFlowProvider>
-          </ThreadProvider>
-        </WorkspaceProvider>
-      </ViewMemoryProvider>
-    </AuthProvider>,
+    <InWorkspace>
+      <ThreadProvider>
+        <IngestFlowProvider>
+          <CriticalAlertBanner />
+        </IngestFlowProvider>
+      </ThreadProvider>
+    </InWorkspace>,
   );
 }
 

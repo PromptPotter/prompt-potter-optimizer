@@ -8,27 +8,10 @@ import {
   userSettingsRead,
 } from "@/lib/api/reads";
 import { FEED_SUBJECT_HEADER, FEED_VERSIONS_HEADER } from "@/lib/api/types";
+import { FakeStream } from "@/lib/__tests__/fake-stream";
 import { RECONNECT_POLL_MS } from "@/lib/cadence";
 import { clearReadCache, subscribe, type ReadDescriptor } from "@/lib/read-cache";
 import { couponStatus, dash } from "@/lib/test-fixtures";
-
-// The browser's `EventSource`, driven by the test: the server's frames, a drop, a refusal.
-class FakeFeed {
-  static CLOSED = 2;
-  static opened: FakeFeed[] = [];
-  readyState = 1;
-  onmessage: ((ev: MessageEvent<string>) => void) | null = null;
-  onerror: (() => void) | null = null;
-  constructor(readonly url: string) {
-    FakeFeed.opened.push(this);
-  }
-  close(): void {
-    this.readyState = FakeFeed.CLOSED;
-  }
-  frame(subject: string, version: string): void {
-    this.onmessage?.({ data: JSON.stringify({ subject, version }) } as MessageEvent<string>);
-  }
-}
 
 const top = [{ campaignId: "c1", cycleId: "root" }];
 const inner = [...top, { campaignId: "i1", cycleId: "x" }];
@@ -61,8 +44,8 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
   const once = Object.fromEntries(NAMES.map((n) => [n, 1])) as Record<Name, number>;
 
   beforeEach(() => {
-    FakeFeed.opened = [];
-    vi.stubGlobal("EventSource", FakeFeed);
+    FakeStream.opened = [];
+    vi.stubGlobal("EventSource", FakeStream);
     clearReadCache(true);
     vi.useFakeTimers();
     asked = Object.fromEntries(NAMES.map((n) => [n, 0])) as Record<Name, number>;
@@ -90,8 +73,8 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
   });
 
   const settle = () => vi.advanceTimersByTimeAsync(0);
-  const feed = (): FakeFeed => {
-    const last = FakeFeed.opened.at(-1);
+  const feed = (): FakeStream => {
+    const last = FakeStream.opened.at(-1);
     if (!last) throw new Error("no feed opened");
     return last;
   };
@@ -119,7 +102,7 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
 
   it("subscribes once, and a subject's first version re-asks nothing its reads stood on", async () => {
     await mount();
-    expect(FakeFeed.opened).toHaveLength(1);
+    expect(FakeStream.opened).toHaveLength(1);
     expect(asked).toEqual(once);
   });
 
@@ -174,7 +157,7 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
     refused.close();
     refused.onerror?.();
     await vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS);
-    expect(FakeFeed.opened).toHaveLength(2);
+    expect(FakeStream.opened).toHaveLength(2);
     feed().frame("account", "v1");
     feed().frame("store:", "v3");
     await settle();
@@ -183,13 +166,13 @@ describe("the feed re-asks exactly the reads whose subject moved, and no read as
 
   it("opens for a signed-in account only: an anonymous subscription asks no feed (I5)", async () => {
     clearReadCache(false);
-    FakeFeed.opened = [];
+    FakeStream.opened = [];
     mounted.push(subscribe(() => couponRead() as unknown as ReadDescriptor<unknown>, () => {}));
     await vi.advanceTimersByTimeAsync(RECONNECT_POLL_MS * 3);
-    expect(FakeFeed.opened).toHaveLength(0);
+    expect(FakeStream.opened).toHaveLength(0);
     clearReadCache(true);
-    expect(FakeFeed.opened).toHaveLength(1);
+    expect(FakeStream.opened).toHaveLength(1);
     clearReadCache(false);
-    expect(FakeFeed.opened[0]!.readyState).toBe(FakeFeed.CLOSED);
+    expect(FakeStream.opened[0]!.readyState).toBe(FakeStream.CLOSED);
   });
 });

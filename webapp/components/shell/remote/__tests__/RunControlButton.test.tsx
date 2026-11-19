@@ -1,28 +1,40 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FakeStream } from "@/lib/__tests__/fake-stream";
+import { DEFAULT_VIEWS, NO_KEYS, formatAddress } from "@/lib/address";
 import { commands } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { clearIncidents } from "@/lib/diagnostics";
-import { AuthProvider } from "@/lib/state/auth";
+import { clearReadCache } from "@/lib/read-cache";
 import { dash } from "@/lib/test-fixtures";
+import { InWorkspace } from "@/lib/test-utils/in-workspace";
 import { RunControlButton } from "../RunControlButton";
 
-// The viewed cycle, moved by the test; both cycles run, so each offers a pause.
-const at = (cycleId: string) => ({ path: [{ campaignId: "c", cycleId }], address: `c/${cycleId}` });
-let viewed = at("A");
-vi.mock("@/lib/state/workspace", () => ({ useWorkspace: () => ({ viewed }) }));
-vi.mock("@/lib/state/poll", () => ({ useViewedDashboard: () => ({ dash: dash() }) }));
+// The viewed cycle, the link the test moves; both cycles run, so each offers a pause.
+const view = (cycleId: string) =>
+  act(() => {
+    const path = [{ campaignId: "c", cycleId }];
+    window.history.replaceState(null, "", formatAddress({ subject: { path }, views: DEFAULT_VIEWS, keys: NO_KEYS }));
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  });
 
 const PAUSING = /will pause after the current sample/;
 
 describe("RunControlButton — a pause answers on the cycle it was sent from", () => {
   beforeEach(() => {
-    viewed = at("A");
-    vi.stubGlobal("fetch", () => Promise.reject(new Error("offline")));
+    vi.stubGlobal("EventSource", FakeStream);
+    vi.stubGlobal("fetch", async (url: string) => {
+      const path = new URL(url, "http://x").pathname;
+      if (path.endsWith("/auth/me")) return Response.json({ tenant_id: "t", user_id: "u" });
+      return path.endsWith("/dashboard") ? Response.json(dash()) : new Response(null, { status: 404 });
+    });
+    clearReadCache(true);
   });
   afterEach(() => {
     cleanup();
     clearIncidents();
+    clearReadCache(false);
+    window.history.replaceState(null, "", window.location.pathname);
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -37,20 +49,19 @@ describe("RunControlButton — a pause answers on the cycle it was sent from", (
       vi.spyOn(commands, "pause").mockReturnValue(
         new Promise<never>((resolve, reject) => (settle = { resolve, reject })),
       );
-      const ui = () => (
-        <AuthProvider>
+      view("A");
+      render(
+        <InWorkspace>
           <RunControlButton />
-        </AuthProvider>
+        </InWorkspace>,
       );
-      const { rerender } = render(ui());
-      fireEvent.click(screen.getByRole("button", { name: "Pause run" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Pause run" }));
       expect(screen.getByText(PAUSING)).toBeTruthy();
-      viewed = at("B");
-      rerender(ui());
+      view("B");
       await act(async () => answer(settle));
       expect(screen.queryByText(PAUSING)).toBeNull();
       expect(screen.queryByRole("alert")).toBeNull();
-      expect(screen.getByRole("button", { name: "Pause run" }).hasAttribute("disabled")).toBe(false);
+      expect((await screen.findByRole("button", { name: "Pause run" })).hasAttribute("disabled")).toBe(false);
     });
   }
 });

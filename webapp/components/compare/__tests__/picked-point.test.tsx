@@ -4,10 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EMPTY_LINEAGE, type CompareItem } from "@/lib/derivations";
 import { encodeCyclePath } from "@/lib/ids";
 import { clearReadCache } from "@/lib/read-cache";
-import { AuthProvider } from "@/lib/state/auth";
-import { ViewMemoryProvider } from "@/lib/state/view-memory";
-import { WorkspaceProvider } from "@/lib/state/workspace";
 import { hierarchyCandidate, roundOfArms } from "@/lib/test-fixtures";
+import { InWorkspace } from "@/lib/test-utils/in-workspace";
 import { usePickedPoint } from "../channel-hooks";
 import { NO_EDITS, ScenarioEditsProvider } from "../config-edit";
 
@@ -28,13 +26,9 @@ const EDITING = { edits: NO_EDITS, setEdits: () => {} };
 
 function wrapper({ children }: { children: ReactNode }) {
   return (
-    <AuthProvider>
-      <ViewMemoryProvider>
-        <WorkspaceProvider>
-          <ScenarioEditsProvider value={EDITING}>{children}</ScenarioEditsProvider>
-        </WorkspaceProvider>
-      </ViewMemoryProvider>
-    </AuthProvider>
+    <InWorkspace>
+      <ScenarioEditsProvider value={EDITING}>{children}</ScenarioEditsProvider>
+    </InWorkspace>
   );
 }
 

@@ -1,39 +1,19 @@
 // @vitest-environment jsdom
-import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FakeStream } from "@/lib/__tests__/fake-stream";
 import { roundRead } from "@/lib/api/reads";
 import type { RoundView } from "@/lib/api/types";
 import { useRound } from "@/lib/hooks/useRound";
 import { clearReadCache, reaskRead } from "@/lib/read-cache";
-import { AuthProvider } from "@/lib/state/auth";
 import { roundOfArms } from "@/lib/test-fixtures";
+import { InWorkspace as wrapper } from "@/lib/test-utils/in-workspace";
 
 const path = [{ campaignId: "c1", cycleId: "root" }];
 
-vi.mock("@/lib/state/workspace", () => ({ useMomentAt: () => null }));
-
-const wrapper = ({ children }: { children: ReactNode }) => createElement(AuthProvider, null, children);
-
 // The account's feed, driven by the test: a live claim stamps the store's version every tick.
-class Feed {
-  static CLOSED = 2;
-  static opened: Feed[] = [];
-  readyState = 1;
-  onmessage: ((ev: MessageEvent<string>) => void) | null = null;
-  onerror = null;
-  constructor() {
-    Feed.opened.push(this);
-  }
-  close(): void {
-    this.readyState = Feed.CLOSED;
-  }
-}
-
-const tick = (version: string): void => {
-  const feed = Feed.opened.findLast((f) => f.readyState !== Feed.CLOSED);
-  feed?.onmessage?.({ data: JSON.stringify({ subject: "store:", version }) } as MessageEvent<string>);
-};
+const tick = (version: string): void =>
+  FakeStream.opened.findLast((f) => f.readyState !== FakeStream.CLOSED)?.frame("store:", version);
 
 const A = { key: "a", label: "C1.0" };
 const B = { key: "b", label: "C1.1" };
@@ -51,11 +31,14 @@ describe("useRound — a round reads the round read alone, in flight and filed",
   beforeEach(() => {
     served = IN_FLIGHT;
     asked = [];
-    Feed.opened = [];
-    vi.stubGlobal("EventSource", Feed);
+    FakeStream.opened = [];
+    vi.stubGlobal("EventSource", FakeStream);
     vi.stubGlobal("fetch", async (url: string) => {
       if (url.endsWith("/auth/me")) return Response.json({ tenant_id: "t", user_id: "u" });
-      asked.push(new URL(url, "http://x").pathname);
+      const asking = new URL(url, "http://x").pathname;
+      // The workspace's own reads (the listing, the active pointer) answer nothing here.
+      if (!asking.includes("/rounds/")) return new Response(null, { status: 404 });
+      asked.push(asking);
       return Response.json(served);
     });
     vi.useFakeTimers();

@@ -2598,9 +2598,10 @@ export interface LoopWarning {
   detail: Record<string, unknown>;
 }
 
-/** One outbound SSE frame, whose receiver treats an unknown field as a drift
- * signal. */
-export interface ProjectionEnvelope {
+/** A cycle tail's frame as the stream serves it. */
+export interface StampedEnvelope {
+  /** The served contract (`X-Served-Contract`), compared as a fetch's answer is. */
+  contract: string;
   /** Closed-set discriminator; every CycleRecord record_type, plus stream_snapshot. */
   kind: 'account_event' | 'arm' | 'arm_act' | 'backend_warning' | 'bank_partition' | 'bench_scored' | 'campaign_ceiling' | 'cell_beat' | 'cycle_final' | 'cycle_minted' | 'cycle_share' | 'cycle_superseded' | 'decision' | 'election' | 'error' | 'flight' | 'fork_graded' | 'health' | 'hold' | 'launch_clock' | 'llm_call' | 'llm_call_progress' | 'llm_call_start' | 'pass_graded' | 'phase' | 'priced_key' | 'provider_eased' | 'provider_hold' | 'race_catch_up' | 'race_standing' | 'resolved_run' | 'round_closed' | 'round_entered' | 'round_proposed' | 'round_restated' | 'round_warning' | 'run_phase' | 'run_wiring' | 'sample_scored' | 'sample_started' | 'scoring_locked' | 'spawned' | 'spend_tombstone' | 'standing_budget' | 'token_usage' | 'trail_tombstone' | 'stream_snapshot';
   /** Target cycle the frame describes; redundant with the channel address but
@@ -4729,8 +4730,10 @@ export interface OriginEntry {
   created_at: string;
 }
 
-/** One subject moved: re-ask every read that names it. A hint, never the body. */
-export interface FeedFrame {
+/** A feed frame as the stream serves it. */
+export interface StampedFeedFrame {
+  /** The served contract (`X-Served-Contract`), compared as a fetch's answer is. */
+  contract: string;
   /** `account`, `machine`, or `store:` and a store's hops. */
   subject: string;
   version: string;
@@ -5680,7 +5683,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "b0e34013c483fe30";
+export const SERVED_CONTRACT = "d72c98a7b38a5e3e";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

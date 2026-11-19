@@ -105,7 +105,7 @@ function byEtag<T>(name: string, url: string): ReadDescriptor<T> {
   };
 }
 
-// The feed's subjects (`FeedFrame.subject`), matched by prefix: what the account filed (`account`),
+// The feed's subjects (`StampedFeedFrame.subject`), matched by prefix: what the account filed (`account`),
 // a store's campaigns, cycles and ledgers (`store:` and the hops above it; bare, every store), the
 // machine's slots. A read naming none reads once. `ACCOUNT` is also an account-level command's scope.
 export const ACCOUNT = "account";

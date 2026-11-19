@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import Field
+from pydantic_core import to_json
 
 from promptpotter.application.caller import Caller
 from promptpotter.application.hierarchy import entries_version
@@ -30,6 +31,7 @@ from promptpotter.domain.cycle_paths import (
 from promptpotter.domain.dashboard_rows import ServedArm
 from promptpotter.domain.export import ExportTier
 from promptpotter.domain.hierarchy import HierarchySteps
+from promptpotter.domain.projection_envelope import ProjectionEnvelope
 from promptpotter.domain.results import Election, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.strict_model import StrictModel
@@ -206,17 +208,38 @@ async def _signed_ticks(caller: Caller, every_s: float) -> AsyncIterator[None]:
         await asyncio.sleep(every_s)
 
 
-async def cycle_event_frames(caller: Caller, cycle: ViewedCycle) -> AsyncIterator[str]:
+async def cycle_event_frames(
+    caller: Caller, cycle: ViewedCycle
+) -> AsyncIterator[ProjectionEnvelope]:
     tail = CycleLedgerTail(cycle.dir, cycle.hop.cycle_id)
-    snapshot = await asyncio.to_thread(
+    yield await asyncio.to_thread(
         lambda: tail.snapshot_frame(
             served_dashboard(cycle.stores, cycle.hop).model_dump(mode="json")
         )
     )
-    yield snapshot.model_dump_json()
     async for _ in _signed_ticks(caller, _TAIL_POLL_INTERVAL_S):
         for envelope in await asyncio.to_thread(tail.read_new):
-            yield envelope.model_dump_json()
+            yield envelope
+
+
+class FrameStamp(StrictModel):
+    """What every frame of a stream carries beside its body: an `EventSource` reads no header."""
+
+    contract: str = Field(
+        description="The served contract (`X-Served-Contract`), compared as a fetch's answer is."
+    )
+
+
+class StampedEnvelope(ProjectionEnvelope, FrameStamp):
+    """A cycle tail's frame as the stream serves it."""
+
+
+async def stamped_frames(frames: AsyncIterator[StrictModel], contract: str) -> AsyncIterator[str]:
+    """Each frame as a stream serves it: its body and the contract its door serves, written as every
+    fetch's answer is (a NaN is `null`: a browser's `JSON.parse` refuses `NaN`)."""
+    stamp = FrameStamp(contract=contract).model_dump()
+    async for frame in frames:
+        yield to_json(frame.model_dump(mode="json") | stamp, inf_nan_mode="null").decode()
 
 
 # A read names its subject, by prefix, and answers the versions it stood on: taken before its body,
@@ -231,6 +254,10 @@ class FeedFrame(StrictModel):
 
     subject: str = Field(description="`account`, `machine`, or `store:` and a store's hops.")
     version: str
+
+
+class StampedFeedFrame(FeedFrame, FrameStamp):
+    """A feed frame as the stream serves it."""
 
 
 def _store_subjects(stores: Stores) -> Iterator[tuple[str, Stores]]:
@@ -262,7 +289,7 @@ def feed_versions(stores: Stores, jobs: JobRegistry, named: str = "") -> dict[st
     }
 
 
-async def feed_frames(caller: Caller) -> AsyncIterator[str]:
+async def feed_frames(caller: Caller) -> AsyncIterator[FeedFrame]:
     """Every subject once, then each move: the server writes every ledger, so it says what moved."""
     sent: dict[str, str] = {}
     async for _ in _signed_ticks(caller, _FEED_TICK_S):
@@ -270,7 +297,7 @@ async def feed_frames(caller: Caller) -> AsyncIterator[str]:
         for subject, version in moved.items():
             if sent.get(subject) != version:
                 sent[subject] = version
-                yield FeedFrame(subject=subject, version=version).model_dump_json()
+                yield FeedFrame(subject=subject, version=version)
 
 
 @dataclass(frozen=True)
