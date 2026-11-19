@@ -28,10 +28,10 @@ class FailureModeCount:
 
 
 class SampleIndex:
-    def __init__(self, *, bank: Bank, sample_ids: frozenset[int] | None) -> None:
+    def __init__(self, *, bank: Bank, sample_ids: frozenset[int]) -> None:
         # Its populations hold only this bank's rows, whichever bank measured them.
         self._bank = bank
-        # The search split, applied at REPLAY so the persisted fold stays whole; ``None`` admits all.
+        # The search split, applied at REPLAY so the persisted fold stays whole.
         self._admitted = sample_ids
         self._rows: dict[str, SampleFoldRow] | None = None
         self._reset()
@@ -75,11 +75,11 @@ class SampleIndex:
 
         for sid, query, ground_truth in row.new_samples:
             self._introduced.add(sid)
-            if sid not in self._samples and (admitted is None or sid in admitted):
+            if sid not in self._samples and sid in admitted:
                 self.register(Sample(id=sid, query=query, ground_truth=ground_truth))
 
         for sid, hit, degraded, failure_mode in row.cells:
-            if admitted is not None and sid not in admitted:
+            if sid not in admitted:
                 continue
             self._hits[sid].append(hit)
             if degraded:
@@ -229,7 +229,7 @@ class SampleIndex:
         *,
         scorer: Scorer,
         bank: Bank,
-        sample_ids: frozenset[int] | None,
+        sample_ids: frozenset[int],
     ) -> SampleIndex | None:
         if stores is None:
             return None

@@ -399,7 +399,8 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
 
     _, replayed = _walk_panel("shared", panel, *read_under, bank=wider_panel)
     assert all(c.facts.cached for c in replayed.sheet), "guard: the second read bought nothing"
-    ruler_cells = {key: y for _, key, y in ruler_rows(shared.store, [("x", replayed.sheet)], None)}
+    every = frozenset(c.key for c in replayed.sheet)
+    ruler_cells = {key: y for _, key, y in ruler_rows(shared.store, [("x", replayed.sheet)], every)}
     assert ruler_cells == pytest.approx(worth), "the ruler read the banked formula's grades"
     assert [c[:2] for c in replayed.cells] == [c[:2] for c in banked_walk.cells]
     assert shared.store.archive.cell_signatures() == signatures, "a replay filed a second answer"
@@ -1706,7 +1707,8 @@ def scenario_line(built_stores: Stores) -> _Scenario:
     )
     bank = samples(4, "g")
     drawn = PartitionRecord.of(
-        partition_bank(bank, DatasetSplit(bench=0), seed=0), dataset_hash="bank"
+        partition_bank(bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0),
+        dataset_hash="bank",
     )
     store.append(scenario, drawn)
     unheld = (
@@ -2724,7 +2726,7 @@ def repair(built_stores: Stores) -> _Repair:
         hop = CycleHop(campaign_id=f"{cycle_id}__20260101-000000", cycle_id=cycle_id)
         stored_campaign(stores, minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
-        drawn = partition_bank(repair_bank, DatasetSplit(bench=0), seed=0)
+        drawn = partition_bank(repair_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
         stores.campaigns.append(hop, PartitionRecord.of(drawn, dataset_hash="bank"))
         rows = [
             measurement(i, 1.0, sample_key=s.key, predicted="g") for i, s in enumerate(repair_bank)

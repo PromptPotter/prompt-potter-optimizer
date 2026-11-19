@@ -2647,14 +2647,12 @@
             "type": "integer"
           },
           "demo": {
-            "default": 0,
             "description": "Distinct samples reserved as the demo pool — the rows an individual's `shots` name by `Sample.key`, rendered into its prompt as query and ground truth, never scored.",
             "minimum": 0,
             "title": "Demo",
             "type": "integer"
           },
           "tolerance": {
-            "default": 0,
             "description": "Bench rows a pass may end with no verdict on — a provider fault, or a cell the formula cannot grade — and still be a reading. Past it the pass reads nothing: a headline over a population other than the one sent is not the bench score.",
             "minimum": 0,
             "title": "Tolerance",
@@ -2662,7 +2660,9 @@
           }
         },
         "required": [
-          "bench"
+          "bench",
+          "demo",
+          "tolerance"
         ],
         "title": "DatasetSplit",
         "type": "object"
@@ -5845,14 +5845,7 @@
             "type": "array"
           },
           "split": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DatasetSplit"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/DatasetSplit"
           },
           "timestamp": {
             "title": "Timestamp",

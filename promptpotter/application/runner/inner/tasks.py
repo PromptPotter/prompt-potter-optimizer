@@ -283,7 +283,7 @@ def _unreadable_geometry(laid: CampaignConfig) -> str | None:
     rounds = laid.optimization.budget.rounds
     if rounds is None or rounds < 2:
         return f"lays `optimization.budget.rounds: {rounds}`: the area reads two rounds or more"
-    if laid.dataset_split is None or not laid.dataset_split.bench:
+    if not laid.dataset_split.bench:
         return "lays no `dataset_split.bench`: the area is read on held-out rows alone"
     if laid.bench_trigger != "every_adoption":
         return f"lays `bench_trigger: {laid.bench_trigger}`, which grades no adoption but the last"

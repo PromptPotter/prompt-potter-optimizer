@@ -1050,13 +1050,18 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
                 reporting, endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
             ),
         )
-        spec = JudgeSpec(name="sealqa", stages=[JudgeStage(model="m", provider="openai")])
+        spec = JudgeSpec(
+            name="sealqa",
+            stages=[JudgeStage(role="grade", temperature=0.0, model="m", provider="openai")],
+        )
         config = defaulted_config(
             {"optimization": {"degradation_threshold": 0.4}, "judges": {name: spec.model_dump()}}
         )
         try:
             scorer_setup(
-                session, config, partition=partition_bank(session.bank.samples, None, seed=0)
+                session,
+                config,
+                partition=partition_bank(session.bank.samples, config.dataset_split, seed=0),
             )
         except ValueError:
             return True
@@ -1193,7 +1198,7 @@ def test_the_scorer_id_names_the_grading_function(
 
 def test_a_formula_is_two_valued_by_its_expression_over_what_emits() -> None:
     # A two-valued fitness takes φ = 1 and an exact band; read as graded, φ is FITTED on 0/1 cells.
-    stage = JudgeStage(model="m", provider="openai")
+    stage = JudgeStage(role="grade", temperature=0.0, model="m", provider="openai")
     judges = {
         "answer": JudgeSpec(name="simpleqa", stages=[stage]),
         "grounded": JudgeSpec(name=ANSWER_GROUNDING.name, stages=[stage]),
@@ -1281,7 +1286,10 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
         predicted=NO_RESULT,
         pipeline=PipelineData(reasoning_trace="searched the docs, found the founding date"),
     )
-    spec = JudgeSpec(name="answer_grounding", stages=[JudgeStage(model="m", provider="openai")])
+    spec = JudgeSpec(
+        name="answer_grounding",
+        stages=[JudgeStage(role="grade", temperature=0.0, model="m", provider="openai")],
+    )
 
     async def grounded() -> JudgeVerdict:
         return await ANSWER_GROUNDING.grade(spec, traced)
@@ -1340,7 +1348,9 @@ _PEER_BANK = samples(16)
 # Each search row's place in the order the search reads it, under the peer cycle's own split.
 _PEER_READ_ORDER = {
     s.id: n
-    for n, s in enumerate(partition_bank(_PEER_BANK, DatasetSplit(bench=0, demo=2), seed=0).search)
+    for n, s in enumerate(
+        partition_bank(_PEER_BANK, DatasetSplit(bench=0, demo=2, tolerance=0), seed=0).search
+    )
 }
 
 
@@ -4848,7 +4858,7 @@ def _evidence_campaign(
 ) -> Subject:
     if stores.campaigns.load_campaign(cid) is not None:
         return Subject(cid)
-    split = DatasetSplit(bench=6)
+    split = DatasetSplit(bench=6, demo=0, tolerance=0)
     partition = partition_bank(_H2H_BANK, split, seed=seed)
     root = CycleHop(campaign_id=cid, cycle_id=f"cycle_{cid}")
     stores.campaigns.create_campaign(
@@ -5939,7 +5949,7 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
     ]
     matrix = subject_evidence(h2h_stores, replicate_arms).head_to_head
     assert matrix is not None and matrix.verdict is True
-    held_out = partition_bank(_H2H_BANK, DatasetSplit(bench=6), seed=0).bench
+    held_out = partition_bank(_H2H_BANK, DatasetSplit(bench=6, demo=0, tolerance=0), seed=0).bench
 
     def seeded(cid: str, row: Sample) -> float:
         selected, tilt, _, _ = replicated[cid]

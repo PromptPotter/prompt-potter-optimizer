@@ -250,12 +250,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `dict[str, dict[str, Any]]` on `ForkStart`, which carries a null clear and text a `NodeCall` refuses
   before the schema types it). Action: one typed node document with knobs a view on it; the steer a
   named layer. It closes ren 8's node-config census and the pipeline-switch row. **Rides with:** cfg.
-- **A sub-model's knobs still default in code**: every `CampaignConfig` / `OptimizationConfig` knob's
-  default lives in `assets/datasets/defaults.yaml` (`authored.py::defaults_config`), but a knob inside
-  a nested model keeps a code default the file never shows: `LivesConfig` start 2 / cap 4,
-  `JudgeSpec.temperature` 0.0, and `campaign_config.py::over_the_default`'s budget (usd 0.025, rounds
-  50) laid under every budget a layer names. Action: each into `defaults.yaml`, its field required.
-  **Rides with:** cfg. **Re-test:** no field of a model `CampaignConfig` nests carries a valued default.
 - **Potter's demo axis is dead wherever a dataset holds out no demo pool**: the derived coupling
   `l1_generate.shots_without_demo_pool` (`application/config_map.py::_draw_couplings`) now badges every default potter
   campaign, because `defaults.yaml` holds out no `dataset_split.demo` and only justlogic declares one

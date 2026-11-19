@@ -12,11 +12,11 @@ from promptpotter.shared.hashing import stable_hash
 class JudgeStage(StrictModel):
     """One model call in a judge's composition, on a model declared here and never inherited."""
 
-    role: str = "grade"
+    role: str
     """The ``node`` a token-usage record is filed under."""
     model: str
     provider: str
-    temperature: float = 0.0
+    temperature: float
     """0.0: a judge is a RULER, and a re-read landing elsewhere adds variance to the measurement."""
     max_tokens: int | None = None
 

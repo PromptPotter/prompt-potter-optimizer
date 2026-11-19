@@ -147,7 +147,7 @@ def session_ruler_scope(session: Session) -> RulerScope:
 
 
 def ruler_rows(
-    stores: Stores, sheets: Iterable[tuple[str, CellSheet]], admitted: frozenset[str] | None
+    stores: Stores, sheets: Iterable[tuple[str, CellSheet]], admitted: frozenset[str]
 ) -> list[RulerRow]:
     """A grade-A row on a search cell, by the archive address that answered it: a bench row and a
     replay of a weaker grade reach no ruler."""
@@ -157,7 +157,7 @@ def ruler_rows(
             filed = None if cell.facts.answer is None else stores.archive.answer(cell.facts.answer)
             if (
                 filed is not None
-                and (admitted is None or cell.key in admitted)
+                and cell.key in admitted
                 and meets_grade(filed.provenance, _RULER_GRADE)
             ):
                 out.append((address, cell.key, graded_response(cell)))

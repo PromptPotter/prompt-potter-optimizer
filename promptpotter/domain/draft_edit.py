@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import functools
 import json
+import types
 from collections.abc import Collection
-from typing import Annotated, Any
+from typing import Annotated, Any, Union, get_args, get_origin
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, create_model
 from pydantic.fields import FieldInfo
@@ -12,21 +14,39 @@ from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.strict_model import StrictModel, UploadBytes
 
 
+@functools.cache
 def _partial(
     model: type[BaseModel], *, only: Collection[str] | None = None, **nested: type[BaseModel]
 ) -> Any:
-    """*model*'s fields, or *only* the ones named, each optional with no default: a layer names only what it sets."""
+    """*model*'s fields, or *only* the ones named, each optional with no default: a layer names
+    only what it sets, a nested instance's keys included, so only the fold is read whole."""
     fields: dict[str, Any] = {}
     for name, info in model.model_fields.items():
         if only is not None and name not in only:
             continue
         bounds = [m for m in info.metadata if not isinstance(m, Knob)]
-        annotation: Any = nested.get(name, info.annotation)
+        annotation: Any = nested.get(name) or _partial_of(info.annotation)
         fields[name] = (
             Annotated[annotation | None, *bounds, FieldInfo(description=info.description)],
             None,
         )
     return create_model(f"_{model.__name__}Fields", __base__=StrictModel, **fields)
+
+
+def _partial_of(annotation: object) -> Any:
+    """*annotation* with each model the fold lays key by key as its partial: a list is laid whole,
+    and a model requiring no field is its own (a node's call keeps its backend's keys)."""
+    origin, args = get_origin(annotation), get_args(annotation)
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        required = any(info.is_required() for info in annotation.model_fields.values())
+        return _partial(annotation) if required else annotation
+    if origin is Annotated:
+        return Annotated[_partial_of(args[0]), *args[1:]]
+    if origin in (Union, types.UnionType):
+        return Union[tuple(_partial_of(a) for a in args)]  # noqa: UP007
+    return (
+        types.GenericAlias(dict, (args[0], _partial_of(args[1]))) if origin is dict else annotation
+    )
 
 
 # An edit's `optimization` takes no `budget`: a launch's bound is its payload's own field, the one

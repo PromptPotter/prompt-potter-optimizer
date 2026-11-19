@@ -271,7 +271,7 @@ def _draw_couplings(selected: SelectedOptimizer) -> Iterator[Coupling]:
 
 
 def _starves_shots(shots: int, config: CampaignConfig) -> bool:
-    return shots > 0 and (config.dataset_split is None or config.dataset_split.demo == 0)
+    return shots > 0 and config.dataset_split.demo == 0
 
 
 def declared_couplings(selected: SelectedOptimizer) -> list[Coupling]:

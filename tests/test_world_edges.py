@@ -168,7 +168,8 @@ async def test_a_fault_in_the_worlds_policy_raises_past_the_call_it_answers(
 
     offline.llm.says = stale
     spec = JudgeSpec(
-        name="answer_grounding", stages=[JudgeStage(model="gpt-4o", provider="openai")]
+        name="answer_grounding",
+        stages=[JudgeStage(role="grade", temperature=0.0, model="gpt-4o", provider="openai")],
     )
     cell = MeasuredCell(
         sample_key="k0", predicted="1891", pipeline=PipelineData(reasoning_trace="read the docs")

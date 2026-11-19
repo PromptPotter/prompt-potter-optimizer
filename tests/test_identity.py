@@ -96,6 +96,7 @@ from promptpotter.application.datasets.authored import (
     dataset_campaign_block,
     declare_run,
     effective_config,
+    load_dataset_campaign_config,
     validated_campaign_config,
 )
 from promptpotter.application.datasets.draft_campaign import (
@@ -270,6 +271,7 @@ from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, Optim
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
 from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells, InnerTaskSpec
+from promptpotter.domain.layer_fold import Layer, fold_layers, rules_of
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.paired_reading import ArmKey
@@ -464,7 +466,9 @@ def test_the_judge_a_cell_is_graded_by_moves_its_searchpoint_hash() -> None:
         )
 
     def judge(name: str, model: str) -> JudgeSpec:
-        return JudgeSpec(name=name, stages=[JudgeStage(model=model, provider="p")])
+        return JudgeSpec(
+            name=name, stages=[JudgeStage(role="grade", temperature=0.0, model=model, provider="p")]
+        )
 
     hashes = {
         "none": sp_hash({}),
@@ -2722,7 +2726,9 @@ def _arming(stores: Stores, decl: _Declared) -> tuple[Session, ConfigLayers, lis
     """An arm's session on 35 rows holding 5 out: an arm is judged on its bench, and capo searches 30."""
     rows = samples(35, "TRUE", query="claim ")
     door = decl.door.model_dump(mode="json", exclude_unset=True)
-    door_layers = ConfigLayers({}, {**door, "dataset_split": {"bench": 5}})
+    door_layers = ConfigLayers(
+        {}, {**door, "dataset_split": {"bench": 5, "demo": 0, "tolerance": 0}}
+    )
     return (
         loop_session(stores, decl.opened.pipeline_schema, rows, dataset=decl.opened.dataset),
         door_layers,
@@ -2924,6 +2930,39 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
         cycle_config(stores, as_campaign.root_cycle).config.model_dump()
         == effective_config(l4_arm).model_dump()
     ), "an arm runs another config than a campaign declared that way"
+
+
+def test_an_account_dataset_stating_one_axis_of_its_split_reads_the_rest_from_the_defaults(
+    built_stores: Stores,
+) -> None:
+    # An account definition is data no landing edits: one it cannot read loses every run on it.
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("bench-only") / DEFINITION_FILE,
+        {
+            "pipeline": {"connector": "termnorm"},
+            "campaign": {"dataset_split": {"bench": 100}},
+        },
+    )
+    under = campaign_defaults()["dataset_split"]
+    dataset = resolve_dataset(built_stores, "bench-only")
+    assert load_dataset_campaign_config(dataset).dataset_split == DatasetSplit(
+        **{**under, "bench": 100}
+    ), "a split stating its bench alone did not read its other axes off `defaults.yaml`"
+    # A member's panel restating the bench keeps the tolerance its family's panel lays.
+    panel = fold_layers(
+        rules_of(InnerTasks),
+        [
+            Layer("family", {"inner_campaign": _GEOMETRY}),
+            Layer("member", {"inner_campaign": {"dataset_split": {"bench": 100}}}),
+        ],
+    ).document
+    seats = [Seat(kind="seat", id="bench-only/seed-0", run_seed=0)]
+    cells = InnerTasks(inner_benchmark="bench-only", tasks=seats, **panel).resolve_cells(
+        built_stores
+    )
+    assert cells.held(cells.cells[0]).campaign.dataset_split == DatasetSplit(
+        **{**_GEOMETRY["dataset_split"], "bench": 100}
+    ), "a seat lost the tolerance its family's panel lays under a member's bench"
 
 
 class _Held(NamedTuple):
@@ -4055,7 +4094,7 @@ _EXPORTED_ROWS = [
 
 def _split_bank() -> tuple[list[Sample], DatasetSplit, BankPartition]:
     bank = samples(60, "TRUE", query="claim ")
-    split = DatasetSplit(bench=12, demo=6)
+    split = DatasetSplit(bench=12, demo=6, tolerance=0)
     return bank, split, partition_bank(bank, split, seed=0)
 
 
@@ -4239,16 +4278,14 @@ def test_a_declared_bench_row_moves_no_other_row() -> None:
     wide = partition_bank([*bank, *extra], split, seed=0)
     assert (wide.search, wide.demo) == (part.search, part.demo), "a wider bench moved a paid cell"
     assert wide.bench == (*part.bench, *extra), "a declared bench row was not held out"
-    for unsplittable, declared_split in (
-        ([*bank, *extra], None),
-        ([*bank, bank[0].model_copy(update={"id": 60, "held_out": True})], split),
-    ):
-        with pytest.raises(ValueError):
-            partition_bank(unsplittable, declared_split, seed=0)
+    with pytest.raises(ValueError):
+        partition_bank(
+            [*bank, bank[0].model_copy(update={"id": 60, "held_out": True})], split, seed=0
+        )
 
 
 def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
-    # So the cell replays once searched, and a pool declaring no split cannot draw it by mistake.
+    # So the cell replays once searched, and a pool's zero split cannot draw it by mistake.
     task = {"kind": "seat", "id": "gsm_hard/8b", "inner_dataset": "gsm_hard", "inner_model": "m"}
     other = {**task, "id": "hotpotqa/8b", "inner_dataset": "hotpotqa"}
     seats = {
@@ -4273,9 +4310,9 @@ def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
     assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
         "the seat entered the pin, so the held-out cell never replays once searched"
     )
-    with pytest.raises(ValueError):
-        partition_bank([seated, drawn], None, seed=0)
-    environments = partition_bank([seated, drawn], DatasetSplit(bench=0), seed=0)
+    environments = partition_bank(
+        [seated, drawn], DatasetSplit(bench=0, demo=0, tolerance=0), seed=0
+    )
     assert (environments.search, environments.bench) == ((drawn,), (seated,)), (
         "a held-out environment was drawn for the search"
     )
@@ -4286,12 +4323,12 @@ def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
     # alone searches them.
     bank, _, _ = _split_bank()
     l4_bank = [*bank[:30], *(s.model_copy(update={"held_out": True}) for s in bank[30:50])]
-    cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0), seed=0)
+    cell_drawn = partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
     back = PartitionRecord.of(cell_drawn, dataset_hash="d").restored(bank)
     assert (back.search, back.bench) == (cell_drawn.search, tuple(bank[30:50])), (
         "the restored partition is not the one the run drew"
     )
-    assert partition_bank(bank, DatasetSplit(bench=0), seed=0).bench == (), (
+    assert partition_bank(bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0).bench == (), (
         "a re-draw held rows out"
     )
 
@@ -4305,7 +4342,7 @@ def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stor
     built_stores.campaigns.append(
         hop,
         PartitionRecord.of(
-            partition_bank(l4_bank, DatasetSplit(bench=0), seed=0),
+            partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0),
             dataset_hash=drawn_bank.dataset_hash,
         ),
     )
@@ -4432,7 +4469,9 @@ def test_the_check_in_model_reads_no_held_out_row_and_inits_on_the_pipeline_chec
     content = build_origin_consultation(
         draft, draft_pipeline(built_stores, draft, served)
     ).user_content
-    bench_rows = partition_bank(checkin_bank, DatasetSplit(bench=30), seed=0).bench
+    bench_rows = partition_bank(
+        checkin_bank, DatasetSplit(bench=30, demo=0, tolerance=0), seed=0
+    ).bench
     assert not [s.id for s in bench_rows if f'"{s.query}"' in content], (
         "a bench row reached the resolver"
     )

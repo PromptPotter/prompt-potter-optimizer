@@ -50,9 +50,8 @@ campaign:
   scoring:
     per_sample: 0.0 if floored else max(0.0, min(1.0, held_out_lift + 0.5))
   display_metric: ability
-  # The bench is the seats a panel declares `held_out`, which the outer search never draws; the
-  # origin and each outer adoption are graded on them once.
-  dataset_split: {bench: 0}
+  # The bench is the seats a panel declares `held_out` (`defaults.yaml`'s zero split), which the
+  # outer search never draws; the origin and each outer adoption are graded on them once.
   bench_trigger: every_adoption
   optimization:
     # What C0 and a round cost is unmeasured under the panel's geometry (40 rows a round, three

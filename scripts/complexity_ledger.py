@@ -244,7 +244,9 @@ BASELINE = {
     # strata-flight (-1): the count once limits-ux and flight-ux stand in one tree.
     # flight-share B (+3): `CapReading.count`'s parts, which the browser reads in `cap_lines`' words.
     # small-5 (+3): `RepairAttempt`'s fields on a round's audit block, which no page draws yet.
-    "p_served": 205,
+    # cfg-3 (+2): a campaign layer's nested partials (split, lives, judge, call target), served
+    # where a door states a layer; three of their keys no surface reads by name yet.
+    "p_served": 207,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

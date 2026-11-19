@@ -247,7 +247,7 @@ LABEL = "OFFLINE — fake optimizer LLM and fake backend; every number is synthe
 
 BENCH: dict[str, Any] = {
     "sp_budget_origin": 14,
-    "dataset_split": {"bench": 10, "demo": 10},
+    "dataset_split": {"bench": 10, "demo": 10, "tolerance": 0},
 }
 ROUND_CELLS = 20
 # Paper configurations scaled to a few-hundred-row bank, so a race cuts within a few rounds.

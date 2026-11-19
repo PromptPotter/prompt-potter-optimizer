@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.bench import BenchTrigger, DatasetSplit
@@ -77,12 +77,10 @@ class LivesConfig(StrictModel):
     each round that does not. ``budget.rounds`` and spend stay the ceilings."""
 
     start: Annotated[int, Knob(Estimand.STOPPING, Estimand.SPEND)] = Field(
-        2,
         ge=1,
         description="Lives a run starts with (a fully-stalling run does exactly this many rounds).",
     )
     cap: Annotated[int, Knob(Estimand.STOPPING, Estimand.SPEND)] = Field(
-        4,
         ge=1,
         description="Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
     )
@@ -91,14 +89,6 @@ class LivesConfig(StrictModel):
     def bank(self) -> tuple[int, int]:
         """``(start, cap)``, as ``domain/run_standing.py::stalls_left`` folds it."""
         return (self.start, self.cap)
-
-
-_DEFAULT_BUDGET = Budget(usd=0.025, rounds=50)
-
-
-def over_the_default(budget: Budget) -> Budget:
-    """The default is the bottom layer: a declaration naming one axis keeps the others."""
-    return _DEFAULT_BUDGET.over(budget)
 
 
 class CallTarget(FrozenModel):
@@ -157,11 +147,6 @@ class OptimizationConfig(OptimizerChoice):
             "and a resume holds again unless an answer was already banked."
         ),
     )
-
-    @field_validator("budget", mode="before")
-    @classmethod
-    def _over_the_default(cls, given: object) -> Budget:
-        return over_the_default(Budget.model_validate(given))
 
     budget: Annotated[Budget, Knob(Estimand.SPEND)] = Field(
         description=(
@@ -394,11 +379,10 @@ class CampaignConfig(StrictModel):
         "guessed value makes every campaign on it publish a round count nobody can defend. "
         "DISPLAY config — it moves no gate, no selection and no stop.",
     )
-    dataset_split: Annotated[DatasetSplit | None, Knob(Estimand.SELECTION)] = Field(
-        None,
+    dataset_split: Annotated[DatasetSplit, Knob(Estimand.SELECTION)] = Field(
         description="How run init partitions the bank into the search split every optimizer draw "
-        "reads, the held-out bench set the headline is scored on, and a demo pool. `None` "
-        "holds nothing out: the whole bank is the search split and there is no bench score.",
+        "reads, the held-out bench set the headline is scored on, and a demo pool. The zero "
+        "split holds out only the rows the bank declares `held_out`.",
     )
     run_seed: Annotated[int, Knob(Estimand.SELECTION)] = Field(
         description="The run's one seed. It seeds which rows fall where and the order the search "
@@ -442,6 +426,18 @@ class CampaignConfig(StrictModel):
 
 # Every campaign document's rule, a partial's included: `CampaignConfig`'s declared per key.
 CAMPAIGN_RULE = rules_of(CampaignConfig)
+
+
+# A knob anywhere in a campaign document defaults in `defaults.yaml` or nowhere: a code default
+# would be a second source for one number. The schema's `$defs` are every model the tree nests.
+_SCHEMA = CampaignConfig.model_json_schema()
+if _defaulted := sorted(
+    f"{model}.{name}"
+    for model, held in [("CampaignConfig", _SCHEMA), *_SCHEMA["$defs"].items()]
+    for name, field in held.get("properties", {}).items()
+    if field.get("default") not in (None, [], {})
+):
+    raise RuntimeError(f"{_defaulted} default in code: `defaults.yaml` is a knob's one default.")
 
 
 def start_layer(overrides: ConfigOverrides) -> Layer[str]:

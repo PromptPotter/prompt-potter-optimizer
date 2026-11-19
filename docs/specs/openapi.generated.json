@@ -2372,15 +2372,8 @@
             "type": "string"
           },
           "dataset_split": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/DatasetSplit"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. `None` holds nothing out: the whole bank is the search split and there is no bench score."
+            "$ref": "#/components/schemas/DatasetSplit",
+            "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. The zero split holds out only the rows the bank declares `held_out`."
           },
           "display_metric": {
             "$ref": "#/components/schemas/DisplayMetric",
@@ -2499,6 +2492,7 @@
           "scoring",
           "display_metric",
           "hard_sample_order",
+          "dataset_split",
           "run_seed",
           "bench_trigger",
           "optimization"
@@ -2625,13 +2619,13 @@
           "dataset_split": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/DatasetSplit"
+                "$ref": "#/components/schemas/_DatasetSplitFields"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. `None` holds nothing out: the whole bank is the search split and there is no bench score."
+            "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. The zero split holds out only the rows the bank declares `held_out`."
           },
           "display_metric": {
             "anyOf": [
@@ -2692,7 +2686,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JudgeSpec"
+                  "$ref": "#/components/schemas/_JudgeSpecFields"
                 },
                 "type": "object"
               },
@@ -4508,13 +4502,13 @@
           "dataset_split": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/DatasetSplit"
+                "$ref": "#/components/schemas/_DatasetSplitFields"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. `None` holds nothing out: the whole bank is the search split and there is no bench score."
+            "description": "How run init partitions the bank into the search split every optimizer draw reads, the held-out bench set the headline is scored on, and a demo pool. The zero split holds out only the rows the bank declares `held_out`."
           },
           "display_metric": {
             "anyOf": [
@@ -4575,7 +4569,7 @@
             "anyOf": [
               {
                 "additionalProperties": {
-                  "$ref": "#/components/schemas/JudgeSpec"
+                  "$ref": "#/components/schemas/_JudgeSpecFields"
                 },
                 "type": "object"
               },
@@ -5817,14 +5811,12 @@
             "type": "integer"
           },
           "demo": {
-            "default": 0,
             "description": "Distinct samples reserved as the demo pool — the rows an individual's `shots` name by `Sample.key`, rendered into its prompt as query and ground truth, never scored.",
             "minimum": 0.0,
             "title": "Demo",
             "type": "integer"
           },
           "tolerance": {
-            "default": 0,
             "description": "Bench rows a pass may end with no verdict on — a provider fault, or a cell the formula cannot grade — and still be a reading. Past it the pass reads nothing: a headline over a population other than the one sent is not the bench score.",
             "minimum": 0.0,
             "title": "Tolerance",
@@ -5832,7 +5824,9 @@
           }
         },
         "required": [
-          "bench"
+          "bench",
+          "demo",
+          "tolerance"
         ],
         "title": "DatasetSplit",
         "type": "object"
@@ -9281,19 +9275,19 @@
             "type": "string"
           },
           "role": {
-            "default": "grade",
             "title": "Role",
             "type": "string"
           },
           "temperature": {
-            "default": 0.0,
             "title": "Temperature",
             "type": "number"
           }
         },
         "required": [
+          "role",
           "model",
-          "provider"
+          "provider",
+          "temperature"
         ],
         "title": "JudgeStage",
         "type": "object"
@@ -10132,20 +10126,22 @@
         "description": "Improvement-banked round budget: banks a life each round that promotes an arm, loses one\neach round that does not. ``budget.rounds`` and spend stay the ceilings.",
         "properties": {
           "cap": {
-            "default": 4,
             "description": "Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
             "minimum": 1.0,
             "title": "Cap",
             "type": "integer"
           },
           "start": {
-            "default": 2,
             "description": "Lives a run starts with (a fully-stalling run does exactly this many rounds).",
             "minimum": 1.0,
             "title": "Start",
             "type": "integer"
           }
         },
+        "required": [
+          "start",
+          "cap"
+        ],
         "title": "LivesConfig",
         "type": "object"
       },
@@ -12460,7 +12456,7 @@
           "call_target": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CallTarget"
+                "$ref": "#/components/schemas/_CallTargetFields"
               },
               {
                 "type": "null"
@@ -12579,7 +12575,7 @@
           "lives": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/LivesConfig"
+                "$ref": "#/components/schemas/_LivesConfigFields"
               },
               {
                 "type": "null"
@@ -19484,6 +19480,148 @@
           "campaigns"
         ],
         "title": "WorkspaceStorageResponse",
+        "type": "object"
+      },
+      "_CallTargetFields": {
+        "additionalProperties": false,
+        "properties": {
+          "model": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          }
+        },
+        "title": "_CallTargetFields",
+        "type": "object"
+      },
+      "_DatasetSplitFields": {
+        "additionalProperties": false,
+        "properties": {
+          "bench": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Distinct samples the split ranks away from the search as the bench set, with every row that repeats one: no optimizer node ever reads one, and the headline is scored on them. A row the bank declares `held_out` is held out beside them, never counted here.",
+            "title": "Bench"
+          },
+          "demo": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Distinct samples reserved as the demo pool — the rows an individual's `shots` name by `Sample.key`, rendered into its prompt as query and ground truth, never scored.",
+            "title": "Demo"
+          },
+          "tolerance": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bench rows a pass may end with no verdict on — a provider fault, or a cell the formula cannot grade — and still be a reading. Past it the pass reads nothing: a headline over a population other than the one sent is not the bench score.",
+            "title": "Tolerance"
+          }
+        },
+        "title": "_DatasetSplitFields",
+        "type": "object"
+      },
+      "_JudgeSpecFields": {
+        "additionalProperties": false,
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "stages": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/JudgeStage"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stages"
+          }
+        },
+        "title": "_JudgeSpecFields",
+        "type": "object"
+      },
+      "_LivesConfigFields": {
+        "additionalProperties": false,
+        "properties": {
+          "cap": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bank ceiling — lives never exceed this no matter how long the improving streak runs.",
+            "title": "Cap"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lives a run starts with (a fully-stalling run does exactly this many rounds).",
+            "title": "Start"
+          }
+        },
+        "title": "_LivesConfigFields",
         "type": "object"
       }
     }

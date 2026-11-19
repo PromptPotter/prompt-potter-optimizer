@@ -589,11 +589,6 @@ def _bench_pass(
     )
 
 
-def _tolerance(session: Session) -> int:
-    split = session.state.scoring.partition.split
-    return split.tolerance if split is not None else 0
-
-
 def graded(
     session: Session,
     bench_pass: BenchPass,
@@ -604,7 +599,7 @@ def graded(
 ) -> None:
     """The one write a line's passes are folded from: a pass no call here follows is lost with the
     process. A *refusal* banks a pass that sent nothing, which the fold reads refused."""
-    tolerance = _tolerance(session)
+    tolerance = session.state.scoring.partition.split.tolerance
     read = _read_pass(
         session.store,
         bench_pass,
@@ -807,7 +802,7 @@ async def bench_origin(
         )
         after = _bench_counted(stores, hop)
         passes = BenchPasses(
-            tolerance=_tolerance(session),
+            tolerance=session.state.scoring.partition.split.tolerance,
             origin=origin_pass,
             reserve_usd=after.usd_amount - before.usd_amount,
             reserve_tokens=after.token_amount - before.token_amount,
@@ -881,7 +876,6 @@ def bench_line(
     campaign, hop = at.campaign, at.hop
     holder = stores.campaigns.live_cycle(campaign.root_hop)
     drawn = stores.campaigns.last(hop, PartitionRecord)
-    split = config.dataset_split
     return BenchLine(
         hop=hop,
         on_live_cycle=holder == hop,
@@ -889,7 +883,7 @@ def bench_line(
         refused=_refused(stores, campaign),
         held_by=None if holder == hop else holder.cycle_id,
         trigger=config.bench_trigger,
-        held_out=len(drawn.bench_ids) if drawn is not None else 0 if split is None else split.bench,
+        held_out=len(drawn.bench_ids) if drawn is not None else config.dataset_split.bench,
         instrument_id=cycle_instrument(
             drawn, stores.campaigns.standing_rounds(hop, moment=None).rounds
         ),

@@ -3581,9 +3581,8 @@ export interface CampaignConfig {
   fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
-   * `None` holds nothing out: the whole bank is the search split and there is
-   * no bench score. */
-  dataset_split: DatasetSplit | null;
+   * The zero split holds out only the rows the bank declares `held_out`. */
+  dataset_split: DatasetSplit;
   /** The run's one seed. It seeds which rows fall where and the order the search
    * pool reads in: each row ranks by this and its content (`Sample.key`),
    * never its slot, so a reordered bank holds out the same rows and reads
@@ -4271,7 +4270,7 @@ export interface ConfigEdit {
    * from the pipeline's node config, not from the optimizer's own LLMs. A
    * judge is a ruler, and a ruler that moved with whatever the search was
    * last steered to would not be one. */
-  judges: Record<string, JudgeSpec> | null;
+  judges: Record<string, _JudgeSpecFields> | null;
   /** Which fitness number the operator's round and candidate views display first
    * (lineage node value, Best tile, sidebar). DISPLAY config, not search
    * state — the optimizer's selector decides on its own objective, and the
@@ -4305,9 +4304,8 @@ export interface ConfigEdit {
   fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
-   * `None` holds nothing out: the whole bank is the search split and there is
-   * no bench score. */
-  dataset_split: DatasetSplit | null;
+   * The zero split holds out only the rows the bank declares `held_out`. */
+  dataset_split: _DatasetSplitFields | null;
   /** The run's one seed. It seeds which rows fall where and the order the search
    * pool reads in: each row ranks by this and its content (`Sample.key`),
    * never its slot, so a reordered bank holds out the same rows and reads
@@ -4327,6 +4325,28 @@ export interface ConfigEdit {
    * `manual`: its comparison is the bench score. */
   bench_trigger: 'manual' | 'at_end' | 'every_adoption' | null;
   optimization: OptimizationOverrides | null;
+}
+
+export interface _JudgeSpecFields {
+  name: string | null;
+  stages: JudgeStage[] | null;
+}
+
+export interface _DatasetSplitFields {
+  /** Distinct samples the split ranks away from the search as the bench set, with
+   * every row that repeats one: no optimizer node ever reads one, and the
+   * headline is scored on them. A row the bank declares `held_out` is held
+   * out beside them, never counted here. */
+  bench: number | null;
+  /** Distinct samples reserved as the demo pool — the rows an individual's `shots`
+   * name by `Sample.key`, rendered into its prompt as query and ground truth,
+   * never scored. */
+  demo: number | null;
+  /** Bench rows a pass may end with no verdict on — a provider fault, or a cell the
+   * formula cannot grade — and still be a reading. Past it the pass reads
+   * nothing: a headline over a population other than the one sent is not the
+   * bench score. */
+  tolerance: number | null;
 }
 
 /** What an operator set on one config row: a free param's padlock, or an axis's
@@ -5173,7 +5193,7 @@ export interface CampaignLayer {
    * from the pipeline's node config, not from the optimizer's own LLMs. A
    * judge is a ruler, and a ruler that moved with whatever the search was
    * last steered to would not be one. */
-  judges: Record<string, JudgeSpec> | null;
+  judges: Record<string, _JudgeSpecFields> | null;
   /** Which fitness number the operator's round and candidate views display first
    * (lineage node value, Best tile, sidebar). DISPLAY config, not search
    * state — the optimizer's selector decides on its own objective, and the
@@ -5207,9 +5227,8 @@ export interface CampaignLayer {
   fitness_ceiling: number | null;
   /** How run init partitions the bank into the search split every optimizer draw
    * reads, the held-out bench set the headline is scored on, and a demo pool.
-   * `None` holds nothing out: the whole bank is the search split and there is
-   * no bench score. */
-  dataset_split: DatasetSplit | null;
+   * The zero split holds out only the rows the bank declares `held_out`. */
+  dataset_split: _DatasetSplitFields | null;
   /** The run's one seed. It seeds which rows fall where and the order the search
    * pool reads in: each row ranks by this and its content (`Sample.key`),
    * never its slot, so a reordered bank holds out the same rows and reads
@@ -5246,7 +5265,7 @@ export interface OptimizationLayer {
   /** The provider and model every llm node of the optimizer calls, laid under each
    * node's own ``config``: a node its manifest or ``nodes`` routes elsewhere
    * keeps it. */
-  call_target: CallTarget | null;
+  call_target: _CallTargetFields | null;
   /** Hold every round, before any arm is measured, until the operator answers with
    * the arms it measures (`submit-arms`). ``off`` (default) never holds.
    * ``review``: the proposers run, their proposals are drafts, and the
@@ -5275,7 +5294,7 @@ export interface OptimizationLayer {
    * of which reached the election banks nothing. ``None`` → ``budget.rounds``
    * governs. It still caps from above, so a lives run wanting the full bank
    * sets ``budget: {rounds: null}``. */
-  lives: LivesConfig | null;
+  lives: _LivesConfigFields | null;
   /** Stop ``target_hit`` once the declared pick's level over the origin, on the
    * origin's panel, reaches this at its paired interval's lower bound.
    * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
@@ -5341,6 +5360,19 @@ export interface OptimizationLayer {
    * gateway routes per call. An L4 inner cell is one caller among the rest:
    * its panel's `inner_campaign` lays it as any campaign block does. */
   determinism: DeterminismClamp | null;
+}
+
+export interface _CallTargetFields {
+  provider: string | null;
+  model: string | null;
+}
+
+export interface _LivesConfigFields {
+  /** Lives a run starts with (a fully-stalling run does exactly this many rounds). */
+  start: number | null;
+  /** Bank ceiling — lives never exceed this no matter how long the improving streak
+   * runs. */
+  cap: number | null;
 }
 
 /** Open an authored dataset's files as a prefilled check-in draft; nothing runs
@@ -5703,7 +5735,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "f6b4cf2bb7159942";
+export const SERVED_CONTRACT = "6cac0d3589aee814";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

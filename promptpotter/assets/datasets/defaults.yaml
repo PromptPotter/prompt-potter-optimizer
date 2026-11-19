@@ -1,13 +1,16 @@
 # The default every `{name}/dataset.yaml::campaign` and every upload's draft is laid over — what
 # one leaves unsaid, it says this. The merge rule is `assets/datasets/CLAUDE.md` § A dataset file is
 # a partial. Every campaign default lives here and nowhere in code: each `CampaignConfig` field this
-# file names is required there. A node's template is its connector's (`Connector.node_templates`).
+# file names is required there, and a layer states any subset of an instance's keys. An instance
+# whose absence means something else (a `lives`, a judge) is held here by none, so its declaration
+# states every key. A node's template is its connector's (`Connector.node_templates`).
 campaign:
   sp_budget_origin: 40
   task_framing: committed
   scoring: label_match(predicted, ground_truth)
   display_metric: fitness
   hard_sample_order: info_gain
+  dataset_split: {bench: 0, demo: 0, tolerance: 0}
   run_seed: 0
   bench_trigger: manual
   optimization:
@@ -28,4 +31,4 @@ campaign:
     origin_gate: strict
     crowning_bar: posterior
     enable_2pl_graduation: true
-    budget: {rounds: 5}
+    budget: {usd: 0.025, rounds: 5}

@@ -497,7 +497,7 @@ async def _grade_twice(
     offline.llm.says = lambda body: completion(reply, model=body["model"], usage=usage)
     offline.llm.sent.clear()
     cache = LLMReuseCache(tmp_path, "judge_reuse")
-    judge = JudgeStage(model="grader-1", provider="openai")
+    judge = JudgeStage(role="grade", temperature=0.0, model="grader-1", provider="openai")
     (ev,) = build_evaluators({"answer": JudgeSpec(name="sealqa", stages=[judge])}, beside=())
     graded = CycleEventLog(tmp_path / "graded.jsonl")
     with _billing_on(graded, spend_book()), scoped(judge_cache=cache):
@@ -1689,7 +1689,11 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
             ),
         )
         with scoped(judge_cache=judge_reuse):
-            await judge_call.ask(JudgeStage(model="m", provider="openai"), "grade", judge="j")
+            await judge_call.ask(
+                JudgeStage(role="grade", temperature=0.0, model="m", provider="openai"),
+                "grade",
+                judge="j",
+            )
 
     # Another campaign's run banks both replies; this arm only ever replays them.
     rescope(priced=tmp_path / "other")
@@ -3363,7 +3367,11 @@ def test_one_unit_of_work_resends_from_one_budget_whichever_loop_asks(offline: R
         assert attempts == SEND_ATTEMPTS + 1, f"{attempts} attempts in one unit of work"
         offline.llm.sent.clear()
         _reply_text, error = jumping_clock(
-            judge_call.ask(JudgeStage(model="gpt-x", provider="openai"), "grade", judge="j")
+            judge_call.ask(
+                JudgeStage(role="grade", temperature=0.0, model="gpt-x", provider="openai"),
+                "grade",
+                judge="j",
+            )
         )
     attempts = len(offline.llm.sent)
     assert error and attempts == SEND_ATTEMPTS, (
@@ -4452,7 +4460,12 @@ def test_the_fence_walks_every_call_a_run_sends_a_judges_model_included(
     free_fence: _FreeFence,
 ) -> None:
     boxed, _, oss, _, schema, layered = free_fence
-    judge = {"name": "j", "stages": [{"model": "openai/dear", "provider": "openrouter"}]}
+    judge = {
+        "name": "j",
+        "stages": [
+            {"role": "grade", "model": "openai/dear", "provider": "openrouter", "temperature": 0.0}
+        ],
+    }
     judged = layered.overlaid(Layer("campaign", {"judges": {"j": judge}}))
     tiered_params = PipelineParams.model_validate(
         {"steps": ["llm_only"], "llm_only": {"model": oss, "reasoning_effort": "low"}}

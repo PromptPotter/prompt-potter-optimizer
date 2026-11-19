@@ -18,7 +18,7 @@ class PartitionRecord(CycleRecord):
 
     record_type: Literal["bank_partition"] = "bank_partition"
     dataset_hash: str
-    split: DatasetSplit | None
+    split: DatasetSplit
     search_ids: list[int]
     bench_ids: list[int]
     # The held-out content two campaigns are compared on.

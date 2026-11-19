@@ -35,14 +35,12 @@ class DatasetSplit(StrictModel):
         "on them. A row the bank declares `held_out` is held out beside them, never counted here.",
     )
     demo: int = Field(
-        0,
         ge=0,
         description="Distinct samples reserved as the demo pool — the rows an individual's "
         "`shots` name by `Sample.key`, rendered into its prompt as query and ground truth, never "
         "scored.",
     )
     tolerance: int = Field(
-        0,
         ge=0,
         description="Bench rows a pass may end with no verdict on — a provider fault, or a cell "
         "the formula cannot grade — and still be a reading. Past it the pass reads nothing: a "
@@ -58,20 +56,19 @@ def bench_split(sample_keys: Iterable[str]) -> CellSet:
 
 @dataclass(frozen=True)
 class BankPartition:
-    split: DatasetSplit | None
+    split: DatasetSplit
     search: tuple[Sample, ...]
     bench: tuple[Sample, ...]
     demo: tuple[Sample, ...]
 
     @property
-    def admitted_ids(self) -> frozenset[int] | None:
-        """``None`` when nothing is held out, so an L4 cell drawn from a bank still reads every row."""
-        return None if self.split is None else frozenset(s.id for s in self.search)
+    def admitted_ids(self) -> frozenset[int]:
+        return frozenset(s.id for s in self.search)
 
     @property
-    def admitted_keys(self) -> frozenset[str] | None:
+    def admitted_keys(self) -> frozenset[str]:
         """:attr:`admitted_ids` as the δ scale names them."""
-        return None if self.split is None else frozenset(s.key for s in self.search)
+        return frozenset(s.key for s in self.search)
 
     @property
     def bank(self) -> tuple[Sample, ...]:
@@ -82,9 +79,7 @@ class BankPartition:
         return bench_split(s.key for s in self.bench)
 
 
-def partition_bank(
-    bank: Sequence[Sample], split: DatasetSplit | None, *, seed: int
-) -> BankPartition:
+def partition_bank(bank: Sequence[Sample], split: DatasetSplit, *, seed: int) -> BankPartition:
     """Ranks DISTINCT samples by *seed* and content, so every copy lands on its sample's side."""
     declared = {s.key for s in bank if s.held_out}
     rank = {k: stable_hash([seed, k]) for k in {s.key for s in bank}}
@@ -92,13 +87,6 @@ def partition_bank(
     def ordered(rows: Iterable[Sample]) -> tuple[Sample, ...]:
         return tuple(sorted(rows, key=lambda s: rank[s.key]))
 
-    if split is None:
-        if declared:
-            raise ValueError(
-                f"{len(declared)} samples of this bank are bench-only and no dataset_split is "
-                "declared, so the search would draw rows the dataset holds out."
-            )
-        return BankPartition(split=None, search=ordered(bank), bench=(), demo=())
     if repeats := sorted(s.id for s in bank if not s.held_out and s.key in declared):
         raise ValueError(
             f"rows {repeats} repeat the content of a bench-only row, so one sample would sit on "
