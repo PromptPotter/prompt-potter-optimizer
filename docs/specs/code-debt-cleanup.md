@@ -819,6 +819,29 @@ and derived the knob couplings from each member's draws and the escalation ladde
   more, or accept the false negative?". **Re-test:** `git grep -c _kept_for_a_fresh_read -- promptpotter`
   is 0.
 
+### wave-5 · webapp (what webapp-1 left)
+
+- **A pane's phone layout keys on the screen, not its column**: `measurements.css`, `scoring.css`,
+  `dashboard-pipeline.css`, `remote.css` and `ui/IntervalRow.module.css` switch at
+  `@media (max-width:640px)` though they draw inside a `.view` 413px wide on a 1440 screen. Root:
+  the `column` container `ui/Toolbar.module.css`'s fold reads. **Re-test:**
+  `git grep -c "@media (max-width: *640px)" -- webapp/components webapp/app/styles/domains` reaches
+  the screen-only rules alone.
+- **A short landscape screen leaves its pane a 30px strip**: at 844×390 on touch the masthead
+  (~200px), nav (56px) and remote bar (~60px) stay fixed; nothing is under the bar any more, but a
+  pane shows less than one row. Root: the masthead scrolls away with the pane on a short viewport.
+  **Re-test:** at landscape-844 touch the samples pane shows ≥ 3 rows.
+- **An open panel lags its trigger by a frame**: `ui/overlay.ts::useAnchored` re-places a popover
+  from `requestAnimationFrame`, and follows a trigger scrolled out of its pane over the masthead;
+  `e2e/harness.ts::everyTapLands` re-reads a cover two frames on for it. Root: CSS anchor
+  positioning, no JS follow. **Held:** iOS before 26 lacks it. **Re-test:**
+  `git grep -c requestAnimationFrame -- webapp/components/ui/overlay.ts webapp/e2e/harness.ts` is 0.
+- **The walk serves a stale bundle as the page under test**: against an old `webapp/out` the app
+  says "This page is out of date" (`promptpotter/main.py`'s `webapp` Said), which shrinks the panes,
+  and a bare `npx playwright test` does not refuse it (the gate rebuilds first). Root: the walk
+  server refuses a bundle older than its sources. **Re-test:** a walk run on a stale build fails at
+  start, naming the build.
+
 ### wave-5 · drift (the 2026-11-19 backbone hunt)
 
 These land in the re-key windows, `W1` (keys, address, cell key and archive row, one wipe) and `W2`
