@@ -1,5 +1,6 @@
 """The package's import walk: which of its files a module imports, read off the source. Stdlib
-only and importing nothing of the package, so a gate script reads it beside the landing key."""
+only and importing nothing of the package but its hashing, so a gate script reads it beside the
+landing key."""
 
 from __future__ import annotations
 
@@ -7,6 +8,8 @@ import ast
 from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
+
+from promptpotter.shared.hashing import normalized_tree
 
 _PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -38,13 +41,17 @@ def _is_type_checking(test: ast.expr) -> bool:
 def import_statements(path: Path) -> list[tuple[set[str], bool]]:
     """Each package file one import statement of *path* names, and whether the statement sits
     under ``TYPE_CHECKING``; function bodies included."""
-    tree = _tree(path)
-    importer = _module_name(path.resolve().relative_to(tree).as_posix())
+    return _imports(path, ast.parse(path.read_text(encoding="utf-8")))
+
+
+def _imports(path: Path, parsed: ast.Module) -> list[tuple[set[str], bool]]:
+    root = _tree(path)
+    importer = _module_name(path.resolve().relative_to(root).as_posix())
     home = importer if path.name == "__init__.py" else importer.rpartition(".")[0]
-    modules = package_modules(tree)
+    modules = package_modules(root)
     found: list[tuple[set[str], bool]] = []
     # An import is a statement, so no expression is walked; a function body is.
-    todo: list[tuple[ast.AST, bool]] = [(ast.parse(path.read_text(encoding="utf-8")), False)]
+    todo: list[tuple[ast.AST, bool]] = [(parsed, False)]
     while todo:
         sub, typed = todo.pop()
         names: list[str] = []
@@ -77,20 +84,23 @@ def imported_files(path: Path) -> set[str]:
     return {rel for files, _ in import_statements(path) for rel in files}
 
 
-def import_closure(modules: Iterable[str]) -> dict[str, Path]:
-    """Every package module *modules* reach through imports, to its file, themselves and each
-    one's enclosing packages included (an import runs their `__init__`): the code a call into one
-    can run, a function body's import included, so a module named may not be loaded yet."""
-    tree = _PACKAGE.parent
-    files = package_modules(tree)
+def import_closure(modules: Iterable[str]) -> dict[str, str]:
+    """Every package module *modules* reach through imports, to its code less its prose
+    (`hashing.py::normalized_tree`, off the one parse its walk read), themselves and each one's
+    enclosing packages included (an import runs their `__init__`): the code a call into one can
+    run, a function body's import included, so a module named may not be loaded yet."""
+    root = _PACKAGE.parent
+    files = package_modules(root)
     names = {rel: name for name, rel in files.items()}
-    seen: set[str] = set()
+    seen: dict[str, str] = {}
     todo = [files[m] for m in modules if m in files]
     while todo:
         if (rel := todo.pop()) in seen:
             continue
-        seen.add(rel)
+        parsed = ast.parse((root / rel).read_text(encoding="utf-8"))
         name = names[rel]
         parents = (name.rpartition(".")[0],) if "." in name else ()
-        todo.extend({*imported_files(tree / rel), *(files[p] for p in parents)} - seen)
-    return {names[rel]: tree / rel for rel in sorted(seen)}
+        imported = {f for found, _ in _imports(root / rel, parsed) for f in found}
+        seen[rel] = normalized_tree(parsed)
+        todo.extend({*imported, *(files[p] for p in parents)} - seen.keys())
+    return {names[rel]: seen[rel] for rel in sorted(seen)}
