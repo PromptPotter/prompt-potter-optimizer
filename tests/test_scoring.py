@@ -224,6 +224,7 @@ from promptpotter.application.scoring.paired import (
     absent_pair,
     as_family,
     grade_measurands,
+    read_arms,
     read_pair,
 )
 from promptpotter.application.scoring.passes import verify_member, verify_reading
@@ -284,7 +285,6 @@ from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
 from promptpotter.domain.cell_fold import (
     ScoreSummary,
     is_prior_dominated,
-    merge_known_outcomes,
     unscoreable_cells,
 )
 from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
@@ -324,6 +324,7 @@ from promptpotter.domain.paired_reading import (
     EstimatorSpec,
     Measurand,
     MeasurandKind,
+    MeasuredLift,
     MemberAddress,
     PairedReading,
     ReadingState,
@@ -1290,15 +1291,20 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     assert billed == [], f"a cell with no answer was billed a grading: {billed}"
 
     # A merge never shrinks what was already measured.
-    prior = list(sheet(measurements([1.0 if i < 10 else 0.0 for i in range(20)])))
+    prior = sheet(measurements([1.0 if i < 10 else 0.0 for i in range(20)]))
     winner = sheet(
         measurements([1.0 if sid in {10, 12, 15} else 0.0 for sid in range(10, 18)], range(10, 18))
     )
-    by_sid = {int(r.key): r for r in merge_known_outcomes(prior, winner)}
+    merged = prior.merged(winner).standing()
+    by_sid = {int(r.key): r for r in merged}
     assert set(by_sid) == set(range(20)), "a merge dropped a measured cell"
     assert [by_sid[i].hit for i in (10, 11, 19)] == [True, False, False], "the later read stands"
     assert all(by_sid[i].hit is True for i in range(10)), "a merge rewrote an untouched cell"
-    assert merge_known_outcomes(prior, []) == prior, "an empty merge moved something"
+    assert prior.merged(NO_CELLS) == prior, "an empty merge moved something"
+    # The declaration rides the merge: a sheet another scorer graded cannot join.
+    assert (merged.scorer_id, merged.two_valued) == (prior.scorer_id, prior.two_valued)
+    with pytest.raises(ValueError, match="cannot join"):
+        prior.merged(sheet(winner, scorer_id="another"))
 
 
 # 3. Electing a round winner
@@ -5123,6 +5129,28 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
     assert spanning.headline.family.p_adjusted == pytest.approx(p_wide)
 
 
+def test_an_arm_of_one_replicate_reads_its_declaration_and_a_pooled_one_the_t() -> None:
+    bank = samples(8, "t", query="w")
+    measurand = grade_measurands(scorer_of())[0]
+    assert measurand.binary, "label_match declares its fitness two-valued"
+    a = member_rows("a", measurements([1.0] * 2 + [0.0] * 6), bank)
+    b = member_rows("b", measurements([1.0] * 7 + [0.0]), bank)
+    b2 = member_rows("b2", measurements([1.0] * 6 + [0.0] * 2), bank)
+
+    def lift(arm_a: list[MemberRows], arm_b: list[MemberRows]) -> MeasuredLift:
+        read = read_arms(
+            arm_a, arm_b, cells=[s.key for s in bank], measurand=measurand, spec=ROUND_LIFT_SPEC
+        ).lift
+        assert read is not None
+        return read
+
+    single = lift([a], [b])
+    assert single.flips is not None and (single.flips.gained, single.flips.lost) == (5, 0)
+    assert single.p_value == pytest.approx(0.0625), "5 gained, 0 lost is exact McNemar's 2/2**5"
+    pooled = lift([a], [b, b2])
+    assert pooled.flips is None, "a mean over two replicates is no 0/1 cell: the t reads it"
+
+
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     four = samples(4, "t")
@@ -5347,12 +5375,15 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     c0 = ArmName(key=ArmKey("c0"), round=0, label="C0")
 
     def verified(
-        pass_: VerifyPass, fresh_rows: CellSheet = fresh, recorded: CellSheet = recorded
+        pass_: VerifyPass,
+        fresh_rows: CellSheet = fresh,
+        recorded: CellSheet = recorded,
+        reader: Scorer = scorer,
     ) -> Any:
         arm = c0 if pass_.arm.round == 0 else pass_.arm
         return verify_reading(
             pass_,
-            scorer=scorer,
+            scorer=reader,
             fresh=fresh_rows,
             recorded=recorded,
             measured=verify_member(
@@ -5384,6 +5415,14 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     assert verified(banked(), recorded=keyed(measurements([1.0] * 4))).held is True, (
         "a verify compared the fresh band against the recorded level's point"
     )
+    # A constant graded side keeps the band its support allows: never a point the other must reach.
+    graded = dataclasses.replace(scorer, two_valued=frozenset({"hit"}))
+    for level, n, held in ((0.79, 5, True), (0.30, 5, True), (0.30, 6, False)):
+        fell, stood = (
+            graded.graded(_keyed(row, f"k{row.key}") for row in measurements([value] * n, keys))
+            for value, keys in ((level, range(100, 100 + n)), (0.80, range(n)))
+        )
+        assert verified(banked(), fell, stood, graded).held is held, f"{n}x{level} vs {n}x0.80"
     hard = verified(banked("hard"))
     assert hard.held is None, (
         "hard picks sit below the level whatever the candidate is worth: no verdict from the level"

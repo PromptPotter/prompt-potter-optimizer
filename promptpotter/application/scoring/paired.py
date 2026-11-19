@@ -294,7 +294,7 @@ def read_arms(
     pairs = [(x, y) for xs, ys in zip(*by_cell, strict=True) for x in xs for y in ys]
     return ArmsReading(
         differences,
-        mean_lift(measurand, means[0], means[1], spec),
+        mean_lift(measurand, means[0], means[1], spec, pooled=len(a) > 1 or len(b) > 1),
         paired_diff_posterior(means[1], means[0])[1],
         paired_diff_posterior([y for _, y in pairs], [x for x, _ in pairs])[1],
     )
@@ -390,9 +390,14 @@ def mean_lift(
     a_values: list[float],
     b_values: list[float],
     spec: EstimatorSpec = ROUND_LIFT_SPEC,
+    *,
+    pooled: bool,
 ) -> MeasuredLift:
-    """The values are means over several passes, so no row is 0 or 1: the t reads it, never the sign test."""
-    return _lift(measurand.model_copy(update={"binary": False}), a_values, b_values, spec)
+    """Per-cell means: where one *pooled* replicates it lies between 0 and 1, so the t reads it;
+    where every mean is a single cell it IS that cell, and the measurand's declaration stands."""
+    if pooled:
+        measurand = measurand.model_copy(update={"binary": False})
+    return _lift(measurand, a_values, b_values, spec)
 
 
 def _lift(

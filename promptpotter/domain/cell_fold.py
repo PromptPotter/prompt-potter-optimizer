@@ -76,16 +76,6 @@ def field_accuracy(scoreable: Iterable[GradedCell]) -> dict[str, float]:
     return {name: sum(hits) / len(hits) for name, hits in verdicts.items()}
 
 
-def merge_known_outcomes(
-    prior: Iterable[GradedCell], incoming: Iterable[GradedCell]
-) -> list[GradedCell]:
-    """Never score this pool: its rows were measured by DIFFERENT configurations."""
-    by_key = {cell.key: cell for cell in prior}
-    for cell in incoming:
-        by_key[cell.key] = cell
-    return list(by_key.values())
-
-
 def measured_cells(rows: Iterable[GradedCell]) -> set[str]:
     return {cell.key for cell in rows if cell.scored}
 

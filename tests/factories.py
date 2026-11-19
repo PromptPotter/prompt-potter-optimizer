@@ -1459,7 +1459,8 @@ def bench_curve(origin: float | None, levels: list[float | None]) -> BenchCurve:
         state = ReadingState.NO_SELECTION if not levels else ReadingState.PAST_TOLERANCE
         return BenchCurve(state=state, origin=origin, levels=levels, area=None, rows={})
     read = [level for level in levels if level is not None]
-    area = mean_lift(grade_measurands(scorer_of())[0], [origin] * 2, [fmean(read)] * 2)
+    # Its rows carry LEVELS (each a mean over a pass's cells), never a cell's 0/1.
+    area = mean_lift(grade_measurands(scorer_of())[0], [origin] * 2, [fmean(read)] * 2, pooled=True)
     rows = {key: [origin, *levels] for key in ("a", "b")}
     return BenchCurve(state=ReadingState.READ, origin=origin, levels=levels, area=area, rows=rows)
 

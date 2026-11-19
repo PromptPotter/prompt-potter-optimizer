@@ -766,7 +766,7 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   "upstream unreachable" switch and no fetch count, so a fact patches `pricing.UPSTREAM_URL` and
   reads `Router.unrouted`, a set. **Rides with:** tests-x.
 
-### wave-5 · readings (what readings-4 and readings-5 left at their landing)
+### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
 - **A connector's two-valued term reaches no scorer** (readings-5's report): `authored.py::scorer_of`
   compiles from `CampaignConfig` alone, which names no connector, so a `CellTerm` or observation
@@ -775,25 +775,22 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   `max(0.0, min(1.0, env_reward))` still fits φ. Root: a connector declares the shape of its
   observation keys (per panel where it varies), and the scorer compiles with the campaign's
   connector. **Re-test:** the clamp under harbor reads two-valued in `Scorer.two_valued`.
-- **A merge drops a sheet's declaration** (readings-4's and its review's): `cell_fold.py::merge_known_outcomes`
-  returns `list[GradedCell]`, so `node_context.py`, `bench/cycle.py::pooled_theta`,
-  `measurement_log.py` and `evidence/read.py` re-wrap through a separately fetched scorer (correct
-  only while the scorer is locked at round 0's close). Root: the merge takes and returns sheets.
-  **Re-test:** `git grep -c "scorer.graded(" -- promptpotter` drops by 4.
-- **`read_arms` forces the t at one replicate per side** (readings-4's review): `paired.py::read_arms`
-  goes through `mean_lift`, which forces `binary=False`, where at one replicate the means are 0/1
-  and the declaration calls for McNemar; its docstring ("no row is 0 or 1") is false there. Root:
-  `mean_lift` reads the declaration where the replicate means are single cells. **Re-test:** a
-  1-replicate arm pair under `label_match` reads `flips`.
-- **A constant graded read is its own band** (readings-5's report): `statistics.py::difference_interval`'s
-  Welch arm returns the point (d, d) when both sides have zero variance, so a constant fresh read
-  below a constant recorded read fails a verify with certainty. Root: the graded difference is
-  bounded by the support as `bounded_mean_interval` is. **Re-test:** five fresh 0.79s against five
-  recorded 0.80s read held.
 - **A verify reads its comparison twice** (readings-5's report): `passes.py::verify_reading` computes
   the levels (`own_level`) and `_held` off the fitness column separately. Root: `VerifyReading`
-  carries the difference band as its own `Estimate`, which `held` reads. **Re-test:** one reader of
-  the fitness column in `verify_reading`.
+  carries the difference band as its own `Estimate`, which `held` reads. **Held:** `VerifyReading`
+  rides `PassGradedRecord` in the ledger (`extra="forbid"`), so a new field reshapes run data: it
+  lands with the next wipe the operator calls. **Re-test:** one reader of the fitness column in
+  `verify_reading`.
+- **The paired SE floor is its own rule** (readings-6's report): `statistics.py::_normal_posterior`
+  floors the SE at `1/(4n)` beside `bounded_mean_interval`'s support bound, the rule a constant
+  graded side now reads in `difference_interval`. Folding it moves CAPO's paired t race (via
+  `paired_mean_t`) and `read_arms`' SEs, so it needs an offline-run attribution of every moved pick
+  first. **Re-test:** one rule for a constant side in `statistics.py`, each moved pick named.
+- **θ's frontier reads every row of its sheet** (readings-6's report): `bench/difficulty.py::frontier`
+  iterates the sheet it is handed, not its `standing()` rows, so a merged sheet not yet folded would
+  fit θ on a cell's duplicates; every caller folds today. Root: a sheet the merge returns is
+  standing by construction (`CellSheet.merged` folds), or `frontier` reads `standing()`. **Re-test:**
+  `frontier` over a merge of two reads of one cell fits one row.
 
 ### wave-5 · l4 (what l4-measure and l1-cite left at their landing)
 

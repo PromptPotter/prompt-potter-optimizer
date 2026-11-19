@@ -135,33 +135,38 @@ def declared_two_valued(values: Sequence[float]) -> Sequence[float]:
     return values
 
 
-def _wilson(k: int, n: int, z: float) -> tuple[float, float]:
-    p, z2 = k / n, z * z
-    center, half = p + z2 / (2 * n), z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
-    return (center - half) / (1 + z2 / n), (center + half) / (1 + z2 / n)
-
-
 def difference_interval(
     a: Sequence[float], b: Sequence[float], *, binary: bool, alpha: float = 0.05
 ) -> tuple[float, float] | None:
-    """The band of ``mean(a) - mean(b)`` over INDEPENDENT cells: Newcombe's hybrid score interval
-    where the values are DECLARED binary, else Welch's. ``None`` where a side is too short for one."""
+    """The band of ``mean(a) - mean(b)`` over INDEPENDENT cells: Welch's where both graded sides
+    spread, else Newcombe's MOVER over each side's `_side_band`. ``None`` where a side is too short."""
     na, nb = len(a), len(b)
     if min(na, nb) < (1 if binary else 2):
         return None
-    d = sum(a) / na - sum(b) / nb
+    ma, mb = sum(a) / na, sum(b) / nb
+    d = ma - mb
+    va, vb = (0.0, 0.0) if binary else (_sd(list(a)) ** 2 / na, _sd(list(b)) ** 2 / nb)
+    if va and vb:
+        df = (va + vb) ** 2 / (va**2 / (na - 1) + vb**2 / (nb - 1))
+        half = _t_ppf(1 - alpha / 2, df) * math.sqrt(va + vb)
+        return d - half, d + half
+    (la, ua), (lb, ub) = (_side_band(side, binary=binary, alpha=alpha) for side in (a, b))
+    return d - math.hypot(ma - la, ub - mb), d + math.hypot(ua - ma, mb - lb)
+
+
+def _side_band(values: Sequence[float], *, binary: bool, alpha: float) -> tuple[float, float]:
+    """Wilson's where DECLARED binary; a graded side's t where it spreads (Welch's own term beside a
+    constant side), else the support's (`bounded_mean_interval`), never the point."""
+    n, z = len(values), NormalDist().inv_cdf(1 - alpha / 2)
     if binary:
-        z = NormalDist().inv_cdf(1 - alpha / 2)
-        ka, kb = int(sum(declared_two_valued(a))), int(sum(declared_two_valued(b)))
-        (la, ua), (lb, ub) = _wilson(ka, na, z), _wilson(kb, nb, z)
-        pa, pb = ka / na, kb / nb
-        return d - math.hypot(pa - la, ub - pb), d + math.hypot(ua - pa, pb - lb)
-    va, vb = _sd(list(a)) ** 2 / na, _sd(list(b)) ** 2 / nb
-    if va + vb == 0.0:
-        return d, d
-    df = (va + vb) ** 2 / (va**2 / (na - 1) + vb**2 / (nb - 1))
-    half = _t_ppf(1 - alpha / 2, df) * math.sqrt(va + vb)
-    return d - half, d + half
+        p, z2 = sum(declared_two_valued(values)) / n, z * z
+        center, half = p + z2 / (2 * n), z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n))
+        return (center - half) / (1 + z2 / n), (center + half) / (1 + z2 / n)
+    if half := t_critical(n - 1, alpha) * _sd(list(values)) / math.sqrt(n):
+        return sum(values) / n - half, sum(values) / n + half
+    band = bounded_mean_interval(values, binary=False, alpha=alpha)
+    assert band is not None, "a graded side of two cells brackets its mean"
+    return band
 
 
 def bounded_mean_interval(

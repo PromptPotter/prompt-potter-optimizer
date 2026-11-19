@@ -34,7 +34,6 @@ from promptpotter.application.scoring.sample_measurement import interpolate_prom
 from promptpotter.domain.arms import Cut, Measuring, Proposed, arm_name
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.cells import (
     Cell,
     CellCandidate,
@@ -57,6 +56,7 @@ from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import (
+    NO_CELLS,
     CellSheet,
     GradedCell,
     PipelineData,
@@ -351,10 +351,10 @@ def cycle_hard_samples(stores: Stores, at: CampaignCycle) -> HardSamples:
             enable_2pl=knobs.enable_2pl_graduation,
         )
     )
-    cells: list[GradedCell] = []
+    cells = NO_CELLS
     for rr in rounds:
-        cells = merge_known_outcomes(cells, rr.results)
-    frontier = None if judging is None else judging.frontier(scorer.graded(cells))
+        cells = cells.merged(rr.results).standing()
+    frontier = None if judging is None else judging.frontier(cells)
     return build_hard_samples(
         build_observations(rounds),
         None if judging is None else judging.ruler,

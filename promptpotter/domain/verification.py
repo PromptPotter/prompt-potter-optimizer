@@ -156,7 +156,9 @@ class VerifyReading(FrozenModel):
     )
     held: bool | None = Field(
         description="Whether the fresh cells leave the recorded hit rate standing: the 95% band of "
-        "fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness, else Welch's). "
+        "fresh minus recorded reaches 0 (Newcombe's under a two-valued fitness; a graded one reads "
+        "Welch's where both sides spread, else Newcombe's construction over each side's band, a "
+        "constant side's being the one its support allows). "
         "`None`: `hard` picks sit below the level whatever the candidate is worth, and a side too "
         "short for that band (no cell two-valued, under two graded) has none; read `vs_origin` there."
     )

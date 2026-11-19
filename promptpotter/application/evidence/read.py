@@ -92,8 +92,8 @@ from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import (
+    NO_CELLS,
     CellSheet,
-    GradedCell,
     Scorer,
     ScoringFormulaError,
     WalkedCell,
@@ -241,7 +241,7 @@ class _Accum:
     def __init__(self, arm: ArmName) -> None:
         self.arm = arm
         self.provenance: list[EffectProvenance] = []
-        self.cells: dict[str, GradedCell] = {}
+        self.sheet = NO_CELLS
 
 
 def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
@@ -955,7 +955,7 @@ def _campaign_edits(
         if cand_id in pooled:
             continue
         pooled.add(cand_id)
-        acc.cells.update((cell.key, cell) for cell in cycle.sheet(cand_id))
+        acc.sheet = acc.sheet.merged(cycle.sheet(cand_id)).standing()
     return [
         RankedEdit(
             sp_hash=sp_hash,
@@ -969,7 +969,7 @@ def _campaign_edits(
                     _member_rows(
                         address.path,
                         acc.arm,
-                        cycle.scorer.graded(acc.cells.values()),
+                        acc.sheet,
                         origin.rows.instrument_id,
                     ),
                     masked=False,

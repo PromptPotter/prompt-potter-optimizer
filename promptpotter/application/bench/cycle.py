@@ -22,7 +22,6 @@ from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput, StateSlice
@@ -165,7 +164,7 @@ class Cycle:
     # Bumped by every write to `_rounds`: the memos below key on it, never on a round's address.
     _rounds_version: int = 0
     # `measured_pool`'s fold at a version, and its θ by scale.
-    _pool: tuple[int, dict[str, tuple[OptSearchPoint, list[GradedCell]]]] | None = None
+    _pool: tuple[int, dict[str, tuple[OptSearchPoint, CellSheet]]] | None = None
     _pool_theta: dict[tuple[RulerStamp, str], float | None] = field(default_factory=dict)
     # `sealed_rounds`' copies at a version.
     _sealed: tuple[int, tuple[RoundResult, ...]] | None = None
@@ -254,19 +253,19 @@ class Cycle:
         """The individual's latest arm a round of this cycle concluded."""
         return measured_arm(self.rounds, individual_id)
 
-    def measured_pool(self) -> dict[str, tuple[OptSearchPoint, list[GradedCell]]]:
+    def measured_pool(self) -> dict[str, tuple[OptSearchPoint, CellSheet]]:
         """Every individual a CLOSED round concluded, by id in the order first measured, with its cells merged."""
         if self._pool is not None and self._pool[0] == self._rounds_version:
             return self._pool[1]
         closed = self.closed_rounds
-        held: dict[str, tuple[OptSearchPoint, list[GradedCell]]] = {}
+        held: dict[str, tuple[OptSearchPoint, CellSheet]] = {}
         for rr in closed:
             for key, arm in rr.arms.items():
                 if isinstance(arm, Concluded):
                     # By individual, never arm key: a key names a slot, and readers ask by id.
                     individual = arm.individual
-                    _, rows = held.get(individual.id, (individual, []))
-                    held[individual.id] = (individual, merge_known_outcomes(rows, rr.rows(key)))
+                    _, rows = held.get(individual.id, (individual, NO_CELLS))
+                    held[individual.id] = (individual, rows.merged(rr.rows(key)).standing())
         self._pool = (self._rounds_version, held)
         self._pool_theta.clear()
         return held
@@ -276,8 +275,7 @@ class Cycle:
         held = self.measured_pool().get(individual_id)
         memo = (self.difficulty.stamp, individual_id)
         if memo not in self._pool_theta:
-            judging, scorer = self.difficulty.judging, self.session.state.scoring.scorer
-            read = None if held is None else judging.frontier(scorer.graded(held[1]))
+            read = None if held is None else self.difficulty.judging.frontier(held[1])
             self._pool_theta[memo] = None if read is None or read.caveat else read.theta
         return self._pool_theta[memo]
 

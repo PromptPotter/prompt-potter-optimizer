@@ -284,7 +284,10 @@ def read_curve(
         state = ReadingState.UNDER_TWO_CELLS
     area = (
         mean_lift(
-            grade_measurands(scorer)[0], [r[0] for r in paired], [fmean(r[1:]) for r in paired]
+            grade_measurands(scorer)[0],
+            [r[0] for r in paired],
+            [fmean(r[1:]) for r in paired],
+            pooled=len(standing) > 1,
         )
         if state is ReadingState.READ
         else None

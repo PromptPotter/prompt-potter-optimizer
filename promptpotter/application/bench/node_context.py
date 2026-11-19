@@ -39,7 +39,6 @@ from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.campaign_config import LivesConfig
-from promptpotter.domain.cell_fold import merge_known_outcomes
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import BarRead, CrowningBar
 from promptpotter.domain.l4.inner_facts import InnerRunAddress
@@ -76,7 +75,7 @@ from promptpotter.domain.results import Reelection, RoundResult, round_document_
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.domain.run_standing import LineOutlay, RunStanding, walked_position
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint, TaskDecomposition
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.value_tree import Delivery
@@ -354,10 +353,10 @@ class Parent(CycleRead):
         """Each sample's latest cell of the parent ITSELF, its origin-panel top-ups included, never
         one another individual answered."""
         key = ArmKey(self._cycle.parent.id)
-        rows: list[GradedCell] = []
+        rows = NO_CELLS
         for rr in self._cycle.rounds:
-            rows = merge_known_outcomes(rows, rr.raced(key))
-        return self._cycle.session.state.scoring.scorer.graded(rows)
+            rows = rows.merged(rr.raced(key)).standing()
+        return rows
 
     @property
     def fitness(self) -> FitnessFact | None:
