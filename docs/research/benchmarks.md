@@ -230,6 +230,15 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   pts, more than the origin's whole delivered lift). A gain from these edits is unresolved at
   thirteen seats, not ruled out ($1.60 billed, $1.83 incurred; the null arm's served
   `held_out_lift` term, +5.5, is this read's).
+  The same three arms as a **no-cut proposal matrix** (2026-11-19; each arm's banked inner
+  candidates on the thirteen seats, every one on all 150 search rows, none cut, one ruler and one
+  bar; `bbh-multistep-arithmetic-8b__8615e5`, `__b8bd9c`, `__b275f3`, 91 candidates, $0.36): the
+  crippled arm reads **−4.17 ± 0.92 against mean(origin, null)** (t −4.5; the cells read −3.5,
+  t −3.5) and origin vs null +1.9 ± 2.2, so the matrix ranks the known-sign pair as the cells do,
+  at about their power (seat SD 8.0, the cells' ≈ 8). It costs about what a cell does ($0.155 an
+  arm plus its generation, against $0.23) and runs no faster. Read post hoc, the crippled arm's
+  candidates lift MORE on average than origin's or null's (+2.6, t 1.5) with nothing cut: what it
+  loses is a candidate the bar crowns, not rows a cut took from it.
   `bbh-word-sorting-8b__423a03`
   (`word_sorting` on the 8B; arm: `bbh-word-sorting-cot`'s group-by-letter procedure with a count
   check): origin 42% on 40, arm **30% vs parent 40%** on 88 paired rows (cut, θ lift −0.49 ± 0.32);
