@@ -95,6 +95,7 @@ from promptpotter.application.optimizers.nodes import (
     BEHAVIOUR_KEYS_FILE,
     NODE_MEMBERS,
     BehaviourKeys,
+    member_package_dir,
 )
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
@@ -169,8 +170,8 @@ STAMP = "offline-run.json"
 # The key a workspace went green under, written last, so a killed or rewritten one holds none.
 GREEN = "green.key"
 TRACE = "trace.json"
-# Set in a leg's env under `--coverage`: the directory its process files the lines it ran into.
-COVERAGE = "PROMPTPOTTER_OFFLINE_COVERAGE"
+# Each leg's process files the lines it ran into its own workspace, as `ran-lines-<pid>.json`.
+RAN_LINES = "ran-lines"
 CONTROLLED = ("controlled", "controlled-bare")
 RESUMED = "resumed"
 DIVERGED = "diverged"
@@ -1801,7 +1802,7 @@ def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
         fingerprints = {}
     for name in sorted(builtin.intersection(names)):
         trace = BehaviourTrace.read(home / name)
-        fingerprints[name] = stable_hash([trace.decisions, trace.requests])
+        fingerprints[name] = stable_hash([trace.decisions, trace.requests, unrun(name, home)])
     fingerprint = held.estimator
     if "potter" in names and (nested := home / "potter" / L4 / TRACE).is_file():
         fingerprint = stable_hash(BehaviourTrace.read(nested.parent).inner_half())
@@ -1812,6 +1813,23 @@ def behaviour_keys(home: Path, names: Sequence[str]) -> bool:
     wrote = replace_changed(BEHAVIOUR_KEYS_FILE, text)
     print(f"{'wrote' if wrote else 'unchanged'} {BEHAVIOUR_KEYS_FILE.relative_to(REPO).as_posix()}")
     return wrote
+
+
+def unrun(name: str, home: Path) -> dict[str, list[str]]:
+    """Per file of *name*'s member packages, the function-body lines its straight run never ran,
+    as they read: what the world ran is keyed by its behaviour, what it did not run by its source
+    (the other value of a knob an arm sets, a walk the default never takes, a heal branch)."""
+    ran = ran_lines(home / name, recursive=False)
+    roster = select_optimizer(bench_choice(name)).member_nodes
+    out: dict[str, list[str]] = {}
+    for package in sorted({member_package_dir(NODE_MEMBERS.table[n]) for n in roster}):
+        for path in sorted(package.rglob("*.py")):
+            text = path.read_text(encoding="utf-8").splitlines()
+            left = _function_lines(path) - ran[os.path.normcase(str(path))]
+            out[path.relative_to(PACKAGE_ROOT).as_posix()] = [
+                text[at - 1].strip() for at in sorted(left)
+            ]
+    return out
 
 
 def traced(out: Path) -> None:
@@ -1828,7 +1846,7 @@ def traced(out: Path) -> None:
 
     def filed() -> None:
         lines = {name: sorted(at) for name, at in ran.items()}
-        (out / f"{os.getpid()}.json").write_text(json.dumps(lines), encoding="utf-8")
+        (out / f"{RAN_LINES}-{os.getpid()}.json").write_text(json.dumps(lines), encoding="utf-8")
 
     monitoring.use_tool_id(monitoring.COVERAGE_ID, OFFLINE_RUN)
     monitoring.register_callback(monitoring.COVERAGE_ID, monitoring.events.LINE, line)
@@ -1851,11 +1869,18 @@ def _function_lines(path: Path) -> set[int]:
     return lines
 
 
-def coverage_by_package(out: Path) -> list[str]:
-    ran: dict[str, set[int]] = defaultdict(set)
-    for filed in out.glob("*.json"):
+def ran_lines(workspace: Path, *, recursive: bool) -> defaultdict[str, set[int]]:
+    """The lines the legs run in *workspace* ran, by file; its own process alone unless *recursive*."""
+    ran: defaultdict[str, set[int]] = defaultdict(set)
+    pattern = f"{RAN_LINES}-*.json"
+    for filed in workspace.rglob(pattern) if recursive else workspace.glob(pattern):
         for name, lines in json.loads(filed.read_text(encoding="utf-8")).items():
             ran[os.path.normcase(name)].update(lines)
+    return ran
+
+
+def coverage_by_package(home: Path) -> list[str]:
+    ran = ran_lines(home, recursive=True)
     root = Path(promptpotter.__file__).parent
     counted: dict[str, list[int]] = defaultdict(lambda: [0, 0])
     for path in root.rglob("*.py"):
@@ -1950,25 +1975,14 @@ def claim_home(home: Path, stamp: dict[str, object]) -> Path:
     return home
 
 
-def prepared_home(
-    home: Path, stamp: dict[str, object], due: Sequence[str], *, held: bool, coverage: bool
-) -> Path | None:
-    """*home* cleared for *due*'s workspaces, and under *coverage* the directory every leg's
-    process files the lines it ran into, named in the env each leg inherits."""
+def prepared_home(home: Path, stamp: dict[str, object], due: Sequence[str], *, held: bool) -> None:
+    """*home* cleared for *due*'s workspaces."""
     if held:
         for name in due:
             if (home / name).exists():
                 rmtree_robust(home / name)
     else:
         claim_home(home, stamp)
-    if not coverage:
-        return None
-    covered = home / "coverage"
-    if covered.exists():
-        rmtree_robust(covered)
-    covered.mkdir()
-    os.environ[COVERAGE] = str(covered)
-    return covered
 
 
 def child_env(root: Path) -> dict[str, str]:
@@ -2255,10 +2269,9 @@ def read_children(
 def run_child_leg(args: argparse.Namespace) -> None:
     if any(os.environ[k] != NOT_A_KEY for k in PROVIDER_KEYS):
         raise SystemExit("offline run: --child runs only under the env its parent builds")
-    if filed_into := os.environ.get(COVERAGE):
-        traced(Path(filed_into))
     # Its outputs land in its directory, its run in the data root it was handed.
     workspace = Path.cwd()
+    traced(workspace)
     if args.terminal:
         run_terminal(
             args.child,
@@ -2343,7 +2356,7 @@ def main() -> int:
     ap.add_argument(
         "--coverage",
         action="store_true",
-        help="print, per package, the function-body lines every leg's process ran; keeps no green",
+        help="print, per package, the function-body lines every leg's process ran",
     )
     ap.add_argument("--child", help=argparse.SUPPRESS)
     ap.add_argument("--pause-after", type=int, help=argparse.SUPPRESS)
@@ -2382,7 +2395,7 @@ def main() -> int:
         if args.controlled
         else args.optimizer or sorted(optimizers.MANIFESTS.table)
     )
-    kept = None if args.coverage else LastGreen.open()
+    kept = LastGreen.open()
     keys = {} if kept is None else optimizer_keys(kept, names, controlled=args.controlled)
     held = holds_run(home, run)
     green = still_green(home, keys) if held else set()
@@ -2400,7 +2413,7 @@ def main() -> int:
         return int(keying and behaviour_keys(home, names))
     stamp: dict[str, object] = {"offline": True, "note": LABEL, "run": run, "workspaces": names}
     queue_behind_siblings("offline_run")
-    covered = prepared_home(home, stamp, due, held=held, coverage=args.coverage)
+    prepared_home(home, stamp, due, held=held)
     end_children_with_this_process()
     # One workspace each: a shared archive and δ ruler let one optimizer's run move another's.
     child_args = ["--rows", str(args.rows), "--bench-trigger", args.bench_trigger]
@@ -2526,8 +2539,8 @@ def main() -> int:
     if args.controlled and not any(failed.values()):
         print(controlled_reading(home, arm_names))
     print(f"wall clock {time.monotonic() - t0:.0f}s")
-    if covered is not None:
-        print("\n".join(coverage_by_package(covered)))
+    if args.coverage:
+        print("\n".join(coverage_by_package(home)))
     # Under the home its flags stamped, and only where the sources read the same as before it.
     if kept is not None:
         now = optimizer_keys(kept, due, controlled=args.controlled)

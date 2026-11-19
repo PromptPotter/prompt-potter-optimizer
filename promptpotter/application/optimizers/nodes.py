@@ -345,7 +345,8 @@ BEHAVIOUR_KEYS_FILE = PACKAGE_ROOT / "assets" / "behaviour_keys.json"
 
 class BehaviourKeys(FrozenModel):
     world: str
-    # By built-in optimizer: the hash of its straight run's trace in `world`.
+    # By built-in optimizer: the hash of its straight run's trace in `world` and of the source of
+    # every function-body line in its member packages that run never ran.
     fingerprints: dict[str, str]
     # The hash of the L4 leg's inner campaigns in `world`, never its outer's own half.
     estimator: str
@@ -360,7 +361,7 @@ class BehaviourKeys(FrozenModel):
         return stable_hash([self.estimator, self.world])
 
 
-def _package_dir(member: NodeMember) -> Path:
+def member_package_dir(member: NodeMember) -> Path:
     """The built-in optimizer package declaring *member*, or the top package of a plugin's."""
     package = member_package(member)
     top = f"{_PACKAGE}.{package}" if package else type(member).__module__.split(".")[0]
@@ -385,15 +386,14 @@ def _files_hash(roots: Iterable[Path]) -> str:
 
 def behaviour_key(name: str, members: Iterable[NodeMember], manifests: Sequence[Path]) -> str:
     """L4 identity (architecture §0.5): a built-in's fingerprint on the offline world and the
-    world's version, so a rename that moves no decision re-keys nothing; a manifest outside the
-    package has no fingerprint, so the code of the packages declaring its members stands in. A
-    built-in missing from `BEHAVIOUR_KEYS_FILE` raises: a stale key is a refused commit, never a
-    second identity."""
+    world's version, so a rename on a line the world ran re-keys nothing, an edit to one it never
+    ran does; a manifest outside the package has no fingerprint, so the code of the packages
+    declaring its members stands in. A built-in missing from `BEHAVIOUR_KEYS_FILE` raises: a stale
+    key is a refused commit, never a second identity."""
     keys = BehaviourKeys.held()
     if not all(directory.is_relative_to(PACKAGE_ROOT) for directory in manifests):
-        return stable_hash(
-            {"code": _files_hash({_package_dir(member) for member in members}), "world": keys.world}
-        )
+        code = _files_hash({member_package_dir(member) for member in members})
+        return stable_hash({"code": code, "world": keys.world})
     if name not in keys.fingerprints:
         raise LookupError(
             f"{BEHAVIOUR_KEYS_FILE.name} holds no {name!r}: give it any fingerprint there, and "
