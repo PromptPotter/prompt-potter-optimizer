@@ -801,21 +801,23 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   and the inner chain. **Re-test:** pause an outer mid inner-round (operator 2026-11-18: seat #001
   of `promptpotter-self.run__54ccef`); the inner row reads its cut sends as unreported, never
   `$0.000`, and the outer's mirror matches.
-- **A CLI payload refusal reads pydantic's union text**: `set-sample-lookahead bogus` answers
-  "cells.constrained-int: … cells.literal['max']: …" (`presentation/cli/main.py`'s payload arm prints
-  the `ValidationError` raw). Action: the CLI renders a payload refusal by field and expected form,
-  once, for every verb. **Re-test:** `set-sample-lookahead bogus` reads "cells: a count ≥ 1 or max".
+- **A payload refusal says no expected form** (small-10's report): `shared/errors.py::PayloadInvalidError`
+  lists pydantic's per-branch union errors ("cells.constrained-int: …; cells.literal['max']: …"), and
+  REST's 422 and every CLI verb read it; only `validating` holds the model's schema, so a CLI-side
+  renderer could not name "≥ 1". Action: `validating` folds each field's errors into one entry naming
+  its expected form from the model's JSON schema, for every door. **Re-test:**
+  `set-sample-lookahead bogus --campaign c --cycle y` in a fresh home reads "cells: a count ≥ 1 or max".
 - **The cap halts on money its served reading omits**: C0 `promptpotter-self.run__265c4d` (2026-11-18)
   halted `spend_budget` inside round 1 while `dashboard` and `set-limits` served "$1.09 spent" of
   $2.50. The book counted $1.09 billed + $1.11 unreported (52 lapsed cells, folded by
   `read_model.py::Money.unreported_holds`: ~37 broken sends, 15 cut by the halt itself) + $0.18 set
   aside for the bench, $2.38, so the cells still out (each held at its $0.02 bound) tipped it.
   A send's room fired (`SpendBook.refuse_unless_room`, which counts calls out; `exhausted()` does
-  not, and read under $2.50 even after the halt's own lapses), and the halt's `detail` is `""`
-  because a kept cut returns a bare `StopReason`. Left open: only a walk's own stop names the
-  parts, while a kept cut (`run_walks`' return, `runner/round.py`) and a round boundary
-  (`runner/loop.py::LoopEnd`) carry no words. Action: a budget stop travels as its `StopLoop`. **Rides with:** none yet. **Re-test:** a halt at a
-  round boundary names the book's parts in its `run_phase` `detail`.
+  not, and read under $2.50 even after the halt's own lapses); a halt's words travel as its
+  `StopLoop` since `c1c6c8161`. Action (small-10's reading): `exhausted()` reads the remainder net
+  of the calls out, as `_room` and `refuse_unless_room` do, so a between-samples read also counts
+  the walk's own sends still out. **Rides with:** none yet. **Re-test:** after a cap halt,
+  `exhausted()` and `refuse_unless_room` agree on the book they read.
 - **The wallet read under the admission gate grows with the account's charges** (gate-hold's
   report): `jobs/quota.py::read_account_wallet` folds `money_on(stores.charges.path)` and
   `campaign_spend` under the gate, admission's last scan that grows with history. Unmeasured.
@@ -856,10 +858,11 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   hotpotqa's `escalation.l1_patience: 5` differs from the others; `runner/inner/tasks.py::_lever`
   leaves knobs out, so nothing flags it. Action: one inner measurand and one ladder across seats, or a
   refusal. **Held:** a decision. **Re-test:** the three definitions' `scoring` and `escalation` blocks.
-- **Two builders of one sandbox store**: `infrastructure/store/stores.py::inner_sandbox_store` and
-  `runner/inner/spawn.py::sandbox_stores`; the first takes `(stores, campaign_id, cycle_id)`, so its
-  callers split a `CycleHop` to call it (`hierarchy_subtree.py:380`, `stores.py:268`,
-  `lineage_queries.py:80`). Action: one builder from (stores, hop). **Held:** none claims it. **Re-test:** `git grep -n "def inner_sandbox_store\|def sandbox_stores" -- promptpotter`.
+- **Two builders of one sandbox store**: `infrastructure/store/stores.py::inner_sandbox_store` (the
+  reader, from `(stores, hop)`) and `runner/inner/spawn.py::sandbox_stores` (the writer, from an
+  `infrastructure/run_scope.py::InnerSpawnContext`, which carries the spawner's fields but not its
+  `Stores`, so it cannot call the reader). Action: the spawn context carries the spawner's `Stores`,
+  and the writer builds through the one builder, its existence checks off. **Held:** none claims it. **Re-test:** `git grep -n "def inner_sandbox_store\|def sandbox_stores" -- promptpotter`.
 - **Two fits of one reading**: `runner/round.py::measure_population` and
   `scoring/selection.py` both fit `candidate_abilities` over the same rows. Action: the election takes
   the measured abilities. **Held:** none claims it. **Re-test:** `git grep -n "candidate_abilities(" -- promptpotter`.

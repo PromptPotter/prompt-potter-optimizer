@@ -370,7 +370,7 @@ class _Build:
         ]
         self._place(stores, cycles, host)
         for cycle in cycles:
-            sandbox = inner_sandbox_store(stores, cycle.hop.campaign_id, cycle.hop.cycle_id)
+            sandbox = inner_sandbox_store(stores, cycle.hop)
             if sandbox is not None and depth > 0:
                 self._inner(sandbox, (*inside, cycle.hop), cycle, cycles, depth=depth - 1)
         return SubtreeCampaign(

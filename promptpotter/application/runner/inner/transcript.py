@@ -104,7 +104,7 @@ def _head(facts: InnerCellFacts) -> str:
 def inner_transcript(stores: Stores, facts: InnerCellFacts) -> str:
     """Every round the inner run closed, read where it ran: what it was told, what each arm tried and how it measured."""
     run, head = facts.run, _head(facts)
-    sandbox = inner_sandbox_store(stores, run.sandbox.campaign_id, run.sandbox.cycle_id)
+    sandbox = inner_sandbox_store(stores, run.sandbox)
     campaign = None if sandbox is None else sandbox.campaigns.load_campaign(run.campaign_id)
     if sandbox is None or campaign is None or campaign.lifecycle_status == "deleted":
         return (

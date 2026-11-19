@@ -76,7 +76,7 @@ def _child_cycles(stores: Stores, path: CyclePath, reads: _Reads) -> list[Family
             )
         )
 
-    sandbox = inner_sandbox_store(stores, leaf.campaign_id, leaf.cycle_id)
+    sandbox = inner_sandbox_store(stores, leaf)
     if sandbox is not None:
         for hop, index in reads.cycles(sandbox):
             # A cycle whose campaign does not load has no entry, so it is no cycle of the tree.

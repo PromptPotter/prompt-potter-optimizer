@@ -260,12 +260,9 @@ def tenant_stores(projects_root: Path, workspace: WorkspaceDir) -> Stores:
     return build_stores(default_identity(tenant_id=workspace.name), projects_root=projects_root)
 
 
-def inner_sandbox_store(
-    stores: Stores, outer_campaign_id: str, outer_cycle_id: str
-) -> Stores | None:
+def inner_sandbox_store(stores: Stores, outer: CycleHop) -> Stores | None:
     """Anchored on ``shared_root``, invariant across depth, exactly as the sandbox's writer is. The
     key is flat, so the outer hop must be a cycle of *stores*: else a chain splices in any sandbox."""
-    outer = CycleHop(campaign_id=outer_campaign_id, cycle_id=outer_cycle_id)
     if not stores.campaigns.cycle_dir(outer).is_dir():
         return None
     sandbox_root = inner_sandbox_dir(stores.shared_root, str(stores.tenant_id), outer)
@@ -278,10 +275,7 @@ def inner_sandbox_store(
         research_datasets_root=stores.research_datasets_root,
         shared_root=stores.shared_root,
     )
-    return replace(
-        built,
-        inside=(*stores.inside, CycleHop(campaign_id=outer_campaign_id, cycle_id=outer_cycle_id)),
-    )
+    return replace(built, inside=(*stores.inside, outer))
 
 
 def descend_store(stores: Stores, hops: CyclePath) -> Stores:
@@ -292,7 +286,7 @@ def descend_store(stores: Stores, hops: CyclePath) -> Stores:
             validate_path_component(hop.cycle_id)
         except ValueError as exc:
             raise BadRequestError(str(exc)) from exc
-        nxt = inner_sandbox_store(cur, hop.campaign_id, hop.cycle_id)
+        nxt = inner_sandbox_store(cur, hop)
         if nxt is None:
             raise NotFoundError(f"No inner sandbox for cycle '{hop.cycle_id}'")
         cur = nxt

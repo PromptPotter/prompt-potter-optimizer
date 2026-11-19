@@ -65,7 +65,7 @@ def _reap(stores: Stores, unread: list[str]) -> int:
                     reaped += 1
             except FileUnreadableError as refusal:
                 unread.append(fault_said(refusal)[0])
-            if (inner := inner_sandbox_store(stores, campaign_id, hop.cycle_id)) is not None:
+            if (inner := inner_sandbox_store(stores, hop)) is not None:
                 reaped += _reap(inner, unread)
     return reaped
 

@@ -2087,7 +2087,7 @@ def _family(stores: Stores) -> _Family:
         )
     )
     inner_sandbox(stores, family.campaign_id, family.cycle_id)
-    sandbox = inner_sandbox_store(stores, family.campaign_id, family.cycle_id)
+    sandbox = inner_sandbox_store(stores, family)
     assert sandbox is not None, "guard"
     asks = {
         "reread": (grand, 3, "a", MeasurementRole.PARENT),
