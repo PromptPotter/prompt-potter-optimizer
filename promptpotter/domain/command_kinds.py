@@ -30,7 +30,6 @@ from promptpotter.domain.draft_edit import (
     EditDraftPatch,
     OptimizationOverrides,
 )
-from promptpotter.domain.layer_fold import CLEAR, wire_patch
 from promptpotter.domain.opt_search_point import NodePrompt
 from promptpotter.domain.phases import (
     INNER_ARMS_REFUSAL,
@@ -39,7 +38,6 @@ from promptpotter.domain.phases import (
     INNER_SKIP_REFUSAL,
     STOP_REASON_INFO,
 )
-from promptpotter.domain.pipeline_params import node_rule
 from promptpotter.domain.pipeline_schema import ParamIntent
 from promptpotter.domain.records.run_records import ConfigOverrides
 from promptpotter.domain.run_mode import RunMode
@@ -689,7 +687,7 @@ class ChangeRunLimitsPayload(CyclePayload, kind=CommandKind.SET_LIMITS):
         "moved. Armed now:\n{said}"
     )
 
-    # An axis it does not name stays as it stands; a named null lifts it.
+    # An axis it does not name stays as it stands; ``unbounded`` lifts it.
     budget: Budget = Budget()
     overshoot: bool | None = Field(
         default=None,
@@ -744,13 +742,12 @@ class ForkStart(StrictModel):
         return self
 
     @property
-    def cleared(self) -> dict[str, dict[str, object]]:
+    def cleared(self) -> dict[str, dict[str, None]]:
         """The keys the seed clears, as a patch of the forked candidate's node document."""
-        rule = node_rule(None)
         return {
             node: kept
             for node, keys in self.pipeline_overlay.items()
-            if (kept := {k: v for k, v in wire_patch(rule, keys, node).items() if v is CLEAR})
+            if (kept := {k: v for k, v in keys.items() if v is None})
         }
 
     @property
@@ -868,7 +865,7 @@ LifecyclePayload = ArchiveCampaignPayload | UnarchiveCampaignPayload | DeleteCam
 class SetCampaignLabelPayload(CampaignPayload, kind=CommandKind.RENAME_CAMPAIGN):
     """Name a campaign wherever it is named to a human; its id still addresses it."""
 
-    # Required, and `""` is the CLEAR: a default would give "clear" two spellings.
+    # Required, and `""` is the clear: a default would give "clear" two spellings.
     label: str = Field(max_length=200, description='`""` restores the dataset-name fallback.')
 
 

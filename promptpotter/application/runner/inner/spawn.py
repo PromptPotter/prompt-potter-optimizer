@@ -17,7 +17,6 @@ from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import campaign_refusal, slotless_share
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
-    declare,
     mint,
     resolve_cycle_plan,
     resolve_resume,
@@ -270,10 +269,9 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
             session, config = laid_session(
                 session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))
             )
-            declaration = declare(session, config, purpose=ctx.purpose)
             if campaign is None:
                 minted = mint(
-                    resolve_cycle_plan(session, declaration, train_data),
+                    resolve_cycle_plan(session, config, ctx.purpose, train_data),
                     campaign_id=cell.campaign_id,
                     adopting=None,
                 )

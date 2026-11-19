@@ -14,7 +14,6 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.runner.termination import run_stop_reason
 from promptpotter.application.scoring.closed_rounds import (
     closed_rounds,
-    cycle_instrument,
     walked_rows,
 )
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
@@ -884,9 +883,7 @@ def bench_line(
         held_by=None if holder == hop else holder.cycle_id,
         trigger=config.bench_trigger,
         held_out=len(drawn.bench_ids) if drawn is not None else config.dataset_split.bench,
-        instrument_id=cycle_instrument(
-            drawn, stores.campaigns.standing_rounds(hop, moment=None).rounds
-        ),
+        instrument_id=None if drawn is None else drawn.instrument_id,
         run=run,
         spend=scan_ledger_spend(stores.campaigns.line_spans(campaign.root_hop)).spend,
     )

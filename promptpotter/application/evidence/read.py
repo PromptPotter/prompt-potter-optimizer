@@ -67,7 +67,6 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.closed_rounds import (
     campaign_scorer,
     cycle_bank,
-    cycle_instrument,
     walked_rows,
 )
 from promptpotter.application.scoring.formula.compiler import CompiledExpression
@@ -250,7 +249,7 @@ def campaigns_on_dataset(stores: Stores, dataset_name: str) -> list[str]:
     return [
         c.campaign_id
         for c in stores.campaigns.list_campaigns(lifecycle="all")
-        if digest is not None and c.declaration.dataset_hash == digest
+        if digest is not None and c.declaration.spec.dataset_hash == digest
     ]
 
 
@@ -809,9 +808,10 @@ def _cycle_facts(stores: Stores, at: CampaignCycle) -> _CycleFacts:
     scanned = scan_standing_rounds(chain)
     standing, series = scanned.rounds, scanned.level_series
     spend_by_round = scan_ledger_spend_by_round(chain)
-    instrument_id = cycle_instrument(stores.campaigns.last(hop, PartitionRecord), standing)
-    if instrument_id is None:
+    drawn = stores.campaigns.last(hop, PartitionRecord)
+    if drawn is None:
         raise NotFoundError(f"cycle {hop.cycle_id} drew no bank, so it names no instrument")
+    instrument_id = drawn.instrument_id
     opt = cycle_config(stores, at).config.optimization
     scale = (
         None

@@ -173,14 +173,6 @@ class FoldedParams:
     params: PipelineParams
     provenance: dict[str, dict[str, ParamSource]]
 
-    @property
-    def identity_keys(self) -> dict[str, frozenset[str]]:
-        return {
-            node: owned
-            for node, stamps in self.provenance.items()
-            if (owned := frozenset(k for k, source in stamps.items() if source == "identity"))
-        }
-
 
 @dataclass(frozen=True)
 class ParamLayers:
@@ -194,10 +186,7 @@ class ParamLayers:
     campaign: Mapping[str, NodeCall] = field(default_factory=dict)
     free_tier: Mapping[str, Any] = field(default_factory=dict)
     start: Mapping[str, Any] = field(default_factory=dict)
-    identity: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     evolved: Mapping[str, Any] = field(default_factory=dict)
-    # A measured point's params: the identity it ran under stands over the one recomputed today.
-    recorded: Mapping[str, Any] = field(default_factory=dict)
 
     def fold(self) -> FoldedParams:
         layers = [
@@ -229,20 +218,10 @@ class ParamLayers:
                 return self.start
             case "model_floor":
                 return self._floors(params)
-            case "identity":
-                return self._identity()
             case "evolved":
                 return self.evolved
             case _:
                 assert_never(source)
-
-    def _identity(self) -> dict[str, dict[str, Any]]:
-        out: dict[str, dict[str, Any]] = {}
-        for node, cfg in self.identity.items():
-            ran = self.recorded.get(node)
-            ran = ran if isinstance(ran, dict) else {}
-            out[node] = {k: ran.get(k, v) for k, v in cfg.items()}
-        return out
 
     def _floors(self, params: PipelineParams) -> dict[str, dict[str, Any]]:
         answering = schema_as_run(self.schema, params, self.workspace)
@@ -545,16 +524,14 @@ def _validate_model_ownership(
             )
 
 
-def _evolved_overlay(stores: Stores, at: Subject) -> tuple[dict[str, Any], dict[str, Any]]:
-    """(sparse delta, complete config): the complete one read as a delta stamps every param ``evolved``."""
+def _evolved_overlay(stores: Stores, at: Subject) -> dict[str, Any]:
+    """The sparse delta: the complete config read as one would stamp every param ``evolved``."""
     if at.kind != "candidate" or at.round is None:
-        return {}, {}
+        return {}
     hop = CycleHop(campaign_id=at.campaign_id, cycle_id=at.cycle_id)
     held = stores.campaigns.standing_rounds(hop, moment=None).rounds.get(at.round)
     arm = None if held is None else held.close.arms.get(ArmKey(at.candidate_id))
-    if isinstance(arm, Concluded):
-        return dict(arm.overlay), dict(arm.resolved_params)
-    return {}, {}
+    return dict(arm.overlay) if isinstance(arm, Concluded) else {}
 
 
 def _nests(schema: PipelineSchema) -> list[NestedPipelineRef]:
@@ -658,7 +635,7 @@ def draft_sends(stores: Stores, draft: DraftFile) -> tuple[Send, ...]:
 def defaults_drift(campaign: Campaign, *, running: Treatment) -> DefaultsDrift | None:
     """The one answer to whether what the declaration is a delta over moved since its mint."""
     declared = DefaultsPin(
-        bench=campaign.declaration.bench_defaults_pin, treatment=campaign.treatment
+        bench=campaign.declaration.spec.bench_defaults_pin, treatment=campaign.treatment
     )
     now = DefaultsPin(bench=bench_defaults_pin(), treatment=running)
     return None if now == declared else DefaultsDrift(declared=declared, running=now)
@@ -681,7 +658,7 @@ def declared_config(stores: Stores, campaign: Campaign) -> CycleConfig:
 
 def _declared(stores: Stores, campaign: Campaign) -> CampaignConfig:
     try:
-        return effective_config(campaign.declaration)
+        return effective_config(campaign.declaration.spec)
     except ValidationError as exc:
         raise FileUnreadableError(
             FileKind.MANIFEST,
@@ -757,9 +734,6 @@ def merge_outside_run(
             dataset=pipeline_node_overlay(templated),
             campaign=cfg.pipeline_overlay,
             free_tier=free_tier_overlay(cfg, declared, fence),
-            identity=identity_layer(
-                None, None, None, cfg.judges, filtered.active_steps, base_url=""
-            ),
         ),
         free=_task_fenced(fence),
         steer_bound=False,
@@ -774,8 +748,7 @@ def _task_fenced(fence: FreeFence | None) -> bool:
 
 
 def _campaign_merge(stores: Stores, campaign: Campaign, at: Subject) -> _CampaignMerge:
-    """Off its mint's records alone, so a campaign outlives its dataset dir; lays no identity:
-    what a point is keyed by is the subject's to add."""
+    """Off its mint's records alone, so a campaign outlives its dataset dir."""
     on = CampaignCycle(campaign, at.cycle_id or campaign.root_cycle_id)
     resolved = scan_resolved_run(stores.campaigns.chain(on.hop))
     read = _recorded_read(resolved, on.hop)
@@ -986,21 +959,7 @@ def resolve_pipeline_for_campaign(
 ) -> CampaignPipelineResponse:
     """``stores`` is already the store *campaign* lives in: the caller descends ``at.inside`` first."""
     m = _campaign_merge(stores, campaign, at)
-    evolved, measured = _evolved_overlay(stores, at)
-    folded = replace(
-        m.layers,
-        # The recorded roster alone: a live resolve recomputes a banked identity off one it never ran.
-        identity=identity_layer(
-            stores,
-            connector := connectors.CONNECTORS.get(campaign.connector),
-            None if m.experiment is None else connector.pinned(m.experiment),
-            m.cfg.judges,
-            m.filtered.active_steps,
-            base_url=connector.base_url(m.endpoint),
-        ),
-        evolved=evolved,
-        recorded=measured,
-    ).fold()
+    folded = replace(m.layers, evolved=_evolved_overlay(stores, at)).fold()
     return _response(
         m,
         folded,
@@ -1008,7 +967,7 @@ def resolve_pipeline_for_campaign(
         campaign_id=campaign.campaign_id,
         cycle_id=m.hop.cycle_id,
         dataset_name=campaign.dataset_name,
-        connector=connector,
+        connector=connectors.CONNECTORS.get(campaign.connector),
         mint=_cycle_mint(stores, m),
     )
 
@@ -1188,7 +1147,6 @@ def _root_key(stores: Stores, campaign: Campaign) -> tuple[Any, ...]:
 
 def _runs_with(stores: Stores, campaign: Campaign) -> CampaignRunsWith:
     m = _campaign_merge(stores, campaign, Subject(campaign.campaign_id))
-    # What the root SENDS: no identity layer, which keys a cell and is never sent.
     folded = m.layers.fold()
     stripped = strip_rendered_prompt(folded.params)
     nodes = {n.name: n for n in m.filtered.declared_nodes}
@@ -1254,14 +1212,6 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         campaign=campaign_config.pipeline_overlay,
         free_tier=read.free_tier_overlay,
         start=cycle.start_overlay,
-        identity=identity_layer(
-            session.store,
-            session.backend_client.connector,
-            session.backend_client.workload.experiment,
-            campaign_config.judges,
-            filtered.active_steps,
-            base_url=session.backend_client.base_url,
-        ),
     ).fold()
     pipeline_params = folded.params
 
@@ -1289,5 +1239,16 @@ def configure_and_apply_pipeline(session: Session, cycle: CycleConfig) -> Sessio
         pipeline_schema=schema_as_run(filtered, pipeline_params, session.store.base_dir),
         pipeline_read=read,
         pipeline_params=pipeline_params,
-        identity_keys=folded.identity_keys,
+        cell_identity={
+            node: keys
+            for node, keys in identity_layer(
+                session.store,
+                session.backend_client.connector,
+                session.backend_client.workload.experiment,
+                campaign_config.judges,
+                filtered.active_steps,
+                base_url=session.backend_client.base_url,
+            ).items()
+            if node in filtered.running
+        },
     )

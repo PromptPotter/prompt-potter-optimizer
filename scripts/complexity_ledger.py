@@ -197,11 +197,15 @@ BASELINE = {
     # store-5a (+5): a population's signature carries a scoped task's own walk counts, so a round
     # close reloads only the populations it moved; `LastOf`, a declared fold, where `last_fold`
     # made record classes in module globals.
-    # addr-3 (+59, provisional: its fix pass hunts it down): a run declaration is a fold patch over
-    # `defaults.yaml` (`layer_fold.py::patch_between`), an arm is planned on its seat and numbered
-    # once at the mint (`RunSpec` / `ArmSeat`). bkeys-3 (+21, provisional likewise): the landing key
+    # addr-3 (+59) less addr-4 (−20) = +39: a run declaration is a fold patch over `defaults.yaml`
+    # that refuses a list it cannot lay (`layer_fold.py::patch_between`), and an arm is one
+    # `RunSpec` planned on its seat and numbered once at the mint (`ArmSeat`). bkeys-3 (+21, provisional likewise): the landing key
     # hashes the code a load runs (`landing.py::loading_modules`'s schema walk).
-    "package_lines": 112256,
+    # addr-4's fix pass (+85): a cycle files the cell identity it drew under and a moved one
+    # refuses (`moved_leaves` over the drawn record, +45); a null clears on every layer and
+    # `unbounded` is the one no-bound word on each budget axis (+19); the archive and the ruler
+    # are addressed by `config_key` (+23); the rest nets −2.
+    "package_lines": 112321,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

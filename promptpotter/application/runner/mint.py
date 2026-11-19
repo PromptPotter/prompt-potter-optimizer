@@ -68,7 +68,8 @@ def origin_content_hash(
     *,
     answer_terms: Collection[str],
 ) -> str:
-    """Config-AWARE, as the measurement key is: a connector-config edit yields a DISTINCT origin."""
+    """What the origin SENDS over its rows: a cell's identity is not in it, and is checked beside it
+    off the cycle's drawn record (`CampaignSurvey.drawn`)."""
     return points.job(origin).content_hash(dataset, answer_terms=answer_terms)[:12]
 
 
@@ -289,10 +290,14 @@ def _campaigns_on_origin(session: Session, survey: CampaignSurvey) -> list[str]:
     own = next((c for c in survey.campaigns if c.campaign_id == session.campaign_id), None)
     if own is None:
         return []
+    # One origin graded under another identity is another measurement, never the identical one.
     return sorted(
         other.campaign_id
         for other in survey.campaigns
-        if other.campaign_id != own.campaign_id and other.root_content_hash == own.root_content_hash
+        if other.campaign_id != own.campaign_id
+        and other.root_content_hash == own.root_content_hash
+        and (drawn := survey.drawn(other.root_hop)) is not None
+        and drawn.cell_identity == session.cell_identity
     )
 
 
@@ -301,15 +306,8 @@ def _banked_instruments(session: Session, survey: CampaignSurvey) -> list[str]:
     for campaign in survey.campaigns:
         if campaign.dataset_name != session.measured_dataset:
             continue
-        standing = survey.standing(campaign.root_hop)
-        origin = None if standing is None else standing.rounds.get(0)
-        instrument = (
-            None
-            if origin is None
-            else inner_origin_of(origin.close.origin.individual.pipeline_params)
-        )
-        if instrument is not None:
-            banked.append(instrument)
+        if (drawn := survey.drawn(campaign.root_hop)) is not None:
+            banked.append(drawn.instrument_id)
     return banked
 
 
@@ -325,7 +323,9 @@ async def _enter_init(
     measured = measured_cell_price(
         session.store, session.bank.dataset_hash, session.pipeline_params
     )
-    instrument = inner_origin_of(session.pipeline_params)
+    # An L4 cell's instrument names its inner origin; another's is its bank alone.
+    inner = inner_origin_of(session.pipeline_params.keyed_by(session.cell_identity))
+    instrument = None if inner is None else session.instrument_id
     warnings = run_preflight_checks(
         config,
         selected,

@@ -349,8 +349,9 @@ class ArmReading(FrozenModel):
         "whatever round `arm` names."
     )
     sp_hash: str = Field(
-        description="The archive address of this arm's measurements (`prompt_fields_id`). Not a "
-        "key: a re-proposed configuration shares it across rounds. Empty before it is measured."
+        description="This arm's id, what it sends (the archive's `prompt_fields_id`; its address "
+        "is `config_key`). Not a key: a re-proposed configuration shares it across rounds. Empty "
+        "before it is measured."
     )
     changes_description: str
     state: ArmStateKind = Field(

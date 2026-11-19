@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import replace
 
 from promptpotter.application.datasets.authored import scorer_of
@@ -8,7 +8,6 @@ from promptpotter.application.initialization.session import LaunchState
 from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.paired_reading import instrument_of
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     RoundClosedRecord,
@@ -54,19 +53,6 @@ def walked_rows(stores: Stores, cells: Sequence[WalkedCell], scorer: Scorer) -> 
         ("walked_rows", stores.archive.base_dir, scorer.id, tuple(cells)),
         sig=stores.archive.files_signature({answer.partition(".")[0] for answer in replayed}),
         compute=grade,
-    )
-
-
-def cycle_instrument(
-    drawn: PartitionRecord | None, standing: Mapping[int, StandingRound]
-) -> str | None:
-    """The read-side spelling of ``Session.instrument_id``; a cycle that drew no bank names none."""
-    if drawn is None:
-        return None
-    origin = standing.get(0)
-    return instrument_of(
-        drawn.dataset_hash,
-        None if origin is None else origin.close.origin.individual.pipeline_params,
     )
 
 

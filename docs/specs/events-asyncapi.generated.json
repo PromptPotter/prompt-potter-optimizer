@@ -1323,7 +1323,7 @@
       },
       "Budget": {
         "additionalProperties": false,
-        "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.\n``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and\nseconds are what each arm's money bought, and differ by arm.",
+        "description": "What bounds a run per axis: a named axis binds, ``unbounded`` lifts (read back as ``None``,\nno bound), and an omitted or null one inherits, as a null clears on every layer.\n``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and\nseconds are what each arm's money bought, and differ by arm.",
         "properties": {
           "rounds": {
             "anyOf": [
@@ -1333,6 +1333,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "default": null,
@@ -1347,6 +1351,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "default": null,
@@ -1361,6 +1369,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "default": null,
@@ -1375,6 +1387,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "default": null,
@@ -1880,6 +1896,10 @@
         "additionalProperties": false,
         "description": "Stopped short of its panel against it.",
         "properties": {
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
           "expected_samples": {
             "title": "Expected Samples",
             "type": "integer"
@@ -1972,6 +1992,7 @@
           "position",
           "individual",
           "sp_hash",
+          "config_key",
           "resolved_params",
           "expected_samples",
           "reason"
@@ -4526,6 +4547,10 @@
       "Measured": {
         "additionalProperties": false,
         "properties": {
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
           "expected_samples": {
             "title": "Expected Samples",
             "type": "integer"
@@ -4598,6 +4623,7 @@
           "position",
           "individual",
           "sp_hash",
+          "config_key",
           "resolved_params",
           "expected_samples",
           "locked_in"
@@ -4713,6 +4739,10 @@
             "default": null,
             "title": "Block"
           },
+          "config_key": {
+            "title": "Config Key",
+            "type": "string"
+          },
           "expected_samples": {
             "title": "Expected Samples",
             "type": "integer"
@@ -4787,6 +4817,7 @@
           "position",
           "individual",
           "sp_hash",
+          "config_key",
           "resolved_params",
           "expected_samples"
         ],
@@ -5429,6 +5460,10 @@
                 "type": "number"
               },
               {
+                "const": "unbounded",
+                "type": "string"
+              },
+              {
                 "type": "null"
               }
             ],
@@ -5793,6 +5828,14 @@
           "bench_rows": {
             "$ref": "#/components/schemas/CellSet"
           },
+          "cell_identity": {
+            "additionalProperties": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Cell Identity",
+            "type": "object"
+          },
           "dataset_hash": {
             "title": "Dataset Hash",
             "type": "string"
@@ -5803,6 +5846,10 @@
             },
             "title": "Demo Ids",
             "type": "array"
+          },
+          "instrument_id": {
+            "title": "Instrument Id",
+            "type": "string"
           },
           "record_type": {
             "const": "bank_partition",
@@ -5827,6 +5874,8 @@
         },
         "required": [
           "dataset_hash",
+          "instrument_id",
+          "cell_identity",
           "split",
           "search_ids",
           "bench_ids",
@@ -8872,7 +8921,7 @@
       },
       "StandingBudgetRecord": {
         "additionalProperties": false,
-        "description": "A patch of a cycle's standing budget: it names the fields it changes and the rest stand, a\nnamed null clearing (`Budget`'s rule). Folded in order of arrival, PHYSICALLY, so a fork never\ninherits one.",
+        "description": "A patch of a cycle's standing budget: it names the fields it changes and the rest stand, a\nlift spelled ``unbounded`` (`Budget`'s rule). Folded in order of arrival, PHYSICALLY, so a fork never\ninherits one.",
         "properties": {
           "budget": {
             "$ref": "#/components/schemas/Budget",

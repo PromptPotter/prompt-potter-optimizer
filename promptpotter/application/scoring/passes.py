@@ -35,7 +35,7 @@ from promptpotter.application.runner.bench import (
 )
 from promptpotter.application.runner.output import RunArtifacts
 from promptpotter.application.runner.termination import RUN_STOPS, run_stop_reason
-from promptpotter.application.scoring.closed_rounds import cycle_instrument, walked_rows
+from promptpotter.application.scoring.closed_rounds import walked_rows
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, read_pair
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.views.readout import ReadoutProjection
@@ -232,8 +232,9 @@ def read_verify(stores: Stores, hop: CycleHop, banked: VerifyPass, scorer: Score
             f"{hop.campaign_id}/{hop.cycle_id} holds no closed round 0, so {banked.arm.label} has "
             "no origin to be read over."
         )
-    instrument_id = cycle_instrument(stores.campaigns.last(hop, PartitionRecord), standing)
-    assert instrument_id is not None, "a cycle that closed round 0 drew its bank"
+    drawn = stores.campaigns.last(hop, PartitionRecord)
+    assert drawn is not None, "a cycle that closed round 0 drew its bank"
+    instrument_id = drawn.instrument_id
     c0 = standing[0].close.origin
     origin = ArmName(key=ArmKey(c0.individual.id), round=0, label=c0.label)
     measured = banked.arm.key
@@ -295,7 +296,9 @@ async def verify_candidate(
         jsp = opened.points.measured(entry)
         sp_hash = jsp.sp_hash(schema)
         # Carries the prompt: keyed on config alone, candidates sharing a model read as one.
-        predicate: dict[str, dict[str, Any]] = dict(schema.node_configs(jsp.pipeline_params))
+        predicate: dict[str, dict[str, Any]] = dict(
+            schema.node_configs(jsp.pipeline_params.keyed_by(session.cell_identity))
+        )
 
         # By sample key under every bank: a re-cut bank re-measures none of the rows it kept.
         prior = stores.archive.measurements_for_config(predicate)

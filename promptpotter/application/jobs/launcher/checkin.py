@@ -18,7 +18,6 @@ from promptpotter.application.jobs.launcher.mint_and_start import (
 )
 from promptpotter.application.jobs.mint import (
     OpenedCycle,
-    declare,
     fresh_campaign_id,
     mint,
     refuse_unrunnable,
@@ -94,7 +93,8 @@ class CheckinStart:
             session, config = laid_session(opened.session, opened.layers)
             plan = resolve_cycle_plan(
                 session,
-                declare(session, config, purpose=Optimize()),
+                config,
+                Optimize(),
                 session.bank.samples,
                 origin_override=opened.origin_override,
             )

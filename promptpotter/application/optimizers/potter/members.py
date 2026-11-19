@@ -568,7 +568,13 @@ class Escalation(nodes.Controller):
             ("l3_patience", "L3 patience", esc.l3_patience),
         ]
         return tuple(
-            OptimizerLimit(node=self.name, knob=knob, label=label, value=value, integer=True)
+            OptimizerLimit(
+                node=self.name,
+                knob=knob,
+                label=label,
+                value=value,
+                integer=True,
+            )
             for knob, label, value in patiences
         )
 

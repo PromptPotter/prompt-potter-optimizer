@@ -58,8 +58,8 @@ export function LimitReconcile({
     });
   };
 
-  const ph = (v: number | null | undefined, fallback: string) =>
-    typeof v === "number" ? String(v) : fallback;
+  const ph = (v: number | "unbounded" | null | undefined, fallback: string) =>
+    v === "unbounded" || typeof v === "number" ? String(v) : fallback;
 
   return (
     <div className="limit-reconcile">

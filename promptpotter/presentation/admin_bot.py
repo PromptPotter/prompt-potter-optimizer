@@ -28,6 +28,7 @@ from promptpotter.application.views.trail import trail_notes, trail_rows
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import default_projects_root
 from promptpotter.config.settings import settings
+from promptpotter.domain.layer_fold import UNBOUNDED
 from promptpotter.domain.spend import RATE_PRICED_LABEL, Budget, money_text, usd_text
 from promptpotter.infrastructure.outbound import notify_operator
 from promptpotter.shared.identity import CAMPAIGN_CAP_BY_NAME, capabilities_from_names
@@ -158,7 +159,7 @@ def _set_coupon(argument: str) -> str:
     parts = argument.split()
     if len(parts) not in (3, 4) or parts[3:] not in ([], ["afresh"]):
         return f"Usage: {_COUPON_USAGE}"
-    usd, tokens = (None if v == "-" else v for v in parts[1:3])
+    usd, tokens = (UNBOUNDED if v == "-" else v for v in parts[1:3])
     face = Budget.model_validate({"usd": usd, "tokens": tokens})
     grant = set_coupon(default_projects_root(), parts[0], face, afresh=len(parts) == 4)
     return f"Coupon for {parts[0]}: {money_text(face)}, drawing from {grant.granted_at}."

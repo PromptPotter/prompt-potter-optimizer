@@ -12,7 +12,7 @@ from typing import Any
 from promptpotter.application.account import local_stores
 from promptpotter.application.caller import Caller
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.datasets.authored import ConfigLayers, effective_config
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.admission import (
@@ -29,7 +29,6 @@ from promptpotter.application.jobs.launcher.head_to_head import (
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
 from promptpotter.application.jobs.launcher.run_job import run_held_job
 from promptpotter.application.jobs.mint import (
-    declare,
     mint_framed_cycle,
 )
 from promptpotter.application.jobs.quota import sends_on
@@ -41,7 +40,6 @@ from promptpotter.application.pipeline_resolve import cycle_config, laid_session
 from promptpotter.application.read_params import CycleDashboardParams, ReadParams
 from promptpotter.application.views.readout import StatusFn
 from promptpotter.config.logging import setup_logging
-from promptpotter.domain.campaign import Optimize, RunDeclaration
 from promptpotter.domain.command_kinds import Door, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
@@ -151,7 +149,6 @@ async def run_campaign(
         stores.write_own_definition(**vars(target))
         target = target.slug
     resuming: ExistingCycle | None = None
-    declaration: RunDeclaration | None = None
     async with AsyncExitStack() as clients:
         if isinstance(target, CycleHop):
             if campaign_config is not None or rows is not None:
@@ -169,10 +166,12 @@ async def run_campaign(
                 _dataset_session(stores, target, program=program, rows=rows)
             )
             assert session.dataset is not None, "a dataset session resolved its dataset"
-            session, laid = laid_session(session, ConfigLayers.of(session.dataset, campaign_config))
-            declaration = declare(session, laid, purpose=Optimize())
-            config = effective_config(declaration)
-            connector, measured = declaration.environment.connector, session.measured_dataset
+            connector = runnable_definition(session.dataset).connector
+            # The config the mint declares runs as laid (`authored.py::effective_config`).
+            session, config = laid_session(
+                session, ConfigLayers.of(session.dataset, campaign_config)
+            )
+            measured = session.measured_dataset
 
         # Admitted BEFORE the mint's paid framing and a resume's bind: a refusal writes nothing.
         start, held = await asyncio.to_thread(
@@ -191,9 +190,8 @@ async def run_campaign(
             if resuming is not None:
                 running = await clients.enter_async_context(resuming.open(stores))
             else:
-                assert declaration is not None, "a run on a dataset declares its campaign"
                 running = await mint_framed_cycle(
-                    session, declaration, session.bank.samples, task_text=None
+                    session, config, session.bank.samples, task_text=None
                 )
                 stamps = running.hop
                 await asyncio.to_thread(start.land, running.hop, held)

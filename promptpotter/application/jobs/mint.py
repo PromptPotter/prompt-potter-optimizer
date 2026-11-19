@@ -73,7 +73,7 @@ from promptpotter.domain.command_events import CommandLanded, draft_subject, sub
 from promptpotter.domain.command_kinds import ArmRequest, HeadToHeadRequest
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.pipeline_params import PipelineParams, moved_leaves
 from promptpotter.domain.pipeline_schema import CapabilityMenu, NodeSearchNarrowing, PipelineSchema
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.partition import PartitionRecord
@@ -139,22 +139,12 @@ def refuse_unrunnable(
 
 
 @dataclass(frozen=True)
-class ArmSpec:
-    """An arm as planned: what it runs and its seat; the mint numbers its replicate (`_numbered`)."""
-
-    spec: RunSpec
-    seat: ArmSeat
-
-
-def spec_of(declared: RunDeclaration | ArmSpec) -> RunSpec:
-    return declared.spec if isinstance(declared, ArmSpec) else declared
-
-
-@dataclass(frozen=True)
 class CyclePlan:
     """What a mint writes and a resume checks, every refusal already asked of what the cycle runs."""
 
-    declared: RunDeclaration | ArmSpec
+    spec: RunSpec
+    # An arm is planned on its seat; the mint numbers its replicate (`_numbered`).
+    purpose: Purpose | ArmSeat
     schema: PipelineSchema
     pipeline_params: PipelineParams
     origin: OptSearchPoint
@@ -185,15 +175,9 @@ class CyclePlan:
         )
 
     @property
-    def spec(self) -> RunSpec:
-        return spec_of(self.declared)
-
-    @property
     def declaration(self) -> RunDeclaration:
-        assert isinstance(self.declared, RunDeclaration), (
-            "an arm is declared as its mint numbers it"
-        )
-        return self.declared
+        assert not isinstance(self.purpose, ArmSeat), "an arm is declared as its mint numbers it"
+        return RunDeclaration(spec=self.spec, purpose=self.purpose)
 
     @property
     def cycle_id(self) -> str:
@@ -218,18 +202,12 @@ class OpenedCycle:
         return self.session.hop
 
 
-def declare(
-    session: Session, campaign_config: CampaignConfig, *, purpose: Purpose
-) -> RunDeclaration:
-    """Every door's ONE declaration."""
-    return RunDeclaration.of(
-        _spec(session, campaign_config, compare=isinstance(purpose, Compare)), purpose
-    )
-
-
-def _spec(session: Session, campaign_config: CampaignConfig, *, compare: bool) -> RunSpec:
-    """A compare run searches prompts alone and is benched."""
-    if compare:
+def run_spec(
+    session: Session, campaign_config: CampaignConfig, purpose: Purpose | ArmSeat
+) -> RunSpec:
+    """Every door's ONE spec; a compare run (an arm, seated or numbered) searches prompts alone and
+    is benched."""
+    if not isinstance(purpose, Optimize):
         campaign_config = campaign_config.model_copy(
             update={
                 "optimizer_narrowing": _prompt_axes_only(session, campaign_config),
@@ -251,28 +229,34 @@ def _spec(session: Session, campaign_config: CampaignConfig, *, compare: bool) -
 
 def resolve_cycle_plan(
     session: Session,
-    declared: RunDeclaration | ArmSpec,
+    config: CampaignConfig,
+    purpose: Purpose | ArmSeat,
     dataset: Sequence[Sample],
     *,
     origin_override: dict[str, NodePrompt] | None = None,
-    resumed: Campaign | None = None,
 ) -> CyclePlan:
-    """What a cycle RUNS: its line's starts, the origin among them, as the configure lays them. A
-    *resumed* campaign's session is bound to one of its cycles, which the caller loaded once."""
+    """What a cycle to mint RUNS: *config* declared for *purpose* (`run_spec`), its origin among
+    its line's starts."""
+    spec = run_spec(session, config, purpose)
+    # The one span the mint writes, so the cycle is what it reads back as.
+    start = (
+        CycleStart(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
+        if origin_override
+        else None
+    )
+    cycle = CycleConfig.laid(effective_config(spec), [LaidSpan(start=start, scoring_lock=None)])
+    return _planned(session, spec, purpose, dataset, cycle)
+
+
+def _planned(
+    session: Session,
+    spec: RunSpec,
+    purpose: Purpose | ArmSeat,
+    dataset: Sequence[Sample],
+    cycle: CycleConfig,
+) -> CyclePlan:
+    """What *cycle* RUNS, as the configure lays it."""
     schema = session.pipeline_schema
-    if resumed is not None:
-        assert origin_override is None, "a minted cycle's origin is its line's starts"
-        cycle = cycle_config(session.store, CampaignCycle(resumed, session.cycle_id))
-    else:
-        # The one span the mint writes, so the cycle is what it reads back as.
-        start = (
-            CycleStart(origin_prompts=origin_override, origin_source=OriginSource.CAMPAIGN_ORIGIN)
-            if origin_override
-            else None
-        )
-        cycle = CycleConfig.laid(
-            effective_config(spec_of(declared)), [LaidSpan(start=start, scoring_lock=None)]
-        )
     configured = configure_and_apply_pipeline(session, cycle)
     pipeline_params = configured.pipeline_params
     selected = select_optimizer(cycle.config.optimization)
@@ -283,10 +267,11 @@ def resolve_cycle_plan(
         pipeline_params,
         configured.pipeline_schema,
         stores=session.store,
-        connector=spec_of(declared).environment.connector,
+        connector=spec.environment.connector,
     )
     return CyclePlan(
-        declared=declared,
+        spec=spec,
+        purpose=purpose,
         schema=schema,
         pipeline_params=pipeline_params,
         origin=resolve_origin_opt_search_point(
@@ -300,7 +285,12 @@ def resolve_cycle_plan(
         admits=campaign_admits(cycle.config, configured.pipeline_schema),
         partition=partition,
         # Slots in the session's bank, whichever rows of it the caller hands in.
-        drawn=PartitionRecord.of(partition, dataset_hash=session.bank.dataset_hash),
+        drawn=PartitionRecord.of(
+            partition,
+            dataset_hash=session.bank.dataset_hash,
+            instrument_id=configured.instrument_id,
+            cell_identity=configured.cell_identity,
+        ),
         cycle=cycle,
         session=configured,
     )
@@ -317,8 +307,15 @@ class ConfigDriftError(ConflictError):
         drift: DefaultsDrift | None,
         capabilities_moved: list[str],
         revision_moved: str | None,
+        identity_moved: list[str],
     ) -> None:
+        # What moved under an unmoved origin: each alone refuses, as a moved origin does.
+        self.moved = bool(capabilities_moved or revision_moved or identity_moved)
         causes: list[str] = []
+        if identity_moved:
+            causes.append(
+                f"the identity its cells were graded under moved at {', '.join(identity_moved)}"
+            )
         if drift is not None:
             moved = ", ".join(drift.moved())
             causes.append(f"what its declaration is a delta over moved since the mint ({moved})")
@@ -334,8 +331,8 @@ class ConfigDriftError(ConflictError):
             "not its declaration"
         )
         super().__init__(
-            f"campaign {campaign.campaign_id} no longer resolves to the origin it was minted on "
-            f"(stored {campaign.root_content_hash}, now {current_hash}): {cause}. Its "
+            f"campaign {campaign.campaign_id} no longer runs as it was minted (origin stored "
+            f"{campaign.root_content_hash}, now {current_hash}): {cause}. Its "
             "measurements may not apply. Revert the edit, or start a fresh campaign on "
             f"{campaign.dataset_name} — this one is preserved.",
             details={
@@ -345,6 +342,7 @@ class ConfigDriftError(ConflictError):
                 "defaults_pin_moved": drift is not None,
                 "capabilities_moved": capabilities_moved,
                 "backend_revision_moved": revision_moved is not None,
+                "identity_moved": identity_moved,
             },
             # A fresh campaign on the same dataset, which every door words.
             next_acts=(
@@ -355,14 +353,7 @@ class ConfigDriftError(ConflictError):
 
 def _capabilities_moved(recorded: CapabilityMenu, running: CapabilityMenu) -> list[str]:
     """``provider/model`` whose answered capability moved; an empty *recorded* menu names none."""
-    if not recorded:
-        return []
-    return sorted(
-        f"{provider}/{model}"
-        for provider in {*recorded, *running}
-        for model in {*recorded.get(provider, {}), *running.get(provider, {})}
-        if recorded.get(provider, {}).get(model) != running.get(provider, {}).get(model)
-    )
+    return moved_leaves(recorded, running, joint="/") if recorded else []
 
 
 def _revision_moved(
@@ -378,18 +369,22 @@ def _revision_moved(
 
 def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sample]) -> CyclePlan:
     """*session* is bound to the cycle the resume runs, past the campaign's own refusals."""
-    plan = resolve_cycle_plan(session, campaign.declaration, dataset, resumed=campaign)
-    checked = plan
+    declared = campaign.declaration
+
+    def resumed(bound: Session) -> CyclePlan:
+        """*bound* is bound to one of the campaign's cycles, which the caller loaded once."""
+        cycle = cycle_config(bound.store, CampaignCycle(campaign, bound.cycle_id))
+        return _planned(bound, declared.spec, declared.purpose, dataset, cycle)
+
+    plan = checked = resumed(session)
     if session.hop != campaign.root_hop:
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
-        root = session.bound(campaign.root_cycle)
-        checked = resolve_cycle_plan(root, campaign.declaration, dataset, resumed=campaign)
-    if campaign.root_content_hash == checked.origin_hash:
-        return plan
+        checked = resumed(session.bound(campaign.root_cycle))
     campaigns = session.store.campaigns
     recorded = scan_resolved_run(campaigns.chain(campaign.root_hop))
     wired = campaigns.last(campaign.root_hop, RunWiringRecord)
-    raise ConfigDriftError(
+    drawn = campaigns.last(campaign.root_hop, PartitionRecord)
+    drift = ConfigDriftError(
         campaign,
         current_hash=checked.origin_hash,
         drift=defaults_drift(campaign, running=checked.treatment),
@@ -399,7 +394,13 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
         revision_moved=_revision_moved(
             None if wired is None else wired.backend_revision, checked.session.backend_revision
         ),
+        identity_moved=[]
+        if drawn is None
+        else moved_leaves(drawn.cell_identity, checked.session.cell_identity),
     )
+    if campaign.root_content_hash == checked.origin_hash and not drift.moved:
+        return plan
+    raise drift
 
 
 def _differs_line(name: str, declared: object, running: object) -> str:
@@ -410,8 +411,8 @@ def _differs_line(name: str, declared: object, running: object) -> str:
 
 
 def _arm_of(plan: CyclePlan) -> ArmSeat:
-    assert isinstance(plan.declared, ArmSpec), "an arm is planned on its seat"
-    return plan.declared.seat
+    assert isinstance(plan.purpose, ArmSeat), "an arm is planned on its seat"
+    return plan.purpose
 
 
 def standing_arms(stores: Stores, h2h_id: str) -> dict[str, Campaign]:
@@ -429,6 +430,7 @@ def _record_of(plan: CyclePlan) -> HeadToHeadRecord:
         head_to_head_id=_arm_of(plan).head_to_head_id,
         created_at=utcnow_iso(),
         origin=plan.origin_hash,
+        cell_identity=plan.drawn.cell_identity,
         shared=plan.spec.shared_part(),
         # Every arm reads this one version, so no arm's election moves another's scale.
         ruler_version=plan.session.store.ruler.version(),
@@ -448,12 +450,16 @@ def _refuse_off_record(
     ]
     if record.origin != plan.origin_hash:
         differs.append("origin")
-    if differs:
+    identity = moved_leaves(record.cell_identity, plan.drawn.cell_identity)
+    if differs or identity:
         running = {**shared.model_dump(mode="json"), "origin": plan.origin_hash}
         stood = {**record.shared.model_dump(mode="json"), "origin": record.origin}
+        lines = [_differs_line(n, stood[n], running[n]) for n in differs]
+        lines += [f"cell identity {leaf}" for leaf in identity]
+        differs += identity
         raise ConflictError(
             f"arm {arm.arm_key} of head-to-head {arm.head_to_head_id} differs from {stood_by} on "
-            f"{'; '.join(_differs_line(n, stood[n], running[n]) for n in differs)}, so it would "
+            f"{'; '.join(lines)}, so it would "
             "not be graded on that bench set. Nothing was minted: declare the arms alike, or name "
             "a new head-to-head id.",
             code="arm_off_bench_set",
@@ -497,8 +503,7 @@ def _numbered(plans: Sequence[CyclePlan], standing: Mapping[str, Campaign]) -> l
     for plan in plans:
         taken[plan.treatment.digest] += 1
         arm = Arm(**dict(_arm_of(plan)), replicate=taken[plan.treatment.digest])
-        declared = RunDeclaration.of(plan.spec, Compare(arm=arm))
-        numbered.append(replace(plan, declared=declared))
+        numbered.append(replace(plan, purpose=Compare(arm=arm)))
     return numbered
 
 
@@ -525,8 +530,10 @@ async def arm_plans(
                 "an arm stops on its budget, never on a fitness: drop the halt fitness",
                 code="arm_halt_refused",
             )
-        declared = ArmSpec(_spec(armed, config, compare=True), request.seat(arm))
-        plans.append(resolve_cycle_plan(armed, declared, dataset, origin_override=origin_override))
+        seat = request.seat(arm)
+        plans.append(
+            resolve_cycle_plan(armed, config, seat, dataset, origin_override=origin_override)
+        )
     _held_to_record(
         plans,
         session.store.campaigns.load_head_to_head(request.head_to_head_id),
@@ -608,7 +615,9 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
     campaigns.create_campaign(campaign)
     # The name labels the bank its newest campaign declares; a sandbox's datasets are the account's.
     if not session.store.inner:
-        session.store.tenant_datasets.relabel(session.measured_dataset, declaration.dataset_hash)
+        session.store.tenant_datasets.relabel(
+            session.measured_dataset, declaration.spec.dataset_hash
+        )
     return session
 
 
@@ -627,7 +636,7 @@ def mint(plan: CyclePlan, *, campaign_id: str, adopting: str | None) -> OpenedCy
 def _record_held(plans: Sequence[CyclePlan]) -> Iterator[HeadToHeadRecord | None]:
     """An act's arms hold their head-to-head's record from before anything it pays through their mint."""
     first = plans[0]
-    if not isinstance(first.declared, ArmSpec):
+    if not isinstance(first.purpose, ArmSeat):
         yield None
         return
     with first.session.store.campaigns.head_to_head_held(_arm_of(first).head_to_head_id) as stored:
@@ -639,7 +648,7 @@ def _mint_all(
 ) -> list[OpenedCycle]:
     """Arms join their head-to-head on the framed plans they mint; each campaign id is drawn here, past every refusal."""
     first = plans[0]
-    if isinstance(first.declared, ArmSpec):
+    if isinstance(first.purpose, ArmSeat):
         stores = first.session.store
         standing = standing_arms(stores, _arm_of(first).head_to_head_id)
         record = _held_to_record(plans, stored, standing)
@@ -694,16 +703,16 @@ def _description_to_decompose(
 
 async def mint_framed_cycle(
     session: Session,
-    declaration: RunDeclaration,
+    config: CampaignConfig,
     dataset: Sequence[Sample],
     *,
     task_text: str | None,
     origin_override: dict[str, NodePrompt] | None = None,
 ) -> OpenedCycle:
-    """An L4 inner cell mints through ``mint``, so cells never race to decompose."""
-    assert isinstance(declaration.purpose, Optimize), "an arm is planned with its head-to-head"
+    """An optimize run; an arm is planned with its head-to-head, and an L4 inner cell mints
+    through ``mint``, so cells never race to decompose."""
     # Every refusal the mint owes, before the check-in below bills.
-    plan = resolve_cycle_plan(session, declaration, dataset, origin_override=origin_override)
+    plan = resolve_cycle_plan(session, config, Optimize(), dataset, origin_override=origin_override)
     (minted,) = await _mint_framed(session, [plan], task_text=task_text)
     return minted
 

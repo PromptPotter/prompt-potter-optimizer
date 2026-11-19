@@ -64,7 +64,6 @@ pipeline:
           - {pipeline_key: final_ranking, output_field: generated_text, is_llm: true}
 
 campaign:
-  display_metric: ability
   scoring:
     per_sample: label_match(predicted, ground_truth)
     # Cost is charged in TOKENS, not seconds. Latency is `tokens x provider_rate`, and only the

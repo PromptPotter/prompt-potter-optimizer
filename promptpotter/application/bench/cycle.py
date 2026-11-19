@@ -190,10 +190,7 @@ class Cycle:
             optimizer=optimizer,
             slices=SliceMap(optimizer.slices),
             survey=survey,
-            # Hashed here because the parent advances with every round's head.
-            difficulty=DifficultyView.open(
-                session, config, origin=sp.sp_hash(session.pipeline_schema)
-            ),
+            difficulty=DifficultyView.open(session, config, origin=origin.state.config_key),
             framing=framing,
         )
         optimizer.refuse_pipeline(session.pipeline_schema)
@@ -217,7 +214,7 @@ class Cycle:
         """Round 0's view again, on the scorer its close locked."""
         origin = self.origin_round.head
         assert origin is not None, "round 0 ends on its origin"
-        self.difficulty = DifficultyView.open(self.session, self.config, origin=origin.sp_hash)
+        self.difficulty = DifficultyView.open(self.session, self.config, origin=origin.config_key)
 
     def rng(self, round_num: int, tag: str) -> random.Random:
         """A function of ``run_seed``, the arm's replicate, *round_num* and *tag* alone, so a resume

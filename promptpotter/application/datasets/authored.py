@@ -15,9 +15,10 @@ from promptpotter.config.paths import install_datasets_root
 from promptpotter.domain.campaign import Environment, RunSpec
 from promptpotter.domain.campaign_config import CAMPAIGN_RULE, CampaignConfig
 from promptpotter.domain.draft_edit import CampaignLayer
-from promptpotter.domain.layer_fold import Folded, Layer, fold_layers, patch_between, wire_patch
+from promptpotter.domain.layer_fold import UNBOUNDED, Folded, Layer, fold_layers, patch_between
 from promptpotter.domain.pipeline_schema import KnobLayer
 from promptpotter.domain.scoring import Scorer
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (
     DEFAULTS_FILE,
     DEFINITION_FILE,
@@ -117,10 +118,13 @@ def declare_run(
         dataset_hash=dataset_hash,
         run_seed=config.run_seed if "run_seed" in named else None,
         loop={k: v for k, v in named.items() if k not in _ENVIRONMENT_KEYS | {"run_seed"}},
-        budget=budget.only(
-            a
-            for a in budget.named
-            if a not in standing.named or getattr(budget, a) != getattr(standing, a)
+        # An axis the defaults bound and the config cleared runs with none: the declaration lifts it.
+        budget=Budget(**dict.fromkeys(standing.named - budget.named, UNBOUNDED)).over(
+            budget.only(
+                a
+                for a in budget.named
+                if a not in standing.named or getattr(budget, a) != getattr(standing, a)
+            )
         ),
         environment=Environment(
             connector=connector,
@@ -135,15 +139,16 @@ def effective_config(declaration: RunSpec) -> CampaignConfig:
     defaults = defaults_config()
     seed = {} if declaration.run_seed is None else {"run_seed": declaration.run_seed}
     sent = {**declaration.loop, **declaration.environment.target, **seed}
-    budget = defaults.optimization.budget.over(declaration.budget)
+    # A lift over the defaults leaves no bound beneath it: the run's budget names its bounds alone.
+    budget = defaults.optimization.budget.over(declaration.budget).model_dump()
     laid = fold_layers(
         CAMPAIGN_RULE,
         [
             Layer("defaults", _unbudgeted(defaults)),
-            Layer("campaign", wire_patch(CAMPAIGN_RULE, sent)),
+            Layer("campaign", sent),
             Layer(
                 "campaign",
-                {"optimization": {"budget": budget.model_dump(mode="json", exclude_unset=True)}},
+                {"optimization": {"budget": {a: v for a, v in budget.items() if v != UNBOUNDED}}},
             ),
         ],
     )
@@ -173,14 +178,10 @@ class ConfigLayers(NamedTuple):
         return cls(campaign_defaults(), stated.model_dump(mode="json", exclude_unset=True))
 
     def over(self, optimization: Mapping[str, Any]) -> ConfigLayers:
-        """*optimization*, as a door sent it (`layer_fold.py::wire_patch`), laid into the edit,
-        last; its ``budget`` is the payload's own, where a null axis is unbounded, never a clear."""
-        sent = {k: v for k, v in optimization.items() if k != "budget"}
-        budget = {"budget": optimization["budget"]} if "budget" in optimization else {}
-        laid = wire_patch(CAMPAIGN_RULE, sent, "optimization")
+        """*optimization*, as a door sent it, laid into the edit, last."""
         layers = [
             Layer("campaign", self.campaign),
-            Layer("campaign", {"optimization": {**laid, **budget}}),
+            Layer("campaign", {"optimization": dict(optimization)}),
         ]
         return self._replace(campaign=fold_layers(CAMPAIGN_RULE, layers).document)
 

@@ -29,6 +29,7 @@ from promptpotter.domain.job import (
     PaidCall,
     ScoringPass,
 )
+from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.records.run_records import (
     CampaignCeilingRecord,
     CycleShareRecord,
@@ -306,7 +307,9 @@ def overrun(face: Budget, spent: UserSpend) -> Budget:
 
 def _nothing_on(face: Budget) -> Budget:
     """Zero on each unit *face* bounds, unbounded on the rest."""
-    return Budget(usd=None if face.usd is None else 0.0, tokens=None if face.tokens is None else 0)
+    return Budget(
+        usd=UNBOUNDED if face.usd is None else 0.0, tokens=UNBOUNDED if face.tokens is None else 0
+    )
 
 
 def read_account_wallet(
@@ -890,7 +893,7 @@ def _clamped(
     change = requested.over(
         Budget.model_validate(
             {
-                axis: None
+                axis: UNBOUNDED
                 if (v := getattr(requested, axis)) is None
                 else _lowest(v, getattr(clamp, axis))
                 for axis in requested.named & MONEY_AXES
@@ -909,13 +912,13 @@ def _reserve(budget: Budget, headroom: Budget) -> Budget:
     tokens: every send under it is priced (`SpendBook.refuse_unpriced`), so the dollars bound it.
     ``None`` where no coupon bounds the axis."""
     priced = budget.usd is not None and headroom.usd is not None
-    held: dict[str, float | int | None] = {}
+    held: dict[str, float | int | Unbounded] = {}
     for axis in sorted(MONEY_AXES):
         room, ceiling = getattr(headroom, axis), getattr(budget, axis)
         if ceiling is not None:
-            held[axis] = None if room is None else min(room, 2 * ceiling)
+            held[axis] = UNBOUNDED if room is None else min(room, 2 * ceiling)
         elif axis != "tokens" or not priced:
-            held[axis] = room
+            held[axis] = UNBOUNDED if room is None else room
     return Budget.model_validate(held)
 
 

@@ -472,17 +472,6 @@ def _answered_nothing(said: str) -> dict[str, Any] | None:
     return {"step_tokens": detail.get("step_tokens") or {}}
 
 
-def _without_identity(
-    pipeline_params: PipelineParams, identity_keys: Mapping[str, frozenset[str]]
-) -> PipelineParams:
-    return pipeline_params.with_nodes(
-        {
-            node: {k: v for k, v in cfg.items() if k not in identity_keys.get(node, ())}
-            for node, cfg in pipeline_params.laid_nodes.items()
-        }
-    )
-
-
 async def measure_sample(
     sample: Sample,
     session: Session,
@@ -494,9 +483,7 @@ async def measure_sample(
     ground_truth = sample.ground_truth or ""
     pipeline_schema = session.pipeline_schema
     try:
-        wire_params = interpolate_pipeline_params(
-            _without_identity(pipeline_params, session.identity_keys), sample.model_dump()
-        )
+        wire_params = interpolate_pipeline_params(pipeline_params, sample.model_dump())
         calls = wire_params.nodes
         pairs = priced_pairs(session, calls)
         data, spent, envelope = await _send_cell(sample, session, wire_params, calls, pairs)

@@ -9,6 +9,7 @@ from pydantic import Field
 
 from promptpotter.application.optimizers.nodes import LengthKnobs
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.pool import Access
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel
@@ -82,19 +83,19 @@ class PanelShareKnobs(StrictModel):
 class TranscriptKnobs(PanelShareKnobs):
     """How much of the parent's failing rows' runs a node reads in ``sample_transcripts``."""
 
-    transcripts: Annotated[int | None, Knob(Estimand.SEARCH)] = Field(
-        ge=1,
+    transcripts: Annotated[Annotated[int, Field(ge=1)] | Unbounded, Knob(Estimand.SEARCH)] = Field(
         description=(
             "The most rows ``sample_transcripts`` shows, the parent's lowest-scoring misses first; "
-            "``null`` shows every one."
+            "``unbounded`` shows every one."
         ),
     )
-    transcript_chars: Annotated[int | None, Knob(Estimand.SEARCH)] = Field(
-        ge=1,
-        description=(
-            "The most characters of one row's transcript, its head and tail kept around an elided "
-            "middle; ``null`` shows each whole."
-        ),
+    transcript_chars: Annotated[Annotated[int, Field(ge=1)] | Unbounded, Knob(Estimand.SEARCH)] = (
+        Field(
+            description=(
+                "The most characters of one row's transcript, its head and tail kept around an "
+                "elided middle; ``unbounded`` shows each whole."
+            ),
+        )
     )
 
 
@@ -226,13 +227,14 @@ class EscalationKnobs(StrictModel):
             "How DEEP the ladder runs is ``escalation_ladder``, never a patience."
         ),
     )
-    l3_patience: Annotated[int | None, Knob(Estimand.CONTROLLER)] = Field(
-        ge=0,
-        description=(
-            "Consecutive non-improving L3 fires before the cycle stops on "
-            "``OPTIMIZER_EXHAUSTED``. ``None`` replans without limit, leaving the round and "
-            "spend ceilings as the only stops."
-        ),
+    l3_patience: Annotated[Annotated[int, Field(ge=0)] | Unbounded, Knob(Estimand.CONTROLLER)] = (
+        Field(
+            description=(
+                "Consecutive non-improving L3 fires before the cycle stops on "
+                "``OPTIMIZER_EXHAUSTED``. ``unbounded`` replans without limit, leaving the round "
+                "and spend ceilings as the only stops."
+            ),
+        )
     )
     escalation_ladder: Annotated[EscalationLadder, Knob(Estimand.CONTROLLER)] = Field(
         description=(

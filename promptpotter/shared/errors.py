@@ -319,7 +319,7 @@ class BudgetUnenforceableError(SendRefusedError):
 
     def __init__(self, *, backend: str, binds: Literal["run", "allowance"]) -> None:
         remedy = (
-            "Drop the dollar cap and bound the run in tokens (`budget: {usd: null, tokens: N}`), "
+            "Drop the dollar cap and bound the run in tokens (`budget: {usd: unbounded, tokens: N}`), "
             "or run it on a backend that prices its cells."
             if binds == "run"
             else "Run it on a backend that prices its cells, or ask the host to run it: the "

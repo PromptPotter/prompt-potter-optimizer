@@ -10,10 +10,18 @@ import {
 
 export type ConfigMode = "search-space" | "values";
 
-// What a typed-in value is read as: the served row's kind and bounds; `nested` round-trips as JSON.
+// What a typed-in value is read as: the served row's kind, bounds and words (a `number` row's
+// `unbounded`); `nested` round-trips as JSON.
 export type ValueType = Pick<
   NodeConfigParam,
-  "kind" | "integer" | "nullable" | "minimum" | "exclusive_minimum" | "maximum" | "exclusive_maximum"
+  | "kind"
+  | "integer"
+  | "nullable"
+  | "minimum"
+  | "exclusive_minimum"
+  | "maximum"
+  | "exclusive_maximum"
+  | "options"
 >;
 
 function valueType(p: NodeConfigParam): ValueType {
@@ -25,6 +33,7 @@ function valueType(p: NodeConfigParam): ValueType {
     exclusive_minimum: p.exclusive_minimum,
     maximum: p.maximum,
     exclusive_maximum: p.exclusive_maximum,
+    options: p.options,
   };
 }
 
@@ -315,6 +324,7 @@ export function parseParam(type: ValueType, text: string): unknown {
   if (type.kind === "number" || type.kind === "nested") {
     if (t === "") return type.nullable ? null : undefined;
     if (type.kind === "nested") return parseNested(t);
+    if (type.options.includes(t)) return t;
     const n = Number(t);
     if (!Number.isFinite(n) || (type.integer && !Number.isInteger(n))) return undefined;
     return withinBounds(type, n) ? n : undefined;

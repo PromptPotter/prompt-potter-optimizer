@@ -153,11 +153,11 @@ class OptimizationConfig(OptimizerChoice):
             "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the "
             "CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and "
             "checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the "
-            "origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); "
+            "origin (0 measures the origin and stops; ``unbounded`` leaves only ``HARD_CAP_ARMS``); "
             "``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. "
             "A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by "
-            "axis, and the account admits the result whole or refuses the launch. A null axis "
-            "is unbounded. ``tokens`` is unset by default: a token is worth a different amount "
+            "axis, and the account admits the result whole or refuses the launch. An "
+            "``unbounded`` axis lifts; a null one clears. ``tokens`` is unset by default: a token is worth a different amount "
             "on every route, so set it only where a backend bills but reports no cost "
             "(``unpriced_tokens`` on the dashboard is the tell)."
         ),
@@ -169,7 +169,7 @@ class OptimizationConfig(OptimizerChoice):
             "round that promotes an arm, -1 per round that does not, banked up to ``cap``, and "
             "the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election "
             "banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a "
-            "lives run wanting the full bank sets ``budget: {rounds: null}``."
+            "lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
         ),
     )
     halt_at_fitness: Annotated[float | None, Knob(Estimand.STOPPING)] = Field(
@@ -350,8 +350,8 @@ class CampaignConfig(StrictModel):
         "first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — "
         "the optimizer's selector decides on its own objective, and the campaign's headline "
         "is the bench score; this only picks the number the human READS, client-overridable "
-        "per session. `ability` shows θ (a logit, jargon) where the selector stamps one — "
-        "defaults to `fitness` so θ is never forced on an operator who didn't ask for it. "
+        "per session. `ability` shows θ where the selector stamps one, and fitness where it "
+        "stamps none; under a per-round resubset fitness is subset-relative, so `ability` leads. "
         "Rides the `composite_fitness_formula` serve path to "
         "`dashboard.json::display_metric`; never on `OptSearchPoint`.",
     )
@@ -500,7 +500,11 @@ class LaidSpan(FrozenModel):
     def layers(self) -> list[Layer[str]]:
         layers: list[Layer[str]] = []
         if (start := self.start) is not None:
-            narrowing = {n: v.model_dump(mode="json") for n, v in start.optimizer_narrowing.items()}
+            # A typed narrowing's unset part narrows nothing here: laid null, it would clear the fold's.
+            narrowing = {
+                n: v.model_dump(mode="json", exclude_none=True)
+                for n, v in start.optimizer_narrowing.items()
+            }
             layers += [
                 start_layer(start.config_overrides),
                 Layer("start", {"optimizer_narrowing": narrowing}),

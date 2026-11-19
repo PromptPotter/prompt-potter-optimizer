@@ -10,15 +10,14 @@ from pydantic import Field
 
 from promptpotter.domain.bench import CampaignRefusal, DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.paired_reading import CellSet, instrument_of
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.paired_reading import CellSet
+from promptpotter.domain.pipeline_params import CellIdentity, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamSource
 from promptpotter.domain.records.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.errors import ConflictError
-from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 
@@ -41,11 +40,12 @@ def bench_set_of(
     split: DatasetSplit | None,
     bench_rows: CellSet,
     scorer_id: str,
+    instrument_id: str,
     origin_params: PipelineParams | None,
     origin: str,
 ) -> BenchSet:
     return BenchSet(
-        instrument_id=instrument_of(dataset_hash, origin_params),
+        instrument_id=instrument_id,
         dataset_hash=dataset_hash,
         split=split,
         bench_rows=bench_rows,
@@ -152,9 +152,9 @@ def run_clamp(clamp: DeterminismClamp | None, purpose: Purpose) -> DeterminismCl
 
 
 class Environment(FrozenModel):
-    """What the target runs on and is graded by (``target``: the set keys of its node models, host
-    pins, chain, framing and grader), behind ``connector``, whose identity contributions derive
-    from it and the dataset."""
+    """What the target runs on and is graded by, behind ``connector``, whose identity contributions
+    derive from it and the dataset: ``target`` is its node models', host pins', chain's, framing's
+    and grader's fold patch over the defaults (``null`` clears), as ``RunSpec.loop`` is the loop's."""
 
     connector: str = Field(min_length=1)
     target: dict[str, Any]
@@ -197,19 +197,12 @@ class RunSpec(FrozenModel):
         )
 
 
-class RunDeclaration(RunSpec):
+class RunDeclaration(FrozenModel):
     """What a campaign, an L4 seat and a head-to-head arm each ARE: its spec and its purpose."""
 
+    spec: RunSpec
     # Part of what an arm IS, so two arms of one content never share a run id.
     purpose: Purpose
-
-    @classmethod
-    def of(cls, spec: RunSpec, purpose: Purpose) -> RunDeclaration:
-        return cls(**dict(spec), purpose=purpose)
-
-    @property
-    def digest(self) -> str:
-        return stable_hash(self.model_dump(mode="json"))
 
 
 # The loop keys every arm of a head-to-head runs alike.
@@ -278,6 +271,8 @@ class HeadToHeadRecord(FrozenModel):
     head_to_head_id: str
     created_at: str
     origin: str
+    # What every arm's cells are graded under (`PartitionRecord.cell_identity`), beside its origin.
+    cell_identity: CellIdentity
     shared: SharedPart
     # The tenant ruler's version at open: every arm reads it plus its own lines, never another arm's.
     ruler_version: int = Field(ge=0)
@@ -358,7 +353,7 @@ class Campaign(FrozenModel):
     @property
     def connector(self) -> str:
         """FROZEN at mint: a campaign outlives its dataset dir, so re-pointing a slug must not re-kind it."""
-        return self.declaration.environment.connector
+        return self.declaration.spec.environment.connector
 
     @property
     def active(self) -> bool:

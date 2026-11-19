@@ -40,6 +40,7 @@ from promptpotter.application.optimizers.potter.records import (
     Recombination,
 )
 from promptpotter.domain.arm_reading import order_floor
+from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
 from promptpotter.domain.paired_reading import RoundArm
 from promptpotter.domain.phase_acts import StepClosed, StepOpened
@@ -103,7 +104,7 @@ class LadderInputs:
     l2_stall_count: int
     l2_patience: int
     l3_stall_count: int
-    l3_patience: int | None
+    l3_patience: int | Unbounded
     l1_layout_refused: bool = False
 
 
@@ -141,7 +142,7 @@ def decide_escalation(s: EscalationInputs) -> EscalationEvent:
 def decide_climb(s: LadderInputs) -> EscalationEvent:
     if not s.escalation_ladder.fires_l3 or s.l2_stall_count < s.l2_patience:
         return EscalationEvent(NextAction.FIRE_L2, "l2_within_patience")
-    if s.l3_patience is None or s.l3_stall_count < s.l3_patience:
+    if s.l3_patience == UNBOUNDED or s.l3_stall_count < s.l3_patience:
         return EscalationEvent(NextAction.FIRE_L3, L2_PATIENCE_SPENT)
     return EscalationEvent(NextAction.STOP_L3_PATIENCE, "l3_patience_spent")
 
@@ -250,7 +251,7 @@ def ask_l2_escalation(
     best: HighWater,
     escalation_ladder: EscalationLadder,
     l2_patience: int,
-    l3_patience: int | None,
+    l3_patience: int | Unbounded,
     admission: float | None,
 ) -> LadderAsk:
     """A fire that never parsed leaves the counters where the ledger has them."""
@@ -504,7 +505,7 @@ async def _fire_layer(ctx: NodeContext, fired: LayerCall, fire: Fire) -> Transit
 
 
 class EscalationReading(FrozenModel):
-    patience: int | None
+    patience: int | Unbounded
     fires: int
     stall_count: int
     best_composite_fitness_at_entry: float | None
@@ -520,7 +521,7 @@ class EscalationReading(FrozenModel):
         reading: LayerReading,
         best: HighWater,
         *,
-        patience: int | None,
+        patience: int | Unbounded,
         fires: int,
         rule: str,
     ) -> Self:

@@ -125,8 +125,10 @@ def sample_key(
 class ArchiveConfig(FrozenModel):
     """A configuration as its archive file holds it: nothing any dataset or answer says of it."""
 
+    # The archive's address: what its cells file under, the cell identity hashed in.
     config_key: str
-    # ``PipelineSchema.sp_hash``: empty where the searchpoint resolves no node config.
+    # ``PipelineSchema.sp_hash``, what the arm sends; never indexes entries. Empty where the
+    # searchpoint resolves no node config.
     prompt_fields_id: str
     # Empty with it, and its cells are then never replayed.
     node_configs: list[tuple[str, dict[str, Any]]]
@@ -134,6 +136,8 @@ class ArchiveConfig(FrozenModel):
 
     @property
     def individual(self) -> str:
+        """The individual measured, by what it sends: one spans an entry per cell identity, so it
+        names a row to a reader and is never the archive's address (``config_key``)."""
         return self.prompt_fields_id or self.config_key
 
 

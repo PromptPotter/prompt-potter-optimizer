@@ -231,7 +231,7 @@ cfg-2 laid every door's patch through one wire rule and every campaign default i
 and derived the knob couplings from each member's draws and the escalation ladder.
 
 - **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
-  patch through `layer_fold.py::wire_patch`, but L2's steer is read through `L2Memory.steered` /
+  patch through `layer_fold.py::fold_layers` (a null clears), but L2's steer is read through `L2Memory.steered` /
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
   the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleStart`,
   `dict[str, dict[str, Any]]` on `ForkStart`, which carries a null clear and text a `NodeCall` refuses
@@ -442,16 +442,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
   launch against a backend one contract behind fails at the probe, naming both numbers;
   `connectors/termnorm.py` probes `/version`.
-- **An identity re-key moves offline decisions**: an arm's content id carries identity-only keys
-  (`pipeline_resolve.py::identity_layer`). A pure re-key therefore changes which cells are drawn and
-  raced. xconn 3's revision leaf alone moved potter's crossed leader (C2.6 → C2.7) and p_best/θ in
-  capo-pobb, levi and potter (`wip/xconn` f70980fe7). Action: an arm's id derives from what the arm
-  sends, never from its identity keys. **Rides with:** xconn 3, before it lands. **Re-test:**
-  `wip/xconn`'s run against its base moves only `backend_revision` leaves.
-- **A moved capability or backend revision alone passes a resume**: it is a drift cause only when the
-  origin hash also mismatches (`jobs/mint.py::resolve_resume`, `::_revision_moved`). Action: a resume
-  refuses a moved capability or backend revision. **Rides with:** xconn 3. **Re-test:** a resume after a
-  backend revision bump is refused naming it.
 - **TermNorm words a warning's step into its message** (`research_pipeline.py`), though `StepWarning`
   carries the step as a field. Fixed only on TermNorm's `xconn` branch (11b1dbe); master (ce4f15b) and
   the box still word it (master `research_pipeline.py:278`). Action: the message is the fault alone.
