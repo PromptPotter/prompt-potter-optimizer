@@ -213,7 +213,11 @@ without trial. An agent episode is a measured cell and an LLM-judge grade a bank
   20-row bench (SD 10.8, 5 of 6 adopting) and **+5.2 ± 1.9** on a 100-row one (`multistep-bench100`,
   SD 4.6, $0.02 a cell): the 20-row bench's noise was most of the spread. Its 40-row inner races
   adopt a candidate about +12 to +23 above the parent and pass over some up to +17 above it. On this seat
-  L4 is read on the 100-row bench. `bbh-word-sorting-8b__423a03`
+  L4 is read on the 100-row bench. Two origin runs on the same thirteen seats
+  (`multistep-wide`, seeds 1–6 and 8–14) deliver +7.3 and +4.4 (paired −3.0 ± 2.2): a cell's
+  replicate SD is 5.6 against 6.9 across seats and runs, so a seed barely fixes what its inner
+  run delivers, and a two-arm contrast on thirteen seats an arm has an SE of about 2.2 pts.
+  `bbh-word-sorting-8b__423a03`
   (`word_sorting` on the 8B; arm: `bbh-word-sorting-cot`'s group-by-letter procedure with a count
   check): origin 42% on 40, arm **30% vs parent 40%** on 88 paired rows (cut, θ lift −0.49 ± 0.32);
   28% of the arm's replies hit the 1,536-token cap (parent 0%), and inside the procedure the 8B

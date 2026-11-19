@@ -737,8 +737,15 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
 - **On Windows a replace is refused while a reader holds the file**: one thread looping `write_bytes`
   and four looping `read_bytes_optional` on one file for 20 s saw 86 of ~210 writes raise `PermissionError`
   past `store/io.py::_atomic_replace`'s three tries, at 6fa93bab0 (whose reads retry, 0 refused, where
-  fdad7947d's refused 49). Root: a read opens without `FILE_SHARE_DELETE`, so the swap waits on every
-  open reader; the box (Linux) is untouched. **Rides with:** rel 2. **Re-test:** the hammer, 0 refused writes.
+  fdad7947d's refused 49). Live 2026-11-19: it cut an L4 outer cell on the desk (`multistep-wide__773fe8`
+  round 1, C1.3 #000: `PermissionError: [WinError 32]` replacing an inner job file under
+  `.promptpotter/jobs/`); 94 of 182 writes refused at `61fff035c`. Two fixes measured and reverted:
+  reads sharing delete (a `CreateFileW` opener) alone refuse more (95 of 99), as `os.replace`
+  (MoveFileEx) refuses any destination still open; adding a POSIX rename (`FileRenameInfoEx`,
+  replace | posix) lands every write, but reads then see the file absent in bursts (0, 163, 167,
+  382 of ~10k a 25-s run), an immediate re-open included, which is a silent wrong read. **Held:** a
+  design whose reader never reads a present file as absent; the box (Linux) is untouched.
+  **Rides with:** rel 2. **Re-test:** the hammer, 0 refused writes and 0 absent reads.
 - **Run data is stat'ed bare outside `store/io.py`**: `store/read_model.py::file_sig`, six more
   `.stat()` sites (`optimizer_manifest.py:96`, `pricing.py:114`, `event_stream.py:49`,
   `run_state.py:39`, `measurement_archive.py:480`, `private_root.py:32`) and `measurement_archive.py::_named`'s `os.scandir` read a long path bare, so a ledger
