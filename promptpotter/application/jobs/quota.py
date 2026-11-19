@@ -91,10 +91,18 @@ from promptpotter.shared.worded import Worded
 
 
 class CampaignCycle(NamedTuple):
-    """A launch's cycle and the campaign its door loaded, which every ceiling read takes."""
+    """A launch's address: the campaign its door loaded and a cycle of it, the hop derived."""
 
     campaign: Campaign
-    hop: CycleHop
+    cycle_id: str
+
+    @classmethod
+    def loaded(cls, stores: Stores, hop: CycleHop) -> CampaignCycle:
+        return cls(stores.campaigns.campaign(hop.campaign_id), hop.cycle_id)
+
+    @property
+    def hop(self) -> CycleHop:
+        return CycleHop(campaign_id=self.campaign.campaign_id, cycle_id=self.cycle_id)
 
 
 class QuotaExceededError(PotterError):
@@ -811,7 +819,7 @@ def declare_run_budget(
 ) -> tuple[Budget, Budget]:
     """*declared* is the cycle's, its seed laid (`CycleConfig`), so composed BEFORE admission;
     second, the axes an operator named (campaign, cycle, *requested*)."""
-    asked = Budget() if at is None else stores.campaigns.armed_budget(*at)
+    asked = Budget() if at is None else stores.campaigns.armed_budget(at.campaign, at.hop)
     asked = asked.over(requested)
     return declared.over(asked), asked
 
@@ -837,8 +845,8 @@ def change_budget(
     unseen. Money moves the CAMPAIGN's ceiling and re-shares it over every live cycle; holds land
     first. Whether the ceiling *at*'s cycle runs under, or its overshoot, moved: a change
     restating them moves nothing."""
-    campaigns, (campaign, hop) = stores.campaigns, at
-    armed = campaigns.armed_budget(*at)
+    campaigns, campaign, hop = stores.campaigns, at.campaign, at.hop
+    armed = campaigns.armed_budget(campaign, hop)
     change = requested
     with job_registry.admission_gate():
         job = None if (held := campaigns.holder(hop)) is None else held.run
@@ -860,7 +868,7 @@ def change_budget(
         campaigns.append(hop, StandingBudgetRecord(budget=cycle, overshoot=overshoot))
     elif cycle.named:
         campaigns.append(hop, StandingBudgetRecord(budget=cycle))
-    return overshoot is not None or campaigns.armed_budget(*at) != armed
+    return overshoot is not None or campaigns.armed_budget(campaign, hop) != armed
 
 
 def _clamped(

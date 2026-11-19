@@ -23,6 +23,7 @@ from promptpotter.application.free_tier import (
     refuse_outside_free_tier,
 )
 from promptpotter.application.jobs.launcher.admission import paid_call
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, select_optimizer
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.pipeline_resolve import (
@@ -350,7 +351,7 @@ def resolve_resume(session: Session, campaign: Campaign, dataset: Sequence[Sampl
     checked = plan
     if session.hop != campaign.root_hop:
         # A fork's start is its cycle's declared delta: the root's own content is what is checked.
-        root = session.bound(campaign.root_hop, campaign=campaign)
+        root = session.bound(CampaignCycle(campaign, campaign.root_cycle_id))
         checked = resolve_cycle_plan(root, campaign.declaration, dataset, resumed=campaign)
     if campaign.root_content_hash == checked.origin_hash:
         return plan
@@ -574,7 +575,7 @@ def _mint_campaign(plan: CyclePlan, *, hop: CycleHop, adopting: str | None) -> S
         declaration=declaration,
         lifecycle_status="active",
     )
-    session = session.bound(hop, campaign=campaign)
+    session = session.bound(CampaignCycle(campaign, hop.cycle_id))
     session.record_resolved_run()
     declare_run_wiring(session, plan.cycle.config, selected=plan.optimizer)
     # The mint's commit, last: a mint that dies before it leaves no campaign to list.
@@ -691,6 +692,7 @@ async def _mint_after_framing(
     assert session.dataset_name, "a framing commits to the dataset the session opened"
     drafts = session.store.drafts
     draft_id = mint_draft_id()
+    drafts.draft_dir(draft_id).mkdir(parents=True)
     try:
         with scoped(ledger=draft_ledger(session.store, draft_id)):
             async with paid_call(

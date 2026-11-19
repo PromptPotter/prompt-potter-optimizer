@@ -20,6 +20,7 @@ from promptpotter.application.initialization.scoring_scope import (
 )
 from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.jobs.launcher.admission import campaign_sends, paid_pass
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.run_phase_control import budget_stop
 from promptpotter.application.runner.bench import (
@@ -272,7 +273,7 @@ def _scored_candidate(stores: Stores, hop: CycleHop, candidate_id: str) -> tuple
 async def verify_candidate(
     *,
     stores: Stores,
-    hop: CycleHop,
+    at: CampaignCycle,
     candidate_id: str,
     samples: int | None,
     strategy: VerifyStrategy,
@@ -280,12 +281,13 @@ async def verify_candidate(
     acting: str | None = None,
 ) -> PassGradedRecord | VerifySaturated:
     """The graded pass, or what was already measured where that is every sample."""
+    hop = at.hop
     round_num, entry = _scored_candidate(stores, hop, candidate_id)
     arm = arm_name(ArmKey(candidate_id), entry, round_num)
     label = arm.label
 
-    async with open_diagnostic(stores, hop, acting=acting) as opened:
-        session, campaign_config, campaign = opened.session, opened.config, opened.campaign
+    async with open_diagnostic(stores, at, acting=acting) as opened:
+        session, campaign_config, campaign = opened.session, opened.config, at.campaign
         schema = session.pipeline_schema
         # Before a cell is bought: fresh cells of another searchpoint would read as this one's.
         jsp = opened.points.measured(entry)
@@ -400,7 +402,7 @@ async def verify_candidate(
 async def verify_on_saturation(
     *,
     stores: Stores,
-    hop: CycleHop,
+    at: CampaignCycle,
     round_num: int,
     fitness: float | None,
     winner_id: str | None,
@@ -412,14 +414,14 @@ async def verify_on_saturation(
     # Asked here: the loop consults its own ceiling only at the next round boundary, after this.
     if budget_stop(require_spend_book("the saturation verify")) is not None:
         return
-    ledger_path = stores.campaigns.ledger(hop)
+    ledger_path = stores.campaigns.ledger(at.hop)
     mine = [banked.arm.round for banked, _ in scan_ledger_verify(ledger_path).graded.values()]
     if mine and rounds_since_verified(mine, round_num=round_num) < _VERIFY_LIFT_CAP:
         return
     try:
         await verify_candidate(
             stores=stores,
-            hop=hop,
+            at=at,
             candidate_id=winner_id,
             samples=None,
             strategy="random",
@@ -547,12 +549,11 @@ async def measure_noise_floor(
     return graded
 
 
-def refuse_unverifiable(stores: Stores, hop: CycleHop) -> None:
+def refuse_unverifiable(stores: Stores, at: CampaignCycle) -> None:
     """An asked verify is admitted exactly where the served answer says so
     (`CycleEntryFacts.verify`), read before its own pass holds the cycle; the loop's own verify
     runs under the loop's hold and asks nothing."""
-    campaign = stores.campaigns.campaign(hop.campaign_id)
-    if (refusal := cycle_verify(stores, campaign, hop).refusal) is not None:
+    if (refusal := cycle_verify(stores, at.campaign, at.hop).refusal) is not None:
         raise DiagnosticError(PASS_REFUSAL_INFO[refusal])
 
 
@@ -560,13 +561,13 @@ class BenchTriggerError(ConflictError):
     """The bench pass cannot be sent for this cycle as it stands on disk."""
 
 
-async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
+async def grade_line_bench(*, stores: Stores, at: CampaignCycle, acting: str) -> BenchScore:
     """Admitted exactly where the served status says so (``BenchStatus.can_run``)."""
-    campaign = stores.campaigns.campaign(hop.campaign_id)
+    campaign, hop = at.campaign, at.hop
     async with paid_pass(
         stores=stores,
         pass_kind=MeasurementRole.BENCH,
-        hop=hop,
+        at=at,
         declared=Budget(),
         sends=campaign_sends(stores, campaign, hop),
         acting=acting,
@@ -575,13 +576,14 @@ async def grade_line_bench(*, stores: Stores, hop: CycleHop, acting: str) -> Ben
         if status.refusal is not None:
             held = "" if status.held_by is None else f" Holder: {status.held_by}."
             raise BenchTriggerError(PASS_REFUSAL_INFO[status.refusal] + held)
-        return await _grade(stores, hop, acting)
+        return await _grade(stores, at, acting)
 
 
-async def _grade(stores: Stores, hop: CycleHop, acting: str) -> BenchScore:
+async def _grade(stores: Stores, at: CampaignCycle, acting: str) -> BenchScore:
+    hop = at.hop
     standing = stores.campaigns.standing_rounds(hop, moment=None).rounds
     rounds = [standing[n].close for n in sorted(standing)]
-    async with open_diagnostic(stores, hop, acting=acting) as opened:
+    async with open_diagnostic(stores, at, acting=acting) as opened:
         session, config = opened.session, opened.config
         origin_sp = opened.points.measured(rounds[0].origin)
         clock = LaunchClock.now()

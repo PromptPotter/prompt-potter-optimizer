@@ -21,7 +21,7 @@ from promptpotter.application.initialization.session import LaunchClock, Session
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher.admission import land_job, open_spend_book
-from promptpotter.application.jobs.quota import cycle_share, move_campaign_money
+from promptpotter.application.jobs.quota import CampaignCycle, cycle_share, move_campaign_money
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.origin import CampaignOrigin, seat_campaign_origin
@@ -232,7 +232,7 @@ async def onto_fork(
     """THE in-process move onto a fork, a rebase's and a divergence's: the take, the bind, the
     held share, the wiring and *parent*'s release. Taken and rebased off the loop: both wait
     on a gate."""
-    session = session.bound(cut.child, campaign=session.bound_campaign)
+    session = session.bound(CampaignCycle(session.bound_campaign, cut.child.cycle_id))
     observers = await asyncio.to_thread(_rebased_observers, session, cut, parent, prep)
     # A fork's config is already admitted, so it is wired as its observers open.
     declare_run_wiring(session, prep.campaign_config, selected=prep.optimizer)

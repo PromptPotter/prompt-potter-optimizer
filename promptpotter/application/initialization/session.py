@@ -4,6 +4,7 @@ import time
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING
 
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.run_phase_control import FlightGauge, RunControl
 from promptpotter.application.scoring.evaluators import SampleEvaluator
 from promptpotter.domain.arm_reading import DisplayMetric
@@ -129,8 +130,9 @@ class Session:
         self.store.campaigns.act(self.hop, act)
         self.state.human_intervened |= act.babysits
 
-    def bound(self, hop: CycleHop, *, campaign: Campaign) -> Session:
-        """*hop* is a cycle of *campaign*; the bank and partition are what its chain drew."""
+    def bound(self, at: CampaignCycle) -> Session:
+        """The bank and partition are what *at*'s chain drew."""
+        hop = at.hop
         drawn = self.store.campaigns.last(hop, PartitionRecord)
         if drawn is None:
             raise ConflictError(
@@ -151,8 +153,8 @@ class Session:
             )
         return replace(
             self,
-            campaign=campaign,
-            cycle_id=hop.cycle_id,
+            campaign=at.campaign,
+            cycle_id=at.cycle_id,
             bank=bank,
             drawn=drawn.restored(bank.samples),
         )
@@ -166,6 +168,10 @@ class Session:
         if self.campaign is None:
             raise RuntimeError("this session is bound to no campaign: `bound` binds one.")
         return self.campaign
+
+    @property
+    def at(self) -> CampaignCycle:
+        return CampaignCycle(self.bound_campaign, self.cycle_id)
 
     @property
     def purpose(self) -> Purpose:

@@ -32,7 +32,7 @@ from promptpotter.application.jobs.mint import (
     declare,
     mint_framed_cycle,
 )
-from promptpotter.application.jobs.quota import sends_on
+from promptpotter.application.jobs.quota import CampaignCycle, sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
@@ -161,7 +161,7 @@ async def run_campaign(
                     code="resume_declared",
                 )
             refuse_campaign(stores, campaign := stores.campaigns.campaign(target.campaign_id))
-            resuming = ExistingCycle(target, campaign, budget)
+            resuming = ExistingCycle(CampaignCycle(campaign, target.cycle_id), budget)
             config = cycle_config(stores, campaign, target).config
             connector, measured = campaign.connector, campaign.dataset_name
         else:

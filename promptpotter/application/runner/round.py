@@ -1407,7 +1407,7 @@ async def post_round(
     fold, election = round_result.fold, round_result.election
     await verify_on_saturation(
         stores=session.store,
-        hop=session.hop,
+        at=session.at,
         round_num=round_num,
         fitness=None if fold is None else fold.fitness,
         winner_id=None if election is None else election.selected,

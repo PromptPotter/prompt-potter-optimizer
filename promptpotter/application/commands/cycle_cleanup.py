@@ -13,7 +13,7 @@ from promptpotter.shared.errors import CycleBusyError
 
 
 async def delete_cycle(dispatched: DispatchedToCycle[DeleteCyclePayload]) -> Applier[object]:
-    dispatcher, hop = dispatched.dispatcher, dispatched.hop
+    dispatcher, hop = dispatched.dispatcher, dispatched.at.hop
     stores = dispatcher.stores
 
     def _apply() -> None:
@@ -28,7 +28,7 @@ async def delete_cycle(dispatched: DispatchedToCycle[DeleteCyclePayload]) -> App
 async def cleanup_empty_cycles(
     dispatched: DispatchedToCycle[CleanupEmptyCyclesPayload],
 ) -> Applier[object]:
-    dispatcher, hop = dispatched.dispatcher, dispatched.hop
+    dispatcher, hop = dispatched.dispatcher, dispatched.at.hop
     stores = dispatcher.stores
 
     def _apply() -> None:

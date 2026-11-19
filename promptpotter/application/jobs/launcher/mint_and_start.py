@@ -18,10 +18,9 @@ from promptpotter.application.jobs.mint import (
 )
 from promptpotter.application.jobs.quota import CampaignCycle, sends_on
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
-from promptpotter.domain.campaign import Campaign, Optimize
+from promptpotter.domain.campaign import Optimize
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.checkin_draft import DraftFile
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.llm.wallet import Send
@@ -119,42 +118,37 @@ class FreshMint:
 class ExistingCycle:
     verb: ClassVar[str] = "start-run"
 
-    hop: CycleHop
-    campaign: Campaign
+    at: CampaignCycle
     budget: Budget
     step_rounds: int | None = None
 
     @property
-    def at(self) -> CampaignCycle:
-        return CampaignCycle(self.campaign, self.hop)
-
-    @property
     def dataset_name(self) -> str:
-        return self.campaign.dataset_name
+        return self.at.campaign.dataset_name
 
     @property
     def holder(self) -> CampaignLaunch:
         return CampaignLaunch(self.dataset_name)
 
     def connector(self, _stores: Stores) -> str:
-        return self.campaign.connector
+        return self.at.campaign.connector
 
     def endpoint(self, stores: Stores) -> str | None:
         """The definition's, as the resume's session reads it."""
         return runnable_definition(resolve_dataset(stores, self.dataset_name)).endpoint
 
     def declared_budget(self, stores: Stores) -> Budget:
-        return cycle_config(stores, self.campaign, self.hop).config.optimization.budget
+        return cycle_config(stores, self.at.campaign, self.at.hop).config.optimization.budget
 
     def sends(self, stores: Stores) -> tuple[Send, ...]:
-        return campaign_sends(stores, self.campaign, self.hop)
+        return campaign_sends(stores, self.at.campaign, self.at.hop)
 
     @asynccontextmanager
     async def open(self, stores: Stores) -> AsyncIterator[OpenedCycle]:
         """The cycle on disk, bound and drift-checked: in the admitting process, and again in a
         detached run's own."""
-        async with bind_cycle_session(stores, self.campaign, self.hop) as session:
-            plan = resolve_resume(session, self.campaign, session.bank.samples)
+        async with bind_cycle_session(stores, self.at) as session:
+            plan = resolve_resume(session, self.at.campaign, session.bank.samples)
             yield OpenedCycle(plan.cycle, plan.session, plan.optimizer)
 
 

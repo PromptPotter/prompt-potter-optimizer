@@ -66,7 +66,6 @@ def _fork_sibling_setup(
     new_dir = campaign_store.cycle_dir(child)
     if new_dir.exists():
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
-    new_dir.mkdir(parents=True)
 
     # The FORK_CUT's own offset: a parent still running appends past it, never into the fork.
     cut = campaign_store.append(

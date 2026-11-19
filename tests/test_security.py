@@ -44,6 +44,7 @@ from factories import (
     cycle_result,
     defaulted_config,
     inner_sandbox,
+    laid_ledger,
     loop_session,
     measurement,
     mint_fork,
@@ -124,6 +125,7 @@ from promptpotter.application.jobs.launcher.launch import Launched
 from promptpotter.application.jobs.launcher.run_job import JobSpec
 from promptpotter.application.jobs.machine_status import machine_status
 from promptpotter.application.jobs.mint import declare, mint, resolve_cycle_plan
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import LibraryAuthored, library
@@ -2430,7 +2432,7 @@ async def test_a_launch_holds_its_cycle_from_the_moment_it_is_accepted_and_a_ful
         async with paid_pass(
             stores=built_stores,
             pass_kind=MeasurementRole.BENCH,
-            hop=hop,
+            at=CampaignCycle.loaded(built_stores, hop),
             declared=Budget(),
             sends=(),
         ):
@@ -3185,7 +3187,7 @@ def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_s
     stored_campaign(built_stores, kept_campaign)
     minted_dataset(built_stores, kept_campaign)
     torn_hop = CycleHop(campaign_id="c__bbbbbb", cycle_id="y")
-    CycleEventLog.open(CycleDir(campaigns.cycle_dir(torn_hop))).append(billed_call(0.25))
+    laid_ledger(campaigns.cycle_dir(torn_hop)).append(billed_call(0.25))
     torn_dir = campaigns.campaign_root_dir(torn_hop.campaign_id)
     assert campaigns.iter_campaign_dirs() == [campaigns.campaign_root_dir(kept_hop.campaign_id)]
     # A launch admitted in the workspace may be that mint in flight, whatever cycle it names.
@@ -3916,7 +3918,11 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Com
 
     with pytest.raises(PassStoppedError):
         async with paid_pass(
-            stores=stores, pass_kind=MeasurementRole.BENCH, hop=held, declared=Budget(), sends=()
+            stores=stores,
+            pass_kind=MeasurementRole.BENCH,
+            at=CampaignCycle.loaded(stores, held),
+            declared=Budget(),
+            sends=(),
         ):
             pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
             await sender.dispatch(CommandCall(pause, door=Door.HOST))

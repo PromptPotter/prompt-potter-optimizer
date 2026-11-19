@@ -506,6 +506,7 @@ class CampaignStore:
         """THE mint, idempotent by content: a re-mint of what stands is a no-op, another refuses.
         *minted* defaults to a root's, with no seed."""
         minted = minted or CycleMintedRecord()
+        self.cycle_dir(hop).mkdir(parents=True, exist_ok=True)
         held = scan_cycle_facts(self.ledger(hop)).minted
         if held is None:
             self.append(hop, minted)

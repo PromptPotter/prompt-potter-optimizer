@@ -44,6 +44,7 @@ from factories import (
     inner_cells,
     inner_sandbox,
     jumping_clock,
+    laid_ledger,
     launched_bank,
     ledger_records,
     loop_session,
@@ -455,8 +456,8 @@ def _change_run_limits(
     payload = ChangeRunLimitsPayload(
         campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, budget=budget, overshoot=overshoot
     )
-    campaign = dispatcher.stores.campaigns.campaign(hop.campaign_id)
-    dispatched = DispatchedToCycle(dispatcher, payload, "limits", campaign, hop, door=Door.HOST)
+    at = _at(dispatcher.stores, hop)
+    dispatched = DispatchedToCycle(dispatcher, payload, "limits", at, door=Door.HOST)
 
     async def apply() -> Applier[ArmedCaps]:
         applier = await change_run_limits(dispatched)
@@ -464,12 +465,12 @@ def _change_run_limits(
         return applier
 
     asyncio.run(apply())
-    return dispatcher.stores.campaigns.armed_budget(campaign, hop)
+    return dispatcher.stores.campaigns.armed_budget(at.campaign, hop)
 
 
 def _at(stores: Stores, hop: CycleHop) -> CampaignCycle:
     """*hop* with its campaign as a launch's door loads it."""
-    return CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop)
+    return CampaignCycle.loaded(stores, hop)
 
 
 # 1. What a call costs
@@ -919,7 +920,7 @@ async def _walk(
     )
 
     # The walk's own ledger: what each launch recorded of the look-ahead it was sent under.
-    started = CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / "walk"))
+    started = laid_ledger(campaign_cycles_dir(campaign) / "walk")
     with (
         scoped(ledger=started),
         mock.patch.object(query_loop, "measure_sample", _measure),
@@ -992,7 +993,7 @@ async def _round(
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
     flag = {"pause": False}
-    ledger = CycleEventLog.open(CycleDir(stores.projects_root / "rounds" / uuid.uuid4().hex))
+    ledger = laid_ledger(stores.projects_root / "rounds" / uuid.uuid4().hex)
 
     def absorbed() -> list[tuple[int, int]]:
         return [
@@ -1251,7 +1252,7 @@ async def test_runs_on_one_backend_never_hold_more_cells_out_than_its_ceiling_to
             sending[run] -= 1
 
     async def _run(run: str) -> CycleEventLog:
-        ledger = CycleEventLog.open(CycleDir(built_stores.projects_root / "machine" / run))
+        ledger = laid_ledger(built_stores.projects_root / "machine" / run)
         session = loop_session(
             built_stores,
             pipeline_schema([]),
@@ -1339,7 +1340,7 @@ async def test_two_walks_out_at_one_position_are_served_and_discarded_as_the_led
     # walk then sends and takes.
     dataset = _dataset()
     backend = _OrderedFakeBackend(len(dataset))
-    ledger = CycleEventLog.open(CycleDir(built_stores.projects_root / "abreast"))
+    ledger = laid_ledger(built_stores.projects_root / "abreast")
     session = loop_session(
         built_stores,
         pipeline_schema([]),
@@ -1700,7 +1701,7 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
     }
     # The ceiling already spent: no cell fits, and the control reads it as reached.
     campaign = tmp_path / "campaign"
-    ledger = CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / "cycle"))
+    ledger = laid_ledger(campaign_cycles_dir(campaign) / "cycle")
     ledger.append(billed_call(0.02, kind="optimizer", node="spent"))
     arm = spend_book(0.02, meters="search_incurred", metered_on=ledger.path)
     session = loop_session(
@@ -1728,7 +1729,7 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
     feed = _filed(built_stores, picked, session)
     with scoped(ledger=ledger):
         # The stopped launch, a cycle of the same campaign, priced the cells it took.
-        stopped = CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / "stopped"))
+        stopped = laid_ledger(campaign_cycles_dir(campaign) / "stopped")
         for s in reread[:3]:
             stopped.append(PricedKeyRecord(priced_key=feed.cell_key(s.key)))
         rescope(priced=campaign)
@@ -1767,7 +1768,7 @@ async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_
 def test_a_ledger_index_serves_the_file_as_it_stands_grown_compacted_raced_and_shared(
     tmp_path: Path,
 ) -> None:
-    index = CycleEventLog.open(CycleDir(tmp_path / "index"))
+    index = laid_ledger(tmp_path / "index")
 
     def bill(n: int, round: int | None = None, log: CycleEventLog = index) -> None:
         for _ in range(n):
@@ -2297,7 +2298,9 @@ def test_a_raised_ceiling_is_reshared_over_every_live_cycle_never_handed_whole_t
         launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0003"), None)
     for job in (job_a, job_b6):
         shared.release(job.job_id, StopReason.TARGET_HIT)
-    open_c, _ = launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0004"), None)
+    pair_c = CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0004")
+    built_stores.campaigns.mint_cycle(pair_c)
+    open_c, _ = launch(pair_c, None)
     with pytest.raises(QuotaExceededError):
         launch(CycleHop(campaign_id="camp-6", cycle_id="cycle_pair0005"), 1.0)
     shared.release(open_c.job_id, StopReason.TARGET_HIT)
@@ -2813,7 +2816,7 @@ def test_an_overshoot_switched_on_before_the_launch_wires_its_cycle_is_served_on
     built_stores.campaigns.mint_cycle(hop)
     built_stores.campaigns.append(hop, StandingBudgetRecord(overshoot=True))
     built_stores.campaigns.append(hop, run_wiring())
-    limits = built_stores.campaigns.run_limits(*_at(built_stores, hop))
+    limits = built_stores.campaigns.run_limits(_at(built_stores, hop).campaign, hop)
     assert limits is not None and limits.overshoot, (
         "a standing switch landing before the wiring was dropped from the served limits"
     )
@@ -3116,7 +3119,7 @@ def test_a_key_two_cycles_of_one_campaign_read_is_priced_once(tmp_path: Path) ->
     rescope(priced=campaign)
     claims = []
     for cycle in ("a", "b"):
-        with scoped(ledger=CycleEventLog.open(CycleDir(campaign_cycles_dir(campaign) / cycle))):
+        with scoped(ledger=laid_ledger(campaign_cycles_dir(campaign) / cycle)):
             claims.append(telemetry.claim_campaign_price("cell"))
     assert claims == [True, False], "a second cycle of the campaign priced a key again"
 
@@ -3884,7 +3887,7 @@ async def _turn(stores: Stores) -> None:
 
 
 async def _bench(stores: Stores) -> None:
-    await grade_line_bench(stores=stores, hop=_HELD_HOP, acting="bench")
+    await grade_line_bench(stores=stores, at=_at(stores, _HELD_HOP), acting="bench")
 
 
 _SPENT_THE_COUPON = {
@@ -4069,7 +4072,7 @@ def test_a_cycle_retaken_after_a_killed_bench_pass_closes_its_dead_bracket(
         async with paid_pass(
             stores=killed,
             pass_kind=MeasurementRole.BENCH,
-            hop=_HELD_HOP,
+            at=_at(killed, _HELD_HOP),
             declared=Budget(),
             sends=_CELLS,
         ):
@@ -4415,7 +4418,7 @@ def test_a_paid_verb_never_bills_a_cycle_its_producer_still_holds(tmp_path: Path
         async with paid_pass(
             stores=held_stores,
             pass_kind=MeasurementRole.BENCH,
-            hop=_HELD_HOP,
+            at=_at(held_stores, _HELD_HOP),
             declared=Budget(),
             sends=_CELLS,
         ):
@@ -4478,7 +4481,7 @@ def test_a_scoring_pass_holds_a_slot_and_its_reservation_against_a_launch_beside
         async with paid_pass(
             stores=passing,
             pass_kind=MeasurementRole.VERIFY,
-            hop=None,
+            at=None,
             declared=Budget(),
             sends=_CELLS,
         ) as pass_book:
@@ -4506,6 +4509,7 @@ def test_a_budget_change_leaves_the_axis_it_did_not_touch_alone(tmp_path: Path) 
     hop = CycleHop(campaign_id="camp-3", cycle_id="cycle_budget0000")
     campaign = minted_campaign(hop)
     metered.campaigns.create_campaign(campaign)
+    metered.campaigns.mint_cycle(hop)
     registry = JobRegistry(metered.jobs_dir, capacity=lambda _live: 1)
     job = registry.request_slot(
         user_id="sub-9",
@@ -4718,7 +4722,7 @@ def test_the_served_spend_cap_reads_the_count_its_books_stop_reads(tmp_path: Pat
         hold_id=job,
         headroom=Budget(),
         metered_on=ledger.path,
-        meters=ceiling_meter(Optimize()),
+        meters=ceiling_meter(_at(stores, hop).campaign.declaration.purpose),
         opened=0.0,
     )
     assert book.exhausted() is ErrorCategory.SPEND_CEILING, "vacuous — the lapse never tipped it"
@@ -4754,7 +4758,7 @@ def test_a_door_reads_a_live_runs_bench_set_aside_as_its_book_stops_on_it(tmp_pa
         Lapse(hold_id=cell, bound=bound),
     ):
         stores.charges.append(record)
-    meters = ceiling_meter(Optimize())
+    meters = ceiling_meter(_at(stores, hop).campaign.declaration.purpose)
     book = SpendBook(
         declared=Budget(),
         share=Budget(usd=0.5),
@@ -4852,6 +4856,24 @@ def test_of_two_set_limits_raises_the_second_reads_the_wallet_after_the_firsts_r
     assert reserved <= 0.30 + 1e-9, (
         f"two set-limits reserved ${reserved:.2f} on a $0.30 coupon: the second read the wallet "
         "before the first's reserve landed"
+    )
+
+
+def test_a_set_limits_raced_by_a_delete_answers_not_found_and_leaves_no_campaign_dir(
+    tmp_path: Path,
+) -> None:
+    # Its door loaded the campaign; the delete lands before its append.
+    stores = _web_account(tmp_path, "sub-g")
+    hop = CycleHop(campaign_id="camp-g", cycle_id="cycle_gone0000")
+    stores.campaigns.create_campaign(minted_campaign(hop))
+    stores.campaigns.mint_cycle(hop)
+    at = _at(stores, hop)
+    stores.campaigns.delete_campaign(hop.campaign_id, keep_results=False)
+    registry = JobRegistry(tmp_path / "jobs-g", capacity=lambda _live: 1)
+    with pytest.raises(NotFoundError):
+        change_budget(Budget(usd=0.2), stores=stores, job_registry=registry, at=at, sends=_CELLS)
+    assert not stores.campaigns.campaign_root_dir(hop.campaign_id).exists(), (
+        "an append after the delete re-created a campaign no manifest names"
     )
 
 
@@ -5564,7 +5586,7 @@ def test_a_delete_torn_at_its_tree_commits_at_its_tombstone_and_admits_nothing_a
         async with paid_pass(
             stores=stores,
             pass_kind=MeasurementRole.BENCH,
-            hop=root_hop,
+            at=_at(stores, root_hop),
             declared=Budget(usd=1.0),
             sends=(),
         ):
@@ -5903,7 +5925,7 @@ def test_a_campaign_id_is_drawn_again_over_a_live_dir_a_tombstone_and_a_charged_
     live.mkdir(parents=True)
     (live / "mark").write_text("live", encoding="utf-8")
     gone = CycleHop(campaign_id=f"{prefix}__bbbbbb", cycle_id="cycle-0")
-    CycleEventLog.open(CycleDir(campaigns.cycle_dir(gone))).append(billed_call(0.1))
+    laid_ledger(campaigns.cycle_dir(gone)).append(billed_call(0.1))
     assert campaigns.delete_campaign(f"{prefix}__bbbbbb", keep_results=True)
     wiped = CycleHop(campaign_id=f"{prefix}__dddddd", cycle_id="cycle-0")
     built_stores.charges.append(

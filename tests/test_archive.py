@@ -1652,7 +1652,7 @@ def test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent(
 
     async def past_its_refusals(admitted: Admitted) -> Any:
         # The journey asks what the held fork does to its parent, not what holds it.
-        return SimpleNamespace(start=admitted.start, session=admitted.request)
+        return SimpleNamespace(start=admitted.start, session=admitted.request.at)
 
     monkeypatch.setattr(Admitted, "held", past_its_refusals)
     asyncio.run(

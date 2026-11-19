@@ -686,9 +686,7 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
 
 
 def _render_campaign_log_md(session: Session) -> None:
-    store, campaign = session.store.campaigns, session.campaign
-    if campaign is None:
-        return
+    store, campaign = session.store.campaigns, session.bound_campaign
     campaign_id, root = campaign.campaign_id, campaign.root_hop
     index = store.load(root, moment=None)
     if not index:
@@ -729,7 +727,6 @@ def _render_export(session: Session, config: CampaignConfig) -> None:
     index = store.load(hop, moment=None)
     series = store.standing_rounds(hop, moment=None).level_series
     rounds = _banked_rounds(session, hop)
-    campaign = session.campaign
     bench = scan_closed_bench(store.ledger(hop))
     if (
         index is None
@@ -750,7 +747,7 @@ def _render_export(session: Session, config: CampaignConfig) -> None:
         cycle_id=session.cycle_id,
         dataset_name=session.measured_dataset,
         dataset_hash=session.bank.dataset_hash,
-        treatment=None if campaign is None else campaign.treatment,
+        treatment=session.bound_campaign.treatment,
         stop_reason=index.stop_reason,
         finished_at=index.finished_at,
         formula=index.scorer_cell_formula,
@@ -772,7 +769,6 @@ def _render_review_md(session: Session, config: CampaignConfig) -> None:
     if not index or not rounds:
         return
     cycle_dir = store.cycle_dir(session.hop)
-    campaign = session.campaign
     framing = campaign_framing(session.store, config, session.dataset)
     content = render_review_md(
         index,
@@ -786,8 +782,8 @@ def _render_review_md(session: Session, config: CampaignConfig) -> None:
         fitness_ceiling=config.fitness_ceiling,
         optimizer=select_optimizer(config.optimization),
         # Read only once the cycle has ended: nothing renders the headline before then.
-        bench=read_cycle_bench(session.store, campaign, session.hop)
-        if index.final is not None and campaign is not None
+        bench=read_cycle_bench(session.store, session.bound_campaign, session.hop)
+        if index.final is not None
         else None,
         spend=scan_ledger_spend(store.chain(session.hop)).spend,
     )

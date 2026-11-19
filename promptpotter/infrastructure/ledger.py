@@ -9,6 +9,7 @@ from promptpotter.domain.records.run_records import CycleMintedRecord
 from promptpotter.infrastructure.store.io import append_jsonl
 from promptpotter.infrastructure.store.layout import WORKSPACE_STATE_DIR, CycleLayout
 from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, Moment, scan_last
+from promptpotter.shared.errors import NotFoundError
 
 
 def _fork_link(cycle_dir: Path) -> tuple[CycleMintedRecord, Path] | None:
@@ -54,8 +55,12 @@ class CycleEventLog:
 
     @classmethod
     def open(cls, cycle_dir: CycleDir) -> CycleEventLog:
+        """Makes `.runtime/` alone: a cycle's dir is its mint's, so a vanished one is never re-made."""
         ledger_path = CycleLayout(Path(cycle_dir)).ledger
-        ledger_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            ledger_path.parent.mkdir(exist_ok=True)
+        except FileNotFoundError:
+            raise NotFoundError(f"cycle {Path(cycle_dir).name!r} is gone") from None
         return cls(ledger_path)
 
     @staticmethod

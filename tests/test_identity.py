@@ -40,6 +40,7 @@ from factories import (
     inner_sandbox,
     inner_seat,
     jumping_clock,
+    laid_ledger,
     ledger_records,
     loop_session,
     measurement,
@@ -137,6 +138,7 @@ from promptpotter.application.jobs.mint import (
     resolve_cycle_plan,
     resolve_resume,
 )
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -2947,7 +2949,7 @@ def held(built_stores: Stores, decl: _Declared) -> _Held:
             dataset_hash=opened.bank.dataset_hash,
         ),
     )
-    opened = opened.bound(held_campaign.root_hop, campaign=held_campaign)
+    opened = opened.bound(CampaignCycle(held_campaign, held_campaign.root_cycle_id))
     opened.record_resolved_run()
     resolve_resume(opened, held_campaign, rows_30)
     assert read_active_pointer(stores.base_dir) != held_campaign.root_hop, (
@@ -3185,7 +3187,7 @@ def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
     partition = stores.campaigns.last(held_campaign.root_hop, PartitionRecord)
     assert partition is not None, "the held campaign banked no partition"
     stores.campaigns.append(steered_hop, partition)
-    steered_fork = opened.bound(steered_hop, campaign=held_campaign)
+    steered_fork = opened.bound(CampaignCycle(held_campaign, steered_hop.cycle_id))
     steered_fork.record_resolved_run()
     resolve_resume(steered_fork, held_campaign, rows_30)
     with pytest.raises(ConfigDriftError):
@@ -3486,7 +3488,7 @@ def test_a_projection_that_cannot_write_is_one_stale_file_warning(tmp_path: Path
         def _handle_round_warning(self, record: RoundWarningRecord) -> None:  # noqa: ARG002 -- routed by its annotation
             raise OSError("disk full")
 
-    faulty = CycleEventLog.open(CycleDir(tmp_path / "campaigns" / "c" / "cycles" / "faulty"))
+    faulty = laid_ledger(tmp_path / "campaigns" / "c" / "cycles" / "faulty")
     with LedgerIndex.of(faulty.path).projecting() as held:
         held.add(_Unwritable())
         offsets = [
@@ -4231,6 +4233,7 @@ def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stor
     l4_bank, drawn_bank, recut = _recut_banks(built_stores)
     built_stores.tenant_datasets.relabel("recut", recut.dataset_hash)
     hop = CycleHop(campaign_id="camp-recut", cycle_id="cycle_recut")
+    built_stores.campaigns.mint_cycle(hop)
     built_stores.campaigns.append(
         hop,
         PartitionRecord.of(
@@ -4241,7 +4244,7 @@ def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stor
     relabelled = built_stores.tenant_datasets.labelled("recut")
     assert relabelled is not None
     resumed = loop_session(built_stores, pipeline_schema([]), list(relabelled.samples))
-    resumed = resumed.bound(hop, campaign=minted_campaign(hop))
+    resumed = resumed.bound(CampaignCycle(minted_campaign(hop), hop.cycle_id))
     assert resumed.bank == drawn_bank, (
         "a resume after a re-cut switched its cycle onto the new bank"
     )

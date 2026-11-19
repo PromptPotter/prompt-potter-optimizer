@@ -943,24 +943,8 @@ def declare_line_bench(
     scorer = scorer_of(config, verifier_graded=False)
     # The index says `selecting` / `ending` only once the run closes; the launch's own word wins.
     run = live_cycle_run(stores, hop)._replace(selecting=selecting, ending=ending)
-    campaign = session.campaign
-    if campaign is None or not hop.cycle_id:
-        split = config.dataset_split
-        line = BenchLine(
-            hop=hop,
-            on_live_cycle=False,
-            inner=stores.inner,
-            refused=None if campaign is None else _refused(stores, campaign),
-            held_by=None,
-            trigger=config.bench_trigger,
-            held_out=0 if split is None else split.bench,
-            instrument_id=session.instrument_id,
-            run=run,
-            spend=None,
-        )
-        score = read_bench(stores, None, scorer, line=line)
-    else:
-        held = passes if passes is not None else line_passes(stores, campaign)
-        score = bench_under(stores, campaign, hop, held, config, scorer, run=run)
+    campaign = session.bound_campaign
+    held = passes if passes is not None else line_passes(stores, campaign)
+    score = bench_under(stores, campaign, hop, held, config, scorer, run=run)
     append_record(BenchScoredRecord(bench=score))
     return score

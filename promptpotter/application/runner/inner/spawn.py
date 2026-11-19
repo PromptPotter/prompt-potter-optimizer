@@ -215,7 +215,7 @@ def _continue_inner_campaign(
             "producer owns it, and two runs writing one cycle is not a measurement",
             spent={},
         )
-    bound = session.bound(hop, campaign=campaign)
+    bound = session.bound(CampaignCycle(campaign, hop.cycle_id))
     try:
         plan = resolve_resume(bound, campaign, train_data)
     except ConfigDriftError as refused:
@@ -313,7 +313,7 @@ async def _run_inner_campaign(
                 config,
                 stores=session.store,
                 holder=InnerRun(cell.spec.inner_dataset),
-                at=CampaignCycle(session.bound_campaign, session.hop),
+                at=session.at,
                 sends=(),
                 run=lambda held: run_optimization(
                     opened.train_data,

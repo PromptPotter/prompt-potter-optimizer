@@ -31,12 +31,11 @@ async def change_run_limits(
     dispatched: DispatchedToCycle[ChangeRunLimitsPayload],
 ) -> Applier[ArmedCaps]:
     """Answers the caps as ARMED, each against its own book: a clamp is said where it was made."""
-    dispatcher, hop, change = dispatched.dispatcher, dispatched.hop, dispatched.payload
-    at = quota.CampaignCycle(dispatched.campaign, hop)
+    dispatcher, at, change = dispatched.dispatcher, dispatched.at, dispatched.payload
 
     async def _apply() -> ArmedCaps:
         await _apply_change_run_limits(dispatcher, at, change)
-        return await asyncio.to_thread(current_caps, dispatcher.stores, hop)
+        return await asyncio.to_thread(current_caps, dispatcher.stores, at.hop)
 
     return Applier(_apply)
 
@@ -61,7 +60,9 @@ def _change_budget(
         job_registry=dispatcher.job_registry,
         at=at,
         # A change naming no money axis reads no config: it sends nothing a clamp asks of.
-        sends=campaign_sends(stores, *at) if change.budget.named & MONEY_AXES else (),
+        sends=campaign_sends(stores, at.campaign, at.hop)
+        if change.budget.named & MONEY_AXES
+        else (),
     )
 
 

@@ -35,7 +35,7 @@ from promptpotter.application.jobs.launcher.admission import (
     slotless_share,
 )
 from promptpotter.application.jobs.mint import declare, mint_framed_cycle
-from promptpotter.application.jobs.quota import CampaignCycle, sends_on
+from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
     SelectedOptimizer,
@@ -643,7 +643,7 @@ def seat(
         }
     )
     hop = hop or CycleHop(campaign_id="seats", cycle_id=f"seat{next(_SEATS)}")
-    CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    stores.campaigns.mint_cycle(hop)
     session = loop_session(
         stores,
         schema,
@@ -882,7 +882,8 @@ def minted_dataset(stores: Stores, campaign: Campaign) -> None:
 
 
 def stored_campaign(stores: Stores, campaign: Campaign) -> None:
-    """Stored as the mint stores it: the root's resolved run lands before the manifest."""
+    """Stored as the mint stores it: the root minted, its resolved run landed before the manifest."""
+    stores.campaigns.mint_cycle(campaign.root_hop)
     node = {"type": "llm", "config": {"model": "m"}}
     stores.campaigns.write_resolved_run(
         campaign.root_hop,
@@ -897,6 +898,12 @@ def stored_campaign(stores: Stores, campaign: Campaign) -> None:
         model_capabilities={},
     )
     stores.campaigns.create_campaign(campaign)
+
+
+def laid_ledger(cycle_dir: Path) -> CycleEventLog:
+    """A scratch ledger in a directory laid as a mint lays one: `open` never creates the cycle."""
+    cycle_dir.mkdir(parents=True, exist_ok=True)
+    return CycleEventLog.open(CycleDir(cycle_dir))
 
 
 def walking_cycle(stores: Stores) -> tuple[CycleHop, Path]:
@@ -1050,7 +1057,7 @@ async def inner_seat(
                 opened.cycle.config,
                 stores=session.store,
                 holder=InnerRun(LAUNCHED_DATASET),
-                at=CampaignCycle(session.bound_campaign, session.hop),
+                at=session.at,
                 sends=(),
                 run=lambda held: launched_round(
                     session, opened.cycle, opened.optimizer, held, round_num=round_num

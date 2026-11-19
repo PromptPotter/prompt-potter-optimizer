@@ -297,7 +297,7 @@ def launch_cancels(
 
 
 async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[Launched]:
-    dispatcher, payload, hop = dispatched.dispatcher, dispatched.payload, dispatched.hop
+    dispatcher, payload, hop = dispatched.dispatcher, dispatched.payload, dispatched.at.hop
     stores = dispatcher.stores
     _press_admitted(dispatcher, payload)
 
@@ -307,9 +307,7 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
             stores.campaigns.rewind_enters(hop, after)
         admitted = await asyncio.to_thread(
             admit,
-            ExistingCycle(
-                hop, dispatched.campaign, payload.budget, step_rounds=payload.step_rounds
-            ),
+            ExistingCycle(dispatched.at, payload.budget, step_rounds=payload.step_rounds),
             payload.mode,
             stores=stores,
             job_registry=dispatcher.job_registry,
@@ -322,22 +320,16 @@ async def start_run(dispatched: DispatchedToCycle[StartRunPayload]) -> Applier[L
 
 
 async def fork_cycle(dispatched: DispatchedToCycle[ForkCyclePayload]) -> Applier[Launched]:
-    dispatcher, payload, campaign, hop = (
-        dispatched.dispatcher,
-        dispatched.payload,
-        dispatched.campaign,
-        dispatched.hop,
-    )
+    dispatcher, payload, at = dispatched.dispatcher, dispatched.payload, dispatched.at
     stores = dispatcher.stores
     _press_admitted(dispatcher, payload)
-    start = parse_cycle_start(payload.start, stores, campaign, hop)
+    start = parse_cycle_start(payload.start, stores, at.campaign, at.hop)
 
     async def _apply_fork() -> Launched:
         cut = cut_operator_fork(stores, payload, start)
         # Bounded as a start-run is: the payload's own budget, admitted from what the parent leaves.
-        return await _launch_fork(
-            dispatched, cut, ExistingCycle(cut.child, campaign, payload.budget), payload.mode
-        )
+        child = ExistingCycle(at._replace(cycle_id=cut.child.cycle_id), payload.budget)
+        return await _launch_fork(dispatched, cut, child, payload.mode)
 
     return _launch_applier(dispatcher, _apply_fork)
 

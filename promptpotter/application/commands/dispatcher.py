@@ -12,9 +12,9 @@ from pydantic import BaseModel, TypeAdapter
 from promptpotter.application.cycle_addressing import resolve_cycle, resolve_subject
 from promptpotter.application.datasets.draft_campaign import owned_draft
 from promptpotter.application.jobs.launcher.launch import Inline, LaunchOutcome
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.views.render.phase import stop_next_lines
-from promptpotter.domain.campaign import Campaign
 from promptpotter.domain.command_events import (
     WORKSPACE_SUBJECT,
     CommandAckRecord,
@@ -178,7 +178,7 @@ class Applier[R]:
     @staticmethod
     def for_loop(dispatched: DispatchedToCycle[Any], refusal: str) -> Applier[object]:
         """Stamped with the hold read beside *refusal*: a run takes only a pause of its own."""
-        held = dispatched.dispatcher.stores.campaigns.holder(dispatched.hop)
+        held = dispatched.dispatcher.stores.campaigns.holder(dispatched.at.hop)
         job = None if held is None else held.job
         standing = StandingEffect(hold=None if job is None else job.job_id)
 
@@ -201,8 +201,7 @@ class Dispatched[P: CommandPayload]:
 
 @dataclass(frozen=True, slots=True)
 class DispatchedToCycle[P: CommandPayload](Dispatched[P]):
-    campaign: Campaign
-    hop: CycleHop
+    at: CampaignCycle
 
 
 @dataclass(frozen=True, slots=True)
@@ -490,11 +489,11 @@ class CommandDispatcher:
         self, call: CommandCall[LiveCyclePayload], recorded: _Recorded
     ) -> Opened[object, LiveCyclePayload]:
         campaign = self.stores.campaigns.campaign(call.payload.campaign_id)
-        hop = self.stores.campaigns.live_cycle(campaign.root_hop)
+        at = CampaignCycle(campaign, self.stores.campaigns.live_cycle(campaign.root_hop).cycle_id)
         applier = await self._applier(
-            DispatchedToCycle(self, call.payload, call.command_id, campaign, hop, door=call.door)
+            DispatchedToCycle(self, call.payload, call.command_id, at, door=call.door)
         )
-        subject = subject_key(self.stores.subject(hop))
+        subject = subject_key(self.stores.subject(at.hop))
         return await self._filed(subject, call, applier, recorded)
 
     async def _on_cycle(
@@ -508,14 +507,14 @@ class CommandDispatcher:
             return await CommandDispatcher(
                 leaf_stores, job_registry=self._attached, inline=self.inline
             )._on_cycle(replace(call, payload=_at_leaf(payload, leaf)), recorded)
-        campaign_id, cycle_id = hop.campaign_id, hop.cycle_id
-        campaign = self.stores.campaigns.campaign(campaign_id)
+        at = CampaignCycle(self.stores.campaigns.campaign(hop.campaign_id), hop.cycle_id)
         if self.stores.campaigns.load(hop, moment=None) is None:
             raise NotFoundError(
-                f"cycle not found: {campaign_id}/{cycle_id}", code="command_target_not_found"
+                f"cycle not found: {hop.campaign_id}/{hop.cycle_id}",
+                code="command_target_not_found",
             )
         applier = await self._applier(
-            DispatchedToCycle(self, payload, call.command_id, campaign, hop, door=call.door)
+            DispatchedToCycle(self, payload, call.command_id, at, door=call.door)
         )
         subject = subject_key(self.stores.subject(hop))
         return await self._filed(subject, call, applier, recorded)

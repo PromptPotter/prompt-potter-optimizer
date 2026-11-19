@@ -26,12 +26,12 @@ def read_payload_file(path: Path) -> Any:
 
 async def pause_cycle(dispatched: DispatchedToCycle[PauseCyclePayload]) -> Applier[object]:
     return Applier.for_loop(
-        dispatched, dispatched.dispatcher.stores.run_state(dispatched.hop).pause_refusal
+        dispatched, dispatched.dispatcher.stores.run_state(dispatched.at.hop).pause_refusal
     )
 
 
 async def submit_arms(dispatched: DispatchedToCycle[SubmitArmsPayload]) -> Applier[object]:
-    state = dispatched.dispatcher.stores.run_state(dispatched.hop)
+    state = dispatched.dispatcher.stores.run_state(dispatched.at.hop)
     return Applier.for_loop(dispatched, state.arms_refusal(dispatched.payload.keep))
 
 
@@ -39,7 +39,7 @@ async def skip_searchpoint(
     dispatched: DispatchedToCycle[SkipSearchpointPayload],
 ) -> Applier[object]:
     return Applier.for_loop(
-        dispatched, dispatched.dispatcher.stores.run_state(dispatched.hop).skip_refusal
+        dispatched, dispatched.dispatcher.stores.run_state(dispatched.at.hop).skip_refusal
     )
 
 
@@ -58,5 +58,5 @@ async def set_sample_lookahead(
         dispatched,
         ""
         if payload.auto
-        else dispatched.dispatcher.stores.run_state(dispatched.hop).lookahead_refusal,
+        else dispatched.dispatcher.stores.run_state(dispatched.at.hop).lookahead_refusal,
     )

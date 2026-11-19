@@ -598,7 +598,7 @@ def _read(
             origin=campaign.root_content_hash,
         )
     )
-    budget = next_launch_budget(config, stores=stores, at=CampaignCycle(campaign, hop))
+    budget = next_launch_budget(config, stores=stores, at=CampaignCycle(campaign, hop.cycle_id))
     optimization = config.optimization
     # Live off the line's ledgers once a launch has ended: before one, nothing is banked to read.
     launches = line_launches(stores, campaign)

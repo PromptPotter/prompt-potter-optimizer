@@ -19,22 +19,22 @@ async def verify_candidate(
 ) -> Applier[PassGradedRecord | VerifySaturated]:
     """Answers the graded pass, or what was already measured where that is every sample; its end
     keeps that answer, so a retry and its task's result read this pass, never a later one."""
-    stores, hop, payload = dispatched.dispatcher.stores, dispatched.hop, dispatched.payload
+    stores, at, payload = dispatched.dispatcher.stores, dispatched.at, dispatched.payload
 
     async def _apply_verify() -> PassGradedRecord | VerifySaturated:
-        passes.refuse_unverifiable(stores, hop)
+        passes.refuse_unverifiable(stores, at)
         # Taken HERE, not inside `verify_candidate`: the loop's saturation check calls that under its book.
         async with paid_pass(
             stores=stores,
             pass_kind=MeasurementRole.VERIFY,
-            hop=hop,
+            at=at,
             declared=Budget(),
-            sends=campaign_sends(stores, dispatched.campaign, hop),
+            sends=campaign_sends(stores, at.campaign, at.hop),
             acting=dispatched.command_id,
         ):
             return await passes.verify_candidate(
                 stores=stores,
-                hop=hop,
+                at=at,
                 candidate_id=payload.candidate_id,
                 samples=payload.samples,
                 strategy=payload.strategy,
@@ -47,7 +47,7 @@ async def verify_candidate(
 
 async def held_out(dispatched: DispatchedToCycle[HeldOutPayload]) -> Applier[BenchScore]:
     """Answers the line's headline, which its end keeps."""
-    stores, hop = dispatched.dispatcher.stores, dispatched.hop
+    stores, at = dispatched.dispatcher.stores, dispatched.at
     return Applier(
-        lambda: passes.grade_line_bench(stores=stores, hop=hop, acting=dispatched.command_id)
+        lambda: passes.grade_line_bench(stores=stores, at=at, acting=dispatched.command_id)
     )

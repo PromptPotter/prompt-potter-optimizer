@@ -19,6 +19,7 @@ from pydantic import TypeAdapter, model_validator
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import RunStart, refuse_campaign
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
 from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.run_observers import build_run_observers
@@ -312,7 +313,7 @@ async def run_job(spec: JobSpec) -> StopOutcome | None:
     async with AsyncExitStack() as closing:
         try:
             opened = await closing.enter_async_context(
-                ExistingCycle(spec.hop, campaign, Budget()).open(stores)
+                ExistingCycle(CampaignCycle(campaign, spec.hop.cycle_id), Budget()).open(stores)
             )
         except BaseException as exc:  # noqa: BLE001
             await asyncio.to_thread(start.release, exc, stamps=spec.hop)

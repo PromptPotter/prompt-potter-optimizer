@@ -519,7 +519,7 @@ def binding_run_limits(
     stores: Stores, at: CampaignCycle, config: CampaignConfig | None, run: RunState
 ) -> RunLimits | None:
     """``None`` on a cycle that has declared no wiring yet."""
-    limits = stores.campaigns.run_limits(*at)
+    limits = stores.campaigns.run_limits(at.campaign, at.hop)
     return None if limits is None else _binding(stores, at, config, run, limits)
 
 
@@ -579,7 +579,7 @@ def armed_caps(
 ) -> ArmedCaps:
     """THE caps as they bind now, each against its own book: the spend book's count, this cycle's
     rounds closed after the origin, the clock of the launch in flight."""
-    campaign, hop = at
+    campaign, hop = at.campaign, at.hop
     meter = ceiling_meter(campaign.declaration.purpose)
     held = stores.campaigns.holder(hop) if run.producer.appending else None
     job = None if held is None else held.run
@@ -616,11 +616,13 @@ def campaign_count(
 
 def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:
     """`armed_caps` read whole off the stores: what `set-limits` answers once it applied."""
-    at = CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop)
+    at = CampaignCycle.loaded(stores, hop)
     run = stores.run_state(hop)
-    config = cycle_config(stores, *at).config
+    config = cycle_config(stores, at.campaign, at.hop).config
     # Unwired yet, it stands under what its operator armed, as its first launch will.
-    wired = stores.campaigns.run_limits(*at) or RunLimits(budget=stores.campaigns.armed_budget(*at))
+    wired = stores.campaigns.run_limits(at.campaign, at.hop) or RunLimits(
+        budget=stores.campaigns.armed_budget(at.campaign, at.hop)
+    )
     limits = _binding(stores, at, config, run, wired)
     return armed_caps(
         stores,
@@ -641,8 +643,8 @@ def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkR
 
 
 def fork_remainder(stores: Stores, hop: CycleHop) -> ForkRemainder:
-    at = CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop)
-    config = cycle_config(stores, *at).config
+    at = CampaignCycle.loaded(stores, hop)
+    config = cycle_config(stores, at.campaign, at.hop).config
     return _remainder(stores, hop, binding_run_limits(stores, at, config, stores.run_state(hop)))
 
 
@@ -859,7 +861,7 @@ def served_dashboard(
             standing=None,
         )
     config = cycle_config(stores, campaign, hop).config
-    seat = CampaignCycle(campaign, hop)
+    seat = CampaignCycle(campaign, hop.cycle_id)
     limits = _binding(stores, seat, config, run, folded)
     remainder = _remainder(stores, hop, limits)
     return _serve(

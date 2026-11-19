@@ -11,6 +11,7 @@ from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.cycle_addressing import launched, named_campaign, resolve_cycle_id
 from promptpotter.application.initialization.scoring_scope import open_diagnostic
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.views.render.primitives import bench_readout
 from promptpotter.config.logging import setup_logging
 from promptpotter.domain.command_kinds import Door, HeldOutPayload, VerifyCandidatePayload
@@ -43,7 +44,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
         )
 
     hop = target()
-    async with open_diagnostic(stores, hop) as opened:
+    async with open_diagnostic(stores, CampaignCycle.loaded(stores, hop)) as opened:
         report = ab_replay_cycle(hop, opened.session, opened.config)
 
         scope = f"campaign {report.campaign_id} — {report.n_cycles} cycle(s), {report.n_rounds} round(s)"

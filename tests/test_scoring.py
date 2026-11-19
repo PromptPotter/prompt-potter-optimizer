@@ -49,6 +49,7 @@ from factories import (
     filed_under,
     inner_sandbox,
     jumping_clock,
+    laid_ledger,
     ledger_records,
     level_series,
     loop_session,
@@ -119,6 +120,7 @@ from promptpotter.application.jobs.launcher.admission import (
     PassStoppedError,
     paid_pass,
 )
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.optimizer_manifest import bench_choice, select_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
@@ -2262,7 +2264,7 @@ def _pause_mid_pass(
         async with paid_pass(
             stores=stores,
             pass_kind=MeasurementRole.BENCH,
-            hop=_PEER_HOP,
+            at=CampaignCycle.loaded(stores, _PEER_HOP),
             declared=Budget(),
             sends=(),
         ):
@@ -2291,7 +2293,7 @@ async def _held_pass(
     async with paid_pass(
         stores=stores,
         pass_kind=MeasurementRole.BENCH,
-        hop=_PEER_HOP,
+        at=CampaignCycle.loaded(stores, _PEER_HOP),
         declared=Budget(),
         sends=(),
         acting=acting,
@@ -2540,7 +2542,7 @@ def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
         reached: list[CycleHop] = []
 
         async def _verify_reached(dispatched: Any) -> Any:
-            reached.append(dispatched.hop)
+            reached.append(dispatched.at.hop)
             raise ConflictError("reached")
 
         addressed = Subject.parse(
@@ -4495,7 +4497,7 @@ def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_clos
 ) -> None:
     # What a layer fires is on no close.
     cycle_dir = CycleDir(tmp_path / "fired")
-    fired_ledger = CycleEventLog.open(cycle_dir)
+    fired_ledger = laid_ledger(cycle_dir)
     # Appended here, as the store appends a restate.
     carried = select_optimizer(bench_choice("potter")).slices
     live = SliceMap(carried)

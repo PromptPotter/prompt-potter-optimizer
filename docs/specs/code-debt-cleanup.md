@@ -617,30 +617,28 @@ and derived the knob couplings from each member's draws and the escalation ladde
   pins `promptpotter==0.8.20` while the ledger fixes it against the current API. Action: the
   harness names the release it runs against, and a fix to it targets that release. **Rides with:** the
   next chain touching `paper/bbeh-comparison/`.
-- **A cycle's directory is minted by whichever append reaches it first** (load-2's review):
-  `ledger.py::CycleEventLog.open` mkdirs `parents=True`, and no mint creates `cycles/<id>/` itself.
-  Set-limits racing `delete-campaign` (no keep_results) appends after the rmtree: the scans default
-  on the missing ledger, the append re-creates `campaigns/<id>/cycles/…` with no manifest, hidden
-  from `iter_campaign_dirs` and walked by `cycle_hops`. A state the system enters and never
-  reports; main had the window, load-2's carried `Campaign` widened it. Action: each mint door (root,
-  fork, inner sandbox, draft) creates its cycle dir; `open` mkdirs `.runtime/` only, so
-  `CampaignStore.append` on a vanished cycle answers not-found. **Re-test:** a delete between a
-  door's load and its append leaves no `campaigns/<id>/` and the command answers not-found.
-- **A launch's address is taken from two sources** (load-2's review):
-  `Session.bound(hop, *, campaign)` reads the partition off `hop` and the campaign id off `campaign`,
-  `quota.py::CampaignCycle(campaign, hop)` likewise, and nothing checks they agree;
-  `CampaignCycle` is a third (campaign, hop) pair beside `ExistingCycle` and `DispatchedToCycle`.
-  Action: one pair, (campaign, cycle id), the hop derived. **Re-test:** no `(campaign, hop)`
-  constructor left; `git grep -c "CampaignCycle(" == 0` or one carrier.
-- **Two pass paths load the campaign twice, and an unbound session is guarded three ways**
-  (load-2's review): `scoring/passes.py:565` beside `admission.py:770`; `output.py::_render_cycle_log_md`
-  raises a bare `RuntimeError` while its sibling returns, `runner/bench.py::declare_line_bench` keeps a
-  `campaign is None` arm, and only test sessions built with `hop=None` reach either. Action: the pass
-  carries its door's `Campaign`; tests bind a hop and the guards go. Tests left by the same landing:
-  `factories.py::loop_session` seats a synthetic `minted_campaign(hop)` disk does not hold,
-  `test_spend.py:4674/4710` hard-code `ceiling_meter(Optimize())`, and nothing calls
-  `bank_campaign_result` now. **Re-test:** one load per pass; `git grep -c "campaign is None" --
-  promptpotter/application/runner` == 0.
+- **A test seat binds a campaign disk does not hold** (load-2's review, cut by load-3):
+  `factories.py::loop_session` seats a synthetic `minted_campaign(hop)`; reading the stored one
+  breaks 19 facts whose fixtures seat a hop (`test_scoring.py::_PEER_HOP`) and store its campaign
+  after, across `test_scoring.py` / `test_security.py`. Action: each seat stores its campaign first,
+  and `loop_session` reads it. **Re-test:** `git grep -c "minted_campaign(hop)" -- tests/factories.py`
+  drops by the seat's one.
+- **A write re-makes a deleted cycle's directories** (load-3's review, probed): load-3 made each mint
+  create its cycle dir and `CycleEventLog.open` refuse a missing one, but `store/io.py::_tmp_beside`
+  (`:248`) and `io.py::_open_lock` (`:486`) `os.makedirs` the whole path, so after a
+  `delete-campaign` a held ledger handle, a `write_json` (`index.json`) or a `take_lock`
+  (`producer.lock`) re-creates `campaigns/<id>/` with no manifest. Doors in the window: set-limits'
+  cycle-axis appends and its arm act outside the admission gate (`quota.py:868/870`,
+  `limits_and_queue.py:78`), `CampaignStore.append` between its `open` and its lock, the reaper's
+  `stores.py::declare_ended`, a fork mint's `store.py:509` `mkdir(parents=True)` after its cut.
+  Root: a write creates its leaf alone, never a chain; the mint doors own every chain. **Re-test:**
+  `<S2>`-style probe: each of the four writers after a delete raises and leaves no `campaigns/<id>/`.
+- **A launch's (campaign, hop) pair is spelled again below `application/`** (load-3's report):
+  `CampaignStore.armed_budget` / `run_limits`, `pipeline_resolve.py::cycle_config` and
+  `admission.py::campaign_sends` take (campaign, hop), where infrastructure cannot import
+  `quota.py::CampaignCycle`. Root: the carrier lives in `domain/` beside `Campaign`.
+  `admission.py:391` re-reads the campaign `at.campaign` holds before `refuse_campaign` (a fresh read
+  under the gate, or a second load: say which). **Rides with:** the next chain owning `admission.py`.
 
 ### batch/31 · box
 

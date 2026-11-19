@@ -18,6 +18,7 @@ from promptpotter.application.datasets.loaders import (
 from promptpotter.application.datasets.prompts import pipeline_node_overlay
 from promptpotter.application.datasets.tabular_ingest import read_answer_terms_file
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.jobs.quota import CampaignCycle
 from promptpotter.application.pipeline_resolve import ServedPipeline, served_pipeline
 from promptpotter.application.scoring.evaluators import (
     connector_report_owner,
@@ -25,8 +26,6 @@ from promptpotter.application.scoring.evaluators import (
 )
 from promptpotter.config.paths import default_projects_root
 from promptpotter.connectors.protocol import PACKAGE_CACHE_KEY, Connector, InProcessWorkload
-from promptpotter.domain.campaign import Campaign
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import BackendRevision, PipelineRead
@@ -244,17 +243,13 @@ async def _session(
 
 
 @asynccontextmanager
-async def bind_cycle_session(
-    stores: Stores,
-    campaign: Campaign,
-    hop: CycleHop,
-) -> AsyncIterator[Session]:
+async def bind_cycle_session(stores: Stores, at: CampaignCycle) -> AsyncIterator[Session]:
     """Bound, never configured: a resume's drift refusal reads the schema before the config lands.
     Its backend client closes as the block exits."""
     async with _session(
         stores,
-        resolve_dataset(stores, campaign.dataset_name),
-        connectors.CONNECTORS.get(campaign.connector),
+        resolve_dataset(stores, at.campaign.dataset_name),
+        connectors.CONNECTORS.get(at.campaign.connector),
         identity=stores.identity,
     ) as session:
-        yield session.bound(hop, campaign=campaign)
+        yield session.bound(at)

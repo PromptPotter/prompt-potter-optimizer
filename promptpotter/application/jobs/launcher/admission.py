@@ -708,7 +708,7 @@ async def paid_pass(
     *,
     stores: Stores,
     pass_kind: MeasurementRole,
-    hop: CycleHop | None,
+    at: CampaignCycle | None,
     declared: Budget,
     sends: tuple[Send, ...],
     acting: str | None = None,
@@ -720,7 +720,7 @@ async def paid_pass(
         _open_pass,
         stores=stores,
         pass_kind=pass_kind,
-        hop=hop,
+        at=at,
         declared=declared,
         sends=sends,
         acting=acting,
@@ -750,7 +750,7 @@ def _open_pass(
     *,
     stores: Stores,
     pass_kind: MeasurementRole,
-    hop: CycleHop | None,
+    at: CampaignCycle | None,
     declared: Budget,
     sends: tuple[Send, ...],
     acting: str | None,
@@ -760,14 +760,13 @@ def _open_pass(
         stores=stores,
         job_registry=job_registry,
         holder=ScoringPass(pass_kind),
-        hop=UNRESOLVED_HOP if hop is None else hop,
+        hop=UNRESOLVED_HOP if at is None else at.hop,
     )
     if job.queued:
         refuse_as_busy(job_registry, job)
     start = RunStart(stores, job_registry, job)
     holding: ProducerHold | None = None
     try:
-        at = None if hop is None else CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop)
         meters: CeilingMeter = (
             "bill" if at is None else ceiling_meter(at.campaign.declaration.purpose)
         )
@@ -795,7 +794,7 @@ def _open_pass(
         book = open_spend_book(
             held,
             stores=stores,
-            hop=hop,
+            hop=None if at is None else at.hop,
             meters=meters,
             opened=time.monotonic(),
             live=False,
