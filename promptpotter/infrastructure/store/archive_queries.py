@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
@@ -14,7 +15,7 @@ from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
-from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, standing
+from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, file_keys, standing
 from promptpotter.infrastructure.store.read_model import LedgerSpan, read_rows
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -126,12 +127,23 @@ def list_populations(stores: Stores, bank: Bank) -> list[ArchiveEntry]:
     return [e for e in entries if load_population(stores, e, bank)]
 
 
-def population_signatures(stores: Stores, bank: Bank) -> dict[str, list[list[Any]]]:
+def signed_populations(stores: Stores, bank: Bank) -> list[tuple[ArchiveEntry, list[list[Any]]]]:
+    """Each configuration beside what moves its population: its cell files and, for a task
+    remembering its own walks, how many of them sit in each (a replay moves no file).
+    A configuration in none of a task's walks is left out unread."""
     sigs = stores.archive.cell_signatures()
-    out: dict[str, list[list[Any]]] = {}
+    own: Counter[str] | None = None
+    if isinstance(scope := memory_scope(), ArmOf):
+        own = Counter(ref.partition(".")[0] for ref in scan_ledger_answers(scope.walks.spans()))
+    out: list[tuple[ArchiveEntry, list[list[Any]]]] = []
     for entry in _configurations_on(stores, bank, frozenset(bank.position_of)):
-        held = stores.archive.signature(entry, sigs) or ()
-        out[entry.config_key] = [list(part) for part in held]
+        sig = [list(part) for part in stores.archive.signature(entry, sigs) or ()]
+        if own is not None:
+            walked = [[key, own[key]] for key in file_keys(entry) if own[key]]
+            if not walked:
+                continue
+            sig += walked
+        out.append((entry, sig))
     return out
 
 

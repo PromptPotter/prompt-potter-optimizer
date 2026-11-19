@@ -188,24 +188,17 @@ class SampleIndex:
 
     def refresh(self, stores: Stores, *, scorer: Scorer) -> None:
         """A population this formula cannot score is SKIPPED, never 0.0, which poisons every reading."""
-        first = self._rows is None
         if self._rows is None:
             self._rows = self._persisted(stores, scorer.id)
             self._replay()
 
-        # Signatures BEFORE populations: one growing between the two keeps the OLDER and refolds.
-        signatures = archive_queries.population_signatures(stores, self._bank)
-        entries = archive_queries.list_populations(stores, self._bank)
-        # A scoped task's memory grows by the answers it REPLAYS, which move no file.
-        scoped = not archive_queries.every_campaign_now()
-
         rows: dict[str, SampleFoldRow] = {}
         moved = 0
-        for entry in entries:
+        # Signed BEFORE loaded: a population growing between the two keeps the OLDER and refolds.
+        for entry, sig in archive_queries.signed_populations(stores, self._bank):
             key = entry.config_key
-            sig = signatures.get(key) or []
             held = self._rows.get(key)
-            if scoped or held is None or held.sig != sig:
+            if held is None or held.sig != sig:
                 population = archive_queries.load_population(stores, entry, self._bank)
                 if not population:
                     continue
@@ -219,8 +212,6 @@ class SampleIndex:
             archive_queries.write_sample_fold(
                 stores, dataset_hash=self._bank.dataset_hash, rows=rows.values()
             )
-        elif not first:
-            return
 
     @classmethod
     def ensure_for(

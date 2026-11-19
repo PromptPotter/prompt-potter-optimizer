@@ -82,6 +82,7 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_version,
 )
 from promptpotter.application.initialization.session import LaunchClock
+from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.intelligence.rasch import candidate_abilities
 from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Admitted, Inline
@@ -189,7 +190,7 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import line_reference, walked_position
-from promptpotter.domain.sample import ArchiveEntry, Bank, Sample
+from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget
@@ -729,6 +730,55 @@ def test_a_controlled_arm_remembers_only_the_answers_its_campaign_walked(
     assert listed() == {"foreign", "shared", "origin"}, "the fence leaked out of the arm"
     assert remembered("shared") == ["no", "no"]
     assert sample_fold_rows(built_stores, dataset_hash=ds.dataset_hash) == [fold_row("x")]
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_an_arms_round_close_folds_its_replay_and_reloads_no_population_it_left(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    archive, campaigns = built_stores.archive, built_stores.campaigns
+    ds = Bank.of(Sample(id=0, query=f"k{i}", ground_truth="g") for i in range(2))
+    hop = CycleHop(campaign_id="arm", cycle_id="cycle_root")
+    campaigns.mint_cycle(hop)
+
+    def bank(name: str, said: list[str], at: int) -> list[str]:
+        entry = filed_under([("", {"individual": name})], ds.dataset_hash, prompt_fields_id=name)
+        cells = [
+            MeasuredCell(sample_key=s.key, predicted=p, ground_truth="g")
+            for s, p in zip(ds.samples, said, strict=True)
+        ]
+        stamp = f"2026-09-28T00:00:{at:02d}Z"
+        return [ref for _, ref, _ in filed(archive, cells, entry, created_at=stamp)]
+
+    def walk(answers: list[str]) -> None:
+        arm_walk(
+            CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop))),
+            ((i, (ds.samples[i].key, answer, False)) for i, answer in enumerate(answers)),
+            role=MeasurementRole.PANEL,
+        )
+
+    walk(bank("left", ["g", "g"], 1))
+    replayed = bank("replayed", ["g", "x"], 2)
+    loaded: list[str] = []
+    load = archive_queries.load_population
+
+    def spy(stores: Stores, entry: ArchiveEntry, bank: Bank) -> list[FiledAnswer]:
+        loaded.append(entry.prompt_fields_id)
+        return load(stores, entry, bank)
+
+    def inside_arm() -> list[float]:
+        rescope(memory=ArmOf(CampaignWalks(campaigns, "arm"), ruler_version=0))
+        scorer, admitted = scorer_of(), frozenset(ds.position_of.values())
+        index = SampleIndex.ensure_for(built_stores, scorer=scorer, bank=ds, sample_ids=admitted)
+        assert index is not None
+        # The arm replays another campaign's answers: its walk lands, no cell file moves.
+        walk(replayed)
+        monkeypatch.setattr(archive_queries, "load_population", spy)
+        index.refresh(built_stores, scorer=scorer)
+        return [record.hit_rate for record in index.records()]
+
+    assert contextvars.copy_context().run(inside_arm) == [1.0, 0.5], "the arm's replay never folded"
+    assert loaded == ["replayed"], "a round close reloaded a population its arm left untouched"
 
 
 # The re-cut moves the name the relabel placed on the bank.

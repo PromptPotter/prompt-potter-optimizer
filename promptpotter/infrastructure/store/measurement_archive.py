@@ -118,7 +118,7 @@ def _fold_key(key: str, dataset_hash: str) -> str:
     return f"{key}|{dataset_hash}"
 
 
-def _file_keys(entry: ArchiveEntry) -> list[str]:
+def file_keys(entry: ArchiveEntry) -> list[str]:
     chain = entry.node_configs
     return [config_key(chain[:n]) for n in range(1, len(chain) + 1)] or [entry.config_key]
 
@@ -440,7 +440,7 @@ class MeasurementArchive:
         with self._lock:
             found = [
                 answer
-                for file_key in _file_keys(entry)
+                for file_key in file_keys(entry)
                 for answer in self._file(file_key).rows
                 if answer.dataset_hash == entry.dataset_hash
             ]
@@ -452,7 +452,7 @@ class MeasurementArchive:
         with self._lock:
             found = [
                 answer
-                for file_key in _file_keys(entry)
+                for file_key in file_keys(entry)
                 for answer in self._file(file_key).rows
                 if answer.cell.sample_key in sample_keys
             ]
@@ -482,7 +482,7 @@ class MeasurementArchive:
         sigs: dict[str, tuple[int, int]] | None = None,
     ) -> tuple[tuple[str, int, int], ...] | None:
         sigs = self.cell_signatures() if sigs is None else sigs
-        keys = sorted(sigs) if entry is None else _file_keys(entry)
+        keys = sorted(sigs) if entry is None else file_keys(entry)
         held = tuple((key, *sigs[key]) for key in keys if key in sigs)
         return held or None
 

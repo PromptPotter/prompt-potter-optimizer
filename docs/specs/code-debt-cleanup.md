@@ -123,9 +123,6 @@ row it closes.
   prior's arm (its walk continues the prior's pass, `held` = the prior's rows). **Rides with:** rk-opt's
   next chain. **Re-test:** a CAPO race settled `locked_in`: the leader's last `running` before the close
   counts the cells `rows(leader)` holds.
-- **A round close re-folds the bank's whole archive**: `SampleIndex.refresh` re-folds the bank's
-  whole archive history at every round close for compare arms and L4 cells (`sample.py:195-248`), and
-  the local archive sits at 29.96 MB of `_CellFile`'s 32 MB cap. **Rides with:** rk-opt's next chain.
 - **Overlap and repair keep their own pass families**: `RoundCells.overlap` and `RoundRestatedRecord`
   carry their passes beside `VerificationPass`. Action: both ride the one record. **Held (design
   fork):** (a) each overlap top-up is a `VerificationPass` of a new `overlap` kind on the round, and
