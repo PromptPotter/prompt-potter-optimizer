@@ -25,8 +25,8 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store.account_spend import bank_spend
+from promptpotter.infrastructure.store.io import DRAFTS_DIR
 from promptpotter.infrastructure.store.layout import (
-    DRAFTS_DIR,
     inner_sandboxes_dir,
     read_sandbox_owner,
 )

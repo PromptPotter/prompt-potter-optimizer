@@ -14,7 +14,7 @@ from promptpotter.domain.campaign import LifecycleStatus
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.infrastructure.store.data_root import LEAF_INFO, Leaf, campaign_row
-from promptpotter.infrastructure.store.io import iter_files, read_json_tolerant
+from promptpotter.infrastructure.store.io import CAMPAIGNS_DIR, iter_files, read_json_tolerant
 from promptpotter.infrastructure.store.layout import ArchiveHomeOwner
 from promptpotter.infrastructure.store.stores import Stores
 
@@ -138,7 +138,7 @@ def workspace_storage(stores: Stores) -> WorkspaceStorageResponse:
     home_bytes = sum(_dir_size(home.root / name) for name in SHARED_CACHE_DIRS)
     # Both halves read the ONE declaration: a tenant's own home is its workspace, so a cache in the
     # sum but not the skip set counts twice.
-    other = _dir_size(stores.base_dir, skip=frozenset({"campaigns", *SHARED_CACHE_DIRS}))
+    other = _dir_size(stores.base_dir, skip=frozenset({CAMPAIGNS_DIR, *SHARED_CACHE_DIRS}))
     owned = home_bytes if home.owner == "tenant" else 0
     return WorkspaceStorageResponse(
         total_bytes=campaigns_total + owned + other,

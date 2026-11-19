@@ -170,7 +170,11 @@ BASELINE = {
     # link 3 (+37): `statistics.py::difference_interval` (Newcombe's hybrid score, Welch's), the
     # verify's band of fresh − recorded, and `declared_two_valued`, the one check of a declaration.
     # link 4 (+4): `metric_measurand` maps the core `fitness` channel to its grade, nothing else.
-    "package_lines": 112090,
+    # store-3 (+14): a draft is a third deleted unit (`io.py::_ANCHORS`), and an anchor is matched
+    # whole from the data root (`io.py::_plain`), so a nested root and a slug `projects/a/campaigns/b` write.
+    # store-3b (+5): `io.py::claim_dir`, a campaign's exclusive create through io; `_created` answers
+    # "gone" only where the unit is absent. `cycle_reads.py::write_export` (+1): an export follows the umask.
+    "package_lines": 112110,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

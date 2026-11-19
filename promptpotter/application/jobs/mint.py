@@ -92,7 +92,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_framing,
     runnable_definition,
 )
-from promptpotter.infrastructure.store.io import validate_path_component
+from promptpotter.infrastructure.store.io import make_dirs, validate_path_component
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PayloadInvalidError
@@ -692,7 +692,7 @@ async def _mint_after_framing(
     assert session.dataset_name, "a framing commits to the dataset the session opened"
     drafts = session.store.drafts
     draft_id = mint_draft_id()
-    drafts.draft_dir(draft_id).mkdir(parents=True)
+    make_dirs(drafts.draft_dir(draft_id))
     try:
         with scoped(ledger=draft_ledger(session.store, draft_id)):
             async with paid_call(

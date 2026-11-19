@@ -729,35 +729,29 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   key. Root: a shape's loading behaviour has no digest beyond its JSON schema. **Rides with:** rel.
   **Re-test:** edit a validator a survivor's model runs; `landing_key()` moves.
 
-### wave-5 · store (what store-2f and store-2g left at their landing)
+### wave-5 · store (what store-2f, store-2g and store-3b left at their landing)
 
-- **A cycle read still takes (campaign, hop)**: `cycle_reads.py::_closed` and
-  `pipeline_resolve.py::permitted_narrowing` (an optional `hop`) take the pair `CampaignCycle`
-  carries. Action: they take `at: CampaignCycle`. **Re-test:** `git grep -cE "campaign: Campaign, hop:
-  CycleHop" -- promptpotter` == 0.
-- **The campaigns dir is spelled beside its constant**: `landing.py:326`, `data_root.py:651` and
-  `storage_report.py:141` spell `"campaigns"` where `io.py::CAMPAIGNS_DIR` names it. **Re-test:**
-  `git grep -cE "\"campaigns\"" -- promptpotter` == 0.
-- **An anchor is matched from the right** (store-2g): `io.py::_ANCHORS` reads a campaign or cycle at
-  `projects/*/campaigns/<id>` wherever the path ends so, so a data root nested at
-  `…/projects/<x>/campaigns/<D>`, or a dataset slug `projects/a/campaigns/b`, refuses its own first
-  write. Root: the store hands its data root to the io doors and the shape matches whole from it.
-  **Re-test:** both write; a deleted campaign and cycle still refuse.
-- **A draft is re-made after its discard**: a held draft-ledger handle appending after
-  `draft_store.py::discard` re-makes `drafts/<id>/`, and two draft writers bypass `io.py` (`jobs/mint.py:695`'s
-  raw `mkdir(parents=True)`, the CLI export's raw `mkdir` + `write_text` at
-  `presentation/cli/commands/reads.py:173-174`). Root: a draft is a third deleted unit (`_ANCHORS`),
-  and every run-data write goes through the io doors. **Re-test:** an append after a discard raises
-  `NotFoundError`; `git grep -n "\.mkdir(" -- promptpotter` names no run-data path.
-- **A gone unit is said two ways**: a replace whose temporary vanished raises a raw
-  `FileNotFoundError` (`io.py::write_bytes`) where a create answers `NotFoundError`, and
-  `read_model.py::LedgerIndex.shielded` swallows every `Exception` (that one included), then appends its
-  `derived_file_stale` warning INTO the deleted cycle. Root: one "gone" from every io door, and a
-  projection over a gone cycle is skipped, never warned into it. **Re-test:** a fact deleting the
-  cycle between `mkstemp` and the replace reads `NotFoundError`, and no warning row is attempted.
+- **A cycle read still takes (campaign, hop)**: `pipeline_resolve.py::permitted_narrowing` (an
+  optional `hop`, ``None`` reading the campaign's subject) takes the pair `CampaignCycle` carries; its
+  callers sit in `bench/resume_and_fork/fork_siblings.py` and `commands/launching.py`. Action: it takes
+  `at: CampaignCycle`, the campaign-subject callers named. **Re-test:** `git grep -cE "campaign:
+  Campaign, hop: CycleHop" -- promptpotter` == 0.
 - **A test home is built beside `factories.workspace`** (store-2's report): facts in `test_spend.py` and
   `test_security.py` built ledgers, locks and homes under paths nothing minted and passed because io
   made dirs. Root: test homes mint through `factories.workspace`. **Rides with:** tests-x.
+- **The data root has two sources** (store-3b's report, the store-3 review's probe): io reads
+  `paths.py::user_data_root()` on every miss while a store carries `Stores.projects_root`; where they
+  disagree every door fails open silently (a store outside the home re-makes a deleted cycle), and in
+  the suite they always do (`conftest.py::own_home` sets `<tmp>-home`, `built_stores` is
+  `workspace(tmp_path)`), so the anchor is off in every fact but the `homed_stores` ones. Root: one
+  binding source (`build_stores` refuses a root outside the data root) with test homes built under
+  it. **Rides with:** tests-x. **Re-test:** a store built outside the home refuses; every fact's
+  store sits under its home.
+- **An 8.3 short path still fails open** (store-3b's report, probed on Windows): `io.py::_plain` makes
+  a path absolute but expands no short name, so `C:\PROGRA~1\…` against a long-named data root
+  matches no anchor and re-makes a deleted unit. Root: the data root and the path compared in one
+  canonical spelling (`os.path.realpath` on both, the `\\?\` prefix stripped after). **Re-test:** on
+  Windows, a write under the 8.3 spelling of a deleted campaign raises `NotFoundError`.
 
 ### wave-5 · rates (what rates-2 left at its landing)
 

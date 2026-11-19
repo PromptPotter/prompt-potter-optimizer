@@ -19,7 +19,7 @@ from promptpotter.application.served_dashboard import WarmingDashboard, served_d
 from promptpotter.application.views.render.export import ExportFiles, ExportProvenance, export_files
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.arm_reading import ArmReading
-from promptpotter.domain.campaign import Campaign
+from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.cycle_paths import (
     CycleAt,
@@ -44,6 +44,7 @@ from promptpotter.infrastructure.store.family_ray_queries import (
     decode_ray_cursor,
     ray_validator_parts,
 )
+from promptpotter.infrastructure.store.io import make_dirs
 from promptpotter.infrastructure.store.layout import CycleLayout, cycle_dir_for
 from promptpotter.infrastructure.store.lineage_queries import (
     FamilyCycle,
@@ -114,9 +115,10 @@ class RoundView(StrictModel):
 
 
 def _closed(
-    stores: Stores, campaign: Campaign, hop: CycleHop, round_num: int, *, moment: Moment | None
+    stores: Stores, at: CampaignCycle, round_num: int, *, moment: Moment | None
 ) -> RoundResult | None:
-    return closed_round(stores, hop, round_num, campaign_scorer(stores, campaign), moment=moment)
+    scorer = campaign_scorer(stores, at.campaign)
+    return closed_round(stores, at.hop, round_num, scorer, moment=moment)
 
 
 def served_round(
@@ -134,7 +136,7 @@ def served_round(
             unfiled=True,
         )
     campaign = stores.campaigns.campaign(hop.campaign_id)
-    closed = _closed(stores, campaign, hop, round_num, moment=moment)
+    closed = _closed(stores, CampaignCycle(campaign, hop.cycle_id), round_num, moment=moment)
     if closed is None:
         return None
     return RoundView(
@@ -167,7 +169,9 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
     closed = (
         None
         if selection is None
-        else _closed(cycle.stores, campaign, hop, selection.round, moment=None)
+        else _closed(
+            cycle.stores, CampaignCycle(campaign, hop.cycle_id), selection.round, moment=None
+        )
     )
     arm = None if closed is None or selection is None else closed.arms.get(selection.key)
     models = (
@@ -198,6 +202,13 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
         export=export,
         no_export=no_export,
     )
+
+
+def write_export(files: ExportFiles, root: Path) -> None:
+    """The CLI's `--out`: a file a person names is no run data, so it follows their umask, not 0600."""
+    for rel, text in files.files.items():
+        make_dirs((root / rel).parent)
+        (root / rel).write_bytes(text.encode("utf-8"))
 
 
 async def _signed_ticks(caller: Caller, every_s: float) -> AsyncIterator[None]:

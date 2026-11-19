@@ -515,20 +515,22 @@ class LedgerIndex(_LedgerTail):
     def shielded(
         self, projection: Projected, call: Callable[[], None], at: int | None = None
     ) -> None:
-        """Every call into a projection: a fault of any type lands as one `derived_file_stale` warning on
-        this ledger, never a raise into the append whose line landed, and nothing is held for a later one."""
+        """Every call into a projection: a derived file that cannot land is one `derived_file_stale` warning,
+        never a raise into the landed append, nothing held for a later one; io refuses it a gone cycle."""
         try:
             call()
-        except Exception as fault:  # noqa: BLE001 -- a derived file's fault of any kind is its warning
+        except (OSError, NotFoundError, FileUnreadableError) as fault:
             with self._lock:
                 if type(projection) in self._stale:
                     return
                 self._stale.add(type(projection))
                 at = self._lines - 1 if at is None else at
             warning = stale_file_warning(projection.derives, at, _reason(fault))
-            ((raw, landed),) = append_jsonl(
-                self._path, warning.model_dump(mode="json", fallback=str)
-            ).each()
+            try:
+                appended = append_jsonl(self._path, warning.model_dump(mode="json", fallback=str))
+            except NotFoundError:
+                return
+            ((raw, landed),) = appended.each()
             # A ledger that takes the line, then refuses the warning, raises: that fault is the ledger's.
             self.land(raw, landed, warning)
 

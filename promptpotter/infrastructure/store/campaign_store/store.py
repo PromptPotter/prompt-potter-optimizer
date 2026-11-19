@@ -67,6 +67,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 )
 from promptpotter.infrastructure.store.data_root import campaign_row
 from promptpotter.infrastructure.store.io import (
+    claim_dir,
     iter_files,
     make_dirs,
     prune_empty_dirs,
@@ -170,10 +171,8 @@ class CampaignStore:
             held = charges.held_on(self.campaign_root_dir(campaign_id))
             if bank.deleted(campaign_id) or any(ledger.is_relative_to(held) for ledger in charged):
                 continue
-            root = self.campaign_root_dir(campaign_id)
-            make_dirs(root.parent)
             try:
-                root.mkdir()
+                claim_dir(self.campaign_root_dir(campaign_id))
             except FileExistsError:
                 continue
             return campaign_id

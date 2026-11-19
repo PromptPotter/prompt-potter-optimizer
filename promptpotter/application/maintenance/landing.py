@@ -66,6 +66,7 @@ from promptpotter.infrastructure.store.data_root import (
     unloadable_why,
 )
 from promptpotter.infrastructure.store.io import (
+    CAMPAIGNS_DIR,
     INNER_SANDBOXES_DIR,
     iter_files,
     read_text_optional,
@@ -324,7 +325,7 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
             and path not in gone
             and owner is not None
             and owner.parts[0] != INNER_SANDBOXES_DIR
-            and owner.parts[-2] == "campaigns"
+            and owner.parts[-2] == CAMPAIGNS_DIR
             and (unit := data_root / owner) not in runs
             and CampaignLayout(unit).manifest not in found_at
         ):

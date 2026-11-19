@@ -13,6 +13,7 @@ from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.io import (
     CAMPAIGNS_DIR,
     CYCLES_DIR,
+    DRAFTS_DIR,
     INNER_SANDBOXES_DIR,
     read_bytes_optional,
     validate_path_component,
@@ -62,9 +63,6 @@ def campaigns_root_dir_for(tenant_root: WorkspaceDir) -> Path:
 
 def campaign_root_dir_for(tenant_root: WorkspaceDir, campaign_id: str) -> Path:
     return campaigns_root_dir_for(tenant_root) / validate_path_component(campaign_id)
-
-
-DRAFTS_DIR = "drafts"
 
 
 def drafts_root_dir_for(tenant_root: WorkspaceDir) -> Path:

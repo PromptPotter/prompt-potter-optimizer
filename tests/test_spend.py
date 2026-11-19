@@ -149,6 +149,7 @@ from promptpotter.application.served_dashboard import (
     current_caps,
     served_dashboard,
 )
+from promptpotter.config.paths import user_data_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
 from promptpotter.connectors.termnorm import TermNormSession
@@ -4896,8 +4897,8 @@ def test_of_two_set_limits_raises_the_second_reads_the_wallet_after_the_firsts_r
 def test_a_set_limits_raced_by_a_delete_answers_not_found_and_leaves_no_campaign_dir(
     tmp_path: Path,
 ) -> None:
-    # Its door loaded the campaign; the delete lands before its append.
-    stores = _web_account(tmp_path, "sub-g")
+    # Its door loaded the campaign; the delete lands before its append. At the data root io reads.
+    stores = _web_account(user_data_root(), "sub-g")
     hop = CycleHop(campaign_id="camp-g", cycle_id="cycle_gone0000")
     stores.campaigns.create_campaign(minted_campaign(hop))
     stores.campaigns.mint_cycle(hop)

@@ -9,12 +9,13 @@ import sys
 import tempfile
 import time
 from collections.abc import Callable, Iterable, Iterator
+from functools import partial
 from pathlib import Path
 from typing import IO, Any, NamedTuple
 
 import yaml
 
-from promptpotter.config.paths import PROJECTS_DIR
+from promptpotter.config.paths import PROJECTS_DIR, user_data_root
 from promptpotter.config.settings import LOCK_TIMEOUT
 from promptpotter.domain.cycle_paths import ID_COMPONENT_RE
 from promptpotter.shared.errors import ConflictError, NotFoundError
@@ -113,6 +114,10 @@ def _long_path(p: str | Path) -> str:
     if s.startswith(("\\\\?\\", "\\\\.\\")):
         return s
     return "\\\\?\\" + os.path.abspath(s)
+
+
+def _plain(p: str | Path) -> Path:
+    return Path(os.path.abspath(str(p).removeprefix("\\\\?\\")))
 
 
 def unlink_robust(path: Path) -> None:
@@ -246,49 +251,50 @@ def _atomic_replace(tmp: str, path: Path) -> None:
 
 CAMPAIGNS_DIR = "campaigns"
 CYCLES_DIR = "cycles"
+DRAFTS_DIR = "drafts"
 # Flat, off-registry and hash-keyed: nested in its owning cycle, a sandbox exceeds Windows' MAX_PATH.
 INNER_SANDBOXES_DIR = ".inner"
 # A workspace, from the data root: an account's, or an inner sandbox's (`.inner/<key>/<tenant>`).
 WORKSPACE_SHAPES = (f"{PROJECTS_DIR}/*", f"{INNER_SANDBOXES_DIR}/*/*")
-# What a delete removes, by its PLACE under a workspace, never a segment's name: a campaign, or a
-# cycle (`cleanup-empty-cycles` keeps its campaign).
+# What a delete removes, by its PLACE from the data root (`paths.py::user_data_root`, the one source),
+# never a segment's name: a campaign, a cycle (`cleanup-empty-cycles` keeps its campaign), a draft.
 _ANCHORS = tuple(
     (f"{workspace}/{CAMPAIGNS_DIR}/*{below}", unit)
     for workspace in WORKSPACE_SHAPES
     for below, unit in (("", "campaign"), (f"/{CYCLES_DIR}/*", "cycle"))
-)
+) + tuple((f"{workspace}/{DRAFTS_DIR}/*", "draft") for workspace in WORKSPACE_SHAPES)
+
+
+def claim_dir(directory: Path) -> None:
+    """THE dir maker, by `_created`'s rule: exclusive, so a dir that stands raises `FileExistsError`."""
+    _created(directory, lambda: os.mkdir(_long_path(directory)))
 
 
 def make_dirs(directory: Path) -> None:
-    """THE dir maker, by `_created`'s rule."""
     with contextlib.suppress(FileExistsError):
-        _created(directory, lambda: os.mkdir(_long_path(directory)))
+        claim_dir(directory)
 
 
 def _created[T](path: Path, create: Callable[[], T]) -> T:
     """*create*, its missing parents made one `mkdir` per level, long-path, never an existence check
-    first, and never its ANCHOR (a campaign or cycle dir, what a delete removes): a delete landing in
-    the walk answers `NotFoundError` naming it, never a re-made campaign or cycle. One climb, one
-    retry: a level that stands but is no directory raises the create's own error."""
+    first, and never its ANCHOR (a campaign, cycle or draft dir, what a delete removes): an absent one
+    answers `NotFoundError` naming it, never a re-made unit. One climb, one retry: a level that
+    stands but is no directory raises the create's own error."""
     try:
         return create()
     except FileNotFoundError as missing:
-        # Normalized first: a `..` reaches no anchor unseen.
-        parent = Path(os.path.normpath(path)).parent
-        if unit := next((unit for shape, unit in _ANCHORS if parent.match(shape)), None):
+        # Matched whole from the data root, normalized first: a `..` reaches no anchor unseen.
+        parent, root = _plain(path).parent, _plain(user_data_root())
+        rel = parent.relative_to(root) if parent.is_relative_to(root) else None
+        if unit := next((u for shape, u in _ANCHORS if rel and rel.full_match(shape)), None):
+            if os.path.isdir(_long_path(parent)):
+                raise  # The unit stands: what vanished is the create's own (a swept temporary).
             raise NotFoundError(f"{unit} {parent.name!r} is gone") from None
         make_dirs(parent)
         try:
             return create()
         except FileNotFoundError:
             raise missing from None
-
-
-def _tmp_beside(path: Path) -> tuple[int, str]:
-    # Dot-named, which the cycle file listing skips.
-    return _created(
-        path, lambda: tempfile.mkstemp(dir=_long_path(path.parent), prefix=".", suffix=".tmp")
-    )
 
 
 def _synced(f: IO[Any]) -> None:
@@ -301,14 +307,17 @@ def write_bytes(path: Path, data: bytes, *, durable: bool = False) -> None:
     its directory after, so a power loss never brings it back empty; run data stays fast. The
     temporary's lock holds from its creation to the replace on POSIX, so a wipe reads it as a write in
     flight; on Windows it lapses at the close, and a reset in that gap unlinks the temporary."""
-    fd, tmp = _tmp_beside(path)
+    # Dot-named, which the cycle file listing skips.
+    temp = partial(tempfile.mkstemp, dir=_long_path(path.parent), prefix=".", suffix=".tmp")
+    fd, tmp = _created(path, temp)
     _try_lock(fd)
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
             if durable:
                 _synced(f)
-            _land(f, tmp, path)
+            # A replace is a create: a temporary gone with its campaign or cycle answers as one.
+            _created(path, lambda: _land(f, tmp, path))
     except Exception:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
@@ -660,7 +669,7 @@ def _landed(name: str, f: IO[bytes], data: bytes, *, durable: bool) -> range:
 
 
 def _cut_unterminated(name: str) -> None:
-    with open(name, "r+b") as f:
+    with _created(Path(name), lambda: open(name, "r+b")) as f:
         size = f.seek(0, os.SEEK_END)
         if size:
             f.seek(size - 1)

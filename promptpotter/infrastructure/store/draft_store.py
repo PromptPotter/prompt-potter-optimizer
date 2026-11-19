@@ -84,7 +84,8 @@ class DraftStore:
         return claim
 
     def write_draft(self, draft: DraftFile) -> Path:
-        path = self.draft_dir(draft.draft_id) / DRAFT_FILE
+        """Under its claim, or a fresh id: a keep makes its draft's dir, as no write under it does."""
+        make_dirs((path := self.draft_dir(draft.draft_id) / DRAFT_FILE).parent)
         write_bytes(path, draft.model_dump_json(indent=2).encode("utf-8"))
         return path
 

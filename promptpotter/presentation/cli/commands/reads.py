@@ -15,6 +15,7 @@ from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import CommandReading
 from promptpotter.application.commands.loop_commands import read_payload_file
 from promptpotter.application.cycle_addressing import cycle_target, latest_launch
+from promptpotter.application.cycle_reads import write_export
 from promptpotter.application.evidence.read import Evidence
 from promptpotter.application.head_to_head_price import ArmPrice, HeadToHeadPrice
 from promptpotter.application.jobs.capacity import SLOT_BOUND_WORDS
@@ -168,10 +169,7 @@ def export_written(
     if single is not None and args.out is None:
         return CommandResult(data={**ids, "text": single}, human=single.rstrip("\n"))
     root = (args.out or Path.cwd()) / files.name
-    for rel, text in files.files.items():
-        path = root / rel
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8", newline="\n")
+    write_export(files, root)
     written = sorted(files.files)
     return CommandResult(
         data={**ids, "dir": str(root), "files": written},

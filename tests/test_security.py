@@ -2733,8 +2733,9 @@ async def test_the_reaper_takes_a_producer_only_once_it_no_longer_holds_its_cycl
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows deletes no cycle under a held lock")
 def test_a_cycle_deleted_between_a_reap_writes_temporary_and_its_replace_leaves_the_sweep_whole(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle, tmp_path: Path
 ) -> None:
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(tmp_path))  # io places a cycle from the data root
     campaigns = built_stores.campaigns
     hops = (held_cycle.hop, held_cycle.hop.model_copy(update={"cycle_id": "cycle-1"}))
     campaigns.mint_cycle(hops[1])
@@ -2753,7 +2754,8 @@ def test_a_cycle_deleted_between_a_reap_writes_temporary_and_its_replace_leaves_
     with monkeypatch.context() as patched:
         patched.setattr(os, "replace", deleting_first)
         reaped = sweep_dead_cycles(built_stores.projects_root)
-    assert deleted and reaped == 1, "a cycle deleted under the sweep aborted it"
+    # The first replace is a projection's, past the ending's append: that cycle was reaped, then deleted.
+    assert deleted and reaped == 2, "a cycle deleted under the sweep aborted it"
     assert not campaigns.cycle_dir(deleted[0]).exists(), "the reap re-made the deleted cycle"
     (kept,) = set(hops) - set(deleted)
     swept = campaigns.load(kept, moment=None)

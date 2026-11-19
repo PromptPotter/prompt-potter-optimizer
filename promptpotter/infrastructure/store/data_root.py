@@ -73,6 +73,8 @@ from promptpotter.infrastructure.store.dataset_access import (
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
 from promptpotter.infrastructure.store.io import (
+    CAMPAIGNS_DIR,
+    DRAFTS_DIR,
     INNER_SANDBOXES_DIR,
     WORKSPACE_SHAPES,
     complete_lines,
@@ -82,7 +84,6 @@ from promptpotter.infrastructure.store.io import (
 )
 from promptpotter.infrastructure.store.layout import (
     ARCHIVE_HOMES_DIR,
-    DRAFTS_DIR,
     HEAD_TO_HEADS_DIR,
     ROUND_GLOB,
     WORKSPACE_STATE_DIR,
@@ -649,7 +650,7 @@ RETIRED_KINDS: tuple[Kind, ...] = (
 def run_owner(rel: PurePosixPath) -> PurePosixPath | None:
     """The campaign or draft directory a file under a workspace lies in, an inner sandbox's too."""
     owner = 3 if rel.parts[0] == INNER_SANDBOXES_DIR else 2
-    if len(rel.parts) <= owner + 2 or rel.parts[owner] not in ("campaigns", DRAFTS_DIR):
+    if len(rel.parts) <= owner + 2 or rel.parts[owner] not in (CAMPAIGNS_DIR, DRAFTS_DIR):
         return None
     return PurePosixPath(*rel.parts[: owner + 2])
 
