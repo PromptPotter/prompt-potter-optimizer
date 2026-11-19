@@ -32,12 +32,11 @@ _PRICES = (
 )
 
 
-def reclaim_orphan_sandboxes(projects_root: Path) -> int:
+def reclaim_orphan_sandboxes(projects_root: Path) -> list[str]:
+    """Each sandbox whose owner cycle is gone; one it cannot delete is a fault it returns."""
     inner_dir = inner_sandboxes_dir(projects_root)
-    if not inner_dir.is_dir():
-        return 0
-    reclaimed = 0
-    for sandbox in inner_dir.iterdir():
+    undeleted: list[str] = []
+    for sandbox in inner_dir.iterdir() if inner_dir.is_dir() else ():
         if not sandbox.is_dir():
             continue
         # Never matched by directory name: that is the content-addressed cycle_id, shared by any tenant on the same origin.
@@ -53,10 +52,9 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> int:
             continue
         try:
             owner_store.delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)
-        except OSError:
-            continue
-        reclaimed += 1
-    return reclaimed
+        except OSError as refusal:
+            undeleted.append(fault_said(refusal)[0])
+    return undeleted
 
 
 def _reap(stores: Stores) -> list[str]:
@@ -106,9 +104,9 @@ def sweep(projects_root: Path) -> None:
     this releases its runs (`reap_dead_runs`)."""
 
     def orphans() -> list[str]:
-        reclaim_orphan_sandboxes(projects_root)
+        undeleted = reclaim_orphan_sandboxes(projects_root)
         reap_dead_runs(projects_root, JobRegistry.attach(jobs_dir(projects_root)))
-        return []
+        return undeleted
 
     sweep_dead_cycles(projects_root)
     _recorded(projects_root, ORPHANS_STEP, orphans)

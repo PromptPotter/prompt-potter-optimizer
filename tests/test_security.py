@@ -131,7 +131,11 @@ from promptpotter.application.jobs.mint import (
     mint,
     resolve_cycle_plan,
 )
-from promptpotter.application.jobs.reaper import reclaim_orphan_sandboxes, sweep_dead_cycles
+from promptpotter.application.jobs.reaper import (
+    reclaim_orphan_sandboxes,
+    sweep,
+    sweep_dead_cycles,
+)
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import LibraryAuthored, library
 from promptpotter.application.maintenance import landing as landing_module
@@ -2764,9 +2768,32 @@ def test_reclaim_spares_a_sandbox_whose_owner_cycle_exists_and_one_with_no_owner
         built_stores.shared_root, "t", CycleHop(campaign_id="c__aaaaaa", cycle_id="cycle-x")
     )
     (unprovable / "tenant").mkdir(parents=True)
-    assert reclaim_orphan_sandboxes(built_stores.projects_root) == 0
+    reclaim_orphan_sandboxes(built_stores.projects_root)
     assert (owned / built_stores.tenant_id).is_dir() and unprovable.is_dir(), (
         "a sandbox with an owner was reaped"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_an_orphan_sandbox_the_sweep_cannot_delete_stands_in_machine_status(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    orphan = inner_sandbox(built_stores, SANDBOX_CAMPAIGN, "orphaned-outer-cycle")
+
+    def refused(*_: object, **__: object) -> None:
+        raise PermissionError(13, "Permission denied", str(orphan))
+
+    with monkeypatch.context() as patched:
+        patched.setattr(CampaignStore, "delete_inner_sandbox", refused)
+        sweep(built_stores.projects_root)
+    unswept = JobRegistry.attach(jobs_dir(built_stores.projects_root)).unswept()
+    assert orphan.is_dir() and any(
+        f.startswith("orphans: ") and orphan.name in f for f in unswept
+    ), f"an undeletable orphan sandbox was swallowed: {unswept}"
+    sweep(built_stores.projects_root)
+    assert not orphan.exists(), "a deletable orphan sandbox survived the sweep"
+    assert not JobRegistry.attach(jobs_dir(built_stores.projects_root)).unswept(), (
+        "a clean pass left the refusal standing"
     )
 
 

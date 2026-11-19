@@ -246,9 +246,6 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/jobs/reaper.py::_reap::NotFoundError": (
         "a cycle deleted under the sweep has no producer to declare ended; its sandbox is an orphan's"
     ),
-    "application/jobs/reaper.py::reclaim_orphan_sandboxes::OSError": (
-        "a sandbox it cannot delete is the next sweep's"
-    ),
     "application/maintenance/landing.py::last_landing::ValidationError": (
         "a stamp this build cannot read lands the root again"
     ),

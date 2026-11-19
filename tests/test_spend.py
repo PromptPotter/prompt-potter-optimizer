@@ -5725,9 +5725,7 @@ def test_a_reclaimed_orphan_sandbox_banks_only_the_spend_it_did_not_carry_out(
             )
         )
     banked_before = len(tombstones())
-    assert reclaim_orphan_sandboxes(stores.projects_root) == 1, (
-        "an orphan sandbox was not reclaimed"
-    )
+    reclaim_orphan_sandboxes(stores.projects_root)
     assert not sandbox.exists(), "a reclaimed sandbox survived"
     banked = tombstones()[banked_before:]
     assert [b.spent["host"].used_tokens for b in banked] == [600 + 100] and [

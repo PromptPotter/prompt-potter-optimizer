@@ -716,15 +716,6 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   babysit act, decisions.md § 0005) and read it there. **Re-test:** a launch at a fork whose line
   narrowed a model steers to the root-only model and reads `babysat`.
 
-### wave-5 · rates (what rates-5 left at its landing)
-
-- **An orphan reclaim is observed by its count** (rates-5's report): `reaper.py::reclaim_orphan_sandboxes`
-  returns a reclaimed count `reaper.py::sweep` discards, read only by tests, and swallows an `OSError`
-  on a sandbox's delete, so a sandbox that cannot be deleted is reported nowhere (not in
-  `machine-status`). Root: it returns its faults to `_recorded` as the sweep does, and the facts read
-  the sandbox dir. **Re-test:** `git grep -c "except OSError:" --
-  promptpotter/application/jobs/reaper.py` == 0.
-
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
 - **A connector's two-valued term reaches no scorer** (readings-5's report): `authored.py::scorer_of`
