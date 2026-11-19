@@ -596,17 +596,15 @@ class CellSheet:
         return replace(self, cells=tuple(cell for cell in self.cells if keep(cell)))
 
     def merged(self, later: CellSheet) -> CellSheet:
-        """*later* wins each cell both scored."""
-        if not later.cells:
-            return self
-        if not self.cells:
-            return later
+        """STANDING by construction: one row per cell, *later* winning each cell both scored."""
+        if not (self.cells and later.cells):
+            return (self if self.cells else later).standing()
         if (self.scorer_id, self.two_valued) != (later.scorer_id, later.two_valued):
             raise ValueError(
                 f"cells graded under {later.scorer_id!r} cannot join a sheet graded under "
                 f"{self.scorer_id!r}"
             )
-        return replace(self, cells=(*self.cells, *later.cells))
+        return replace(self, cells=(*self.cells, *later.cells)).standing()
 
     def addresses(self) -> list[WalkedCell]:
         return [address for cell in self.cells if (address := cell.address) is not None]

@@ -355,7 +355,7 @@ class Parent(CycleRead):
         key = ArmKey(self._cycle.parent.id)
         rows = NO_CELLS
         for rr in self._cycle.rounds:
-            rows = rows.merged(rr.raced(key)).standing()
+            rows = rows.merged(rr.raced(key))
         return rows
 
     @property

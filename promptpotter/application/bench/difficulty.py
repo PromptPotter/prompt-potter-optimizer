@@ -67,8 +67,7 @@ class JudgingRuler(NamedTuple):
 
     def frontier(self, sheet: CellSheet) -> AbilityReading | None:
         """The SOLE stamping site: θ, its scale and its caveat are minted together."""
-        results = list(sheet)
-        scored = [cell for cell in results if cell.scored]
+        scored = [cell for cell in sheet if cell.scored]
         ruler = self.ruler
         responses = {cell.key: graded_response(cell) for cell in scored}
         entries = ruler.entries() if ruler is not None else None
@@ -86,7 +85,7 @@ class JudgingRuler(NamedTuple):
             ruler_span=ruler.delta_span if ruler is not None else None,
             round_span=band[0] if band is not None else None,
             calibration_model=ruler.calibration_model if ruler is not None else None,
-            caveat=self.caveat(results),
+            caveat=self.caveat(sheet),
             unlinked=ruler.unlinked(responses) if ruler is not None else 0,
             pinned_share=ruler.pinned_share(on) if ruler is not None else None,
         )

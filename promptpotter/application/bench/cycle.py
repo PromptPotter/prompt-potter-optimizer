@@ -265,7 +265,7 @@ class Cycle:
                     # By individual, never arm key: a key names a slot, and readers ask by id.
                     individual = arm.individual
                     _, rows = held.get(individual.id, (individual, NO_CELLS))
-                    held[individual.id] = (individual, rows.merged(rr.rows(key)).standing())
+                    held[individual.id] = (individual, rows.merged(rr.rows(key)))
         self._pool = (self._rounds_version, held)
         self._pool_theta.clear()
         return held

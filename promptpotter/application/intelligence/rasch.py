@@ -8,7 +8,7 @@ from typing import Any, NamedTuple
 import numpy as np
 from numpy.typing import NDArray
 
-from promptpotter.domain.paired_reading import Estimate
+from promptpotter.domain.paired_reading import ArmKey, Estimate
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import (
     CalibrationModel,
@@ -103,10 +103,10 @@ class RoundAbilities:
     """``bar`` is, per arm, the parent's ``(θ, se)`` it is judged against; an arm absent from it
     has no bar, never a logit-0 floor. ``cells`` counts each θ's ``theta_cells``."""
 
-    theta: dict[str, float]
-    theta_se: dict[str, float]
-    bar: dict[str, tuple[float, float]]
-    cells: dict[str, int]
+    theta: dict[ArmKey, float]
+    theta_se: dict[ArmKey, float]
+    bar: dict[ArmKey, tuple[float, float]]
+    cells: dict[ArmKey, int]
 
 
 def _map_fit(
@@ -510,7 +510,7 @@ def theta_cells[V](
 
 
 def candidate_abilities(
-    results_by_id: Mapping[str, CellSheet],
+    results_by_id: Mapping[ArmKey, CellSheet],
     parent_results: CellSheet,
     ruler: DeltaRuler | None,
 ) -> RoundAbilities:
@@ -532,7 +532,7 @@ def candidate_abilities(
     return abilities
 
 
-def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: str) -> Estimate | None:
+def theta_lift_over_parent(abilities: RoundAbilities, candidate_id: ArmKey) -> Estimate | None:
     bar = abilities.bar.get(candidate_id)
     if bar is None:
         return None

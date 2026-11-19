@@ -236,7 +236,20 @@ plan/apply pair and a temporary locked through its replace. Left:
   is an `int`, so `domain/spend.py::StepUsage.from_account` writes `tokens.reasoning or None` and
   `openai_compat.py::ReportedUsage.tokens` reads `reasoning` / `cache_write` with `or 0`. Root:
   `reasoning` and `cache_write` are `int | None`, as `cache_read` is. **Re-test:** a reply reporting
-  `reasoning_tokens: 0` reaches a step's usage as 0, one reporting none as `None`.
+  `reasoning_tokens: 0` reaches a step's usage as 0, one reporting none as `None`. **Built** on
+  `wip/small-13` `b360ae0de`; it lands together with the next row, as ONE re-key: alone, every
+  offline fold's `tokens.cache_write` reads `None` because the row below drops the part.
+- **A step's usage drops `cache_write`** (small-13's report): `domain/spend.py::StepUsage` has no
+  `cache_write`, so `StepUsage.from_account` drops it despite its docstring ("the counts ride
+  whole"), and `offline_world.py` reports neither part. Root: `StepUsage` carries every
+  `TokenAccount` part, and the offline world reports the parts a provider reports. Also folding the
+  unknown into 0: `domain/records/run_records.py::TokenUsageRecord` ("0 also means no breakdown")
+  and `domain/results_health.py` (`usage.reasoning or 0`). **Re-test:** a reply reporting
+  `cache_write_tokens: 5` reaches a fold's `tokens.cache_write` as 5.
+- **Two precedence rules join an arm's rows** (small-13's report): `bench/cycle.py::ArmWalk.continued`
+  keeps the EARLIER row (`where(_unheld)`), while `CellSheet.merged` lets the later scored row win.
+  Root: one rule, `merged`'s; `continued` merges without the filter. **Re-test:** an arm re-read on a
+  cell it holds reads the later row on every path.
 
 ### cfg-2 (what cfg left at landing 50; the re-key window)
 
@@ -787,20 +800,8 @@ Each rename lands with its doc and `CLAUDE.md` row in one commit. **Re-test:** t
   [0.64, 1] against [0.97, 1]), so the fold would cost the race most of its power: decide what a
   constant paired side should claim before cutting either. **Re-test:** one rule for a constant side
   in `statistics.py`, each moved pick named.
-- **θ's frontier reads every row of its sheet** (readings-6's report): `bench/difficulty.py::frontier`
-  iterates the sheet it is handed, not its `standing()` rows, so a merged sheet not yet folded would
-  fit θ on a cell's duplicates; every caller folds today. Root: a sheet the merge returns is
-  standing by construction (`CellSheet.merged` folds), or `frontier` reads `standing()`. **Re-test:**
-  `frontier` over a merge of two reads of one cell fits one row.
 
 ### wave-5 · l4 (what l4-measure, l1-cite and small-12b left at their landing)
-
-- **A fit keyed by `str` beside arms keyed by `ArmKey`** (small-12b's report):
-  `intelligence/rasch.py::candidate_abilities` takes `Mapping[str, CellSheet]` where every caller
-  holds `ArmKey` keys; mapping keys are invariant, so a caller holding a dict rebuilds it as a
-  comprehension (`potter/election.py::RoundWinner.replay`, `tests/test_scoring.py::_elect`). Action:
-  the fit is keyed by `ArmKey`. **Held:** none claims it. **Re-test:** `git grep -n "for k in
-  self.arms}, raced" -- promptpotter` == 0.
 
 - **The outer's edit menu offers fields of inner nodes that never fire**: inner `l3_plan` made 0
   calls and `l2_context` 1 across six inner runs (L4 audit C, 2026-11-15), yet both stay editable.

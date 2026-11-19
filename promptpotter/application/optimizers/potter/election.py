@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 from promptpotter.application.bench.node_context import Bounds, Lineage, NodeContext, Replay, Ruler
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
@@ -83,23 +83,18 @@ class RoundWinner(Replayed, kind="round_winner"):
     parent: ArmKey
 
     def elect(
-        self, raced: Callable[[ArmKey], CellSheet], abilities: RoundAbilities
+        self, raced: Mapping[ArmKey, CellSheet], parent: CellSheet, abilities: RoundAbilities
     ) -> ArmKey | None:
         """On the rows the round's race read and their fit against the parent."""
         return elect_round_winner(
-            self.arms,
-            {key: raced(key) for key in self.arms},
-            raced(self.parent),
-            self.coverage_floor,
-            abilities,
-            bar=self.bar,
+            self.arms, raced, parent, self.coverage_floor, abilities, bar=self.bar
         )
 
     def replay(self, ctx: ReplayContext) -> ArmKey | None:
         """The parent is the reference the round BANKED, never a panel rebuilt here: that one re-elects differently."""
-        raced = ctx.round_data.raced
-        fit = candidate_abilities({k: raced(k) for k in self.arms}, raced(self.parent), ctx.ruler)
-        return self.elect(raced, fit)
+        raced = {key: ctx.round_data.raced(key) for key in self.arms}
+        parent = ctx.round_data.raced(self.parent)
+        return self.elect(raced, parent, candidate_abilities(raced, parent, ctx.ruler))
 
 
 def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
@@ -113,7 +108,7 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
         parent=measured.parent.key,
     )
     abilities = measured.abilities
-    selected = inputs.elect(measured.raced.__getitem__, abilities)
+    selected = inputs.elect(measured.raced, measured.raced[inputs.parent], abilities)
 
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)

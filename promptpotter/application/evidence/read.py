@@ -955,7 +955,7 @@ def _campaign_edits(
         if cand_id in pooled:
             continue
         pooled.add(cand_id)
-        acc.sheet = acc.sheet.merged(cycle.sheet(cand_id)).standing()
+        acc.sheet = acc.sheet.merged(cycle.sheet(cand_id))
     return [
         RankedEdit(
             sp_hash=sp_hash,

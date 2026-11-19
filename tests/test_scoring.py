@@ -1296,7 +1296,7 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     winner = sheet(
         measurements([1.0 if sid in {10, 12, 15} else 0.0 for sid in range(10, 18)], range(10, 18))
     )
-    merged = prior.merged(winner).standing()
+    merged = prior.merged(winner)
     by_sid = {int(r.key): r for r in merged}
     assert set(by_sid) == set(range(20)), "a merge dropped a measured cell"
     assert [by_sid[i].hit for i in (10, 11, 19)] == [True, False, False], "the later read stands"
@@ -1519,7 +1519,7 @@ def _elect(
     bar: CrowningBar,
 ) -> tuple[ArmKey | None, RoundAbilities]:
     """The election on the fit the round measures of the same rows."""
-    abilities = candidate_abilities({key: rows[key] for key in keys}, parent, ruler)
+    abilities = candidate_abilities(rows, parent, ruler)
     return elect_round_winner(keys, rows, parent, coverage_floor, abilities, bar=bar), abilities
 
 
@@ -1545,7 +1545,7 @@ def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
         bar=bar,
     )
     assert winner_id == "able_on_hard", "a round winner elects by ability, not subset accuracy"
-    assert abilities.theta["able_on_hard"] > abilities.theta["weak_on_easy"]
+    assert abilities.theta[ArmKey("able_on_hard")] > abilities.theta[ArmKey("weak_on_easy")]
     # 6 hits far below θ, 13 misses far above, one miss near it the arm gained.
     spread = delta_ruler(
         {**dict.fromkeys(range(6), -2.8), 6: 1.0, **dict.fromkeys(range(7, 20), 4.0)}
@@ -1567,14 +1567,14 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     flat, half = _level_parent()
     deep = sheet(measurements([1.0] * 21 + [0.0] * 7))
     shallow = sheet(measurements([1.0] * 5 + [0.0], range(14, 20)))
-    ab = candidate_abilities({"deep": deep, "shallow": shallow}, half, flat)
-    lifts = {c: theta_lift_over_parent(ab, c) for c in ("deep", "shallow")}
-    p = {c: p_better(lift) for c, lift in lifts.items() if lift is not None}
-    assert ab.theta["shallow"] > ab.theta["deep"], "the thin arm's POINT lift is the larger"
-    assert ab.theta_se["shallow"] > 1.8 * ab.theta_se["deep"], "on nearly twice the SE"
-    assert p["deep"] > p["shallow"], "so it demonstrated less"
     deep_key, shallow_key = ArmKey("deep"), ArmKey("shallow")
     thin_arms = {deep_key: deep, shallow_key: shallow}
+    ab = candidate_abilities(thin_arms, half, flat)
+    lifts = {c: theta_lift_over_parent(ab, c) for c in thin_arms}
+    p = {c: p_better(lift) for c, lift in lifts.items() if lift is not None}
+    assert ab.theta[shallow_key] > ab.theta[deep_key], "the thin arm's POINT lift is the larger"
+    assert ab.theta_se[shallow_key] > 1.8 * ab.theta_se[deep_key], "on nearly twice the SE"
+    assert p[deep_key] > p[shallow_key], "so it demonstrated less"
     assert _elect(list(thin_arms), thin_arms, half, 6, flat, bar=bar)[0] == ("deep"), (
         "a thin arm won"
     )
@@ -1582,9 +1582,10 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
         "shallow"
     ), "ranking on P must never DISQUALIFY: a lone wide-posterior gain still wins"
     behind = sheet(measurements([1.0] * 4 + [0.0] * 2))
-    behind_lift = theta_lift_over_parent(candidate_abilities({"b": behind}, half, flat), "b")
+    b = ArmKey("b")
+    behind_lift = theta_lift_over_parent(candidate_abilities({b: behind}, half, flat), b)
     assert behind_lift is not None and behind_lift.value > 0.0
-    assert _elect([ArmKey("b")], {ArmKey("b"): behind}, half, 6, flat, bar=bar)[0] is None, (
+    assert _elect([b], {b: behind}, half, 6, flat, bar=bar)[0] is None, (
         "a θ lift over the parent's whole panel never crowns an arm that LOST the cells it shares"
     )
     swapped = sheet(measurement(i, float(0 < i < 20 or i == 20)) for i in range(40))
@@ -1639,18 +1640,18 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
     held_id, held_abilities = _elect(list(arms), arms, twenty, 6, flat, bar=bar)
     reads = readable_lifts(list(arms), 6, held_abilities)
     assert held_id is None, "no arm cleared the bar"
-    assert held_abilities.theta["thin"] > held_abilities.bar["thin"][0], (
-        "the floor, not θ, bars thin"
-    )
+    thin = ArmKey("thin")
+    assert held_abilities.theta[thin] > held_abilities.bar[thin][0], "the floor, not θ, bars thin"
     assert set(reads) == {"near", "deep"}, "an arm under the floor is not readable"
     assert reads[deep_key].value < reads[near_key].value <= 0.0
     assert closest_to_bar(reads) == "near", "the lead is named on the θ lift"
-    cold = candidate_abilities({"off": sheet(measurements([1.0] * 8, range(26, 34)))}, twenty, None)
-    assert cold.cells["off"] == 2 and not readable_lifts([ArmKey("off")], 6, cold), (
+    off = ArmKey("off")
+    cold = candidate_abilities({off: sheet(measurements([1.0] * 8, range(26, 34)))}, twenty, None)
+    assert cold.cells[off] == 2 and not readable_lifts([off], 6, cold), (
         "cold, the floor counts the cells θ was READ on — those shared with the parent"
     )
-    warm = candidate_abilities({"off": sheet(measurements([1.0] * 8, range(24, 32)))}, half, flat)
-    assert warm.cells["off"] == 4, "warm, the floor counts only the cells the ruler carries"
+    warm = candidate_abilities({off: sheet(measurements([1.0] * 8, range(24, 32)))}, half, flat)
+    assert warm.cells[off] == 4, "warm, the floor counts only the cells the ruler carries"
     assert closest_to_bar(reads, beside=near_key) == "deep"
 
 
@@ -6119,4 +6120,25 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
         cell({"harness": candidate}, book_usd=0.5)
     assert len(offline.harness.asked) == asked, (
         "a cell no rate prices was sent under a dollar ceiling it cannot be held to"
+    )
+
+
+def test_a_merge_of_two_reads_of_one_cell_fits_theta_on_one_row() -> None:
+    # Imported here: the module's head is another chain's while this one runs beside it.
+    from promptpotter.application.bench.difficulty import JudgingRuler
+    from promptpotter.domain.ruler import RulerScope, RulerStamp
+
+    stamp = RulerStamp(
+        id="v", version=0, own=None, scope=RulerScope(scorer="s", dataset="ds"), excluded=()
+    )
+    judging = JudgingRuler(None, stamp)
+    first = sheet(measurements([float(i % 2) for i in range(10)]))
+    merged = first.merged(sheet(measurements([1.0, 0.0], [0, 1])))
+    assert len(merged) == 10, "a merge held one cell twice"
+    reading = judging.frontier(merged)
+    assert reading is not None and reading.cells == 10, "θ was fit on a cell's duplicate"
+    standing = sheet(measurements([1.0, 0.0, *[float(i % 2) for i in range(2, 10)]]))
+    folded = judging.frontier(standing)
+    assert folded is not None and (reading.theta, reading.se) == (folded.theta, folded.se), (
+        "θ over the merge is not θ over the cells it stands on"
     )

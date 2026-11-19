@@ -353,7 +353,7 @@ def cycle_hard_samples(stores: Stores, at: CampaignCycle) -> HardSamples:
     )
     cells = NO_CELLS
     for rr in rounds:
-        cells = cells.merged(rr.results).standing()
+        cells = cells.merged(rr.results)
     frontier = None if judging is None else judging.frontier(cells)
     return build_hard_samples(
         build_observations(rounds),
