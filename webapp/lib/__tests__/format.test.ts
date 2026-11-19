@@ -1,11 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  fmtEstimate,
   fmtLift,
   fmtMetric,
   fmtUnit,
   PLACEHOLDER,
   sideTone,
 } from "../format";
+import { estimate } from "@/lib/test-fixtures";
 
 const NBSP = String.fromCharCode(0xa0);
 
@@ -48,5 +50,16 @@ describe("fmtLift", () => {
   it("signs a metric's value only where it is a lift", () => {
     expect(fmtMetric({ unit: "theta", lift: true }, 0.2)).toBe(`+0.200${NBSP}logits`);
     expect(fmtMetric({ unit: "theta", lift: false }, 0.2)).toBe("θ 0.20");
+  });
+});
+
+describe("fmtEstimate", () => {
+  // The words `paired_reading.py::Estimate.text` prints for the same facts.
+  it("words a served estimate as the terminal does: its point, then its band", () => {
+    const lift = { unit: "rate", form: "lift", ci_lo: -0.02, ci_hi: 0.2 } as const;
+    expect(fmtEstimate(estimate(0.1, [null, null], lift))).toBe(`+10.0${NBSP}pts [-2.0,${NBSP}+20.0]`);
+    expect(fmtEstimate(estimate(0.456, [0.4, 0.5]))).toBe("46% [40%, 50%]");
+    expect(fmtEstimate(estimate(0.3, [null, null], { unit: "theta" }))).toBe("θ 0.30");
+    expect(fmtEstimate(null)).toBeNull();
   });
 });

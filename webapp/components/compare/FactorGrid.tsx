@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { CardFrame, DataTable, Empty, Said, Select, Term, type Column } from "@/components/ui";
 import type { Evidence, FactorReading } from "@/lib/api/types";
-import { PLACEHOLDER } from "@/lib/format";
+import { fmtBand, fmtPoint, PLACEHOLDER } from "@/lib/format";
 
 
 function clip(value: string, width: number): string {
@@ -170,8 +170,8 @@ function gridColumns(
   at: ReadonlyMap<string, Cell>,
 ): Column<GridRow>[] {
   const margin = (lv: Level) => (
-    <span className="l4-margin" title={lv.estimate?.band ?? PLACEHOLDER}>
-      {lv.estimate?.point ?? PLACEHOLDER}
+    <span className="l4-margin" title={fmtBand(lv.estimate) ?? PLACEHOLDER}>
+      {fmtPoint(lv.estimate) ?? PLACEHOLDER}
     </span>
   );
   return [
@@ -201,8 +201,8 @@ function gridColumns(
               —
             </Term>
           ) : (
-            <span title={cell.estimate?.band ?? PLACEHOLDER}>
-              {cell.estimate?.point ?? PLACEHOLDER}
+            <span title={fmtBand(cell.estimate) ?? PLACEHOLDER}>
+              {fmtPoint(cell.estimate) ?? PLACEHOLDER}
               <span className="l4-cell-n">
                 {" "}
                 · {cell.n_cells} cells, {cell.subjects.length} subj
