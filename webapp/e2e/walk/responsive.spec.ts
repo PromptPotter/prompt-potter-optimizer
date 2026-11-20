@@ -56,8 +56,8 @@ for (const vp of WIDTHS) {
       void rich; // skips a world with no campaign row to open
       await open(page);
       await showSidebar(page);
-      const twist = page.locator(".sidebar-tree-twist").first();
-      if (await twist.count()) await press(twist);
+      // Pressed once drawn: the list lands after its screen, and a count read first checks it closed.
+      await press(page.locator(".sidebar-tree-twist").first());
       await everyTapLands(page);
     });
 

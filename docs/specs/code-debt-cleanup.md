@@ -217,6 +217,10 @@ row it closes.
   (`machine_status.py::machine_version`), `entries_version` parses every
   manifest, and archive-wide signatures serve as read versions (`evidence/read.py:551-554`,
   `measurement_log.py:271-280`), so any run's archive write invalidates every evidence and cells view.
+  Seen at feed-version's landing: a held claim versions its cycle by the clock
+  (`infrastructure/run_state.py:201`, `time.time_ns()`: "it never 304s"), so under a claim every tick
+  moves `store:` and an idle walk re-asks ~6 reads per ~7 s (the producer's end is a write its owner
+  stamps); and `cycle_reads.py::_COUNTING` is one lock over every account's walk.
   The same root: a writer-stamped version per subject.
 
 ### passes-6 (what passes-5 and holders-3 left at landing 54)

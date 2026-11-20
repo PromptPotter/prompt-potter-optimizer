@@ -373,9 +373,15 @@ export async function noSidewaysScroll(page: Page) {
 /** A tap lands on the control drawn there: nothing else sits at a visible button's centre, and on a
  *  touch screen no button is under the 44px floor (`responsive.css`). A cover is read again two frames
  *  after the scroll: an open panel follows its trigger a frame later (`ui/overlay.ts::useAnchored`),
- *  so the scroll's own frame shows it where no user sees it. */
+ *  so the scroll's own frame shows it where no user sees it. A tap hovers nothing, so a mouse's last
+ *  press is taken off the page first: left over a row, it opens the row's card (`ui/HoverCard`,
+ *  portalled to `body`), which on a phone width spans the list it would be checked against. */
 export async function everyTapLands(page: Page) {
   const touch = base.info().project.use.hasTouch === true;
+  if (!touch) {
+    await page.mouse.move(-1, -1);
+    await expect(page.locator('body > [role="note"]')).toHaveCount(0);
+  }
   const wrong = await page.evaluate(async (touch) => {
     const settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const cover = (b: HTMLButtonElement) => {
