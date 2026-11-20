@@ -212,7 +212,9 @@ BASELINE = {
     # 8 (+11): `host_surface.py::ListTools`, the MCP listing as its session's identity files it.
     # 9 (+13): `filable`'s docstring names what stands outside the map; `holding` -> `worded_refusal`
     # wraps `RUN_PHASE_INFO`'s detached row (+6); the launch test reads `RUN_VERB_KIND`.
-    "package_lines": 112441,
+    # vote (+98): `theta_election.vote`, the bar's paired cells chosen once (`round.py::bar_pairing`)
+    # and banked on `RoundWinner`; `origin_panel_cells`, the panel's own size, refused past the origin.
+    "package_lines": 112539,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -226,7 +228,8 @@ BASELINE = {
     # the one bound on a proposal's length, replacing a 3,200-char cap and a 35% rewrite floor.
     # l4-outer-6 (+4): `discretionary_chars` on the four layout nodes, the panel share a family
     # sizes, replacing a `NODE_LAYOUTS` constant per node.
-    "config_leaf_fields": 98,
+    # vote (+2): `theta_election.vote` and `origin_panel_cells`, the overlap vote and its panel's size.
+    "config_leaf_fields": 100,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     "settings_env": 39,
@@ -266,7 +269,8 @@ BASELINE = {
     # small-5 (+3): `RepairAttempt`'s fields on a round's audit block, which no page draws yet.
     # cfg-3 (+2): a campaign layer's nested partials (split, lives, judge, call target), served
     # where a door states a layer; three of their keys no surface reads by name yet.
-    "p_served": 207,
+    # vote (+3): `origin_panel_cells` on the three served campaign configs, which no surface edits yet.
+    "p_served": 210,
     # Fields of a served or recorded model written and never read (`_unread_fields`); it only falls, to 0.
     # hubs-2 (+1): `CycleResult.result_prompt_fields`, read off the banked `index.json::final` by
     # key (`offline_run.py`), no longer by the copy into the deleted `CycleFinal`.

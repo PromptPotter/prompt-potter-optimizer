@@ -3508,6 +3508,12 @@ export interface CampaignConfig {
    * smaller than this scores on the whole bank (`sample_dataset` is a prefix
    * slice) — not an error. */
   sp_budget_origin: number;
+  /** How many of each benchmark's cells the origin panel holds — the fixed set
+   * every pick is read against C0 on, and the rows ``vote: overlap`` elects
+   * on. It is cut from the cells the origin's own round measured, so it may
+   * not exceed ``sp_budget_origin``. Unset holds as many as a round after the
+   * first walks. */
+  origin_panel_cells: number | null;
   /** The noise floor: once round 0 closes, the origin is re-scored this many times
    * fresh on the rows it recorded, and the spread of those composites is
    * served beside the recorded level as the run's own run-to-run noise. Each
@@ -4231,6 +4237,12 @@ export interface ConfigEdit {
    * smaller than this scores on the whole bank (`sample_dataset` is a prefix
    * slice) — not an error. */
   sp_budget_origin: number | null;
+  /** How many of each benchmark's cells the origin panel holds — the fixed set
+   * every pick is read against C0 on, and the rows ``vote: overlap`` elects
+   * on. It is cut from the cells the origin's own round measured, so it may
+   * not exceed ``sp_budget_origin``. Unset holds as many as a round after the
+   * first walks. */
+  origin_panel_cells: number | null;
   /** The noise floor: once round 0 closes, the origin is re-scored this many times
    * fresh on the rows it recorded, and the spread of those composites is
    * served beside the recorded level as the run's own run-to-run noise. Each
@@ -5162,6 +5174,12 @@ export interface CampaignLayer {
    * smaller than this scores on the whole bank (`sample_dataset` is a prefix
    * slice) — not an error. */
   sp_budget_origin: number | null;
+  /** How many of each benchmark's cells the origin panel holds — the fixed set
+   * every pick is read against C0 on, and the rows ``vote: overlap`` elects
+   * on. It is cut from the cells the origin's own round measured, so it may
+   * not exceed ``sp_budget_origin``. Unset holds as many as a round after the
+   * first walks. */
+  origin_panel_cells: number | null;
   /** The noise floor: once round 0 closes, the origin is re-scored this many times
    * fresh on the rows it recorded, and the spread of those composites is
    * served beside the recorded level as the run's own run-to-run noise. Each
@@ -5753,7 +5771,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "e07ce0283e8b789f";
+export const SERVED_CONTRACT = "8d91871fa6e2c909";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

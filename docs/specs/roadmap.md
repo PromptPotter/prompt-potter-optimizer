@@ -700,3 +700,46 @@ skill routing before the library grows.
   address (`lib/state/workspace.tsx`); one panel-chrome primitive; the tapped candidate's before/after.
   **Closes when** an arrangement survives a reload on a phone and a desktop.
 - **Run card:** the chat's sample walk alone. Owed: the round that changed each key ("changed in C7.3").
+- **Program-aided answers (PAL).** A node runs the program the model writes, once, sandboxed, with a
+  time limit, and its printed value is the answer. GSM-Hard is built for this: the answer key is what
+  the reference program computes. Without it the 8B does 7-digit arithmetic in its head
+  (`gsm-hard-8b`, 2026-11-20: three default rounds and two authored arms moved nothing; 32% → 32% on
+  100 held-out rows). PAL's own grader (`abs(ans − target) < 1e-3`) re-scores the 1,817 banked cells
+  from 34.0% to 34.8%, so the grader is not the gap. The sandbox comes from a standard, never a new
+  product: Harbor's container already runs agent tasks, and OpenShell is the path. **Closes when**
+  `gsm-hard-8b` runs under it and its origin is read on the same 100 held-out rows.
+- **One measuring loop inside the round.** A round already runs a loop: pick rows, let the surviving
+  candidates answer them, update θ, cut, elect. Every part it needs exists: the ruler (θ, δ) and each
+  row's expected information (`rasch.py::expected_information`), the round order (`build_round_order`),
+  the fresh draw (`AdaptiveQueue.draw`), PoBB's blocks and cuts, the paired bar
+  (`selection.py::elect_round_winner`) and the origin panel with its trigger (`PanelTrigger`). What is
+  owed is a few switches and computations on that one loop, never a second loop beside it:
+  - **in flight:** the most calls running at once, so the most a late decision wastes (today the
+    operator's `LookaheadPress`: one by default, about two per survivor at full speed);
+  - **dispatch:** `batch` (the loop decides once the whole batch is back) or `rolling` (it decides on
+    every returned row and at once sends as many new calls as the information then warrants, from none
+    up to the cap, never waiting for the rest);
+  - **shape:** `per_candidate` (every survivor answers the same next row) or `per_round` (new calls go to
+    whichever (candidate, row) pairs tell the decision most);
+  - **row choice:** `random` or `informative` (most expected information at the current θ, read off the
+    ruler, never off the parent's own grade on the row), chosen anew at every decision;
+  - **refit:** the ruler rows are chosen on is seated `per_round` (at the election) or `per_decision`;
+    PoBB's cut already refits θ and δ at every block;
+  - **vote:** `draw` (the round's paired rows) or `overlap` (a candidate that reaches its row budget
+    uncut is paired with the parent on the origin panel, at the same bar: more wins than losses among
+    the rows they disagree on, and P past `admission`).
+
+  Today's values (the press's in flight, `batch`, `per_candidate`, `random`, `per_round`, `draw`)
+  reproduce today's race, so no setting is dropped. The default it is built toward: the round
+  opens at full parallelism, then `rolling` dispatch with `per_decision` refits, every call spent on
+  the most informative pair, a candidate cut as soon as it is out, and one that reaches 30 rows uncut
+  read on a 60-row panel and elected if it clears the bar there. **Open:** `per_round` gives each
+  candidate its own rows, so PoBB's cut (today on the rows every racer shares, `EliminationCut`) must
+  read the union of rows, a reshape of run data. `informative` reverses the round order's measured
+  decision (`docs/methods/verdict-resolution.md`), so it runs under `vote: overlap`. Under `overlap`, a
+  parent elected on the panel is read on the rows that elected it from then on; held-out rows judge
+  the climb. **Build order**, each slice keeping today's race: rows chosen at each `close_block`
+  through one race hook; `informative` with θ refit `per_decision`; in flight past the block close, on
+  the press; `per_round`; `rolling` (launch or arrival order); the defaults flipped. `vote` is built.
+  **Closes when** today's values reproduce today's race and the default runs a campaign that is read
+  on held-out rows.

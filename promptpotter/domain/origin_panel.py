@@ -115,7 +115,8 @@ def round_advance(
 
 
 class PanelTrigger(StrEnum):
-    """Why an arm off the line is read on the origin panel: a monitoring call, never a verdict."""
+    """Why an arm off the line is read on the origin panel: a monitoring call, except under the
+    election's ``vote: overlap``, where it is the verdict: only an arm it seats there is electable."""
 
     N_MIN = "n_min"
 

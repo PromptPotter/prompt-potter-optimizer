@@ -110,6 +110,7 @@ from promptpotter.application.optimizers.potter.records import (
 from promptpotter.application.optimizers.potter.validators import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.domain.crowning_bar import Vote
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import Critique, StatePart
@@ -326,6 +327,9 @@ class ThetaElection(nodes.Selector):
 
     def admission(self, selected: SelectedOptimizer) -> float:
         return selected.knobs_of(self.name, ElectionKnobs).admission
+
+    def vote(self, selected: SelectedOptimizer) -> Vote:
+        return selected.knobs_of(self.name, ElectionKnobs).vote
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         return elect_on_theta(ctx, measured)

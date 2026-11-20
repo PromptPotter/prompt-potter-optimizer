@@ -114,6 +114,7 @@ nodes:
     type: selector
     config:
       admission: 0.85
+      vote: draw
   l1_critique:
     type: llm
     optimizer: *node_menus

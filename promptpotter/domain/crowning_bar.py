@@ -16,6 +16,9 @@ from promptpotter.shared.statistics import discordance_e_value, holm_adjusted, s
 #: ``posterior`` is today's bar and the default until separability is read on banked runs.
 CrowningStatistic = Literal["posterior", "sign_test", "e_process", "empirical_bayes"]
 
+#: Which rows a subject pairs with its parent on: the round's draw, or the origin panel's alone.
+Vote = Literal["draw", "overlap"]
+
 #: The ``1 − α`` a subject is read at where no selector declares one: the advance's one-sided 2.5%.
 BAR_ADMISSION = 0.975
 

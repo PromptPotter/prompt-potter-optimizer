@@ -27,6 +27,7 @@ from promptpotter.config.paths import (
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.campaign_config import ArmGateMode, CallTarget, OptimizerChoice
+from promptpotter.domain.crowning_bar import Vote
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -322,6 +323,10 @@ class SelectedOptimizer:
     @property
     def admission(self) -> float | None:
         return self.plan.selector.admission(self)
+
+    @property
+    def vote(self) -> Vote:
+        return self.plan.selector.vote(self)
 
     @property
     def sampler(self) -> Sampler:

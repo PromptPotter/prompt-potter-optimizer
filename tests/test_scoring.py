@@ -130,7 +130,7 @@ from promptpotter.application.optimizers.gepa.members import (
     MinibatchBars,
     MinibatchGate,
 )
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS, RoundSamples
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, RoundSamples
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -140,6 +140,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L3PlanOutput,
     fork_proposal_model,
 )
+from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
 from promptpotter.application.optimizers.potter.escalation import (
     EscalationInputs,
     Fire,
@@ -194,8 +195,10 @@ from promptpotter.application.runner.loop import open_origin_round
 from promptpotter.application.runner.round import (
     ReferencePairs,
     announce_opening,
+    bar_pairing,
     execute_round,
     hold_for_operator,
+    round_origin_panel,
     run_init,
 )
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
@@ -1530,7 +1533,10 @@ def _elect(
 ) -> tuple[ArmKey | None, RoundAbilities]:
     """The election on the fit the round measures of the same rows."""
     abilities = candidate_abilities(rows, parent, ruler)
-    return elect_round_winner(keys, rows, parent, coverage_floor, abilities, bar=bar), abilities
+    winner = elect_round_winner(
+        keys, rows, parent, coverage_floor, abilities, bar=bar, paired_on=None
+    )
+    return winner, abilities
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -1538,7 +1544,7 @@ def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     ruler = _easy_low_hard_high()
     bar = CrowningBar(statistic="posterior", admission=election_knobs().admission)
     with pytest.raises(ValidationError):
-        ElectionKnobs(admission=0.70)  # one discordant cell supports 0.75: it would promote
+        ElectionKnobs(admission=0.70, vote="draw")  # one discordant cell supports 0.75
     weak_on_easy = [measurement(i, float(i < 16)) for i in range(20)]
     able_on_hard = [measurement(i, float(i < 34)) for i in range(20, 40)]
     by_id = {
@@ -1630,6 +1636,86 @@ def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
     }, "a crowned pick's discordant wins stay out of every race it judges, a lone arm's included"
     assert not crowning_cells([won], arm_key("c1")), (
         "an ancestor's are its child's own measurements"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_overlap_vote_elects_on_the_origin_panel_an_arm_its_draw_held_back(
+    built_stores: Stores,
+) -> None:
+    # Campaign bigbench-multistep-d22x4-8b__f866d6, round 5, arm C5.3: θ lift +0.504, se 0.458.
+    c53, parent = ArmKey("C5.3"), ArmKey("parent")
+    # Cells 0-9 are the panel, won 7-3; cells 10-14 lost; 15-24 tied: the draw reads 7-8.
+    rows = sheet(measurements([1.0] * 7 + [0.0] * 8 + [1.0] * 10))
+    bar = sheet(measurements([0.0] * 7 + [1.0] * 18))
+    panel = frozenset(str(i) for i in range(10))
+    abilities = RoundAbilities(
+        theta={c53: 0.504}, theta_se={c53: 0.458}, bar={c53: (0.0, 0.0)}, cells={c53: 25}
+    )
+    electing = seat(built_stores)
+    set_cycle(electing.cycle, line=[round_result(0)])
+    ctx = NodeContext(electing, NODE_MEMBERS.get("theta_election"))
+    assert election_knobs().admission == 0.85, "guard: the admission the campaign ran"
+
+    def measured(paired_on: frozenset[str] | None) -> MeasuredRound:
+        return MeasuredRound(
+            arms={c53: arm_state("C5.3", position=ArmPosition(round=5, idx=2, total=3))},
+            rows={c53: rows},
+            parent=ReadArm(parent, arm_state("parent"), bar),
+            filed={},
+            folds={},
+            fit={},
+            abilities=abilities,
+            electable=[c53],
+            coverage_floor=6,
+            cut=None,
+            origin_panel_slots=list(range(10)),
+            on_panel={},
+            raced={c53: rows, parent: bar},
+            paired_on=paired_on,
+        )
+
+    assert elect_on_theta(ctx, measured(None)).selected is None, (
+        "the draw elected an arm that lost more of its cells than it won"
+    )
+    assert elect_on_theta(ctx, measured(panel)).selected == c53, (
+        "the overlap vote held back an arm that won its panel rows 7-3"
+    )
+    banked = electing.cycle.pending_decisions[-1].inputs_ref
+    assert isinstance(banked, RoundWinner) and banked.paired_on == sorted(panel)
+    assert banked.elect({c53: rows}, bar, abilities) == c53, (
+        "the replay re-elects on other rows than the live vote read"
+    )
+
+
+def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
+    def arm(name: str, idx: int, cut: CutKind | None = None) -> Concluded:
+        return arm_state(name, position=ArmPosition(round=1, idx=idx, total=3), cut=cut)
+
+    arms = {
+        ArmKey("walked"): arm("walked", 0),
+        ArmKey("stopped"): arm("stopped", 1, "eliminated"),
+        ArmKey("thin"): arm("thin", 2),
+    }
+    rows = {
+        ArmKey("walked"): sheet(measurements([1.0] * 8)),
+        ArmKey("stopped"): sheet(measurements([1.0] * 8)),
+        ArmKey("thin"): sheet(measurements([1.0] * 3)),
+    }
+    keys, panel = list(arms), frozenset({"0", "1"})
+    assert bar_pairing("draw", keys, arms, rows, panel, 6) == (keys, None), "the draw moved"
+    assert bar_pairing("overlap", keys, arms, rows, panel, 6) == ([ArmKey("walked")], panel), (
+        "an arm the origin panel holds no reading of stayed electable on it"
+    )
+    voting = select_optimizer(
+        OptimizerChoice(
+            call_target=BENCH_TARGET,
+            optimizer="potter",
+            nodes={"theta_election": ManifestNodeOverlay(config={"vote": "overlap"})},
+        )
+    )
+    assert (voting.vote, select_optimizer(bench_choice("potter")).vote) == ("overlap", "draw"), (
+        "the election's `vote` never reached the round's pairing"
     )
 
 
@@ -5316,6 +5402,30 @@ def test_an_arm_is_read_on_the_cells_its_reference_was_read_on(built_stores: Sto
         assert on_reference.reference_level("fitness") == level, (
             f"{coverage_state}: a reference level is served only on its whole cell set"
         )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_the_origin_panel_holds_a_rounds_cells_unless_its_own_size_is_set(
+    built_stores: Stores,
+) -> None:
+    bank = samples(50)
+    origin = sheet(measurement(s.id, 1.0, sample_key=s.key) for s in bank)
+
+    def panel(cells: int | None) -> tuple[list[int], int]:
+        cycle = seat(
+            built_stores,
+            bank=bank,
+            origin=(OptSearchPoint(), lambda _s: origin),
+            origin_panel_cells=cells,
+        ).cycle
+        pool = list(cycle.session.state.scoring.partition.search)
+        return round_origin_panel(cycle, pool), cycle.optimizer.round_cells(len(pool))
+
+    held, round_cells = panel(None)
+    assert len(held) == round_cells == 20, "unset, the panel left a round's own size"
+    assert len(panel(30)[0]) == 30, "the panel's own size was not the one it holds"
+    with pytest.raises(ValidationError):
+        defaulted_config({"origin_panel_cells": 41})  # past the origin's 40 cells
 
 
 @pytest.mark.usefixtures("optimizing_memory")

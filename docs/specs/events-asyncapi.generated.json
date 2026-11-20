@@ -5799,7 +5799,7 @@
         "type": "object"
       },
       "PanelTrigger": {
-        "description": "Why an arm off the line is read on the origin panel: a monitoring call, never a verdict.",
+        "description": "Why an arm off the line is read on the origin panel: a monitoring call, except under the\nelection's ``vote: overlap``, where it is the verdict: only an arm it seats there is electable.",
         "enum": [
           "n_min"
         ],

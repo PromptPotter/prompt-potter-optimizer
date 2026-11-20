@@ -639,6 +639,7 @@ def seat(
     origin: tuple[OptSearchPoint, Callable[[Session], CellSheet]] | None = None,
     framing: TaskDecomposition | None = None,
     origin_replicates: int | None = None,
+    origin_panel_cells: int | None = None,
 ) -> RoundContext:
     """Round *round_num* of a cycle started from *origin*, an individual and its reading of the
     session, else of one whose origin was never measured. It is bound to *hop*, else to a cycle of
@@ -653,6 +654,7 @@ def seat(
             "dataset_split": {"bench": bench, "demo": demo},
             "scoring": "label_match(predicted, ground_truth)",
             "origin_replicates": origin_replicates,
+            "origin_panel_cells": origin_panel_cells,
         }
     )
     hop = hop or CycleHop(campaign_id="seats", cycle_id=f"seat{next(_SEATS)}")

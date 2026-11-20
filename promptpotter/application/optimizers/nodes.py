@@ -31,6 +31,7 @@ from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import ArmPosition, Concluded, Elimination, Proposal, Proposed
 from promptpotter.domain.campaign_config import ArmGateMode, CampaignConfig, Estimand, Knob
 from promptpotter.domain.cell_fold import ScoreSummary
+from promptpotter.domain.crowning_bar import Vote
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart
@@ -462,7 +463,7 @@ class MeasuredRound:
     # Each filed arm's fold of those rows (`scoring/metrics.py::arm_folds`); none for an arm refused before a cell.
     folds: dict[ArmKey, ScoreSummary]
     fit: dict[ArmKey, ArmFit]
-    # The electable arms' θ over `raced` against the parent: the one fit the election reads.
+    # Every draw-electable arm's θ over `raced` against the parent: the one fit the election reads.
     abilities: RoundAbilities
     electable: list[ArmKey]
     coverage_floor: int
@@ -470,8 +471,10 @@ class MeasuredRound:
     # The origin panel by sample slot; `on_panel` holds each member's rows there beside its draw.
     origin_panel_slots: list[int]
     on_panel: dict[str, CellSheet]
-    # Each arm and the parent as the race read them (`RoundResult.raced`): what the election reads.
+    # Each arm and the parent as the race read them (`RoundResult.raced`): what θ is fit on.
     raced: dict[ArmKey, CellSheet]
+    # The cells of `raced` the crowning bar pairs on (`Selector.vote`); `None` pairs on every one.
+    paired_on: frozenset[str] | None
 
     @property
     def labels(self) -> dict[ArmKey, str]:
@@ -619,6 +622,10 @@ class Selector(NodeMember, Protocol):
     def admission(self, _selected: SelectedOptimizer) -> float | None:
         """The ``P(θ_arm > θ_parent)`` ``select`` promotes at, which a race's leader lock-in stops at; ``None`` locks none in."""
         return None
+
+    def vote(self, _selected: SelectedOptimizer) -> Vote:
+        """Which rows the crowning bar pairs an arm with its parent on, for ``select`` and the promotion alike."""
+        return "draw"
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...
 

@@ -59,6 +59,17 @@ uniform-mixture e-value on the same discordance at `arms / α`, valid wherever t
 its posterior carrying μ0's own error, so a τ at 0 never reads as certainty on μ0's sign
 (`crowning_bar.py::LiftPrior.shrunk`). No reading crowns an arm its paired verdicts contradict.
 
+**Which rows the bar pairs on is potter's `theta_election` `vote`**, chosen once before the election
+(`runner/round.py::bar_pairing`), so the crown, `Election.bar` and the replay read one cell set
+(`MeasuredRound.paired_on`). `draw` (the default) pairs an arm with its parent on every cell raced.
+`overlap` pairs them on the origin panel's cells alone, the rows both hold, and only an arm the
+panel trigger seats there (`runner/round.py::panel_trigger`) is electable: the panel, a monitor
+under `draw`, is the verdict, and a PoBB stop, which it never seats, leaves the election. Its cells are bought before the election
+(`runner/round.py::read_origin_panel`), the crowning cells included, since the panel stays fixed
+at C0; θ, its lift, the statistic and `admission` are the same under both. The panel holds
+`CampaignConfig.origin_panel_cells` of each benchmark's cells (unset: as many as a round walks),
+cut from the origin's own round, which `sp_budget_origin` sizes and must cover.
+
 ## Two regimes
 
 - **Early — high-signal.** A field member clearly behind loses its share in 3–5 queries (Wilcoxon needed ≥8 at α=0.2, being variance-agnostic).
@@ -67,8 +78,9 @@ its posterior carrying μ0's own error, so a τ at 0 never reads as certainty on
 ## Tunable knobs
 
 - potter's `pobb` `epsilon_stop` — the one stop's switch, shipped on (capo-pobb reads the same `pobb` config).
-- potter's `pobb` `epsilon` (`0.05` in its manifest: the planted-arm bar holds there and misses at 0.10), under 0.5. A stop ends measurement; it is **not** a verdict and never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/round.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/round.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
+- potter's `pobb` `epsilon` (`0.05` in its manifest: the planted-arm bar holds there and misses at 0.10), under 0.5. A stop ends measurement; it is **not** a verdict and, under `vote: draw`, never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/round.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/round.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
 - potter's `theta_election` `admission` (`0.85` in its manifest) — the election's own bar (§ The θ rule).
+- potter's `theta_election` `vote` (`draw` in its manifest) — which rows that bar pairs on (§ The θ rule).
 - potter's `pobb` `epsilon_floor` — ε at `elimination_n_min`, ramping linearly to `epsilon` over the next `elimination_n_min` cells read (`PoBBCheck.epsilon_at`). Equal to `epsilon` (as shipped) = a flat bar. **The bar ramps IN only, and nothing guards the tail** — else every late loser spends its budget; the price is that `PairedReading.reference_level` refuses an arm stopped short of a parent cell (`selected_by_stop`), so it ranks on θ alone. Aggression belongs here, never in `elimination_n_min`; a floor above `epsilon` goes flat and `epsilon_floor_inverted` reports it.
 - `OptimizationConfig.elimination_n_min` (default `6`) — the one min-samples floor, gating PoBB **and** ruler warmth (δ≡0 ⇒ θ = logit-fitness until this many grade-A samples bank): difficulty and ability become trustworthy at one threshold.
 

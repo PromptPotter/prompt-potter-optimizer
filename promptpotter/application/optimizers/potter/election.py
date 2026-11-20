@@ -81,13 +81,21 @@ class RoundWinner(Replayed, kind="round_winner"):
     bar: CrowningBar
     # Names which of the round's banked references the bar was; its rows are the close's.
     parent: ArmKey
+    # `MeasuredRound.paired_on`, sorted.
+    paired_on: list[str] | None
 
     def elect(
         self, raced: Mapping[ArmKey, CellSheet], parent: CellSheet, abilities: RoundAbilities
     ) -> ArmKey | None:
         """On the rows the round's race read and their fit against the parent."""
         return elect_round_winner(
-            self.arms, raced, parent, self.coverage_floor, abilities, bar=self.bar
+            self.arms,
+            raced,
+            parent,
+            self.coverage_floor,
+            abilities,
+            bar=self.bar,
+            paired_on=self.paired_on,
         )
 
     def replay(self, ctx: ReplayContext) -> ArmKey | None:
@@ -106,6 +114,7 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
         coverage_floor=measured.coverage_floor,
         bar=ctx.read(Bounds).crowning_bar(ctx.knobs(ElectionKnobs).admission),
         parent=measured.parent.key,
+        paired_on=None if measured.paired_on is None else sorted(measured.paired_on),
     )
     abilities = measured.abilities
     selected = inputs.elect(measured.raced, measured.raced[inputs.parent], abilities)

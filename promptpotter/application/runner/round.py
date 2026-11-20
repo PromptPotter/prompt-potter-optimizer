@@ -11,7 +11,7 @@ import math
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, assert_never
 
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import ruler_clock
@@ -79,7 +79,7 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.cell_fold import measured_cells, unscoreable_cells
 from promptpotter.domain.command_kinds import SubmittedArm
-from promptpotter.domain.crowning_bar import BarRead, BarSubject
+from promptpotter.domain.crowning_bar import BarRead, BarSubject, Vote
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, loci_of
 from promptpotter.domain.optimizer_state import RoundOutput
@@ -244,6 +244,7 @@ def round_origin_panel(cycle: Cycle, scoring_pool: list[Sample]) -> list[int]:
     held = cycle.in_run_cells
     # The origin's OWN round, never every cell read since: a later re-score would move the exam.
     origin_round = next(rr for rr in cycle.rounds if rr.round == ordered[0].arm.round)
+    size = cycle.config.origin_panel_cells
     return origin_panel(
         pairs.walked(origin_round.results),
         line_cells=set[int]().union(
@@ -251,7 +252,7 @@ def round_origin_panel(cycle: Cycle, scoring_pool: list[Sample]) -> list[int]:
         ),
         poolable={s.id for s in scoring_pool},
         benchmark_of={s.id: s.measured_dataset for s in scoring_pool},
-        size=cycle.optimizer.round_cells(len(scoring_pool)),
+        size=cycle.optimizer.round_cells(len(scoring_pool)) if size is None else size,
     )
 
 
@@ -402,6 +403,18 @@ async def measure_overlap(
     return reading, bought
 
 
+def panel_trigger(arm: ArmState, rows: CellSheet, n_min: int) -> PanelTrigger | None:
+    """Why the origin panel reads *arm*, a proposal walked to its draw's end, off its draw's *rows*."""
+    if (
+        not isinstance(arm, Measured)
+        or walked_short(arm)
+        or arm.role is MeasurementRole.PARENT
+        or len(measured_cells(rows)) < n_min
+    ):
+        return None
+    return PanelTrigger.N_MIN
+
+
 def panel_triggers(
     rounds: Sequence[RoundResult], n_min: int
 ) -> list[tuple[LineStep, PanelTrigger]]:
@@ -409,17 +422,31 @@ def panel_triggers(
     fired: dict[str, tuple[LineStep, PanelTrigger]] = {}
     for rr in rounds:
         for key, arm in rr.arms.items():
-            if (
-                not isinstance(arm, Measured)
-                or walked_short(arm)
-                or arm.role is MeasurementRole.PARENT
-                or arm.individual.id in fired
-            ):
-                continue
-            if len(measured_cells(rr.rows(key))) >= n_min:
+            trigger = panel_trigger(arm, rr.rows(key), n_min)
+            if trigger is not None and arm.individual.id not in fired:
                 step = LineStep(arm=arm_name(key, arm, rr.round), opt_sp=arm.individual)
-                fired[arm.individual.id] = (step, PanelTrigger.N_MIN)
+                fired[arm.individual.id] = (step, trigger)
     return list(fired.values())
+
+
+def bar_pairing(
+    vote: Vote,
+    electable: Sequence[ArmKey],
+    arms: Mapping[ArmKey, ArmState],
+    rows: Mapping[ArmKey, CellSheet],
+    panel: frozenset[str],
+    n_min: int,
+) -> tuple[list[ArmKey], frozenset[str] | None]:
+    """The ONE row choice every reader of the bar's paired subjects takes: under ``overlap`` the
+    origin *panel*'s cells, and only an arm its trigger seats there stays electable."""
+    match vote:
+        case "draw":
+            return list(electable), None
+        case "overlap":
+            seated = [k for k in electable if panel_trigger(arms[k], rows[k], n_min) is not None]
+            return seated, panel
+        case unreachable:
+            assert_never(unreachable)
 
 
 class _OriginPanelPairs:
@@ -644,6 +671,15 @@ async def measure_population(
     abilities = candidate_abilities(
         {key: raced[key] for key in electable}, raced[parent.key], ruler
     )
+    slots = set(origin_panel_slots)
+    electable, paired_on = bar_pairing(
+        cycle.optimizer.vote,
+        electable,
+        arms,
+        rows,
+        frozenset(s.key for s in pool if s.id in slots),
+        cycle.config.optimization.elimination_n_min,
+    )
     fit = {
         key: ArmFit(
             theta=abilities.theta.get(key),
@@ -676,6 +712,7 @@ async def measure_population(
         origin_panel_slots=origin_panel_slots,
         on_panel=on_panel,
         raced=raced,
+        paired_on=paired_on,
     )
 
 
@@ -1007,7 +1044,7 @@ def _crowning_read(cycle: Cycle, measured: MeasuredRound, winner: ArmKey | None)
     parent = measured.raced[measured.parent.key]
     subjects = {
         key: BarSubject(
-            *discordant(measured.raced[key], parent),
+            *discordant(measured.raced[key], parent, measured.paired_on),
             None if (fit := measured.fit.get(key)) is None else fit.lift,
             key == winner,
         )

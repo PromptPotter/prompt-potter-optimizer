@@ -109,12 +109,13 @@ def elect_round_winner(
     abilities: RoundAbilities,
     *,
     bar: CrowningBar,
+    paired_on: Collection[str] | None,
 ) -> ArmKey | None:
     """ADMISSION is the crowning *bar* over every readable arm at once; under ``posterior`` that is
     raw θ above the parent's by more than a fit resolves AND ``P(θ_cand > θ_parent)``, bounded by
     the discordant cells, past the admission. The RANK is the unbounded posterior."""
     reads = readable_lifts(keys, coverage_floor, abilities)
-    verdicts = bar.read(bar_subjects(reads, rows, parent_results, bar.admission))
+    verdicts = bar.read(bar_subjects(reads, rows, parent_results, bar.admission, paired_on))
     best_rank: tuple[float, int] = (0.0, 0)
     winner: ArmKey | None = None
     for key, lift in reads.items():
@@ -142,10 +143,13 @@ def banked_lift_prior(survey: CampaignSurvey, dataset: str) -> LiftPrior | None:
     )
 
 
-def discordant(rows: CellSheet, bar: CellSheet) -> tuple[int, int]:
-    """The verdicts *rows* won and lost against *bar* on the cells both scored."""
+def discordant(
+    rows: CellSheet, bar: CellSheet, paired_on: Collection[str] | None
+) -> tuple[int, int]:
+    """The verdicts *rows* won and lost against *bar* on the cells both scored, of *paired_on*
+    alone where it names any."""
     own, against = paired_grades(rows), paired_grades(bar)
-    shared = [k for k in own if k in against]
+    shared = [k for k in own if k in against and (paired_on is None or k in paired_on)]
     return discordance([own[k] for k in shared], [against[k] for k in shared])
 
 
@@ -154,13 +158,14 @@ def bar_subjects(
     rows: Mapping[ArmKey, CellSheet],
     parent_results: CellSheet,
     admission: float,
+    paired_on: Collection[str] | None,
 ) -> dict[ArmKey, BarSubject]:
     """Each arm's paired evidence over the parent. A θ lift the paired cells contradict is the
-    prior's or the δ weighting's, never the arm's, so no reading clears it; the bar is read off no
-    cell that crowned the parent (the round's draw leaves out `crowning_cells`)."""
+    prior's or the δ weighting's, never the arm's, so no reading clears it. The round's draw leaves
+    out every cell that crowned the parent (`crowning_cells`); the fixed origin panel keeps them."""
     subjects: dict[ArmKey, BarSubject] = {}
     for key, lift in lifts.items():
-        wins, losses = discordant(rows[key], parent_results)
+        wins, losses = discordant(rows[key], parent_results, paired_on)
         posterior = wins > losses and clears(lift, admission, support=sign_posterior(wins, losses))
         subjects[key] = BarSubject(wins, losses, lift, posterior)
     return subjects

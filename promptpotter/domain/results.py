@@ -282,7 +282,7 @@ class RoundResult(RoundOutcome):
         return self.cells.get(key, NO_CELLS)
 
     def raced(self, key: ArmKey) -> CellSheet:
-        """The ONE row set the race, the election and the δ fold read: the draw, then the
+        """The ONE row set the race, the election's θ and the δ fold read: the draw, then the
         origin-panel cells it lacks."""
         return self.rows(key).merged(self.overlap_results.get(key, NO_CELLS))
 

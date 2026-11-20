@@ -293,6 +293,15 @@ class CampaignConfig(StrictModel):
         "scored on a superset stays like-for-like. A bank smaller than this scores on "
         "the whole bank (`sample_dataset` is a prefix slice) — not an error.",
     )
+    origin_panel_cells: Annotated[int | None, Knob(Estimand.SELECTION, Estimand.STOPPING)] = Field(
+        None,
+        ge=1,
+        le=MAX_PASS_ROWS,
+        description="How many of each benchmark's cells the origin panel holds — the fixed set "
+        "every pick is read against C0 on, and the rows ``vote: overlap`` elects on. It is cut "
+        "from the cells the origin's own round measured, so it may not exceed "
+        "``sp_budget_origin``. Unset holds as many as a round after the first walks.",
+    )
     origin_replicates: Annotated[int | None, Knob(Estimand.SPEND)] = Field(
         None,
         ge=2,
@@ -410,6 +419,15 @@ class CampaignConfig(StrictModel):
         if dropped := set(self.exclude_nodes) & {*self.optimizer_narrowing, *self.pipeline_overlay}:
             raise ValueError(
                 f"exclude_nodes drops {sorted(dropped)}, which a narrowing or overlay sets"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _origin_measures_its_panel(self) -> CampaignConfig:
+        if (cells := self.origin_panel_cells) is not None and cells > self.sp_budget_origin:
+            raise ValueError(
+                f"origin_panel_cells {cells} exceeds sp_budget_origin {self.sp_budget_origin}: "
+                "the panel is cut from the cells the origin's round measures"
             )
         return self
 

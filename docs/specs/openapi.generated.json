@@ -2428,6 +2428,20 @@
             "title": "Optimizer Narrowing",
             "type": "object"
           },
+          "origin_panel_cells": {
+            "anyOf": [
+              {
+                "maximum": 150.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many of each benchmark's cells the origin panel holds — the fixed set every pick is read against C0 on, and the rows ``vote: overlap`` elects on. It is cut from the cells the origin's own round measured, so it may not exceed ``sp_budget_origin``. Unset holds as many as a round after the first walks.",
+            "title": "Origin Panel Cells"
+          },
           "origin_replicates": {
             "anyOf": [
               {
@@ -2721,6 +2735,20 @@
             ],
             "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`steer_verdict`, asked when a fork's start is parsed). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing"
+          },
+          "origin_panel_cells": {
+            "anyOf": [
+              {
+                "maximum": 150.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many of each benchmark's cells the origin panel holds — the fixed set every pick is read against C0 on, and the rows ``vote: overlap`` elects on. It is cut from the cells the origin's own round measured, so it may not exceed ``sp_budget_origin``. Unset holds as many as a round after the first walks.",
+            "title": "Origin Panel Cells"
           },
           "origin_replicates": {
             "anyOf": [
@@ -4647,6 +4675,20 @@
             ],
             "description": "Per-node declaration over the dataset's optimizer search space — the per-campaign param-lock + value-space lever beside `exclude_nodes` (whole node). `provider`/`route_order` are always locked. **`param_keys` SUBSETS the config axes, `prompt_fields_held` holds the prompt fields it names, and `param_allowed_values` REPLACES** (`PipelineSchema.narrow`, applied at pipeline setup): a campaign may only close axes the dataset opened, but the value space is its own statement — which is what lets an operator ADD a model or a reasoning rung no `dataset.yaml::pipeline` on disk carries. `param_allowed_values['model']` is also the ONE permitted model set: what the optimizer may pick, and what a human fork may steer to without tainting the branch. A steer outside it is a `campaign.babysit` act — warned + graded C (`steer_verdict`, asked when a fork's start is parsed). Nothing declared for a node = nothing sanctioned there, the restrictive default.",
             "title": "Optimizer Narrowing"
+          },
+          "origin_panel_cells": {
+            "anyOf": [
+              {
+                "maximum": 150.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How many of each benchmark's cells the origin panel holds — the fixed set every pick is read against C0 on, and the rows ``vote: overlap`` elects on. It is cut from the cells the origin's own round measured, so it may not exceed ``sp_budget_origin``. Unset holds as many as a round after the first walks.",
+            "title": "Origin Panel Cells"
           },
           "origin_replicates": {
             "anyOf": [
@@ -13781,7 +13823,7 @@
         "type": "object"
       },
       "PanelTrigger": {
-        "description": "Why an arm off the line is read on the origin panel: a monitoring call, never a verdict.",
+        "description": "Why an arm off the line is read on the origin panel: a monitoring call, except under the\nelection's ``vote: overlap``, where it is the verdict: only an arm it seats there is electable.",
         "enum": [
           "n_min"
         ],

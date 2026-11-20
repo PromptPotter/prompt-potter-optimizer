@@ -9,6 +9,7 @@ from pydantic import Field
 
 from promptpotter.application.optimizers.nodes import LengthKnobs
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.crowning_bar import Vote
 from promptpotter.domain.pool import Access
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel
@@ -211,6 +212,14 @@ class ElectionKnobs(StrictModel):
             "P(θ_arm > θ_parent), capped by what its discordant cells support. Never below "
             "what one discordant cell supports (0.75), so one cell never promotes. Higher → "
             "fewer promotions."
+        ),
+    )
+    vote: Annotated[Vote, Knob(Estimand.GATE)] = Field(
+        description=(
+            "Which rows the crowning bar pairs an arm with its parent on, for the election and "
+            "the promotion alike. ``draw``: every cell the round raced. ``overlap``: the origin "
+            "panel's cells alone, and only an arm the panel trigger seats there is electable. "
+            "The θ lift and the statistic are the same under both."
         ),
     )
 
