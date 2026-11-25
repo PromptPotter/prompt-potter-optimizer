@@ -4,8 +4,6 @@ from enum import StrEnum
 
 from pydantic import Field
 
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.phases import StopReason
 from promptpotter.domain.ruler import THETA_CAVEAT_INFO, ThetaCaveat
 from promptpotter.domain.strict_model import FrozenModel
 
@@ -32,15 +30,9 @@ def series_reason_head(reason: ThetaCaveat | SeriesGap) -> str:
     return SERIES_GAP_HEAD[reason]
 
 
-class InnerRunAddress(FrozenModel):
-    """A replayed cell reads its run in the sandbox of the cycle that measured it, never the reader's."""
-
-    sandbox: CycleHop = Field(description="The outer cycle whose sandbox holds the inner campaign")
-    campaign_id: str = Field(description="The inner campaign, in that sandbox")
-
-
 class InnerCellFacts(FrozenModel):
-    """Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score."""
+    """Carried BESIDE the measurement, never as ``OuterSampleProxies`` fields the formula could score.
+    What was MEASURED alone: no word of its run's vocabulary and no address, which are run data."""
 
     origin_level: float | None = Field(
         description="The origin's θ on the search split's level series; null where "
@@ -65,15 +57,6 @@ class InnerCellFacts(FrozenModel):
     )
     rounds_ran: int = Field(description="The rounds the inner cycle closed past its origin")
     round_budget: int = Field(description="The round budget, never below the rounds it ran")
-    stop_reason: StopReason = Field(description="Why the inner cycle stopped")
-    floor_reason: str | None = Field(
-        description="Why the optimizer prompt's own run was scored at the floor, measuring no "
-        "lift; null on a measured cell"
-    )
-    origin_headroom: float | None = Field(
-        description="The share of origin rows still missed: 0 is a cell no arm can lift, however "
-        "sharply it reads"
-    )
     bench_origin_level: float | None = Field(
         description="The origin's headline on the held-out rows"
     )
@@ -87,4 +70,3 @@ class InnerCellFacts(FrozenModel):
     tokens: int | None = Field(
         description="Tokens used, cumulative across attempts; reporting only, as `sent_usd`"
     )
-    run: InnerRunAddress = Field(description="The inner campaign that measured the cell")

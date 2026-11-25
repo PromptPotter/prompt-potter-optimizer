@@ -16,7 +16,6 @@ import numpy as np
 import pytest
 import yaml
 from factories import (
-    INNER_RUN,
     arm_key,
     arm_state,
     cycle_result,
@@ -57,7 +56,7 @@ from promptpotter.application.intelligence.rasch import (
     fit_theta,
     graduate_ruler_model,
 )
-from promptpotter.application.runner.bench import own_level
+from promptpotter.application.runner.bench import LineSpan, own_level
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.paired import grade_measurands
 from promptpotter.application.views.render.sample import fmt_query_result
@@ -67,6 +66,7 @@ from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
     compute_outer_proxies,
+    floor_reason,
     inner_cell_facts,
     inner_cell_report,
     mean_parent_level_se,
@@ -721,9 +721,7 @@ def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     )
     ran = [round_result(1), round_result(2)]
     withheld = inner_cell_facts(
-        cycle_result([0.40, 0.55], 0.30, ran).model_copy(update={"level_series": cold}),
-        ran,
-        INNER_RUN,
+        cycle_result([0.40, 0.55], 0.30, ran).model_copy(update={"level_series": cold})
     )
     assert withheld.mean_round_delta is None, (
         "a reader asked the stamp, not the series' caveat, and differenced a cold series"
@@ -770,7 +768,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         return cycle_result(levels, origin, ran, **kw), ran
 
     def delta(levels: list[float | None], **kw: Any) -> float | None:
-        return inner_cell_facts(*cyc(levels, **kw), INNER_RUN).mean_round_delta
+        return inner_cell_facts(cyc(levels, **kw)[0]).mean_round_delta
 
     def lift(levels: list[float | None], bench: list[float | None], **kw: Any) -> float | None:
         px = compute_outer_proxies(*cyc(levels, bench_origin=0.40, bench_levels=bench, **kw))
@@ -804,7 +802,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     # search split's θ scores ZERO.
     churned = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40])
     churn = (
-        inner_cell_facts(*churned, INNER_RUN).mean_round_delta,
+        inner_cell_facts(churned[0]).mean_round_delta,
         compute_outer_proxies(*churned),
     )
     assert (churn[0], churn[1].held_out_lift) == pytest.approx((0.25, 0.0))
@@ -827,7 +825,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         cyc([0.40, None]),
         cyc([0.40, 0.55], origin=None),
     ):
-        facts = inner_cell_facts(*unread, INNER_RUN)
+        facts = inner_cell_facts(unread[0])
         assert compute_outer_proxies(*unread).held_out_lift == pytest.approx(0.0), (
             "a cold or holed search series excluded a cell its held-out lift scores"
         )
@@ -852,16 +850,12 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         for sid, report in enumerate(
             [
                 inner_cell_report(
-                    inner_cell_facts(*cyc([0.40]), INNER_RUN),
+                    inner_cell_facts(cyc([0.40])[0]),
                     OuterSampleProxies(floored=0, held_out_lift=held),
                 )
                 for held in (0.0, 0.0, 0.0, 0.05, 0.0, 0.0375)
             ]
-            + [
-                inner_cell_report(
-                    inner_cell_facts(*owned, INNER_RUN), compute_outer_proxies(*owned)
-                )
-            ]
+            + [inner_cell_report(inner_cell_facts(owned[0]), compute_outer_proxies(*owned))]
         )
     ]
     family = yaml.safe_load(
@@ -889,7 +883,7 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
 
     for spoiled in (
         [failed(PARSE_FAILURE_TOOLING, 1)],
-        [round_result(0), failed(PARSE_FAILURE_MALFORMED, 1), failed(PARSE_FAILURE_MALFORMED, 2)],
+        [failed(PARSE_FAILURE_MALFORMED, 1), failed(PARSE_FAILURE_MALFORMED, 2)],
         [round_result(1, candidates_scored=0, no_op=1, dup=1)],
         [round_result(1, candidates_scored=0, no_op=2), failed(PARSE_FAILURE_MALFORMED, 2)],
     ):
@@ -905,4 +899,52 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     ), "a cycle one proposal of which reached a cell floored"
     assert delta([0.40, 0.55], rounds=reached) == pytest.approx(0.175), (
         "a malformed reply is the prompt's verdict and scores"
+    )
+
+
+def test_an_inner_cell_floors_on_the_rounds_its_line_spent() -> None:
+    def spoiled(rnd: int) -> RoundResult:
+        return round_result(rnd, parse_failure=PARSE_FAILURE_MALFORMED)
+
+    def proxies(spans: list[LineSpan]) -> OuterSampleProxies:
+        rounds = [rr for span in spans for rr in span.own]
+        return compute_outer_proxies(cycle_result([0.40, 0.40], 0.30, rounds), rounds)
+
+    # Its first cycle reached a cell in round 1; a rebase cut at 1 and the fork spoiled every round.
+    reached_then_forked = [
+        LineSpan([round_result(1), spoiled(2)], None),
+        LineSpan([spoiled(1), spoiled(2)], 1),
+    ]
+    assert proxies(reached_then_forked).floored == 0, (
+        "the round a rebase discarded never judged whether a proposal reached a cell"
+    )
+    # Every round of both cycles spoiled: the floor names the four the line spent, not the fork's two.
+    all_spoiled = [LineSpan([spoiled(1), spoiled(2)], None), LineSpan([spoiled(1), spoiled(2)], 1)]
+    rounds = [rr for span in all_spoiled for rr in span.own]
+    said = floor_reason(cycle_result([0.40, 0.40], 0.30, rounds), rounds)
+    assert said is not None and "of its 4 L1 round(s)" in said
+
+
+def test_an_abort_floors_only_where_the_optimizer_prompt_owns_it() -> None:
+    def ran(*cells: Any) -> list[RoundResult]:
+        sheet = scorer_of().sheet([cell.facts for cell in cells])
+        return [round_result(1), round_result(2, cells={"x": sheet})]
+
+    def aborted(rounds: list[RoundResult]) -> OuterSampleProxies:
+        result = cycle_result(
+            [0.40, 0.55],
+            0.30,
+            rounds,
+            stop_reason=StopReason.OPTIMIZER_ABORT,
+            bench_origin=0.40,
+            bench_levels=[0.45, 0.50],
+        )
+        return compute_outer_proxies(result, rounds)
+
+    # The owner is what the line FILED before the abort: a 504 is the backend's, never the prompt's.
+    backend = ran(measurement(0, None, error="504: no reply", error_category="SERVER"))
+    assert aborted(backend).floored == 0, "an abort on a backend fault floored its prompt"
+    prompt = ran(measurement(0, 0.0), measurement(1, None, error="bad", error_category="PIPELINE"))
+    assert aborted(prompt) == OuterSampleProxies(floored=1, held_out_lift=None), (
+        "an abort the optimizer prompt owns was scored as a measured lift"
     )

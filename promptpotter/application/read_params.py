@@ -897,8 +897,8 @@ class DatasetCellParams(
         min_length=1, alias="answer", description="The answer's address in the log"
     )
 
-    async def answer(self, caller: Caller) -> Cell:
-        return await open_cell(caller.stores, self.name, self.answer_id)
+    def answer(self, caller: Caller) -> Cell:
+        return open_cell(caller.stores, self.name, self.answer_id)
 
 
 class OriginsParams(ReadParams, read=ReadKind.ORIGINS, route="/origins"):

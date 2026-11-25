@@ -8,14 +8,14 @@ import re
 import threading
 import uuid
 from collections import OrderedDict
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import replace
 from enum import Enum
 from pathlib import Path
 from typing import Any, ClassVar, NamedTuple
 
 from promptpotter.config.paths import MEASUREMENTS_DIR
-from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.l4.proxies import read_inner_report
 from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE, meets_grade
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import ArchiveConfig, ArchiveEntry, FiledAnswer
@@ -156,10 +156,13 @@ def index_row(line: str | bytes) -> tuple[str, ArchiveEntry]:
 
 
 def answer_of(line: str | bytes) -> FiledAnswer:
+    """A cell line's ONE reader (`data_root.py::_ARCHIVE_SHAPES`), strict to its nested report."""
     row = json.loads(line)
     if not isinstance(row, dict):
         raise ValueError(f"a cell line holds an answer, not a {type(row).__name__}")
-    return FiledAnswer.from_wire(row)
+    answer = FiledAnswer.from_wire(row)
+    read_inner_report(answer.cell.pipeline)
+    return answer
 
 
 def answer_line(answer: FiledAnswer) -> str:
@@ -265,7 +268,7 @@ class _CellFile:
         if not (whole and landed.at.start == held):
             return
         # Through JSON, as a reader folds them: a tuple is a list on disk.
-        fresh = [FiledAnswer.from_wire(json.loads(line)) for line in landed.lines]
+        fresh = [answer_of(line) for line in landed.lines]
         self.rows.extend(fresh)
         self.by_id.update((answer.answer, answer) for answer in fresh)
         # The next refresh asks the mark's identity rule whether the file is still the one appended to.
@@ -382,9 +385,10 @@ class MeasurementArchive:
         *,
         role: MeasurementRole,
         created_at: str,
-        filed_by: CycleHop,
+        output_keys: Mapping[str, tuple[str, ...]],
     ) -> list[str]:
-        """Each cell beside its provenance grade; the addresses come back in that order."""
+        """Each cell beside its provenance grade, filed with the outputs each node declared; the
+        addresses come back in that order."""
         by_file: dict[str, list[FiledAnswer]] = {}
         refs: list[str] = []
         for cell, provenance in graded:
@@ -399,7 +403,7 @@ class MeasurementArchive:
                     role=role,
                     provenance=provenance,
                     created_at=created_at,
-                    filed_by=filed_by,
+                    output_keys=output_keys,
                 )
             )
         if not refs:

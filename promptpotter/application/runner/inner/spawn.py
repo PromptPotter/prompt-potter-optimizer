@@ -32,6 +32,7 @@ from promptpotter.application.optimizer_manifest import (
 )
 from promptpotter.application.pipeline_resolve import laid_session
 from promptpotter.application.run_phase_control import RunControl
+from promptpotter.application.runner.bench import line_spans
 from promptpotter.application.runner.inner.tasks import (
     InnerTasks,
     ResolvedInnerPanel,
@@ -48,7 +49,6 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import InnerRun
 from promptpotter.domain.l4.cells import InnerCells, cell_key
-from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
     BENCH_ROWS_KEY,
@@ -63,11 +63,11 @@ from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.run_records import (
-    RoundStatement,
     RunPhaseRecord,
     SpawnedBy,
     SpawnedRecord,
 )
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import split_rendered_prompt
@@ -94,7 +94,6 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
 )
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.measurement_context import MAX_INSTRUMENT_DEPTH
 
 # An inner cycle's budget is ROUNDS, never a spend or token cap: those trip on token counts, which jitter.
 
@@ -143,7 +142,7 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
             "promptpotter connector: this run has no cycle to spawn an inner campaign under"
         )
     cells = _cells(ctx)
-    pinned = panel_cell(sample)
+    pinned = panel_cell(sample, cells.cells)
     arm = cells.own(pinned.cell, payload.get("optimizer_prompt_overrides") or {})
     dataset = cells.dataset(pinned.cell)
     campaign_id = inner_campaign_id(dataset, pinned.instrument, arm)
@@ -336,9 +335,10 @@ async def _run_inner_campaign(
     cell: _InnerCell,
     minted: list[CycleHop],
     spawned_by: dict[str, Any],
-) -> tuple[CycleResult, list[RoundStatement], str]:
+) -> tuple[CycleResult, list[RoundResult], str]:
     """Runs in a FRESH task, so every ContextVar bound below is this cell's alone. The rounds are
-    the ended cycle's standing closes, and the words its stop was declared in, off its ledger."""
+    the ones its LINE spent (`bench.py::LineSpan.own`), a rebase's discarded ones included, and the
+    words its stop was declared in, off its ledger."""
     store = claim_sandbox(cell.ctx)
     # Over the seat too: its init reads what this cell remembers.
     with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
@@ -356,10 +356,10 @@ async def _run_inner_campaign(
                 budget=opened.held,
                 optimizer=opened.optimizer,
             )
-            standing = ended.store.campaigns.standing_rounds(ended.hop, moment=None)
+            spans = line_spans(ended.store, ended.state.scoring.scorer, ended.hop)
             declared = ended.store.campaigns.last(ended.hop, RunPhaseRecord)
     assert declared is not None and declared.stop_reading is not None, "an inner run ends declared"
-    return result, [held.close for held in standing.rounds.values()], declared.stop_reading.said
+    return result, [rr for span in spans for rr in span.own], declared.stop_reading.said
 
 
 def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
@@ -376,14 +376,6 @@ def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
 async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, Any]:
     """One cell: an inner hop in the asker's sandbox, read by one law."""
     query = sample.query
-    depth = run_scope().depth
-    if depth >= MAX_INSTRUMENT_DEPTH:
-        raise CellUnscoreableError(
-            f"promptpotter connector: an inner run {depth} level(s) deep spawns no inner campaign "
-            f"(MAX_INSTRUMENT_DEPTH={MAX_INSTRUMENT_DEPTH}): the inner dataset's own connector "
-            "is 'promptpotter' — name an inner_benchmark on another backend in the panel.",
-            spent={},
-        )
     cell = _resolve_inner_cell(sample, payload)
     minted: list[CycleHop] = []
     fresh = (
@@ -425,8 +417,7 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     except CellUnscoreableError as unscored:
         # Every other no-evidence shape, which `measure_sample` resolves.
         raise CellUnscoreableError(f"{unscored}; {said}", spent=unscored.spent) from unscored
-    run = InnerRunAddress(sandbox=cell.ctx.inside[-1], campaign_id=cell.campaign_id)
-    facts = inner_cell_facts(result, rounds, run)
+    facts = inner_cell_facts(result)
     delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"
     held = "floored" if scored.held_out_lift is None else f"B{scored.held_out_lift:+.3f}"
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Sequence
+from enum import StrEnum
 from typing import Any, Literal, Self
 
 from pydantic import Field, model_validator
@@ -8,10 +9,10 @@ from pydantic import Field, model_validator
 from promptpotter.domain.arms import Cut
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.cycle_result import CycleResult
-from promptpotter.domain.l4.inner_facts import InnerCellFacts, InnerRunAddress, SeriesGap
+from promptpotter.domain.l4.inner_facts import InnerCellFacts, SeriesGap
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
-from promptpotter.domain.results import RoundOutcome
+from promptpotter.domain.results import RoundOutcome, RoundResult
 from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
 from promptpotter.domain.scoring import GradedCell, PipelineData
 from promptpotter.domain.strict_model import FrozenModel
@@ -39,7 +40,7 @@ OUTER_PROXY_KEYS: tuple[str, ...] = tuple(OuterSampleProxies.model_fields)
 
 # Here because the `promptpotter` connector declares it too and may not import `application/runner`.
 INNER_RESULT_KEY = "final_ranking"
-# The facts no term names (the series' reason, its SE, the stop, the run): what the tape reads.
+# The facts no term names (the θ series, its reason and SE): what the tape reads.
 INNER_FACTS_KEY = "inner"
 
 
@@ -107,6 +108,20 @@ def inner_cell_report(facts: InnerCellFacts, proxies: OuterSampleProxies) -> dic
     }
 
 
+_INNER_REPORT_KEYS = frozenset({*(t.name for t in INNER_CELL_TERMS), *INNER_REPORTED_KEYS})
+
+
+def read_inner_report(pipeline: PipelineData) -> None:
+    """The recursion's report proven as its connector declares it, a no-op on any other row: what
+    the archive's one reader (`measurement_archive.py::answer_of`) refuses, the landing drops."""
+    if INNER_FACTS_KEY not in pipeline.cell_report:
+        return
+    if undeclared := sorted(pipeline.cell_report.keys() - _INNER_REPORT_KEYS):
+        raise KeyError(f"the recursion's cell report declares no {', '.join(undeclared)}")
+    inner_facts_of(pipeline)
+    outer_proxies_of(pipeline)
+
+
 def inner_facts_of(pipeline: PipelineData) -> InnerCellFacts | None:
     """Written by the recursion alone, so a row carrying it IS an L4 outer row."""
     report = pipeline.cell_report
@@ -125,11 +140,6 @@ def outer_proxies_of(pipeline: PipelineData) -> OuterSampleProxies | None:
         return None
     # A floored cell's report leaves its lift out.
     return OuterSampleProxies.model_validate({key: report.get(key) for key in OUTER_PROXY_KEYS})
-
-
-def _origin_headroom(result: CycleResult) -> float | None:
-    fitness = result.origin.fitness if result.origin is not None else None
-    return None if fitness is None else 1.0 - fitness.value
 
 
 def unread_rounds(result: CycleResult) -> list[int]:
@@ -171,9 +181,7 @@ def parent_levels(result: CycleResult) -> tuple[float, list[float]] | None:
     return trajectory[0].theta, [level.theta for level in trajectory[1]]
 
 
-def inner_cell_facts(
-    result: CycleResult, rounds: Sequence[RoundOutcome], run: InnerRunAddress
-) -> InnerCellFacts:
+def inner_cell_facts(result: CycleResult) -> InnerCellFacts:
     held = parent_levels(result)
     origin = None if held is None else held[0]
     levels = [] if held is None else held[1]
@@ -190,16 +198,12 @@ def inner_cell_facts(
         mean_parent_level_se=mean_parent_level_se(result),
         rounds_ran=result.n_rounds_after_origin,
         round_budget=result.round_budget,
-        stop_reason=result.stop_reason,
-        floor_reason=floor_reason(result, rounds),
-        origin_headroom=_origin_headroom(result),
         bench_origin_level=bench_origin,
         bench_final_lift=(
             None if bench_origin is None or bench_last is None else bench_last - bench_origin
         ),
         sent_usd=result.spend.sent_usd if result.spend else None,
         tokens=result.spend.total_tokens_used if result.spend else None,
-        run=run,
     )
 
 
@@ -232,42 +236,64 @@ def _spoiled(rnd: RoundOutcome) -> bool:
     return all(isinstance(arm, Cut) and arm.kind == "invalid" for arm in rnd.proposed.values())
 
 
-def no_evidence_reason(result: CycleResult) -> str | None:
-    """Only a SUCCESS ``StopOutcome`` is a measurement: a cut-short optimizer prompt reads flawless to every aggregate."""
-    outcome = stop_reason_outcome(result.stop_reason)
-    if outcome is not StopOutcome.SUCCESS:
-        return (
-            f"it did not end on its own terms — {outcome} (stop_reason={result.stop_reason}); "
-            "its trajectory was cut short by something the optimizer prompt does not own"
-        )
-    return None
+class AbortOwner(StrEnum):
+    """Who an ``OPTIMIZER_ABORT`` belongs to: read off what its line filed, never the abort's words."""
+
+    PROMPT = "prompt"
+    UPSTREAM = "upstream"
 
 
-def floor_reason(result: CycleResult, rounds: Sequence[RoundOutcome]) -> str | None:
+def abort_owner(rounds: Sequence[RoundResult]) -> AbortOwner:
+    """UPSTREAM where a round its line spent filed a cell the configuration does not answer for
+    (`MeasuredCell.charged`): a fault no framing refinement fixes, whatever the abort said."""
+    faulted = any(
+        cell.facts.errored and not cell.facts.charged
+        for rnd in rounds
+        for sheet in rnd.cells.values()
+        for cell in sheet
+    )
+    return AbortOwner.UPSTREAM if faulted else AbortOwner.PROMPT
+
+
+def floor_reason(result: CycleResult, rounds: Sequence[RoundResult]) -> str | None:
     """Optimizer-prompt-OWNED, so FLOORED rather than excluded: it is reproducible, hence evidence.
-    *rounds* are the cycle's standing closes, read off its ledger."""
+    *rounds* are the rounds its line spent (`runner/bench.py::LineSpan.own`)."""
     if result.stop_reason is StopReason.OPTIMIZER_ABORT:
-        return "its optimizer prompt terminated the inner campaign (optimizer_abort)"
+        if abort_owner(rounds) is AbortOwner.UPSTREAM:
+            return None
+        return floor_words(result.stop_reason, len(rounds))
     if stop_reason_outcome(result.stop_reason) is not StopOutcome.SUCCESS:
         return None
-    spent = [r for r in rounds if r.round > 0]
-    if spent and all(_spoiled(r) for r in spent):
-        return (
-            f"no proposal of its {len(spent)} L1 round(s) reached a cell: a reply that yielded "
-            "none, or only invalid edits"
-        )
+    if rounds and all(_spoiled(r) for r in rounds):
+        return floor_words(result.stop_reason, len(rounds))
     return None
 
 
-def compute_outer_proxies(
-    result: CycleResult, rounds: Sequence[RoundOutcome]
-) -> OuterSampleProxies:
-    """A floor is scored by the formula reading `floored`, never by a lift nobody measured."""
+def floor_words(stop: StopReason, spent: int) -> str:
+    """A floor in words, worded at the read off its run (its stop and the rounds its line spent),
+    never filed with the cell: `floor_reason` asks the abort first, so a floored abort is one."""
+    if stop is StopReason.OPTIMIZER_ABORT:
+        return "its optimizer prompt terminated the inner campaign (optimizer_abort)"
+    return (
+        f"no proposal of its {spent} L1 round(s) reached a cell: a reply that yielded none, or "
+        "only invalid edits"
+    )
+
+
+def compute_outer_proxies(result: CycleResult, rounds: Sequence[RoundResult]) -> OuterSampleProxies:
+    """A floor is scored by the formula reading `floored`, never by a lift nobody measured. Past
+    it, a SUCCESS ``StopOutcome`` or an upstream-owned abort is a measurement, its area read over
+    the rounds it ran: any other cut-short run reads flawless to every aggregate."""
     if floor_reason(result, rounds) is not None:
         return OuterSampleProxies(floored=1, held_out_lift=None)
-    if (reason := no_evidence_reason(result)) is not None:
+    outcome = stop_reason_outcome(result.stop_reason)
+    if outcome is not StopOutcome.SUCCESS and result.stop_reason is not StopReason.OPTIMIZER_ABORT:
         # The inner cycle forwarded its own spend onto the outer ledger as it ran.
-        raise CellUnscoreableError(reason, spent={})
+        raise CellUnscoreableError(
+            f"it did not end on its own terms — {outcome} (stop_reason={result.stop_reason}); "
+            "its trajectory was cut short by something the optimizer prompt does not own",
+            spent={},
+        )
     curve = result.curve
     state = result.bench.status.state if curve is None else curve.state
     if curve is None or curve.area is None:

@@ -21,8 +21,6 @@ from promptpotter.application.intelligence.hard_sample_sorter import (
 from promptpotter.application.intelligence.rasch import Observation, build_observations
 from promptpotter.application.pipeline_resolve import (
     cycle_config,
-    dataset_pipeline,
-    experiment_outside_run,
 )
 from promptpotter.application.scoring.closed_rounds import (
     campaign_scorer,
@@ -50,8 +48,6 @@ from promptpotter.domain.cycle_paths import CycleHop, CyclePath
 from promptpotter.domain.dashboard_rows import sample_status
 from promptpotter.domain.paired_reading import MeasurandUnit
 from promptpotter.domain.pass_kinds import individual_cells
-from promptpotter.domain.pipeline_parsing import parse_pipeline_response
-from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.ruler import RulerReach, RulerScope
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
@@ -145,10 +141,9 @@ def _assemble(
     described: ArchiveEntry,
     filed: FiledAnswer,
     cell: GradedCell,
-    schema: PipelineSchema,
     sid: int,
 ) -> Cell:
-    """Spans are READ-TIME assembly: outputs attribute through the dataset's CURRENT schema."""
+    """Spans are READ-TIME assembly: outputs attribute through the outputs filed with the answer."""
     facts = cell.facts
     pd = facts.pipeline
     recorded = pd.wire()
@@ -158,9 +153,8 @@ def _assemble(
         "ground_truth": facts.ground_truth or None,
         "question": pd.question,
     }
-    outputs_of = {n.name: n.output_keys for n in schema.running_nodes}
     spans = [
-        _span(node, cfg, pd, recorded, variables, outputs_of.get(node, []))
+        _span(node, cfg, pd, recorded, variables, list(filed.output_keys.get(node, ())))
         for node, cfg in described.node_configs
     ]
     attributed = {k for s in spans for k in s.outputs} | _SPAN_KEYS
@@ -186,7 +180,7 @@ def _assemble(
     )
 
 
-async def open_cell(stores: Stores, name: str, answer: str) -> Cell:
+def open_cell(stores: Stores, name: str, answer: str) -> Cell:
     """The position is the answer's own bank's: *name* may label a re-cut that moved or dropped its row."""
     dataset = resolve_dataset(stores, name)
     filed = stores.archive.answer(answer)
@@ -200,11 +194,7 @@ async def open_cell(stores: Stores, name: str, answer: str) -> Cell:
         raise NotFoundError(f"Answer '{answer}' is filed under a bank no longer held")
     position = bank.position_of[filed.cell.sample_key]
     filed = stores.archive.whole(filed)
-    declared = await dataset_pipeline(
-        stores, dataset, experiment=experiment_outside_run(stores, dataset)
-    )
-    schema = parse_pipeline_response(declared)
-    return _assemble(described, filed, dataset_scorer(dataset).grade(filed.cell), schema, position)
+    return _assemble(described, filed, dataset_scorer(dataset).grade(filed.cell), position)
 
 
 def campaign_scope_cycle(stores: Stores, campaign_id: str) -> CycleHop:

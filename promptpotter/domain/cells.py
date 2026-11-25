@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from typing import Any, Literal, get_args
 
 from pydantic import Field, JsonValue
@@ -23,8 +23,8 @@ assert HARD_SAMPLE_ORDER_LABELS.keys() == set(get_args(HardSampleOrder))
 
 
 class Seat(FrozenModel):
-    """One fresh inner campaign, declared off its panel. ``id`` is the outer query; omitted
-    overrides inherit the panel's benchmark and model."""
+    """One fresh inner campaign, declared off its panel. ``id`` labels it in its panel and keys
+    nothing a row files; omitted overrides inherit the panel's benchmark and model."""
 
     # In every pin, so in every banked cell's `Sample.key`: dropping it re-keys them all.
     kind: Literal["seat"]
@@ -39,9 +39,9 @@ class Seat(FrozenModel):
     inner_route_order: list[str] | None = None
 
     def pin(self) -> dict[str, JsonValue]:
-        """What the cell IS, never its seat; its depth is the instrument's (`l4/cells.py::cell_key`): a
-        default is one key spelled or not."""
-        return self.model_dump(mode="json", exclude_defaults=True, exclude={"held_out"})
+        """What the cell IS, never its seat or its label; its depth is the instrument's
+        (`l4/cells.py::cell_key`): a default is one key spelled or not."""
+        return self.model_dump(mode="json", exclude_defaults=True, exclude={"id", "held_out"})
 
 
 _INSTRUMENT = "instrument"
@@ -58,9 +58,14 @@ class PinnedCell(FrozenModel):
         return self.cell.pin() | {_INSTRUMENT: self.instrument}
 
     @classmethod
-    def from_pin(cls, pin: Mapping[str, JsonValue]) -> PinnedCell:
+    def from_pin(cls, pin: Mapping[str, JsonValue], seats: Iterable[Seat]) -> PinnedCell:
+        """The seat of *seats* the pin names by what it IS; RAISES where none is it."""
         declared = {k: v for k, v in pin.items() if k != _INSTRUMENT}
-        return cls.model_validate({"cell": declared, _INSTRUMENT: pin.get(_INSTRUMENT)})
+        instrument = pin.get(_INSTRUMENT)
+        seat = next((s for s in seats if s.pin() == declared), None)
+        if seat is None or not isinstance(instrument, str):
+            raise ValueError(f"no seat of this panel is the cell {declared!r}")
+        return cls(cell=seat, instrument=instrument)
 
 
 # The tier stops at dataset: samples differ per dataset, so a workspace scope would mean nothing.

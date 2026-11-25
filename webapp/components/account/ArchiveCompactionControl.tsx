@@ -150,12 +150,6 @@ export function ArchiveCompactionControl() {
             <dt>Answers</dt>
             <dd>{report.rows_moved}</dd>
           </div>
-          {report.breaks.length > 0 && (
-            <div>
-              <dt>{done ? "Broke" : "Would break"}</dt>
-              <dd>{report.breaks.join(", ")}</dd>
-            </div>
-          )}
         </dl>
       )}
 

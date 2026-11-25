@@ -36,13 +36,14 @@ from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
 from promptpotter.application.runner.inner.transcript import inner_transcript
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.formula.matchers import admits
+from promptpotter.application.scoring.sample_measurement import interpolate_pipeline_params
 from promptpotter.application.scoring.search_point_scorer import filed_entry, score_search_point
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import BarRead, CrowningBar
-from promptpotter.domain.l4.inner_facts import InnerRunAddress
-from promptpotter.domain.l4.proxies import inner_facts_of
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.opt_search_point import (
     OPERATOR_SOURCE,
     EvidenceGrounding,
@@ -82,6 +83,8 @@ from promptpotter.domain.value_tree import Delivery
 from promptpotter.domain.wounds import RuntimeFailure, ValidationFailure, ValidationReason
 from promptpotter.infrastructure.llm.spend_book import require_spend_book
 from promptpotter.infrastructure.llm.telemetry import append_record
+from promptpotter.infrastructure.run_scope import InnerSpawnContext, run_scope
+from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
 from promptpotter.shared.errors import SendRefusedError
 from promptpotter.shared.measurement_context import MeasurementRole
 
@@ -441,17 +444,41 @@ class Target(CycleRead):
 
     def __init__(self, round_: RoundContext, member: NodeMember) -> None:
         super().__init__(round_, member)
-        self._inner_runs: dict[InnerRunAddress, str] = {}
+        self._inner_runs: dict[str, str] = {}
 
     def transcript(self, cell: GradedCell) -> Transcript | None:
         """What a row's run said: an L4 cell's inner campaign, read where it ran and once per
         reader, else the model's reasoning."""
-        if (inner := inner_facts_of(cell.facts.pipeline)) is None:
-            trace = cell.facts.pipeline.reasoning_trace
+        pipeline = cell.facts.pipeline
+        scored, inner = outer_proxies_of(pipeline), inner_facts_of(pipeline)
+        if scored is None or inner is None:
+            trace = pipeline.reasoning_trace
             return Transcript("MODEL REASONING", trace) if trace else None
-        if inner.run not in self._inner_runs:
-            self._inner_runs[inner.run] = inner_transcript(self._cycle.session.store, inner)
-        return Transcript("INNER RUN", self._inner_runs[inner.run])
+        seen = cell.facts.answer or cell.key
+        if seen not in self._inner_runs:
+            sandbox, hop = self._inner_run(cell)
+            self._inner_runs[seen] = inner_transcript(
+                sandbox, hop, inner, floored=bool(scored.floored)
+            )
+        return Transcript("INNER RUN", self._inner_runs[seen])
+
+    def _inner_run(self, cell: GradedCell) -> tuple[Stores | None, CycleHop | None]:
+        """The cell's inner campaign, found by its content: the point that measured it, laid as
+        its connector sent it, in THIS cycle's sandbox; a replay another line measured has none."""
+        session = self._cycle.session
+        spawn = run_scope().spawn
+        if not isinstance(spawn, InnerSpawnContext):
+            return None, None
+        sandbox = inner_sandbox_store(spawn.stores, spawn.inside[-1])
+        archive = session.store.archive
+        filed = None if cell.facts.answer is None else archive.answer(cell.facts.answer)
+        entry = None if filed is None else archive.entry(filed.config_key, filed.dataset_hash)
+        hop_of = session.backend_client.connector.cell_hop
+        if entry is None or hop_of is None or sandbox is None:
+            return sandbox, None
+        sample = session.bank.samples[session.bank.position_of[cell.key]]
+        wire = interpolate_pipeline_params(entry.pipeline_params, sample.model_dump())
+        return sandbox, hop_of(sample, wire)
 
     @property
     def schema(self) -> PipelineSchema:

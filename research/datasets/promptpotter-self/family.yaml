@@ -22,7 +22,7 @@ campaign:
   # may pick where an axis is open, and what a human may steer to un-tainted where it is not. A
   # `param_allowed_values` entry REPLACES the node's own list rather than intersecting with it
   # (`PipelineSchema.narrow`), so this file may name a model the manifest predates. It is a
-  # permission, not an instrument: no cell's pin (`domain/l4/cells.py::InnerTaskSpec`) reads it.
+  # permission, not an instrument: no cell's key (`domain/l4/cells.py::cell_key`) reads it.
   optimizer_narrowing:
     l1_generate: &pp_self_narrowing
       param_allowed_values:
@@ -136,7 +136,17 @@ panel:
   #   (`members.py::AdaptiveQueue.draw`, `adaptive_queue_mechanism.py::covered_prefix`).
   # - `partition_bank` ranks rows by `stable_hash([seed, key])`, so the seats draw other rows than
   #   the seed screens below read: those screens no longer describe the seats.
+  #
+  # ONE inner measurand and ONE stall ladder for every seat, declared here and nowhere else: a
+  # seat's own `scoring` and `escalation` never reach its inner run (`tasks.py::_THE_PANELS`),
+  # so a lift on one benchmark and on another are read on one scale. Here, beside the round
+  # budget, because this block is laid over every seat once; a seat file would spell it per
+  # benchmark. `em_match` reads the last bolded span under SQuAD normalization: hotpotqa's own
+  # grader, and on a label (TRUE / FALSE / Uncertain, a legal role) the label compared as text.
+  # The ladder is the manifest's at the time of writing, pinned so tuning the manifest's moves
+  # no inner cell.
   inner_campaign:
+    scoring: em_match(predicted, ground_truth)
     sp_budget_origin: 40
     # `demo: 0` is load-bearing: justlogic's own `demo: 50` would open shots.
     dataset_split: {bench: 20, demo: 0, tolerance: 2}
@@ -149,6 +159,8 @@ panel:
         adaptive_queue: {config: {sp_budget_round: 40, per_round_resubset: false}}
         # justlogic's own `k_max: 5` would open shots over the `demo: 0` above.
         l1_generate: {config: {n_variants: 3, k_max: 0}}
+        escalation:
+          config: {l1_patience: 3, l2_patience: 2, l3_patience: 1, escalation_ladder: full}
   #
   # A panel spans THREE benchmarks, two search seats each, so an edit that helps one task family
   # and hurts another reads as the mixture it is. Each inner campaign reads its own benchmark's δ

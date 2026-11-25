@@ -422,6 +422,7 @@ def _install(name: str) -> ResolvedDataset:
 _INNER = "justlogic/d234"
 # A panel's `inner_campaign` that reads a held-out area: two rounds, a bench, every adoption graded.
 _GEOMETRY: dict[str, Any] = {
+    "scoring": "label_match(predicted, ground_truth)",
     "sp_budget_origin": 40,
     "dataset_split": {"bench": 20, "demo": 0, "tolerance": 2},
     "bench_trigger": "every_adoption",
@@ -1115,7 +1116,8 @@ def test_a_cell_is_keyed_by_what_its_session_loads_and_no_other_cells(
     def keyed(declared: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
         resolved = ResolvedInnerPanel.read(built_stores, declared)
         rows = samples_from_dicts(asyncio.run(spawn.panel_rows(built_stores, resolved)))
-        return {s.query: s.key for s in rows}, identity_of(built_stores, resolved, "")
+        by_seat = {t["id"]: s.key for t, s in zip(declared["tasks"], rows, strict=True)}
+        return by_seat, identity_of(built_stores, resolved, "")
 
     before, fingerprint = keyed(panel)
     assert before["seed-0"] != before["seed-1"], "two seeds share one cell key"
@@ -3017,6 +3019,75 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     ), "an arm runs another config than a campaign declared that way"
 
 
+def test_every_seat_of_a_panel_runs_its_panels_one_measurand_and_one_ladder() -> None:
+    # A seat's own discount or patience reaching its inner run reads its lift on another scale.
+    # A checkout resolves every tier the panel's seats sit in.
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    run = read_dataset_definition(resolve_dataset(stores, "promptpotter-self/run"))
+    assert run is not None and run.panel is not None, "guard"
+    cells = InnerTasks.model_validate(run.panel).resolve_cells(stores)
+    assert len(cells.by_dataset) == 3, "guard: the panel spans three benchmarks"
+    laid = {
+        (
+            str(cell.campaign.scoring),
+            json.dumps(
+                cell.campaign.model_dump(mode="json")["optimization"]["nodes"]["escalation"]
+            ),
+        )
+        for cell in cells.by_dataset.values()
+    }
+    assert laid == {
+        (
+            "em_match(predicted, ground_truth)",
+            json.dumps(
+                {
+                    "config": {
+                        "l1_patience": 3,
+                        "l2_patience": 2,
+                        "l3_patience": 1,
+                        "escalation_ladder": "full",
+                    }
+                }
+            ),
+        )
+    }, "a seat's own scoring or stall ladder reached its inner run"
+    named = {
+        (
+            json.dumps(cell.optimizer.levers[cell.optimizer.measurement]["scoring"]),
+            cell.optimizer.levers["escalation"]["ladder"]["l1_patience"],
+        )
+        for cell in cells.by_dataset.values()
+    }
+    assert named == {('"em_match(predicted, ground_truth)"', 3)}, (
+        "the outer's levers name another measurand or ladder than the inner runs"
+    )
+    hotpot = cells.by_dataset["hotpotqa-distractor"]
+    split = replace(
+        hotpot,
+        optimizer=replace(
+            hotpot.optimizer,
+            levers={
+                **hotpot.optimizer.levers,
+                "escalation": {**hotpot.optimizer.levers["escalation"], "ladder": {"l1": 5}},
+            },
+        ),
+    )
+    with pytest.raises(ValueError):
+        _ = replace(cells, by_dataset={**cells.by_dataset, "hotpotqa-distractor": split}).owners
+
+
+def test_a_panel_seats_no_outer_dataset_so_no_inner_run_spawns() -> None:
+    # L4's one depth door (no spawn checks a depth): a seat on an outer dataset would run its
+    # inner campaign on a connector that spawns.
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    run = read_dataset_definition(resolve_dataset(stores, "promptpotter-self/run"))
+    assert run is not None and run.panel is not None, "guard"
+    nested = {"kind": "seat", "id": "nested", "inner_dataset": "promptpotter-self/e2e"}
+    with pytest.raises(PayloadInvalidError) as refused:
+        InnerTasks.model_validate({**run.panel, "tasks": [nested]}).resolve_cells(stores)
+    assert refused.value.code == "pipeline_config_invalid", "a nested L4 seat resolved"
+
+
 def test_an_account_dataset_stating_one_axis_of_its_split_reads_the_rest_from_the_defaults(
     built_stores: Stores,
 ) -> None:
@@ -4433,9 +4504,17 @@ def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
     seated, drawn = rows({**task, "held_out": True}, other)
     searched, _ = rows(task, other)
     assert seated.held_out and not searched.held_out, "a held-out environment was searched"
-    assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
+    content = {k: v for k, v in task.items() if k != "id"}
+    assert seated.source_pin == {**content, "instrument": "i"} and seated.key == searched.key, (
         "the seat entered the pin, so the held-out cell never replays once searched"
     )
+    # A seat's id is its label in the panel: renamed, its banked cells still replay.
+    renamed = {**task, "id": "gsm_hard/renamed"}
+    relabelled = ResolvedInnerPanel(
+        inner_panel=InnerTasks.model_validate({**seats, "tasks": [renamed, other]})
+    )
+    moved, _ = samples_from_dicts(relabelled.samples({renamed["id"]: "i", other["id"]: "j"}))
+    assert moved.key == searched.key, "renaming a seat moved its cell key"
     environments = partition_bank(
         [seated, drawn], DatasetSplit(bench=0, demo=0, tolerance=0), seed=0
     )

@@ -118,26 +118,6 @@
       ],
       "shape": {
         "$defs": {
-          "CycleHop": {
-            "additionalProperties": false,
-            "description": "One ``(campaign, cycle)`` step of a cycle path; neither id names a cycle alone.",
-            "properties": {
-              "campaign_id": {
-                "title": "Campaign Id",
-                "type": "string"
-              },
-              "cycle_id": {
-                "title": "Cycle Id",
-                "type": "string"
-              }
-            },
-            "required": [
-              "campaign_id",
-              "cycle_id"
-            ],
-            "title": "CycleHop",
-            "type": "object"
-          },
           "Diagnostics": {
             "properties": {
               "step_statuses": {
@@ -813,7 +793,7 @@
             "type": "object"
           }
         },
-        "description": "Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it,\n``filed_by`` the run that filed it, ``None`` on an answer filed before the stamp.",
+        "description": "Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it,\n``output_keys`` each node's outputs as the pipeline that answered declared them, so a read\nattributes the answer by what was filed, never today's declaration.",
         "properties": {
           "cell": {
             "$ref": "#/$defs/MeasuredCell"
@@ -842,16 +822,15 @@
             "title": "Dataset Hash",
             "type": "string"
           },
-          "filed_by": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/CycleHop"
+          "output_keys": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
               },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
+              "type": "array"
+            },
+            "title": "Output Keys",
+            "type": "object"
           },
           "provenance": {
             "title": "Provenance",
@@ -879,7 +858,8 @@
           "dataset_hash",
           "role",
           "provenance",
-          "created_at"
+          "created_at",
+          "output_keys"
         ],
         "title": "FiledAnswer",
         "type": "object"

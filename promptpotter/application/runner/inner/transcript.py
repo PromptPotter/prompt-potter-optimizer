@@ -5,14 +5,17 @@ from pathlib import Path
 
 from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.arms import Cut
+from promptpotter.domain.cycle_paths import CycleHop
+from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, series_reason_head
+from promptpotter.domain.l4.proxies import floor_words
 from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.records.run_records import RoundStatement
+from promptpotter.domain.records.run_records import CycleFinalRecord, RoundStatement
 from promptpotter.domain.round_audit import RoundAudit
 from promptpotter.domain.ruler import LevelSeries
 from promptpotter.infrastructure.projections.audit_trail import round_audits
-from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
+from promptpotter.infrastructure.store.stores import Stores
 
 # One line's clip: a round shows every arm and cluster, each in a line.
 CLAIM_CAP = 200
@@ -90,29 +93,39 @@ def _elected(close: RoundStatement) -> str:
     return f"elected {close.arms[selected].label}"
 
 
-def _head(facts: InnerCellFacts) -> str:
-    run = facts.run
-    head = f"inner run {run.campaign_id}: stopped {facts.stop_reason}"
-    if facts.floor_reason is not None:
-        return f"{head}, scored at the floor: {facts.floor_reason}"
-    origin, final = facts.bench_origin_level, facts.bench_final_lift
-    if origin is not None and final is not None:
-        head += f"; its held-out rows from {origin:.3f} to {origin + final:.3f}"
+def _head(hop: CycleHop, final: CycleResult, facts: InnerCellFacts, *, floored: bool) -> str:
+    """The stop and the floor's words are its run's, read off the run; the levels, the cell's."""
+    head = f"inner run {hop.campaign_id}: stopped {final.stop_reason}"
+    if floored:
+        said = floor_words(final.stop_reason, final.n_rounds_after_origin)
+        return f"{head}, scored at the floor: {said}"
+    origin, lift = facts.bench_origin_level, facts.bench_final_lift
+    if origin is not None and lift is not None:
+        head += f"; its held-out rows from {origin:.3f} to {origin + lift:.3f}"
     return head
 
 
-def inner_transcript(stores: Stores, facts: InnerCellFacts) -> str:
-    """Every round the inner run closed, read where it ran: what it was told, what each arm tried and how it measured."""
-    run, head = facts.run, _head(facts)
-    sandbox = inner_sandbox_store(stores, run.sandbox)
-    campaign = None if sandbox is None else sandbox.campaigns.load_campaign(run.campaign_id)
-    if sandbox is None or campaign is None or campaign.lifecycle_status == "deleted":
+def inner_transcript(
+    sandbox: Stores | None, hop: CycleHop | None, facts: InnerCellFacts, *, floored: bool
+) -> str:
+    """Every round the inner run closed, read where it ran (*hop* in *sandbox*, this cycle's):
+    what it was told, what each arm tried and how it measured."""
+    campaigns = None if sandbox is None else sandbox.campaigns
+    campaign = (
+        None if campaigns is None or hop is None else campaigns.load_campaign(hop.campaign_id)
+    )
+    live = campaign is not None and campaign.lifecycle_status != "deleted"
+    ended = (
+        None
+        if not live or campaigns is None or hop is None
+        else campaigns.last(hop, CycleFinalRecord)
+    )
+    if campaigns is None or hop is None or ended is None:
         return (
-            f"{head}. UNREADABLE: its records went with the sandbox of outer cycle "
-            f"{run.sandbox.campaign_id}/{run.sandbox.cycle_id}; only this cell's numbers remain."
+            "inner run: UNREADABLE — no campaign of this cycle's sandbox ran it; only this cell's "
+            "numbers remain."
         )
-    campaigns = sandbox.campaigns
-    hop = campaigns.live_cycle(campaign.root_hop)
+    head = _head(hop, ended.final, facts, floored=floored)
     standing = campaigns.standing_rounds(hop, moment=None).rounds
     closes = [standing[n].close for n in sorted(standing)]
     if not closes:

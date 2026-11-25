@@ -61,9 +61,11 @@ from promptpotter.infrastructure.store.data_root import (
     Parsed,
     Staged,
     classify,
+    drop_unloadable_rows,
     row_schema,
     run_owner,
     run_unit,
+    unloadable_rows,
     unloadable_why,
 )
 from promptpotter.infrastructure.store.io import (
@@ -139,6 +141,20 @@ class Unloadable(NamedTuple):
         return f"{self.found.kind.fate.value} {self.found.kind.name} {self.path}: {self.why}"
 
 
+class RowDrops(NamedTuple):
+    """A line cache's rows its reader refuses, counted by why (`data_root.py::Kind.drops_rows`)."""
+
+    path: Path
+    found: Found
+    why: Counter[str]
+
+    @property
+    def said(self) -> str:
+        kind = self.found.kind
+        whys = "; ".join(f"{n} {why}" for why, n in self.why.most_common())
+        return f"{self.why.total()} row(s) of {kind.fate.value} {kind.name} {self.path}: {whys}"
+
+
 class LandingRefusal(NamedTuple):
     """What refuses a landing, the paths that do and its remedy."""
 
@@ -155,9 +171,11 @@ class Landing(NamedTuple):
     staged: tuple[Staged, ...]
     # Asked with `--reset`: every account's run data, whether it loads or not.
     reset: ResetPlan | None
-    # What the landing drops unasked: each cache file that does not load, and each run that does
-    # not, its campaign or draft whole where the file is one of its records (`data_root.run_unit`).
+    # What the landing drops unasked: each cache file that does not load, each line cache's rows
+    # that do not, and each run that does not, its campaign or draft whole where the file is one of
+    # its records (`data_root.run_unit`).
     caches: tuple[Unloadable, ...]
+    rows: tuple[RowDrops, ...]
     runs: tuple[Unloadable, ...]
     # A workspace campaign a mint left before its manifest: no verb lists it, and a draft's billed
     # ledger may sit in it, so it goes as `delete` takes a campaign, its spend banked first.
@@ -226,7 +244,9 @@ class Landing(NamedTuple):
         return (
             *(f"migrate {one.said}" for one in self.staged),
             *(f"complete the definition swap {swap}" for swap in self.swaps),
-            *(f"drop {one.said}" for one in (*self.caches, *self.runs)),
+            *(f"drop {one.said}" for one in self.caches),
+            *(f"drop {one.said}" for one in self.rows),
+            *(f"drop {one.said}" for one in self.runs),
             *(f"delete {one.why}, its spend banked" for one in self.torn),
             *(f"kept {one.why}" for one in self.kept),
             *(() if self.reset is None else (f"reset {len(self.reset.drops):,} run file(s)",)),
@@ -236,10 +256,14 @@ class Landing(NamedTuple):
     def tally(self) -> str:
         """Its lines counted by what each did to which kind: one line, however large the landing."""
         dropped = Counter(one.found.kind.name for one in (*self.caches, *self.runs))
+        rows: Counter[tuple[str, str]] = Counter()
+        for one in self.rows:
+            rows.update({(one.found.kind.name, why): n for why, n in one.why.items()})
         return ", ".join(
             (
                 *((f"migrated {len(self.staged)} file(s)",) if self.staged else ()),
                 *(f"dropped {n} {name}" for name, n in sorted(dropped.items())),
+                *(f"dropped {n} {name} row(s), {why}" for (name, why), n in rows.most_common()),
                 *((f"deleted {len(self.torn)} torn mint(s)",) if self.torn else ()),
                 *((f"kept {len(self.kept)} taken or minted since the plan",) if self.kept else ()),
                 *(() if self.reset is None else (f"reset {len(self.reset.drops):,} run file(s)",)),
@@ -267,9 +291,14 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
     staged = _staged(projects_root)
     found_at: dict[Path, Found | None] = {}
     why_at: dict[Path, str | None] = {}
+    rows: list[RowDrops] = []
     for path in sorted({path for path, _st in iter_files(data_root)} | staged.keys()):
         found = found_at[path] = classify(PurePosixPath(path.relative_to(data_root).as_posix()))
-        if found is not None and found.kind.fate is not Fate.RUN:
+        if found is not None and found.kind.drops_rows and not found.lock:
+            if whys := unloadable_rows(path, found):
+                rows.append(RowDrops(path, found, whys))
+            why_at[path] = None
+        elif found is not None and found.kind.fate is not Fate.RUN:
             held = staged.get(path)
             why_at[path] = unloadable_why(
                 path, found, staged=None if held is None else held.data
@@ -363,6 +392,7 @@ def plan_landing(projects_root: Path, *, reset: bool) -> Landing:
         tuple(staged.values()),
         swept,
         tuple(caches),
+        tuple(one for one in rows if one.path not in gone and dropped.isdisjoint(one.path.parents)),
         tuple(runs.values()),
         tuple(torn),
         proven,
@@ -473,6 +503,11 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
             complete_definition_swap(swap)
         for cache in landing.caches:
             unlink_robust(cache.path)
+        rows = [
+            one._replace(why=whys)
+            for one in landing.rows
+            if (whys := drop_unloadable_rows(one.path, one.found.kind))
+        ]
         jobs = live_jobs(registry)
         for run in landing.runs:
             if (
@@ -496,7 +531,9 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
             with destroying(stores, registry, mint.path.name):
                 stores.campaigns.delete_campaign(mint.path.name, keep_results=False)
             torn.append(mint)
-    applied = landing._replace(runs=tuple(runs), torn=tuple(torn), kept=tuple(kept))
+    applied = landing._replace(
+        rows=tuple(rows), runs=tuple(runs), torn=tuple(torn), kept=tuple(kept)
+    )
     stamp = LandedStamp(
         key=None if kept else landing_key(), version=APP_VERSION, at=utcnow_iso(), said=applied.said
     )

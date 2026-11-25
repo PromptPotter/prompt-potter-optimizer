@@ -336,7 +336,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   validator and the readers' None branches deleted. A reshape wipes run data. **Re-test:**
   `git grep -c "_state_fits_content" -- promptpotter/domain/paired_reading.py` is 0.
 - **Fields written, never read: 27 left** (`scripts/complexity_ledger.py::_unread_fields`, the
-  `p_unread_fields` ceiling). `InnerCellFacts.origin_headroom` sits in the hashed `l4/proxies.py`. Action: each goes, or names its reader. **Re-test:** the ceiling is 0.
+  `p_unread_fields` ceiling). Action: each goes, or names its reader. **Re-test:** the ceiling is 0.
 - **`SampleScoredRecord.running` stamps a running fold on every cell** (9.3 % of a 1.5 MB ledger). Its
   readers (`Narration.fold`, `StandingArm.fold`, the live board's rows) need the scorer's evaluators,
   which no domain fold holds. Action: the readers fold `StandingArm.cells` through
@@ -475,10 +475,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   for a cheap model; `usd_text` and webapp `fmtUsd` are one rule; `run_standing.py` spells a third.
   Open (operator): the rule (significant digits under a dollar is one candidate). **Rides with:** forks 1.
   **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
-- **An archived answer's outputs are read off today's backend**: `scoring/measurement_log.py::open_cell`
-  reads the live declaration, because an `ArchiveEntry` records only `node_configs`. Action: a per-node
-  output-key map filed with the answer; a replay reads the bank. **Rides with:** forks 2. **Re-test:**
-  `git grep -n "dataset_pipeline(" -- promptpotter/application/scoring/measurement_log.py`.
 - **`api_keys.json` holds account keys in plaintext at rest.** Action: encrypt under a box key, with its
   survivor migration. **Rides with:** forks 4. **Re-test:** `cat` one.
 
@@ -682,7 +678,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `enclosed_as` line instead of calling it; `tests/factories.py::spend_book(enclosing=…)` nests a book a
   second way; `spend_book.py::_ENCLOSED = "backend"` is what a nested book falls back to where its
   spawner's pass names no kind; `RunScope.depth` / `InstrumentMode.depth` restate `instrument is not
-  None` at `MAX_INSTRUMENT_DEPTH = 1`. Root: `enter_inner_cell` nests the book (enclosing book and
+  None` (L4 is one level deep, `docs/concepts/l4.md` § Depth). Root: `enter_inner_cell` nests the book (enclosing book and
   kind together, every spawning pass naming its kind), and depth goes. **Held:** `_ENCLOSED` is also
   the hold tree's kind for a nested cell's hold with no resource (`SpendBook._filed`, `_out`), where
   an outer search's inner cell IS its backend: decide what names that kind before cutting it.
@@ -775,24 +771,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 These land in the re-key windows, `W1` (keys, address, cell key and archive row, one wipe) and `W2`
 (ledger record shapes), each row naming its window and chain.
 
-- **An archived answer carries its run's vocabulary and its run's address, and both are run data**:
-  the CACHE row's `domain/l4/inner_facts.py::InnerCellFacts` holds `stop_reason: StopReason`, a
-  `floor_reason` sentence and `run: InnerRunAddress`, so a `StopReason` rename fails every archived
-  cell that stopped on it; `domain/sample.py::FiledAnswer.filed_by` is `CycleHop | None` (11,997 desk
-  rows unstamped, `archive_maintenance.py::_UNSTAMPED`), carries no `Job.workspace`, and on 48,589 of
-  111,614 stamped rows names a wiped campaign. New beside "`floor_reason` and the bench read different
-  rounds" and "The abort knob and the floor disagree": those say what it says, this that it is filed. Root: an archived cell holds what was measured, not its run's enum or
-  address; one strict reshape with "An archived answer's outputs are read off today's backend", a row
-  that no longer fits dropped. **Window:** W1 · l4-key. **Re-test:** `git grep -nE "StopReason|filed_by: CycleHop \| None" -- promptpotter/domain/l4/inner_facts.py promptpotter/domain/sample.py` is empty.
-- **The archive is a cache no landing proves: its row reads tolerant, its nested facts strict**:
-  `store/data_root.py::_ARCHIVE_SHAPES` proves a cell file by `Parsed(answer_of, FiledAnswer)`, deaf
-  to undeclared keys (`domain/scoring.py::MeasuredCell.from_wire`) over an open `cell_report`, while
-  `domain/l4/proxies.py::inner_facts_of` reads `InnerCellFacts` on `extra="forbid"`: on the desk
-  `FiledAnswer` loads 123,611 of 123,611 rows and `inner_facts_of` raises on 50 of 325 L4 outer cells
-  (four `cell_report.inner` generations; 6,582 rows keep a retired `source`). New beside "An archived
-  L4 outer cell carries no `floored`": the proof stops at `FiledAnswer`, so no landing says it. Root:
-  the row's `Shape` is its one strict reader, nested reports typed by their connector; a row that no
-  longer loads is dropped at the landing, said. **Window:** W1 · l4-key, last. **Re-test:** does `compact-archive inventory` on a copy of the desk root read every L4 outer cell without a `ValidationError`?
 - **A race decision names its own cells and copies its rivals'**: `potter/race.py::_RaceDecision`
   holds `candidate_cells` (keys, re-read at replay) beside `prior_histories` (every rival's per-cell
   `fitness`/`objective` by value), since `resume_and_fork/replayers.py::ReplayContext` holds "ONE round
@@ -837,11 +815,6 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
-- **The inner measurand differs by benchmark**: justlogic seats inherit `justlogic/family.yaml`'s
-  `per_cell` token discount while hotpotqa and legalbench score raw `em_match` / `label_match`, and
-  hotpotqa's `escalation.l1_patience: 5` differs from the others; `runner/inner/tasks.py::_lever`
-  leaves knobs out, so nothing flags it. Action: one inner measurand and one ladder across seats, or a
-  refusal. **Held:** a decision. **Re-test:** the three definitions' `scoring` and `escalation` blocks.
 - **The outer reads θ beside a held-out lift that carries no SE**: Shape: no panel ranks on θ
   (`potter/dispatch/injections/panels.py::_transcript_plan` sorts on `grade.fitness`), but the
   in-sample θ lift (`InnerCellFacts.mean_round_delta`, which scores nothing) rides
@@ -857,20 +830,6 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   filed one), and `BenchScope` partitions by benchmark under the word `RulerScope` owns. Action:
   `_strata` keys on the field raw; `BenchScope` takes a benchmark name. **Held:** l4-outer owns
   `potter/`, l4-runs `runner/bench.py`. **Re-test:** `git grep -n "measured_dataset or\|BenchScope" -- promptpotter`.
-- **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`
-  reads the ended cycle's standing closes (`runner/inner/spawn.py::_run_inner_campaign`), while the
-  bench and `n_rounds_after_origin` read the line (`runner/entry.py`), so after a fork "no proposal
-  reached a cell" is judged without the rounds the rebase discarded. Action: the spawn reads the
-  line's spent rounds (`LineSpan.own`). **Re-test:** a forked inner line whose pre-fork rounds all spoiled.
-- **The abort knob and the floor disagree**: Shape: `potter/knobs.py`'s `terminate_capability` names
-  an unrecoverable upstream fault as an abort's intended use, while `domain/l4/proxies.py::floor_reason`
-  floors every `OPTIMIZER_ABORT` as prompt-owned, one after a real held-out gain included. Action: an
-  abort carries who owns it, and only a prompt-owned one floors. **Held:** a decision. **Re-test:** an
-  inner run aborted on a backend fault reads `floored` 1.
-- **An archived L4 outer cell carries no `floored`**: rows banked before `floored` became a row term
-  leave the `per_sample` of `research/datasets/promptpotter-self/family.yaml` unscored; no reader reads both
-  shapes. Action: none past the landing that ships it, which re-measures C0. **Held:** that landing.
-  **Re-test:** after it, `promptpotter-self` scores every outer cell it reads.
 - **`locus_crossover` re-crosses a measured or hosted child**: it edits every two-parent proposal, so
   a hosted recombination and a rejoined crossover child are crossed again (one call: the re-crossed
   id differs; l4-outer-5's report). Action: a crossover applies to a proposal it drew, never one it

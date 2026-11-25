@@ -29,7 +29,6 @@ from unittest import mock
 import httpx
 import pytest
 from factories import (
-    INNER_RUN,
     LAUNCHED_DATASET,
     PROMPT_INFO,
     SANDBOX_CAMPAIGN,
@@ -126,7 +125,7 @@ from promptpotter.application.run_phase_control import FlightGauge, RunControl, 
 from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
-from promptpotter.application.runner.inner.tasks import enter_inner_cell, panel_cell
+from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.mint import stand_held_budget
 from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
@@ -317,7 +316,6 @@ from promptpotter.infrastructure.projections.live_dashboard import (
 )
 from promptpotter.infrastructure.run_scope import (
     InnerSpawnContext,
-    InstrumentMode,
     rescope,
     run_scope,
     scoped,
@@ -1649,7 +1647,7 @@ async def test_a_seat_its_admission_refuses_mints_no_campaign_and_opens_no_obser
         pytest.raises(MachineBusyError),
     ):
         await spawn.run_inner_cycle(cell, {})
-    asked = spawn.inner_campaign_id(LAUNCHED_DATASET, panel_cell(cell).instrument, {})
+    asked = spawn.inner_campaign_id(LAUNCHED_DATASET, "i", {})
     assert (
         sandbox_store(spawning.stores, spawning.inside[-1]).campaigns.load_campaign(asked) is None
     ), "a seat refused at its admission left its minted campaign"
@@ -1685,16 +1683,6 @@ async def test_a_cells_envelope_cancels_the_inner_campaign_it_spawned(
                 await spawn.run_inner_cycle(cell, {})
     assert started.is_set(), "the inner campaign never started — the envelope proved nothing"
     assert cancelled.is_set(), "the inner campaign outlived its envelope and kept spending"
-
-
-async def test_an_inner_run_spawns_no_inner_campaign() -> None:
-    async def _from_inside() -> None:
-        with scoped(instrument=InstrumentMode(depth=1, root_round=0, enclosed_as=None)):
-            await spawn.run_inner_cycle(Sample(id=0, query="q", ground_truth=None), {})
-
-    with pytest.raises(CellUnscoreableError) as refused:
-        await asyncio.create_task(_from_inside())
-    assert refused.value.spent == {}, "a refused spawn held money it never sent"
 
 
 @pytest.mark.usefixtures("run_bound")
@@ -3310,9 +3298,7 @@ def test_a_nested_runs_send_is_admitted_by_both_books_and_billed_on_its_roots_le
 def test_an_inner_campaign_whose_provider_reports_no_bill_is_not_a_free_cell() -> None:
     silent = SpendRollup()
     silent.bank(billed_call(node="n", input_tokens=10, output_tokens=5, rate_priced_usd=0.02))
-    facts = inner_cell_facts(
-        cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}), [], INNER_RUN
-    )
+    facts = inner_cell_facts(cycle_result([0.4], 0.3, []).model_copy(update={"spend": silent}))
     assert silent.total_used_usd == 0.0, "an unbilled inner cell vanished"
     inner_row = MeasuredCell(
         sample_key="k0",

@@ -8690,7 +8690,7 @@
             "type": "integer"
           },
           "task": {
-            "description": "The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0` (`dataset.yaml::panel.tasks[].id`). The individual does NOT identify a run: every task runs for every individual, so one individual's spawns are as many as the panel has cells and are told apart only by this.",
+            "description": "The panel cell this run measured — the outer query, e.g. `justlogic/d234/seed-0`, spelled off what the cell IS (`runner/inner/tasks.py::InnerTasks.query_of`), never its seat's id. The individual does NOT identify a run: every task runs for every individual, so one individual's spawns are as many as the panel has cells and are told apart only by this.",
             "title": "Task",
             "type": "string"
           }

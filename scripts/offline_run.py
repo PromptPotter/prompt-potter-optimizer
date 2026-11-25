@@ -2282,6 +2282,7 @@ def proven_home() -> None:
     unknown = list(landing.unknown)
     refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches, *landing.runs)]
     refused += [f"{u.path}: {u.why}" for u in landing.torn]
+    refused += [one.said for one in landing.rows]
     if unknown or refused or landing.staged:
         raise SystemExit(
             f"offline run: the run wrote what no data-root row names {unknown}, what its row's "

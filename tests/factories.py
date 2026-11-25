@@ -106,7 +106,6 @@ from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult, WallClock
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, LaunchMove
 from promptpotter.domain.l4.cells import InnerCell, InnerCells
-from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
@@ -515,14 +514,6 @@ def archive_row(query: str, *, truth: str = "g", **wire: Any) -> MeasuredCell:
     )
 
 
-#: The run `filed` stamps on what it files, where a fact names no filer of its own.
-FILER = CycleHop(campaign_id="filer", cycle_id="filer")
-#: The inner campaign an L4 cell's facts name, where a fact reads no sandbox.
-INNER_RUN = InnerRunAddress(
-    sandbox=CycleHop(campaign_id="outer", cycle_id="cycle-0"), campaign_id="inner"
-)
-
-
 def filed(
     archive: MeasurementArchive,
     cells: Iterable[MeasuredCell],
@@ -531,7 +522,7 @@ def filed(
     grade: str = "A",
     role: MeasurementRole = MeasurementRole.PANEL,
     created_at: str = "",
-    filed_by: CycleHop = FILER,
+    output_keys: Mapping[str, tuple[str, ...]] | None = None,
 ) -> list[WalkedCell]:
     """Each cell filed as a fresh answer under *under*, as a walk files what it bought."""
     held = list(cells)
@@ -540,7 +531,7 @@ def filed(
         [(cell, grade) for cell in held],
         role=role,
         created_at=created_at,
-        filed_by=filed_by,
+        output_keys={} if output_keys is None else output_keys,
     )
     return [(cell.sample_key, ref, False) for cell, ref in zip(held, refs, strict=True)]
 
@@ -1093,7 +1084,9 @@ def inner_cells(
     on = {name: dataset or f"{name}ds" for name in optimizers}
     laid = campaign or defaulted_config({})
     by_dataset = {
-        on[name]: InnerCell(laid, cell_optimizer(select_optimizer(bench_choice(name))))
+        on[name]: InnerCell(
+            laid, cell_optimizer(select_optimizer(bench_choice(name)), laid.scoring)
+        )
         for name in optimizers
     }
     cells = tuple(Seat(kind="seat", id=name, inner_dataset=on[name]) for name in optimizers)

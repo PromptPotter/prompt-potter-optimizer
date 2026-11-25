@@ -192,7 +192,9 @@ class _ArchiveRecorder:
             ((cell.facts, self.provenance(cell.facts)) for cell in cells),
             role=self.kind,
             created_at=utcnow_iso(),
-            filed_by=self.session.hop,
+            output_keys={
+                n.name: tuple(n.output_keys) for n in self.session.pipeline_schema.running_nodes
+            },
         )
         return [
             cell.filed(replace(cell.facts, answer=answer))

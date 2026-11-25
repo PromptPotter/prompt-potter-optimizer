@@ -35,7 +35,6 @@ from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.reaper import sweep
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import reindex_measurement_archive
-from promptpotter.application.maintenance.landing import land_at_entry
 from promptpotter.application.pipeline_resolve import cycle_config, laid_session
 from promptpotter.application.read_params import CycleDashboardParams, ReadParams
 from promptpotter.application.views.readout import StatusFn
@@ -73,8 +72,11 @@ __all__ = [
 async def enter(stores: Stores | None = None) -> Stores:
     """The embedded door, first wherever a host enters it: *stores* (the local account's where none),
     landed and swept off the loop, as no server ticks for a host. A sync host awaits `asyncio.run`."""
+    # Here alone: only an entry lands, and a module importing this one is no entry.
+    from promptpotter.application.maintenance import landing
+
     setup_logging()
-    await asyncio.to_thread(land_at_entry, every_treatment=False)
+    await asyncio.to_thread(landing.land_at_entry, every_treatment=False)
     stores = local_stores(tenant=None) if stores is None else stores
     await asyncio.to_thread(sweep, stores.projects_root)
     return stores

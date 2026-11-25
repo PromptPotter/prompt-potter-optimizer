@@ -38,12 +38,14 @@ import pytest
 from factories import (
     PROMPT_INFO,
     SANDBOX_CAMPAIGN,
+    archive_row,
     arm_state,
     billed_call,
     close_round,
     cycle_result,
     declaration_of,
     defaulted_config,
+    filed,
     inner_sandbox,
     laid_ledger,
     loop_session,
@@ -241,6 +243,11 @@ from promptpotter.domain.hierarchy import (
     entries_under,
 )
 from promptpotter.domain.job import UNRESOLVED_HOP, CampaignLaunch, Job, LaunchMove, ScoringPass
+from promptpotter.domain.l4.proxies import (
+    OuterSampleProxies,
+    inner_cell_facts,
+    inner_cell_report,
+)
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
@@ -431,7 +438,7 @@ import sys
 from pathlib import Path
 from promptpotter.application.maintenance.landing import plan_landing
 landing = plan_landing(Path(sys.argv[1]) / "projects", reset=False)
-sys.exit(0 if landing.proven and not landing.refused and not landing.caches else repr(landing))
+sys.exit(0 if landing.proven and not (landing.refused or landing.caches or landing.rows) else repr(landing))
 """
 
 # 1. Leaks and the perimeter
@@ -3116,9 +3123,9 @@ def test_a_resets_plan_carries_its_refusal_of_a_held_draft_or_cycle_so_a_dry_run
     )
     built_stores.drafts.write_draft(held_draft)
     written = plan_landing(built_stores.projects_root, reset=False)
-    assert not (written.refused or written.caches or written.runs or written.staged), (
-        f"a writer files what no data-root row names, or what its reader refuses: {written}"
-    )
+    assert not (
+        written.refused or written.caches or written.rows or written.runs or written.staged
+    ), f"a writer files what no data-root row names, or what its reader refuses: {written}"
     with built_stores.drafts.hold(held_draft.draft_id):
         held = plan_reset(built_stores.projects_root, tenant_id=None, staged={})
     assert held.refusal is not None, "a reset's plan missed a held draft"
@@ -3191,7 +3198,7 @@ def test_a_landing_drops_a_cache_this_build_cannot_read_unasked_and_a_file_no_ro
     write_json(stray, {})
     found = plan_landing(built_stores.projects_root, reset=False)
     assert list(found.unknown) == [stray] and found.refused, "a file no row names was landed"
-    assert [one.path for one in found.caches] == [fold], "a cache this build cannot read was kept"
+    assert [one.path for one in found.rows] == [fold], "a cache this build cannot read was kept"
     stray.unlink()
     cache_only = plan_landing(built_stores.projects_root, reset=False)
     assert not cache_only.refused, "a cache that does not load refused a landing"
@@ -3202,6 +3209,60 @@ def test_a_landing_drops_a_cache_this_build_cannot_read_unasked_and_a_file_no_ro
     assert [str(fold) in line for line in dropped] == [True], f"a cache dropped unsaid: {dropped}"
     assert stamp is not None and stamp.said == dropped, "the stamp lost what the landing dropped"
     assert UserStore(campaigns.workspace).load() == user, "a landing dropped a survivor"
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_landing_drops_each_archived_answer_its_one_reader_refuses_by_name_and_keeps_the_rest(
+    built_stores: Stores,
+) -> None:
+    facts = inner_cell_facts(cycle_result([0.4], 0.3, []))
+    report = inner_cell_report(facts, OuterSampleProxies(floored=0, held_out_lift=0.05))
+    cell = archive_row("seat", pipeline_data={"cell_report": report})
+    [(_key, ref, _cached)] = filed(built_stores.archive, [cell], output_keys={"n": ("answer",)})
+    cells = built_stores.archive.cell_path(ref.rpartition(".")[0])
+    now = json.loads(cells.read_text(encoding="utf-8"))
+
+    def generation(name: str, **report: Any) -> dict[str, Any]:
+        pipeline = {**now["pipeline_data"], "cell_report": {**now["pipeline_data"]["cell_report"]}}
+        for key, value in report.items():
+            if value is None:
+                del pipeline["cell_report"][key]
+            else:
+                pipeline["cell_report"][key] = value
+        return {**now, "answer": f"{ref}{name}", "pipeline_data": pipeline}
+
+    worded = {"stop_reason": "completed", "floor_reason": None, "origin_headroom": 0.1}
+    retired = {
+        # Each `cell_report.inner` generation this build no longer files, and the field it names.
+        "stop_reason": generation(
+            "-worded", inner={**now["pipeline_data"]["cell_report"]["inner"], **worded}
+        ),
+        "run": generation(
+            "-addressed",
+            inner={**now["pipeline_data"]["cell_report"]["inner"], "run": {"cycle_id": "c"}},
+        ),
+        "floored": generation("-unfloored", floored=None),
+        "lift_se": generation("-undeclared", lift_se=0.1),
+        "source": {**now, "answer": f"{ref}-sourced", "source": "panel"},
+        "output_keys": {k: v for k, v in now.items() if k != "output_keys"},
+    }
+    with cells.open("a", encoding="utf-8") as f:
+        f.writelines(json.dumps(row) + "\n" for row in retired.values())
+    planned = plan_landing(built_stores.projects_root, reset=False)
+    [drops] = planned.rows
+    assert drops.path == cells and drops.why.total() == len(retired), (
+        f"a landing kept an answer its reader refuses, or dropped one it takes: {drops}"
+    )
+    for name in retired:
+        assert sum(n for why, n in drops.why.items() if name in why) == 1, (
+            f"a dropped answer's why does not name {name!r}: {drops.why}"
+        )
+    applied = apply_landing(built_stores.projects_root, planned)
+    assert applied.rows == planned.rows and not applied.caches, "a landing dropped the file whole"
+    assert [json.loads(line) for line in cells.read_text().splitlines()] == [now], (
+        "a landing dropped an answer this build files, or kept one it refuses"
+    )
+    assert all(name in applied.tally for name in retired), f"a drop went untallied: {applied.tally}"
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
