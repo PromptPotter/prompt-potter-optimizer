@@ -917,11 +917,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   no `aria-busy` while it is in flight, so the walk counts fetches itself (`webapp/e2e/harness.ts::drawn`).
   Root: `useRead`'s `loading` state marks its pane busy, one rule in `webapp/lib/hooks/useRead.ts`.
   **Re-test:** `drawn` keeps only its `aria-busy` check and `landscape-844 › every view` stays red 3/3 at base.
-- **`catalogue_for` keys L4 on a term no connector declares**: `application/evidence/metric_catalogue.py:228`
-  branches on `"lift" in available` ("Lift over origin", θ, "the number the outer loop scores"). That was
-  L4's θ term, which l4-key-c removed, so the branch is dead and its words false: the outer loop scores
-  `held_out_lift`. Root: delete the branch; L4 evidence then reads `fitness`, a linear re-anchor of
-  `held_out_lift`. **Rides with:** l4-key-c. **Re-test:** `git grep -c seed_lift -- promptpotter` (today 8, target 0).
 - **A series caveat unions every round's cells** (ml-fork): `bench/difficulty.py::level_series` stamps
   `LevelSeries.caveat` from `theta_caveat` over every cell the line read, so a withholding state in one
   round's cells (say `collapsed_band`) withholds every level of the line, and `SeriesReading` falls back
@@ -967,15 +962,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
-- **The held-out lift's SE is never served**: `OuterSampleProxies.held_out_lift_se` reads
-  `BenchCurve.area`'s estimate, which `scoring/paired.py::_lift` builds with `se=None` although
-  `shared/statistics.py::paired_diff_posterior` took it, so `domain/l4/proxies.py::panel_precision`
-  reads no L4 panel and the outer reply (`runner/inner/spawn.py`) carries no band. The same
-  wrongness stands at every t-based `Estimate`: `scoring/paired.py:423`, `scoring/selection.py:33`,
-  `scoring/passes.py:144,538,547`, `evidence/metric_catalogue.py:94` and `domain/arm_reading.py:331`
-  each set `se=None`. Root: `shared/statistics.py::paired_mean_t` returns `n` where it could return the SE.
-  Action: a paired t's `Estimate` carries its SE. **Held:** `scoring/` is ml-6/ml-7's. **Re-test:**
-  `git grep -c "se=None" -- promptpotter/application/scoring/paired.py` (today 1, target 0), and the other sites above.
 - **"Which benchmark a row measures" is spelled twice**: Shape: `potter/members.py::_strata` reads
   `measured_dataset or ""` where every other reader takes `Sample.measured_dataset` raw (None = the
   filed one), and `BenchScope` partitions by benchmark under the word `RulerScope` owns. Action:

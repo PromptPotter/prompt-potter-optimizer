@@ -293,11 +293,9 @@ def _readings(
     out: dict[ArmKey, tuple[float, int]] = {}
     for pid, rival in rivals.items():
         shared = [sid for sid in arm if sid in rival]
-        _, _, _, p, n = paired_mean_t(
-            [rival[s] for s in shared], [arm[s] for s in shared], tail="greater"
-        )
+        p = paired_mean_t([rival[s] for s in shared], [arm[s] for s in shared], tail="greater")[3]
         if p is not None:
-            out[pid] = (p, n)
+            out[pid] = (p, len(shared))
     return out
 
 

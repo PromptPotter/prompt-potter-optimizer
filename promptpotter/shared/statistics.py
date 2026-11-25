@@ -201,18 +201,19 @@ def paired_mean_t(
     *,
     tail: Literal["two", "greater"] = "two",
     alpha: float = 0.05,
-) -> tuple[float, float | None, float | None, float | None, int]:
-    """The bracket is two-sided under BOTH tails: never pair a ``greater`` p with it as a verdict."""
+) -> tuple[float, float | None, float | None, float | None, float | None]:
+    """The mean difference, its bracket, p and SE; the bracket is two-sided under BOTH tails: never
+    pair a ``greater`` p with it as a verdict. No spread under two cells."""
     mean_d, se_d, n = paired_diff_posterior(candidate_scores, prior_scores)
     if n < 2:
-        return (mean_d, None, None, None, n)
+        return (mean_d, None, None, None, None)
     half = t_critical(n - 1, alpha) * se_d
     # `_normal_posterior` floors the SE strictly above zero.
     t = mean_d / se_d
     beyond = _t_sf(abs(t), n - 1)
     one_sided = beyond if t >= 0.0 else 1.0 - beyond
     p = 2.0 * beyond if tail == "two" else one_sided
-    return (mean_d, mean_d - half, mean_d + half, p, n)
+    return (mean_d, mean_d - half, mean_d + half, p, se_d)
 
 
 def exact_p_floor(n: int) -> float:

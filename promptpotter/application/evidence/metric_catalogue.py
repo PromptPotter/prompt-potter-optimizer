@@ -89,9 +89,9 @@ def merge_cells(values: dict[str, float], metric: MetricSpec) -> Estimate | None
     if not ordered:
         return None
     # Unbounded: a merged metric may be a lift.
-    value, lo, hi, _, _ = paired_mean_t(ordered, [0.0] * len(ordered))
+    value, lo, hi, _, se = paired_mean_t(ordered, [0.0] * len(ordered))
     return Estimate(
-        value=value, ci_lo=lo, ci_hi=hi, n=len(ordered), se=None, unit=metric.unit, form=metric.form
+        value=value, ci_lo=lo, ci_hi=hi, n=len(ordered), se=se, unit=metric.unit, form=metric.form
     )
 
 
@@ -211,46 +211,25 @@ _ENTRIES: tuple[MetricSpec, ...] = (
     ),
 )
 
-_COMPOSITE_FITNESS = MetricSpec(
-    key="fitness",
-    label="Composite fitness",
+
+def catalogue_for(available: frozenset[str]) -> tuple[MetricSpec, ...]:
+    out = [_FITNESS] if "fitness" in available else []
+    out.extend(m for m in _ENTRIES if m.expression in available)
+    return tuple(out)
+
+
+_FITNESS = MetricSpec(
+    key=MEASURAND,
+    label="Fitness",
     expression="fitness",
     unit="score",
     form="level",
     higher_is_better=True,
     description=(
-        "What the one scoring formula every campaign here declares makes of the measurand."
+        "The value each cell was scored at, under the one formula every campaign here declares. "
+        "A cell here is a sample, which has no origin of its own to lift over."
     ),
 )
-
-
-def catalogue_for(available: frozenset[str]) -> tuple[MetricSpec, ...]:
-    seed_lift = "lift" in available
-    out: list[MetricSpec] = []
-    if seed_lift or "fitness" in available:
-        out.append(
-            MetricSpec(
-                key=MEASURAND,
-                label="Lift over origin" if seed_lift else "Fitness",
-                expression="lift" if seed_lift else "fitness",
-                unit="theta" if seed_lift else "score",
-                form="lift" if seed_lift else "level",
-                higher_is_better=True,
-                description=(
-                    "How far each seed's own inner campaign moved off its own origin, averaged "
-                    "over its round budget. This is the number the outer loop scores."
-                    if seed_lift
-                    else "The value each cell was scored at, under the one formula every campaign "
-                    "here declares. A cell here is a sample, which has no origin of its own to "
-                    "lift over."
-                ),
-            )
-        )
-    # Only beside the lift: where the measurand IS fitness it is one number, one entry.
-    if seed_lift and "fitness" in available:
-        out.append(_COMPOSITE_FITNESS)
-    out.extend(m for m in _ENTRIES if m.expression in available)
-    return tuple(out)
 
 
 def compile_metric(expression: str, available: frozenset[str]) -> CompiledExpression:
