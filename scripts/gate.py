@@ -1783,7 +1783,7 @@ CHECKS: tuple[Check, ...] = (
         "pytest",
         "py",
         _pytest,
-        mb=408,  # 38 MB above a warm 370 MB measured on main 5d150ac13: a 40 MB growth is red
+        mb=393,  # 38 MB above a warm 355 MB: tw-0's suite peaks 15 MB under 7dce00a96's (331 vs 346)
         # Every script, as the suite imports them bare off pytest's `pythonpath`.
         reads=(*ENGINE_RUNTIME, "tests/", "scripts/"),
     ),
@@ -1795,7 +1795,7 @@ CHECKS: tuple[Check, ...] = (
         OFFLINE_RUN,
         "py",
         _offline_leg(_OFFLINE_HOME),
-        mb=1270,  # 1017
+        mb=1240,  # 986: 1017 at a child peak of 196 MB, 190 at tw-0 under the same slots
         tier="landing",
         slots=min(OFFLINE_RUN_CHILDREN_MAX, _CORES),
         reads=(*OFFLINE_RUN_READS, *_GATE),
