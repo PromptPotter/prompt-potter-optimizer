@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import functools
-import hashlib
-import json
 import time
 
-from fastapi import FastAPI
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from promptpotter.presentation.api.served_contract import SERVED_CONTRACT
 
 _API = "/api/v1/"
 # The build (`webapp/vite.config.ts`) names these files by their content, so one that was served never changes.
@@ -56,14 +54,6 @@ def cache_policy(*, api: bool, path: str, status: int) -> str:
     return "no-cache"
 
 
-@functools.cache
-def served_contract(app: FastAPI) -> str:
-    """The API's shape as served, once per process (FastAPI's own `/openapi.json` builds it on the
-    loop too); `scripts/build_ts_types.py` stamps a bundle with the one it is built against."""
-    shape = [app.openapi()[part] for part in ("paths", "components")]
-    return hashlib.sha256(json.dumps(shape, sort_keys=True).encode()).hexdigest()[:16]
-
-
 class ResponseHeadersMiddleware:
     """Pure ASGI: ``BaseHTTPMiddleware`` buffers the body and breaks SSE teardown."""
 
@@ -97,7 +87,7 @@ class ResponseHeadersMiddleware:
                     elapsed_ms = (time.perf_counter() - began) * 1000
                     headers["server-timing"] = f"app;dur={elapsed_ms:.1f}"
                     # The webapp compares it with the one it was built against (`lib/api/client.ts::send`).
-                    headers["x-served-contract"] = served_contract(scope["app"])
+                    headers["x-served-contract"] = SERVED_CONTRACT
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
