@@ -63,6 +63,7 @@ from factories import (
     stored_campaign,
     workspace,
 )
+from world import Ran, World
 
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import DifficultyView, ruler_rows
@@ -84,6 +85,7 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_cycle,
     subtree_version,
 )
+from promptpotter.application.initialization.scoring_scope import run_memory
 from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.intelligence.rasch import (
@@ -843,6 +845,31 @@ def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
     assert bench_reads(built_stores, bank=recut, sample_keys=frozenset({q2.key})) == 1, (
         "a holdout read under the bank before a re-cut was not counted on the re-cut"
     )
+
+
+async def test_a_deleted_campaigns_cells_stay_the_memory_of_the_next_campaign_on_its_dataset(
+    world: World,
+) -> None:
+    def memory(ran: Ran) -> set[str]:
+        """Every answer a population read at *ran*'s scope holds."""
+        stores, bank = world.stores, ran.session.bank
+        with scoped(memory=run_memory(ran.session)):
+            return {
+                answer.answer
+                for entry in list_populations(stores, bank)
+                for answer in load_population(stores, entry, bank)
+            }
+
+    # A walks a round B never reaches, so B's own walks name none of its children's cells.
+    a = await world.campaign(rounds=2, rows=24)
+    held = memory(a)
+    assert held, "vacuous: campaign A filed nothing"
+    await CommandDispatcher(world.stores).dispatch(
+        CommandCall(DeleteCampaignPayload(campaign_id=a.hop.campaign_id), door=Door.HOST)
+    )
+    assert not world.stores.campaigns.campaign_root_dir(a.hop.campaign_id).exists(), "guard"
+    b = await world.campaign(rounds=1, rows=24)
+    assert held <= memory(b), "a deleted campaign took its cells out of the archive's memory"
 
 
 # 3. Replayed decisions, and forks
