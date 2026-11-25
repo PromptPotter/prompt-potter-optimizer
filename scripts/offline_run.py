@@ -2307,6 +2307,12 @@ def read_warm(
     )
     again = decided(home / RESUMED, after=pause_after)
     same = decided(home / WARM, after=pause_after) == again
+    # A cell the race took before the pause, past its opening draw included, is never bought again.
+    cells = [
+        BehaviourTrace.read(home / leg).decisions["harness"]["backend_cells"]
+        for leg in (WARM, RESUMED)
+    ]
+    same = same and cells[0] == cells[1]
     failed += not _graded(again["run"]["bench"]) or not same
     at, inside = paused_at(home / RESUMED)
     # Inside a round past the boundary, whose walk banked.
@@ -2315,7 +2321,7 @@ def read_warm(
     where = f"inside round {at} past its banked walk" if inside else f"after round {at}"
     print(
         f"{name}: paused {where}{'' if landed else ' (NOT where its leg pauses)'} and resumed, "
-        f"decisions {'UNMOVED' if same else 'MOVED'}"
+        f"decisions and backend cells {'UNMOVED' if same else 'MOVED'} ({cells[0]} -> {cells[1]})"
     )
     return failed
 

@@ -930,9 +930,10 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `domain/cells.py:131` (the heatmap's hard-sample order, `list[str]`). Root: one name per thing, the
   heatmap's renamed for what it orders. **Re-test:**
   `git grep -nE "sample_order\s*:" -- promptpotter/domain` returns one line.
-- **`tests/test_spend.py` holds the walk's tests**: 6,141 lines, 87 lines naming a walk. Root: the file's
-  name stopped describing its contents; the walk's tests move to a file named for the walk, with its
-  `tests/CLAUDE.md` row. **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
+- **`tests/test_spend.py` holds the walk's tests**: 6,021 lines, 70 lines naming a walk (tw-0 moved the
+  fake races onto the offline legs; the hand-driven `_walk`/`_round` pause, catch-up and ceiling tests
+  stay). Root: each becomes an offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and
+  `_walk`/`_round` go (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
 - **A resume replays a cut without the catch-ups another arm's walk filed** (tw-0): the warm
   `capo-pobb/resumed` leg halts "Resume divergence at round 1, decision 'elimination_cut': recorded
   True, current False" (deterministic, the base too): `EliminationCut.replay` reads the parent's cell
