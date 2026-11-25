@@ -409,10 +409,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   every served response field to a webapp reader, or to its model naming why not (as `Verb.unspelled` /
   `terminal_only` do for the CLI), on a baseline that only falls. **Rides with:** webd. **Re-test:**
   the check's baseline is 0.
-- **Form fields are skinned outside `base.css`** (`scoring.css:17`, `chat.css:23`, `onboarding.css:44`),
-  against `webapp/app/CLAUDE.md`'s one-skin rule. Action: fields skin in `base.css` alone.
-  **Rides with:** webd. **Re-test:** no `border:` on an `input` / `select` / `textarea` selector
-  outside `foundation/base.css`.
 - **An inner campaign serves a Delete no door presses** (webd-3's report): `domain/hierarchy.py::SubtreeCampaign`
   subclasses `HierarchyCampaign`, so an inner campaign in the deep read inherits its
   `delete: DeleteAct` (`delete-campaign`), which nothing may file for it. Root: the subtree entry is

@@ -41,7 +41,6 @@
 .prompt-snippet-drop{all:unset;margin-left:auto;display:grid;place-items:center;width:24px;height:24px;border-radius:50%;cursor:pointer;color:var(--color-text-secondary)}
 .prompt-snippet-drop:hover{color:var(--color-text-primary);background:var(--color-background-hover)}
 .prompt-snippet-drop:focus-visible{outline:2px solid var(--color-accent)}
-.prompt-snippet-input{border:0;background:transparent}
 .prompt-field-input.is-structured{font-family:var(--font-mono);font-size:var(--text-xs);white-space:pre;overflow-x:auto}
 /* The library is a recessed shelf, never a second prompt: darker well, accent spine, a book glyph,
    rows as tiles with a "+". Under the prompt on a phone; beside it, sticky, on a wide screen. */

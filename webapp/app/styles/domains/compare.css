@@ -306,24 +306,13 @@
 .cmp-cfg-input {
   width: 100%;
   min-width: 6rem;
-  padding: 0;
-  border: 0;
-  border-bottom: 0.5px solid transparent;
-  background: transparent;
-  font: inherit;
-  color: inherit;
-}
-.cmp-cfg-input:hover,
-.cmp-cfg-input:focus {
-  border-bottom-color: var(--color-border);
-  outline: none;
 }
 .cmp-cfg-edited {
   background: var(--color-new-bg);
 }
 .cmp-cfg-edited .cmp-cfg-input {
   color: var(--color-new);
-  border-bottom-color: var(--color-new-border);
+  border-color: var(--color-new-border);
 }
 .cmp-cfg-restore {
   flex: 0 0 auto;
@@ -482,10 +471,6 @@
 .cmp-expr-input {
   width: min(28rem, 100%);
   padding: var(--space-6) var(--space-8);
-  border: 1px solid var(--color-border);
-  border-radius: var(--border-radius-md);
-  background: var(--color-background-secondary);
-  color: var(--color-text-primary);
   font-family: var(--font-mono);
   font-size: var(--input-text-floor);
 }
@@ -508,10 +493,6 @@
 }
 .l4-factor-pick select {
   padding: var(--space-4) var(--space-8);
-  border: 1px solid var(--color-border);
-  border-radius: var(--border-radius-md);
-  background: var(--color-background-secondary);
-  color: var(--color-text-primary);
   font-family: var(--font-mono);
   font-size: var(--text-sm);
 }

@@ -14,8 +14,8 @@
 .criterion-name{font-family:var(--font-mono);font-size:var(--text-sm)}
 .criterion-range{width:100%;min-width:0;accent-color:var(--color-accent);cursor:pointer}
 .criterion-range:disabled{cursor:default}
-.criterion-pct{width:100%;min-width:0;padding:2px var(--space-4);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-primary);font-family:var(--font-mono);font-size:var(--input-text-floor);text-align:right}
-span.criterion-pct{border-color:transparent;background:transparent;font-size:var(--text-sm)}
+.criterion-pct{width:100%;min-width:0;padding:2px var(--space-4);font-family:var(--font-mono);font-size:var(--input-text-floor);text-align:right}
+span.criterion-pct{font-size:var(--text-sm)}
 .criterion-unit,.criterion-anchor{font-size:var(--text-xs);color:var(--color-text-secondary);white-space:nowrap}
 .criterion-remove,.criterion-add{display:inline-flex;align-items:center;justify-content:center;padding:0;background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer}
 .criterion-remove:hover,.criterion-add:hover{color:var(--color-accent)}
