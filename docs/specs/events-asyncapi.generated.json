@@ -4366,17 +4366,6 @@
         "additionalProperties": false,
         "description": "Every round's ended-on individual read on ONE δ scale, so any two of its levels difference.",
         "properties": {
-          "caveat": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ThetaCaveat"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "`theta_caveat` over every cell this line read. One that withholds, no two of its levels difference, whatever `stamp` says; another line on the stamp keeps its own."
-          },
           "levels": {
             "additionalProperties": {
               "anyOf": [
@@ -4388,7 +4377,7 @@
                 }
               ]
             },
-            "description": "By round, round 0 the origin: the individual the round ended on — on a round that elected nothing, the parent standing into it — read on all of its rows in the cycle. Null where it holds no scored cell on the scale.",
+            "description": "By round, round 0 the origin: the individual the round ended on — on a round that elected nothing, the parent standing into it — read on all of its rows in the cycle, under its own round's caveat: one that withholds (`ThetaCaveat.withholds`) keeps that level alone from differencing. Null where it holds no scored cell on the scale.",
             "title": "Levels",
             "type": "object"
           },
@@ -4399,8 +4388,7 @@
         },
         "required": [
           "stamp",
-          "levels",
-          "caveat"
+          "levels"
         ],
         "title": "LevelSeries",
         "type": "object"

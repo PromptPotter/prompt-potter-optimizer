@@ -586,7 +586,7 @@ def from_disk_log(
                     if fit and fit.vs_reference
                     else None
                 ),
-                level=None if level_series is None else level_series.reading(t.round),
+                level=None if level_series is None else level_series.levels[t.round],
                 verdict_reason=None if election is None else election.verdict_reason,
                 overlap=t.overlap,
                 p_best_trajectory=traj,
@@ -750,7 +750,7 @@ def _render_export(session: Session, config: CampaignConfig) -> None:
         finished_at=index.finished_at,
         formula=index.scorer_cell_formula,
         own=own_level(winner.results, session.state.scoring.scorer.fitness_unit),
-        level=series.reading(winner.round),
+        level=series.levels[winner.round],
         schema=session.pipeline_schema,
         framing=campaign_framing(session.store, config, session.dataset),
         demo=session.state.scoring.partition.demo,

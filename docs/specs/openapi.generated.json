@@ -16092,33 +16092,6 @@
         "title": "ScoringPass",
         "type": "object"
       },
-      "SeriesReading": {
-        "additionalProperties": false,
-        "description": "A round's level as its series read it, under the one caveat that qualifies it.",
-        "properties": {
-          "caveat": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ThetaCaveat"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The level's own caveat, else its series'. One that withholds (`ThetaCaveat.withholds`) keeps the level from differencing; a footnote does not."
-          },
-          "reading": {
-            "$ref": "#/components/schemas/AbilityReading",
-            "description": "The round's level: the individual it ended on, read on the series' one scale"
-          }
-        },
-        "required": [
-          "reading",
-          "caveat"
-        ],
-        "title": "SeriesReading",
-        "type": "object"
-      },
       "ServedArm": {
         "additionalProperties": false,
         "description": "One arm as every round read serves it, in flight (`current_round.candidates`) or filed\n(`RoundView.candidates`): its reading, its searchpoint and why it was refused.",
@@ -16802,13 +16775,13 @@
           "series_reading": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/SeriesReading"
+                "$ref": "#/components/schemas/AbilityReading"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "This round's level on the cycle's `LevelSeries`, read under the caveat that withholds it from differencing; null where no scored cell sits on the scale."
+            "description": "This round's level on the cycle's `LevelSeries`, under its own round's caveat; null where no scored cell sits on the scale."
           },
           "verdict_reason": {
             "anyOf": [

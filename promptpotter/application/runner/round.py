@@ -907,8 +907,6 @@ async def _walk_population(
         walks[key] = _open_arm(ctx, arm, sps[key], panel, standing.skipped.get((round_num, key)))
 
     def on_turn(key: ArmKey, turn: Turn) -> None:
-        if race is not None:
-            race.open_turn(key)
         states[key] = states[key].model_copy(
             update={
                 # The rows its race chose, which the readout heads.

@@ -1832,10 +1832,9 @@ export interface ServedRound {
   /** How each sample of `selection` moved against the round before it that measured
    * any, position for position with `selection` (`sample_movements`). */
   selection_movement: ('new' | 'readded' | 'gained' | 'lost' | 'kept')[];
-  /** This round's level on the cycle's `LevelSeries`, read under the caveat that
-   * withholds it from differencing; null where no scored cell sits on the
-   * scale. */
-  series_reading: SeriesReading | null;
+  /** This round's level on the cycle's `LevelSeries`, under its own round's caveat;
+   * null where no scored cell sits on the scale. */
+  series_reading: AbilityReading | null;
   /** This round's promotion over the parent it beat, each read on every row it met
    * in the cycle on `series_reading`'s one scale, its later rows as parent
    * included: the lift that held beside the one it was crowned on. Null on a
@@ -1924,16 +1923,6 @@ export interface LiftPrior {
   tau: number;
   pairs: number;
   mu0_se: number;
-}
-
-/** A round's level as its series read it, under the one caveat that qualifies it. */
-export interface SeriesReading {
-  /** The round's level: the individual it ended on, read on the series' one scale */
-  reading: AbilityReading;
-  /** The level's own caveat, else its series'. One that withholds
-   * (`ThetaCaveat.withholds`) keeps the level from differencing; a footnote
-   * does not. */
-  caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
 /** A Rasch θ and the δ scale it was read on, held as one value because apart they
@@ -5767,7 +5756,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "c729b62ce88ea14a";
+export const SERVED_CONTRACT = "bd615921430c802c";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

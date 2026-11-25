@@ -9,7 +9,7 @@ from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import OptimizerFact
-from promptpotter.domain.ruler import SeriesReading
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.run_standing import RunStanding
 from promptpotter.domain.spend import SpendRollup
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import LedgerSpend
@@ -39,7 +39,7 @@ class RoundDigestView:
     overlap: OverlapReading
     # ``None`` where the round matched nothing: the cycle origin is a different basis, not a default.
     composite_floor: float | None = None
-    level: SeriesReading | None = None
+    level: AbilityReading | None = None
     verdict_reason: str | None = None
     # Empty for resumed rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)

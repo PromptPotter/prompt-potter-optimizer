@@ -108,8 +108,8 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
         parts.append(f"- formula terms: `{terms}`")
     if rd.level is not None:
         parts.append(
-            f"- {DISPLAY_METRIC_INFO['ability'].label}: `{rd.level.reading.theta:+.3f}` "
-            f"({rd.level.reading.scale()})"
+            f"- {DISPLAY_METRIC_INFO['ability'].label}: `{rd.level.theta:+.3f}` "
+            f"({rd.level.scale()})"
         )
         if rd.level.caveat is not None:
             parts.append(

@@ -152,7 +152,7 @@ def outer_proxies_of(pipeline: PipelineData) -> OuterSampleProxies | None:
 
 def unread_rounds(result: CycleResult) -> list[int]:
     series = result.level_series
-    return [] if series is None else [r for r in series.rounds if series.reading(r) is None]
+    return [] if series is None else [r for r in series.rounds if series.levels[r] is None]
 
 
 def series_reason(result: CycleResult) -> ThetaCaveat | SeriesGap | None:
@@ -160,12 +160,10 @@ def series_reason(result: CycleResult) -> ThetaCaveat | SeriesGap | None:
     series = result.level_series
     if series is None:
         return SeriesGap.NEVER_STARTED
-    if withheld(series.caveat):
-        return series.caveat
     if unread_rounds(result):
         return SeriesGap.UNREAD_ROUND
     for rnd in series.rounds:
-        read = series.reading(rnd)
+        read = series.levels[rnd]
         if read is not None and withheld(read.caveat):
             return read.caveat
     if len(series.rounds) < 2:

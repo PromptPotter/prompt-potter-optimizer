@@ -158,9 +158,6 @@ class PoBBRace(Race):
         budgets = {key: self._depth(key) + walk.budget for key, walk in walks.items()}
         return dict(self._check.check({**self._check.priors, **standing}, budgets))
 
-    def open_turn(self, _key: ArmKey) -> None:
-        return None
-
     def judge(
         self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
     ) -> Elimination | None:

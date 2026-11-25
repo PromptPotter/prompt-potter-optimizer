@@ -917,22 +917,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   no `aria-busy` while it is in flight, so the walk counts fetches itself (`webapp/e2e/harness.ts::drawn`).
   Root: `useRead`'s `loading` state marks its pane busy, one rule in `webapp/lib/hooks/useRead.ts`.
   **Re-test:** `drawn` keeps only its `aria-busy` check and `landscape-844 › every view` stays red 3/3 at base.
-- **A series caveat unions every round's cells** (ml-fork): `bench/difficulty.py::level_series` stamps
-  `LevelSeries.caveat` from `theta_caveat` over every cell the line read, so a withholding state in one
-  round's cells (say `collapsed_band`) withholds every level of the line, and `SeriesReading` falls back
-  to it wherever a level's own caveat is null. Root: a level carries its own round's caveat; the series
-  states none of its own. **Rides with:** ml-8. **Re-test:** a line with one `collapsed_band` round reads
-  every other round's level.
-- **A fork proposed with `rebase_capability` off is dropped unsaid** (ml-fork): the reply schemas carry
-  `fork_proposal` whatever the bit says (`dispatch/schemas.py:386`), and `escalation.py::_run_transition`
-  asks no `_rebase_request` when it is off, so the proposal leaves no record. Root: the bit decides the
-  schema the L2 is asked, so an off bit asks for no proposal. **Rides with:** ml-8. **Re-test:** with the bit
-  off, the L2 reply schema holds no `fork_proposal`.
-- **`Race.open_turn` is a hook one race needs** (ml-7): potter's and gepa's are no-ops; capo's counts the
-  field racing for `n_priors` (`capo/members.py`), a fact the race's first `View` already holds, and it
-  writes the race's `_racing`, which `decide` then overwrites: two writers of one count. Root: `n_priors`
-  is derived off the first `View`; `open_turn` goes from `nodes.py` and the three races. **Rides with:**
-  ml-8. **Re-test:** `git grep -c open_turn -- promptpotter` is 0.
 - **A max-press resume replays on timing** (ml-7): at press max the offline run's `capo/resumed` and
   `gepa/resumed` legs differ run to run on the base itself (capo-only rerun 3×: 3 of 3 moved), so
   equals-main at max cannot pin them; at max a 1-SIGINT `new` can also finish before the signal lands

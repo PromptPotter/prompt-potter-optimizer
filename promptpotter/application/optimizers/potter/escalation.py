@@ -431,7 +431,7 @@ async def _run_transition(
     proposal = result.fork_proposal
     fork = (
         _rebase_request(ctx, layer.layer_id, proposal, view.reelect_offer)
-        if proposal is not None and ctx.knobs(EscalationKnobs).rebase_capability
+        if proposal is not None
         else None
     )
     closed = layer.exit_act(ctx, result)

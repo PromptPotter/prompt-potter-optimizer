@@ -329,10 +329,9 @@ class PairedTRace(nodes.Race):
     def n_priors(self) -> int:
         return len(self._racing) - 1
 
-    def open_turn(self, key: ArmKey) -> None:
-        self._racing.add(key)
-
     def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
+        if view.opening:
+            self._racing = set(view.walks)
         stops = {} if view.opening else self._cut(view)
         return next_block(view, stops, self._block_size)
 

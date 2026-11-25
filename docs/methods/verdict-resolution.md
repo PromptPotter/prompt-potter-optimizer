@@ -177,8 +177,8 @@ in after its walks and BEFORE its election. An election reads that version less 
 parent line — fit on the parent's rows, δ would be its hit pattern and θ would favour it every round.
 
 **The clock is the task's memory scope**: an optimizing run reads the head at each round's open, and
-each close re-reads every round on one stamp, so two levels difference wherever the series' caveat is
-null. A head-to-head arm reads its head-to-head's frozen version plus its own campaign's lines; an L4
+each close re-reads every round on one stamp, so two levels difference wherever neither level's own
+round caveat withholds. A head-to-head arm reads its head-to-head's frozen version plus its own campaign's lines; an L4
 inner cell reads its outer round's, so `variant − origin` cancels. **Every reading names its scale**,
 so resume, replay and `verify` re-fit the scale a reading was taken on.
 

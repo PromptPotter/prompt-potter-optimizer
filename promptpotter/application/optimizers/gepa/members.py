@@ -279,9 +279,6 @@ class _GateRace(nodes.Race):
     def n_priors(self) -> int:
         return 1
 
-    def open_turn(self, _key: ArmKey) -> None:
-        return None
-
     def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
         stops = {} if view.opening else self._cut(view)
         return next_block(view, stops, self._block_size)
