@@ -292,6 +292,7 @@ from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoi
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import PauseCause, StopReason
+from promptpotter.domain.pipeline_manifest import resolved_key
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     normalize_model_id,

@@ -252,7 +252,11 @@ BASELINE = {
     # policy any eliminator hands its view to (`row_policy.py::send_rows`), modules of their own;
     # the turn wheel, `Untaken`, `Stretch` and `choose_rows` they replace net −; the walk keyed by arm.
     # The loop's line merged with the chains above, the resolution adding none.
-    "package_lines": 113624,
+    # tw-0…tw-4 (+1 past it, +40 of their own): a structural invariant leaves the suite for the
+    # load it guards (`select_optimizer`'s reply order), `fill` and `flight` read one
+    # `Walk.sendable`, and the rules the suite reached through a seated race stand on their own
+    # (`EliminationCut.of`, `RowKnobs.rows_ran`); a home listing no rates shares the floor's table.
+    "package_lines": 113625,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
