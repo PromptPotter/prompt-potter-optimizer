@@ -371,7 +371,7 @@ def member_package_dir(member: NodeMember) -> Path:
 
 @dataclass(frozen=True)
 class RoundSamples:
-    """The walks read ``order``, a block closing every ``block_size``; the parent's re-score, the rows they took."""
+    """The parent's re-score reads ``cells``; the walks read ``order``, a block closing every ``block_size``."""
 
     cells: list[Sample]
     order: list[Sample]
@@ -385,9 +385,9 @@ class RoundSamples:
         return [*self.order, *self.pool]
 
     def read_on(self, rows: Mapping[ArmKey, CellSheet]) -> list[Sample]:
-        """Each row of ``cells``, then of the pool, an arm took: a reference answers no row no arm pairs on."""
+        """``cells``, then each row of the pool an arm took past them: what the round reads a reference on."""
         taken = {cell.key for sheet in rows.values() for cell in sheet}
-        return [s for s in (*self.cells, *self.pool) if s.key in taken]
+        return [*self.cells, *(s for s in self.pool if s.key in taken)]
 
 
 @dataclass(frozen=True)

@@ -921,8 +921,9 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `gepa/resumed` legs differ run to run on the base itself (capo-only rerun 3×: 3 of 3 moved), so
   equals-main at max cannot pin them; at max a 1-SIGINT `new` can also finish before the signal lands
   (`offline_run.py`'s capo signal leg exits 0, not 130). Root: a resume replays the reads the run filed,
-  whatever the press. **Rides with:** ml-8. **Re-test:** three runs at press max leave `capo/resumed`
-  and `gepa/resumed` UNMOVED against each other.
+  whatever the press. Unreproduced at ml-8 (4-core cloud: 0 of 3 moved at press 16, 0 of 3 at 64), so
+  no replayed record is named yet; reproduce it first. **Re-test:** three runs at press max leave
+  `capo/resumed` and `gepa/resumed` UNMOVED against each other.
 - **`sample_order` names two things**: `domain/arms.py:175` (an arm's walk order, `list[int]`) and
   `domain/cells.py:131` (the heatmap's hard-sample order, `list[str]`). Root: one name per thing, the
   heatmap's renamed for what it orders. **Re-test:**
