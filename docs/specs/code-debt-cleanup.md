@@ -944,17 +944,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   (`offline_run.py`'s capo signal leg exits 0, not 130). Root: a resume replays the reads the run filed,
   whatever the press. **Rides with:** ml-8. **Re-test:** three runs at press max leave `capo/resumed`
   and `gepa/resumed` UNMOVED against each other.
-- **Under `rolling`, the parent is handed calls no live rival's decision reads**: in
-  the race's settle rule (`_settles`; potter's race module at ml-6, `application/scoring/` after ml-7)
-  the parent "stands no bar", so it never settles, and `_hand_out` gives it
-  its whole budget while its rivals are cut. Its later rows have no other answerer. The judging scale
-  leaves the parent line out, so those rows carry no δ, and `expected_information` reads 0 on them. In
-  the offline fork leg at ml-6 (`fc9a2e7b5`), 24–40 of a line's 68–96 cells sat off the scale.
-  Unmeasured: how many of those calls were billed and how many were replays. Root, if they are billed:
-  a call is sent only where a decision reads it, so the parent's lead is bounded by the live rivals'
-  rows plus the press horizon. Measure it after ml-7 moves the row policy into
-  `application/scoring/`. **Re-test:** on a paid `rolling` run, the parent's billed cells on rows that
-  no rival answered, then → 0.
 - **`sample_order` names two things**: `domain/arms.py:175` (an arm's walk order, `list[int]`) and
   `domain/cells.py:131` (the heatmap's hard-sample order, `list[str]`). Root: one name per thing, the
   heatmap's renamed for what it orders. **Re-test:**

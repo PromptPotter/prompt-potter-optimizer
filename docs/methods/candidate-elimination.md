@@ -92,7 +92,10 @@ v_k and the nearness are 1 and the information alone decides: at one θ on a col
 pair ties, and a tie goes to the walk handed fewer, a round robin. An arm far past the bar either
 way (a sure cut, a sure leader) draws few calls while a contested one remains; one alone draws
 them all. Under `per_round` the parent catches up on every row a candidate takes it never answered,
-so its bill grows with the union of the rows.
+so its bill grows with the union of the rows, and never past it: a parent's answer tells a decision
+only where a candidate's pairs with it (the cut's field, the election's pairs), so the round's
+re-score reads it on the rows an arm took alone (`nodes.py::RoundSamples.read_on`), never a drawn
+row no arm answered, which no judging scale carries.
 
 `pobb.dispatch` says when the decision runs (`race_protocol.py::Trigger`). `batch` decides once
 every call it sent is back, each decision closing a block. `rolling` (the default) decides on every
@@ -119,7 +122,8 @@ posterior's standard units (one preposterior sd). An arm whose z_k lies inside t
 the bar on what is already out, so a further call would be spent before the decision it serves
 could use it. An arm outside the reach cannot, so the next call goes out now, by the arg-max above.
 A sure leader therefore rides to its budget at once, as it would under `batch`, while a contested
-arm waits on its calls out. The parent stands no bar, so its top-up is never settled. With
+arm waits on its calls out. The parent stands no bar, so its top-up is never settled: each of its
+calls is a row a candidate took, which the election pairs on whatever the cut decides. With
 `epsilon_stop` off the cut never fires and every walk is sent its whole budget. The press caps what
 is out at once, never what is committed, so a cut wastes at most the press.
 

@@ -156,8 +156,8 @@ Every arm's `vs_reference` reading (blocked lift, interval, matched floor) is re
 individual per arm; a repair re-measures the arms, never the bar. `lift_reference` picks it, both
 values under every optimizer:
 
-- **`best_so_far` (default)** — the round's selected best-so-far, re-scored on the whole panel and
-  paired on cells both measured (a truncated arm keeps lift and interval, loses the matched floor).
+- **`best_so_far` (default)** — the round's selected best-so-far, re-scored on `Selector.parent_cells`
+  (by default the rows its arms took) and paired on cells both measured (a truncated arm keeps lift and interval, loses the matched floor).
   Potter's parent IS this individual.
 - **`parents`** — the arm's own `parent_ids`, each re-measured on exactly the arm's cells, so every
   arm has a matched floor. A crossover child is read against the BETTER parent on those cells — a
