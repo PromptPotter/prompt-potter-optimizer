@@ -1,61 +1,23 @@
-"""The app a browser world walks, behind the backend its posture names: ``live`` reaches whatever
-``TERMNORM_ENDPOINTS`` names, ``offline`` answers it with ``scripts/offline_world.py::FakeBackend`` — so a
-check-in reads the same backend schema on every machine, CI's included, whether or not one runs."""
+"""The app a browser world walks, behind the world its posture names: ``live`` reaches whatever
+``TERMNORM_ENDPOINTS`` and every other host name, ``offline`` answers every send of this process with
+``scripts/offline_world.py::Router`` (its ``FakeBackend``, an empty model catalogue, the bundled price
+floor) and resolves no name — so a check-in reads the same world on every machine, CI's included,
+and no request leaves for a proxy to refuse."""
 
 from __future__ import annotations
 
-import os
 import sys
-import threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import TYPE_CHECKING, ClassVar
-
-if TYPE_CHECKING:
-    from offline_world import FakeBackend
 
 REPO = Path(__file__).resolve().parents[2]
 
 
-class _Backend(BaseHTTPRequestHandler):
-    world: ClassVar[FakeBackend]
-
-    def _answer(self) -> None:
-        import httpx
-
-        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
-        request = httpx.Request(self.command, f"http://{self.headers['Host']}{self.path}")
-        answered = self.world.respond(request, body)
-        assert answered is None or isinstance(answered, httpx.Response), "no fault is scripted"
-        status, content = (
-            (404, b'{"error": "offline backend: no route"}')
-            if answered is None
-            else (answered.status_code, answered.content)
-        )
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(content)))
-        self.end_headers()
-        self.wfile.write(content)
-
-    def do_GET(self) -> None:
-        self._answer()
-
-    def do_POST(self) -> None:
-        self._answer()
-
-
-def _serve_offline_backend() -> None:
-    # Bound before `promptpotter` imports: settings read `TERMNORM_ENDPOINTS` once, at import.
-    server = ThreadingHTTPServer(("127.0.0.1", 0), _Backend)
-    url = f"http://127.0.0.1:{server.server_address[1]}"
-    os.environ["TERMNORM_ENDPOINTS"] = f'{{"offline": "{url}"}}'
+def _install_offline_world() -> None:
     sys.path.insert(0, str(REPO / "scripts"))
-    from offline_world import FakeBackend
+    from offline_world import FakeBackend, FakeLLM, Router, install_network
 
-    _Backend.world = FakeBackend([])
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"[e2e] offline backend at {url}", flush=True)
+    install_network(Router(FakeLLM(lambda _body: "ok"), FakeBackend([])))
+    print("[e2e] offline world: every send answered in-process", flush=True)
 
 
 def main(argv: list[str]) -> int:
@@ -64,7 +26,7 @@ def main(argv: list[str]) -> int:
         print("[e2e] usage: serve_app.py --backend=offline|live <port>", file=sys.stderr)
         return 2
     if backend == "--backend=offline":
-        _serve_offline_backend()
+        _install_offline_world()
     import uvicorn
 
     uvicorn.run("promptpotter.main:app", host="127.0.0.1", port=int(port))

@@ -25,8 +25,10 @@ account agreed to the live terms, with the `offline` backend. Unset, `playwright
 `gate.py --walk-world` for this tree's world, which builds it when absent.
 
 **The backend is a posture too, argued like auth** (`serve.mjs --backend=offline|live`). A run
-without `spend` serves the throwaway world `offline`: `serve_app.py` answers `TERMNORM_ENDPOINTS` with
-`scripts/offline_world.py::FakeBackend`, so a check-in reads one schema on every machine. A desk
+without `spend` serves the throwaway world `offline`: `serve_app.py` answers every send of the server
+with `scripts/offline_world.py::Router` (`TERMNORM_ENDPOINTS` its `FakeBackend`, the model catalogue
+pinned empty) and resolves no name, so a check-in reads one world on every machine and a refusing
+proxy changes no walk. A desk
 TermNorm at :8000 once turned a CI-red spec green at the push hook.
 
 ## Three worlds, because the app has two populations

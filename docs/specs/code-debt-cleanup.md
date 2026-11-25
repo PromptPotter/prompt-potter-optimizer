@@ -792,11 +792,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   and a bare `npx playwright test` does not refuse it (the gate rebuilds first). Root: the walk
   server refuses a bundle older than its sources. **Re-test:** a walk run on a stale build fails at
   start, naming the build.
-- **The walk's server reaches the network for model capabilities** (store-5a's report): a cloud
-  full gate went red on `playwright` once and green on its rerun with no web change, its WebServer
-  logging "model capability refresh failed … 403 Forbidden". Root: the walk world serves a pinned
-  capability answer and makes no outbound call. **Re-test:** the walk server makes no outbound
-  request (a refusing proxy changes no walk result).
 
 ### wave-5 · drift (the 2026-11-19 backbone hunt)
 
