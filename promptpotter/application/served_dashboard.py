@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Mapping
+from functools import reduce
 from typing import Any, Literal, NamedTuple
 
 from pydantic import Field
@@ -52,7 +53,7 @@ from promptpotter.domain.spend import (
     CAP_AXIS_INFO,
     MONEY_AXES,
     NO_OVERSHOOT,
-    NO_SPEND_COUNT,
+    NOTHING_METERED,
     Budget,
     CapAxis,
     CeilingMeter,
@@ -517,6 +518,8 @@ class _Present(NamedTuple):
     orphaned: bool
     fork_remainder: ForkRemainder
     caps: ArmedCaps
+    # This cycle's spend book by part, its metered line's count.
+    spent: SpendCount
     overshot: Overshoot
     at: float
 
@@ -582,15 +585,17 @@ def armed_caps(
     limits: RunLimits,
     run: RunState,
     rounds_closed: int,
-) -> ArmedCaps:
-    """THE caps as they bind now, each against its own book: the spend book's count, this cycle's
-    rounds closed after the origin, the clock of the launch in flight."""
+) -> tuple[ArmedCaps, SpendCount]:
+    """THE caps as they bind now, each against its own book: the campaign's spend count, this
+    cycle's rounds closed after the origin, the clock of the launch in flight; and this cycle's
+    spend count, its metered line's."""
     campaign, hop = at.campaign, at.hop
     meter = ceiling_meter(campaign.declaration.purpose)
     held = stores.campaigns.holder(hop) if run.producer.appending else None
     job = None if held is None else held.run
     started = None if job is None else epoch_seconds(job.started_at)
-    return _caps(
+    cycle, count = spend_counts(stores, hop, meter, hold_id=None if job is None else job.job_id)
+    caps = _caps(
         limits,
         meter,
         asked=stores.campaigns.read_campaign_ceiling(campaign).asked,
@@ -598,26 +603,39 @@ def armed_caps(
             "rounds": rounds_closed,
             "wall_clock_s": None if started is None else max(0.0, time.time() - started),
         },
-        count=campaign_count(stores, hop, meter, hold_id=None if job is None else job.job_id),
+        count=count,
+    )
+    return caps, cycle
+
+
+def spend_counts(
+    stores: Stores, hop: CycleHop, meter: CeilingMeter, *, hold_id: str | None
+) -> tuple[SpendCount, SpendCount]:
+    """This cycle's book, its live run's job holding *hold_id*, and the count the caps bind on:
+    the campaign's bills (a deleted cycle's banked) and every cycle's book's other parts."""
+    books = {
+        cycle: SpendBook(
+            declared=Budget(),
+            share=Budget(),
+            charges=stores.charges,
+            hold_id=(hold_id if cycle == hop else _job_holding(stores, cycle)) or "",
+            headroom=Budget(),
+            metered_on=stores.campaigns.ledger(cycle),
+            meters=meter,
+            opened=0.0,
+        ).count()
+        for cycle in {hop, *stores.campaigns.campaign_cycle_hops(hop.campaign_id)}
+    }
+    parts = reduce(SpendCount.plus, books.values())
+    billed = stores.campaigns.metered_spend(hop.campaign_id, meter)
+    return books[hop], SpendCount(
+        billed=billed, unreported=parts.unreported, set_aside=parts.set_aside, out=parts.out
     )
 
 
-def campaign_count(
-    stores: Stores, hop: CycleHop, meter: CeilingMeter, *, hold_id: str | None
-) -> SpendCount:
-    """The count the caps bind on: the campaign's bills, every cycle's, beside the other parts of
-    this cycle's book, its live run's job holding *hold_id*."""
-    count = SpendBook(
-        declared=Budget(),
-        share=Budget(),
-        charges=stores.charges,
-        hold_id=hold_id or "",
-        headroom=Budget(),
-        metered_on=stores.campaigns.ledger(hop),
-        meters=meter,
-        opened=0.0,
-    ).count()
-    return count.beside(stores.campaigns.metered_spend(hop.campaign_id, meter))
+def _job_holding(stores: Stores, hop: CycleHop) -> str | None:
+    held = stores.campaigns.holder(hop)
+    return None if held is None or held.run is None else held.run.job_id
 
 
 def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:
@@ -628,13 +646,14 @@ def current_caps(stores: Stores, hop: CycleHop) -> ArmedCaps:
     # Unwired yet, it stands under what its operator armed, as its first launch will.
     wired = stores.campaigns.run_limits(at) or RunLimits(budget=stores.campaigns.armed_budget(at))
     limits = _binding(stores, at, config, run, wired)
-    return armed_caps(
+    caps, _ = armed_caps(
         stores,
         at,
         limits=limits,
         run=run,
         rounds_closed=_remainder(stores, hop, limits).rounds_closed,
     )
+    return caps
 
 
 def _remainder(stores: Stores, hop: CycleHop, limits: RunLimits | None) -> ForkRemainder:
@@ -798,11 +817,15 @@ def _serve(
         },
         metered_line=metered_line(
             meter,
-            # The live book's parts ride the caps' count; a replay has none.
-            count=next(
-                (c.count for c in ([] if standing is None else standing.caps.caps) if c.count),
-                NO_SPEND_COUNT,
-            ).beside(state.spend.metered(meter)),
+            # A replay holds nothing: the bills it folded are its whole count.
+            count=SpendCount(
+                billed=state.spend.metered(meter),
+                unreported=NOTHING_METERED,
+                set_aside=NOTHING_METERED,
+                out=NOTHING_METERED,
+            )
+            if standing is None
+            else standing.spent,
             cap=Budget() if standing is None else run_limits.budget,
             share=Budget() if standing is None else standing.allotment or Budget(),
         ),
@@ -872,6 +895,9 @@ def served_dashboard(
     config = cycle_config(stores, seat).config
     limits = _binding(stores, seat, config, run, folded)
     remainder = _remainder(stores, hop, limits)
+    caps, spent = armed_caps(
+        stores, seat, limits=limits, run=run, rounds_closed=remainder.rounds_closed
+    )
     return _serve(
         state,
         hop=hop,
@@ -887,9 +913,8 @@ def served_dashboard(
             orphaned=any(mark.state == "running" for mark in state.verification)
             and stores.campaigns.holder(hop) is None,
             fork_remainder=remainder,
-            caps=armed_caps(
-                stores, seat, limits=limits, run=run, rounds_closed=remainder.rounds_closed
-            ),
+            caps=caps,
+            spent=spent,
             overshot=money_on(stores.charges.path).overshot.get(
                 stores.charges.held_on(CycleLayout(cycle_path).ledger), NO_OVERSHOOT
             ),

@@ -3749,6 +3749,47 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
     )
 
 
+def test_a_lapsed_cell_on_a_sibling_cycle_reads_in_the_campaign_cap_line_alone(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # The caps bind the campaign, so a sibling's unreported cell counts against them; the
+    # stopping cycle's own line reads its book alone.
+    stores = built_stores
+    opened, held_campaign = held
+    launched = effective_config(decl.declared.spec)
+    sibling = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_sibling")
+    stores.campaigns.mint_cycle(sibling)
+    declare_run_wiring(opened, launched, selected=select_optimizer(launched.optimization))
+    observers = build_run_observers(session=opened, campaign_config=launched)
+    with scoped(account=stores):
+        book = spend_book(1.0, metered_on=stores.campaigns.ledger(opened.hop))
+    cell, bound = "sibling-cell", Budget(usd=0.25, tokens=0)
+    stores.charges.append(
+        Hold(
+            hold_id=cell,
+            parent=None,
+            key_source="host",
+            bound=bound,
+            resource="backend",
+            node="cell",
+            ledger=stores.charges.held_on(stores.campaigns.ledger(sibling)),
+        ),
+        Lapse(hold_id=cell, bound=bound),
+    )
+    with scoped(book=book):
+        declare_run_stop(opened, observers, StopReason.PAUSED, interrupted_by=PauseCause.INTERRUPT)
+    observers.drain_all()
+    observers.release()
+    stop = stores.campaigns.last(opened.hop, RunPhaseRecord)
+    assert stop is not None and stop.spend is not None, "vacuous — no stop record landed"
+    assert stop.spend.campaign.unreported.usd_amount == bound.usd_amount, (
+        "the campaign's cap count dropped a sibling cycle's lapsed cell"
+    )
+    assert not stop.spend.cycle.unreported.usd_amount, (
+        "the stopping cycle's count took a sibling cycle's lapsed cell"
+    )
+
+
 def test_a_pause_admitted_as_its_run_releases_never_reaches_the_next_run(
     built_stores: Stores, decl: _Declared, held: _Held
 ) -> None:

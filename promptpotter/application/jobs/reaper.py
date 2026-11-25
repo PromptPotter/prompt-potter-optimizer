@@ -51,7 +51,7 @@ def reclaim_orphan_sandboxes(projects_root: Path) -> list[str]:
         if owner_store.load(owner_hop, moment=None) is not None:
             continue
         try:
-            owner_store.delete_inner_sandbox(sandbox, campaign_id=owner.campaign_id)
+            owner_store.delete_inner_sandbox(sandbox, owner=owner_hop)
         except OSError as refusal:
             undeleted.append(fault_said(refusal)[0])
     return undeleted

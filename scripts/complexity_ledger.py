@@ -233,7 +233,10 @@ BASELINE = {
     # w1-rebase (±0): W1 (+260 over 112176) replayed on main's 112539, the resolution adding none.
     # l4-key-b (+83): the archive row's one strict reader and a landing that drops a line cache's
     # rows by why (link 9, +105), net of links 1-8; the hunt found no dead code in the arc's files.
-    "package_lines": 112882,
+    # spend-tomb (+24): the campaign cap count folds every cycle's book (`served_dashboard.py::
+    # spend_counts`), a sandbox banks each inner campaign at its address, a verify's difference band.
+    # l4-key-c (−4) and the web chain (±0) land beside them.
+    "package_lines": 112902,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

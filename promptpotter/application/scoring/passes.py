@@ -49,6 +49,7 @@ from promptpotter.domain.paired_reading import (
     ArmName,
     CellSetName,
     Estimate,
+    MeasurandUnit,
     MemberAddress,
     ReadingState,
 )
@@ -130,17 +131,25 @@ def pick_fresh(
     return [*placed, *rng.sample(unplaced, len(unplaced))][:n]
 
 
-def _held(strategy: VerifyStrategy, fresh: CellSheet, recorded: CellSheet) -> bool | None:
-    """The 95% band of fresh − recorded reaches 0: the fresh cells cannot tell the level fell."""
-    if strategy != "random":
-        return None
+def _difference(fresh: CellSheet, recorded: CellSheet, unit: MeasurandUnit) -> Estimate | None:
+    """Fresh − recorded in the fitness column, with the band of the difference of two
+    independent means (`difference_interval`); ``None`` where a side reads no cell."""
     fitness = ROW_GRADES["fitness"]
-    band = difference_interval(
-        list(fresh.column(fitness).values()),
-        list(recorded.column(fitness).values()),
-        binary="fitness" in fresh.two_valued,
+    a, b = (list(sheet.column(fitness).values()) for sheet in (fresh, recorded))
+    if not a or not b:
+        return None
+    lo, hi = difference_interval(a, b, binary="fitness" in fresh.two_valued) or (None, None)
+    value = sum(a) / len(a) - sum(b) / len(b)
+    return Estimate(
+        value=value, ci_lo=lo, ci_hi=hi, n=len(a) + len(b), se=None, unit=unit, form="lift"
     )
-    return None if band is None else band[1] >= 0.0
+
+
+def _held(strategy: VerifyStrategy, difference: Estimate | None) -> bool | None:
+    """The difference's band reaches 0: the fresh cells cannot tell the level fell."""
+    if strategy != "random" or difference is None or difference.ci_hi is None:
+        return None
+    return difference.ci_hi >= 0.0
 
 
 def verify_member(
@@ -181,10 +190,8 @@ def verify_reading(
     """Fresh beside recorded, never pooled: a pooled rate moves with how many cells each holds."""
     unit = scorer.fitness_unit
     fresh_level, recorded_level = own_level(fresh, unit), own_level(recorded, unit)
-
-    def increment(a: Estimate | None, b: Estimate | None) -> float | None:
-        return None if a is None or b is None else a.value - b.value
-
+    fresh_composite, recorded_composite = fresh_level.composite, recorded_level.composite
+    difference = _difference(fresh, recorded, unit)
     strategy = banked.strategy
     return VerifyReading(
         label=banked.arm.label,
@@ -192,8 +199,10 @@ def verify_reading(
         strategy=strategy,
         fresh=fresh_level,
         recorded=recorded_level,
-        fitness_increment=increment(fresh_level.fitness, recorded_level.fitness),
-        composite_increment=increment(fresh_level.composite, recorded_level.composite),
+        fitness_difference=difference,
+        composite_increment=None
+        if fresh_composite is None or recorded_composite is None
+        else fresh_composite.value - recorded_composite.value,
         vs_origin=read_pair(
             a=origin,
             b=measured,
@@ -206,7 +215,7 @@ def verify_reading(
             scope=RoleScope.REPORT,
             instrument_id=measured.instrument_id,
         ),
-        held=_held(strategy, fresh, recorded),
+        held=_held(strategy, difference),
     )
 
 

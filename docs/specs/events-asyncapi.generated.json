@@ -690,20 +690,38 @@
       },
       "BankedStop": {
         "additionalProperties": false,
-        "description": "A cycle's abnormal run stop, banked before the cycle went; its commands are the account log's.",
+        "description": "A cycle's abnormal run stop, banked before the cycle went, worded where it is read; its\ncommands are the account log's.",
         "properties": {
           "at": {
             "title": "At",
             "type": "string"
           },
-          "subject": {
-            "title": "Subject",
-            "type": "string"
+          "hop": {
+            "$ref": "#/components/schemas/CycleHop"
+          },
+          "state": {
+            "discriminator": {
+              "mapping": {
+                "paused": "#/components/schemas/Paused",
+                "terminal": "#/components/schemas/Ended"
+              },
+              "propertyName": "run_phase"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/Paused"
+              },
+              {
+                "$ref": "#/components/schemas/Ended"
+              }
+            ],
+            "title": "State"
           }
         },
         "required": [
-          "at",
-          "subject"
+          "hop",
+          "state",
+          "at"
         ],
         "title": "BankedStop",
         "type": "object"
@@ -4916,10 +4934,6 @@
             "title": "Meter",
             "type": "string"
           },
-          "metered_tokens": {
-            "title": "Metered Tokens",
-            "type": "integer"
-          },
           "metered_usd": {
             "title": "Metered Usd",
             "type": "number"
@@ -4951,7 +4965,6 @@
         "required": [
           "meter",
           "metered_usd",
-          "metered_tokens",
           "billed_usd",
           "rate_priced_usd",
           "calls_rate_priced",
@@ -8875,6 +8888,14 @@
             "title": "Cycle Id",
             "type": "string"
           },
+          "inside": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CycleHop"
+            },
+            "title": "Inside",
+            "type": "array"
+          },
           "metered": {
             "additionalProperties": {
               "$ref": "#/components/schemas/Budget"
@@ -9120,6 +9141,9 @@
           "cap": {
             "$ref": "#/components/schemas/Budget"
           },
+          "cycle": {
+            "$ref": "#/components/schemas/SpendCount"
+          },
           "share": {
             "$ref": "#/components/schemas/Budget"
           },
@@ -9129,6 +9153,7 @@
         },
         "required": [
           "spent",
+          "cycle",
           "campaign",
           "cap",
           "share"
@@ -9445,6 +9470,14 @@
             "default": "",
             "title": "Cycle Id",
             "type": "string"
+          },
+          "inside": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/CycleHop"
+            },
+            "title": "Inside",
+            "type": "array"
           },
           "record_type": {
             "const": "trail_tombstone",
@@ -9795,17 +9828,16 @@
             ],
             "title": "Composite Increment"
           },
-          "fitness_increment": {
+          "fitness_difference": {
             "anyOf": [
               {
-                "type": "number"
+                "$ref": "#/components/schemas/Estimate"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "`fresh` minus `recorded`, hit rate. Unpaired — the two are different cells.",
-            "title": "Fitness Increment"
+            "description": "`fresh` minus `recorded`, hit rate, with the band `held` reads. Unpaired — the two are different cells."
           },
           "fresh": {
             "$ref": "#/components/schemas/OwnLevel",
@@ -9856,7 +9888,7 @@
           "strategy",
           "fresh",
           "recorded",
-          "fitness_increment",
+          "fitness_difference",
           "composite_increment",
           "vs_origin",
           "held"
