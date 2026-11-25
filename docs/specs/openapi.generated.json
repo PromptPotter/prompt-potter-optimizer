@@ -16043,15 +16043,15 @@
       },
       "SampleWalk": {
         "additionalProperties": false,
-        "description": "The scoring walk of the arm being measured: the cells it took, in the order it took them,\nplus a cursor, so a race that re-chooses its rows at a decision never moves a taken cell.",
+        "description": "The scoring walk of the arm being measured, on its own order, plus a cursor. Its cells taken\nlead, so a race that re-chooses its rows at a decision never moves a taken cell; past the\ncursor is chosen, never promised — an eliminator can stop the arm before its tail.",
         "properties": {
           "cursor": {
-            "description": "Where the walk stands in `ids`: its last cell.",
+            "description": "Where the walk stands in `ids`: the cell in flight, else the one after the last taken.",
             "title": "Cursor",
             "type": "integer"
           },
           "ids": {
-            "description": "The cells the arm has measured, in the order it took them, then the one in flight.",
+            "description": "The arm's rows through its budget as its last turn filed them: those it took, in the order it took them, then its untaken in the order its race chose.",
             "items": {
               "type": "integer"
             },

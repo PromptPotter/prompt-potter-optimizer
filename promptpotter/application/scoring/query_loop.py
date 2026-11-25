@@ -12,6 +12,14 @@ from typing import TYPE_CHECKING, Any, Protocol
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.run_phase_control import Flight, budget_stop
+from promptpotter.application.scoring.race_protocol import (
+    BATCH,
+    Decider,
+    Trigger,
+    View,
+    WalkView,
+    next_block,
+)
 from promptpotter.application.scoring.sample_measurement import (
     cell_bound,
     emit_replayed_step_tokens,
@@ -40,7 +48,7 @@ from promptpotter.domain.records.run_records import (
     StopLoop,
 )
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.sample import FiledAnswer, ReadOrder, Sample, Stretch, Untaken
+from promptpotter.domain.sample import FiledAnswer, Sample
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
     CellSheet,
@@ -116,28 +124,6 @@ def _dearest(bounds: Sequence[SendBound | None]) -> SendBound | None:
 NEXT_CELL = "the next cell"
 
 MAX_CONSECUTIVE_ERRORS: int = 3
-
-
-class BlockRace[K: Hashable](Protocol):
-    @property
-    def block_size(self) -> int: ...
-
-    @property
-    def rolling(self) -> ReadOrder | None:
-        """``None``: ``batch`` dispatch, a decision once every call a block handed out is back.
-        Else ``rolling``: a decision on every returned row, the rows read in this order."""
-        ...
-
-    def close(self, rows: Mapping[K, Sequence[GradedCell]]) -> Mapping[K, StopSignal]: ...
-
-    def choose_rows(
-        self, taken: Mapping[K, Sequence[GradedCell]], ahead: Mapping[K, Untaken]
-    ) -> Mapping[K, Stretch]:
-        """At each decision, every live walk's stretch: a block closes once each has taken its
-        calls, its budget capping them, and hands out at least one call while a walk has a row
-        left and no call out. Read off the rows taken and the calls decisions sent alone: no cell
-        a press sent ahead enters, so a press never moves the choice."""
-        ...
 
 
 _ABORTS_AT_ONCE: dict[ErrorCategory, WalkEnd] = {
@@ -395,8 +381,9 @@ LaunchEvent = tuple["Sample", LookaheadWindow]
 class Walk:
     """A cell frees its slot when it RETURNS, not when taken; no walk reads another's state across an await."""
 
-    # Every row the walk may take, in the order it takes them; its replay state covers them all.
-    dataset: list[Sample]
+    # Every row the walk may take, in the order it takes them: those taken, then its untaken in the
+    # order its race last chose. Its replay state covers them all.
+    order: list[Sample]
     # How many of them it takes.
     budget: int
     ctx: QueryLoopState
@@ -407,7 +394,7 @@ class Walk:
     skip_at: int | None = None
     results: list[GradedCell] = field(default_factory=list)
     consecutive_errors: int = 0
-    # Each cell out, then back, by the row it takes: a block's open re-seats it where its row moved.
+    # Each cell out, then back, by its row's sample id: a decision that moves a row moves no cell.
     running: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
     # Sample ids of running cells still on another process's claim: every stop cancels them.
     claiming: set[int] = field(default_factory=set)
@@ -417,70 +404,41 @@ class Walk:
     held: list[LaunchEvent] | None = field(default_factory=list)
     settling: Sample | None = None
     outcome: QueryLoopResult | None = None
-    # The rows at which a block race next closes, where it may stop this walk. ``None`` outside one.
-    boundary: int | None = None
-    # A `rolling` race decides on every returned row: the walk sends only the calls a decision
-    # sent it, up to `boundary`, and is sure of no row it has not taken.
-    rolling: bool = False
 
-    @property
-    def n(self) -> int:
-        return self.budget
+    def view(self, out: int) -> WalkView:
+        """As its race decides on it, its first *out* untaken rows sent and not yet read."""
+        return WalkView(self.results, self.order[len(self.results) :], out, self.budget)
 
-    @property
-    def owed(self) -> int:
-        """The calls a decision sent it whose rows it has not taken."""
-        return 0 if self.boundary is None else self.boundary - len(self.results)
-
-    def untaken(self) -> Untaken:
-        head = len(self.results)
-        return Untaken(self.dataset[head:], self.n - head, self.owed)
-
-    def enter_block(self, end: int) -> None:
-        self.boundary = min(self.n, end)
-
-    @property
-    def waits(self) -> bool:
-        """Handed no call this block, a row still left to it: it waits out the block's close."""
-        return (close := self.boundary) is not None and len(self.results) == close < self.n
-
-    def reorder(self, rows: Sequence[Sample]) -> None:
-        """Its untaken pool in the order its race chose. A cell out or back moves with its row, by
-        sample id: the choice drops no row from the pool, so a press re-buys and replays none."""
+    def rank(self, rows: Sequence[Sample]) -> None:
+        """Its untaken rows in the order its race chose: the choice drops no row, and a cell out or
+        back stays with its row, so a press re-buys and replays none."""
         head = len(self.results)
         # By slot, never by key: two rows of one content share a key.
-        assert sorted(s.id for s in rows) == sorted(s.id for s in self.dataset[head:]), (
+        assert sorted(s.id for s in rows) == sorted(s.id for s in self.order[head:]), (
             "a race chose rows outside the walk's untaken pool"
         )
-        seat = {sample.id: head + k for k, sample in enumerate(rows)}
-        row = self.dataset
-        self.running = {seat[row[i].id]: cell for i, cell in self.running.items()}
-        self.finished = {seat[row[i].id]: cell for i, cell in self.finished.items()}
-        # A taken row keeps its own: a settling cell reads it.
-        self.launched_at = {
-            seat[row[i].id] if i >= head else i: at for i, at in self.launched_at.items()
-        }
         # A copy: walks share the list they were opened on.
-        self.dataset = [*row[:head], *rows]
+        self.order = [*self.order[:head], *rows]
 
-    def unsent(self, cells: int) -> list[int]:
-        """The rows it may still send, in the order it takes them: none taken, out or back, and
-        at most *cells* out or back past its pending close, so a cut there wastes them at most."""
-        end, out = self.n if self.skip_at is None else self.skip_at, {*self.running, *self.finished}
-        rows = [i for i in range(len(self.results), end) if i not in out]
-        if (close := self.boundary) is None:
-            return rows
-        past = 0 if self.rolling else max(cells - sum(i >= close for i in out), 0)
-        return [i for i in rows if i < close] + [i for i in rows if i >= close][:past]
+    def unsent(self, cells: int, decided: int, trigger: Trigger) -> list[int]:
+        """The rows it may still send, in the order it takes them: none taken, out or back, those
+        *decided* past its taken ones, then as many past them as *trigger* lets a press of *cells*."""
+        end = self.budget if self.skip_at is None else self.skip_at
+        head, close = len(self.results), len(self.results) + decided
+        out = {*self.running, *self.finished}
+        rows = [i for i in range(head, end) if self.order[i].id not in out]
+        past = sum(self.order[i].id in out for i in range(close, len(self.order)))
+        return [i for i in rows if i < close] + [i for i in rows if i >= close][
+            : trigger.ahead(cells, past)
+        ]
 
     def sent(self) -> list[Sample]:
         """The rows it took, then each one a cell is out or back on, in the order it takes them."""
-        out = sorted({*self.running, *self.finished})
-        return [*self.dataset[: len(self.results)], *(self.dataset[i] for i in out)]
+        head, out = len(self.results), {*self.running, *self.finished}
+        return [*self.order[:head], *(s for s in self.order[head:] if s.id in out)]
 
-    def launch(self, armed: LookaheadWindow) -> tuple[Sample, asyncio.Task[_Acquired]]:
-        idx = self.unsent(armed.cells)[0]
-        sample = self.dataset[idx]
+    def launch(self, idx: int, armed: LookaheadWindow) -> tuple[Sample, asyncio.Task[_Acquired]]:
+        sample = self.order[idx]
         # `armed` is the window the round RUNS at, never the in-flight count, empty at each candidate's start.
         event: LaunchEvent = (sample, armed)
         if self.held is not None:
@@ -492,8 +450,8 @@ class Walk:
             name=f"scoring:{sample.id}",
             context=self.context.copy(),
         )
-        self.running[idx] = cell
-        self.launched_at[idx] = time.time()
+        self.running[sample.id] = cell
+        self.launched_at[sample.id] = time.time()
         return sample, cell
 
     def release(self) -> None:
@@ -509,7 +467,7 @@ class Walk:
                     round=bound_round(),
                     individual_id=recorded.individual_id,
                     role=recorded.role,
-                    sample_total=self.n,
+                    sample_total=self.budget,
                     position=sample.id,
                     query_preview=sample.query,
                     sample_lookahead=armed.cells,
@@ -518,18 +476,20 @@ class Walk:
             )
 
     def collect(self) -> None:
-        for idx in [idx for idx, cell in self.running.items() if cell.done()]:
-            self.finished[idx] = self.running.pop(idx)
+        for sid in [sid for sid, cell in self.running.items() if cell.done()]:
+            self.finished[sid] = self.running.pop(sid)
 
     def head(self) -> asyncio.Task[_Acquired] | None:
-        return None if self.settling is not None else self.finished.get(len(self.results))
+        if self.settling is not None or len(self.results) >= len(self.order):
+            return None
+        return self.finished.get(self.order[len(self.results)].id)
 
     def take(self, cell: asyncio.Task[_Acquired]) -> QueryLoopResult | None:
         """The only writer of the rows; raises the cell's own error in its turn, never in its race."""
         acq = cell.result()
         idx = len(self.results)
-        del self.finished[idx]
-        ctx, n = self.ctx, self.n
+        del self.finished[acq.sample.id]
+        ctx, n = self.ctx, self.budget
         first = ctx.claim_price(acq.sample)
         if not acq.fresh:
             # Only if it STAYED a replay: the stale-data protocol may have re-measured for real.
@@ -575,14 +535,7 @@ class Walk:
         for check in self.checks:
             if (signal := check.check(self.results)) is not None:
                 return QueryLoopResult(self.results, ended_on=WalkEnd.STOP_RULE, stop_signal=signal)
-        if len(self.results) == self.n and self.boundary is None:
-            return QueryLoopResult(self.results)
         return None
-
-    def launch_horizon(self, last: int) -> int | None:
-        """Index ``i`` may launch while no rule can cut before ``i`` rows, so a rule's cut wastes one
-        cell at most. A block's close bounds no launch: a cut there wastes the press at most."""
-        return self.horizon(last - 2)
 
     def horizon(self, last: int) -> int | None:
         """The fewest rows at which a stop rule may cut, read off the rows up to index *last*."""
@@ -590,44 +543,46 @@ class Walk:
         if last < head:
             return None
         upcoming = [
-            (self.dataset[i], _returned_row(cell) if (cell := self.finished.get(i)) else None)
-            for i in range(head, last + 1)
+            (sample, _returned_row(cell) if (cell := self.finished.get(sample.id)) else None)
+            for sample in self.order[head : last + 1]
         ]
         stops = [check.earliest_stop(self.results, upcoming) for check in self.checks]
         return min((m for m in stops if m is not None), default=None)
 
     def rereads_ahead(self, start: int) -> int:
         end = start
-        while end < self.n and self.ctx.rereads(self.dataset[end]):
+        while end < self.budget and self.ctx.rereads(self.order[end]):
             end += 1
         return end - start
 
-    def sendable(self, cells: int, room: int = sys.maxsize) -> list[int]:
-        """The rows it may send now, at most *room*: unsent at a press of *cells*, and none where a
-        rule's cut would waste more than one."""
-        if not (sending := self.unsent(cells)[: max(room, 0)]):
+    def sendable(
+        self, cells: int, decided: int, trigger: Trigger, room: int = sys.maxsize
+    ) -> list[int]:
+        """The rows it may send now, at most *room*: unsent at a press of *cells*, and index ``i``
+        only while no rule can cut before ``i`` rows, so a cut wastes one at most."""
+        if not (sending := self.unsent(cells, decided, trigger)[: max(room, 0)]):
             return []
-        horizon = self.launch_horizon(sending[-1])
+        horizon = self.horizon(sending[-1] - 2)
         return [i for i in sending if horizon is None or i <= horizon]
 
-    def flight(self, cells: int) -> Flight:
+    def flight(self, cells: int, decided: int, trigger: Trigger) -> Flight:
         """``allowed`` is what ``fill`` may have out at a press of *cells*: one bound for both."""
         out, settled = len(self.running), len(self.results) + len(self.finished)
-        return Flight(out, out + len(self.sendable(cells, cells - out)), self.n - settled)
+        sendable = self.sendable(cells, decided, trigger, cells - out)
+        return Flight(out, out + len(sendable), self.budget - settled)
 
-    def bank(self) -> list[Sample]:
-        """Only cells this walk was SURE to take: below its horizon, its block race's pending close
-        (under ``rolling``, the next row's decision) and the first error."""
+    def bank(self, sure: int) -> list[Sample]:
+        """Only cells this walk was SURE to take: below its horizon, the *sure* rows its race's
+        decisions leave it and the first error."""
         self.collect()
-        close = len(self.results) if self.rolling else self.boundary
-        sure = min(m for m in (self.n, self.horizon(self.n - 1), close) if m is not None)
+        head = len(self.results)
+        sure = min(m for m in (self.budget, self.horizon(self.budget - 1), sure) if m is not None)
         rows: list[GradedCell] = []
         paid: list[Sample] = []
         samples: list[Sample] = []
-        for idx in sorted(self.finished):
-            if idx >= sure:
-                break
-            cell = self.finished[idx]
+        for sample in self.order[head:sure]:
+            if (cell := self.finished.get(sample.id)) is None:
+                continue
             if cell.cancelled() or cell.exception() is not None:
                 continue
             acq = cell.result()
@@ -660,9 +615,26 @@ class Walk:
         return draining
 
     def drop_claim_waits(self) -> None:
-        for idx, cell in self.running.items():
-            if self.dataset[idx].id in self.claiming:
+        for sid, cell in self.running.items():
+            if sid in self.claiming:
                 cell.cancel()
+
+
+@dataclass(frozen=True)
+class Turn:
+    """What a phase files of a walk at its turn: its rows through its budget, taken then untaken
+    (``None``: no walk), the block it walks in where its race's decisions close blocks, and how
+    many walks race."""
+
+    order: Sequence[Sample] | None
+    block: int | None
+    racing: int
+
+    def moved(self, held: Turn) -> bool:
+        """Whether it files anything *held* did not: its rows, or a block's field racing."""
+        ids = None if self.order is None else [s.id for s in self.order]
+        was = None if held.order is None else [s.id for s in held.order]
+        return ids != was or (self.block is not None and self.racing != held.racing)
 
 
 async def run_walks[K: Hashable](
@@ -671,26 +643,24 @@ async def run_walks[K: Hashable](
     *,
     keep_cut: bool,
     backfills: CatchUpPool | None = None,
-    blocks: BlockRace[K] | None = None,
-    on_turn: Callable[[K, int | None], None] | None = None,
-    on_decided: Callable[[K], None] | None = None,
-    reads: Sequence[tuple[K, int]] = (),
+    race: Decider[K] | None = None,
+    on_turn: Callable[[K, Turn], None] | None = None,
+    on_decided: Callable[[K, Sequence[Sample] | None], None] | None = None,
 ) -> StopLoop | None:
-    """Rows, cuts and events land where a SERIAL phase lands them, in *walks*' order, or under a
-    ``rolling`` race in the order its decisions read them; ``keep_cut`` returns a budget stop, its
-    words whole, not raises. *reads*: the rows, by walk and sample id, an ``arrival`` race read
-    before a pause, which a resume reads in that order."""
-    if over := [w.n for w in walks.values() if w is not None and w.n > MAX_PASS_ROWS]:
+    """Rows, cuts and events land where a SERIAL phase lands them: one walk's turn at a time, the
+    calls its race's decisions sent read in the order its trigger names; ``keep_cut`` returns a
+    budget stop, its words whole, not raises."""
+    if over := [w.budget for w in walks.values() if w is not None and w.budget > MAX_PASS_ROWS]:
         raise PayloadInvalidError(
             f"A pass scores at most {MAX_PASS_ROWS} rows, and this one asks for {max(over)}. "
             "Cut the set where it is defined: the dataset's split or the pass's sample size.",
             code="pass_too_large",
         )
     phase = _ScoringPhase(
-        list(walks), list(walks.values()), session, backfills, blocks, on_turn, on_decided
+        list(walks), list(walks.values()), session, backfills, race, on_turn, on_decided
     )
-    if phase.rolling == "arrival":
-        phase.replaying = [(phase.keys.index(key), sid) for key, sid in reads if walks.get(key)]
+    if phase.trigger.reads == "arrival":
+        phase.replaying = phase.filed_reads()
     phase.cell = _dearest(
         [
             await cell_bound(session, walk.ctx.search_point.pipeline_params)
@@ -747,26 +717,29 @@ class _ScoringPhase[K: Hashable]:
     walks: list[Walk | None]
     session: Session
     backfills: CatchUpPool | None
-    blocks: BlockRace[K] | None
-    on_turn: Callable[[K, int | None], None] | None
-    on_decided: Callable[[K], None] | None
+    # ``None``: no race, so one decision sends every walk its budget.
+    race: Decider[K] | None
+    on_turn: Callable[[K, Turn], None] | None
+    on_decided: Callable[[K, Sequence[Sample] | None], None] | None
     cell: SendBound | None = None
     turn: int = -1
+    # The decisions its race made past its first: a block's number where they close blocks.
     block: int = 0
+    opened: bool = False
     draining: set[asyncio.Future[Any]] = field(default_factory=set)
-    announced: set[int] = field(default_factory=set)
+    # By walk, what its turn last filed.
+    handed: dict[int, Turn] = field(default_factory=dict)
     decided: set[int] = field(default_factory=set)
-    # Under `rolling`, by walk and sample id: each call a decision sent and no walk has read yet,
-    # in the order sent; each in the order it returned; the reads a resume replays.
+    # By walk and sample id: each call a decision sent and no walk has read yet, in the order sent;
+    # each in the order it returned; the reads a resume replays.
     sent: list[tuple[int, int]] = field(default_factory=list)
     returned: list[tuple[int, int]] = field(default_factory=list)
     replaying: list[tuple[int, int]] = field(default_factory=list)
+    # The walks with no row whose turn has not passed, in walk order.
+    unwalked: list[int] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        self.rolling = None if self.blocks is None else self.blocks.rolling
-        for walk in self.walks:
-            if walk is not None:
-                walk.rolling = self.rolling is not None
+        self.trigger = BATCH if self.race is None else self.race.trigger
         self.gauge = self.session.state.flight
         self.client = self.session.backend_client
         self.cancels = self.client.connector.cancel_stops_billing
@@ -791,89 +764,142 @@ class _ScoringPhase[K: Hashable]:
             if walk is not None and walk.outcome is None
         }
 
-    def live(self) -> list[Walk]:
-        return list(self.racing().values())
+    def filed_reads(self) -> list[tuple[int, int]]:
+        """The rows, by walk and sample id, its arms' walks read this round before a pause, as
+        the ledger stands them (`StandingRounds.reads`): an ``arrival`` resume reads them so."""
+        arms = {
+            ArmKey(walk.ctx.recorded.individual_id): i
+            for i, walk in enumerate(self.walks)
+            if walk is not None and walk.ctx.recorded is not None and PASSES[walk.ctx.kind].arm
+        }
+        standing = self.session.store.campaigns.standing_rounds(self.session.hop, moment=None)
+        return [
+            (arms[arm], sid) for arm, sid in standing.reads.get(bound_round(), ()) if arm in arms
+        ]
+
+    def owed(self, i: int) -> int:
+        """The calls decisions sent walk *i* that it has not read."""
+        return sum(j == i for j, _ in self.sent)
 
     def out(self) -> int:
         # A catch-up and a cancelled call still draining count too, or `max_cells_in_flight` understates peak RSS.
-        cells = sum(len(walk.running) for walk in self.live())
+        cells = sum(len(walk.running) for walk in self.racing().values())
         catching = len(self.backfills.backfills_in_flight()) if self.backfills is not None else 0
         return cells + len(self.draining) + catching
 
     def outstanding(self) -> set[asyncio.Future[Any]]:
         calls = {call for call in self.draining if not call.done()}
-        for walking in self.live():
+        for walking in self.racing().values():
             calls.update(walking.running.values())
         if self.backfills is not None:
             calls.update(self.backfills.backfills_in_flight())
         return calls
 
-    def open_block(self) -> None:
-        """Each live walk's next stretch: the order its race takes its untaken pool in, and the
-        row its block closes at; under ``rolling``, the calls the decision sends join those out."""
-        racing = self.racing()
-        if self.blocks is None or not racing:
+    def decide(self) -> None:
+        """The race's one call: the walks it cuts and those done are decided, and the calls it
+        sends each survivor join the calls out."""
+        keys = self.keys
+        if not (racing := self.deciding()):
             return
-        chosen = self.blocks.choose_rows(
-            {self.keys[i]: walk.results for i, walk in racing.items()},
-            {self.keys[i]: walk.untaken() for i, walk in racing.items()},
+        view = View(
+            {keys[i]: walk.view(self.owed(i)) for i, walk in racing.items()},
+            opening=not self.opened,
+        )
+        decision = (
+            next_block(view, {}, sys.maxsize) if self.race is None else self.race.decide(view)
         )
         for i, walk in racing.items():
-            stretch, head, owed = chosen[self.keys[i]], len(walk.results), walk.owed
-            assert [s.id for s in stretch.rows[:owed]] == [
-                s.id for s in walk.dataset[head : head + owed]
-            ], "a decision moved a call already out"
-            walk.reorder(stretch.rows)
-            walk.enter_block(head + stretch.calls)
-            if self.rolling is not None:
-                self.sent += [(i, s.id) for s in walk.dataset[head + owed : head + walk.owed]]
-                # No block re-files it: a decision that moved its rows does.
-                if i in self.announced:
-                    self.announce(i)
-        assert any(not walk.waits for walk in racing.values()), "a block handed out no call"
+            if (signal := decision.stops.get(keys[i])) is not None:
+                verdict = QueryLoopResult(
+                    walk.results, ended_on=WalkEnd.STOP_RULE, stop_signal=signal
+                )
+            elif len(walk.results) == walk.budget:
+                verdict = QueryLoopResult(walk.results)
+            else:
+                continue
+            self.draining.update(walk.end(verdict, cancel=self.cancels))
+            self.conclude(i)
+        if self.opened:
+            self.block += 1
+        self.opened = True
+        for i, walk in self.deciding().items():
+            head, owed = len(walk.results), self.owed(i)
+            if (order := decision.order.get(keys[i])) is not None:
+                assert [s.id for s in order[:owed]] == [
+                    s.id for s in walk.order[head : head + owed]
+                ], "a decision moved a call already out"
+                walk.rank(order)
+            sends = decision.sends.get(keys[i], ())
+            assert [s.id for s in sends] == [
+                s.id for s in walk.order[head + owed : head + owed + len(sends)]
+            ], "a decision sends a walk's rows in the order it takes them"
+            self.sent += [(i, s.id) for s in sends]
+            if i in self.handed:
+                self.hand(i)
+        assert self.sent or not self.deciding(), "a decision sent no call while a walk races"
 
-    def announce(self, i: int) -> None:
-        self.announced.add(i)
+    def deciding(self) -> dict[int, Walk]:
+        """The walks its race decides: racing, a row to take."""
+        return {i: walk for i, walk in self.racing().items() if i not in self.unwalked}
+
+    def hand(self, i: int) -> None:
+        """The turn callback, wherever what it files moved: at a walk's first seat, then at each
+        decision that moves its rows or, closing a block, the field racing."""
+        walk = self.walks[i]
+        turn = Turn(
+            None if walk is None else walk.order[: walk.budget],
+            self.block if self.race is not None and not self.trigger.each_read else None,
+            len(self.racing()),
+        )
+        if (held := self.handed.get(i)) is not None and not turn.moved(held):
+            return
+        self.handed[i] = turn
         if self.on_turn is not None:
-            # A `rolling` round has no block every survivor closes together.
-            block = None if self.blocks is None or self.rolling is not None else self.block
-            self.on_turn(self.keys[i], block)
+            self.on_turn(self.keys[i], turn)
 
     def conclude(self, i: int) -> None:
         self.decided.add(i)
         if self.on_decided is not None:
-            self.on_decided(self.keys[i])
+            walk = self.walks[i]
+            self.on_decided(self.keys[i], None if walk is None else walk.order[: walk.budget])
 
     def first_turn(self) -> bool:
-        self.open_block()
-        if self.rolling is None:
-            return self.advance()
-        for i, walk in enumerate(self.walks):
-            if walk is None or not walk.n:
-                self.announce(i)
-                if walk is not None:
-                    walk.end(QueryLoopResult([]), cancel=self.cancels)
-                self.conclude(i)
-        return self.advance()
+        self.unwalked = [i for i, w in enumerate(self.walks) if w is None or not w.budget]
+        if self.trigger.each_read:
+            self.pass_unwalked(len(self.walks))
+        self.decide()
+        return self.next_turn()
 
-    def roll(self) -> bool:
-        """``rolling``: the turn passes to the walk whose row is read next, the first call out in
-        the order sent; a decision runs first wherever no call is out."""
+    def pass_unwalked(self, before: int) -> None:
+        """A walk with no row is decided as the turn passes its place: where decisions close
+        blocks, in walk order through the first; else before any call is sent."""
+        while self.unwalked and self.unwalked[0] < before:
+            i = self.unwalked.pop(0)
+            self.hand(i)
+            if (walk := self.walks[i]) is not None:
+                walk.end(QueryLoopResult([]), cancel=self.cancels)
+            self.conclude(i)
+
+    def next_turn(self) -> bool:
+        """The turn passes to the walk whose call is read next, the first call out in the order
+        sent; the race decides wherever no call is out."""
         while True:
             racing = self.racing()
             self.sent = [call for call in self.sent if call[0] in racing]
             if self.sent:
                 break
-            if not racing:
+            self.pass_unwalked(len(self.walks))
+            if not self.racing():
                 return False
-            self.close_block()
+            self.decide()
+        self.pass_unwalked(self.sent[0][0])
         self.seat(self.sent[0][0])
         return True
 
     def seat(self, i: int) -> None:
         self.turn = i
-        if i not in self.announced:
-            self.announce(i)
+        if i not in self.handed:
+            self.hand(i)
         walk = self.walks[i]
         assert walk is not None
         walk.release()
@@ -893,13 +919,13 @@ class _ScoringPhase[K: Hashable]:
         walk = self.walks[i]
         assert walk is not None
         head = len(walk.results)
-        if walk.dataset[head].id != sid:
-            rows = walk.dataset[head:]
-            walk.reorder([s for s in rows if s.id == sid] + [s for s in rows if s.id != sid])
+        if walk.order[head].id != sid:
+            rows = walk.order[head:]
+            walk.rank([s for s in rows if s.id == sid] + [s for s in rows if s.id != sid])
         self.seat(i)
 
     def read(self, i: int, sample: Sample) -> None:
-        """A rolling turn's row is read: it leaves the calls out."""
+        """A turn's row is read: it leaves the calls out."""
         call = (i, sample.id)
         self.sent.remove(call)
         if call in self.returned:
@@ -907,55 +933,12 @@ class _ScoringPhase[K: Hashable]:
         if self.replaying and self.replaying[0] == call:
             self.replaying.pop(0)
 
-    def advance(self) -> bool:
-        if self.rolling is not None:
-            return self.roll()
-        while True:
-            self.turn += 1
-            if self.turn >= len(self.walks):
-                if self.blocks is None or not self.close_block():
-                    return False
-                self.turn = 0
-            walk = self.walks[self.turn]
-            # A block race turns every live walk handed a call once per block; a decided one had
-            # its last turn.
-            if (walk is None and self.block > 0) or (
-                walk is not None and (walk.outcome is not None or walk.waits)
-            ):
-                continue
-            self.announce(self.turn)
-            if walk is not None:
-                walk.release()
-                if walk.n:
-                    return True
-                walk.end(QueryLoopResult([]), cancel=self.cancels)
-            self.conclude(self.turn)
-
-    def close_block(self) -> bool:
-        assert self.blocks is not None
-        racing = self.racing()
-        stops = (
-            self.blocks.close({self.keys[i]: walk.results for i, walk in racing.items()})
-            if racing
-            else {}
-        )
-        for i, walk in racing.items():
-            if (signal := stops.get(self.keys[i])) is not None:
-                verdict = QueryLoopResult(
-                    walk.results, ended_on=WalkEnd.STOP_RULE, stop_signal=signal
-                )
-            elif len(walk.results) == walk.n:
-                verdict = QueryLoopResult(walk.results)
-            else:
-                continue
-            self.draining.update(walk.end(verdict, cancel=self.cancels))
-            self.conclude(i)
-        self.block += 1
-        self.open_block()
-        return bool(self.live())
-
     async def step(self) -> bool:
-        if self.rolling == "arrival" and (held := self.walks[self.turn]) and held.settling is None:
+        if (
+            self.trigger.reads == "arrival"
+            and (held := self.walks[self.turn])
+            and held.settling is None
+        ):
             self.arrive()
         walk = self.walks[self.turn]
         assert walk is not None
@@ -963,7 +946,7 @@ class _ScoringPhase[K: Hashable]:
             self.gauge.touch()
         armed = _armed(self.session, walk.ctx.kind)
         if walk.skip_at is not None and len(walk.results) >= walk.skip_at:
-            return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
+            return self.ends(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         now = self.turn_state(walk)
         if now.stopping and (now.cut or not now.keeping):
             return self.honour_stop(walk, now)
@@ -1014,18 +997,17 @@ class _ScoringPhase[K: Hashable]:
             if session.state.control.spend_skip():
                 # Stamped where a searchpoint is actually cut, never at the press.
                 session.act(ArmAct.SKIP)
-            return self.decide(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
+            return self.ends(walk, QueryLoopResult(walk.results, ended_on=WalkEnd.SKIP))
         if now.pause or now.tripped is None:
             raise KeyboardInterrupt("graceful")
         raise now.tripped
 
     def take_head(self, walk: Walk, head: asyncio.Task[_Acquired]) -> bool:
         backfills = self.backfills
-        sample = walk.dataset[len(walk.results)]
-        if self.rolling is not None:
-            self.read(self.turn, sample)
+        sample = walk.order[len(walk.results)]
+        self.read(self.turn, sample)
         if (verdict := walk.take(head)) is not None:
-            return self.decide(walk, verdict)
+            return self.ends(walk, verdict)
         if backfills is not None and (
             backfills.owed_backfills(sample) or backfills.backfills_for(sample)
         ):
@@ -1033,21 +1015,20 @@ class _ScoringPhase[K: Hashable]:
             return True
         return self.judged(walk)
 
-    def decide(self, walk: Walk, verdict: QueryLoopResult) -> bool:
+    def ends(self, walk: Walk, verdict: QueryLoopResult) -> bool:
         self.draining.update(walk.end(verdict, cancel=self.cancels))
         self.conclude(self.turn)
-        return self.advance()
+        return self.next_turn()
 
     def judged(self, walk: Walk) -> bool:
         if (verdict := walk.judge()) is not None:
-            return self.decide(walk, verdict)
-        if self.rolling is not None:
-            # A decision whose block is the one row returned: the close, the cut, the next calls.
-            self.close_block()
-            return self.roll()
-        if walk.boundary is not None and len(walk.results) == walk.boundary:
-            return self.advance()
-        return True
+            return self.ends(walk, verdict)
+        if self.race is None and len(walk.results) == walk.budget:
+            # No race decides it: it is done at its last row.
+            return self.ends(walk, QueryLoopResult(walk.results))
+        if self.trigger.each_read:
+            self.decide()
+        return self.next_turn()
 
     def held(self, walk: Walk) -> int:
         """A walk's own calls out: its cells, and the catch-ups started on its cells not yet settled."""
@@ -1078,7 +1059,7 @@ class _ScoringPhase[K: Hashable]:
         if self.backfills is not None:
             room = min(self.room(walk, armed, self.ceiling), self.affordable())
             owing = [walk.settling] if walk.settling is not None else []
-            owing += [walk.dataset[idx] for idx in sorted(walk.finished)]
+            owing += [sample for sample in walk.order if sample.id in walk.finished]
             for sample in owing:
                 room -= len(self.backfills.start_backfill(sample, room))
         for ahead in self.abreast(armed):
@@ -1086,21 +1067,22 @@ class _ScoringPhase[K: Hashable]:
             self.fill(ahead, armed, self.ceiling if ahead is walk else self.ceiling - 1)
 
     def fill(self, walk: Walk, armed: LookaheadWindow, ceiling: int) -> None:
-        """Up to the press, past a pending block close too, on the rows its last open chose."""
+        """Up to the press, on the rows its race's last decision ordered: its decided calls, then
+        past them as far as the trigger lets the press."""
         backfills = self.backfills
-        if not (unsent := walk.unsent(armed.cells)):
+        i = next(i for i, w in enumerate(self.walks) if w is walk)
+        decided = self.owed(i)
+        if not (unsent := walk.unsent(armed.cells, decided, self.trigger)):
             return
         room = min(
             self.room(walk, armed, ceiling),
             max(self.affordable(), walk.rereads_ahead(unsent[0])),
         )
-        i = next(i for i, w in enumerate(self.walks) if w is walk)
-        for _ in walk.sendable(armed.cells, room):
+        for idx in walk.sendable(armed.cells, decided, self.trigger, room):
             if room <= 0:
                 break
-            sample, cell = walk.launch(armed)
-            if self.rolling == "arrival":
-                cell.add_done_callback(partial(_returned, self.returned, (i, sample.id)))
+            sample, cell = walk.launch(idx, armed)
+            cell.add_done_callback(partial(_returned, self.returned, (i, sample.id)))
             room -= 1
             if backfills is not None:
                 room -= len(backfills.start_backfill(sample, min(room, self.affordable())))
@@ -1125,7 +1107,7 @@ class _ScoringPhase[K: Hashable]:
                 book.refuse_unless_room((cell, cell), self.label.kind, NEXT_CELL, self.payer)
             raise RuntimeError(
                 f"scoring phase stalled: nothing out and nothing to take at query "
-                f"{len(walk.results)}/{walk.n}"
+                f"{len(walk.results)}/{walk.budget}"
             )
         watched = set[asyncio.Future[Any]](calls)
         polls: list[asyncio.Future[None]] = []
@@ -1139,18 +1121,18 @@ class _ScoringPhase[K: Hashable]:
         finally:
             for poll in polls:
                 poll.cancel()
-        for walking in self.live():
+        for walking in self.racing().values():
             walking.collect()
         self.draining.difference_update([call for call in self.draining if call.done()])
 
     async def land(self) -> None:
-        for walking in self.live():
+        for walking in self.racing().values():
             walking.drop_claim_waits()
         if calls := self.outstanding():
             if self.gauge is not None:
                 self.gauge.touch()
             await asyncio.wait(calls)
-        for walking in self.live():
+        for walking in self.racing().values():
             walking.collect()
         self.draining.clear()
 
@@ -1183,9 +1165,9 @@ class _ScoringPhase[K: Hashable]:
         )
 
     def bank(self) -> None:
-        for walk in self.live():
+        for i, walk in self.racing().items():
             try:
-                sure = walk.bank()
+                sure = walk.bank(self.trigger.sure(len(walk.results), self.owed(i)))
                 if self.backfills is not None:
                     self.caught_up(
                         walk,
@@ -1207,8 +1189,8 @@ class _ScoringPhase[K: Hashable]:
         for i, walk in enumerate(self.walks):
             if i in self.decided:
                 continue
-            if i not in self.announced:
-                self.announce(i)
+            if i not in self.handed:
+                self.hand(i)
             if walk is not None:
                 # The cell the ceiling refused was taken as a row before it stopped the phase.
                 kept = [
@@ -1220,7 +1202,7 @@ class _ScoringPhase[K: Hashable]:
             self.conclude(i)
 
     def discard(self) -> None:
-        for walk in self.live():
+        for walk in self.racing().values():
             walk.end(None, cancel=True)
         if self.backfills is not None:
             self.backfills.discard_backfills()
@@ -1229,15 +1211,19 @@ class _ScoringPhase[K: Hashable]:
 
     def reading(self) -> Flight:
         backfills, book, cell = self.backfills, self.book, self.cell
-        walking = self.live()
-        parts = [walk.flight(_armed(self.session, walk.ctx.kind).cells) for walk in walking]
+        racing = self.racing()
+        walking = list(racing.values())
+        parts = [
+            walk.flight(_armed(self.session, walk.ctx.kind).cells, self.owed(i), self.trigger)
+            for i, walk in racing.items()
+        ]
         winding = sum(1 for call in self.draining if not call.done())
         out_now = sum(p.out for p in parts) + winding
         allowed = sum(p.allowed for p in parts) + winding
         most = sum(p.most for p in parts) + winding
         if backfills is not None:
             catching = len(backfills.backfills_in_flight())
-            samples = {s.id: s for walk in walking for s in walk.dataset[: walk.n]}
+            samples = {s.id: s for walk in walking for s in walk.order[: walk.budget]}
             launched = {s.id for walk in walking for s in walk.sent()}
             owed = {sid: backfills.owed_backfills(s) for sid, s in samples.items()}
             out_now += catching
@@ -1245,11 +1231,12 @@ class _ScoringPhase[K: Hashable]:
             most += catching + sum(owed.values())
         waiting = None
         if 0 <= self.turn < len(self.walks) and (holder := self.walks[self.turn]) is not None:
-            head, settling = len(holder.results), holder.settling
-            held = settling or (holder.dataset[head] if head in holder.running else None)
+            rows, head = holder.order, len(holder.results)
+            reading = rows[head] if head < len(rows) and rows[head].id in holder.running else None
+            held = holder.settling or reading
             # A walk writing no sample record holds no cell a reader can name.
             if held is not None and (recorded := holder.ctx.recorded) is not None:
-                since = holder.launched_at[head if settling is None else head - 1]
+                since = holder.launched_at[held.id]
                 who = recorded.individual_id
                 waiting = FlightWaiting(individual_id=who, position=held.id, since=since)
         # The machine's calls out, every run's on it: what its ceiling bounds.

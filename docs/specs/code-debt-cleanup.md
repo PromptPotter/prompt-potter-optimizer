@@ -933,6 +933,17 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   asks no `_rebase_request` when it is off, so the proposal leaves no record. Root: the bit decides the
   schema the L2 is asked, so an off bit asks for no proposal. **Rides with:** ml-8. **Re-test:** with the bit
   off, the L2 reply schema holds no `fork_proposal`.
+- **`Race.open_turn` is a hook one race needs** (ml-7): potter's and gepa's are no-ops; capo's counts the
+  field racing for `n_priors` (`capo/members.py`), a fact the race's first `View` already holds, and it
+  writes the race's `_racing`, which `decide` then overwrites: two writers of one count. Root: `n_priors`
+  is derived off the first `View`; `open_turn` goes from `nodes.py` and the three races. **Rides with:**
+  ml-8. **Re-test:** `git grep -c open_turn -- promptpotter` is 0.
+- **A max-press resume replays on timing** (ml-7): at press max the offline run's `capo/resumed` and
+  `gepa/resumed` legs differ run to run on the base itself (capo-only rerun 3×: 3 of 3 moved), so
+  equals-main at max cannot pin them; at max a 1-SIGINT `new` can also finish before the signal lands
+  (`offline_run.py`'s capo signal leg exits 0, not 130). Root: a resume replays the reads the run filed,
+  whatever the press. **Rides with:** ml-8. **Re-test:** three runs at press max leave `capo/resumed`
+  and `gepa/resumed` UNMOVED against each other.
 - **Under `rolling`, the parent is handed calls no live rival's decision reads**: in
   the race's settle rule (`_settles`; potter's race module at ml-6, `application/scoring/` after ml-7)
   the parent "stands no bar", so it never settles, and `_hand_out` gives it

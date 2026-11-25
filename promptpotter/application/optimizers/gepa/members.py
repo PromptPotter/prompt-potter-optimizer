@@ -34,6 +34,7 @@ from promptpotter.application.optimizers.nodes import (
     Selection,
 )
 from promptpotter.application.optimizers.paper_templates import child, shown
+from promptpotter.application.scoring.race_protocol import Decision, View, next_block
 from promptpotter.application.scoring.row_diagnostics import cell_feedback
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Cut, Elimination, Measured
@@ -278,20 +279,17 @@ class _GateRace(nodes.Race):
     def n_priors(self) -> int:
         return 1
 
-    @property
-    def blocks(self) -> _GateRace:
-        return self
-
-    @property
-    def block_size(self) -> int:
-        return self._block_size
-
     def open_turn(self, _key: ArmKey) -> None:
         return None
 
-    def close(self, rows: Mapping[ArmKey, Sequence[GradedCell]]) -> dict[ArmKey, StopSignal]:
+    def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
+        stops = {} if view.opening else self._cut(view)
+        return next_block(view, stops, self._block_size)
+
+    def _cut(self, view: View[ArmKey]) -> dict[ArmKey, StopSignal]:
         stops: dict[ArmKey, StopSignal] = {}
-        for cid, arm_rows in rows.items():
+        for cid, walk in view.walks.items():
+            arm_rows = walk.taken
             if cid in self._tested:
                 continue
             self._tested.add(cid)

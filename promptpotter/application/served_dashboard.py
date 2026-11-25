@@ -99,14 +99,18 @@ class WarmingDashboard(StrictModel):
 
 
 class SampleWalk(StrictModel):
-    """The scoring walk of the arm being measured: the cells it took, in the order it took them,
-    plus a cursor, so a race that re-chooses its rows at a decision never moves a taken cell."""
+    """The scoring walk of the arm being measured, on its own order, plus a cursor. Its cells taken
+    lead, so a race that re-chooses its rows at a decision never moves a taken cell; past the
+    cursor is chosen, never promised — an eliminator can stop the arm before its tail."""
 
     ids: list[int] = Field(
-        description="The cells the arm has measured, in the order it took them, then the one in "
-        "flight."
+        description="The arm's rows through its budget as its last turn filed them: those it took, "
+        "in the order it took them, then its untaken in the order its race chose."
     )
-    cursor: int = Field(description="Where the walk stands in `ids`: its last cell.")
+    cursor: int = Field(
+        description="Where the walk stands in `ids`: the cell in flight, else the one after the "
+        "last taken."
+    )
     key: str = Field(description="Changes when the walk does — a new arm is a new axis.")
 
 
@@ -329,16 +333,17 @@ def _observed(state: LiveDashboardState, *, live: bool) -> ArmName | None:
 
 
 def _walk(state: LiveDashboardState, hop: CycleHop, *, live: bool) -> SampleWalk | None:
-    """``None`` where nothing is walking: `current_round` rows linger after a stop."""
-    current = state.current_round
-    if not live:
+    """The measuring arm's walk on its own order; ``None`` where no arm walks: `current_round`
+    rows linger after a stop."""
+    arm, current = state.measuring_arm, state.current_round
+    if not live or state.round_closed() or arm is None:
         return None
-    rows = [] if state.round_closed() else current.candidates
-    measured = [s.position for s in rows[-1].samples] if rows else []
+    if not (ids := state.walk_orders.get(arm.key)):
+        return None
+    taken = sum(len(c.samples) for c in current.candidates if c.reading.arm == arm)
     in_flight = state.current_position
-    key = f"{hop.cycle_id}:{current.round}:{len(rows) - 1 if rows else '-'}"
-    ids = measured if in_flight is None or measured[-1:] == [in_flight] else [*measured, in_flight]
-    return SampleWalk(ids=ids, cursor=len(ids) - 1, key=key) if ids else None
+    cursor = ids.index(in_flight) if in_flight in ids else min(taken, len(ids) - 1)
+    return SampleWalk(ids=ids, cursor=cursor, key=f"{hop.cycle_id}:{current.round}:{arm.key}")
 
 
 class ServedDashboard(DashboardFacts):

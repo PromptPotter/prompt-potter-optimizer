@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, fields
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import ConfigDict, JsonValue, PrivateAttr
 
@@ -57,33 +57,6 @@ class Sample(StrictModel):
         if "id" not in data and fallback_id is not None:
             data = {**data, "id": fallback_id}
         return cls(**data)
-
-
-# When a block race decides: once every call a block handed out is back, or on every returned row.
-Dispatch = Literal["batch", "rolling"]
-# The order a `rolling` decision reads returns in: the order they were sent, or as they come.
-ReadOrder = Literal["launch", "arrival"]
-
-
-@dataclass(frozen=True)
-class Untaken:
-    """A live walk's rows as its race decides on them (`query_loop.py::BlockRace.choose_rows`):
-    its untaken pool in its current order, how many of them its budget still takes, and how many
-    of the first it has out under ``rolling`` dispatch, which keep their seats."""
-
-    rows: Sequence[Sample]
-    left: int
-    owed: int = 0
-
-
-@dataclass(frozen=True)
-class Stretch:
-    """A live walk's next block in a race (`query_loop.py::BlockRace.choose_rows`): its untaken
-    pool in the order it takes them, and how many of them it answers before the block closes;
-    under ``rolling``, how many a decision has sent it, those it had out among them."""
-
-    rows: Sequence[Sample]
-    calls: int
 
 
 @dataclass(frozen=True, slots=True)

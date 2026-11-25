@@ -25,6 +25,7 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
+from promptpotter.application.scoring.race_protocol import BATCH, Decider, Trigger
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
@@ -49,7 +50,7 @@ from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.sample import ReadOrder, Sample, Stretch, Untaken
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
@@ -63,7 +64,6 @@ if TYPE_CHECKING:
     from promptpotter.application.config_map import CouplingSeverity
     from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.scoring.query_loop import BlockRace
 
 
 @dataclass(frozen=True)
@@ -524,9 +524,10 @@ class RaceSnapshot:
     paired_breakdown: dict[ArmKey, float]
 
 
-class Race(Protocol):
-    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``blocks`` stops every live walk at once.
-    A race whose arms all walk one panel keeps no prior, so it inherits ``priors``, ``admit`` and ``catch_up``."""
+class Race(Decider[ArmKey], Protocol):
+    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``decide`` (`race_protocol.py`)
+    cuts and sends to every live walk at once. A race whose arms all walk one panel keeps no
+    prior, so it inherits ``priors``, ``admit`` and ``catch_up``."""
 
     @property
     def n_priors(self) -> int: ...
@@ -537,10 +538,7 @@ class Race(Protocol):
         return {}
 
     @property
-    def blocks(self) -> BlockRace[ArmKey]: ...
-
-    @property
-    def top_up(self) -> BlockRace[ArmKey] | None:
+    def top_up(self) -> Decider[ArmKey] | None:
         """The race walked on over the origin panel's top-up; ``None`` where it ends with the draw."""
         return None
 
@@ -559,18 +557,9 @@ class Race(Protocol):
         return None
 
     @property
-    def rolling(self) -> ReadOrder | None:
-        """``batch``: a race decides once every call a block handed out is back."""
-        return None
-
-    def choose_rows(
-        self,
-        _taken: Mapping[ArmKey, Sequence[GradedCell]],
-        ahead: Mapping[ArmKey, Untaken],
-    ) -> Mapping[ArmKey, Stretch]:
-        """Each walk its sampler's draw, in the sampler's order, a block's rows apiece: the race
-        chooses no row."""
-        return {key: Stretch(pool.rows, self.blocks.block_size) for key, pool in ahead.items()}
+    def trigger(self) -> Trigger:
+        """``batch``: a race decides once no call it sent is out."""
+        return BATCH
 
     @property
     def rows_ran(self) -> RowsRan:

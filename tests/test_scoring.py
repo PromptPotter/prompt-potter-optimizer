@@ -234,6 +234,7 @@ from promptpotter.application.scoring.paired import (
     read_pair,
 )
 from promptpotter.application.scoring.passes import verify_member, verify_reading
+from promptpotter.application.scoring.race_protocol import View, WalkView
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
@@ -3840,7 +3841,8 @@ def test_gepas_gate_tests_each_arm_against_the_minibatch_scores_of_its_own_paren
     )
     assert race.priors == {}, "the gate paired a prior, so the bench would catch it up"
     level = [measurement(i, 1.0, objective=0.5) for i in range(2)]
-    stops = race.close({weak_child: level, strong_child: level})
+    walk = WalkView(level, minibatch, 0, len(level))
+    stops = race.decide(View(dict.fromkeys((weak_child, strong_child), walk), False)).stops
     assert (
         list(stops) == [strong_child] and stops[strong_child].check_result["parent_id"] == "p2"
     ), "one arm's parent bar decided another arm's gate"

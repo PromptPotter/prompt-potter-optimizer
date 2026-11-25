@@ -138,6 +138,15 @@ from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.judges import call as judge_call
 from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.application.scoring.passes import grade_line_bench
+from promptpotter.application.scoring.race_protocol import (
+    BATCH,
+    Decider,
+    Decision,
+    ReadOrder,
+    Trigger,
+    View,
+    next_block,
+)
 from promptpotter.application.scoring.sample_measurement import (
     cell_billing,
     emit_replayed_step_tokens,
@@ -249,7 +258,7 @@ from promptpotter.domain.records.run_records import (
     TokenUsageRecord,
 )
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.sample import Bank, ReadOrder, Sample, Stretch, Untaken
+from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, PipelineData, Scorer
 from promptpotter.domain.search_point import JobSearchPoint, NodeConfig
 from promptpotter.domain.spend import (
@@ -888,7 +897,7 @@ async def _walk(
     stall: int | None = None,
     skip_at: int | None = None,
     cap_usd: float | None = None,
-    blocks: query_loop.BlockRace[str] | None = None,
+    race: Decider[str] | None = None,
     budget: int | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset))
@@ -974,7 +983,7 @@ async def _walk(
                 session,
                 keep_cut=False,
                 backfills=priors if parent_lacks_cells else None,
-                blocks=blocks,
+                race=race,
             )
         )
     depths = [
@@ -1013,16 +1022,21 @@ async def _round(
     pause_after_call: int | None = None,
     kind: MeasurementRole = MeasurementRole.PANEL,
     ceiling: int = 1,
-    blocks: query_loop.BlockRace[int] | None = None,
+    race: Decider[int] | None = None,
     points: Sequence[JobSearchPoint] | None = None,
-    reads: Sequence[tuple[int, int]] = (),
+    hop: CycleHop | None = None,
     calls_out: dict[int, int] | None = None,
 ) -> dict[str, Any]:
     """*points*: each walk's individual, so a second round on them replays what the first filed;
-    *calls_out*: each walk's calls out now, kept as they move."""
+    *calls_out*: each walk's calls out now, kept as they move; *hop*: the cycle it walks,
+    entered and its arms announced on the store's ledger, so a second round there resumes the first."""
     backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
     flag = {"pause": False}
-    ledger = laid_ledger(stores.projects_root / "rounds" / uuid.uuid4().hex)
+    ledger = (
+        laid_ledger(stores.projects_root / "rounds" / uuid.uuid4().hex)
+        if hop is None
+        else CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    )
 
     def absorbed() -> list[tuple[int, int]]:
         return [
@@ -1059,6 +1073,7 @@ async def _round(
         scorer=_HIT,
         control=_control_pausing(lambda: flag["pause"], lookahead=armed),
         client=backend_client(stores.jobs_dir, max_cells_in_flight=ceiling, holds_own_sends=True),
+        hop=hop,
     )
     walks = [
         open_walk(
@@ -1071,11 +1086,15 @@ async def _round(
         )
         for w, cut in enumerate(cuts)
     ]
+    if hop is not None:
+        ledger.append(RoundEnteredRecord(round=1))
+        for w in range(len(cuts)):
+            position = ArmPosition(round=1, idx=w, total=len(cuts))
+            state = arm_state(f"c{w}", position=position)
+            ledger.append(ArmRecord(round=1, arm=ArmKey(f"c{w}"), state=state))
     with scoped(ledger=ledger), mock.patch.object(query_loop, "measure_sample", _measure):
         stopped = await _stopped_by_operator(
-            query_loop.run_walks(
-                dict(enumerate(walks)), session, keep_cut=False, blocks=blocks, reads=reads
-            )
+            query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False, race=race)
         )
     return {
         "rows": [
@@ -1366,18 +1385,14 @@ class _ReversingRace:
     """Cuts no walk; at every block's open it reverses what each walk has left, so a cell a press
     sent ahead on the last open's order lands on a row this open moved."""
 
-    block_size = 1
-    rolling = None
+    trigger = BATCH
 
-    def close(self, _rows: Mapping[Any, Sequence[GradedCell]]) -> dict[Any, StopSignal]:
-        return {}
-
-    def choose_rows(
-        self, _taken: Mapping[Any, Sequence[GradedCell]], ahead: Mapping[Any, Untaken]
-    ) -> dict[Any, Stretch]:
-        return {
-            key: Stretch(list(reversed(pool.rows)), self.block_size) for key, pool in ahead.items()
-        }
+    def decide(self, view: View[Any]) -> Decision[Any]:
+        order = {key: list(reversed(walk.untaken)) for key, walk in view.walks.items()}
+        return Decision(
+            sends={key: order[key][: min(1, walk.left)] for key, walk in view.walks.items()},
+            order=order,
+        )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -1387,7 +1402,7 @@ async def test_a_race_orders_each_blocks_rows_and_a_press_moves_the_bill_never_t
 ) -> None:
     dataset = _dataset()
     serial = await _round(
-        built_stores, dataset, cuts=[None, None], ceiling=8, blocks=_ReversingRace()
+        built_stores, dataset, cuts=[None, None], ceiling=8, race=_ReversingRace()
     )
     chosen = [8, 1, 7, 2, 6, 3, 5, 4]
     slot = {s.key: s.id for s in dataset}
@@ -1400,7 +1415,7 @@ async def test_a_race_orders_each_blocks_rows_and_a_press_moves_the_bill_never_t
             armed=press,
             cuts=[None, None],
             ceiling=8,
-            blocks=_ReversingRace(),
+            race=_ReversingRace(),
         )
         sent = [[sid for who, sid, _ in pressed["asked"] if who == w] for w in (0, 1)]
         assert sent != taken, (
@@ -1426,7 +1441,7 @@ async def test_a_cell_out_past_a_close_moves_with_its_row_and_is_never_bought_or
 
     async def raced(**walk: Any) -> dict[str, Any]:
         return await _walk(
-            built_stores, dataset, cut_at=None, blocks=_ReversingRace(), budget=4, **walk
+            built_stores, dataset, cut_at=None, race=_ReversingRace(), budget=4, **walk
         )
 
     serial = await raced(armed=1)
@@ -1475,7 +1490,7 @@ async def test_the_dashboard_counts_the_cells_a_reorder_left_untaken_as_the_ledg
     with scoped(ledger=ledger), mock.patch.object(query_loop, "measure_sample", _measure):
         for w, state in arms.items():
             ledger.append(ArmRecord(round=1, arm=ArmKey(f"c{w}"), state=state))
-        await query_loop.run_walks(walks, session, keep_cut=False, blocks=_ReversingRace())
+        await query_loop.run_walks(walks, session, keep_cut=False, race=_ReversingRace())
         for w, state in arms.items():
             ledger.append(ArmRecord(round=1, arm=ArmKey(f"c{w}"), state=state))
     records = ledger_records(ledger)
@@ -1501,22 +1516,21 @@ class _PerRoundRace:
     """`per_round`'s shape: walk 1 takes its pool last slot first, so the two answer different rows, and
     each open hands the block's two calls to the walk that has taken fewer, the other none."""
 
-    block_size = 1
-    rolling = None
+    trigger = BATCH
 
-    def close(self, _rows: Mapping[int, Sequence[GradedCell]]) -> dict[int, StopSignal]:
-        return {}
-
-    def choose_rows(
-        self, taken: Mapping[int, Sequence[GradedCell]], ahead: Mapping[int, Untaken]
-    ) -> dict[int, Stretch]:
-        behind = min(taken, key=lambda key: (len(taken[key]), key))
-        return {
-            key: Stretch(
-                sorted(pool.rows, key=lambda s: -s.id) if key else pool.rows, 2 * (key == behind)
-            )
-            for key, pool in ahead.items()
+    def decide(self, view: View[int]) -> Decision[int]:
+        live = view.walks
+        behind = min(live, key=lambda key: (len(live[key].taken), key))
+        order = {
+            key: sorted(walk.untaken, key=lambda s: -s.id) if key else list(walk.untaken)
+            for key, walk in live.items()
         }
+        return Decision(
+            sends={
+                key: order[key][: min(2 * (key == behind), walk.left)] for key, walk in live.items()
+            },
+            order=order,
+        )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -1525,9 +1539,7 @@ async def test_a_per_round_block_hands_each_walk_its_own_rows_and_closes_on_the_
     built_stores: Stores,
 ) -> None:
     dataset = _dataset()
-    serial = await _round(
-        built_stores, dataset, cuts=[None, None], ceiling=8, blocks=_PerRoundRace()
-    )
+    serial = await _round(built_stores, dataset, cuts=[None, None], ceiling=8, race=_PerRoundRace())
     order = [w for w, _ in serial["absorbed"]]
     assert order == [0, 0, 1, 1] * 4, (
         f"a walk handed no call took a row, or a block closed before its calls were back: {order}"
@@ -1543,9 +1555,7 @@ async def test_a_press_under_per_round_moves_the_bill_never_the_record(
     built_stores: Stores,
 ) -> None:
     dataset = _dataset()
-    serial = await _round(
-        built_stores, dataset, cuts=[None, None], ceiling=8, blocks=_PerRoundRace()
-    )
+    serial = await _round(built_stores, dataset, cuts=[None, None], ceiling=8, race=_PerRoundRace())
     for press in (LookaheadPress(cells=2), LookaheadPress(cells=3, abreast="all"), MAX_SPEED):
         pressed = await _round(
             built_stores,
@@ -1553,7 +1563,7 @@ async def test_a_press_under_per_round_moves_the_bill_never_the_record(
             armed=press,
             cuts=[None, None],
             ceiling=8,
-            blocks=_PerRoundRace(),
+            race=_PerRoundRace(),
         )
         assert sorted(pressed["calls"]) == sorted(serial["calls"]), f"{press} bought a row twice"
         assert (pressed["rows"], pressed["stops"], pressed["absorbed"]) == (
@@ -1564,19 +1574,21 @@ async def test_a_press_under_per_round_moves_the_bill_never_the_record(
 
 
 class _ChoosingRace(_PerRoundRace):
-    """`_PerRoundRace`, filing each open's choice: every walk's rows taken, then its stretch."""
+    """`_PerRoundRace`, filing each decision: every walk's rows taken, its order, then its sends."""
 
     def __init__(self) -> None:
         self.chose: list[dict[int, tuple[list[str], list[int], int]]] = []
 
-    def choose_rows(
-        self, taken: Mapping[int, Sequence[GradedCell]], ahead: Mapping[int, Untaken]
-    ) -> dict[int, Stretch]:
-        chosen = super().choose_rows(taken, ahead)
+    def decide(self, view: View[int]) -> Decision[int]:
+        chosen = super().decide(view)
         self.chose.append(
             {
-                key: ([c.key for c in taken[key]], [s.id for s in got.rows], got.calls)
-                for key, got in chosen.items()
+                key: (
+                    [c.key for c in walk.taken],
+                    [s.id for s in chosen.order[key]],
+                    len(chosen.sends[key]),
+                )
+                for key, walk in view.walks.items()
             }
         )
         return chosen
@@ -1601,7 +1613,7 @@ async def test_a_pause_and_resume_mid_round_under_per_round_rechooses_the_pairs_
     press = LookaheadPress(cells=2, abreast="all")
     straight = _ChoosingRace()
     whole = await _round(
-        built_stores, dataset, armed=press, cuts=[None, None], ceiling=8, blocks=straight
+        built_stores, dataset, armed=press, cuts=[None, None], ceiling=8, race=straight
     )
     points = [
         JobSearchPoint(pipeline_params=PipelineParams().with_nodes({"search": {"walk": f"w{w}"}}))
@@ -1613,7 +1625,7 @@ async def test_a_pause_and_resume_mid_round_under_per_round_rechooses_the_pairs_
         armed=press,
         cuts=[None, None],
         ceiling=8,
-        blocks=_ChoosingRace(),
+        race=_ChoosingRace(),
         points=points,
         pause_after_call=5,
     )
@@ -1625,7 +1637,7 @@ async def test_a_pause_and_resume_mid_round_under_per_round_rechooses_the_pairs_
         armed=press,
         cuts=[None, None],
         ceiling=8,
-        blocks=resumed_race,
+        race=resumed_race,
         points=points,
     )
     assert resumed_race.chose == straight.chose, "the resume chose other pairs than the round did"
@@ -1652,32 +1664,32 @@ class _RollingRace:
     its sampler order (its budget capping them), cutting a walk once it took `cut_at` rows; each
     close files the rows each walk had read, and the cut walk's calls still out as it landed."""
 
-    block_size = 1
-
     def __init__(
-        self, rolling: ReadOrder, cut_at: Mapping[int, int], sends: int, out: dict[int, int]
+        self, reads: ReadOrder, cut_at: Mapping[int, int], sends: int, out: dict[int, int]
     ) -> None:
-        self.rolling, self.cut_at, self.sends, self.out = rolling, cut_at, sends, out
+        self.trigger = Trigger(each_read=True, reads=reads)
+        self.cut_at, self.sends, self.out = cut_at, sends, out
         self.closes: list[dict[int, int]] = []
         self.out_at_cut: dict[int, int] = {}
 
-    def close(self, rows: Mapping[int, Sequence[GradedCell]]) -> dict[int, StopSignal]:
-        self.closes.append({key: len(taken) for key, taken in rows.items()})
-        stops = {
-            key: StopSignal("cut_at", "eliminated", {"queries_scored": len(taken)})
-            for key, taken in rows.items()
-            if key in self.cut_at and len(taken) >= self.cut_at[key]
-        }
-        self.out_at_cut |= {key: self.out.get(key, 0) for key in stops}
-        return stops
-
-    def choose_rows(
-        self, _taken: Mapping[int, Sequence[GradedCell]], ahead: Mapping[int, Untaken]
-    ) -> dict[int, Stretch]:
-        return {
-            key: Stretch(pool.rows, max(pool.owed, min(self.sends, pool.left)))
-            for key, pool in ahead.items()
-        }
+    def decide(self, view: View[int]) -> Decision[int]:
+        stops: dict[int, StopSignal] = {}
+        if not view.opening:
+            self.closes.append({key: len(walk.taken) for key, walk in view.walks.items()})
+            stops = {
+                key: StopSignal("cut_at", "eliminated", {"queries_scored": len(walk.taken)})
+                for key, walk in view.walks.items()
+                if key in self.cut_at and len(walk.taken) >= self.cut_at[key]
+            }
+            self.out_at_cut |= {key: self.out.get(key, 0) for key in stops}
+        return Decision(
+            stops,
+            {
+                key: walk.untaken[walk.out : max(walk.out, min(self.sends, walk.left))]
+                for key, walk in view.walks.items()
+                if key not in stops
+            },
+        )
 
 
 async def _rolled(
@@ -1692,7 +1704,7 @@ async def _rolled(
     out: dict[int, int] = {}
     race = _RollingRace(rolling, cut_at, sends, out)
     rolled = await _round(
-        stores, dataset, cuts=[None, None], ceiling=8, blocks=race, calls_out=out, **walk
+        stores, dataset, cuts=[None, None], ceiling=8, race=race, calls_out=out, **walk
     )
     return race, rolled
 
@@ -1774,7 +1786,14 @@ async def test_a_rolling_arrival_race_reads_as_calls_return_and_a_resume_replays
         built_stores, dataset, "launch", sends=4, cut_at={0: 3}, armed=press
     )
     # The later a row, the faster its call: as they come is not as they were sent.
-    _, came = await _rolled(built_stores, dataset, "arrival", sends=4, cut_at={0: 3}, armed=press)
+    hop = CycleHop(campaign_id="arrival", cycle_id="cycle_arrival0000")
+    built_stores.campaigns.create_campaign(minted_campaign(hop))
+    built_stores.campaigns.mint_cycle(hop)
+    minted = _kinds(CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(hop))).path)
+    _, came = await _rolled(
+        built_stores, dataset, "arrival", sends=4, cut_at={0: 3}, armed=press, hop=hop
+    )
+    filed = _kinds(came["ledger"]) - minted
     assert came["absorbed"] != launched["absorbed"], "the calls came back as sent: vacuous"
     assert came["absorbed"][0] == (0, 4), (
         f"the first read was {came['absorbed'][0]}, not walk 0's fastest"
@@ -1788,14 +1807,16 @@ async def test_a_rolling_arrival_race_reads_as_calls_return_and_a_resume_replays
         cut_at={0: 3},
         armed=press,
         slowest_last=True,
-        reads=came["absorbed"],
+        hop=hop,
     )
-    assert (replayed["rows"], replayed["stops"], replayed["absorbed"]) == (
+    # The replay's own reads, past the round it resumes on the one ledger.
+    reread = replayed["absorbed"][len(came["absorbed"]) :]
+    assert (replayed["rows"], replayed["stops"], reread) == (
         came["rows"],
         came["stops"],
         came["absorbed"],
     ), "a resume read the rows in a new order"
-    assert _kinds(replayed["ledger"]) == _kinds(came["ledger"]), "the replay filed a new record"
+    assert _kinds(replayed["ledger"]) - minted - filed == filed, "the replay filed a new record"
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -1812,7 +1833,7 @@ async def test_a_walk_resolves_no_archive_row_past_the_draw_it_takes(
         armed=1,
         cut_at=None,
         resumes=bought["sp"],
-        blocks=_CuttingRace({}),
+        race=_CuttingRace({}),
         budget=4,
     )
     draw = {s.id for s in dataset[:4]}
@@ -1833,9 +1854,9 @@ async def test_the_gauge_allows_what_fill_sends_under_a_block_race(built_stores:
     )
     walk = open_walk(JobSearchPoint(), dataset, session, kind=MeasurementRole.PANEL, measured="c0")
     phase = query_loop._ScoringPhase([0], [walk], session, None, _CuttingRace({}), None, None)
-    phase.open_block()
+    phase.decide()
     armed = query_loop._armed(session, walk.ctx.kind)
-    allowed = walk.flight(armed.cells).allowed
+    allowed = walk.flight(armed.cells, phase.owed(0), phase.trigger).allowed
 
     async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
         return await backend.measure(sample)
@@ -1853,23 +1874,18 @@ class _CuttingRace:
     """Potter's shape: one row a block in the sampler's order, each walk cut at the close the test
     picks."""
 
-    block_size = 1
-    rolling = None
+    trigger = BATCH
 
     def __init__(self, cut_at: Mapping[Any, int]) -> None:
         self.cut_at = cut_at
 
-    def close(self, rows: Mapping[Any, Sequence[GradedCell]]) -> dict[Any, StopSignal]:
-        return {
-            key: StopSignal("cut_at", "eliminated", {"queries_scored": len(taken)})
-            for key, taken in rows.items()
-            if key in self.cut_at and len(taken) >= self.cut_at[key]
+    def decide(self, view: View[Any]) -> Decision[Any]:
+        stops = {
+            key: StopSignal("cut_at", "eliminated", {"queries_scored": len(walk.taken)})
+            for key, walk in view.walks.items()
+            if not view.opening and key in self.cut_at and len(walk.taken) >= self.cut_at[key]
         }
-
-    def choose_rows(
-        self, _taken: Mapping[Any, Sequence[GradedCell]], ahead: Mapping[Any, Untaken]
-    ) -> Mapping[Any, Stretch]:
-        return {key: Stretch(pool.rows, self.block_size) for key, pool in ahead.items()}
+        return next_block(view, stops, 1)
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -1878,7 +1894,7 @@ async def test_a_block_race_cut_wastes_at_most_the_press_and_moves_no_record(
     built_stores: Stores,
 ) -> None:
     dataset, race = _dataset(), _CuttingRace({0: 3, 1: 5})
-    serial = await _round(built_stores, dataset, cuts=[None, None], ceiling=8, blocks=race)
+    serial = await _round(built_stores, dataset, cuts=[None, None], ceiling=8, race=race)
     assert serial["stops"] == ["stop_rule", "stop_rule"], "guard: the race cut no walk"
     for press in (
         LookaheadPress(cells=2),
@@ -1886,7 +1902,7 @@ async def test_a_block_race_cut_wastes_at_most_the_press_and_moves_no_record(
         LookaheadPress(cells=4, abreast="all"),
     ):
         pressed = await _round(
-            built_stores, dataset, armed=press, cuts=[None, None], ceiling=8, blocks=race
+            built_stores, dataset, armed=press, cuts=[None, None], ceiling=8, race=race
         )
         # One row a block: every cell past the first out is out past its walk's close.
         assert max(pressed["peaks"].values()) == press.cells, (
@@ -1915,7 +1931,7 @@ async def test_a_row_a_race_takes_past_the_opening_budget_is_priced_and_bought_o
 
     async def raced(**walk: Any) -> dict[str, Any]:
         return await _walk(
-            built_stores, dataset, cut_at=None, blocks=_ReversingRace(), budget=4, **walk
+            built_stores, dataset, cut_at=None, race=_ReversingRace(), budget=4, **walk
         )
 
     serial = await raced(armed=1)
