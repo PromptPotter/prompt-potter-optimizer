@@ -119,8 +119,8 @@ def measured_address(declaration: RunDeclaration) -> dict[str, Any]:
     return {**dumped, **purpose, "loop": _measured(spec.loop, ())}
 
 
-# Gravest first: an ill-defined statistic, a silent waste, knobs that co-move.
-CouplingSeverity = Literal["collision", "inert", "info"]
+# Gravest first: a pairing no run may take, an ill-defined statistic, a silent waste, knobs that co-move.
+CouplingSeverity = Literal["refused", "collision", "inert", "info"]
 
 
 class CouplingSeverityInfo(NamedTuple):
@@ -130,6 +130,7 @@ class CouplingSeverityInfo(NamedTuple):
 
 COUPLING_SEVERITY_INFO: Worded[CouplingSeverity, CouplingSeverityInfo] = Worded(
     {
+        "refused": CouplingSeverityInfo("danger"),
         "collision": CouplingSeverityInfo("danger"),
         "inert": CouplingSeverityInfo("attention"),
         "info": CouplingSeverityInfo("quiet"),
@@ -208,14 +209,18 @@ def _member_couplings(selected: SelectedOptimizer) -> Iterator[Coupling]:
                 relation=mc.relation,
                 consequence=mc.consequence,
                 severity=mc.severity,
-                predicate=functools.partial(_member_predicate, mc, knobs, declared),
+                predicate=functools.partial(_member_predicate, mc, knobs, declared, selected),
             )
 
 
 def _member_predicate(
-    coupling: MemberCoupling, knobs: object, declared: object, config: CampaignConfig
+    coupling: MemberCoupling,
+    knobs: object,
+    declared: object,
+    selected: SelectedOptimizer,
+    config: CampaignConfig,
 ) -> bool:
-    return coupling.predicate(config, knobs, declared)
+    return coupling.predicate(config, knobs, declared, selected)
 
 
 def _draw_couplings(selected: SelectedOptimizer) -> Iterator[Coupling]:

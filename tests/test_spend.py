@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable, Coroutine, Iterator, Sequence
+from collections.abc import Callable, Coroutine, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, NamedTuple, cast, get_args
 from unittest import mock
@@ -888,6 +888,8 @@ async def _walk(
     stall: int | None = None,
     skip_at: int | None = None,
     cap_usd: float | None = None,
+    blocks: query_loop.BlockRace[str] | None = None,
+    budget: int | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset))
     # The walk's own campaign, which priced nothing yet.
@@ -964,6 +966,7 @@ async def _walk(
             checks=[_CutAfter(cut_at)] if cut_at else [],
             measured="arm",
             skip_at=skip_at,
+            budget=budget,
         )
         stopped = await _stopped_by_operator(
             query_loop.run_walks(
@@ -971,6 +974,7 @@ async def _walk(
                 session,
                 keep_cut=False,
                 backfills=priors if parent_lacks_cells else None,
+                blocks=blocks,
             )
         )
     depths = [
@@ -1007,6 +1011,7 @@ async def _round(
     pause_after_call: int | None = None,
     kind: MeasurementRole = MeasurementRole.PANEL,
     ceiling: int = 1,
+    blocks: query_loop.BlockRace[int] | None = None,
 ) -> dict[str, Any]:
     backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
     flag = {"pause": False}
@@ -1060,7 +1065,7 @@ async def _round(
     ]
     with scoped(ledger=ledger), mock.patch.object(query_loop, "measure_sample", _measure):
         stopped = await _stopped_by_operator(
-            query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False)
+            query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False, blocks=blocks)
         )
     return {
         "rows": [
@@ -1344,6 +1349,218 @@ async def test_a_rounds_walks_each_send_to_their_own_depth_as_many_at_once_as_pr
     for w in (0, 1):
         calls = sorted(sid for who, sid, _ in ahead["asked"] if who == w)
         assert calls == [s.id for s in dataset], f"walk {w}'s calls ran under another identity"
+
+
+class _ReversingRace:
+    """Cuts no walk; at every block's open it reverses what each walk has left, so a cell a press
+    sent ahead on the last open's order lands on a row this open moved."""
+
+    block_size = 1
+
+    def close(self, _rows: Mapping[Any, Sequence[GradedCell]]) -> dict[Any, StopSignal]:
+        return {}
+
+    def choose_rows(
+        self, _taken: Mapping[Any, Sequence[GradedCell]], ahead: Mapping[Any, Sequence[Sample]]
+    ) -> dict[Any, list[Sample]]:
+        return {key: list(reversed(rows)) for key, rows in ahead.items()}
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_race_orders_each_blocks_rows_and_a_press_moves_the_bill_never_the_record(
+    built_stores: Stores,
+) -> None:
+    dataset = _dataset()
+    serial = await _round(
+        built_stores, dataset, cuts=[None, None], ceiling=8, blocks=_ReversingRace()
+    )
+    chosen = [8, 1, 7, 2, 6, 3, 5, 4]
+    slot = {s.key: s.id for s in dataset}
+    taken = [[slot[cell.key] for cell in rows] for rows in serial["rows"]]
+    assert taken == [chosen, chosen], f"the walks took {taken}, not the rows their race chose"
+    for press in (LookaheadPress(cells=2), LookaheadPress(cells=2, abreast="all"), MAX_SPEED):
+        pressed = await _round(
+            built_stores,
+            dataset,
+            armed=press,
+            cuts=[None, None],
+            ceiling=8,
+            blocks=_ReversingRace(),
+        )
+        sent = [[sid for who, sid, _ in pressed["asked"] if who == w] for w in (0, 1)]
+        assert sent != taken, (
+            f"{press} sent no cell ahead onto a row the next open moved — the rest proves nothing"
+        )
+        assert sorted(pressed["calls"]) == sorted(serial["calls"]), (
+            f"{press} bought a row twice: a cell out on a row the race moved was not re-seated"
+        )
+        assert (pressed["rows"], pressed["stops"], pressed["absorbed"]) == (
+            serial["rows"],
+            serial["stops"],
+            serial["absorbed"],
+        ), f"{press} moved the record: a cell out on a row the race moved was taken out of turn"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_cell_out_past_a_close_moves_with_its_row_and_is_never_bought_or_replayed_again(
+    built_stores: Stores,
+) -> None:
+    # An archive files each cell under its claim: one discarded on a moved row would replay there.
+    dataset = _dataset()
+
+    async def raced(**walk: Any) -> dict[str, Any]:
+        return await _walk(
+            built_stores, dataset, cut_at=None, blocks=_ReversingRace(), budget=4, **walk
+        )
+
+    serial = await raced(armed=1)
+    pressed = await raced(armed=4, max_cells=4)
+    assert max(pressed["entries"]) == 4 and pressed["calls"][:4] != serial["calls"][:4], (
+        "no cell went out past a close on a row the next open moved — the rest proves nothing"
+    )
+    assert len(set(pressed["calls"])) == len(pressed["calls"]), "a press bought a row twice"
+    assert pressed["rows"] == serial["rows"], "a press moved the record: a moved row replayed"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_the_dashboard_counts_the_cells_a_reorder_left_untaken_as_the_ledger_does(
+    built_stores: Stores,
+) -> None:
+    # Half the pool each: a cell out on a row the next open seats past the budget is never taken.
+    dataset = _dataset()
+    backend = _OrderedFakeBackend(len(dataset))
+    ledger = laid_ledger(built_stores.projects_root / "reseated")
+    press = LookaheadPress(cells=4, abreast="all")
+    session = loop_session(
+        built_stores,
+        pipeline_schema([]),
+        dataset,
+        scorer=_HIT,
+        control=_control_pausing(lambda: False, lookahead=press),
+        client=backend_client(built_stores.jobs_dir, max_cells_in_flight=8, holds_own_sends=True),
+    )
+    arms = {w: arm_state(f"c{w}", position=ArmPosition(round=1, idx=w, total=2)) for w in (0, 1)}
+    walks = {
+        w: open_walk(
+            JobSearchPoint(),
+            dataset,
+            session,
+            kind=MeasurementRole.PANEL,
+            measured=f"c{w}",
+            budget=4,
+        )
+        for w in arms
+    }
+
+    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
+        return await backend.measure(sample)
+
+    with scoped(ledger=ledger), mock.patch.object(query_loop, "measure_sample", _measure):
+        for w, state in arms.items():
+            ledger.append(ArmRecord(round=1, arm=ArmKey(f"c{w}"), state=state))
+        await query_loop.run_walks(walks, session, keep_cut=False, blocks=_ReversingRace())
+        for w, state in arms.items():
+            ledger.append(ArmRecord(round=1, arm=ArmKey(f"c{w}"), state=state))
+    records = ledger_records(ledger)
+    started = [(r.individual_id, r.position) for r in records if isinstance(r, SampleStartedRecord)]
+    scored = {(r.individual_id, r.position) for r in records if isinstance(r, SampleScoredRecord)}
+    assert len(set(started)) == len(started), (
+        "a walk sent one row twice: a moved cell was re-bought"
+    )
+    discarded = set(started) - scored
+    assert discarded, "vacuous — every cell a press sent was taken"
+    dashboard = LiveDashboardProjection()
+    dashboard.feed(run_wiring())
+    dashboard.feed(RoundEnteredRecord(round=1))
+    for record in records:
+        dashboard.feed(record)
+    assert dashboard.composed().sample_lookahead_discards == len(discarded), (
+        f"the dashboard counted {dashboard.composed().sample_lookahead_discards} discards, "
+        f"the ledger {len(discarded)}"
+    )
+
+
+class _CuttingRace:
+    """Potter's shape: one row a block in the sampler's order, each walk cut at the close the test
+    picks."""
+
+    block_size = 1
+
+    def __init__(self, cut_at: Mapping[int, int]) -> None:
+        self.cut_at = cut_at
+
+    def close(self, rows: Mapping[int, Sequence[GradedCell]]) -> dict[int, StopSignal]:
+        return {
+            key: StopSignal("cut_at", "eliminated", {"queries_scored": len(taken)})
+            for key, taken in rows.items()
+            if key in self.cut_at and len(taken) >= self.cut_at[key]
+        }
+
+    def choose_rows(
+        self, _taken: Mapping[int, Sequence[GradedCell]], ahead: Mapping[int, Sequence[Sample]]
+    ) -> Mapping[int, Sequence[Sample]]:
+        return ahead
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_block_race_cut_wastes_at_most_the_press_and_moves_no_record(
+    built_stores: Stores,
+) -> None:
+    dataset, race = _dataset(), _CuttingRace({0: 3, 1: 5})
+    serial = await _round(built_stores, dataset, cuts=[None, None], ceiling=8, blocks=race)
+    assert serial["stops"] == ["stop_rule", "stop_rule"], "guard: the race cut no walk"
+    for press in (
+        LookaheadPress(cells=2),
+        LookaheadPress(cells=4),
+        LookaheadPress(cells=4, abreast="all"),
+    ):
+        pressed = await _round(
+            built_stores, dataset, armed=press, cuts=[None, None], ceiling=8, blocks=race
+        )
+        # One row a block: every cell past the first out is out past its walk's close.
+        assert max(pressed["peaks"].values()) == press.cells, (
+            f"{press}: a walk never had the press's cells out past its close"
+        )
+        assert (pressed["rows"], pressed["stops"], pressed["absorbed"]) == (
+            serial["rows"],
+            serial["stops"],
+            serial["absorbed"],
+        ), f"{press} moved the record"
+        for w in (0, 1):
+            wasted = sum(who == w for who, *_ in pressed["asked"]) - sum(
+                who == w for who, *_ in serial["asked"]
+            )
+            assert 0 <= wasted <= press.cells, f"{press}: walk {w}'s cut wasted {wasted} cells"
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+@on_jumping_clock
+async def test_a_row_a_race_takes_past_the_opening_budget_is_priced_and_bought_once_on_resume(
+    built_stores: Stores,
+) -> None:
+    # A budget of half the pool: the reversing race takes rows the opening order put past it.
+    dataset, chosen = _dataset(), [8, 1, 7, 2]
+    slot = {s.key: s.id for s in dataset}
+
+    async def raced(**walk: Any) -> dict[str, Any]:
+        return await _walk(
+            built_stores, dataset, cut_at=None, blocks=_ReversingRace(), budget=4, **walk
+        )
+
+    serial = await raced(armed=1)
+    assert [slot[cell.key] for cell in serial["rows"]] == chosen, "the walk took other rows"
+    assert serial["priced"] == set(chosen), "a row the race took past the budget went unpriced"
+    stopped = await raced(armed=1, pause_after_call=2)
+    assert stopped["returned"] == chosen[:2], "guard: the pause fell after the swapped-in rows"
+    resumed = await raced(armed=1, resumes=stopped["sp"])
+    assert [slot[cell.key] for cell in resumed["rows"]] == chosen, "the resume took other rows"
+    assert not set(resumed["calls"]) & set(stopped["returned"]), (
+        "a row the race took past the budget was bought again on resume"
+    )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")

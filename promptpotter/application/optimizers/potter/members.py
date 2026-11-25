@@ -189,7 +189,12 @@ class AdaptiveQueue(nodes.Sampler):
             parent_grades(ctx.read(Parent).own_rows), view.ruler, by_id, n_min=n_min
         )
         # Every cell closes a block: PoBB decides after each one.
-        return nodes.RoundSamples(cells=cells, order=[by_id[sid] for sid in order], block_size=1)
+        return nodes.RoundSamples(
+            cells=cells,
+            order=[by_id[sid] for sid in order],
+            block_size=1,
+            pool=[s for s in pool if int(s.id) not in by_id],
+        )
 
 
 class L1Generate(LayoutNode, nodes.Proposer):

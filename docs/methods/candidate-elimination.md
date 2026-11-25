@@ -98,7 +98,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 
 The first signal ends the candidate: fatal beats rate beats PoBB.
 
-**Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a cut discards at most one call. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
+**Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a rule's cut discards at most one call. A block race's close bounds no launch: a walk has at most the press's cells out past it, on the rows the last open chose, each re-seated by its sample where the next open moves its row, so a cut there discards at most the press. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
 
 **One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; one answer where the parent answered apart on the same cells is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 

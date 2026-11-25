@@ -297,8 +297,10 @@ def open_walk(
     measured: str | None,
     skip_at: int | None = None,
     held: CellSheet = NO_CELLS,
+    budget: int | None = None,
 ) -> Walk:
-    """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace."""
+    """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace.
+    It takes *budget* of *dataset*'s rows (all, unset), in the order its race chooses."""
     store = session.store
     entry = filed_entry(search_point, session)
     row = PASSES[kind]
@@ -339,6 +341,7 @@ def open_walk(
     )
     return Walk(
         dataset=dataset,
+        budget=len(dataset) if budget is None else budget,
         ctx=ctx,
         checks=[*session.state.scoring.degradation_checks, *checks] if row.checks else checks,
         context=scope_context(measured=measuring),

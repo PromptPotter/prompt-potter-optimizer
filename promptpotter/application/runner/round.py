@@ -35,6 +35,7 @@ from promptpotter.application.optimizers.nodes import (
     MeasuredRound,
     Proposals,
     RoundOpening,
+    RoundSamples,
     RoundWalk,
 )
 from promptpotter.application.runner.bench import (
@@ -651,7 +652,7 @@ async def measure_population(
         arms,
         declared=[cell.key for cell in parent.rows]
         if cycle.config.optimization.lift_reference == "best_so_far"
-        else [sample.key for sample in panel.cells],
+        else [sample.key for sample in panel.read_on(rows)],
     )
     readings = await _reference_readings(ctx, arms, rows, scored, parent, pair)
     rejects = eliminator is not None and eliminator.stop_disqualifies
@@ -746,7 +747,7 @@ async def _reference_readings(
             ctx,
             individual,
             cycle.points.job(individual),
-            [s for s in ctx.panel.cells if s.key in keys],
+            [s for s in ctx.panel.read_on(rows) if s.key in keys],
             role=MeasurementRole.PARENT,
         )
     walks = ctx.walks
@@ -898,7 +899,7 @@ async def _walk_population(
     skipped = session.store.campaigns.standing_rounds(session.hop, moment=None).skipped
     walks: dict[ArmKey, Walk | None] = {}
     for key, arm in proposed.items():
-        walks[key] = _open_arm(ctx, arm, sps[key], panel.order, skipped.get((round_num, key)))
+        walks[key] = _open_arm(ctx, arm, sps[key], panel, skipped.get((round_num, key)))
 
     blocks = race.blocks if race is not None else None
 
@@ -907,11 +908,16 @@ async def _walk_population(
             race.open_turn(key)
         held = states[key].block
         racing = sum(1 for w in walks.values() if w is not None and w.outcome is None)
-        # A turn inside a block race files the arm once per checkpoint that moved the field.
-        if block and held is not None and held["racing"] == racing:
+        walk = walks[key]
+        # The rows its race chose, which the readout heads and the dashboard's axis reads.
+        chosen = order if walk is None else [int(s.id) for s in walk.dataset[: walk.n]]
+        # A turn inside a block race files the arm once per checkpoint that moved the field or its rows.
+        moved = chosen != states[key].sample_order
+        if block and held is not None and held["racing"] == racing and not moved:
             return
         states[key] = states[key].model_copy(
             update={
+                "sample_order": chosen,
                 "n_priors": race.n_priors if race is not None else 0,
                 "block": None
                 if block is None or blocks is None
@@ -926,7 +932,9 @@ async def _walk_population(
         append_record(ArmRecord(round=round_num, arm=key, state=states[key]))
 
     def on_decided(key: ArmKey) -> None:
-        arm, results = _conclude_arm(ctx, states[key], walks[key], key, race, labels)
+        if (walk := walks[key]) is not None:
+            asked[key] = ctx.asked(key, walk.dataset[: walk.n])
+        arm, results = _conclude_arm(ctx, states[key], walk, key, race, labels)
         rows[key] = results
         concluded[key] = arm
         ctx.walked(ReadArm(key, arm, results), asked[key])
@@ -955,14 +963,14 @@ def _open_arm(
     ctx: RoundContext,
     arm: Proposed,
     sp: JobSearchPoint,
-    dataset: list[Sample],
+    panel: RoundSamples,
     skip_at: int | None,
 ) -> Walk | None:
     if arm.refused:
         return None
     return open_walk(
         sp,
-        dataset,
+        panel.walked,
         ctx.cycle.session,
         kind=MeasurementRole.PANEL,
         sample_index=ctx.cycle.sample_index,
@@ -970,6 +978,7 @@ def _open_arm(
         measured=arm.individual.id,
         skip_at=skip_at,
         held=ctx.held(ArmKey(arm.individual.id)),
+        budget=len(panel.order),
     )
 
 

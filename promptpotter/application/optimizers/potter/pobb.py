@@ -9,9 +9,11 @@ from numpy.typing import NDArray
 
 from promptpotter.application.intelligence.rasch import (
     Observation,
+    RaschPosterior,
     fit_rasch,
     responses_of,
     theta_cells,
+    theta_on_ruler,
 )
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
@@ -87,10 +89,10 @@ def wire_sheet(sheet: CellSheet) -> dict[str, dict[str, float | None]]:
 
 def field_p_best(
     field: Mapping[ArmKey, CellSheet], cells: Collection[str]
-) -> tuple[dict[ArmKey, float], dict[ArmKey, NDArray[np.float64]]]:
+) -> tuple[dict[ArmKey, float], dict[ArmKey, NDArray[np.float64]], RaschPosterior]:
     """Each member's posterior probability of being the field's best on *cells*: one hierarchical
     Rasch fit of the field, θ and δ together, and a Monte Carlo over its θ draws, seeded by the read
-    so a replay draws the same. The shares sum to 1."""
+    so a replay draws the same. The shares sum to 1; the fit rides beside them."""
     fit = fit_rasch(
         [
             Observation(key, cell, y)
@@ -100,14 +102,14 @@ def field_p_best(
         ]
     )
     if not fit.theta:
-        return {}, {}
+        return {}, {}, fit
     rng = np.random.default_rng(len(cells))
     draws = {
         ArmKey(key): rng.normal(fit.theta[key], fit.theta_se[key], _DRAWS) for key in fit.theta
     }
     best = np.argmax(np.vstack(list(draws.values())), axis=0)
     shares = np.bincount(best, minlength=len(draws)) / _DRAWS
-    return dict(zip(draws, map(float, shares), strict=True)), draws
+    return dict(zip(draws, map(float, shares), strict=True)), draws, fit
 
 
 class PoBBCheck:
@@ -135,6 +137,8 @@ class PoBBCheck:
         self.n_samples = n_samples
         # The GRADED rows, never a binarized hit, degenerate on a graded backend.
         self.priors: dict[ArmKey, CellSheet] = {}
+        # Each arm's θ in the last check's field fit, on the ruler's scale: `per_decision` chooses rows on it.
+        self.refit: dict[ArmKey, float] = {}
         self._on_snapshot = on_snapshot
 
     def register_completed(self, results: Iterable[GradedCell], *, key: ArmKey) -> None:
@@ -163,7 +167,8 @@ class PoBBCheck:
         cells = list(theta_cells(dict.fromkeys(walked), parent, self.ruler))
         if len(cells) < self.n_min:
             return {}
-        p_best, draws = field_p_best(field, cells)
+        p_best, draws, fit = field_p_best(field, cells)
+        self.refit = {ArmKey(key): theta for key, theta in theta_on_ruler(fit, self.ruler).items()}
         bar = self.epsilon_at(len(cells))
         stops: dict[ArmKey, PoBBStop] = {}
         for key in (key for key in racing if key in draws):

@@ -303,6 +303,28 @@ def expected_information(theta: float, keys: Collection[str], delta: Ruler | Non
     return float(np.sum(a * a * p * (1.0 - p)))
 
 
+def most_informative(
+    rows: Sequence[Sample], thetas: Collection[float], ruler: DeltaRuler | None
+) -> list[Sample]:
+    """*rows* by the information an answer at each of *thetas* carries, summed, most first; a tie
+    keeps *rows*' order, so a cold ruler, which tells every row alike, keeps it whole."""
+    entries = None if ruler is None else ruler.entries()
+    info = {
+        key: sum(expected_information(theta, (key,), entries) for theta in thetas)
+        for key in {s.key for s in rows}
+    }
+    return sorted(rows, key=lambda s: -info[s.key])
+
+
+def theta_on_ruler(fit: RaschPosterior, ruler: DeltaRuler | None) -> dict[str, float]:
+    """*fit*'s θ on *ruler*'s scale: shifted by the mean gap between the two δ of every cell the fit
+    read. A fit on a warm ruler reads ruler cells alone (`theta_cells`); a cold one sets no scale."""
+    if ruler is None or not fit.delta:
+        return dict(fit.theta)
+    shift = float(np.mean([ruler.delta[key] - delta for key, delta in fit.delta.items()]))
+    return {key: theta + shift for key, theta in fit.theta.items()}
+
+
 # log(aₛ) ~ N(0, σ_a²): collapses 2PL to 1PL absent evidence and identifies a against θ/δ spread.
 _SIGMA_LOG_A = 0.5
 _LOG_A_CLIP = 3.0

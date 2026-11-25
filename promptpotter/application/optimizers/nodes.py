@@ -68,7 +68,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class MemberCoupling:
-    """``predicate`` is True in the VIOLATING combination; its third argument is the manifest file's knobs, before any overlay."""
+    """``predicate`` is True in the VIOLATING combination; its third argument is the manifest file's knobs, before any overlay, its fourth the roster they run in. A ``refused`` one stops the mint (`preflight.py::refuse_couplings`)."""
 
     name: str
     knobs: tuple[str, ...]
@@ -77,7 +77,7 @@ class MemberCoupling:
     relation: str
     consequence: str
     severity: CouplingSeverity
-    predicate: Callable[[CampaignConfig, Any, Any], bool]
+    predicate: Callable[[CampaignConfig, Any, Any, SelectedOptimizer], bool]
 
 
 # How many of the pipeline's prompt nodes a member writes: a `one` refuses any other roster before the mint.
@@ -371,6 +371,18 @@ class RoundSamples:
     cells: list[Sample]
     order: list[Sample]
     block_size: int
+    # The rest of the sampler's pool, its crowning cells dropped: what a race may take past `order`.
+    pool: Sequence[Sample] = ()
+
+    @property
+    def walked(self) -> list[Sample]:
+        """Every row a walk opens on; it takes ``len(order)`` of them, in the order its race chooses."""
+        return [*self.order, *self.pool]
+
+    def read_on(self, rows: Mapping[ArmKey, CellSheet]) -> list[Sample]:
+        """``cells``, then each row of the pool an arm took past them: what the round reads a reference on."""
+        taken = {cell.key for sheet in rows.values() for cell in sheet}
+        return [*self.cells, *(s for s in self.pool if s.key in taken)]
 
 
 @dataclass(frozen=True)
@@ -541,6 +553,14 @@ class Race(Protocol):
         """A prior's caught-up cells, folded onto the rows it holds."""
         return None
 
+    def choose_rows(
+        self,
+        _taken: Mapping[ArmKey, Sequence[GradedCell]],
+        ahead: Mapping[ArmKey, Sequence[Sample]],
+    ) -> Mapping[ArmKey, Sequence[Sample]]:
+        """Each walk its sampler's draw, in the sampler's order: the race chooses no row."""
+        return ahead
+
 
 class Eliminator(NodeMember, Protocol):
     @property
@@ -568,10 +588,10 @@ class Selector(NodeMember, Protocol):
         ...
 
     def parent_cells(
-        self, _ctx: NodeContext, panel: RoundSamples, _rows: Mapping[ArmKey, CellSheet]
+        self, _ctx: NodeContext, panel: RoundSamples, rows: Mapping[ArmKey, CellSheet]
     ) -> list[Sample]:
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
-        return panel.cells
+        return panel.read_on(rows)
 
     def parent_read(self, panel: DrawSize) -> int:
         """The most of *panel*'s cells ``parent_cells`` names that no arm's walk buys."""

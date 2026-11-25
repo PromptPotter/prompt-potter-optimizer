@@ -37,6 +37,7 @@ from factories import (
     cycle_ledger,
     defaulted_config,
     degradation_health,
+    delta_ruler,
     election,
     filed,
     filed_under,
@@ -63,7 +64,7 @@ from factories import (
 )
 
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
-from promptpotter.application.bench.difficulty import ruler_rows
+from promptpotter.application.bench.difficulty import DifficultyView, ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     cut_operator_fork,
@@ -83,7 +84,11 @@ from promptpotter.application.hierarchy_subtree import (
 )
 from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.intelligence.rasch import candidate_abilities
+from promptpotter.application.intelligence.rasch import (
+    build_round_order,
+    candidate_abilities,
+    expected_information,
+)
 from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Admitted, Inline
 from promptpotter.application.jobs.registry import JobRegistry
@@ -188,10 +193,11 @@ from promptpotter.domain.records.run_records import (
     StopLoop,
 )
 from promptpotter.domain.results import RoundResult
+from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import line_reference, walked_position
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
-from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
+from promptpotter.domain.scoring import GRADE_KEYS, CellSheet, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure import producer_lock
@@ -1289,6 +1295,98 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     assert disjoint.current_outcome == [], (
         "population_kept ranked arms that share no cell, reading each as a 0.0 mean"
     )
+
+
+def _on_ten(ten: list[Sample], grades: list[float]) -> CellSheet:
+    return sheet(measurement(i, g, sample_key=ten[i].key) for i, g in enumerate(grades))
+
+
+def _informative_race(
+    stores: Stores, monkeypatch: pytest.MonkeyPatch, refit: str
+) -> tuple[Callable[[], PoBBRace], list[Sample], DeltaRuler, RoundContext]:
+    """A race choosing `informative` rows on a warm ruler (δ = slot − 4) whose parent hit all ten."""
+    ten = samples(10, "g")
+    slots = delta_ruler({i: float(i - 4) for i in range(10)})
+    ruler = slots.model_copy(
+        update={
+            "delta": {s.key: slots.delta[str(s.id)] for s in ten},
+            "delta_se": {s.key: slots.delta_se[str(s.id)] for s in ten},
+        }
+    )
+    monkeypatch.setattr(DifficultyView, "ruler", property(lambda _view: ruler))
+    racing = seat(
+        stores,
+        round_num=3,
+        optimization={
+            "elimination_n_min": 4,
+            "nodes": {
+                "pobb": {"config": {"row_choice": "informative", "refit": refit}},
+                "theta_election": {"config": {"vote": "overlap"}},
+            },
+        },
+    )
+    parent = prompted(instruction="parent")
+    on_parent = _on_parent()
+    set_cycle(
+        racing.cycle,
+        line=[_round(round=0, cells={ArmKey(parent.id): _on_ten(ten, [1.0] * 10)}, **on_parent)],
+    )
+    rescope(ledger=cycle_ledger(racing.cycle))
+    return (
+        lambda: PoBBRace(
+            NodeContext(racing, NODE_MEMBERS.get("pobb")),
+            RoundSamples(cells=ten[:6], order=ten[:6], block_size=1, pool=ten[6:]),
+        ),
+        ten,
+        ruler,
+        racing,
+    )
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_informative_rows_are_the_most_informative_at_the_theta_the_refit_seats(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    by_refit: dict[str, list[str]] = {}
+    for refit in ("per_round", "per_decision"):
+        race_of, ten, ruler, _ = _informative_race(built_stores, monkeypatch, refit)
+        missed = _on_ten(ten, [0.0] * 4).cells
+        race = race_of()
+        race.close({ArmKey("c1"): missed})
+        ahead = {ArmKey("c1"): ten[4:]}
+        [chosen] = race.choose_rows({ArmKey("c1"): missed}, ahead).values()
+        theta = race._round_theta if refit == "per_round" else race._check.refit[ArmKey("c1")]
+        best = max(ten[4:], key=lambda s: expected_information(theta, [s.key], ruler.entries()))
+        assert chosen[0] == best, f"{refit}: the row led is not the most informative at its θ"
+        assert sorted(s.id for s in chosen) == sorted(s.id for s in ten[4:]), "rows lost or added"
+        by_refit[refit] = [s.key for s in chosen]
+    graded = build_round_order(
+        {s.key: 1.0 for s in ten}, ruler, {int(s.id): s for s in ten[4:]}, n_min=4
+    )
+    assert by_refit["per_round"][0] != ten[graded[0]].key, (
+        "the parent's grade on the row, not θ, chose the row"
+    )
+    assert by_refit["per_decision"][0] != by_refit["per_round"][0], (
+        "a cut-bound arm's refit θ chose the row the parent's θ did"
+    )
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_resumed_informative_race_rechooses_its_rows_and_files_nothing(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    race_of, ten, _, racing = _informative_race(built_stores, monkeypatch, "per_decision")
+    taken = {ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells}
+    ahead = {ArmKey("c1"): ten[4:]}
+    live = race_of()
+    live.close(taken)
+    chose = live.choose_rows(taken, ahead)
+    filed = len(racing.cycle.pending_decisions)
+    # A resume rebuilds the race and closes its blocks again on the rows the walk replays.
+    resumed = race_of()
+    resumed.close(taken)
+    assert resumed.choose_rows(taken, ahead) == chose, "the resume chose other rows"
+    assert len(racing.cycle.pending_decisions) == filed, "a choice filed a record"
 
 
 @pytest.mark.usefixtures("offline", "optimizing_memory")

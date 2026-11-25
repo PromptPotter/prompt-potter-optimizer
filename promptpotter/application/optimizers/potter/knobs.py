@@ -17,6 +17,8 @@ from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import sign_posterior
 
 CellStrata = Literal["none", "dataset"]
+RowChoice = Literal["random", "informative"]
+Refit = Literal["per_round", "per_decision"]
 
 
 class EscalationLadder(StrEnum):
@@ -200,6 +202,24 @@ class PoBBKnobs(StrictModel):
         description=(
             "Elimination: a candidate stops measuring once its posterior probability of being "
             "the round's best falls below ε(n). Off → no candidate is cut for futility."
+        ),
+    )
+    row_choice: Annotated[RowChoice, Knob(Estimand.SELECTION)] = Field(
+        description=(
+            "Which rows each surviving candidate answers next, chosen at every block's open. "
+            "``random``: the sampler's draw in its round order. ``informative``: the rows of the "
+            "sampler's pool an answer tells θ most about (Fisher information at the θ ``refit`` "
+            "seats, off the δ ruler, never off the parent's own grade on the row), so a round reads "
+            "rows outside its draw. It reverses the round order's stratified interleave, so it runs "
+            "under ``theta_election.vote: overlap`` alone; any other selector is refused."
+        ),
+    )
+    refit: Annotated[Refit, Knob(Estimand.SELECTION)] = Field(
+        description=(
+            "The θ ``informative`` chooses rows on. ``per_round``: the parent's, on the ruler "
+            "seated at the round's start. ``per_decision``: each survivor's in the field fit "
+            "PoBB's last check made, moved onto that ruler's scale; the round's until a check "
+            "first fits. Read under ``informative`` alone."
         ),
     )
 

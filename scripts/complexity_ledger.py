@@ -231,7 +231,14 @@ BASELINE = {
     # `KindTable` (`kinds.py::KindTable.every`). W1's plugin key (±0): one rule, its own files and
     # the import closure its members, its files and the run reach (`optimizer_manifest.py::behaviour_key`).
     # w1-rebase (±0): W1 (+260 over 112176) replayed on main's 112539, the resolution adding none.
-    "package_lines": 112799,
+    # rows-hook (+62): `BlockRace.choose_rows`, the order a block race takes each walk's untaken
+    # pool in at each block's open; `Walk.budget`, how many of its pool a walk takes, so its replay
+    # state covers every row it may take; `Walk.reorder`, which re-seats each cell out or back by
+    # sample id (the in-round measuring loop's seam; ml-3, −1, rides it past a close on the press).
+    # ml-2 (+163): `pobb.row_choice` / `refit`, the race choosing each block's rows by expected
+    # information (`rasch.py::most_informative`, `theta_on_ruler`) and the sampler's pool it reads
+    # (`RoundSamples.pool`); a `refused` coupling severity, so informative off `overlap` stops the mint.
+    "package_lines": 113023,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -246,7 +253,8 @@ BASELINE = {
     # l4-outer-6 (+4): `discretionary_chars` on the four layout nodes, the panel share a family
     # sizes, replacing a `NODE_LAYOUTS` constant per node.
     # vote (+2): `theta_election.vote` and `origin_panel_cells`, the overlap vote and its panel's size.
-    "config_leaf_fields": 100,
+    # ml-2 (+2): `pobb.row_choice` and `pobb.refit`, the measuring loop's row-choice switches.
+    "config_leaf_fields": 102,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     "settings_env": 39,

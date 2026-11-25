@@ -176,6 +176,7 @@ from promptpotter.application.optimizers.variation.members import (
     donor_take,
     most_donated,
 )
+from promptpotter.application.preflight import refuse_couplings
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner import bench as line_bench
 from promptpotter.application.runner.bench import (
@@ -1717,6 +1718,24 @@ def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
     assert (voting.vote, select_optimizer(bench_choice("potter")).vote) == ("overlap", "draw"), (
         "the election's `vote` never reached the round's pairing"
     )
+
+
+def test_informative_rows_without_an_overlap_vote_are_refused_before_the_mint() -> None:
+    informative = {"pobb": {"config": {"row_choice": "informative"}}}
+    for optimizer, nodes, refused in (
+        ("potter", informative, True),
+        ("capo-pobb", informative, True),
+        ("potter", {**informative, "theta_election": {"config": {"vote": "overlap"}}}, False),
+        ("potter", {}, False),
+    ):
+        config = defaulted_config({"optimization": {"optimizer": optimizer, "nodes": nodes}})
+        selected = select_optimizer(config.optimization)
+        if not refused:
+            refuse_couplings(config, selected)
+            continue
+        with pytest.raises(PayloadInvalidError) as caught:
+            refuse_couplings(config, selected)
+        assert caught.value.code == "coupling_refused", f"{optimizer}: refused for another reason"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -3634,12 +3653,12 @@ def test_the_fields_p_best_sums_to_one_discriminates_graded_rows_and_reads_no_sl
     cells = [str(i) for i in range(12)]
     strong, weak = uncharged(*[0.66] * 12), uncharged(*[0.30] * 12)
     field = {ArmKey("a"): weak, ArmKey("b"): strong, ArmKey("c"): weak}
-    p_best, _ = field_p_best(field, cells)
+    p_best, _, _ = field_p_best(field, cells)
     assert sum(p_best.values()) == pytest.approx(1.0), "the field's shares do not sum to 1"
     assert p_best[ArmKey("b")] > 0.8, f"graded rows failed to discriminate: {p_best}"
-    reordered, _ = field_p_best(dict(reversed(field.items())), cells)
+    reordered, _, _ = field_p_best(dict(reversed(field.items())), cells)
     assert reordered == p_best, "the order the field was walked in moved an arm's p_best"
-    ties, _ = field_p_best({ArmKey("a"): weak, ArmKey("c"): weak}, cells)
+    ties, _, _ = field_p_best({ArmKey("a"): weak, ArmKey("c"): weak}, cells)
     assert ties[ArmKey("a")] == pytest.approx(0.5, abs=0.03), "a tie reads as a coin"
 
 

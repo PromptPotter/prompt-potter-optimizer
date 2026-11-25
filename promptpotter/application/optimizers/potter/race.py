@@ -13,7 +13,13 @@ from promptpotter.application.bench.node_context import (
     Ruler,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.optimizers.nodes import RoundSamples
+from promptpotter.application.intelligence.rasch import (
+    fit_theta,
+    most_informative,
+    responses_binary,
+    responses_of,
+)
+from promptpotter.application.optimizers.nodes import Race, RoundSamples
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,
@@ -26,6 +32,7 @@ from promptpotter.application.optimizers.potter.pobb import (
 )
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.validators import StopSignal
 
@@ -60,7 +67,7 @@ class EliminationCut(_RaceDecision, kind="elimination_cut"):
         if read is None:
             return False
         sheet, rivals = read
-        p_best, _ = field_p_best({**rivals, self.arm: sheet}, self.candidate_cells)
+        p_best, _, _ = field_p_best({**rivals, self.arm: sheet}, self.candidate_cells)
         return self.arm in p_best and p_best[self.arm] < self.epsilon
 
 
@@ -74,7 +81,7 @@ def _reason(ctx: EliminationContext, labels: Mapping[ArmKey, str]) -> str:
     )
 
 
-class PoBBRace:
+class PoBBRace(Race):
     """A block race cut on the family-wise p_best (`PoBBCheck.check`) at each checkpoint the arms share;
     its top-up onto the origin panel is one more stretch of it (`runner/round.py::measure_population`)."""
 
@@ -83,17 +90,31 @@ class PoBBRace:
         lineage = ctx.read(Lineage)
         parent = ArmKey(lineage.parent.id)
         self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
+        knobs = ctx.knobs(PoBBKnobs)
+        ruler = ctx.read(Ruler).difficulty.ruler
         self._check = PoBBCheck(
-            ctx.knobs(PoBBKnobs),
+            knobs,
             n_min=ctx.read(Bounds).elimination_n_min,
-            n_samples=len(panel.cells),
-            ruler=ctx.read(Ruler).difficulty.ruler,
+            # The budget: a walk takes as many rows as its draw holds, from wherever the race chose them.
+            n_samples=len(panel.order),
+            ruler=ruler,
             parent=parent,
             on_snapshot=self._progress.race_standing,
         )
         self._block_size = panel.block_size
-        if parent_results := ctx.read(Parent).own_rows:
-            self._check.register_completed(parent_results, key=parent)
+        self._row_choice, self._refit = knobs.row_choice, knobs.refit
+        own_rows = ctx.read(Parent).own_rows
+        # The round's θ: the parent's on the ruler seated at its start; its centre where it reads none.
+        seated = (
+            None
+            if ruler is None
+            else fit_theta(
+                responses_of(own_rows), ruler.entries(), binary=responses_binary(own_rows)
+            )
+        )
+        self._round_theta = 0.0 if seated is None else seated[0]
+        if own_rows:
+            self._check.register_completed(own_rows, key=parent)
 
     @property
     def n_priors(self) -> int:
@@ -120,6 +141,27 @@ class PoBBRace:
     @property
     def block_size(self) -> int:
         return self._block_size
+
+    def choose_rows(
+        self,
+        _taken: Mapping[ArmKey, Sequence[GradedCell]],
+        ahead: Mapping[ArmKey, Sequence[Sample]],
+    ) -> Mapping[ArmKey, Sequence[Sample]]:
+        """``informative``: every draw walk its rows most informative at one set of θ, so the
+        survivors answer the same next rows. An admitted arm walking again is topped up on its own
+        panel gaps and keeps their order."""
+        if self._row_choice == "random":
+            return ahead
+        drawn = [key for key in ahead if key not in self._check.priors]
+        refit = self._check.refit
+        thetas = (
+            [refit[key] for key in drawn if key in refit] if self._refit == "per_decision" else []
+        ) or [self._round_theta]
+        ruler = self._check.ruler
+        return {
+            key: most_informative(rows, thetas, ruler) if key in drawn else rows
+            for key, rows in ahead.items()
+        }
 
     def close(self, rows: Mapping[ArmKey, Sequence[GradedCell]]) -> dict[ArmKey, StopSignal]:
         """An admitted arm walking again is topped up: its rows so far lead the stretch."""

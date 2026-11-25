@@ -120,6 +120,14 @@ class BlockRace[K: Hashable](Protocol):
 
     def close(self, rows: Mapping[K, Sequence[GradedCell]]) -> Mapping[K, StopSignal]: ...
 
+    def choose_rows(
+        self, taken: Mapping[K, Sequence[GradedCell]], ahead: Mapping[K, Sequence[Sample]]
+    ) -> Mapping[K, Sequence[Sample]]:
+        """At each block's open, every live walk's untaken pool in the order it takes them: it
+        takes the first its budget leaves. Read off the rows taken alone: no cell in flight
+        enters, so a press never moves the choice."""
+        ...
+
 
 _ABORTS_AT_ONCE: dict[ErrorCategory, WalkEnd] = {
     ErrorCategory.CLIENT: WalkEnd.CLIENT_ERROR,
@@ -243,7 +251,6 @@ class _Acquired:
     A claimed cell a cut discards stays filed, already paid."""
 
     sample: Sample
-    idx: int
     result: GradedCell
     fresh: bool
     deprecated_display: GradedCell | None = None
@@ -261,18 +268,18 @@ def _quiet(call: asyncio.Future[Any]) -> None:
         call.exception()
 
 
-async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[int]) -> _Acquired:
+async def _acquire(sample: Sample, ctx: QueryLoopState, claiming: set[int]) -> _Acquired:
     cached = ctx.cached_sample_results.get(sample.id)
     claim: HeldLock | None = None
     if cached is None and ctx.claim_cell is not None:
-        claiming.add(idx)
+        claiming.add(sample.id)
         try:
             cached, claim = await ctx.claim_cell(sample)
         finally:
-            claiming.discard(idx)
+            claiming.discard(sample.id)
     if cached is not None:
         cached_r = await _maybe_recover_degraded(cached.replayed(), sample, ctx)
-        return _Acquired(sample=sample, idx=idx, result=ctx.scorer.grade(cached_r), fresh=False)
+        return _Acquired(sample=sample, result=ctx.scorer.grade(cached_r), fresh=False)
 
     deprecated_display: GradedCell | None = None
     if (cached_deprecated := ctx.deprecated_samples.get(sample.id)) is not None:
@@ -293,7 +300,6 @@ async def _acquire(sample: Sample, idx: int, ctx: QueryLoopState, claiming: set[
             claim.retire()
     return _Acquired(
         sample=sample,
-        idx=idx,
         result=graded,
         fresh=True,
         deprecated_display=deprecated_display,
@@ -307,7 +313,10 @@ LaunchEvent = tuple["Sample", int, LookaheadWindow]
 class Walk:
     """A cell frees its slot when it RETURNS, not when taken; no walk reads another's state across an await."""
 
+    # Every row the walk may take, in the order it takes them; its replay state covers them all.
     dataset: list[Sample]
+    # How many of them it takes.
+    budget: int
     ctx: QueryLoopState
     checks: Sequence[StopRule]
     # Copied once per cell: a cell's throttle give-back and envelope deadline bind to its task.
@@ -316,9 +325,9 @@ class Walk:
     skip_at: int | None = None
     results: list[GradedCell] = field(default_factory=list)
     consecutive_errors: int = 0
-    submitted: int = 0
+    # Each cell out, then back, by the row it takes: a block's open re-seats it where its row moved.
     running: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
-    # Running cells still waiting on another process's claim: nothing sent, so every stop cancels them.
+    # Sample ids of running cells still on another process's claim: every stop cancels them.
     claiming: set[int] = field(default_factory=set)
     finished: dict[int, asyncio.Task[_Acquired]] = field(default_factory=dict)
     launched_at: dict[int, float] = field(default_factory=dict)
@@ -331,13 +340,47 @@ class Walk:
 
     @property
     def n(self) -> int:
-        return len(self.dataset)
+        return self.budget
 
     def enter_block(self, end: int) -> None:
         self.boundary = min(self.n, end)
 
+    def reorder(self, rows: Sequence[Sample]) -> None:
+        """Its untaken pool in the order its race chose. A cell out or back moves with its row, by
+        sample id: the choice drops no row from the pool, so a press re-buys and replays none."""
+        head = len(self.results)
+        # By slot, never by key: two rows of one content share a key.
+        assert sorted(s.id for s in rows) == sorted(s.id for s in self.dataset[head:]), (
+            "a race chose rows outside the walk's untaken pool"
+        )
+        seat = {sample.id: head + k for k, sample in enumerate(rows)}
+        row = self.dataset
+        self.running = {seat[row[i].id]: cell for i, cell in self.running.items()}
+        self.finished = {seat[row[i].id]: cell for i, cell in self.finished.items()}
+        # A taken row keeps its own: a settling cell reads it.
+        self.launched_at = {
+            seat[row[i].id] if i >= head else i: at for i, at in self.launched_at.items()
+        }
+        # A copy: walks share the list they were opened on.
+        self.dataset = [*row[:head], *rows]
+
+    def unsent(self, cells: int) -> list[int]:
+        """The rows it may still send, in the order it takes them: none taken, out or back, and
+        at most *cells* out or back past its pending close, so a cut there wastes them at most."""
+        end, out = self.n if self.skip_at is None else self.skip_at, {*self.running, *self.finished}
+        rows = [i for i in range(len(self.results), end) if i not in out]
+        if (close := self.boundary) is None:
+            return rows
+        past = max(cells - sum(i >= close for i in out), 0)
+        return [i for i in rows if i < close] + [i for i in rows if i >= close][:past]
+
+    def sent(self) -> list[Sample]:
+        """The rows it took, then each one a cell is out or back on, in the order it takes them."""
+        out = sorted({*self.running, *self.finished})
+        return [*self.dataset[: len(self.results)], *(self.dataset[i] for i in out)]
+
     def launch(self, armed: LookaheadWindow) -> tuple[Sample, asyncio.Task[_Acquired]]:
-        idx = self.submitted
+        idx = self.unsent(armed.cells)[0]
         sample = self.dataset[idx]
         # `armed` is the window the round RUNS at, never the in-flight count, empty at each candidate's start.
         event: LaunchEvent = (sample, idx, armed)
@@ -346,13 +389,12 @@ class Walk:
         else:
             self._started(event)
         cell = asyncio.create_task(
-            _acquire(sample, idx, self.ctx, self.claiming),
+            _acquire(sample, self.ctx, self.claiming),
             name=f"scoring:{sample.id}",
             context=self.context.copy(),
         )
         self.running[idx] = cell
         self.launched_at[idx] = time.time()
-        self.submitted += 1
         return sample, cell
 
     def release(self) -> None:
@@ -387,7 +429,8 @@ class Walk:
     def take(self, cell: asyncio.Task[_Acquired]) -> QueryLoopResult | None:
         """The only writer of the rows; raises the cell's own error in its turn, never in its race."""
         acq = cell.result()
-        del self.finished[acq.idx]
+        idx = len(self.results)
+        del self.finished[idx]
         ctx, n = self.ctx, self.n
         first = ctx.claim_price(acq.sample)
         if not acq.fresh:
@@ -395,7 +438,7 @@ class Walk:
             if acq.result.facts.cached and first:
                 _emit_cached_step_tokens(acq.result.facts)
         elif acq.deprecated_display is not None:
-            ctx.sample_scored(acq.deprecated_display, acq.sample, acq.idx, n, running=None)
+            ctx.sample_scored(acq.deprecated_display, acq.sample, idx, n, running=None)
 
         # Before the snapshot below, which names the cell by its answer's address.
         taken = ctx.recorder.take(acq.result)
@@ -417,7 +460,7 @@ class Walk:
             else:
                 self.consecutive_errors = 0
 
-        ctx.sample_scored(taken, acq.sample, acq.idx, n, running=running)
+        ctx.sample_scored(taken, acq.sample, idx, n, running=running)
         return None
 
     def _abort_reason(self, result: GradedCell) -> WalkEnd | None:
@@ -439,10 +482,12 @@ class Walk:
         return None
 
     def launch_horizon(self, last: int) -> int | None:
-        """Index ``i`` may launch while no cut is possible before ``i`` rows, so a cut wastes one cell at most."""
+        """Index ``i`` may launch while no rule can cut before ``i`` rows, so a rule's cut wastes one
+        cell at most. A block's close bounds no launch: a cut there wastes the press at most."""
         return self.horizon(last - 2)
 
     def horizon(self, last: int) -> int | None:
+        """The fewest rows at which a stop rule may cut, read off the rows up to index *last*."""
         head = len(self.results)
         if last < head:
             return None
@@ -451,8 +496,6 @@ class Walk:
             for i in range(head, last + 1)
         ]
         stops = [check.earliest_stop(self.results, upcoming) for check in self.checks]
-        if self.boundary is not None and self.boundary <= last + 1:
-            stops.append(self.boundary)
         return min((m for m in stops if m is not None), default=None)
 
     def rereads_ahead(self, start: int) -> int:
@@ -461,10 +504,6 @@ class Walk:
             end += 1
         return end - start
 
-    def rows(self) -> list[GradedCell]:
-        returned = (_returned_row(cell) for cell in self.finished.values())
-        return [*self.results, *(row for row in returned if row is not None)]
-
     def flight(self) -> Flight:
         settled = len(self.results) + len(self.finished)
         horizon = self.horizon(self.n - 1)
@@ -472,14 +511,15 @@ class Walk:
         return Flight(len(self.running), limit - settled, self.n - settled)
 
     def bank(self) -> list[Sample]:
-        """Only cells this walk was SURE to take: below its horizon and before the first error."""
+        """Only cells this walk was SURE to take: below its horizon, its block race's pending close
+        and the first error."""
         self.collect()
-        horizon = self.horizon(self.n - 1)
+        sure = min(m for m in (self.n, self.horizon(self.n - 1), self.boundary) if m is not None)
         rows: list[GradedCell] = []
         paid: list[Sample] = []
         samples: list[Sample] = []
         for idx in sorted(self.finished):
-            if horizon is not None and idx >= horizon:
+            if idx >= sure:
                 break
             cell = self.finished[idx]
             if cell.cancelled() or cell.exception() is not None:
@@ -515,7 +555,7 @@ class Walk:
 
     def drop_claim_waits(self) -> None:
         for idx, cell in self.running.items():
-            if idx in self.claiming:
+            if self.dataset[idx].id in self.claiming:
                 cell.cancel()
 
 
@@ -624,8 +664,15 @@ class _ScoringPhase[K: Hashable]:
             return sys.maxsize
         return book.fits(cell, paid_by=self.payer, kind=self.label.kind) - self.out()
 
+    def racing(self) -> dict[int, Walk]:
+        return {
+            i: walk
+            for i, walk in enumerate(self.walks)
+            if walk is not None and walk.outcome is None
+        }
+
     def live(self) -> list[Walk]:
-        return [walk for walk in self.walks if walk is not None and walk.outcome is None]
+        return list(self.racing().values())
 
     def out(self) -> int:
         # A catch-up and a cancelled call still draining count too, or `max_cells_in_flight` understates peak RSS.
@@ -641,9 +688,19 @@ class _ScoringPhase[K: Hashable]:
             calls.update(self.backfills.backfills_in_flight())
         return calls
 
-    def reach(self, walk: Walk) -> None:
-        if self.blocks is not None:
+    def open_block(self) -> None:
+        """Each live walk's next stretch: the row its block closes at, and the order its race takes
+        its untaken pool in."""
+        if self.blocks is None:
+            return
+        live = {self.keys[i]: walk for i, walk in self.racing().items()}
+        chosen = self.blocks.choose_rows(
+            {key: walk.results for key, walk in live.items()},
+            {key: walk.dataset[len(walk.results) :] for key, walk in live.items()},
+        )
+        for key, walk in live.items():
             walk.enter_block((self.block + 1) * self.blocks.block_size)
+            walk.reorder(chosen[key])
 
     def announce(self, i: int) -> None:
         self.announced.add(i)
@@ -656,8 +713,7 @@ class _ScoringPhase[K: Hashable]:
             self.on_decided(self.keys[i])
 
     def first_turn(self) -> bool:
-        for opened in self.live():
-            self.reach(opened)
+        self.open_block()
         return self.advance()
 
     def advance(self) -> bool:
@@ -674,18 +730,14 @@ class _ScoringPhase[K: Hashable]:
             self.announce(self.turn)
             if walk is not None:
                 walk.release()
-                if walk.dataset:
+                if walk.n:
                     return True
                 walk.end(QueryLoopResult([]), cancel=self.cancels)
             self.conclude(self.turn)
 
     def close_block(self) -> bool:
         assert self.blocks is not None
-        racing = {
-            i: walk
-            for i, walk in enumerate(self.walks)
-            if walk is not None and walk.outcome is None
-        }
+        racing = self.racing()
         stops = (
             self.blocks.close({self.keys[i]: walk.results for i, walk in racing.items()})
             if racing
@@ -703,8 +755,7 @@ class _ScoringPhase[K: Hashable]:
             self.draining.update(walk.end(verdict, cancel=self.cancels))
             self.conclude(i)
         self.block += 1
-        for walk in self.live():
-            self.reach(walk)
+        self.open_block()
         return bool(self.live())
 
     async def step(self) -> bool:
@@ -798,7 +849,7 @@ class _ScoringPhase[K: Hashable]:
         """A walk's own calls out: its cells, and the catch-ups started on its cells not yet settled."""
         out = len(walk.running)
         if self.backfills is not None:
-            for sample in walk.dataset[max(0, len(walk.results) - 1) : walk.submitted]:
+            for sample in walk.sent()[max(0, len(walk.results) - 1) :]:
                 out += sum(not call.done() for call in self.backfills.backfills_for(sample))
         return out
 
@@ -831,21 +882,20 @@ class _ScoringPhase[K: Hashable]:
             self.fill(ahead, armed, self.ceiling if ahead is walk else self.ceiling - 1)
 
     def fill(self, walk: Walk, armed: LookaheadWindow, ceiling: int) -> None:
+        """Up to the press, past a pending block close too, on the rows its last open chose."""
         backfills = self.backfills
+        if not (unsent := walk.unsent(armed.cells)):
+            return
         room = min(
             self.room(walk, armed, ceiling),
-            max(self.affordable(), walk.rereads_ahead(walk.submitted)),
+            max(self.affordable(), walk.rereads_ahead(unsent[0])),
         )
-        last = min(walk.n if walk.skip_at is None else walk.skip_at, walk.submitted + room) - 1
-        if walk.boundary is not None:
-            # One cell past a pending close at most, whatever the rules allow.
-            last = min(last, walk.boundary)
-        if last < walk.submitted:
+        if not (sending := unsent[: max(room, 0)]):
             return
-        horizon = walk.launch_horizon(last)
-        while (
-            room > 0 and walk.submitted <= last and (horizon is None or walk.submitted <= horizon)
-        ):
+        horizon = walk.launch_horizon(sending[-1])
+        for idx in sending:
+            if room <= 0 or (horizon is not None and idx > horizon):
+                break
             sample, _cell = walk.launch(armed)
             room -= 1
             if backfills is not None:
@@ -983,8 +1033,8 @@ class _ScoringPhase[K: Hashable]:
         most = sum(p.most for p in parts) + winding
         if backfills is not None:
             catching = len(backfills.backfills_in_flight())
-            samples = {s.id: s for walk in walking for s in walk.dataset}
-            launched = {s.id for walk in walking for s in walk.dataset[: walk.submitted]}
+            samples = {s.id: s for walk in walking for s in walk.dataset[: walk.n]}
+            launched = {s.id for walk in walking for s in walk.sent()}
             owed = {sid: backfills.owed_backfills(s) for sid, s in samples.items()}
             out_now += catching
             allowed += catching + sum(k for sid, k in owed.items() if sid in launched)

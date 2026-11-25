@@ -10,7 +10,8 @@ blind to every outcome:
 | **Acquisition score** | Which sample is hardest to call? | `pick_value = decision_information_gain + delta_learning_gain` | the persisted hard-samples ranking alone |
 | **Round order** | In what order do we score the round's samples? | `build_round_order` | **Within** a round — one deterministic order, shared by every candidate |
 
-**There is no online per-sample re-fit** — the round order is static by design (§ The round order).
+**Under `pobb.row_choice: random` (the default) there is no online per-sample re-fit** — the round
+order is static by design (§ The round order); `informative` reverses that, under `overlap` alone.
 Which *candidate* wins is [`candidate-elimination.md`](candidate-elimination.md)'s; both read θ, so
 they never disagree about what "better" means.
 
@@ -289,6 +290,17 @@ discordance-potential samples. **At a low base rate the static order hits the sa
 symptom INVERTED:** the candidate misses the MISS stratum too, near-ties narrow both SEs, and `p_best`
 reads DECISIVE (`sealqa/longseal-12`: four arms cut at `elimination_n_min`, identical to six
 decimals). Count the discordant cells (`selection.py::discordant`) to tell the two apart.
+
+**`pobb.row_choice: informative` reverses this decision, and is refused unless
+`theta_election.vote: overlap`** (`couplings.py::POBB`, `informative_rows_without_overlap`). At
+every block's open the race takes each walk's next rows from the sampler's pool by Fisher
+information (`rasch.py::most_informative`), δ read off the ruler and θ by `pobb.refit`: `per_round`
+the parent's on the ruler seated at the round's start, `per_decision` the survivors' in PoBB's last
+field fit, linked onto that ruler (`rasch.py::theta_on_ruler`). A chosen row is no blind draw and the
+parent's hits it skips are the regressions the probe above looks for, so the draw cannot crown an
+arm read on it: the origin panel, blind to the race, does. Every survivor answers the same next row
+(`per_candidate`); a top-up walk keeps its own panel gaps' order. A row the parent never answered is
+caught up as on the draw, so PoBB's field always holds the parent on the rows the arms raced.
 
 ---
 

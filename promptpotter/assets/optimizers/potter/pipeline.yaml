@@ -110,6 +110,8 @@ nodes:
       epsilon: 0.05
       epsilon_floor: 0.05
       epsilon_stop: true
+      row_choice: random
+      refit: per_round
   # The next parent: a θ lift over the parent its paired cells agree with (`elect_round_winner`).
   theta_election:
     type: selector

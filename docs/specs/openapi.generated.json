@@ -4546,6 +4546,7 @@
           "severity": {
             "description": "collision (soundness) | inert (wasted knob) | info (relationship)",
             "enum": [
+              "refused",
               "collision",
               "inert",
               "info"
