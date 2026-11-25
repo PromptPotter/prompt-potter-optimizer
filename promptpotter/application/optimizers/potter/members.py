@@ -92,7 +92,6 @@ from promptpotter.application.optimizers.potter.l1 import (
     critique_facts,
     distil_critique,
     propose_l1_population,
-    rejoining,
     review_reading,
     variants_this_round,
     yield_facts,
@@ -254,10 +253,10 @@ class L1Generate(LayoutNode, nodes.Proposer):
 
     def arms(self, selected: SelectedOptimizer) -> int:
         knobs = selected.knobs_of(self.name, L1GenerateKnobs)
-        # An unfired host writes no child; +1: the leader a held round keeps (`l1.py::rejoining`).
+        # An unfired host writes no child.
         ladder = selected.knobs_of(Escalation.name, EscalationKnobs).escalation_ladder
         hosted = knobs.recombination_host == self.name or ladder.fires_l2
-        return knobs.n_variants + (knobs.recombine if hosted else 0) + 1
+        return knobs.n_variants + (knobs.recombine if hosted else 0)
 
     def opening(self, ctx: NodeContext, bench: nodes.RoundOpening) -> nodes.RoundOpening:
         knobs = ctx.knobs(L1GenerateKnobs)
@@ -271,9 +270,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
                 "L2 after stalled rounds": CountFact(value=ctx.knobs(EscalationKnobs).l1_patience),
                 critique: CountFact(value=prior) if prior >= 0 else None,
             },
-            arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory))
-            + knobs.recombine
-            + len(rejoining(ctx.read(Lineage))),
+            arms=variants_this_round(knobs.n_variants, ctx.slice(L2Memory)) + knobs.recombine,
             replayed=bench.replayed,
         )
 

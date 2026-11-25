@@ -10,6 +10,12 @@ swap:
   paired_t:
     node: pobb
     of: potter
+    # The race on the draw: capo's selector votes on every arm's draw rows, a block at a time, and
+    # `informative` would reverse the round order's measured interleave (`verdict-resolution.md`).
+    config:
+      row_choice: random
+      shape: per_candidate
+      dispatch: batch
 # Its own lead knobs, never capo's: the swapped race brings its own.
 main:
   - blocks.block_size

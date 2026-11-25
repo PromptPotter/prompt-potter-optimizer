@@ -1336,7 +1336,14 @@ def _informative_race(
         optimization={
             "elimination_n_min": 4,
             "nodes": {
-                "pobb": {"config": {"row_choice": "informative", "refit": refit, "shape": shape}},
+                "pobb": {
+                    "config": {
+                        "row_choice": "informative",
+                        "refit": refit,
+                        "shape": shape,
+                        "dispatch": "batch",
+                    }
+                },
                 "theta_election": {"config": {"vote": "overlap"}},
             },
         },

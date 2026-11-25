@@ -1711,21 +1711,23 @@ def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
         OptimizerChoice(
             call_target=BENCH_TARGET,
             optimizer="potter",
-            nodes={"theta_election": ManifestNodeOverlay(config={"vote": "overlap"})},
+            nodes={
+                "pobb": ManifestNodeOverlay(config={"row_choice": "random"}),
+                "theta_election": ManifestNodeOverlay(config={"vote": "draw"}),
+            },
         )
     )
-    assert (voting.vote, select_optimizer(bench_choice("potter")).vote) == ("overlap", "draw"), (
+    assert (voting.vote, select_optimizer(bench_choice("potter")).vote) == ("draw", "overlap"), (
         "the election's `vote` never reached the round's pairing"
     )
 
 
 def test_informative_rows_without_an_overlap_vote_are_refused_at_every_selection() -> None:
-    informative = {"pobb": {"config": {"row_choice": "informative"}}}
     for optimizer, nodes, refused in (
-        ("potter", informative, True),
-        ("capo-pobb", informative, True),
-        ("potter", {**informative, "theta_election": {"config": {"vote": "overlap"}}}, False),
+        ("potter", {"theta_election": {"config": {"vote": "draw"}}}, True),
+        ("capo-pobb", {"pobb": {"config": {"row_choice": "informative"}}}, True),
         ("potter", {}, False),
+        ("capo-pobb", {}, False),
     ):
         # The one door a check-in, a mint and a resume's laid overlay each select through.
         choice = defaulted_config({"optimization": {"optimizer": optimizer, "nodes": nodes}})
@@ -2083,6 +2085,9 @@ def peer_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Compos
     name = "capo"
     capo = yaml.safe_load((optimizers_root() / "capo" / "pipeline.yaml").read_text("utf-8"))
     potter = yaml.safe_load((optimizers_root() / "potter" / "pipeline.yaml").read_text("utf-8"))
+    # Potter's race beside capo's selector runs on the draw, as capo-pobb lays it.
+    switch = yaml.safe_load((optimizers_root() / "capo-pobb" / "pipeline.yaml").read_text("utf-8"))
+    potter["nodes"]["pobb"]["config"] |= switch["swap"]["paired_t"]["config"]
     seed = ["capo_init"]
     walk = ["blocks", "mating", "capo_crossover", "pobb", "score", "population"]
     homes = count()

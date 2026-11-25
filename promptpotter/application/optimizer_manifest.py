@@ -813,7 +813,7 @@ def _resolved(name: str) -> tuple[PipelineManifest, dict[str, Any]]:
             "main": authored.main,
             "resolved_prompts": prompts,
         }
-    )
+    ).laid_over({swap.node: swap.config for swap in authored.swap.values()})
     return manifest, schemas
 
 

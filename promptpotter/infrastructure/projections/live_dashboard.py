@@ -14,7 +14,7 @@ from promptpotter.domain.arm_reading import (
     panel_counts,
     panel_cuts,
 )
-from promptpotter.domain.arms import Concluded, Measuring, arm_name
+from promptpotter.domain.arms import Concluded, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.connector import MeasuredUnit
@@ -312,8 +312,6 @@ class LiveDashboardState(DashboardFacts):
     current_position: int | None = None
     # The last close's; served only as each `ServedRound`'s readings of it.
     level_series: LevelSeries | None = None
-    # A PLAN: an eliminator can stop a candidate before the tail is reached.
-    declared_sample_order: list[int] = Field(default_factory=list)
 
     waiting_since: float | None = None
 
@@ -375,7 +373,6 @@ class LiveDashboardState(DashboardFacts):
             "error": None,
             "current_query_payload": None,
             "current_position": None,
-            "declared_sample_order": [],
         }
 
 
@@ -645,8 +642,6 @@ class LiveDashboardProjection(Projection):
             self.state.sample_lookahead_discards += sum(
                 1 for k in ended if self._open_samples.pop(k)[2]
             )
-        if isinstance(record.state, Measuring) and record.state.sample_order:
-            self.state.declared_sample_order = record.state.sample_order
 
     def _mark(self, mark: VerificationMark) -> None:
         held = [

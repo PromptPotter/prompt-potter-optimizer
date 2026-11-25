@@ -110,17 +110,17 @@ nodes:
       epsilon: 0.05
       epsilon_floor: 0.05
       epsilon_stop: true
-      row_choice: random
-      refit: per_round
-      shape: per_candidate
-      dispatch: batch
+      row_choice: informative
+      refit: per_decision
+      shape: per_round
+      dispatch: rolling
       read_order: launch
   # The next parent: a θ lift over the parent its paired cells agree with (`elect_round_winner`).
   theta_election:
     type: selector
     config:
       admission: 0.85
-      vote: draw
+      vote: overlap
   l1_critique:
     type: llm
     optimizer: *node_menus

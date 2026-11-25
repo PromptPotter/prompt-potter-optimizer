@@ -61,8 +61,8 @@ its posterior carrying μ0's own error, so a τ at 0 never reads as certainty on
 
 **Which rows the bar pairs on is potter's `theta_election` `vote`**, chosen once before the election
 (`runner/round.py::bar_pairing`), so the crown, `Election.bar` and the replay read one cell set
-(`MeasuredRound.paired_on`). `draw` (the default) pairs an arm with its parent on every cell raced.
-`overlap` pairs them on the origin panel's cells alone, the rows both hold, and only an arm the
+(`MeasuredRound.paired_on`). `draw` pairs an arm with its parent on every cell raced.
+`overlap` (the default) pairs them on the origin panel's cells alone, the rows both hold, and only an arm the
 panel trigger seats there (`runner/round.py::panel_trigger`) is electable: the panel, a monitor
 under `draw`, is the verdict, and a PoBB stop, which it never seats, leaves the election. Its cells are bought before the election
 (`runner/round.py::read_origin_panel`), the crowning cells included, since the panel stays fixed
@@ -74,8 +74,8 @@ cut from the origin's own round, which `sp_budget_origin` sizes and must cover.
 
 `pobb.shape` says it (`race.py::PoBBRace.choose_rows`, the loop's one rows hook,
 `query_loop.py::BlockRace.choose_rows`, answering each live walk's row order and its share of the
-block's calls). `per_candidate` (the default) hands every survivor `block_size` calls on the same
-next rows. `per_round` hands the block's `block_size × survivors` calls one at a time
+block's calls). `per_candidate` hands every survivor `block_size` calls on the same
+next rows. `per_round` (the default) hands the block's `block_size × survivors` calls one at a time
 (`race.py::_hand_out`) to the walk whose next answer tells the decision most; a walk handed none
 waits out the block, and the block closes once the calls it handed out are back.
 
@@ -93,8 +93,8 @@ way (a sure cut, a sure leader) draws few calls while a contested one remains; o
 them all. Under `per_round` the parent catches up on every row a candidate takes it never answered,
 so its bill grows with the union of the rows.
 
-`pobb.dispatch` says when the decision runs. `batch` (the default) closes a block once every call
-it handed out is back. `rolling` decides on every returned row through the same close, cut and
+`pobb.dispatch` says when the decision runs. `batch` closes a block once every call
+it handed out is back. `rolling` (the default) decides on every returned row through the same close, cut and
 `choose_rows`, with no block every survivor closes together (no readout block line, no `block` on
 the arm). Each decision hands calls by the same arg-max, as many as § How many calls a rolling
 decision sends derives, the calls out keeping their seats. `pobb.read_order` says which returned
@@ -127,7 +127,7 @@ is out at once, never what is committed, so a cut wastes at most the press.
 - potter's `pobb` `epsilon_stop` — the one stop's switch, shipped on (capo-pobb reads the same `pobb` config).
 - potter's `pobb` `epsilon` (`0.05` in its manifest: the planted-arm bar holds there and misses at 0.10), under 0.5. A stop ends measurement; it is **not** a verdict and, under `vote: draw`, never removes the candidate from the election (`is_leader_eligible`). **A stopped arm buys no cell after its stop**: the election reads it on its draw (`runner/round.py::measure_population`) and no `PanelTrigger` seats it on the origin panel (`runner/round.py::panel_triggers`); only a stopped arm the election PICKS is topped up, as every line member is.
 - potter's `theta_election` `admission` (`0.85` in its manifest) — the election's own bar (§ The θ rule).
-- potter's `theta_election` `vote` (`draw` in its manifest) — which rows that bar pairs on (§ The θ rule).
+- potter's `theta_election` `vote` (`overlap` in its manifest) — which rows that bar pairs on (§ The θ rule).
 - potter's `pobb` `epsilon_floor` — ε at `elimination_n_min`, ramping linearly to `epsilon` over the next `elimination_n_min` cells read (`PoBBCheck.epsilon_at`). Equal to `epsilon` (as shipped) = a flat bar. **The bar ramps IN only, and nothing guards the tail** — else every late loser spends its budget; the price is that `PairedReading.reference_level` refuses an arm stopped short of a parent cell (`selected_by_stop`), so it ranks on θ alone. Aggression belongs here, never in `elimination_n_min`; a floor above `epsilon` goes flat and `epsilon_floor_inverted` reports it.
 - `OptimizationConfig.elimination_n_min` (default `6`) — the one min-samples floor, gating PoBB **and** ruler warmth (δ≡0 ⇒ θ = logit-fitness until this many grade-A samples bank): difficulty and ability become trustworthy at one threshold.
 

@@ -58,12 +58,11 @@ class EliminationContext(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class PoBBStop(StopSignal):
-    """What a cut read: ``cells``, the arm's own the field was read on, and ``priors``, each
-    rival's rows on the cells read; `race.py::EliminationCut` records their keys."""
+    """What a cut read: ``cells``, each rival's rows and the arm's own on the cells the field was
+    read on, by key, the arm last as its field was fit; `race.py::EliminationCut` records them."""
 
     check_result: EliminationContext
-    cells: list[str]
-    priors: dict[ArmKey, CellSheet]
+    cells: dict[ArmKey, list[str]]
     paired_breakdown: dict[ArmKey, float]
 
 
@@ -202,10 +201,13 @@ class PoBBCheck:
                     "gate": _GATE,
                     "epsilon": float(bar[key]),
                 },
-                cells=[cell for cell in cells if cell in set(answered[key])],
-                priors={
-                    pid: race_sheet(c for c in rival.cells if c.key in held)
-                    for pid, rival in rivals.items()
+                # The arm last, as its field was fit: the draws are seeded in that order.
+                cells={
+                    **{
+                        pid: [c.key for c in rival.scoreable if c.key in held]
+                        for pid, rival in rivals.items()
+                    },
+                    key: [cell for cell in cells if cell in set(answered[key])],
                 },
                 paired_breakdown=paired_breakdown,
             )

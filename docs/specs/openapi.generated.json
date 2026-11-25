@@ -16057,15 +16057,15 @@
       },
       "SampleWalk": {
         "additionalProperties": false,
-        "description": "The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the\ncursor is declared, never promised — an eliminator can stop the arm before its tail.",
+        "description": "The scoring walk of the arm being measured: the cells it took, in the order it took them,\nplus a cursor, so a race that re-chooses its rows at a decision never moves a taken cell.",
         "properties": {
           "cursor": {
-            "description": "Where the walk stands in `ids`: the cell in flight, else the one after the last measured.",
+            "description": "Where the walk stands in `ids`: its last cell.",
             "title": "Cursor",
             "type": "integer"
           },
           "ids": {
-            "description": "The declared order; before the arm declares one, the cells it has measured and the one in flight.",
+            "description": "The cells the arm has measured, in the order it took them, then the one in flight.",
             "items": {
               "type": "integer"
             },

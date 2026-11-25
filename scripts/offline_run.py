@@ -1034,12 +1034,18 @@ async def run_rebasing(workspace: Path, *, rounds: int, rows: int) -> None:
     """Potter resumed with `--from` under an L2 proposing the same fork at every fire: only the
     first changes something, and the line's forks spend one round budget between them."""
     # L2 fires every round, so the fork owes nothing to whether the fake replies happen to stall;
-    # no arm stops short, so the ruler a rewind needs spans the rows whatever PoBB would cut.
+    # no arm stops short and every arm answers the draw, so the ruler a rewind needs spans the rows
+    # whatever PoBB would cut or `informative` would choose off the first campaign's bank; the
+    # election votes on the draw, so the noise walk holds a promotion up for the doors to read.
     config = campaign_config(
         "potter",
         rounds,
         bench_trigger="manual",
-        knobs={"escalation": EVERY_L2, "pobb": {"epsilon_stop": False}},
+        knobs={
+            "escalation": EVERY_L2,
+            "pobb": {"epsilon_stop": False, "row_choice": "random"},
+            "theta_election": {"vote": "draw"},
+        },
     )
     samples = synthetic_rows(rows)
     (workspace / "requests").mkdir()

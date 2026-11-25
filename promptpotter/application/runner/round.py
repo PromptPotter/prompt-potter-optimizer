@@ -910,7 +910,7 @@ async def _walk_population(
         held = states[key].block
         racing = sum(1 for w in walks.values() if w is not None and w.outcome is None)
         walk = walks[key]
-        # The rows its race chose, which the readout heads and the dashboard's axis reads.
+        # The rows its race chose, which the readout heads.
         chosen = order if walk is None else [int(s.id) for s in walk.dataset[: walk.n]]
         # A turn inside a block race files the arm once per checkpoint that moved the field or its rows.
         moved = chosen != states[key].sample_order

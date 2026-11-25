@@ -2464,15 +2464,14 @@ export interface ForkRemainder {
   rounds: number | null;
 }
 
-/** The scoring walk of the arm being measured: the axis it DECLARED plus a
- * cursor. Past the cursor is declared, never promised — an eliminator can
- * stop the arm before its tail. */
+/** The scoring walk of the arm being measured: the cells it took, in the order it
+ * took them, plus a cursor, so a race that re-chooses its rows at a decision
+ * never moves a taken cell. */
 export interface SampleWalk {
-  /** The declared order; before the arm declares one, the cells it has measured and
-   * the one in flight. */
+  /** The cells the arm has measured, in the order it took them, then the one in
+   * flight. */
   ids: number[];
-  /** Where the walk stands in `ids`: the cell in flight, else the one after the
-   * last measured. */
+  /** Where the walk stands in `ids`: its last cell. */
   cursor: number;
   /** Changes when the walk does — a new arm is a new axis. */
   key: string;
@@ -5768,7 +5767,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "160c11b368c042b5";
+export const SERVED_CONTRACT = "e0e743053480ea2d";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

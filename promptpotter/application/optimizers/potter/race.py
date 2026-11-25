@@ -348,11 +348,7 @@ class PoBBRace(Race):
             "leader": context["leader"],
             "paired_breakdown": signal.paired_breakdown,
             "epsilon": context["epsilon"],
-            # The arm last, as its field was fit: the draws are seeded in that order.
-            "cells": {
-                **{pid: [c.key for c in prior.scoreable] for pid, prior in signal.priors.items()},
-                key: signal.cells,
-            },
+            "cells": signal.cells,
         }
         self._replay.decide(EliminationCut(**raced), True)
         named = {**labels, self._check.parent: "parent"}
