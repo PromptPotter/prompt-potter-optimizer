@@ -941,11 +941,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   L4's θ term, which l4-key-c removed, so the branch is dead and its words false: the outer loop scores
   `held_out_lift`. Root: delete the branch; L4 evidence then reads `fitness`, a linear re-anchor of
   `held_out_lift`. **Rides with:** l4-key-c. **Re-test:** `git grep -c seed_lift -- promptpotter` (today 8, target 0).
-- **A switch names the knobs it pins and refuses the ones it does not**: `assets/optimizers/capo-pobb/pipeline.yaml`
-  extends `capo` and swaps `paired_t` for potter's `pobb`, so every knob the swap does not pin is inherited
-  silently; a potter `pobb` knob added later reaches `capo-pobb` with nothing saying so. Root: a swap
-  declares each of the swapped node's knobs as pinned or taken. **Re-test:** a new `pobb` knob without a
-  decision in `capo-pobb`'s manifest fails the load.
 - **A fork under `informative` rows is declined in silence**: `mask/load.py::load_lineage_spine` reads every
   level of a line whose rows lie off the banked ruler as `unmeasured_delta`, so `backprop.py::select_branch_round`
   returns `None` and `escalation.py::_rebase_request` drops the L2's `fork_proposal` with no record or readout
