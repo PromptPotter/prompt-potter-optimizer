@@ -843,9 +843,11 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   (786 lines) writes `log.md`, `review.md` and `export.json` (`:640`); `readout.log`,
   `rounds/round_NNNN.json`, the `evidence` verb and the dashboard serve the same facts. Dropping the two
   markdown files takes the runner to 9 modules and removes B's hardest reader. **Closes:**
-  **A round's markdown names its lift column from the first arm**. **Held:** the operator's fork; the tuning
-  row **The default host pin is a trial with no verdict** reads `review.md`, so its reader moves to a
-  served read first. **Run data:** none. **Size:** medium. **Re-test:** `git grep -c "review.md" -- promptpotter` is 0.
+  **A round's markdown names its lift column from the first arm**. **Decided** (operator, 2026-11-25): the
+  two go, and the run folder stays the headless UI (a device with no browser, a PLC or a Raspberry Pi,
+  reads it), so every fact they show stays plain text in `readout.log`, a round file or a CLI read
+  verb, never a served-only read. The tuning row **The default host pin is a trial with no verdict**
+  reads `review.md`, so its reader moves first. **Run data:** none. **Size:** medium. **Re-test:** `git grep -c "review.md" -- promptpotter` is 0.
 - **A nested run's send is filed once, on the run that sent it**: `domain/records/run_records.py:572`
   `mirrored: bool = False`, `infrastructure/llm/spend_book.py:751` writes `mirrored=self._book.nested`,
   `infrastructure/store/read_model.py:1132-1136` branches on it, and `store/CLAUDE.md` warns that money
