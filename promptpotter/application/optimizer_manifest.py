@@ -686,6 +686,23 @@ def _refuse_unknown_slots(selected: SelectedOptimizer) -> None:
             )
 
 
+def _refuse_couplings(selected: SelectedOptimizer) -> None:
+    """A ``refused`` coupling is a pairing no run takes, never one it falls back from: asked of
+    every selection, so a resume's or a steer's overlay meets it as the mint's does."""
+    refused = [
+        f"{', '.join(f'optimization.nodes.{member.name}.config.{k}' for k in c.knobs)}: "
+        f"{c.consequence}"
+        for member in selected.members
+        for c in member.couplings
+        if c.severity == "refused"
+        and c.predicate(
+            None, selected.knobs(member.name), selected.declared_knobs(member.name), selected
+        )
+    ]
+    if refused:
+        raise PayloadInvalidError("; ".join(refused), code="coupling_refused")
+
+
 def _refuse_unheld_steers(selected: SelectedOptimizer) -> None:
     for target, keys in selected.steered_axes.items():
         held = selected.node_config(target).model_fields_set
@@ -884,6 +901,7 @@ def _select(
     _refuse_unnamed_arms(selected)
     _refuse_unheld_steers(selected)
     _refuse_unknown_slots(selected)
+    _refuse_couplings(selected)
     if refused := selected.pool_refusals(mint=None):
         raise ValueError("; ".join(refused))
     return selected

@@ -19,6 +19,7 @@ from promptpotter.shared.statistics import sign_posterior
 CellStrata = Literal["none", "dataset"]
 RowChoice = Literal["random", "informative"]
 Refit = Literal["per_round", "per_decision"]
+Shape = Literal["per_candidate", "per_round"]
 
 
 class EscalationLadder(StrEnum):
@@ -220,6 +221,15 @@ class PoBBKnobs(StrictModel):
             "seated at the round's start. ``per_decision``: each survivor's in the field fit "
             "PoBB's last check made, moved onto that ruler's scale; the round's until a check "
             "first fits. Read under ``informative`` alone."
+        ),
+    )
+    shape: Annotated[Shape, Knob(Estimand.SELECTION)] = Field(
+        description=(
+            "Who answers a block's calls. ``per_candidate``: every survivor answers its next "
+            "``block_size`` rows, the same rows under ``random``. ``per_round``: the block's calls "
+            "(``block_size`` per survivor) go to the (candidate, row) pairs that tell PoBB's cut "
+            "most, so each candidate answers rows of its own, none, one or several a block; the "
+            "cut reads the field on the union of rows (``methods/candidate-elimination.md``)."
         ),
     )
 

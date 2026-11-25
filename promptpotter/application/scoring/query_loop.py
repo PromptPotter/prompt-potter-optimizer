@@ -4,7 +4,7 @@ import asyncio
 import contextvars
 import sys
 import time
-from collections.abc import Awaitable, Callable, Hashable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -39,7 +39,7 @@ from promptpotter.domain.records.run_records import (
     StopLoop,
 )
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import FiledAnswer, Sample, Stretch
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
     CellSheet,
@@ -51,6 +51,7 @@ from promptpotter.domain.scoring import (
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import StopRule, StopSignal
 from promptpotter.infrastructure.backend import CELL
+from promptpotter.infrastructure.llm.heartbeat import CellBeat, heartbeat
 from promptpotter.infrastructure.llm.send_pacing import HELD_POLL_S
 from promptpotter.infrastructure.llm.spend_book import (
     SendBound,
@@ -60,10 +61,12 @@ from promptpotter.infrastructure.llm.telemetry import (
     append_record,
     bound_round,
     claim_campaign_price,
+    current_round,
 )
 from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.store.command_log import LookaheadWindow, effective_lookahead
 from promptpotter.infrastructure.store.io import HeldLock
+from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.errors import (
     ErrorCategory,
     PayloadInvalidError,
@@ -122,10 +125,11 @@ class BlockRace[K: Hashable](Protocol):
 
     def choose_rows(
         self, taken: Mapping[K, Sequence[GradedCell]], ahead: Mapping[K, Sequence[Sample]]
-    ) -> Mapping[K, Sequence[Sample]]:
-        """At each block's open, every live walk's untaken pool in the order it takes them: it
-        takes the first its budget leaves. Read off the rows taken alone: no cell in flight
-        enters, so a press never moves the choice."""
+    ) -> Mapping[K, Stretch]:
+        """At each block's open, every live walk's stretch: a block closes once each has taken its
+        calls, its budget capping them, and hands out at least one call while a walk has a row
+        left. Read off the rows taken alone: no cell in flight enters, so a press never moves the
+        choice."""
         ...
 
 
@@ -166,19 +170,50 @@ class QueryLoopState:
     search_point: JobSearchPoint
     session: Session
     kind: MeasurementRole
-    cached_sample_results: dict[int, MeasuredCell]
+    # ``None`` where nothing is archived or the walk re-measures on purpose.
+    feed: ReplayFeed | None
     # ``None``: the walk writes no sample record — it is no pass a live surface draws.
     recorded: MeasuredPass | None
     sample_index: SampleIndex | None
-    deprecated_samples: dict[int, MeasuredCell]
     recorder: WalkRecorder
-    # ``None`` where nothing is archived or the walk re-measures on purpose.
-    claim_cell: Callable[[Sample], Awaitable[tuple[MeasuredCell | None, HeldLock | None]]] | None
-    cell_keys: Mapping[int, str]
-    # Replays the bound meter prices nothing for: none waits on the ceiling or takes a spend stop.
-    rereads: frozenset[int]
     # The rows of the walk this one continues: its running fold covers them, then its own they lack.
     held: CellSheet
+    # The archive's answers by sample key, first read when a row is first sent or taken, never at
+    # open: a row the walk never reaches costs no read.
+    filed: dict[str, FiledAnswer] | None = None
+    # By sample id, whether its replay is priced nothing (`rereads`), as first asked.
+    free: dict[int, bool] = field(default_factory=dict)
+
+    def advance(self) -> dict[str, FiledAnswer]:
+        """The archive's answers, what landed since the walk last read it folded in."""
+        filed = self.filed = {} if self.filed is None else self.filed
+        if self.feed is not None:
+            filed.update(self.feed.advance())
+        return filed
+
+    def _answer(self, sample: Sample) -> MeasuredCell | None:
+        held = (self.advance() if self.filed is None else self.filed).get(sample.key)
+        return None if held is None else held.cell
+
+    def replay(self, sample: Sample) -> MeasuredCell | None:
+        cell = self._answer(sample)
+        return None if cell is None or is_deprecated(cell) else cell
+
+    def deprecated(self, sample: Sample) -> MeasuredCell | None:
+        """An archived answer the stale-data protocol re-measures."""
+        cell = self._answer(sample)
+        return cell if cell is not None and is_deprecated(cell) else None
+
+    def rereads(self, sample: Sample) -> bool:
+        """A replay the bound meter prices nothing for: it waits on no ceiling, takes no spend stop."""
+        if (free := self.free.get(sample.id)) is None:
+            book, feed = run_scope().book, self.feed
+            free = self.free[sample.id] = (
+                feed is not None
+                and self.replay(sample) is not None
+                and (book is None or book.replays_free(feed.cell_key(sample.key)))
+            )
+        return free
 
     @property
     def scorer(self) -> Scorer:
@@ -216,8 +251,7 @@ class QueryLoopState:
     def claim_price(self, sample: Sample) -> bool:
         """True on its campaign's first reading of the cell, which this call claims: the one a
         replay is metered on."""
-        cell = self.cell_keys.get(sample.id)
-        return cell is None or claim_campaign_price(cell)
+        return self.feed is None or claim_campaign_price(self.feed.cell_key(sample.key))
 
 
 def _armed(session: Session, kind: MeasurementRole) -> LookaheadWindow:
@@ -268,13 +302,50 @@ def _quiet(call: asyncio.Future[Any]) -> None:
         call.exception()
 
 
+_CLAIM_POLL_S = 0.5
+
+
+async def _claim_cell(
+    sample: Sample, feed: ReplayFeed, ctx: QueryLoopState
+) -> tuple[MeasuredCell | None, HeldLock | None]:
+    waiting: asyncio.Task[None] | None = None
+    try:
+        while True:
+            claim = feed.claim(sample.key)
+            if claim is not None:
+                try:
+                    ctx.advance()
+                except BaseException:
+                    claim.retire()
+                    raise
+                if (row := ctx.replay(sample)) is None:
+                    return None, claim
+                claim.retire()
+                return row, None
+            if waiting is None:
+                waiting = asyncio.create_task(
+                    heartbeat(
+                        CellBeat(sample.id),
+                        round_num=current_round(),
+                        start_monotonic=time.monotonic(),
+                        detail_fn=lambda: "another run is measuring this cell",
+                    )
+                )
+            if ctx.session.state.control.pause_requested():
+                raise asyncio.CancelledError("claim wait aborted by a pause")
+            await asyncio.sleep(_CLAIM_POLL_S)
+    finally:
+        if waiting is not None:
+            waiting.cancel()
+
+
 async def _acquire(sample: Sample, ctx: QueryLoopState, claiming: set[int]) -> _Acquired:
-    cached = ctx.cached_sample_results.get(sample.id)
+    cached = ctx.replay(sample)
     claim: HeldLock | None = None
-    if cached is None and ctx.claim_cell is not None:
+    if cached is None and (feed := ctx.feed) is not None:
         claiming.add(sample.id)
         try:
-            cached, claim = await ctx.claim_cell(sample)
+            cached, claim = await _claim_cell(sample, feed, ctx)
         finally:
             claiming.discard(sample.id)
     if cached is not None:
@@ -282,14 +353,14 @@ async def _acquire(sample: Sample, ctx: QueryLoopState, claiming: set[int]) -> _
         return _Acquired(sample=sample, result=ctx.scorer.grade(cached_r), fresh=False)
 
     deprecated_display: GradedCell | None = None
-    if (cached_deprecated := ctx.deprecated_samples.get(sample.id)) is not None:
+    if (cached_deprecated := ctx.deprecated(sample)) is not None:
         # Graded here, rendered at the take: a display call from a cell prints out of walk order.
         deprecated_display = ctx.scorer.grade(cached_deprecated.replayed())
 
     try:
         result = await measure_sample(sample, ctx.session, ctx.search_point.pipeline_params)
         result = await _maybe_recover_degraded(result, sample, ctx)
-        if sample.id in ctx.deprecated_samples:
+        if cached_deprecated is not None:
             result = replace(result, retry_of_deprecated_cache=True)
         graded = ctx.scorer.grade(result)
         if claim is not None:
@@ -306,7 +377,7 @@ async def _acquire(sample: Sample, ctx: QueryLoopState, claiming: set[int]) -> _
     )
 
 
-LaunchEvent = tuple["Sample", int, LookaheadWindow]
+LaunchEvent = tuple["Sample", LookaheadWindow]
 
 
 @dataclass
@@ -344,6 +415,11 @@ class Walk:
 
     def enter_block(self, end: int) -> None:
         self.boundary = min(self.n, end)
+
+    @property
+    def waits(self) -> bool:
+        """Handed no call this block, a row still left to it: it waits out the block's close."""
+        return (close := self.boundary) is not None and len(self.results) == close < self.n
 
     def reorder(self, rows: Sequence[Sample]) -> None:
         """Its untaken pool in the order its race chose. A cell out or back moves with its row, by
@@ -383,7 +459,7 @@ class Walk:
         idx = self.unsent(armed.cells)[0]
         sample = self.dataset[idx]
         # `armed` is the window the round RUNS at, never the in-flight count, empty at each candidate's start.
-        event: LaunchEvent = (sample, idx, armed)
+        event: LaunchEvent = (sample, armed)
         if self.held is not None:
             self.held.append(event)
         else:
@@ -404,13 +480,12 @@ class Walk:
 
     def _started(self, event: LaunchEvent) -> None:
         if (recorded := self.ctx.recorded) is not None:
-            sample, idx, armed = event
+            sample, armed = event
             append_record(
                 SampleStartedRecord(
                     round=bound_round(),
                     individual_id=recorded.individual_id,
                     role=recorded.role,
-                    sample_idx=idx,
                     sample_total=self.n,
                     position=sample.id,
                     query_preview=sample.query,
@@ -500,15 +575,22 @@ class Walk:
 
     def rereads_ahead(self, start: int) -> int:
         end = start
-        while end < self.n and self.dataset[end].id in self.ctx.rereads:
+        while end < self.n and self.ctx.rereads(self.dataset[end]):
             end += 1
         return end - start
 
-    def flight(self) -> Flight:
-        settled = len(self.results) + len(self.finished)
-        horizon = self.horizon(self.n - 1)
-        limit = self.n if horizon is None else min(self.n, horizon + 1)
-        return Flight(len(self.running), limit - settled, self.n - settled)
+    def sendable(self, cells: int, room: int = sys.maxsize) -> list[int]:
+        """The rows it may send now, at most *room*: unsent at a press of *cells*, and none where a
+        rule's cut would waste more than one."""
+        if not (sending := self.unsent(cells)[: max(room, 0)]):
+            return []
+        horizon = self.launch_horizon(sending[-1])
+        return [i for i in sending if horizon is None or i <= horizon]
+
+    def flight(self, cells: int) -> Flight:
+        """``allowed`` is what ``fill`` may have out at a press of *cells*: one bound for both."""
+        out, settled = len(self.running), len(self.results) + len(self.finished)
+        return Flight(out, out + len(self.sendable(cells, cells - out)), self.n - settled)
 
     def bank(self) -> list[Sample]:
         """Only cells this walk was SURE to take: below its horizon, its block race's pending close
@@ -689,18 +771,19 @@ class _ScoringPhase[K: Hashable]:
         return calls
 
     def open_block(self) -> None:
-        """Each live walk's next stretch: the row its block closes at, and the order its race takes
-        its untaken pool in."""
-        if self.blocks is None:
-            return
+        """Each live walk's next stretch: the order its race takes its untaken pool in, and the
+        row its block closes at."""
         live = {self.keys[i]: walk for i, walk in self.racing().items()}
+        if self.blocks is None or not live:
+            return
         chosen = self.blocks.choose_rows(
             {key: walk.results for key, walk in live.items()},
             {key: walk.dataset[len(walk.results) :] for key, walk in live.items()},
         )
         for key, walk in live.items():
-            walk.enter_block((self.block + 1) * self.blocks.block_size)
-            walk.reorder(chosen[key])
+            walk.reorder(chosen[key].rows)
+            walk.enter_block(len(walk.results) + chosen[key].calls)
+        assert any(not walk.waits for walk in live.values()), "a block handed out no call"
 
     def announce(self, i: int) -> None:
         self.announced.add(i)
@@ -724,8 +807,11 @@ class _ScoringPhase[K: Hashable]:
                     return False
                 self.turn = 0
             walk = self.walks[self.turn]
-            # A block race turns every live walk once per block; a decided one had its last turn.
-            if (walk is None and self.block > 0) or (walk is not None and walk.outcome is not None):
+            # A block race turns every live walk handed a call once per block; a decided one had
+            # its last turn.
+            if (walk is None and self.block > 0) or (
+                walk is not None and (walk.outcome is not None or walk.waits)
+            ):
                 continue
             self.announce(self.turn)
             if walk is not None:
@@ -890,11 +976,8 @@ class _ScoringPhase[K: Hashable]:
             self.room(walk, armed, ceiling),
             max(self.affordable(), walk.rereads_ahead(unsent[0])),
         )
-        if not (sending := unsent[: max(room, 0)]):
-            return
-        horizon = walk.launch_horizon(sending[-1])
-        for idx in sending:
-            if room <= 0 or (horizon is not None and idx > horizon):
+        for _ in walk.sendable(armed.cells, room):
+            if room <= 0:
                 break
             sample, _cell = walk.launch(armed)
             room -= 1
@@ -1026,7 +1109,7 @@ class _ScoringPhase[K: Hashable]:
     def reading(self) -> Flight:
         backfills, book, cell = self.backfills, self.book, self.cell
         walking = self.live()
-        parts = [walk.flight() for walk in walking]
+        parts = [walk.flight(_armed(self.session, walk.ctx.kind).cells) for walk in walking]
         winding = sum(1 for call in self.draining if not call.done())
         out_now = sum(p.out for p in parts) + winding
         allowed = sum(p.allowed for p in parts) + winding

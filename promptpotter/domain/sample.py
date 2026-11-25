@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -58,6 +58,15 @@ class Sample(StrictModel):
         if "id" not in data and fallback_id is not None:
             data = {**data, "id": fallback_id}
         return cls(**data)
+
+
+@dataclass(frozen=True)
+class Stretch:
+    """A live walk's next block in a race (`query_loop.py::BlockRace.choose_rows`): its untaken
+    pool in the order it takes them, and how many of them it answers before the block closes."""
+
+    rows: Sequence[Sample]
+    calls: int
 
 
 @dataclass(frozen=True, slots=True)

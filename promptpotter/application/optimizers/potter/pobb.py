@@ -58,12 +58,24 @@ class EliminationContext(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class PoBBStop(StopSignal):
-    """``priors`` is what a replay re-fits: each prior's scored cells as the race read them."""
+    """What a replay re-fits: ``cells``, the arm's own the field was read on, and ``priors``, each
+    rival's grades on the cells read."""
 
     check_result: EliminationContext
     cells: list[str]
     priors: dict[ArmKey, CellSheet]
     paired_breakdown: dict[ArmKey, float]
+
+
+@dataclass(frozen=True)
+class FieldRead:
+    """PoBB's last field fit: each arm's θ on the ruler's scale, its posterior variance, its
+    P(best) and the ε(n) its depth stood at; what ``per_decision`` and ``per_round`` choose on."""
+
+    theta: dict[ArmKey, float]
+    variance: dict[ArmKey, float]
+    p_best: dict[ArmKey, float]
+    bar: dict[ArmKey, float]
 
 
 def race_sheet(cells: Iterable[GradedCell]) -> CellSheet:
@@ -90,9 +102,10 @@ def wire_sheet(sheet: CellSheet) -> dict[str, dict[str, float | None]]:
 def field_p_best(
     field: Mapping[ArmKey, CellSheet], cells: Collection[str]
 ) -> tuple[dict[ArmKey, float], dict[ArmKey, NDArray[np.float64]], RaschPosterior]:
-    """Each member's posterior probability of being the field's best on *cells*: one hierarchical
-    Rasch fit of the field, θ and δ together, and a Monte Carlo over its θ draws, seeded by the read
-    so a replay draws the same. The shares sum to 1; the fit rides beside them."""
+    """Each member's posterior probability of being the field's best on *cells*, each member read
+    on those it answered: one hierarchical Rasch fit of the field, θ and δ together, so a cell a
+    member never answered is no hole, and a Monte Carlo over its θ draws, seeded by the read so a
+    replay draws the same. The shares sum to 1; the fit rides beside them."""
     fit = fit_rasch(
         [
             Observation(key, cell, y)
@@ -131,14 +144,15 @@ class PoBBCheck:
         self.ruler = ruler
         self.parent = parent
         self.n_min = n_min
+        # `per_round` hands each arm rows of its own, so the field is read on their union.
+        self.union = knobs.shape == "per_round"
         self.epsilon = knobs.epsilon
         self.epsilon_floor = knobs.epsilon_floor
         self.epsilon_stop = knobs.epsilon_stop
         self.n_samples = n_samples
         # The GRADED rows, never a binarized hit, degenerate on a graded backend.
         self.priors: dict[ArmKey, CellSheet] = {}
-        # Each arm's θ in the last check's field fit, on the ruler's scale: `per_decision` chooses rows on it.
-        self.refit: dict[ArmKey, float] = {}
+        self.read: FieldRead | None = None
         self._on_snapshot = on_snapshot
 
     def register_completed(self, results: Iterable[GradedCell], *, key: ArmKey) -> None:
@@ -156,20 +170,33 @@ class PoBBCheck:
     def check(
         self, field: Mapping[ArmKey, CellSheet], standing: Collection[ArmKey]
     ) -> dict[ArmKey, PoBBStop]:
-        """An arm is cut when its posterior P(best of parent and every arm standing) falls below ε(n)."""
+        """An arm is cut when its posterior P(best of parent and every arm standing) falls below
+        ε(n), n its own depth on the cells the field is read on: under `per_round` the union of the
+        rows the racers answered, else those every racer shares."""
         racing = [key for key in standing if key != self.parent]
         if not racing:
             return {}
-        shared = set.intersection(*({c.key for c in field[key].scoreable} for key in racing))
-        walked = [c.key for c in field[racing[0]].scoreable if c.key in shared]
+        answered = {key: [c.key for c in field[key].scoreable] for key in racing}
+        if self.union:
+            read = dict.fromkeys(cell for key in racing for cell in answered[key])
+        else:
+            shared = set.intersection(*(set(answered[key]) for key in racing))
+            read = dict.fromkeys(cell for cell in answered[racing[0]] if cell in shared)
         parent = [c.key for c in field.get(self.parent, NO_CELLS).scoreable]
         # Every posterior gate and the ε ramp read the depth the election's coverage floor counts.
-        cells = list(theta_cells(dict.fromkeys(walked), parent, self.ruler))
-        if len(cells) < self.n_min:
+        cells = list(theta_cells(read, parent, self.ruler))
+        held = set(cells)
+        depth = {key: len(held.intersection(answered[key])) for key in racing}
+        if max(depth.values()) < self.n_min:
             return {}
         p_best, draws, fit = field_p_best(field, cells)
-        self.refit = {ArmKey(key): theta for key, theta in theta_on_ruler(fit, self.ruler).items()}
-        bar = self.epsilon_at(len(cells))
+        bar = {key: self.epsilon_at(n) for key, n in depth.items()}
+        self.read = FieldRead(
+            theta={ArmKey(key): theta for key, theta in theta_on_ruler(fit, self.ruler).items()},
+            variance={ArmKey(key): se * se for key, se in fit.theta_se.items()},
+            p_best=p_best,
+            bar=bar,
+        )
         stops: dict[ArmKey, PoBBStop] = {}
         for key in (key for key in racing if key in draws):
             rivals = {pid: field[pid] for pid in draws if pid != key}
@@ -178,7 +205,7 @@ class PoBBCheck:
             n = len(field[key].cells)
             if self._on_snapshot is not None:
                 self._on_snapshot(RaceSnapshot(p_best[key], key, n, paired_breakdown))
-            if not self.epsilon_stop or p_best[key] >= bar:
+            if not self.epsilon_stop or depth[key] < self.n_min or p_best[key] >= bar[key]:
                 continue
             stops[key] = PoBBStop(
                 self.name,
@@ -190,10 +217,13 @@ class PoBBCheck:
                     "total_queries": self.n_samples,
                     "n_priors": len(rivals),
                     "gate": _GATE,
-                    "epsilon": float(bar),
+                    "epsilon": float(bar[key]),
                 },
-                cells=cells,
-                priors=rivals,
+                cells=[cell for cell in cells if cell in set(answered[key])],
+                priors={
+                    pid: race_sheet(c for c in rival.cells if c.key in held)
+                    for pid, rival in rivals.items()
+                },
                 paired_breakdown=paired_breakdown,
             )
         return stops

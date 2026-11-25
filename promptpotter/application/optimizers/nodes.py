@@ -37,7 +37,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phase_acts import StepFact
+from promptpotter.domain.phase_acts import RowsRan, StepFact
 from promptpotter.domain.pipeline_schema import (
     INITIAL_POPULATION,
     MEMBER_KINDS,
@@ -49,7 +49,7 @@ from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.sample import Sample
+from promptpotter.domain.sample import Sample, Stretch
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
@@ -68,7 +68,7 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True)
 class MemberCoupling:
-    """``predicate`` is True in the VIOLATING combination; its third argument is the manifest file's knobs, before any overlay, its fourth the roster they run in. A ``refused`` one stops the mint (`preflight.py::refuse_couplings`)."""
+    """``predicate`` is True in the VIOLATING combination; its third argument is the manifest file's knobs, before any overlay, its fourth the roster they run in. A ``refused`` one reads no bench knob, so every selection asks it (`optimizer_manifest.py::_select`), its config ``None``."""
 
     name: str
     knobs: tuple[str, ...]
@@ -77,7 +77,12 @@ class MemberCoupling:
     relation: str
     consequence: str
     severity: CouplingSeverity
-    predicate: Callable[[CampaignConfig, Any, Any, SelectedOptimizer], bool]
+    predicate: Callable[[CampaignConfig | None, Any, Any, SelectedOptimizer], bool]
+
+    def __post_init__(self) -> None:
+        assert self.severity != "refused" or not self.bench_knobs, (
+            f"{self.name}: a refused coupling is asked at the selection, which reads no bench knob"
+        )
 
 
 # How many of the pipeline's prompt nodes a member writes: a `one` refuses any other roster before the mint.
@@ -557,9 +562,15 @@ class Race(Protocol):
         self,
         _taken: Mapping[ArmKey, Sequence[GradedCell]],
         ahead: Mapping[ArmKey, Sequence[Sample]],
-    ) -> Mapping[ArmKey, Sequence[Sample]]:
-        """Each walk its sampler's draw, in the sampler's order: the race chooses no row."""
-        return ahead
+    ) -> Mapping[ArmKey, Stretch]:
+        """Each walk its sampler's draw, in the sampler's order, a block's rows apiece: the race
+        chooses no row."""
+        return {key: Stretch(rows, self.blocks.block_size) for key, rows in ahead.items()}
+
+    @property
+    def rows_ran(self) -> RowsRan:
+        """The row choice it runs, which the round's measure record names."""
+        return "random"
 
 
 class Eliminator(NodeMember, Protocol):

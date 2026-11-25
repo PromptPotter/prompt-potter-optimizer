@@ -28,7 +28,7 @@ PoBB (Russo 2016) assumes i.i.d. observation; the shared order front-loads the s
 
 PoBB is a **block race** (`potter/race.py::PoBBRace`): every arm walks the panel at once and, at each checkpoint they share (potter's `RoundSamples.block_size` is one cell), the field — the parent and every arm still standing — is read together (`pobb.py::PoBBCheck.check`):
 
-1. The cells read are those every standing arm scored that θ is read on (`rasch.py::theta_cells`, never rows walked — [`verdict-resolution.md`](verdict-resolution.md) § The round order); under `elimination_n_min` of them nothing is cut. A rival with no row on them is **excluded, never zero-filled**.
+1. The cells read are those θ is read on (`rasch.py::theta_cells`, never rows walked — [`verdict-resolution.md`](verdict-resolution.md) § The round order) that every standing arm scored, or, under `pobb.shape: per_round`, that any did: the union, since each arm answers rows of its own. An arm is cut only once it answered `elimination_n_min` of them itself, and its ε(n) ramps on that own depth; under `per_candidate` every racer's depth is the shared count, as before. A rival with no row on a cell is **excluded there, never zero-filled**: the fit reads each member on the cells it answered.
 2. One hierarchical Rasch fit of the whole field on those cells, θ and δ together (`rasch.py::fit_rasch`), and a Monte Carlo over its θ draws, seeded by the read (`pobb.py::field_p_best`): `p_best` is each arm's posterior probability of being the field's best. The shares sum to 1, so the multiplicity of a wide field is inside the statement and slot order enters nowhere. A pairwise "credibly worse than some rival" cut was slot-dependent (serial, 0.25 → 0.63 by slot) or, raced against every sibling, cut a planted better arm 11.8% of the time against serial's 7.1%; the joint fit cuts it 4.7% at ε 0.05, flat by slot.
 3. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`). **An arm that ran its panel joins the priors** (`runner/round.py::_conclude_arm`), so it stays in the field of its top-up; an eliminated one never does.
 
@@ -69,6 +69,29 @@ under `draw`, is the verdict, and a PoBB stop, which it never seats, leaves the 
 at C0; θ, its lift, the statistic and `admission` are the same under both. The panel holds
 `CampaignConfig.origin_panel_cells` of each benchmark's cells (unset: as many as a round walks),
 cut from the origin's own round, which `sp_budget_origin` sizes and must cover.
+
+## Who answers a block's calls
+
+`pobb.shape` says it (`race.py::PoBBRace.choose_rows`, the loop's one rows hook,
+`query_loop.py::BlockRace.choose_rows`, answering each live walk's row order and its share of the
+block's calls). `per_candidate` (the default) hands every survivor `block_size` calls on the same
+next rows. `per_round` hands the block's `block_size × survivors` calls one at a time
+(`race.py::_hand_out`) to the walk whose next answer tells the decision most; a walk handed none
+waits out the block, and the block closes once the calls it handed out are back.
+
+The derivation, to first order. The decision on arm k is the cut, P_k < ε(n_k), and past it the
+election, which reads the arm uncut. Write z_k = Φ⁻¹(P_k) − Φ⁻¹(ε(n_k)) for its probit distance
+from the bar and v_k for its posterior variance in PoBB's last fit. One answer on row r carries
+Fisher information I_k(r) = a²p(1−p) about θ_k (`rasch.py::expected_information`, at the θ
+`refit` seats: under `per_round` refit every arm's is the round's). It removes about v_k²·I_k(r)
+of θ_k's variance, and the chance that moves the cut's decision on k scales with the density of z_k
+at the bar, φ(z_k)/φ(0). So a call goes to the arg-max of I_k(r)·v_k²·φ(z_k)/φ(0), and v_k shrinks
+to 1/(1/v_k + I_k(r)) for each call handed, so a block spreads its calls. Before PoBB first fits,
+v_k and the nearness are 1 and the information alone decides: at one θ on a cold ruler, every
+pair ties, and a tie goes to the walk handed fewer, a round robin. An arm far past the bar either
+way (a sure cut, a sure leader) draws few calls while a contested one remains; one alone draws
+them all. Under `per_round` the parent catches up on every row a candidate takes it never answered,
+so its bill grows with the union of the rows.
 
 ## Two regimes
 
@@ -195,4 +218,4 @@ Departures from the paper:
 
 ## On-disk shape and replay
 
-**A cut record is the replay's entire input — no cross-round lookup, no backfill** — so replay on the fixed δ ruler is bit-for-bit absent a scorer change; under one, the candidate side is rescored and priors stay recorded. Why this family of stop rules: [`../research/landscape.md`](../research/landscape.md) § Why PoBB's family and not another. The fatal-classification rule table: `domain/results_health.py::classify_result`.
+**A cut record is the replay's entire input — no cross-round lookup, no backfill** — the arm's own cells the field was read on (`race.py::EliminationCut.arm_cells`, re-read off its rows) and each rival's grades on the cells read, whose union is the read, so replay on the fixed δ ruler is bit-for-bit absent a scorer change; under one, the candidate side is rescored and priors stay recorded. Why this family of stop rules: [`../research/landscape.md`](../research/landscape.md) § Why PoBB's family and not another. The fatal-classification rule table: `domain/results_health.py::classify_result`.

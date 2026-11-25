@@ -176,7 +176,6 @@ from promptpotter.application.optimizers.variation.members import (
     donor_take,
     most_donated,
 )
-from promptpotter.application.preflight import refuse_couplings
 from promptpotter.application.run_phase_control import RunControl
 from promptpotter.application.runner import bench as line_bench
 from promptpotter.application.runner.bench import (
@@ -1720,7 +1719,7 @@ def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
     )
 
 
-def test_informative_rows_without_an_overlap_vote_are_refused_before_the_mint() -> None:
+def test_informative_rows_without_an_overlap_vote_are_refused_at_every_selection() -> None:
     informative = {"pobb": {"config": {"row_choice": "informative"}}}
     for optimizer, nodes, refused in (
         ("potter", informative, True),
@@ -1728,14 +1727,17 @@ def test_informative_rows_without_an_overlap_vote_are_refused_before_the_mint() 
         ("potter", {**informative, "theta_election": {"config": {"vote": "overlap"}}}, False),
         ("potter", {}, False),
     ):
-        config = defaulted_config({"optimization": {"optimizer": optimizer, "nodes": nodes}})
-        selected = select_optimizer(config.optimization)
+        # The one door a check-in, a mint and a resume's laid overlay each select through.
+        choice = defaulted_config({"optimization": {"optimizer": optimizer, "nodes": nodes}})
         if not refused:
-            refuse_couplings(config, selected)
+            select_optimizer(choice.optimization)
             continue
         with pytest.raises(PayloadInvalidError) as caught:
-            refuse_couplings(config, selected)
+            select_optimizer(choice.optimization)
         assert caught.value.code == "coupling_refused", f"{optimizer}: refused for another reason"
+        assert "optimization.nodes.pobb.config.row_choice" in str(caught.value), (
+            f"{optimizer}: the refusal never named the knob that laid it"
+        )
 
 
 @pytest.mark.usefixtures("optimizing_memory")

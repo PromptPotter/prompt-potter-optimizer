@@ -583,12 +583,13 @@ async def measure_population(
     population: Proposals,
     pool: list[Sample],
     eliminator: Eliminator | None,
+    race: Race | None,
     selector: Selector,
 ) -> MeasuredRound:
     cycle = ctx.cycle
     panel = ctx.panel
-    arms, rows, cut, race = await _walk_population(
-        ctx, population, eliminator, keep_cut=selector.elects_partial
+    arms, rows, cut = await _walk_population(
+        ctx, population, eliminator, race, keep_cut=selector.elects_partial
     )
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
@@ -860,9 +861,10 @@ async def _walk_population(
     ctx: RoundContext,
     population: Proposals,
     eliminator: Eliminator | None,
+    race: Race | None,
     *,
     keep_cut: bool,
-) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopLoop | None, Race | None]:
+) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopLoop | None]:
     cycle = ctx.cycle
     round_num = ctx.round_num
     panel = ctx.panel
@@ -873,10 +875,8 @@ async def _walk_population(
     labels = {key: arm.label for key, arm in proposed.items()}
     order = [int(s.id) for s in panel.order]
     sps = {key: cycle.points.job(arm.individual) for key, arm in proposed.items()}
-    race: Race | None = None
     pool: CatchUpPool | None = None
-    if eliminator is not None:
-        race = eliminator.race(NodeContext(ctx, eliminator), panel)
+    if eliminator is not None and race is not None:
         pool = CatchUpPool(
             race,
             cycle.session,
@@ -956,7 +956,7 @@ async def _walk_population(
             rows[key] = rows[key].merged(taken)
             ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]
-    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut, race
+    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
 
 
 def _open_arm(
@@ -1287,15 +1287,21 @@ async def _proposed(ctx: RoundContext) -> Proposals:
 
 async def _measured(ctx: RoundContext, population: Proposals, pool: list[Sample]) -> MeasuredRound:
     plan = ctx.cycle.optimizer.plan
+    eliminator = plan.eliminator
+    race = None if eliminator is None else eliminator.race(NodeContext(ctx, eliminator), ctx.panel)
     append_record(
         PhaseRecord(
             phase=CampaignPhase.MEASURE,
             step="enter",
             round=ctx.round_num,
-            act=MeasureOpened(candidates=len(population.proposals), cells=len(ctx.panel.cells)),
+            act=MeasureOpened(
+                candidates=len(population.proposals),
+                cells=len(ctx.panel.cells),
+                rows="random" if race is None else race.rows_ran,
+            ),
         )
     )
-    measured = await measure_population(ctx, population, pool, plan.eliminator, plan.selector)
+    measured = await measure_population(ctx, population, pool, eliminator, race, plan.selector)
     append_record(PhaseRecord(phase=CampaignPhase.MEASURE, step="exit", round=ctx.round_num))
     return measured
 

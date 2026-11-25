@@ -46,7 +46,9 @@ ADAPTIVE_QUEUE = (
         ),
         # `inert`, not `info`: nothing co-moves; one knob's display choice wastes the other's invariance.
         severity="inert",
-        predicate=lambda c, k, _d, _s: bool(k.per_round_resubset) and c.display_metric != "ability",
+        predicate=lambda c, k, _d, _s: (
+            bool(k.per_round_resubset) and c is not None and c.display_metric != "ability"
+        ),
     ),
 )
 

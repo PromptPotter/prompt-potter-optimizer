@@ -238,7 +238,9 @@ BASELINE = {
     # ml-2 (+163): `pobb.row_choice` / `refit`, the race choosing each block's rows by expected
     # information (`rasch.py::most_informative`, `theta_on_ruler`) and the sampler's pool it reads
     # (`RoundSamples.pool`); a `refused` coupling severity, so informative off `overlap` stops the mint.
-    "package_lines": 113023,
+    # ml-4 (+187): `race.py::_hand_out`, per_round's allocation of a block's calls by what each
+    # walk's next call tells, and `QueryLoopState`'s per-row reads, built when a row is first taken.
+    "package_lines": 113210,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -254,7 +256,8 @@ BASELINE = {
     # sizes, replacing a `NODE_LAYOUTS` constant per node.
     # vote (+2): `theta_election.vote` and `origin_panel_cells`, the overlap vote and its panel's size.
     # ml-2 (+2): `pobb.row_choice` and `pobb.refit`, the measuring loop's row-choice switches.
-    "config_leaf_fields": 102,
+    # ml-4 (+1): `pobb.shape`, whether a block's rows are shared or each walk's own.
+    "config_leaf_fields": 103,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     "settings_env": 39,

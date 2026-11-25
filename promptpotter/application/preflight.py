@@ -218,15 +218,6 @@ def refuse_arm_below_round(
     )
 
 
-def refuse_couplings(config: CampaignConfig, selected: SelectedOptimizer) -> None:
-    """A ``refused`` coupling is a pairing no run takes, never one it falls back from."""
-    if refused := [c for c in check_couplings(config, selected) if c.severity == "refused"]:
-        raise PayloadInvalidError(
-            "; ".join(f"{', '.join(c.knobs)}: {c.consequence}" for c in refused),
-            code="coupling_refused",
-        )
-
-
 def refuse_unfit_pipeline(
     selected: SelectedOptimizer, schema: PipelineSchema, connector: str
 ) -> None:

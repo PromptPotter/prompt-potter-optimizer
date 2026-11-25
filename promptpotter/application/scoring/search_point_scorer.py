@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import functools
-import time
 from collections import Counter
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, replace
@@ -18,15 +16,11 @@ from promptpotter.domain.measurement_provenance import grade_answer
 from promptpotter.domain.pass_kinds import PASSES
 from promptpotter.domain.phases import WalkEnd
 from promptpotter.domain.records.run_records import StopLoop
-from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.sample import ArchiveEntry, FiledAnswer, Sample
+from promptpotter.domain.sample import ArchiveEntry, Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, MeasuredCell, WalkedCell
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
-from promptpotter.infrastructure.llm.heartbeat import CellBeat, heartbeat
-from promptpotter.infrastructure.llm.telemetry import current_round
 from promptpotter.infrastructure.run_scope import run_scope, scope_context, scoped
-from promptpotter.infrastructure.store.io import HeldLock
 from promptpotter.infrastructure.store.measurement_archive import ReplayFeed
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import SendRefusedError
@@ -73,77 +67,6 @@ def _build_scoring_error_signal(results: Sequence[GradedCell]) -> BrokenSignal:
             dominant_warning=str(real_errors[-1].error),
         ),
     )
-
-
-def _split_off_deprecated_samples(
-    cached_sample_results: dict[int, MeasuredCell],
-) -> tuple[dict[int, MeasuredCell], dict[int, MeasuredCell]]:
-    deprecated = {sid: r for sid, r in cached_sample_results.items() if is_deprecated(r)}
-    kept = {sid: r for sid, r in cached_sample_results.items() if sid not in deprecated}
-    return kept, deprecated
-
-
-def replayable_on(
-    dataset: list[Sample], reusable: dict[str, FiledAnswer]
-) -> dict[int, MeasuredCell]:
-    """A cell replays on its sample's key alone, whichever bank filed it."""
-    return {s.id: held.cell for s in dataset if (held := reusable.get(s.key)) is not None}
-
-
-def _resolve_prior_cache(
-    dataset: list[Sample],
-    *,
-    feed: ReplayFeed | None,
-) -> tuple[dict[int, MeasuredCell], dict[int, MeasuredCell]]:
-    cached_sample_results: dict[int, MeasuredCell] = {}
-    if feed is not None:
-        cached_sample_results = replayable_on(dataset, feed.advance())
-
-    cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
-    return cached_sample_results, deprecated_samples
-
-
-_CLAIM_POLL_S = 0.5
-
-
-async def _claim_cell(
-    sample: Sample,
-    *,
-    feed: ReplayFeed,
-    session: Session,
-    dataset: list[Sample],
-    cached: dict[int, MeasuredCell],
-) -> tuple[MeasuredCell | None, HeldLock | None]:
-    waiting: asyncio.Task[None] | None = None
-    try:
-        while True:
-            claim = feed.claim(sample.key)
-            if claim is not None:
-                try:
-                    held = replayable_on(dataset, feed.advance())
-                    cached.update({sid: f for sid, f in held.items() if not is_deprecated(f)})
-                except BaseException:
-                    claim.retire()
-                    raise
-                if (row := cached.get(sample.id)) is None:
-                    return None, claim
-                claim.retire()
-                return row, None
-            if waiting is None:
-                waiting = asyncio.create_task(
-                    heartbeat(
-                        CellBeat(sample.id),
-                        round_num=current_round(),
-                        start_monotonic=time.monotonic(),
-                        detail_fn=lambda: "another run is measuring this cell",
-                    )
-                )
-            if session.state.control.pause_requested():
-                raise asyncio.CancelledError("claim wait aborted by a pause")
-            await asyncio.sleep(_CLAIM_POLL_S)
-    finally:
-        if waiting is not None:
-            waiting.cancel()
 
 
 def _walk_stop_signal(batch: QueryLoopResult) -> StopSignal | None:
@@ -271,8 +194,9 @@ def reread_cells(
 ) -> CellSheet:
     """The rows a walk of *dataset* would take free off the archive, graded as it takes them."""
     ctx = open_walk(search_point, dataset, session, kind=kind, measured=None).ctx
-    held = ctx.cached_sample_results
-    return ctx.scorer.sheet(held[s.id].replayed() for s in dataset if s.id in ctx.rereads)
+    return ctx.scorer.sheet(
+        replay.replayed() for s in dataset if ctx.rereads(s) and (replay := ctx.replay(s))
+    )
 
 
 def filed_entry(search_point: JobSearchPoint, session: Session) -> ArchiveEntry:
@@ -307,36 +231,17 @@ def open_walk(
     node_configs = [] if row.fresh else entry.node_configs
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.
     feed = ReplayFeed(store.archive, node_configs) if node_configs else None
-    cached_sample_results, deprecated_samples = _resolve_prior_cache(dataset, feed=feed)
-    cell_keys = {} if feed is None else {s.id: feed.cell_key(s.key) for s in dataset}
-    book = run_scope().book
-    rereads = frozenset(
-        s for s in cached_sample_results if book is None or book.replays_free(cell_keys[s])
-    )
-
     measuring = None if measured is None else MeasuredPass(measured, kind)
     ctx = QueryLoopState(
         search_point=search_point,
         session=session,
         kind=kind,
-        cached_sample_results=cached_sample_results,
+        feed=feed,
         recorded=measuring if row.recorded else None,
         sample_index=sample_index,
-        deprecated_samples=deprecated_samples,
         recorder=_ArchiveRecorder(
             session=session, search_point=search_point, kind=kind, entry=entry
         ),
-        claim_cell=None
-        if feed is None
-        else functools.partial(
-            _claim_cell,
-            feed=feed,
-            session=session,
-            dataset=dataset,
-            cached=cached_sample_results,
-        ),
-        cell_keys=cell_keys,
-        rereads=rereads,
         held=held,
     )
     return Walk(

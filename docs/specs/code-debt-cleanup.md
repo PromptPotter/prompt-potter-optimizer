@@ -830,7 +830,7 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   the row's `Shape` is its one strict reader, nested reports typed by their connector; a row that no
   longer loads is dropped at the landing, said. **Window:** W1 · l4-key, last. **Re-test:** does `compact-archive inventory` on a copy of the desk root read every L4 outer cell without a `ValidationError`?
 - **A race decision names its own cells and copies its rivals'**: `potter/race.py::_RaceDecision`
-  holds `candidate_cells` (keys, re-read at replay) beside `prior_histories` (every rival's per-cell
+  holds `arm_cells` (keys, re-read at replay) beside `prior_histories` (every rival's per-cell
   `fitness`/`objective` by value), since `resume_and_fork/replayers.py::ReplayContext` holds "ONE round
   and no history". On the desk 147 `decision` records are 13.1 of 111.5 MB of ledger, and
   `prior_histories` averages 87.6 KB a record against 1.1 KB for the arm's cells; the record is named

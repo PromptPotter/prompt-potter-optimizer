@@ -383,7 +383,6 @@ class _Pass(CycleRecord):
 
 class SampleStartedRecord(_Pass):
     record_type: Literal["sample_started"] = "sample_started"
-    sample_idx: int
     sample_total: int
     position: int
     # Capped at the writer: the whole query is a dataset fact, in every measurement row.

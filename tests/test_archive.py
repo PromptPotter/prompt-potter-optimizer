@@ -129,7 +129,7 @@ from promptpotter.application.runner.termination import RUN_STOPS, end_run_on
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
-from promptpotter.application.scoring.search_point_scorer import filed_entry, replayable_on
+from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.application.views.render.phase import acts_line
 from promptpotter.config.paths import MEASUREMENTS_DIR, user_data_root
@@ -368,7 +368,7 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
         Sample(id=1, query="q_aime_14", ground_truth="not_g"),
         Sample(id=2, query="q_aime_14", ground_truth="g", source_pin={"git_commit_id": "moved"}),
     ]
-    on_wider = replayable_on(wider, reusable)
+    on_wider = {s.id: got.cell for s in wider if (got := reusable.get(s.key))}
     assert set(on_wider) == {0}, "a cell replayed onto a sample whose content it never measured"
     assert on_wider[0].query == "q_aime_14"
 
@@ -807,7 +807,8 @@ def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
     assert tree_bytes() == before_relabel, "a relabel rewrote a measurement or a campaign"
     renamed = built_stores.tenant_datasets.labelled("compacted-renamed")
     assert renamed == compacted_bank
-    assert set(replayable_on(list(renamed.samples), ReplayFeed(archive, compacted).advance())) == {
+    replays = ReplayFeed(archive, compacted).advance()
+    assert {s.id for s in renamed.samples if s.key in replays} == {
         0,
         1,
     }, "a cell filed under the bank stopped replaying once its name moved"
@@ -1243,7 +1244,7 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     assert reading is not None and reading.context["gate"] == "epsilon"
     [cut] = racing.cycle.pending_decisions
     assert isinstance(cut.inputs_ref, EliminationCut)
-    assert cut.inputs_ref.candidate_cells == [str(i) for i in range(8) if i != 2]
+    assert cut.inputs_ref.arm_cells == [str(i) for i in range(8) if i != 2]
     assert replay_all_mismatches(_round(round=3, cells={ArmKey("c1"): walked}), [cut]) == [], (
         "the cut the live rule made is not the cut its own record replays"
     )
@@ -1302,7 +1303,7 @@ def _on_ten(ten: list[Sample], grades: list[float]) -> CellSheet:
 
 
 def _informative_race(
-    stores: Stores, monkeypatch: pytest.MonkeyPatch, refit: str
+    stores: Stores, monkeypatch: pytest.MonkeyPatch, refit: str, shape: str = "per_candidate"
 ) -> tuple[Callable[[], PoBBRace], list[Sample], DeltaRuler, RoundContext]:
     """A race choosing `informative` rows on a warm ruler (δ = slot − 4) whose parent hit all ten."""
     ten = samples(10, "g")
@@ -1320,7 +1321,7 @@ def _informative_race(
         optimization={
             "elimination_n_min": 4,
             "nodes": {
-                "pobb": {"config": {"row_choice": "informative", "refit": refit}},
+                "pobb": {"config": {"row_choice": "informative", "refit": refit, "shape": shape}},
                 "theta_election": {"config": {"vote": "overlap"}},
             },
         },
@@ -1354,8 +1355,10 @@ def test_informative_rows_are_the_most_informative_at_the_theta_the_refit_seats(
         race = race_of()
         race.close({ArmKey("c1"): missed})
         ahead = {ArmKey("c1"): ten[4:]}
-        [chosen] = race.choose_rows({ArmKey("c1"): missed}, ahead).values()
-        theta = race._round_theta if refit == "per_round" else race._check.refit[ArmKey("c1")]
+        [stretch] = race.choose_rows({ArmKey("c1"): missed}, ahead).values()
+        chosen, read = stretch.rows, race._check.read
+        assert read is not None, "guard: the close fit no field"
+        theta = race._round_theta if refit == "per_round" else read.theta[ArmKey("c1")]
         best = max(ten[4:], key=lambda s: expected_information(theta, [s.key], ruler.entries()))
         assert chosen[0] == best, f"{refit}: the row led is not the most informative at its θ"
         assert sorted(s.id for s in chosen) == sorted(s.id for s in ten[4:]), "rows lost or added"
@@ -1375,18 +1378,97 @@ def test_informative_rows_are_the_most_informative_at_the_theta_the_refit_seats(
 def test_a_resumed_informative_race_rechooses_its_rows_and_files_nothing(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    race_of, ten, _, racing = _informative_race(built_stores, monkeypatch, "per_decision")
-    taken = {ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells}
-    ahead = {ArmKey("c1"): ten[4:]}
-    live = race_of()
-    live.close(taken)
-    chose = live.choose_rows(taken, ahead)
-    filed = len(racing.cycle.pending_decisions)
-    # A resume rebuilds the race and closes its blocks again on the rows the walk replays.
-    resumed = race_of()
-    resumed.close(taken)
-    assert resumed.choose_rows(taken, ahead) == chose, "the resume chose other rows"
-    assert len(racing.cycle.pending_decisions) == filed, "a choice filed a record"
+    for shape in ("per_candidate", "per_round"):
+        race_of, ten, _, racing = _informative_race(
+            built_stores, monkeypatch, "per_decision", shape
+        )
+        taken = {
+            ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells,
+            ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 0.0]).cells,
+        }
+        ahead = {ArmKey("c1"): ten[4:], ArmKey("c2"): ten[4:]}
+        live = race_of()
+        live.close(taken)
+        chose = live.choose_rows(taken, ahead)
+        filed = len(racing.cycle.pending_decisions)
+        # A resume rebuilds the race and closes its blocks again on the rows the walk replays.
+        resumed = race_of()
+        resumed.close(taken)
+        assert resumed.choose_rows(taken, ahead) == chose, f"{shape}: the resume chose other pairs"
+        assert len(racing.cycle.pending_decisions) == filed, f"{shape}: a choice filed a record"
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_the_round_names_the_row_choice_its_race_ran(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    race_of, *_ = _informative_race(built_stores, monkeypatch, "per_round")
+    assert race_of().rows_ran == "informative"
+    # A cold ruler tells every row alike: `informative` there runs the sampler's order.
+    monkeypatch.setattr(DifficultyView, "ruler", property(lambda _view: None))
+    assert race_of().rows_ran == "cold", "a cold ruler's informative choice reported as informative"
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_per_round_open_hands_each_walk_its_own_rows_and_the_blocks_calls_by_what_they_tell(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    race_of, ten, ruler, _ = _informative_race(
+        built_stores, monkeypatch, "per_decision", "per_round"
+    )
+    race = race_of()
+    # A strong and a weak arm: PoBB's fit seats them far apart, so their most informative rows part.
+    taken = {
+        ArmKey("c1"): _on_ten(ten, [0.0, 0.0, 0.0, 0.0]).cells,
+        ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 1.0]).cells,
+    }
+    race.close(taken)
+    read = race._check.read
+    assert read is not None, "guard: the close fit no field"
+    # The whole slate, so the two θ the fit seats lie inside the δ the rows span.
+    ahead = dict.fromkeys(taken, ten)
+    chosen = race.choose_rows(taken, ahead)
+    for key, stretch in chosen.items():
+        best = max(
+            ten, key=lambda s: expected_information(read.theta[key], [s.key], ruler.entries())
+        )
+        assert stretch.rows[0] == best, f"{key}: its row led is not the most informative at its θ"
+    assert chosen[ArmKey("c1")].rows[0] != chosen[ArmKey("c2")].rows[0], (
+        "two walks at one open answer the same row: vacuous"
+    )
+    calls = [stretch.calls for stretch in chosen.values()]
+    assert sum(calls) == race.block_size * len(taken), f"the block handed out {calls} calls"
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_pobb_per_round_cuts_a_candidate_on_rows_its_rivals_never_answered_and_the_cut_replays(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One journey: the cut the union read files is the record its replay re-reads.
+    cut_by: dict[str, bool] = {}
+    for shape in ("per_candidate", "per_round"):
+        race_of, ten, _, racing = _informative_race(built_stores, monkeypatch, "per_round", shape)
+        lost = sheet(measurement(i, 0.0, sample_key=ten[i].key) for i in range(6))
+        apart = {
+            ArmKey("c1"): lost.cells,
+            ArmKey("c2"): _on_ten(ten, [1.0] * 10).cells[4:],
+        }
+        race = race_of()
+        stop = race.close(apart).get(ArmKey("c1"))
+        cut_by[shape] = stop is not None
+        if shape == "per_candidate":
+            continue
+        reading = race.judge(stop, ArmKey("c1"), {ArmKey("c1"): "C3.1", ArmKey("c2"): "C3.2"})
+        assert reading is not None and reading.context["gate"] == "epsilon"
+        [cut] = racing.cycle.pending_decisions
+        assert isinstance(cut.inputs_ref, EliminationCut)
+        assert set(cut.inputs_ref.arm_cells) == {s.key for s in ten[:6]}, "the arm's cells moved"
+        assert replay_all_mismatches(_round(round=3, cells={ArmKey("c1"): lost}), [cut]) == [], (
+            "a per_round cut does not replay on its own record"
+        )
+    assert cut_by == {"per_candidate": False, "per_round": True}, (
+        f"the union read cut {cut_by}: the arm was not cut on rows its rival never answered"
+    )
 
 
 @pytest.mark.usefixtures("offline", "optimizing_memory")
