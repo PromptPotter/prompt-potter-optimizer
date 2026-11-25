@@ -234,7 +234,7 @@ from promptpotter.application.scoring.paired import (
     read_pair,
 )
 from promptpotter.application.scoring.passes import verify_member, verify_reading
-from promptpotter.application.scoring.race_protocol import View, WalkView
+from promptpotter.application.scoring.race_protocol import Trigger, View, WalkView
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
@@ -2355,6 +2355,16 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
     assert not is_answer_collapsed(spanless, truthful), (
         "a reply with no graded span was counted as the answer"
     )
+
+
+def test_a_rolling_race_sends_only_what_it_decided_and_banks_only_the_rows_it_took() -> None:
+    # A rolling decision reads one returned row, so nothing past its decided calls is sent ahead
+    # and a stop banks no cell a later decision might never have taken.
+    rolling, batch = Trigger(each_read=True), Trigger(each_read=False)
+    for trigger, cells, past, ahead in ((rolling, 4, 0, 0), (batch, 4, 1, 3), (batch, 2, 3, 0)):
+        assert trigger.ahead(cells, past) == ahead, f"{trigger} at {cells}/{past} sent ahead"
+    for trigger, taken, decided, sure in ((rolling, 3, 2, 3), (batch, 3, 2, 5)):
+        assert trigger.sure(taken, decided) == sure, f"{trigger} banked past {sure}"
 
 
 def test_the_fields_p_best_sums_to_one_discriminates_graded_rows_and_reads_no_slot() -> None:

@@ -200,6 +200,10 @@ PRESSED = "pressed"
 # A fixed depth, never `max`: the backend's ceiling is the machine's, so `max` presses another
 # depth on another box and a trace would read the box.
 PRESS = LookaheadPress(cells=4, abreast="all", auto=True)
+# Potter's warm run reading its rolling race's calls as they return, pressed, paused inside a walk
+# and resumed: the record hangs on timing, so the resume replays the order the run filed.
+ARRIVED = "arrived"
+ARRIVAL = {"pobb": {"read_order": "arrival"}}
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # Potter's straight campaign with invalid answers scripted by call, each on the rung that heals it:
 # a re-ask, a repair, a salvaged refusal, a repair salvaged, a repair failing into a re-ask.
@@ -842,13 +846,20 @@ async def run_one(
     wound: bool = False,
     hardness: int = 0,
     press: bool = False,
+    arrival: bool = False,
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it.
     *pause_after* pauses at that round's boundary; *pause_in_walk* at the first cell that round
     measures, its walk banked, so the resume replays the walk and runs no proposer; *press* presses
-    `PRESS` as the first cell is answered."""
+    `PRESS` as the first cell is answered; *arrival* lays `ARRIVAL`."""
     out = workspace if out is None else out
-    config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger, crossover=crossover)
+    config = campaign_config(
+        optimizer,
+        rounds,
+        bench_trigger=bench_trigger,
+        crossover=crossover,
+        knobs=ARRIVAL if arrival else None,
+    )
     if not framing:
         config = config.model_copy(update={"task_framing": "off"})
     samples = synthetic_rows(rows)
@@ -2307,9 +2318,10 @@ def read_warm(
     )
     again = decided(home / RESUMED, after=pause_after)
     same = decided(home / WARM, after=pause_after) == again
-    # A cell the race took before the pause, past its opening draw included, is never bought again.
+    # A cell the race took before the pause, past its opening draw included (potter's `informative`
+    # rows), is never bought again, and each is billed and priced once.
     cells = [
-        BehaviourTrace.read(home / leg).decisions["harness"]["backend_cells"]
+        (BehaviourTrace.read(home / leg).decisions["harness"]["backend_cells"], *bought(home / leg))
         for leg in (WARM, RESUMED)
     ]
     same = same and cells[0] == cells[1]
@@ -2321,9 +2333,58 @@ def read_warm(
     where = f"inside round {at} past its banked walk" if inside else f"after round {at}"
     print(
         f"{name}: paused {where}{'' if landed else ' (NOT where its leg pauses)'} and resumed, "
-        f"decisions and backend cells {'UNMOVED' if same else 'MOVED'} ({cells[0]} -> {cells[1]})"
+        f"decisions, backend cells, bills and priced keys {'UNMOVED' if same else 'MOVED'} "
+        f"({cells[0]} -> {cells[1]})"
     )
     return failed
+
+
+def arrived_leg(workspace: Path, leg: Future[int], pause_after: int) -> bool:
+    """Potter's rolling race read in arrival order, paused inside a walk and resumed: before the
+    pause some walk took a row ahead of one it sent earlier, and the resumed round reads first
+    every row the run filed, in that order (`query_loop.py::_ScoringPhase.filed_reads`). Its
+    record is never held to the unpaused run's: the pause, pressed inside a call's answer, is
+    timing too."""
+    if rc := leg.result():
+        print(f"potter: arrival order: FAILED (exit {rc}) -- {workspace / 'run.log'}")
+        return False
+    at, inside = paused_at(workspace)
+    sent: defaultdict[tuple[Any, ...], list[int]] = defaultdict(list)
+    took: defaultdict[tuple[Any, ...], list[int]] = defaultdict(list)
+    filed: list[tuple[str, int]] = []
+    reread: list[tuple[str, int]] | None = None
+    for record in leg_ledger(workspace):
+        match record.get("record_type"):
+            case "run_phase" if record["state"].get("stop_reason") == StopReason.PAUSED:
+                reread = []
+            case "sample_started" if reread is None and record.get("round"):
+                sent[record["round"], record["individual_id"]].append(record["position"])
+            case "sample_scored" if record.get("round") == at and record.get("role") != "bench":
+                (filed if reread is None else reread).append(
+                    (record["individual_id"], record["position"])
+                )
+            case "sample_scored" if reread is None and record.get("round"):
+                took[record["round"], record["individual_id"]].append(record["position"])
+    for one, position in filed:
+        took[at, one].append(position)
+    out_of_order = sum([p for p in sent[w] if p in took[w]] != took[w] for w in took)
+    replayed = reread is not None and reread[: len(filed)] == filed
+    landed = inside and at > pause_after
+    # A rolling race decides on each row returned, so a cut with calls out never waited for them.
+    cut_early = PressBill.read(workspace).discarded
+    print(
+        f"potter: arrival order, {out_of_order} walks read out of launch order, {cut_early} cells "
+        f"out at a cut, paused {'inside' if inside else 'after'} round {at} with {len(filed)} "
+        f"reads filed, the resume {'replayed them in order' if replayed else 'read them OTHERWISE'}"
+    )
+    return replayed and landed and out_of_order > 0 and cut_early > 0
+
+
+def bought(workspace: Path) -> tuple[int, int]:
+    """A leg's bills (each call's `money`) and the keys it priced, off its ledger."""
+    ledger = leg_ledger(workspace)
+    bills = sum((record.get("money") or {}).get("record_type") == "bill" for record in ledger)
+    return bills, sum(record.get("record_type") == "priced_key" for record in ledger)
 
 
 def leg_ledger(workspace: Path) -> list[dict[str, Any]]:
@@ -2506,6 +2567,7 @@ def run_child_leg(args: argparse.Namespace) -> None:
             wound=args.wound,
             hardness=args.hardness,
             press=args.press,
+            arrival=args.arrival,
         )
         print(asyncio.run(one)[0])
     proven_home()
@@ -2564,6 +2626,7 @@ def main() -> int:
     ap.add_argument("--wound", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--hardness", type=int, default=0, help=argparse.SUPPRESS)
     ap.add_argument("--press", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--arrival", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument(
         "--l4",
         action="store_true",
@@ -2628,7 +2691,7 @@ def main() -> int:
     # Each script wounds a call of the first two rounds.
     wounded = [name for name in due if name in WOUNDS] if legs and args.rounds > 1 else []
     tasks = (
-        4 * len(due) + (len(INTERRUPTED) + 2) * firsts + 6 * potter_legs + len(wounded)
+        4 * len(due) + (len(INTERRUPTED) + 2) * firsts + 7 * potter_legs + len(wounded)
         if legs
         else len(due)
     )
@@ -2682,23 +2745,28 @@ def main() -> int:
     wounding = {name: spawn(name, home / name / WOUNDED, "--wound") for name in wounded}
     # The L4 fixture's outer and inner optimizer are potter's.
     nesting = spawn("potter", home / "potter" / L4, "--l4") if potter_legs else None
-    # Its pool is read off the closed rounds, so a resume must hand it the pool a straight run had.
+    warmly = f"--hardness={REBASE_HARDNESS}"
+    # Its pool is read off the closed rounds, so a resume must hand it the pool a straight run had;
+    # only potter's race rolls, so only its calls are read as they return, pressed so several are out.
     l1_host, l2_host = (f"--crossover={host}" for host in CROSSED_HOSTS)
-    crossing = (
+    arrival = (warmly, "--arrival", "--press", f"--pause-in-walk={pause_after + 1}")
+    paired = (
         None
         if not potter_legs
         else (
-            spawn("potter", home / "potter" / CROSSED, l1_host),
-            spawn(
-                "potter",
-                home / "potter" / f"{CROSSED}-{RESUMED}",
-                l1_host,
-                f"--pause-after={pause_after}",
+            (
+                spawn("potter", home / "potter" / CROSSED, l1_host),
+                spawn(
+                    "potter",
+                    home / "potter" / f"{CROSSED}-{RESUMED}",
+                    l1_host,
+                    f"--pause-after={pause_after}",
+                ),
+                spawn("potter", home / "potter" / f"{CROSSED}-l2", l2_host),
             ),
-            spawn("potter", home / "potter" / f"{CROSSED}-l2", l2_host),
+            spawn("potter", home / "potter" / ARRIVED, *arrival),
         )
     )
-    warmly = f"--hardness={REBASE_HARDNESS}"
     warm = {
         name: (
             spawn(name, home / name / WARM, warmly),
@@ -2725,8 +2793,10 @@ def main() -> int:
         )
     said_leg(failed, first, home / first / GATED, gating, "the origin gate")
     said_leg(failed, "potter", home / "potter" / REBASED, rebasing, "a line forking at every L2")
-    if crossing is not None:
+    if paired is not None:
+        crossing, arriving = paired
         failed["potter"] += not crossed_legs(home / "potter", crossing, pause_after)
+        failed["potter"] += not arrived_leg(home / "potter" / ARRIVED, arriving, pause_after)
     if healing is not None:
         failed["potter"] += not healed_leg(home / "potter", healing)
     for name, wound in wounding.items():
