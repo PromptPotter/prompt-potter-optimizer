@@ -3419,7 +3419,10 @@ def dspy_paid(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
         cwd=tests,
         env={
             **os.environ,
-            "PYTHONPATH": os.pathsep.join((str(tests), str(tests.parent / "scripts"))),
+            # The repo root first: the child imports the promptpotter this suite runs, never the install's.
+            "PYTHONPATH": os.pathsep.join(
+                (str(tests.parent), str(tests), str(tests.parent / "scripts"))
+            ),
             "PROMPTPOTTER_HOME": str(out / "home"),
             "PROMPTPOTTER_ENV_FILE": str(out / ".env"),
         },
