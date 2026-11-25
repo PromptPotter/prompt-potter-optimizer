@@ -236,7 +236,20 @@ BASELINE = {
     # spend-tomb (+24): the campaign cap count folds every cycle's book (`served_dashboard.py::
     # spend_counts`), a sandbox banks each inner campaign at its address, a verify's difference band.
     # l4-key-c (−4) and the web chain (±0) land beside them.
-    "package_lines": 112902,
+    # rows-hook (+62): `BlockRace.choose_rows`, the order a block race takes each walk's untaken
+    # pool in at each block's open; `Walk.budget`, how many of its pool a walk takes, so its replay
+    # state covers every row it may take; `Walk.reorder`, which re-seats each cell out or back by
+    # sample id (the in-round measuring loop's seam; ml-3, −1, rides it past a close on the press).
+    # ml-2 (+163): `pobb.row_choice` / `refit`, the race choosing each block's rows by expected
+    # information (`rasch.py::most_informative`, `theta_on_ruler`) and the sampler's pool it reads
+    # (`RoundSamples.pool`); a `refused` coupling severity, so informative off `overlap` stops the mint.
+    # ml-4 (+187): `race.py::_hand_out`, per_round's allocation of a block's calls by what each
+    # walk's next call tells, and `QueryLoopState`'s per-row reads, built when a row is first taken.
+    # ml-5 (+257): `rolling` dispatch, a decision on every returned row (`_ScoringPhase.roll`,
+    # `arrive`), the calls it warrants (`race.py::_settles`), and the read order a resume replays.
+    # ml-6 (its commit's count) and ml-fork (+30: `ForkDecline`, `ThetaCaveat.withholds`); the loop's
+    # line merged with the chains above, the resolution adding none.
+    "package_lines": 113531,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -251,7 +264,10 @@ BASELINE = {
     # l4-outer-6 (+4): `discretionary_chars` on the four layout nodes, the panel share a family
     # sizes, replacing a `NODE_LAYOUTS` constant per node.
     # vote (+2): `theta_election.vote` and `origin_panel_cells`, the overlap vote and its panel's size.
-    "config_leaf_fields": 100,
+    # ml-2 (+2): `pobb.row_choice` and `pobb.refit`, the measuring loop's row-choice switches.
+    # ml-4 (+1): `pobb.shape`, whether a block's rows are shared or each walk's own.
+    # ml-5 (+2): `pobb.dispatch` and `pobb.read_order`, when the race decides and in what order.
+    "config_leaf_fields": 105,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     "settings_env": 39,

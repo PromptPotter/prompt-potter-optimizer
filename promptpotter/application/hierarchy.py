@@ -61,7 +61,7 @@ from promptpotter.domain.paired_reading import (
     lift_versus,
 )
 from promptpotter.domain.phases import LaunchStage
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, withheld
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import ScoringFormulaError
 from promptpotter.domain.spend import RATE_PRICED_LABEL, LifetimeSpend, MeteredSpend, usd_text
@@ -255,13 +255,13 @@ def candidate_figures(reading: ArmReading) -> list[Figure]:
     ]
     if terms := fitness_terms_text(reading.fitness_terms):
         rows.append(_figure("fitness_terms", "Formula terms", terms))
-    if ability is not None and (ability.theta is not None or ability.caveat is not None):
+    if ability is not None and (ability.theta is not None or withheld(ability.caveat)):
         rows.append(
             _figure(
                 "ability",
                 "Ability θ",
                 "—" if ability.theta is None else ability.theta.text,
-                None if ability.caveat is None else "not ability — see below",
+                "not ability — see below" if withheld(ability.caveat) else None,
             )
         )
     if reading.vs_reference is not None:

@@ -5,7 +5,7 @@ from collections import Counter
 from collections.abc import Collection, Iterable, Mapping
 from enum import StrEnum
 from statistics import NormalDist
-from typing import Literal, NamedTuple
+from typing import Literal, NamedTuple, TypeGuard
 
 from pydantic import Field
 
@@ -112,8 +112,19 @@ class ThetaCaveat(StrEnum):
     COLLAPSED_BAND = "collapsed_band"
     # Most cells sit on a δ shared with other cells: the prior, whose pin MOVES with the version. Silent.
     PRIOR_PINNED = "prior_pinned"
-    # θ skips cells the ruler does not carry, so it is read on fewer cells than fitness.
+    # θ skips cells the ruler does not carry, so it is read on fewer cells than fitness. A FOOTNOTE:
+    # on one scale a Rasch θ is item-free, so two levels read on different cells still difference.
     UNMEASURED_DELTA = "unmeasured_delta"
+
+    @property
+    def withholds(self) -> bool:
+        """The one fact: θ under this caveat is not ability, so no level, lift or plateau reads it."""
+        return self is not ThetaCaveat.UNMEASURED_DELTA
+
+
+def withheld(caveat: ThetaCaveat | None) -> TypeGuard[ThetaCaveat]:
+    """Every reader's "is θ withheld", over an optional caveat (``None``: θ is ability)."""
+    return caveat is not None and caveat.withholds
 
 
 class ThetaCaveatInfo(NamedTuple):
@@ -397,14 +408,14 @@ PLATEAU_ROUNDS = 3
 
 
 class SeriesReading(FrozenModel):
-    """A round's level as its series read it, under the one caveat that withholds it."""
+    """A round's level as its series read it, under the one caveat that qualifies it."""
 
     reading: AbilityReading = Field(
         description="The round's level: the individual it ended on, read on the series' one scale"
     )
     caveat: ThetaCaveat | None = Field(
-        description="The level's own caveat, else its series'. Null, and it differences any "
-        "other level of the series that is null too."
+        description="The level's own caveat, else its series'. One that withholds "
+        "(`ThetaCaveat.withholds`) keeps the level from differencing; a footnote does not."
     )
 
 
@@ -421,8 +432,8 @@ class LevelSeries(FrozenModel):
         "cycle. Null where it holds no scored cell on the scale."
     )
     caveat: ThetaCaveat | None = Field(
-        description="`theta_caveat` over every cell this line read. Non-null, no two of its "
-        "levels difference, whatever `stamp` says; another line on the stamp keeps its own."
+        description="`theta_caveat` over every cell this line read. One that withholds, no two of "
+        "its levels difference, whatever `stamp` says; another line on the stamp keeps its own."
     )
 
     @property
@@ -441,7 +452,7 @@ class LevelSeries(FrozenModel):
     def level(self, rnd: int) -> AbilityReading | None:
         """The level two rounds may difference."""
         read = self.reading(rnd)
-        return None if read is None or read.caveat is not None else read.reading
+        return None if read is None or withheld(read.caveat) else read.reading
 
     def plateau(self) -> float | None:
         recent = [self.level(r) for r in self.rounds[-PLATEAU_ROUNDS:]]

@@ -105,9 +105,11 @@ class PipelineManifest(FrozenModel):
 
 
 class ManifestSwap(FrozenModel):
-    # Takes the swapped node's place in every walk, as manifest `of` declares and configures it.
+    # Takes the swapped node's place in every walk, as manifest `of` declares and configures it,
+    # with `config` laid over that config as a fold patch.
     node: str
     of: str
+    config: dict[str, Any] = Field(default_factory=dict)
 
 
 class ManifestSwitch(FrozenModel):

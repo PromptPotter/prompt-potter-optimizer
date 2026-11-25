@@ -21,6 +21,7 @@ from factories import (
     cycle_result,
     election,
     jumping_clock,
+    level_series,
     loop_session,
     measurement,
     pipeline_schema,
@@ -533,7 +534,24 @@ def test_a_theta_off_the_judging_scale_is_withheld_and_its_caveat_names_why() ->
         (None, ["1", "2"], ThetaCaveat.COLD_RULER),
     ):
         served = theta_caveat(scale, read_on, prior_dominated=False)
-        assert served is expected, "the pin cancels inside a lift, a skipped cell does not"
+        assert served is expected, "a state θ was read in is not the caveat it carries"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_line_read_on_cells_the_scale_lacks_still_differences_its_levels() -> None:
+    # Adaptive rows read each arm on its own cells: θ is item-free on one scale, so they difference.
+    for caveat, differences in (
+        (ThetaCaveat.UNMEASURED_DELTA, True),
+        (ThetaCaveat.COLLAPSED_BAND, False),
+        (ThetaCaveat.PRIOR_PINNED, False),
+    ):
+        series = level_series(0.30, [0.31, 0.32, 0.30], caveat=caveat)
+        first, last = series.level(0), series.level(3)
+        lift = None if first is None or last is None else last.lift_over(first)
+        read = (lift is not None, series.plateau() is not None)
+        assert read == (differences, differences), (
+            f"`{caveat}` withheld a level it only footnotes, or read one it withholds"
+        )
 
 
 @pytest.mark.usefixtures("optimizing_memory")

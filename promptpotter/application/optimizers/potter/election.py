@@ -68,13 +68,6 @@ def _verdict_reason(
     return f"no arm cleared the parent: best {labels[leading]} {lift}; {census}{scale}"
 
 
-def _kept_for_a_fresh_read(
-    leading: ArmKey, reads: Mapping[ArmKey, Estimate], lineage: Lineage
-) -> bool:
-    """A held round's leader ahead of its parent, once: only the next round's panel says whether it clears the bar."""
-    return reads[leading].value > 0.0 and not any(leading in rr.arms for rr in lineage.rounds)
-
-
 class RoundWinner(Replayed, kind="round_winner"):
     arms: list[ArmKey]
     coverage_floor: int
@@ -107,7 +100,6 @@ class RoundWinner(Replayed, kind="round_winner"):
 
 def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
     ruler = ctx.read(Ruler).difficulty.ruler
-    lineage = ctx.read(Lineage)
     electable = measured.electable
     inputs = RoundWinner(
         arms=electable,
@@ -121,17 +113,14 @@ def elect_on_theta(ctx: NodeContext, measured: MeasuredRound) -> Selection:
 
     reads = readable_lifts(electable, measured.coverage_floor, abilities)
     leading = selected or closest_to_bar(reads)
-    if selected is not None:
-        ranked = [measured.arms[selected].individual]
-    elif leading is not None and _kept_for_a_fresh_read(leading, reads, lineage):
-        ranked = [lineage.parent, measured.arms[leading].individual]
-    else:
-        ranked = [lineage.parent]
     ctx.read(Replay).decide(inputs, selected)
+    # Evidence is bought in the round's race alone: a leader short of the bar there is dropped.
     return Selection(
         selected=selected,
         leading=leading,
-        ranked=ranked,
+        ranked=[
+            measured.arms[selected].individual if selected is not None else ctx.read(Lineage).parent
+        ],
         verdict_reason=_verdict_reason(
             winner=selected,
             leading=leading,

@@ -84,7 +84,6 @@ from promptpotter.domain.optimizer_state import (
     Critique,
     CritiqueReadout,
 )
-from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import OptimizerFact, RoundResult
@@ -342,17 +341,6 @@ def variants_this_round(n_variants: int, l2: L2Memory) -> int:
     return min(int(steered.get("n_variants", n_variants)), n_variants * 3)
 
 
-def rejoining(lineage: Lineage) -> list[Proposal]:
-    """The population beside the parent — the leader a held round kept — as it was walked, ahead
-    of L1's own, so each of those races it too (`election.py::elect_on_theta`)."""
-    walked = lineage.rounds[-1].arms
-    return [
-        Proposal(individual=member, overlay=walked[ArmKey(member.id)].overlay)
-        for member in lineage.population
-        if member.id != lineage.parent.id
-    ]
-
-
 def l1_readout(ctx: NodeContext, generation: L1Generation) -> L1Readout:
     """Called once every reject posture has read *generation*: the yield is counted here alone."""
     axes = ctx.read(Ruler).axes
@@ -375,8 +363,6 @@ def l1_readout(ctx: NodeContext, generation: L1Generation) -> L1Readout:
 async def propose_l1_population(ctx: NodeContext) -> Proposals:
     parent_point = ctx.read(Parent).point
     lineage, target = ctx.read(Lineage), ctx.read(Target)
-    # Outside L1's generation: no invariant reads them and its yield never counts them.
-    kept = rejoining(lineage)
     generation = await _generate(ctx)
     checked = detect_invariants(
         generation.proposals, lineage.parent, parent_point.pipeline_params, lineage.rounds
@@ -390,7 +376,7 @@ async def propose_l1_population(ctx: NodeContext) -> Proposals:
     )
     generation = replace(generation, proposals=parsed)
     ctx.emit(l1_readout(ctx, generation))
-    return Proposals(proposals=[*kept, *generation.proposals])
+    return Proposals(proposals=generation.proposals)
 
 
 async def _generate(ctx: NodeContext) -> L1Generation:

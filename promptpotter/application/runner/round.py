@@ -35,6 +35,7 @@ from promptpotter.application.optimizers.nodes import (
     MeasuredRound,
     Proposals,
     RoundOpening,
+    RoundSamples,
     RoundWalk,
 )
 from promptpotter.application.runner.bench import (
@@ -587,12 +588,13 @@ async def measure_population(
     population: Proposals,
     pool: list[Sample],
     eliminator: Eliminator | None,
+    race: Race | None,
     selector: Selector,
 ) -> MeasuredRound:
     cycle = ctx.cycle
     panel = ctx.panel
-    arms, rows, cut, race = await _walk_population(
-        ctx, population, eliminator, keep_cut=selector.elects_partial
+    arms, rows, cut = await _walk_population(
+        ctx, population, eliminator, race, keep_cut=selector.elects_partial
     )
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
@@ -656,7 +658,7 @@ async def measure_population(
         arms,
         declared=[cell.key for cell in parent.rows]
         if cycle.config.optimization.lift_reference == "best_so_far"
-        else [sample.key for sample in panel.cells],
+        else [sample.key for sample in panel.read_on(rows)],
     )
     readings = await _reference_readings(ctx, arms, rows, scored, parent, pair)
     rejects = eliminator is not None and eliminator.stop_disqualifies
@@ -751,7 +753,7 @@ async def _reference_readings(
             ctx,
             individual,
             cycle.points.job(individual),
-            [s for s in ctx.panel.cells if s.key in keys],
+            [s for s in ctx.panel.read_on(rows) if s.key in keys],
             role=MeasurementRole.PARENT,
         )
     walks = ctx.walks
@@ -864,9 +866,10 @@ async def _walk_population(
     ctx: RoundContext,
     population: Proposals,
     eliminator: Eliminator | None,
+    race: Race | None,
     *,
     keep_cut: bool,
-) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopLoop | None, Race | None]:
+) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopLoop | None]:
     cycle = ctx.cycle
     round_num = ctx.round_num
     panel = ctx.panel
@@ -877,10 +880,8 @@ async def _walk_population(
     labels = {key: arm.label for key, arm in proposed.items()}
     order = [int(s.id) for s in panel.order]
     sps = {key: cycle.points.job(arm.individual) for key, arm in proposed.items()}
-    race: Race | None = None
     pool: CatchUpPool | None = None
-    if eliminator is not None:
-        race = eliminator.race(NodeContext(ctx, eliminator), panel)
+    if eliminator is not None and race is not None:
         pool = CatchUpPool(
             race,
             cycle.session,
@@ -900,23 +901,33 @@ async def _walk_population(
         for key, arm in proposed.items()
     }
     session = cycle.session
-    skipped = session.store.campaigns.standing_rounds(session.hop, moment=None).skipped
+    standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
     walks: dict[ArmKey, Walk | None] = {}
     for key, arm in proposed.items():
-        walks[key] = _open_arm(ctx, arm, sps[key], panel.order, skipped.get((round_num, key)))
+        walks[key] = _open_arm(ctx, arm, sps[key], panel, standing.skipped.get((round_num, key)))
 
     blocks = race.blocks if race is not None else None
+    filed: set[ArmKey] = set()
 
     def on_turn(key: ArmKey, block: int | None) -> None:
         if race is not None:
             race.open_turn(key)
         held = states[key].block
         racing = sum(1 for w in walks.values() if w is not None and w.outcome is None)
-        # A turn inside a block race files the arm once per checkpoint that moved the field.
-        if block and held is not None and held["racing"] == racing:
+        walk = walks[key]
+        # The rows its race chose, which the readout heads.
+        chosen = order if walk is None else [int(s.id) for s in walk.dataset[: walk.n]]
+        # A turn inside a block race files the arm once per checkpoint that moved the field or its rows.
+        moved = chosen != states[key].sample_order
+        if block and held is not None and held["racing"] == racing and not moved:
             return
+        # A `rolling` round re-announces a walk at each decision: it files the rows it moved.
+        if block is None and key in filed and not moved:
+            return
+        filed.add(key)
         states[key] = states[key].model_copy(
             update={
+                "sample_order": chosen,
                 "n_priors": race.n_priors if race is not None else 0,
                 "block": None
                 if block is None or blocks is None
@@ -931,7 +942,9 @@ async def _walk_population(
         append_record(ArmRecord(round=round_num, arm=key, state=states[key]))
 
     def on_decided(key: ArmKey) -> None:
-        arm, results = _conclude_arm(ctx, states[key], walks[key], key, race, labels)
+        if (walk := walks[key]) is not None:
+            asked[key] = ctx.asked(key, walk.dataset[: walk.n])
+        arm, results = _conclude_arm(ctx, states[key], walk, key, race, labels)
         rows[key] = results
         concluded[key] = arm
         ctx.walked(ReadArm(key, arm, results), asked[key])
@@ -945,6 +958,7 @@ async def _walk_population(
         blocks=blocks,
         on_turn=on_turn,
         on_decided=on_decided,
+        reads=standing.reads.get(round_num, ()),
     )
     # A prior's caught-up cells are its round reading's rows, so the race and the election read one sheet.
     for key, cells in ({} if pool is None else pool.caught).items():
@@ -953,21 +967,21 @@ async def _walk_population(
             rows[key] = rows[key].merged(taken)
             ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]
-    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut, race
+    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
 
 
 def _open_arm(
     ctx: RoundContext,
     arm: Proposed,
     sp: JobSearchPoint,
-    dataset: list[Sample],
+    panel: RoundSamples,
     skip_at: int | None,
 ) -> Walk | None:
     if arm.invalid:
         return None
     return open_walk(
         sp,
-        dataset,
+        panel.walked,
         ctx.cycle.session,
         kind=MeasurementRole.PANEL,
         sample_index=ctx.cycle.sample_index,
@@ -975,6 +989,7 @@ def _open_arm(
         measured=arm.individual.id,
         skip_at=skip_at,
         held=ctx.held(ArmKey(arm.individual.id)),
+        budget=len(panel.order),
     )
 
 
@@ -1283,15 +1298,21 @@ async def _proposed(ctx: RoundContext) -> Proposals:
 
 async def _measured(ctx: RoundContext, population: Proposals, pool: list[Sample]) -> MeasuredRound:
     plan = ctx.cycle.optimizer.plan
+    eliminator = plan.eliminator
+    race = None if eliminator is None else eliminator.race(NodeContext(ctx, eliminator), ctx.panel)
     append_record(
         PhaseRecord(
             phase=CampaignPhase.MEASURE,
             step="enter",
             round=ctx.round_num,
-            act=MeasureOpened(candidates=len(population.proposals), cells=len(ctx.panel.cells)),
+            act=MeasureOpened(
+                candidates=len(population.proposals),
+                cells=len(ctx.panel.cells),
+                rows="random" if race is None else race.rows_ran,
+            ),
         )
     )
-    measured = await measure_population(ctx, population, pool, plan.eliminator, plan.selector)
+    measured = await measure_population(ctx, population, pool, eliminator, race, plan.selector)
     append_record(PhaseRecord(phase=CampaignPhase.MEASURE, step="exit", round=ctx.round_num))
     return measured
 

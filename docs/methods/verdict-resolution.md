@@ -10,7 +10,9 @@ blind to every outcome:
 | **Acquisition score** | Which sample is hardest to call? | `pick_value = decision_information_gain + delta_learning_gain` | the persisted hard-samples ranking alone |
 | **Round order** | In what order do we score the round's samples? | `build_round_order` | **Within** a round — one deterministic order, shared by every candidate |
 
-**There is no online per-sample re-fit** — the round order is static by design (§ The round order).
+**Under `pobb.row_choice: random` there is no online per-sample re-fit** — the round order is
+static by design (§ The round order); potter's default, `informative`, reverses that, under `overlap`
+alone, and capo-pobb pins `random`, since capo's selector votes on the draw.
 Which *candidate* wins is [`candidate-elimination.md`](candidate-elimination.md)'s; both read θ, so
 they never disagree about what "better" means.
 
@@ -129,8 +131,12 @@ carry a pinned arm. In severity order:
   the ruler's composition, so an unchanged prompt walks up the scale round on round. Silent too.
   **Read the LIFT, never the level, never a level across rounds** — the pin cancels within a round.
 - **Unmeasured difficulty** (`unmeasured_delta`). A cell the judging scale does not carry; θ leaves
-  it out, and two arms can skip different cells, so it does not cancel inside a lift. A later round
-  reads it once this round's rows fold in.
+  it out. **A footnote, never a withholding** (`ThetaCaveat.withholds`, the one fact every reader
+  asks): on one warm `ruler.id` a Rasch θ is item-free, so two levels read on different cells the
+  scale carries still difference, and a skipped cell costs precision (θ's SE, `cells`), not the
+  scale. Adaptive rows (`informative`) read different cells by design, and the parent line's last
+  rows have no other answerer, so a withholding here would leave the default's own series unread.
+  Every surface still shows it; a later round reads the cell once this round's rows fold in.
 - **A ruler HOLE is never graded.** δ=0 is a position, not neutral: against a centre near +2.1 it
   scores an unmeasured cell as easiest and pulls θ down ~2 logits, so θ reads only cells the ruler
   carries.
@@ -289,6 +295,17 @@ discordance-potential samples. **At a low base rate the static order hits the sa
 symptom INVERTED:** the candidate misses the MISS stratum too, near-ties narrow both SEs, and `p_best`
 reads DECISIVE (`sealqa/longseal-12`: four arms cut at `elimination_n_min`, identical to six
 decimals). Count the discordant cells (`selection.py::discordant`) to tell the two apart.
+
+**`pobb.row_choice: informative` (potter's default) reverses this decision, and is refused unless
+`theta_election.vote: overlap`** (`couplings.py::POBB`, `informative_rows_without_overlap`). At
+every block's open the race takes each walk's next rows from the sampler's pool by Fisher
+information (`rasch.py::most_informative`), δ read off the ruler and θ by `pobb.refit`: `per_round`
+the parent's on the ruler seated at the round's start, `per_decision` (the default) the survivors' in PoBB's last
+field fit, linked onto that ruler (`rasch.py::theta_on_ruler`). A chosen row is no blind draw and the
+parent's hits it skips are the regressions the probe above looks for, so the draw cannot crown an
+arm read on it: the origin panel, blind to the race, does. Every survivor answers the same next row
+under `pobb.shape: per_candidate`, rows of its own under `per_round` (the default); a top-up walk keeps its own panel gaps' order. A row the parent never answered is
+caught up as on the draw, so PoBB's field always holds the parent on the rows the arms raced.
 
 ---
 

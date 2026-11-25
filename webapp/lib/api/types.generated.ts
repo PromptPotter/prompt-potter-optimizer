@@ -1926,12 +1926,13 @@ export interface LiftPrior {
   mu0_se: number;
 }
 
-/** A round's level as its series read it, under the one caveat that withholds it. */
+/** A round's level as its series read it, under the one caveat that qualifies it. */
 export interface SeriesReading {
   /** The round's level: the individual it ended on, read on the series' one scale */
   reading: AbilityReading;
-  /** The level's own caveat, else its series'. Null, and it differences any other
-   * level of the series that is null too. */
+  /** The level's own caveat, else its series'. One that withholds
+   * (`ThetaCaveat.withholds`) keeps the level from differencing; a footnote
+   * does not. */
   caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
@@ -2464,15 +2465,14 @@ export interface ForkRemainder {
   rounds: number | null;
 }
 
-/** The scoring walk of the arm being measured: the axis it DECLARED plus a
- * cursor. Past the cursor is declared, never promised — an eliminator can
- * stop the arm before its tail. */
+/** The scoring walk of the arm being measured: the cells it took, in the order it
+ * took them, plus a cursor, so a race that re-chooses its rows at a decision
+ * never moves a taken cell. */
 export interface SampleWalk {
-  /** The declared order; before the arm declares one, the cells it has measured and
-   * the one in flight. */
+  /** The cells the arm has measured, in the order it took them, then the one in
+   * flight. */
   ids: number[];
-  /** Where the walk stands in `ids`: the cell in flight, else the one after the
-   * last measured. */
+  /** Where the walk stands in `ids`: its last cell. */
   cursor: number;
   /** Changes when the walk does — a new arm is a new axis. */
   key: string;
@@ -2940,8 +2940,8 @@ export interface DeterminismClamp {
 }
 
 /** The column a pick's election is quoted on: θ where it was won on θ, unless θ
- * is unread or carries a caveat — there θ is not ability, and the election
- * reads on fitness. */
+ * is unread or withheld (`ThetaCaveat.withholds`): there θ is not ability,
+ * and the election reads on fitness. */
 export interface ElectionColumn {
   /** What the electing round's selector ranked on. */
   elects_on: 'fitness' | 'composite' | 'ability';
@@ -4453,7 +4453,7 @@ export interface ConfigCoupling {
   /** What goes wrong when the combination is violated */
   consequence: string;
   /** collision (soundness) | inert (wasted knob) | info (relationship) */
-  severity: 'collision' | 'inert' | 'info';
+  severity: 'refused' | 'collision' | 'inert' | 'info';
   /** True when this campaign's config is in the violating combination */
   active: boolean;
 }
@@ -5765,7 +5765,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "341bc4ae12ba6176";
+export const SERVED_CONTRACT = "23183ec01bc9b147";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -6026,7 +6026,8 @@ export const SIGN_IN_REFUSAL_INFO: Record<'state_invalid_or_expired' | 'code_exc
 };
 
 // Mirror of application/config_map.py::COUPLING_SEVERITY_INFO, in display order.
-export const COUPLING_SEVERITY_INFO: Record<'collision' | 'inert' | 'info', CouplingSeverityInfo> = {
+export const COUPLING_SEVERITY_INFO: Record<'refused' | 'collision' | 'inert' | 'info', CouplingSeverityInfo> = {
+  "refused": { tone: "danger" },
   "collision": { tone: "danger" },
   "inert": { tone: "attention" },
   "info": { tone: "quiet" },
@@ -6614,7 +6615,7 @@ export const LEAF_INFO: Record<Leaf, LeafInfo> = {
 // Each table's keys in display order (lib/api/words.ts walks a table by it).
 export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object, readonly string[]>([
   [SIGN_IN_REFUSAL_INFO, ["state_invalid_or_expired", "code_exchange_failed", "provider_returned_error", "callback_missing_params", "signin_unavailable", "accounts_full"]],
-  [COUPLING_SEVERITY_INFO, ["collision", "inert", "info"]],
+  [COUPLING_SEVERITY_INFO, ["refused", "collision", "inert", "info"]],
   [KNOB_SOURCE_SET_BY, ["default", "dataset", "campaign", "free_tier", "start", "manifest"]],
   [SETUP_STEP_TITLES, ["optimizer", "data", "scoring", "pipeline", "head_to_head", "run"]],
   [GUARD_DIFFERENCE_INFO, ["instrument_id", "dataset_hash", "split", "bench_rows", "scorer_id", "models", "origin", "budget", "defaults", "optimizer_models", "human_intervened", "origin_reading"]],

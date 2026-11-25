@@ -99,17 +99,14 @@ class WarmingDashboard(StrictModel):
 
 
 class SampleWalk(StrictModel):
-    """The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the
-    cursor is declared, never promised — an eliminator can stop the arm before its tail."""
+    """The scoring walk of the arm being measured: the cells it took, in the order it took them,
+    plus a cursor, so a race that re-chooses its rows at a decision never moves a taken cell."""
 
     ids: list[int] = Field(
-        description="The declared order; before the arm declares one, the cells it has measured "
-        "and the one in flight."
+        description="The cells the arm has measured, in the order it took them, then the one in "
+        "flight."
     )
-    cursor: int = Field(
-        description="Where the walk stands in `ids`: the cell in flight, else the one after the "
-        "last measured."
-    )
+    cursor: int = Field(description="Where the walk stands in `ids`: its last cell.")
     key: str = Field(description="Changes when the walk does — a new arm is a new axis.")
 
 
@@ -340,14 +337,6 @@ def _walk(state: LiveDashboardState, hop: CycleHop, *, live: bool) -> SampleWalk
     measured = [s.position for s in rows[-1].samples] if rows else []
     in_flight = state.current_position
     key = f"{hop.cycle_id}:{current.round}:{len(rows) - 1 if rows else '-'}"
-    if axis := state.declared_sample_order:
-        # Anchored on a cell's own position, so a walk off the declared order cannot slide the cursor.
-        if in_flight in axis:
-            return SampleWalk(ids=axis, cursor=axis.index(in_flight), key=key)
-        last = len(axis) - 1
-        if measured and measured[-1] in axis:
-            return SampleWalk(ids=axis, cursor=min(axis.index(measured[-1]) + 1, last), key=key)
-        return SampleWalk(ids=axis, cursor=min(len(measured), last), key=key)
     ids = measured if in_flight is None or measured[-1:] == [in_flight] else [*measured, in_flight]
     return SampleWalk(ids=ids, cursor=len(ids) - 1, key=key) if ids else None
 

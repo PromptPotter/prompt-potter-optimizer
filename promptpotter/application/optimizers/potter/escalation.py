@@ -18,6 +18,7 @@ from promptpotter.application.bench.node_context import (
     Replay,
     Ruler,
 )
+from promptpotter.application.mask.backprop import ForkDecline
 from promptpotter.application.optimizers.nodes import OptimizerPhase
 from promptpotter.application.optimizers.potter.dispatch.facade import (
     DispatchHub,
@@ -43,7 +44,7 @@ from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
 from promptpotter.domain.paired_reading import RoundArm
-from promptpotter.domain.phase_acts import StepClosed, StepOpened
+from promptpotter.domain.phase_acts import StepClosed, StepOpened, TextFact
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import ManifestNodeOverlay
 from promptpotter.domain.records.run_records import (
@@ -393,8 +394,8 @@ class LayerCall(NamedTuple):
 
 async def _run_transition(
     fired: LayerCall, fire: Fire
-) -> tuple[TransitionResult, PotterView] | None:
-    """With the view it was composed from; ``None`` when the layer's output never parsed."""
+) -> tuple[TransitionResult, RebaseRequest | ForkDecline | None] | None:
+    """With the fork its proposal asks, or why none may; ``None`` when the output never parsed."""
     layer, ctx = fired
     ctx.read(Progress).phase(layer.phase.phase, "enter", layer.enter_act(ctx, fire))
     ladder = ctx.slice(Ladder)
@@ -427,32 +428,39 @@ async def _run_transition(
         return None
 
     layer.land(ctx, result)
-    ctx.read(Progress).phase(layer.phase.phase, "exit", layer.exit_act(ctx, result))
-    return result, view
+    proposal = result.fork_proposal
+    fork = (
+        _rebase_request(ctx, layer.layer_id, proposal, view.reelect_offer)
+        if proposal is not None and ctx.knobs(EscalationKnobs).rebase_capability
+        else None
+    )
+    closed = layer.exit_act(ctx, result)
+    if isinstance(fork, ForkDecline):
+        assert proposal is not None
+        # The step's own record names the proposal and why no node took it; the readout prints it.
+        declined = TextFact(value=f"{proposal.reason} — {fork.value}")
+        closed = StepClosed(facts={**closed.facts, "fork declined": declined}, audit=closed.audit)
+    ctx.read(Progress).phase(layer.phase.phase, "exit", closed)
+    return result, fork
 
 
-def _layer_control(fired: LayerCall, result: TransitionResult, view: PotterView) -> None:
+def _layer_control(
+    fired: LayerCall, result: TransitionResult, fork: RebaseRequest | ForkDecline | None
+) -> None:
     """The layer-control channel, read after the ladder banked the fire: terminate outranks rebase."""
-    layer, ctx = fired
-    capability = ctx.knobs(EscalationKnobs)
     # Present only where the reply schema offered it (`PotterView.terminate_offer`); never a
     # stand-in reason: a blank stop is not a decision.
     if result.terminate_proposal is not None and (
         reason := result.terminate_proposal.reason.strip()
     ):
-        raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{layer.layer_id}: {reason}")
-
-    if (
-        result.fork_proposal is not None
-        and capability.rebase_capability
-        and (fork := _rebase_request(ctx, layer.layer_id, result.fork_proposal, view.reelect_offer))
-    ):
+        raise StopLoop(StopReason.OPTIMIZER_ABORT, detail=f"{fired.layer.layer_id}: {reason}")
+    if isinstance(fork, RebaseRequest):
         raise StopLoop(StopReason.REBASED, fork=fork)
 
 
 def _rebase_request(
     ctx: NodeContext, layer_id: str, proposal: ForkProposal, offer: Mapping[str, RoundArm]
-) -> RebaseRequest | None:
+) -> RebaseRequest | ForkDecline:
     round_num = ctx.round_num
     unlock = proposal.unlock_schema_field_rename and not (
         ctx.knobs(L1GenerateKnobs).schema_field_rename
@@ -465,17 +473,17 @@ def _rebase_request(
     stand_on = proposal.stand_on if isinstance(proposal, StandingForkProposal) else ""
     if stand_on:
         at = offer[stand_on]
-        branch: int | None = at.round
+        branch: int | ForkDecline = at.round
         held = next(rr for rr in lineage.rounds if rr.round == at.round)
         assert held.election is not None, "ELECTIONS lists only rounds that elected"
         if held.election.selected != at.arm:
             hangs_from = lineage.reelected(at, Reelection(by=issued_by, reason=reason))
     else:
         branch = lineage.branch_round(changing=unlock)
-    if branch is None:
-        return None
+    if isinstance(branch, ForkDecline):
+        return branch
 
-    request = RebaseRequest(
+    return RebaseRequest(
         fork_from_round=branch + 1,
         trigger=ForkTrigger.OPTIMIZER_REBASE,
         reason=reason,
@@ -489,7 +497,6 @@ def _rebase_request(
         ),
         hangs_from=hangs_from,
     )
-    return request
 
 
 async def _fire_layer(ctx: NodeContext, fired: LayerCall, fire: Fire) -> TransitionResult | None:
@@ -497,10 +504,10 @@ async def _fire_layer(ctx: NodeContext, fired: LayerCall, fire: Fire) -> Transit
     landed = await _run_transition(fired, fire)
     if landed is None:
         return None
-    result, view = landed
+    result, fork = landed
     ctx.put(fired.layer.record(ctx.slice(Ladder), fire))
     ctx.restate(Ladder)
-    _layer_control(fired, result, view)
+    _layer_control(fired, result, fork)
     return result
 
 

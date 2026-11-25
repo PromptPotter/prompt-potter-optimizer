@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from enum import Enum
 
 from promptpotter.application.mask.record import SpineCycle
 
@@ -101,6 +102,17 @@ def _ancestors(
     return out
 
 
+class ForkDecline(Enum):
+    """Why a fork the layer proposed stands on no node, worded: the step's record says it."""
+
+    NO_PICK = "the round it was proposed in holds no pick on the line's spine"
+    NO_THETA = "no pick on the line's spine holds a θ to rank it by"
+    NOTHING_NEW = (
+        "every pick holding a θ is the origin or the one the line stands on, and the fork "
+        "changes nothing, so it would replay what it left"
+    )
+
+
 def select_branch_round(
     spine: list[SpineCycle],
     *,
@@ -108,24 +120,23 @@ def select_branch_round(
     current_round: int,
     origin_id: str,
     changing: bool,
-) -> int | None:
+) -> int | ForkDecline:
     """The node a fork stands on, the current one or an ancestor, in the current cycle's
-    coordinates; ``None`` ⇒ the caller must not fork. A fork carrying no change stands only on a
-    promoted individual the line does not stand on now: anything else replays what it left."""
+    coordinates, else why none may. A fork carrying no change stands only on a promoted
+    individual the line does not stand on now: anything else replays what it left."""
     stats = accumulate_node_stats(spine)
     qs = {key: q for key, s in stats.items() if (q := s.q) is not None}
     node: NodeKey = (cycle_id, current_round)
     picks = {(c.cycle_id, rnd): pick for c in spine for rnd, pick in c.pick_by_round.items()}
     if node not in picks:
-        return None
+        return ForkDecline.NO_PICK
     stale = {origin_id, picks[node]}
-    candidates = [
-        a
-        for a in (node, *_ancestors(stats, spine, node))
-        if a in qs and a in picks and (changing or picks[a] not in stale)
-    ]
+    valued = [a for a in (node, *_ancestors(stats, spine, node)) if a in qs and a in picks]
+    if not valued:
+        return ForkDecline.NO_THETA
+    candidates = [a for a in valued if changing or picks[a] not in stale]
     if not candidates:
-        return None
+        return ForkDecline.NOTHING_NEW
 
     # θ is in logits and UCB1 assumes [0, 1]; a one-θ forest collapses to pure exploration.
     lo, hi = min(qs.values()), max(qs.values())

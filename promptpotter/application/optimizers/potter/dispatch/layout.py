@@ -125,6 +125,8 @@ NODE_LAYOUTS: dict[str, NodeLayoutSpec] = {
         mandatory=frozenset(
             {
                 "critique",
+                # The subject L2 steers L1 on, as L1's own is: a grown prompt never drops it.
+                "rendered_prompt",
                 "l1_signal_catalogue",
                 "diagnostics",
                 "rebase_capability",

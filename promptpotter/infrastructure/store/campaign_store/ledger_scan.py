@@ -323,12 +323,15 @@ class StandingRounds(NamedTuple):
     decisions: dict[int, list[ResumeCheckpointRecord]]
     # The cells an operator's skip left each arm at: it stands as its proposal does, past a re-entry.
     skipped: dict[tuple[int, ArmKey], int]
+    # The open round's rows in the order its walks read them, which an ``arrival`` resume replays:
+    # it stands past a re-entry, a leg that re-reads it extending it.
+    reads: dict[int, list[tuple[ArmKey, int]]]
     entered: int | None = None
     rewound: int | None = None
 
     @classmethod
     def none(cls) -> StandingRounds:
-        return cls({}, {}, {}, {}, {}, {}, {}, {})
+        return cls({}, {}, {}, {}, {}, {}, {}, {}, {})
 
     def displaced(self, entered: int | None, rewound: int | None) -> StandingRounds:
         return self._replace(
@@ -340,6 +343,7 @@ class StandingRounds(NamedTuple):
             elections=_before(self.elections, entered),
             decisions=_before(self.decisions, entered),
             skipped=_before(self.skipped, rewound),
+            reads=_before(self.reads, rewound),
         )
 
     def then(self, later: StandingRounds) -> StandingRounds:
@@ -355,6 +359,10 @@ class StandingRounds(NamedTuple):
             elections={**prefix.elections, **later.elections},
             decisions=prefix.decisions,
             skipped={**prefix.skipped, **later.skipped},
+            reads={
+                **prefix.reads,
+                **{n: _reread(prefix.reads.get(n, []), leg) for n, leg in later.reads.items()},
+            },
             entered=later.entered if self.entered is None else self.entered,
             rewound=later.rewound if self.rewound is None else self.rewound,
         )
@@ -391,6 +399,11 @@ def _earliest(held: int | None, rnd: int | None) -> int | None:
     return min(held, rnd)
 
 
+def _reread[T](held: list[T], leg: list[T]) -> list[T]:
+    """A leg that re-reads the order held so far, stopped short of its end, extends nothing."""
+    return held if leg == held[: len(leg)] else leg
+
+
 def _take(taken: dict[str, WalkedCell], cell: WalkedCell) -> None:
     # Popped first: the cell moves to where the walk last read it.
     taken.pop(cell[0], None)
@@ -422,6 +435,8 @@ class _StandingFold:
         self._live: int | None = None
         # Each closed round's arms as its close left them, built once: a later record of one thaws it.
         self._frozen: dict[tuple[int, ArmKey], StandingArm] = {}
+        # How far the live leg has re-read its round's read order.
+        self._reread = 0
 
     def feed(self, record: _RoundStep) -> None:
         if isinstance(record, CycleMintedRecord):
@@ -443,6 +458,7 @@ class _StandingFold:
                 self._cells = _before(self._cells, rnd)
                 self._frozen = _before(self._frozen, rnd)
                 self._live = rnd
+                self._reread = 0
             case ElectionRecord():
                 held.elections[rnd] = record
             case ResumeCheckpointRecord():
@@ -453,6 +469,7 @@ class _StandingFold:
                     self._cells.setdefault((rnd, arm_key), {})
                 self._freeze(rnd, record.arms)
                 held.rounds[rnd] = StandingRound(record, offset)
+                held.reads.pop(rnd, None)
             case RoundRestatedRecord():
                 # A restatement is its round WHOLE, so the ledger holding it owns every arm.
                 self._arms.close(record, record.arms)
@@ -480,6 +497,7 @@ class _StandingFold:
                 # The arm's fold moved, so its frozen standing goes whether or not a cell was walked.
                 if (walking := self._arms.take(record)) is not None:
                     self._frozen.pop((rnd, walking), None)
+                    self._read(held.reads.setdefault(rnd, []), (walking, record.position))
                 if (cell := _walked_cell(record)) is None:
                     return
                 if walking is not None:
@@ -493,6 +511,12 @@ class _StandingFold:
                     )
             case _:
                 assert_never(record)
+
+    def _read(self, order: list[tuple[ArmKey, int]], call: tuple[ArmKey, int]) -> None:
+        if order[self._reread : self._reread + 1] != [call]:
+            del order[self._reread :]
+            order.append(call)
+        self._reread += 1
 
     def _shared(self, rnd: int) -> bool:
         return self._live is not None and rnd < self._live
@@ -525,6 +549,7 @@ class _StandingFold:
             elections=dict(held.elections),
             decisions={n: list(made) for n, made in held.decisions.items()},
             skipped=dict(held.skipped),
+            reads={n: list(order) for n, order in held.reads.items()},
         )
 
 
