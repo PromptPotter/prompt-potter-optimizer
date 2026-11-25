@@ -26,8 +26,8 @@ from promptpotter.application.jobs.launcher.head_to_head import (
     admit_head_to_head,
     run_each,
 )
-from promptpotter.application.jobs.launcher.held_job import run_held_job
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
+from promptpotter.application.jobs.launcher.run_job import run_held_job
 from promptpotter.application.jobs.mint import (
     mint_framed_cycle,
 )

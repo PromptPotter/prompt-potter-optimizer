@@ -18,7 +18,7 @@ row it closes.
 - **A fork is not opened under a carried admission**: `jobs/launcher/launch.py::hold` opens every held
   launch's cycle, and the slotless doors (`embedded_run.py::run_campaign`,
   `runner/inner/spawn.py::_open_seat`) admit through `admission.py::admit_slotless` before they mint
-  and run through `held_job.py::run_held_job`, but mint or resume beside it. Action: a fork is opened
+  and run through `run_job.py::run_held_job`, but mint or resume beside it. Action: a fork is opened
   under a carried admission, and the slotless doors open through the request kind's one `open`.
   **Rides with:** admit-2. **Re-test:** `git grep -n "mint(" -- promptpotter/application/runner/inner/spawn.py promptpotter/application/embedded_run.py` is empty.
 - **A start's release is still hand-rolled at each start site**: `admission.py::RunStart.release` is the

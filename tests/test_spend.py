@@ -91,7 +91,6 @@ from promptpotter.application.head_to_head_price import (
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs import interlock, mint, quota
 from promptpotter.application.jobs.account_activity import account_activity
-from promptpotter.application.jobs.launcher import held_job
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
     RunStart,
@@ -1637,7 +1636,7 @@ async def test_a_seat_its_admission_refuses_mints_no_campaign_and_opens_no_obser
         built_stores, inner_cells("potter", dataset=LAUNCHED_DATASET, campaign=laid)
     )
     opened: list[object] = []
-    monkeypatch.setattr(held_job, "build_run_observers", lambda **kw: opened.append(kw))
+    monkeypatch.setattr(run_job_mod, "build_run_observers", lambda **kw: opened.append(kw))
 
     def _refused(*_a: object, **_kw: object) -> NoReturn:
         raise MachineBusyError(holding="", holder_user="", started_at=None)

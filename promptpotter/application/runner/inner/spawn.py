@@ -18,7 +18,7 @@ from promptpotter.application.jobs.launcher.admission import (
     admit_slotless,
     campaign_refusal,
 )
-from promptpotter.application.jobs.launcher.held_job import run_held_job
+from promptpotter.application.jobs.launcher.run_job import run_held_job
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     CyclePlan,
