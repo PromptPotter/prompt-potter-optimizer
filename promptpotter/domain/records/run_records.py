@@ -28,7 +28,7 @@ from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.connector import MeasuredUnit
 from promptpotter.domain.crowning_bar import lift_prior
-from promptpotter.domain.cycle_paths import CycleHop, Subject
+from promptpotter.domain.cycle_paths import CycleHop, CyclePath, Subject
 from promptpotter.domain.cycle_result import CycleResult, WallClock
 from promptpotter.domain.dashboard_rows import (
     DashboardCandidate,
@@ -182,14 +182,17 @@ class RunPhaseRecord(CycleRecord):
     @property
     def stop_reading(self) -> StopReading | None:
         """The stop it declares, as every door reads it; ``None`` where it declares none."""
-        if not isinstance(state := self.state, Paused | Ended):
-            return None
-        return StopReading(
-            stop_reason=state.stop_reason,
-            cause=state.cause if isinstance(state, Paused) else None,
-            detail=state.detail,
-            at=self.timestamp,
-        )
+        state = self.state
+        return declared_stop(state, self.timestamp) if isinstance(state, Paused | Ended) else None
+
+
+def declared_stop(state: Paused | Ended, at: str) -> StopReading:
+    return StopReading(
+        stop_reason=state.stop_reason,
+        cause=state.cause if isinstance(state, Paused) else None,
+        detail=state.detail,
+        at=at,
+    )
 
 
 class BackendWarningRecord(CycleRecord):
@@ -629,9 +632,10 @@ class SpendTombstoneRecord(CycleRecord):
     account's charges are `store/wallet_store.py::ChargeBook`'s, which no delete reaches."""
 
     record_type: Literal["spend_tombstone"] = "spend_tombstone"
+    # Its subject's address: a cycle, or a whole campaign (no cycle), in its sandbox chain.
     campaign_id: str
-    # Empty for a whole-campaign bank.
     cycle_id: str = ""
+    inside: CyclePath = ()
     # By whose key paid it, so the campaign's row keeps what its deleted cycles cost.
     spent: dict[KeySource, BankedSpend]
     # What the campaign's ceiling counted of it in each meter, so a bank needs no manifest to name one.
@@ -640,30 +644,33 @@ class SpendTombstoneRecord(CycleRecord):
 
     @property
     def subject(self) -> Subject:
-        return Subject(self.campaign_id, self.cycle_id)
+        return Subject(self.campaign_id, self.cycle_id, inside=self.inside)
 
 
 class BankedStop(FrozenModel):
-    """A cycle's abnormal run stop, banked before the cycle went; its commands are the account log's."""
+    """A cycle's abnormal run stop, banked before the cycle went, worded where it is read; its
+    commands are the account log's."""
 
+    # The cycle, below its tombstone's sandbox chain.
+    hop: CycleHop
+    state: Annotated[Paused | Ended, Field(discriminator="run_phase")]
     at: str
-    # The campaign and cycle it stopped, as the trail read it before they went, then why.
-    subject: str
 
 
 class TrailTombstoneRecord(CycleRecord):
     """On the WORKSPACE ledger, so deleting a cycle cannot delete that its run stopped."""
 
     record_type: Literal["trail_tombstone"] = "trail_tombstone"
+    # Its subject's address, as `SpendTombstoneRecord`'s.
     campaign_id: str
-    # Empty for a whole-campaign bank.
     cycle_id: str = ""
+    inside: CyclePath = ()
     stops: tuple[BankedStop, ...]
     timestamp: str = Field(default_factory=utcnow_iso)
 
     @property
     def subject(self) -> Subject:
-        return Subject(self.campaign_id, self.cycle_id)
+        return Subject(self.campaign_id, self.cycle_id, inside=self.inside)
 
 
 class LLMCallStartRecord(CycleRecord):

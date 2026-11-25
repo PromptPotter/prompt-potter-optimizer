@@ -5,6 +5,7 @@ import os
 import secrets
 from collections.abc import Iterable, Iterator, Sequence
 from contextlib import contextmanager
+from itertools import groupby
 from pathlib import Path, PurePosixPath
 from typing import Unpack, get_args
 
@@ -434,16 +435,13 @@ class CampaignStore:
         store: CampaignStore,
         hops: list[CycleHop],
         *,
-        campaign_id: str,
-        cycle_id: str = "",
+        subject: Subject,
         metered: dict[CeilingMeter, Budget],
     ) -> None:
         bank_before_removal(
             workspace=self._base_dir,
             ledgers={hop: store.ledger(hop) for hop in hops},
-            # A store off this workspace is an inner sandbox's, and the campaign names its owner.
-            inside="" if store is self else campaign_id,
-            subject=Subject(campaign_id, cycle_id),
+            subject=subject,
             metered=metered,
         )
 
@@ -452,7 +450,7 @@ class CampaignStore:
         self._bank(
             self,
             self.campaign_cycle_hops(campaign_id),
-            campaign_id=campaign_id,
+            subject=Subject(campaign_id),
             metered=_ledger_meters(self.campaign_cycle_ledgers(campaign_id)),
         )
 
@@ -479,26 +477,28 @@ class CampaignStore:
                     self._base_dir.name,
                     campaign_id,
                 ):
-                    self.delete_inner_sandbox(sandbox, campaign_id=campaign_id)
+                    owner_hop = CycleHop(campaign_id=campaign_id, cycle_id=owner.cycle_id)
+                    self.delete_inner_sandbox(sandbox, owner=owner_hop)
         if keepsake:
             _strip_to_keepsake(campaign_dir)
         else:
             rmtree_robust(campaign_dir)
         return True
 
-    def delete_inner_sandbox(self, sandbox: Path, *, campaign_id: str) -> None:
+    def delete_inner_sandbox(self, sandbox: Path, *, owner: CycleHop) -> None:
+        """Each inner campaign banked inside *owner*, the cycle whose sandbox it is: inner ids are
+        content-addressed and repeat across sandboxes. Metered nothing of the outer ceiling: the
+        outer ledger carries every inner call."""
         if not sandbox.exists():
             return
-        # Keyed on the sandbox directory: inner cycle ids are content-addressed and repeat across them.
-        # Metered nothing of the outer ceiling: the outer ledger carries every inner call.
         inner = self.in_sandbox(sandbox)
-        self._bank(
-            inner,
-            inner.cycle_hops(),
-            campaign_id=campaign_id,
-            cycle_id=sandbox.name,
-            metered=_ledger_meters([]),
-        )
+        for campaign_id, hops in groupby(inner.cycle_hops(), key=lambda hop: hop.campaign_id):
+            self._bank(
+                inner,
+                list(hops),
+                subject=Subject(campaign_id, inside=(owner,)),
+                metered=_ledger_meters([]),
+            )
         rmtree_robust(sandbox)
 
     def load(self, hop: CycleHop, *, moment: Moment | None) -> CycleIndex | None:
@@ -655,8 +655,7 @@ class CampaignStore:
         self._bank(
             self,
             [hop],
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
+            subject=Subject(hop.campaign_id, hop.cycle_id),
             metered=_ledger_meters([self.ledger(hop)]),
         )
         rmtree_robust(cycle_dir)

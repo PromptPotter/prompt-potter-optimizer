@@ -322,7 +322,8 @@ from promptpotter.infrastructure.producer_lock import hold_cycle, minted_produce
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.run_state import derive_run_state
 from promptpotter.infrastructure.store import io as store_io
-from promptpotter.infrastructure.store.account_spend import campaign_spend
+from promptpotter.infrastructure.store.account_spend import campaign_spend, workspace_bank
+from promptpotter.infrastructure.store.account_trail import RUN_STOPPED, TrailLine
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.command_log import CommandLog, Controls, PauseAsk
 from promptpotter.infrastructure.store.data_root import Fate, classify
@@ -2407,6 +2408,40 @@ async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_
             "a deleted campaign took its commands with it, or told them twice"
         )
     assert not sandbox.exists()
+
+
+def test_a_deleted_sandboxs_run_stop_is_banked_at_its_cycles_address_in_its_own_words(
+    built_stores: Stores,
+) -> None:
+    # The bank files each inner campaign inside its owner cycle, never the sandbox's directory
+    # name, and the trail words the banked stop as it worded the live one.
+    stores = built_stores
+    owner = CycleHop(campaign_id="camp-banked", cycle_id="cycle_banked000000")
+    stores.campaigns.create_campaign(minted_campaign(owner))
+    stores.campaigns.mint_cycle(owner)
+    sandbox = inner_sandbox(stores, owner.campaign_id, owner.cycle_id)
+    inner = stores.campaigns.in_sandbox(sandbox)
+    (inner_hop,) = inner.cycle_hops()
+    inner.append(
+        inner_hop,
+        RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.COMMAND, detail="the operator"),
+    )
+
+    def stops() -> list[TrailLine]:
+        return [line for line in account.tenant_trail(stores).lines if line.what == RUN_STOPPED]
+
+    live = stops()
+    assert len(live) == 1, "vacuous — the inner cycle's stop left no trail line"
+    stores.campaigns.delete_campaign(
+        owner.campaign_id, keep_results=False, inner_sandbox_root=sandbox.parent
+    )
+    assert not sandbox.exists() and stops() == live, (
+        "a deleted sandbox's run stop moved its address or its words when banked"
+    )
+    banked = workspace_bank(stores.campaigns.workspace).subjects
+    assert Subject(inner_hop.campaign_id, inside=(owner,)) in banked, (
+        "the sandbox was banked at another address than its inner campaign inside its owner"
+    )
 
 
 @pytest.mark.usefixtures("offline")

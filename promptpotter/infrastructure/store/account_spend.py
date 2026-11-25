@@ -49,15 +49,16 @@ class _Tombstones:
         self._subjects: set[Subject] = set()
 
     def feed(self, banked: SpendTombstoneRecord) -> None:
+        # Filed under the top-level campaign: a sandbox's costs its owner's.
+        owner = banked.subject.root_campaign_id
         self._subjects.add(banked.subject)
         spent = NOTHING_PAID
         for paid_by, part in banked.spent.items():
             spent = spent.plus(PaidSpend.of(paid_by, part.spend))
         for meter, counted in banked.metered.items():
-            key = (banked.campaign_id, meter)
+            key = (owner, meter)
             self._metered[key] = self._metered.get(key, NOTHING_METERED).plus(counted)
-        held = self._by_campaign.get(banked.campaign_id, NOTHING_PAID)
-        self._by_campaign[banked.campaign_id] = held.plus(spent)
+        self._by_campaign[owner] = self._by_campaign.get(owner, NOTHING_PAID).plus(spent)
 
     def value(self) -> WorkspaceBank:
         return WorkspaceBank(
@@ -185,6 +186,7 @@ def bank_spend(
         SpendTombstoneRecord(
             campaign_id=subject.campaign_id,
             cycle_id=subject.cycle_id,
+            inside=subject.inside,
             spent={
                 paid_by: BankedSpend.of(part)
                 for paid_by, part in by_payer.items()

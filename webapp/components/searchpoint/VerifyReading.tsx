@@ -27,7 +27,7 @@ export function VerifyReading({ reading, unit }: { reading: Reading; unit: Measu
           <dd>
             {fmtEstimate(recorded.fitness) ?? PLACEHOLDER} →{" "}
             <strong>{fmtEstimate(fresh.fitness) ?? PLACEHOLDER}</strong>{" "}
-            ({fmtSigned(reading.fitness_increment, 2)})
+            ({fmtSigned(reading.fitness_difference?.value, 2)})
           </dd>
         </div>
         <div>

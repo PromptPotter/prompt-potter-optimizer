@@ -980,7 +980,6 @@ export interface TestFamily {
 export interface MeteredSpend {
   meter: 'bill' | 'search_incurred';
   metered_usd: number;
-  metered_tokens: number;
   billed_usd: number;
   rate_priced_usd: number;
   calls_rate_priced: boolean;
@@ -1639,8 +1638,9 @@ export interface VerifyReading {
    * walk and each re-score as a parent — re-read under this scorer: the
    * number the fresh cells are a check on. */
   recorded: OwnLevel;
-  /** `fresh` minus `recorded`, hit rate. Unpaired — the two are different cells. */
-  fitness_increment: number | null;
+  /** `fresh` minus `recorded`, hit rate, with the band `held` reads. Unpaired — the
+   * two are different cells. */
+  fitness_difference: Estimate | null;
   composite_increment: number | null;
   /** This candidate over the campaign origin, on every cell the cycle measured both
    * on outside the bench — the fresh ones and the overlap pass's included.
@@ -5768,7 +5768,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "0a743eb797031a40";
+export const SERVED_CONTRACT = "0df3c7623d84f031";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

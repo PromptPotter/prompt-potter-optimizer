@@ -231,7 +231,9 @@ BASELINE = {
     # `KindTable` (`kinds.py::KindTable.every`). W1's plugin key (±0): one rule, its own files and
     # the import closure its members, its files and the run reach (`optimizer_manifest.py::behaviour_key`).
     # w1-rebase (±0): W1 (+260 over 112176) replayed on main's 112539, the resolution adding none.
-    "package_lines": 112799,
+    # spend-tomb (+24): the campaign cap count folds every cycle's book (`served_dashboard.py::
+    # spend_counts`), a sandbox banks each inner campaign at its address, a verify's difference band.
+    "package_lines": 112823,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

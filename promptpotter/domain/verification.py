@@ -145,8 +145,9 @@ class VerifyReading(FrozenModel):
         "walk and each re-score as a parent — re-read under this scorer: the number the fresh "
         "cells are a check on."
     )
-    fitness_increment: float | None = Field(
-        description="`fresh` minus `recorded`, hit rate. Unpaired — the two are different cells."
+    fitness_difference: Estimate | None = Field(
+        description="`fresh` minus `recorded`, hit rate, with the band `held` reads. Unpaired — "
+        "the two are different cells."
     )
     composite_increment: float | None
     vs_origin: PairedReading = Field(

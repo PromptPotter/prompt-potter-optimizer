@@ -679,12 +679,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `max(0.0, min(1.0, env_reward))` still fits φ. Root: a connector declares the shape of its
   observation keys (per panel where it varies), and the scorer compiles with the campaign's
   connector. **Re-test:** the clamp under harbor reads two-valued in `Scorer.two_valued`.
-- **A verify reads its comparison twice** (readings-5's report): `passes.py::verify_reading` computes
-  the levels (`own_level`) and `_held` off the fitness column separately. Root: `VerifyReading`
-  carries the difference band as its own `Estimate`, which `held` reads. **Held:** `VerifyReading`
-  rides `PassGradedRecord` in the ledger (`extra="forbid"`), so a new field reshapes run data: it
-  lands with the next wipe the operator calls. **Re-test:** one reader of the fitness column in
-  `verify_reading`.
 - **The paired SE floor is its own rule** (readings-6's report): `statistics.py::_normal_posterior`
   floors the SE at `1/(4n)` beside `bounded_mean_interval`'s support bound, the rule a constant
   graded side now reads in `difference_interval`. Folding it moves CAPO's paired t race (via
@@ -736,17 +730,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   (small-6's report): `domain/results_health.py::classify_result` keeps it on the fast path, against
   its own law (a fatal code is deterministic for the whole config). **Held:** a measured case.
   **Re-test:** an arm filtered on 1 of 18 rows is graded, never cut.
-- **A campaign's cap count joins every cycle's bills to one cycle's other parts** (spend-served-fix's
-  report): `served_dashboard.py::campaign_count` sets `metered_spend` (every cycle) beside this
-  cycle's book's unreported, set-aside and calls out, so a sibling cycle's lapsed cells drop out of
-  the campaign line the cap is said against. It cannot close in `campaign_count` alone (spend-4
-  built it, then cut it): "this cycle" is that same count relabelled, `campaign.beside(cycle bills)`
-  in `domain/spend.py::StopSpend.meter_lines` and `served_dashboard.py`'s metered line, so folding
-  the siblings' holds there moves them into the cycle line. Action: `StopSpend` carries `cycle:
-  SpendCount` beside `campaign` (a run-data wipe: the `RunPhaseRecord` stop shape),
-  `campaign_count` folds every cycle's unreported, and `SpendCount.beside` goes. **Rides with:** a
-  chain owning `domain/spend.py`, `run_observers.py`, `served_dashboard.py`. **Re-test:** a lapsed
-  cell on a sibling cycle reads in the campaign cap line and not in this cycle's.
 - **`l1_critique` on minimax runs its first cluster to `max_tokens`** (three sightings 2026-11-18:
   two dyck inner cells, `bbh-multistep-arithmetic-8b__908474` round 0, 26.7k chars, `finish=length`):
   the reply fails inside `failure_highlights.0` (`mechanism`, `claim` and `priority_fix` missing), so
@@ -852,15 +835,6 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   inside `round_document_digest`, so a diagnostic edit moves `consumed`. Root: a report derived from
   cells is computed by the optimizer that reads it; potter folds it at render, its text byte-identical.
   **Window:** W2 · rec-2, after W1 (it edits `optimizers/potter/`). **Re-test:** `git grep -n "RoundDiagnostics" -- promptpotter/domain/results.py` is empty.
-- **A tombstone's `cycle_id` names a sandbox, and its stop is one sentence**:
-  `domain/records/run_records.py::TrailTombstoneRecord.cycle_id` is a cycle, `""` for a whole-campaign
-  bank, or a sandbox id (`campaign_store/store.py::delete_inner_sandbox` banks `cycle_id=sandbox.name`;
-  the desk workspace ledger holds `inner_002c6600f3e2fcc1`, and `""` on 5 of 6 tombstones), and
-  `SpendTombstoneRecord` takes the same `Subject` (`account_trail.py::bank_before_removal`).
-  `BankedStop.subject` flattens the stopped run's address, `StopReason` and cause into one sentence no
-  reader parses back. Root: a record that outlives its subject stores the subject's typed address
-  (`inside` chain + hop) and a `StopReading`'s facts, worded at the read. **Window:** W2 · rec-2.
-  **Re-test:** `git grep -n "cycle_id=sandbox.name" -- promptpotter` is empty and `BankedStop` holds no `str` subject.
 - **A job is a survivor that carries how its run ended**: `store/data_root.py::INSTALL_KINDS` keeps
   `Kind("job", …, _SURVIVOR, …)` for the daily quota, but `domain/job.py::Job` holds `ending:
   StopReason | None`, `refusal: Refusal | None` (a served message, `details`, `next_acts`), `lapse`,
