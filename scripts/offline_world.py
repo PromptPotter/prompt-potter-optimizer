@@ -330,13 +330,23 @@ class FakeBackend:
                 if self.down:
                     return _json(500, {"detail": "offline: the backend is down"}, request)
                 answer = self.matches(payload)
-                if (hook := self.before_answer) is not None:
+                hook = self.before_answer
+                # A cell's own lag, in loop turns keyed on what it asks: calls out at once return
+                # in another order than sent, the same order in every process.
+                lag = (
+                    draw("lag", payload["node_config"]["llm_only"]["prompt"], payload["query"]) % 4
+                )
+                if not lag and hook is None:
+                    return _json(200, answer, request)
 
-                    async def answered() -> httpx.Response:
+                async def answered() -> httpx.Response:
+                    for _ in range(lag):
+                        await asyncio.sleep(0)
+                    if hook is not None:
                         await hook()
-                        return _json(200, answer, request)
+                    return _json(200, answer, request)
 
-                    return answered()
+                return answered()
             case _:
                 return None
         return _json(200, answer, request)

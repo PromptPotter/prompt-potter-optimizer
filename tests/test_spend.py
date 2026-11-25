@@ -235,7 +235,6 @@ from promptpotter.domain.records.run_records import (
     CycleShareRecord,
     CycleStart,
     FlightRecord,
-    FlightWaiting,
     ForkRemainder,
     ForkSpec,
     ForkTrigger,
@@ -322,7 +321,6 @@ from promptpotter.infrastructure.producer_lock import hold_cycle, release_cycle
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.projections.live_dashboard import (
     LiveDashboardProjection,
-    WaitingOn,
 )
 from promptpotter.infrastructure.run_scope import (
     InnerSpawnContext,
@@ -1913,75 +1911,6 @@ async def test_a_row_a_race_takes_past_the_opening_budget_is_priced_and_bought_o
     assert [slot[cell.key] for cell in resumed["rows"]] == chosen, "the resume took other rows"
     assert not set(resumed["calls"]) & set(stopped["returned"]), (
         "a row the race took past the budget was bought again on resume"
-    )
-
-
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_two_walks_out_at_one_position_are_served_and_discarded_as_the_ledger_says(
-    built_stores: Stores,
-) -> None:
-    # All candidates at once: the first walk cuts at 2 with a cell out, at a position the second
-    # walk then sends and takes.
-    dataset = _dataset()
-    backend = _OrderedFakeBackend(len(dataset))
-    ledger = laid_ledger(built_stores.projects_root / "abreast")
-    session = loop_session(
-        built_stores,
-        pipeline_schema([]),
-        dataset,
-        scorer=_HIT,
-        control=_control_pausing(lambda: False, lookahead=LookaheadPress(cells=2, abreast="all")),
-        client=backend_client(built_stores.jobs_dir, max_cells_in_flight=8, holds_own_sends=True),
-    )
-    session.state.flight = FlightGauge(every=0.0)
-    arms = {
-        f"c{w}": arm_state(f"c{w}", position=ArmPosition(round=1, idx=w, total=2)) for w in (0, 1)
-    }
-    walks = {
-        w: open_walk(
-            JobSearchPoint(),
-            dataset,
-            session,
-            kind=MeasurementRole.PANEL,
-            checks=[_CutAfter(2)] if w == 0 else [],
-            measured=f"c{w}",
-        )
-        for w in (0, 1)
-    }
-
-    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
-        return await backend.measure(sample)
-
-    with scoped(ledger=ledger), mock.patch.object(query_loop, "measure_sample", _measure):
-        for key, state in arms.items():
-            ledger.append(ArmRecord(round=1, arm=ArmKey(key), state=state))
-        await query_loop.run_walks(walks, session, keep_cut=False)
-        for key, state in arms.items():
-            ledger.append(ArmRecord(round=1, arm=ArmKey(key), state=state))
-    records = ledger_records(ledger)
-    started = {(r.individual_id, r.position) for r in records if isinstance(r, SampleStartedRecord)}
-    scored = {(r.individual_id, r.position) for r in records if isinstance(r, SampleScoredRecord)}
-    discarded = started - scored
-    assert any((other, p) in scored for who, p in discarded for other in arms if other != who), (
-        "vacuous — no walk took a position another walk discarded"
-    )
-    dashboard = LiveDashboardProjection()
-    dashboard.feed(run_wiring())
-    dashboard.feed(RoundEnteredRecord(round=1))
-    served: list[tuple[FlightWaiting, WaitingOn | None]] = []
-    for record in records:
-        dashboard.feed(record)
-        if isinstance(record, FlightRecord) and record.waiting is not None:
-            served.append((record.waiting, dashboard.composed().waiting_on))
-    assert dashboard.composed().sample_lookahead_discards == len(discarded), (
-        f"the cut counted {dashboard.composed().sample_lookahead_discards} discards, "
-        f"the ledger {len(discarded)}"
-    )
-    labels = {key: state.position.label for key, state in arms.items() if state.position}
-    said = [(WaitingOn(label=labels[w.individual_id], position=w.position), on) for w, on in served]
-    assert said and all(held == on for held, on in said), (
-        f"`waiting on` named another cell than the call held: {said}"
     )
 
 

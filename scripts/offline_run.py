@@ -124,9 +124,11 @@ from promptpotter.domain.command_kinds import (
     ForkCyclePayload,
     HeadToHeadRequest,
     HeldOutPayload,
+    LookaheadPress,
     MintCampaignPayload,
     PauseCyclePayload,
     ReadKind,
+    SetSampleLookaheadPayload,
 )
 from promptpotter.domain.cycle_paths import CycleHop, Subject
 from promptpotter.domain.draft_edit import CampaignLayer, OptimizationOverrides
@@ -191,6 +193,13 @@ SCRIPTED_L2 = {"l1_patience": 2}
 # Spreads δ without saturating k: at 6 most rows clamp to always/never, every arm answers them
 # alike, and θ reads `prior_pinned`; 3 and 4 hold a level, 0 and 2 leave the ruler too flat.
 REBASE_HARDNESS = 3
+# Each optimizer's warm straight run, the same pressed, and paused inside a walk then resumed: the
+# press and the resume move the bill, never the record (`docs/developer/offline-run.md`).
+WARM = "warm"
+PRESSED = "pressed"
+# A fixed depth, never `max`: the backend's ceiling is the machine's, so `max` presses another
+# depth on another box and a trace would read the box.
+PRESS = LookaheadPress(cells=4, abreast="all", auto=True)
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # Potter's straight campaign with invalid answers scripted by call, each on the rung that heals it:
 # a re-ask, a repair, a salvaged refusal, a repair salvaged, a repair failing into a re-ask.
@@ -804,12 +813,13 @@ class Harness:
         samples: list[Sample],
         *,
         crossing: bool,
+        hardness: int = 0,
     ) -> Harness:
         (out / "requests").mkdir(parents=True)
         llm = ByCallIdentity(
             out / "requests", templates, cites=cited_panel(config), crossing=crossing
         )
-        backend = FakeBackend(samples)
+        backend = FakeBackend(samples, hardness=hardness)
         router = Router(FakeLLM(llm), backend)
         install_network(router)
         return cls(llm, backend, router)
@@ -830,17 +840,25 @@ async def run_one(
     crossover: str | None = None,
     heal: bool = False,
     wound: bool = False,
+    hardness: int = 0,
+    press: bool = False,
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it.
     *pause_after* pauses at that round's boundary; *pause_in_walk* at the first cell that round
-    measures, its walk banked, so the resume replays the walk and runs no proposer."""
+    measures, its walk banked, so the resume replays the walk and runs no proposer; *press* presses
+    `PRESS` as the first cell is answered."""
     out = workspace if out is None else out
     config = campaign_config(optimizer, rounds, bench_trigger=bench_trigger, crossover=crossover)
     if not framing:
         config = config.model_copy(update={"task_framing": "off"})
     samples = synthetic_rows(rows)
     harness = Harness.installed(
-        out, config, text_templates(config), samples, crossing=crossover is not None
+        out,
+        config,
+        text_templates(config),
+        samples,
+        crossing=crossover is not None,
+        hardness=hardness,
     )
     if heal:
         harness.llm.heals = HEALS
@@ -849,8 +867,16 @@ async def run_one(
 
     stores = build_stores(default_identity(), projects_root=default_projects_root())
     stand_in_fetch(stores, samples)
-    if pause_in_walk is not None:
-        harness.backend.before_answer = pausing_in_walk(stores, pause_in_walk)
+    acts = [
+        *([pressing(stores)] if press else []),
+        *([pausing_in_walk(stores, pause_in_walk)] if pause_in_walk is not None else []),
+    ]
+
+    async def acting() -> None:
+        for act in acts:
+            await act()
+
+    harness.backend.before_answer = acting if acts else None
     session, result = await run_campaign(
         DATASET,
         stated(config),
@@ -907,6 +933,25 @@ def pausing_in_walk(stores: Stores, round_num: int) -> Callable[[], Awaitable[No
         await (await host_dispatcher(stores)).dispatch(CommandCall(payload, door=Door.TERMINAL))
 
     return pause
+
+
+def pressing(stores: Stores) -> Callable[[], Awaitable[None]]:
+    """`PRESS`, pressed by an operator as the run's first cell is answered, standing every round."""
+    pressed = False
+
+    async def press() -> None:
+        nonlocal pressed
+        if pressed:
+            return
+        pressed = True
+        (campaign,) = stores.campaigns.list_campaigns(lifecycle="all")
+        hop = campaign.root_hop
+        payload = SetSampleLookaheadPayload(
+            campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, **PRESS.model_dump()
+        )
+        await (await host_dispatcher(stores)).dispatch(CommandCall(payload, door=Door.TERMINAL))
+
+    return press
 
 
 async def banked(
@@ -2191,13 +2236,10 @@ def moved_against(home: Path, earlier: Path, names: Sequence[str]) -> list[str]:
     return said
 
 
-def read_straight_and_resumed(
-    name: str, workspace: Path, resumed: Future[int] | None, pause_after: int
-) -> int:
+def read_straight(name: str, workspace: Path) -> int:
     ran = BehaviourTrace.read(workspace).decisions["run"]
     (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
     bench = ran["bench"]
-    failed = int(not _graded(bench))
     lift = None if bench is None else bench["vs_origin"]["headline"]
     headline = (
         f"{lift['estimate']['value']:+.3f}"
@@ -2207,15 +2249,66 @@ def read_straight_and_resumed(
         else f"none ({bench['vs_origin']['state']})"
     )
     print(f"{name}: {ran['stop_reason']}, bench lift {headline} -- {cycle}")
-    if resumed is None:
+    return int(not _graded(bench))
+
+
+def _the_record(workspace: Path) -> dict[str, Any]:
+    """A trace's decisions less the harness's counts: the cells a press sent past a close are the
+    bill, and the record is everything else."""
+    return {k: v for k, v in BehaviourTrace.read(workspace).decisions.items() if k != "harness"}
+
+
+def read_warm(
+    name: str,
+    home: Path,
+    warm: Future[int],
+    pressed: Future[int],
+    resumed: Future[int],
+    pause_after: int,
+) -> int:
+    """*name*'s warm run against the same pressed, and paused inside a walk then resumed: each
+    reads the record the warm run filed, on a ruler that holds a level past round 1."""
+    failed = 0
+    for leg, rc in (
+        (WARM, warm.result()),
+        (PRESSED, pressed.result()),
+        (RESUMED, resumed.result()),
+    ):
+        if rc:
+            print(f"{name}: {leg} FAILED (exit {rc}) -- {home / leg / 'run.log'}")
+            failed += 1
+    if failed:
         return failed
-    if rc := resumed.result():
-        print(f"{name}: RESUME FAILED (exit {rc}) -- {workspace / RESUMED / 'run.log'}")
-        return failed + 1
-    again = decided(workspace / RESUMED, after=pause_after)
-    same = decided(workspace, after=pause_after) == again
+    rows = {leg: rows_read(home / leg) for leg in (WARM, PRESSED, RESUMED)}
+    # Past the origin's round a ruler stands, so a race choosing rows by it never reads cold.
+    if cold := [leg for leg, read in rows.items() if "cold" in read[1:]]:
+        print(f"{name}: a warm leg chose its rows on a cold ruler past round 1: {cold} {rows}")
+        failed += 1
+    same_pressed = _the_record(home / PRESSED) == _the_record(home / WARM)
+    failed += not same_pressed
+    # The press reached the walk, and a cut wasted at most the press; both counts say one bill.
+    bill = PressBill.read(home / PRESSED)
+    billed = bill.depth == PRESS.cells and bill.most_wasted <= PRESS.cells
+    billed = billed and bill.discarded == bill.served
+    failed += not billed
+    sent = {leg: BehaviourTrace.read(home / leg) for leg in (WARM, PRESSED)}
+    # Not a fail: a cell a press bought past a close is banked, and the archive's sample fold, which
+    # a later optimizer prompt reads, folds every banked row (`indexes/sample.py::SampleIndex`).
+    asked = [n for n, h in sent[PRESSED].requests.items() if sent[WARM].requests.get(n) != h]
+    print(
+        f"{name}: pressed {PRESS.cells} cells x {PRESS.abreast} on a warm ruler "
+        f"(rows {sorted(set(rows[WARM]))}), backend cells "
+        f"{sent[WARM].decisions['harness']['backend_cells']} -> "
+        f"{sent[PRESSED].decisions['harness']['backend_cells']}, "
+        f"record {'UNMOVED' if same_pressed else 'MOVED'}, at depth {bill.depth} a walk wasted "
+        f"at most {bill.most_wasted}, {bill.discarded} discarded (dashboard {bill.served})"
+        f"{'' if billed else ' (NOT the press it was handed)'}"
+        f"{f', requests reading the banked cells {sorted(asked)}' if asked else ''}"
+    )
+    again = decided(home / RESUMED, after=pause_after)
+    same = decided(home / WARM, after=pause_after) == again
     failed += not _graded(again["run"]["bench"]) or not same
-    at, inside = paused_at(workspace / RESUMED)
+    at, inside = paused_at(home / RESUMED)
     # Inside a round past the boundary, whose walk banked.
     landed = inside and at > pause_after
     failed += not landed
@@ -2227,15 +2320,62 @@ def read_straight_and_resumed(
     return failed
 
 
-def paused_at(workspace: Path) -> tuple[int, bool]:
-    """The round its campaign's pause stood in, off its cycle's own ledger, and whether the pause
-    lay inside it: entered and not yet closed when the pause was declared."""
+def leg_ledger(workspace: Path) -> list[dict[str, Any]]:
+    """The one cycle's ledger a leg ran, off its own data root."""
     (ledger,) = Path(long_path(data_root(workspace))).glob(
         "projects/*/campaigns/*/cycles/*/.runtime/ledger.jsonl"
     )
+    return _jsonl(ledger)
+
+
+def rows_read(workspace: Path) -> list[str]:
+    """The row choice each round's measure opened on, in ledger order (`MeasureOpened.rows`)."""
+    return [
+        act["rows"]
+        for record in leg_ledger(workspace)
+        if (act := record.get("act")) and act.get("act") == "measure_opened"
+    ]
+
+
+@dataclass(frozen=True)
+class PressBill:
+    """What a press bought past the record, off a leg's ledger and its dashboard: the deepest
+    look-ahead a round's walk sent at, the most cells one walk's cut discarded (sent, never
+    taken), and the discards the ledger and the dashboard each count."""
+
+    depth: int
+    most_wasted: int
+    discarded: int
+    served: int
+
+    @classmethod
+    def read(cls, workspace: Path) -> PressBill:
+        started: defaultdict[tuple[Any, ...], set[int]] = defaultdict(set)
+        scored: defaultdict[tuple[Any, ...], set[int]] = defaultdict(set)
+        depth = 0
+        for record in leg_ledger(workspace):
+            kind = record.get("record_type")
+            if kind not in ("sample_started", "sample_scored") or record.get("round") is None:
+                continue
+            walk = (record["round"], record.get("role"), record["individual_id"])
+            (started if kind == "sample_started" else scored)[walk].add(record["position"])
+            # The origin's walks and a bench pass race nothing, so they send at the backend's ceiling.
+            raced = record["round"] > 0 and record.get("role") != "bench"
+            if kind == "sample_started" and raced:
+                depth = max(depth, record["sample_lookahead"])
+        wasted = [len(sent - scored[walk]) for walk, sent in started.items()]
+        (cycle,) = (data_root(workspace) / PROJECTS_DIR).glob("*/campaigns/*/cycles/*")
+        dashboard = json.loads((cycle / "dashboard.json").read_text(encoding="utf-8"))
+        return cls(
+            depth, max(wasted, default=0), sum(wasted), dashboard["sample_lookahead_discards"]
+        )
+
+
+def paused_at(workspace: Path) -> tuple[int, bool]:
+    """The round its campaign's pause stood in, off its cycle's own ledger, and whether the pause
+    lay inside it: entered and not yet closed when the pause was declared."""
     entered = closed = 0
-    for line in ledger.read_text(encoding="utf-8").splitlines():
-        record = json.loads(line)
+    for record in leg_ledger(workspace):
         match record.get("record_type"):
             case "round_entered":
                 entered = record["round"]
@@ -2294,23 +2434,22 @@ def proven_home() -> None:
 def read_children(
     home: Path,
     children: Mapping[str, Future[int]],
-    resumed: Mapping[str, Future[int]],
+    warm: Mapping[str, tuple[Future[int], Future[int], Future[int]]],
     pause_after: int,
     *,
     controlled: bool,
 ) -> dict[str, int]:
-    """Per optimizer, its straight run's failed checks, and its resume's where one ran."""
+    """Per optimizer, its straight run's failed checks, and its warm legs' where they ran."""
     failed = dict.fromkeys(children, 0)
     for name, child in children.items():
         workspace = home / name
         if rc := child.result():
             failed[name] += 1
             print(f"{name}: FAILED (exit {rc}) -- {workspace / 'run.log'}")
-            continue
-        if not controlled:
-            failed[name] += read_straight_and_resumed(
-                name, workspace, resumed.get(name), pause_after
-            )
+        elif not controlled:
+            failed[name] += read_straight(name, workspace)
+        if name in warm:
+            failed[name] += read_warm(name, workspace, *warm[name], pause_after)
     return failed
 
 
@@ -2359,6 +2498,8 @@ def run_child_leg(args: argparse.Namespace) -> None:
             crossover=args.crossover,
             heal=args.heal,
             wound=args.wound,
+            hardness=args.hardness,
+            press=args.press,
         )
         print(asyncio.run(one)[0])
     proven_home()
@@ -2415,6 +2556,8 @@ def main() -> int:
     ap.add_argument("--crossover", choices=CROSSED_HOSTS, help=argparse.SUPPRESS)
     ap.add_argument("--heal", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--wound", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--hardness", type=int, default=0, help=argparse.SUPPRESS)
+    ap.add_argument("--press", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument(
         "--l4",
         action="store_true",
@@ -2479,7 +2622,7 @@ def main() -> int:
     # Each script wounds a call of the first two rounds.
     wounded = [name for name in due if name in WOUNDS] if legs and args.rounds > 1 else []
     tasks = (
-        2 * len(due) + (len(INTERRUPTED) + 2) * firsts + 6 * potter_legs + len(wounded)
+        4 * len(due) + (len(INTERRUPTED) + 2) * firsts + 6 * potter_legs + len(wounded)
         if legs
         else len(due)
     )
@@ -2549,15 +2692,16 @@ def main() -> int:
             spawn("potter", home / "potter" / f"{CROSSED}-l2", l2_host),
         )
     )
-    resumed = (
-        {}
-        if not legs
-        else {
-            name: spawn(name, home / name / RESUMED, f"--pause-in-walk={pause_after + 1}")
-            for name in due
-        }
-    )
-    failed = read_children(home, children, resumed, pause_after, controlled=args.controlled)
+    warmly = f"--hardness={REBASE_HARDNESS}"
+    warm = {
+        name: (
+            spawn(name, home / name / WARM, warmly),
+            spawn(name, home / name / PRESSED, warmly, "--press"),
+            spawn(name, home / name / RESUMED, warmly, f"--pause-in-walk={pause_after + 1}"),
+        )
+        for name in (due if legs else ())
+    }
+    failed = read_children(home, children, warm, pause_after, controlled=args.controlled)
     # After the straight run, never beside it: two processes would land one root at entry.
     if args.l4 and failed.get("potter") == 0:
         nesting = spawn("potter", home / "potter" / L4, "--l4", into=home / "potter")

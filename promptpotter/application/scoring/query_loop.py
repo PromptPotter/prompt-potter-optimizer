@@ -556,10 +556,11 @@ class Walk:
         return end - start
 
     def sendable(self, cells: int, decided: int, trigger: Trigger) -> list[int]:
-        """The rows it may send now at a press of *cells*, past its own calls out: unsent, and
-        index ``i`` only while no rule can cut before ``i`` rows, so a cut wastes one at most.
-        ``fill`` sends from it and ``flight`` serves it: one bound for both."""
-        room = max(cells - len(self.running), 0)
+        """The rows it may send now at a press of *cells*, past its cells ahead of its head (out, or
+        back and not yet taken: a cut discards both): unsent, and index ``i`` only while no rule
+        can cut before ``i`` rows, so a cut wastes the press at most. ``fill`` sends from it and
+        ``flight`` serves it: one bound for both."""
+        room = max(cells - len(self.running) - len(self.finished), 0)
         if not (sending := self.unsent(cells, decided, trigger)[:room]):
             return []
         horizon = self.horizon(sending[-1] - 2)
