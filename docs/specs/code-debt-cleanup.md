@@ -951,6 +951,23 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
   **Re-test:** `git grep -n "class FiledAnswer" -- promptpotter/domain/sample.py` is empty.
+- **Every process that lands recomputes the landing key** (tw-m): `maintenance/landing.py::landing_key`
+  (`:577`, `functools.cache` per process) hashes every row's schema and the code of every module a load
+  runs, which costs +20.5 MB committed (3 MB live) and 2.6 s at each entry that lands, an API's lifespan
+  among them. Root: the key is settled at build, a generated module a gate check regenerates, as
+  `presentation/api/served_contract.py` is. **Re-test:** `landing_key` is deleted and an API's first
+  open/close commits under 5 MB.
+- **Queue and task-result waits re-read on a clock** (tw-m): `application/jobs/registry.py::_QUEUE_POLL_S`
+  and `host_surface.py::_SETTLE_POLL_S` each wait on a write another process makes, and no signal in
+  this process carries it, so tests patch both to 0 (`test_security.py::_held_at_arms_gate` and the
+  reaped-queued test). Root: a cross-process wake on the jobs dir or ledger write (a lock handoff or a
+  file watch). **Re-test:** neither constant exists and no test patches a poll.
+- **`config/` has no layering row**: `scripts/gate.py::_LAYERING` (`:189`) lists application, shared,
+  domain, infrastructure and connectors but not `config/`, so nothing bars it from `application/` or
+  `presentation/`. It imports `infrastructure/` once (`config/first_run.py:9`, `store.io.write_text`)
+  while 17 infrastructure files import `config/`. Root: `config/` gets its row, and first-run's write
+  moves to the side the row puts below it. **Re-test:** `_LAYERING` names `config/` and the gate's
+  `layering` check is green.
 
 ## Held — no wave-4 chain yet
 
