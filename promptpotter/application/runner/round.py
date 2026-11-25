@@ -593,7 +593,7 @@ async def measure_population(
 ) -> MeasuredRound:
     cycle = ctx.cycle
     panel = ctx.panel
-    arms, rows, cut = await _walk_population(
+    arms, rows, cut, caught = await _walk_population(
         ctx, population, eliminator, race, keep_cut=selector.elects_partial
     )
     # Clamped so a tiny dataset stays electable.
@@ -620,6 +620,11 @@ async def measure_population(
     parent = await measure_as_parent(
         ctx, cycle.parent, cycle.parent_point, cells, role=MeasurementRole.PARENT
     )
+    if parent.key not in arms and (backfilled := caught.get(parent.key)):
+        # The cells its race caught the parent up on are its round reading's rows, as an arm's are.
+        taken = ReadArm(parent.key, parent.state, replace(parent.rows, cells=tuple(backfilled)))
+        ctx.walked(taken, ctx.asked(parent.key, ()))
+        parent = ctx.walks[parent.key].arm
     origin_panel_slots = round_origin_panel(cycle, pool)
     on_panel, topped_cuts = await read_origin_panel(
         cycle,
@@ -869,7 +874,12 @@ async def _walk_population(
     race: Race | None,
     *,
     keep_cut: bool,
-) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopLoop | None]:
+) -> tuple[
+    dict[ArmKey, Concluded],
+    dict[ArmKey, CellSheet],
+    StopLoop | None,
+    Mapping[ArmKey, Sequence[GradedCell]],
+]:
     cycle = ctx.cycle
     round_num = ctx.round_num
     panel = ctx.panel
@@ -943,14 +953,16 @@ async def _walk_population(
         on_turn=on_turn,
         on_decided=on_decided,
     )
-    # A prior's caught-up cells are its round reading's rows, so the race and the election read one sheet.
-    for key, cells in ({} if pool is None else pool.caught).items():
+    # A prior's caught-up cells are its round reading's rows, so the race and the election read one
+    # sheet; the parent's, no arm, are handed on to its read.
+    caught = {} if pool is None else pool.caught
+    for key, cells in caught.items():
         if key in concluded:
             taken = replace(rows[key], cells=tuple(cells))
             rows[key] = rows[key].merged(taken)
             ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]
-    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
+    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut, caught
 
 
 def _open_arm(
