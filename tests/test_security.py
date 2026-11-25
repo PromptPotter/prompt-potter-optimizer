@@ -3216,7 +3216,9 @@ def test_a_landing_drops_each_archived_answer_its_one_reader_refuses_by_name_and
     built_stores: Stores,
 ) -> None:
     facts = inner_cell_facts(cycle_result([0.4], 0.3, []))
-    report = inner_cell_report(facts, OuterSampleProxies(floored=0, held_out_lift=0.05))
+    report = inner_cell_report(
+        facts, OuterSampleProxies(floored=0, held_out_lift=0.05, held_out_lift_se=0.02)
+    )
     cell = archive_row("seat", pipeline_data={"cell_report": report})
     [(_key, ref, _cached)] = filed(built_stores.archive, [cell], output_keys={"n": ("answer",)})
     cells = built_stores.archive.cell_path(ref.rpartition(".")[0])

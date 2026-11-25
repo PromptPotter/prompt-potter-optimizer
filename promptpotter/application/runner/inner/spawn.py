@@ -417,14 +417,13 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     except CellUnscoreableError as unscored:
         # Every other no-evidence shape, which `measure_sample` resolves.
         raise CellUnscoreableError(f"{unscored}; {said}", spent=unscored.spent) from unscored
-    facts = inner_cell_facts(result)
-    delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"
-    held = "floored" if scored.held_out_lift is None else f"B{scored.held_out_lift:+.3f}"
+    lift, se = scored.held_out_lift, scored.held_out_lift_se
+    held = "floored" if lift is None else f"B{lift:+.3f}" + ("" if se is None else f"±{se:.3f}")
 
     data: dict[str, Any] = {
         # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.
-        INNER_RESULT_KEY: [f"inner:{query} {held} D{delta}"],
-        **inner_cell_report(facts, scored),
+        INNER_RESULT_KEY: [f"inner:{query} {held}"],
+        **inner_cell_report(inner_cell_facts(result), scored),
         **({} if result.curve is None else {BENCH_ROWS_KEY: result.curve.rows}),
         # An inner campaign consumes its optimizer's ENTIRE outer config, so the stamp is its terminal.
         "terminal_node": _cells(cell.ctx).terminal(cell.cell),

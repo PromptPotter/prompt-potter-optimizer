@@ -3306,7 +3306,9 @@ def test_an_inner_campaign_whose_provider_reports_no_bill_is_not_a_free_cell() -
         predicted="",
         ground_truth="",
         pipeline=PipelineData(
-            cell_report=inner_cell_report(facts, OuterSampleProxies(floored=0, held_out_lift=0.0))
+            cell_report=inner_cell_report(
+                facts, OuterSampleProxies(floored=0, held_out_lift=0.0, held_out_lift_se=0.02)
+            )
         ),
     )
     assert cell_channels_of(inner_row, None)["cost"] == pytest.approx(0.02), (

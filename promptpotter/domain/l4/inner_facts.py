@@ -46,14 +46,11 @@ class InnerCellFacts(FrozenModel):
     )
     mean_round_delta: float | None = Field(
         description="The mean level less the origin's, the last level held forward to the round "
-        "budget; null where `series_reason` names why"
+        "budget: the in-sample θ lift, a column, never a ranked term; null where `series_reason` "
+        "names why"
     )
     series_reason: ThetaCaveat | SeriesGap | None = Field(
         description="Why the level series differences nothing; null where it does"
-    )
-    mean_parent_level_se: float | None = Field(
-        description="The mean SE of the levels past the origin: this arm's own half of a paired "
-        "difference, the shared origin level cancelling; a precision, never a penalty"
     )
     rounds_ran: int = Field(description="The rounds the inner cycle closed past its origin")
     round_budget: int = Field(description="The round budget, never below the rounds it ran")

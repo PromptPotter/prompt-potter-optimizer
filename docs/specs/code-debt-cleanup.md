@@ -815,16 +815,12 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
-- **The outer reads θ beside a held-out lift that carries no SE**: Shape: no panel ranks on θ
-  (`potter/dispatch/injections/panels.py::_transcript_plan` sorts on `grade.fitness`), but the
-  in-sample θ lift (`InnerCellFacts.mean_round_delta`, which scores nothing) rides
-  `domain/l4/proxies.py` as the cell's `lift` term (`_FACT_OF_KEY`) and as `_level`, the level
-  `panel_precision` reads, and reaches the outer prompt in each cell's reply
-  (`runner/inner/spawn.py`: `D{delta}` beside `B{held_out_lift}`), while
-  `OuterSampleProxies.held_out_lift` has no SE to separate on. Action: serve the held-out lift's SE
-  (a binomial 20-row bench a pass) and rank and separate on it; θ stays a column. **Held:** a served
-  SE. **Re-test:** `OuterSampleProxies.model_fields` holds an SE beside `held_out_lift` (today
-  `floored`, `held_out_lift`).
+- **The held-out lift's SE is never served**: `OuterSampleProxies.held_out_lift_se` reads
+  `BenchCurve.area`'s estimate, which `scoring/paired.py::_lift` builds with `se=None` although
+  `shared/statistics.py::paired_diff_posterior` took it, so `domain/l4/proxies.py::panel_precision`
+  reads no L4 panel and the outer reply (`runner/inner/spawn.py`) carries no band. Action: a paired
+  t's `Estimate` carries its SE. **Held:** `scoring/` is ml-6/ml-7's. **Re-test:**
+  `git grep -c "se=None" -- promptpotter/application/scoring/paired.py` (today 1, target 0).
 - **"Which benchmark a row measures" is spelled twice**: Shape: `potter/members.py::_strata` reads
   `measured_dataset or ""` where every other reader takes `Sample.measured_dataset` raw (None = the
   filed one), and `BenchScope` partitions by benchmark under the word `RulerScope` owns. Action:

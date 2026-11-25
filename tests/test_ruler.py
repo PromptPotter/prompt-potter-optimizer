@@ -69,7 +69,7 @@ from promptpotter.domain.l4.proxies import (
     floor_reason,
     inner_cell_facts,
     inner_cell_report,
-    mean_parent_level_se,
+    panel_precision,
 )
 from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
@@ -91,7 +91,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import LedgerCell, Scorer
+from promptpotter.domain.scoring import GradedCell, LedgerCell, Scorer
 from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import (
@@ -787,16 +787,6 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     for levels, budget, mean, why in walked:
         kw = {} if budget is None else {"round_budget": budget}
         assert delta(levels, **kw) == pytest.approx(mean), why
-    # `parent_level_series` pads a short series with its last value; padding carries no precision.
-    se_kw: dict[str, Any] = {"origin_se": 0.90, "ses": [0.30, 0.40]}
-    padded = mean_parent_level_se(cyc([0.30, 0.60], round_budget=4, **se_kw)[0])
-    assert padded == pytest.approx(
-        mean_parent_level_se(cyc([0.30, 0.60], round_budget=2, **se_kw)[0])
-    )
-    assert padded == pytest.approx(0.35), (
-        "nested frontier fits are correlated: never sigma/sqrt(n); and the origin's SE cancels "
-        "inside `variant - origin` and stays out"
-    )
 
     # The scored term is the held-out curve's area (`runner/bench.py::read_curve`): churn on the
     # search split's θ scores ZERO.
@@ -844,14 +834,14 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     # The L4 round reads its mean held-out lift over MEASURED cells, the floored share beside it:
     # a floor is a typed fact on the row, never a -1 inside the mean.
     owned = cyc([0.40], stop_reason=StopReason.OPTIMIZER_ABORT)
-    floor = OuterSampleProxies(floored=1, held_out_lift=None)
+    floor = OuterSampleProxies(floored=1, held_out_lift=None, held_out_lift_se=None)
     rows = [
         measurement(sid, None, pipeline_data={"cell_report": report}).facts
         for sid, report in enumerate(
             [
                 inner_cell_report(
                     inner_cell_facts(cyc([0.40])[0]),
-                    OuterSampleProxies(floored=0, held_out_lift=held),
+                    OuterSampleProxies(floored=0, held_out_lift=held, held_out_lift_se=0.02),
                 )
                 for held in (0.0, 0.0, 0.0, 0.05, 0.0, 0.0375)
             ]
@@ -894,11 +884,41 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         "its optimizer's own abort was excluded or scored as a held lift"
     )
     reached = [failed(PARSE_FAILURE_MALFORMED, 1), round_result(2, no_op=1)]
-    assert compute_outer_proxies(*cyc([0.40, 0.55], rounds=reached)) == OuterSampleProxies(
-        floored=0, held_out_lift=0.0
-    ), "a cycle one proposal of which reached a cell floored"
+    assert compute_outer_proxies(*cyc([0.40, 0.55], rounds=reached)).floored == 0, (
+        "a cycle one proposal of which reached a cell floored"
+    )
     assert delta([0.40, 0.55], rounds=reached) == pytest.approx(0.175), (
         "a malformed reply is the prompt's verdict and scores"
+    )
+
+
+def test_panel_precision_separates_outer_cells_on_the_held_out_estimate_never_theta() -> None:
+    # Every cell carries ONE θ series, so a θ reading would see no spread at all.
+    facts = inner_cell_facts(cycle_result([0.40, 0.55], 0.30, [round_result(1), round_result(2)]))
+    l4 = scorer_of("0.0 if floored else max(0.0, min(1.0, held_out_lift + 0.5))")
+
+    def arm(lifts: list[float | None]) -> tuple[GradedCell, ...]:
+        held = [
+            OuterSampleProxies(floored=0, held_out_lift=lift, held_out_lift_se=0.03)
+            if lift is not None
+            else OuterSampleProxies(floored=1, held_out_lift=None, held_out_lift_se=None)
+            for lift in lifts
+        ]
+        rows = [
+            measurement(
+                sid,
+                None,
+                query=f"cell {sid}",
+                pipeline_data={"cell_report": inner_cell_report(facts, px)},
+            )
+            for sid, px in enumerate(held)
+        ]
+        return l4.sheet([row.facts for row in rows]).cells
+
+    read = panel_precision(arm([0.10, 0.20, 0.0, None]), arm([0.0, 0.0, 0.0, 0.0]))
+    assert read is not None and read.n_cells == 3, "a floored cell entered the precision read"
+    assert (read.observed_sd, read.estimation_sd) == pytest.approx((0.10, 0.03 * 2**0.5)), (
+        "the panel's spread was read off θ, not the held-out lift and its SE"
     )
 
 
@@ -945,6 +965,6 @@ def test_an_abort_floors_only_where_the_optimizer_prompt_owns_it() -> None:
     backend = ran(measurement(0, None, error="504: no reply", error_category="SERVER"))
     assert aborted(backend).floored == 0, "an abort on a backend fault floored its prompt"
     prompt = ran(measurement(0, 0.0), measurement(1, None, error="bad", error_category="PIPELINE"))
-    assert aborted(prompt) == OuterSampleProxies(floored=1, held_out_lift=None), (
-        "an abort the optimizer prompt owns was scored as a measured lift"
-    )
+    assert aborted(prompt) == OuterSampleProxies(
+        floored=1, held_out_lift=None, held_out_lift_se=None
+    ), "an abort the optimizer prompt owns was scored as a measured lift"
