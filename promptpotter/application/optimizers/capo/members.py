@@ -39,6 +39,7 @@ from promptpotter.application.optimizers.paper_templates import (
     unmarked,
 )
 from promptpotter.application.optimizers.variation.members import Survival, SurvivalKnobs
+from promptpotter.application.scoring.race_protocol import Decision, View, next_block
 from promptpotter.domain.arm_reading import DisplayMetric
 from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
@@ -330,18 +331,15 @@ class PairedTRace(nodes.Race):
     def n_priors(self) -> int:
         return len(self._racing) - 1
 
-    @property
-    def blocks(self) -> PairedTRace:
-        return self
-
-    @property
-    def block_size(self) -> int:
-        return self._block_size
-
     def open_turn(self, key: ArmKey) -> None:
         self._racing.add(key)
 
-    def close(self, rows: Mapping[ArmKey, Sequence[GradedCell]]) -> dict[ArmKey, StopSignal]:
+    def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
+        stops = {} if view.opening else self._cut(view)
+        return next_block(view, stops, self._block_size)
+
+    def _cut(self, view: View[ArmKey]) -> dict[ArmKey, StopSignal]:
+        rows = {key: walk.taken for key, walk in view.walks.items()}
         readings: dict[ArmKey, dict[str, float]] = {
             cid: _cell_objectives(r, self._objective) for cid, r in rows.items()
         }

@@ -323,7 +323,8 @@ class StandingRounds(NamedTuple):
     decisions: dict[int, list[ResumeCheckpointRecord]]
     # The cells an operator's skip left each arm at: it stands as its proposal does, past a re-entry.
     skipped: dict[tuple[int, ArmKey], int]
-    # The open round's rows in the order its walks read them, which an ``arrival`` resume replays:
+    # The open round's rows in the order its walks read them, which an ``arrival`` resume replays
+    # (`query_loop.py::_ScoringPhase.filed_reads`):
     # it stands past a re-entry, a leg that re-reads it extending it.
     reads: dict[int, list[tuple[ArmKey, int]]]
     entered: int | None = None

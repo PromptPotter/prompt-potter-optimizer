@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import sys
 import threading
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
 from typing import IO, Any, NamedTuple
@@ -109,13 +109,7 @@ from promptpotter.application.optimizers.capo.members import (
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, RoundSamples
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
-from promptpotter.application.optimizers.potter.pobb import FieldRead
-from promptpotter.application.optimizers.potter.race import (
-    EliminationCut,
-    PoBBRace,
-    _hand_out,
-    _Walking,
-)
+from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
 from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
@@ -135,6 +129,8 @@ from promptpotter.application.runner.termination import RUN_STOPS, end_run_on
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
+from promptpotter.application.scoring.race_protocol import Decision, View, WalkView
+from promptpotter.application.scoring.row_policy import FieldRead, _hand_out, _Walking
 from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.application.views.render.phase import acts_line
@@ -202,8 +198,8 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import line_reference, walked_position
-from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample, Untaken
-from promptpotter.domain.scoring import GRADE_KEYS, CellSheet, MeasuredCell
+from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
+from promptpotter.domain.scoring import GRADE_KEYS, CellSheet, GradedCell, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure import producer_lock
@@ -1230,7 +1226,7 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
             RoundSamples(cells=ten, order=ten, block_size=len(ten)),
         )
         # The block's open, before its close: the walk took eight rows of its ten.
-        race.choose_rows({ArmKey("c1"): walked.cells}, {ArmKey("c1"): Untaken(ten[8:], 2)})
+        _decided(race, {ArmKey("c1"): walked.cells}, ten[8:], 2, opening=True)
         return race
 
     rescope(ledger=cycle_ledger(racing.cycle))
@@ -1241,14 +1237,14 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
         else measurement(i, 1.0 if i == 4 else 0.0)
         for i in range(8)
     )
-    assert not race_of().close({ArmKey("c1"): walked.cells}), (
+    assert not _decided(race_of(), {ArmKey("c1"): walked.cells}, ten[8:], 2).stops, (
         "the parent's prior borrowed cells another individual answered"
     )
     set_cycle(
         racing.cycle, line=[*line, _round(round=1, cells={ArmKey(parent.id): hits}, **on_parent)]
     )
     race = race_of()
-    stop = race.close({ArmKey("c1"): walked.cells}).get(ArmKey("c1"))
+    stop = _decided(race, {ArmKey("c1"): walked.cells}, ten[8:], 2).stops.get(ArmKey("c1"))
     reading = race.judge(stop, ArmKey("c1"), {ArmKey("c1"): "C3.1"})
     assert reading is not None and reading.context["gate"] == "epsilon"
     [cut] = racing.cycle.pending_decisions
@@ -1313,6 +1309,19 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     )
 
 
+def _decided(
+    race: PoBBRace,
+    taken: Mapping[ArmKey, Sequence[GradedCell]],
+    untaken: Sequence[Sample],
+    left: int,
+    *,
+    opening: bool = False,
+) -> Decision[ArmKey]:
+    """One decision on walks with none out, each with *untaken* ahead and *left* rows to take."""
+    walks = {key: WalkView(cells, untaken, 0, len(cells) + left) for key, cells in taken.items()}
+    return race.decide(View(walks, opening))
+
+
 def _on_ten(ten: list[Sample], grades: list[float]) -> CellSheet:
     return sheet(measurement(i, g, sample_key=ten[i].key) for i, g in enumerate(grades))
 
@@ -1375,11 +1384,9 @@ def test_informative_rows_are_the_most_informative_at_the_theta_the_refit_seats(
         race_of, ten, ruler, _ = _informative_race(built_stores, monkeypatch, refit)
         missed = _on_ten(ten, [0.0] * 4).cells
         race = race_of()
-        ahead = {ArmKey("c1"): Untaken(ten[4:], 2)}
-        race.choose_rows({ArmKey("c1"): missed}, ahead)
-        race.close({ArmKey("c1"): missed})
-        [stretch] = race.choose_rows({ArmKey("c1"): missed}, ahead).values()
-        chosen, read = stretch.rows, race._check.read
+        _decided(race, {ArmKey("c1"): missed}, ten[4:], 2, opening=True)
+        [chosen] = _decided(race, {ArmKey("c1"): missed}, ten[4:], 2).order.values()
+        read = race._check.read
         assert read is not None, "guard: the close fit no field"
         theta = race._round_theta if refit == "per_round" else read.theta[ArmKey("c1")]
         best = max(ten[4:], key=lambda s: expected_information(theta, [s.key], ruler.entries()))
@@ -1409,17 +1416,16 @@ def test_a_resumed_informative_race_rechooses_its_rows_and_files_nothing(
             ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells,
             ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 0.0]).cells,
         }
-        ahead = dict.fromkeys(taken, Untaken(ten[4:], 2))
         live = race_of()
-        live.choose_rows(taken, ahead)
-        live.close(taken)
-        chose = live.choose_rows(taken, ahead)
+        _decided(live, taken, ten[4:], 2, opening=True)
+        chose = _decided(live, taken, ten[4:], 2)
         filed = len(racing.cycle.pending_decisions)
         # A resume rebuilds the race and closes its blocks again on the rows the walk replays.
         resumed = race_of()
-        resumed.choose_rows(taken, ahead)
-        resumed.close(taken)
-        assert resumed.choose_rows(taken, ahead) == chose, f"{shape}: the resume chose other pairs"
+        _decided(resumed, taken, ten[4:], 2, opening=True)
+        assert _decided(resumed, taken, ten[4:], 2) == chose, (
+            f"{shape}: the resume chose other pairs"
+        )
         assert len(racing.cycle.pending_decisions) == filed, f"{shape}: a choice filed a record"
 
 
@@ -1442,28 +1448,28 @@ def test_a_per_round_open_hands_each_walk_its_own_rows_and_the_blocks_calls_by_w
         built_stores, monkeypatch, "per_decision", "per_round"
     )
     race = race_of()
-    # A strong and a weak arm: PoBB's fit seats them far apart, so their most informative rows part.
+    # A strong and a weak arm the cut keeps: the fit seats them apart, so their most informative
+    # rows part.
     taken = {
-        ArmKey("c1"): _on_ten(ten, [0.0, 0.0, 0.0, 0.0]).cells,
+        ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells,
         ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 1.0]).cells,
     }
     # The whole slate, so the two θ the fit seats lie inside the δ the rows span.
-    ahead = dict.fromkeys(taken, Untaken(ten, 6))
-    race.choose_rows(taken, ahead)
-    race.close(taken)
+    _decided(race, taken, ten, 6, opening=True)
+    chosen = _decided(race, taken, ten, 6)
     read = race._check.read
     assert read is not None, "guard: the close fit no field"
-    chosen = race.choose_rows(taken, ahead)
-    for key, stretch in chosen.items():
+    for key, rows in chosen.order.items():
         best = max(
             ten, key=lambda s: expected_information(read.theta[key], [s.key], ruler.entries())
         )
-        assert stretch.rows[0] == best, f"{key}: its row led is not the most informative at its θ"
-    assert chosen[ArmKey("c1")].rows[0] != chosen[ArmKey("c2")].rows[0], (
+        assert rows[0] == best, f"{key}: its row led is not the most informative at its θ"
+    assert chosen.order[ArmKey("c1")][0] != chosen.order[ArmKey("c2")][0], (
         "two walks at one open answer the same row: vacuous"
     )
-    calls = [stretch.calls for stretch in chosen.values()]
-    assert sum(calls) == race.block_size * len(taken), f"the block handed out {calls} calls"
+    calls = [len(sent) for sent in chosen.sends.values()]
+    # One row a block, each walk's.
+    assert sum(calls) == len(taken), f"the block handed out {calls} calls"
 
 
 def test_a_rolling_decision_sends_none_where_the_calls_out_can_settle_the_cut() -> None:
@@ -1512,8 +1518,8 @@ def test_pobb_per_round_cuts_a_candidate_on_rows_its_rivals_never_answered_and_t
             ArmKey("c2"): _on_ten(ten, [1.0] * 10).cells[4:],
         }
         race = race_of()
-        race.choose_rows(apart, dict.fromkeys(apart, Untaken(ten[6:], 0)))
-        stop = race.close(apart).get(ArmKey("c1"))
+        _decided(race, apart, ten[6:], 0, opening=True)
+        stop = _decided(race, apart, ten[6:], 0).stops.get(ArmKey("c1"))
         cut_by[shape] = stop is not None
         if shape == "per_candidate":
             continue

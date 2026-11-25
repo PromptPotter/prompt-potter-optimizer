@@ -14,7 +14,7 @@ from promptpotter.domain.arm_reading import (
     panel_counts,
     panel_cuts,
 )
-from promptpotter.domain.arms import Concluded, arm_name
+from promptpotter.domain.arms import Concluded, Measuring, arm_name
 from promptpotter.domain.backend import BackpressureReading
 from promptpotter.domain.bench import BenchReading
 from promptpotter.domain.connector import MeasuredUnit
@@ -312,6 +312,9 @@ class LiveDashboardState(DashboardFacts):
     current_position: int | None = None
     # The last close's; served only as each `ServedRound`'s readings of it.
     level_series: LevelSeries | None = None
+    # Each walking arm's rows through its budget as its last turn filed them, those taken leading:
+    # served only as `ServedDashboard.walk`'s axis.
+    walk_orders: dict[ArmKey, list[int]] = Field(default_factory=dict)
 
     waiting_since: float | None = None
 
@@ -863,6 +866,11 @@ class LiveDashboardProjection(Projection):
                 "at_offset": self.at_offset,
                 "current_round": current,
                 "measuring_arm": s.measuring_arm if measuring else None,
+                "walk_orders": {
+                    key: walking.sample_order
+                    for key in self._narration.announced(self._live)
+                    if isinstance(walking := self._narration.state(self._live, key), Measuring)
+                },
                 "in_flight": in_flight,
                 "lookahead_allowed": allowed,
                 "lookahead_most": most,

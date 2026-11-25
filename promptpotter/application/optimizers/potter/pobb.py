@@ -17,6 +17,7 @@ from promptpotter.application.intelligence.rasch import (
 )
 from promptpotter.application.optimizers.nodes import RaceSnapshot
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
+from promptpotter.application.scoring.row_policy import FieldRead
 from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.ruler import DeltaRuler
@@ -64,17 +65,6 @@ class PoBBStop(StopSignal):
     check_result: EliminationContext
     cells: dict[ArmKey, list[str]]
     paired_breakdown: dict[ArmKey, float]
-
-
-@dataclass(frozen=True)
-class FieldRead:
-    """PoBB's last field fit: each arm's θ on the ruler's scale, its posterior variance, its
-    P(best) and the ε(n) its depth stood at; what ``per_decision`` and ``per_round`` choose on."""
-
-    theta: dict[ArmKey, float]
-    variance: dict[ArmKey, float]
-    p_best: dict[ArmKey, float]
-    bar: dict[ArmKey, float]
 
 
 def race_sheet(cells: Iterable[GradedCell]) -> CellSheet:
@@ -133,7 +123,7 @@ class PoBBCheck:
         self.epsilon_stop = knobs.epsilon_stop
         # The GRADED rows, never a binarized hit, degenerate on a graded backend.
         self.priors: dict[ArmKey, CellSheet] = {}
-        self.read: FieldRead | None = None
+        self.read: FieldRead[ArmKey] | None = None
         self._on_snapshot = on_snapshot
 
     def register_completed(self, results: Iterable[GradedCell], *, key: ArmKey) -> None:

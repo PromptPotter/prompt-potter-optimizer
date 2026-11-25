@@ -28,7 +28,8 @@ from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRol
 
 if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
-    from promptpotter.application.scoring.query_loop import BlockRace, QueryLoopResult
+    from promptpotter.application.scoring.query_loop import QueryLoopResult
+    from promptpotter.application.scoring.race_protocol import Decider
 
 
 @dataclass(frozen=True)
@@ -153,10 +154,10 @@ async def score_search_points[K: Hashable](
     kind: MeasurementRole,
     sample_index: SampleIndex | None = None,
     held: CellSheet = NO_CELLS,
-    blocks: BlockRace[K] | None = None,
+    race: Decider[K] | None = None,
 ) -> dict[K, ScoredWalk]:
     """Each point on its own rows, in ONE pass: the slowest walk sets the wall clock, never their sum;
-    *blocks* races them as a round's arms are raced."""
+    *race* races them as a round's arms are raced."""
     row = PASSES[kind]
     # Opened inside the filing too: the walk's cells run in a copy of the context taken here.
     with scoped(filed_as=row.spend or run_scope().filed_as):
@@ -173,7 +174,7 @@ async def score_search_points[K: Hashable](
             for key, (search_point, dataset, measured) in points.items()
         }
         try:
-            cut = await run_walks(walks, session, keep_cut=row.keeps, blocks=blocks)
+            cut = await run_walks(walks, session, keep_cut=row.keeps, race=race)
         except (KeyboardInterrupt, asyncio.CancelledError, StopLoop, SendRefusedError) as halt:
             if not row.keeps:
                 raise
@@ -245,7 +246,7 @@ def open_walk(
         held=held,
     )
     return Walk(
-        dataset=dataset,
+        order=dataset,
         budget=len(dataset) if budget is None else budget,
         ctx=ctx,
         checks=[*session.state.scoring.degradation_checks, *checks] if row.checks else checks,
@@ -259,6 +260,6 @@ def close_walk(walk: Walk) -> ScoredWalk:
     assert outcome is not None, "close_walk needs a decided walk"
     results = outcome.results
     scores = walk.ctx.recorder.scores(results)
-    stopped = None if len(results) == walk.n else outcome.ended_on
+    stopped = None if len(results) == walk.budget else outcome.ended_on
     sheet = walk.ctx.scorer.graded(results)
     return ScoredWalk(sheet, scores, _walk_stop_signal(outcome), stopped)

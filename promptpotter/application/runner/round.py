@@ -54,7 +54,7 @@ from promptpotter.application.scoring.paired import (
     read_pair,
 )
 from promptpotter.application.scoring.passes import verify_on_saturation
-from promptpotter.application.scoring.query_loop import Walk, run_walks
+from promptpotter.application.scoring.query_loop import Turn, Walk, run_walks
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     close_walk,
@@ -152,7 +152,7 @@ if TYPE_CHECKING:
         Selection,
         Selector,
     )
-    from promptpotter.application.scoring.query_loop import BlockRace
+    from promptpotter.application.scoring.race_protocol import Decider
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
 
 
@@ -555,7 +555,7 @@ async def _measure_gaps(
     cycle: Cycle,
     gaps: Mapping[str, tuple[LineStep, list[Sample]]],
     *,
-    top_up: BlockRace[ArmKey] | None = None,
+    top_up: Decider[ArmKey] | None = None,
 ) -> dict[str, ScoredWalk]:
     """Every member's gaps in ONE pass, each on its OWN configuration, never the round subject's;
     *top_up* races them on."""
@@ -573,7 +573,7 @@ async def _measure_gaps(
         cycle.session,
         # One run per (member, cell set), so a re-run of the same round replays it free.
         kind=MeasurementRole.OVERLAP,
-        blocks=top_up,
+        race=top_up,
     )
     return {member: raced[ArmKey(member)] for member in gaps}
 
@@ -901,44 +901,30 @@ async def _walk_population(
     for key, arm in proposed.items():
         walks[key] = _open_arm(ctx, arm, sps[key], panel, standing.skipped.get((round_num, key)))
 
-    blocks = race.blocks if race is not None else None
-    filed: set[ArmKey] = set()
-
-    def on_turn(key: ArmKey, block: int | None) -> None:
+    def on_turn(key: ArmKey, turn: Turn) -> None:
         if race is not None:
             race.open_turn(key)
-        held = states[key].block
-        racing = sum(1 for w in walks.values() if w is not None and w.outcome is None)
-        walk = walks[key]
-        # The rows its race chose, which the readout heads.
-        chosen = order if walk is None else [int(s.id) for s in walk.dataset[: walk.n]]
-        # A turn inside a block race files the arm once per checkpoint that moved the field or its rows.
-        moved = chosen != states[key].sample_order
-        if block and held is not None and held["racing"] == racing and not moved:
-            return
-        # A `rolling` round re-announces a walk at each decision: it files the rows it moved.
-        if block is None and key in filed and not moved:
-            return
-        filed.add(key)
         states[key] = states[key].model_copy(
             update={
-                "sample_order": chosen,
+                # The rows its race chose, which the readout heads.
+                "sample_order": order if turn.order is None else [int(s.id) for s in turn.order],
                 "n_priors": race.n_priors if race is not None else 0,
                 "block": None
-                if block is None or blocks is None
+                if turn.block is None
                 else {
-                    "n": block + 1,
-                    "of": -(-len(order) // blocks.block_size),
-                    "size": blocks.block_size,
-                    "racing": racing,
+                    "n": turn.block + 1,
+                    "of": -(-len(order) // panel.block_size),
+                    "size": panel.block_size,
+                    "racing": turn.racing,
                 },
             }
         )
         append_record(ArmRecord(round=round_num, arm=key, state=states[key]))
 
-    def on_decided(key: ArmKey) -> None:
-        if (walk := walks[key]) is not None:
-            asked[key] = ctx.asked(key, walk.dataset[: walk.n])
+    def on_decided(key: ArmKey, walked: Sequence[Sample] | None) -> None:
+        if walked is not None:
+            asked[key] = ctx.asked(key, walked)
+        walk = walks[key]
         arm, results = _conclude_arm(ctx, states[key], walk, key, race, labels)
         rows[key] = results
         concluded[key] = arm
@@ -950,10 +936,9 @@ async def _walk_population(
         cycle.session,
         keep_cut=keep_cut,
         backfills=pool,
-        blocks=blocks,
+        race=race,
         on_turn=on_turn,
         on_decided=on_decided,
-        reads=standing.reads.get(round_num, ()),
     )
     # A prior's caught-up cells are its round reading's rows, so the race and the election read one sheet.
     for key, cells in ({} if pool is None else pool.caught).items():

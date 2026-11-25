@@ -242,7 +242,10 @@ BASELINE = {
     # walk's next call tells, and `QueryLoopState`'s per-row reads, built when a row is first taken.
     # ml-5 (+257): `rolling` dispatch, a decision on every returned row (`_ScoringPhase.roll`,
     # `arrive`), the calls it warrants (`race.py::_settles`), and the read order a resume replays.
-    "package_lines": 113467,
+    # ml-7 (+89 over 113402): the race's one call (`race_protocol.py::Decider.decide`) and the row
+    # policy any eliminator hands its view to (`row_policy.py::send_rows`), modules of their own;
+    # the turn wheel, `Untaken`, `Stretch` and `choose_rows` they replace net −; the walk keyed by arm.
+    "package_lines": 113491,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

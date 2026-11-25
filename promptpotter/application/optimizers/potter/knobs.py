@@ -8,19 +8,16 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from promptpotter.application.optimizers.nodes import LengthKnobs
+from promptpotter.application.scoring.row_policy import RowKnobs
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.crowning_bar import Vote
 from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.pool import Access
-from promptpotter.domain.sample import Dispatch, ReadOrder
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import sign_posterior
 
 CellStrata = Literal["none", "dataset"]
-RowChoice = Literal["random", "informative"]
-Refit = Literal["per_round", "per_decision"]
-Shape = Literal["per_candidate", "per_round"]
 
 
 class EscalationLadder(StrEnum):
@@ -176,7 +173,7 @@ class L1GenerateKnobs(TranscriptKnobs, LengthKnobs):
     )
 
 
-class PoBBKnobs(StrictModel):
+class PoBBKnobs(RowKnobs):
     """Its first decision point is the bench's ``elimination_n_min``, which the δ ruler's warmth shares: aggression lives HERE."""
 
     # Under 0.5, so it never reaches a selector's admission bar and the two stops never cross.
@@ -204,49 +201,6 @@ class PoBBKnobs(StrictModel):
         description=(
             "Elimination: a candidate stops measuring once its posterior probability of being "
             "the round's best falls below ε(n). Off → no candidate is cut for futility."
-        ),
-    )
-    row_choice: Annotated[RowChoice, Knob(Estimand.SELECTION)] = Field(
-        description=(
-            "Which rows each surviving candidate answers next, chosen at every block's open. "
-            "``random``: the sampler's draw in its round order. ``informative``: the rows of the "
-            "sampler's pool an answer tells θ most about (Fisher information at the θ ``refit`` "
-            "seats, off the δ ruler, never off the parent's own grade on the row), so a round reads "
-            "rows outside its draw. It reverses the round order's stratified interleave, so it runs "
-            "under ``theta_election.vote: overlap`` alone; any other selector is refused."
-        ),
-    )
-    refit: Annotated[Refit, Knob(Estimand.SELECTION)] = Field(
-        description=(
-            "The θ ``informative`` chooses rows on. ``per_round``: the parent's, on the ruler "
-            "seated at the round's start. ``per_decision``: each survivor's in the field fit "
-            "PoBB's last check made, moved onto that ruler's scale; the round's until a check "
-            "first fits. Read under ``informative`` alone."
-        ),
-    )
-    shape: Annotated[Shape, Knob(Estimand.SELECTION)] = Field(
-        description=(
-            "Who answers a block's calls. ``per_candidate``: every survivor answers its next "
-            "``block_size`` rows, the same rows under ``random``. ``per_round``: the block's calls "
-            "(``block_size`` per survivor) go to the (candidate, row) pairs that tell PoBB's cut "
-            "most, so each candidate answers rows of its own, none, one or several a block; the "
-            "cut reads the field on the union of rows (``methods/candidate-elimination.md``)."
-        ),
-    )
-    dispatch: Annotated[Dispatch, Knob(Estimand.SELECTION)] = Field(
-        description=(
-            "When the race decides. ``batch``: once every call a block handed out is back. "
-            "``rolling``: on every returned row, each decision sending as many new calls as the "
-            "information then warrants, none where the calls out can settle the cut, never "
-            "waiting for the rest; the in-flight press caps what is out at once."
-        ),
-    )
-    read_order: Annotated[ReadOrder, Knob(Estimand.SELECTION)] = Field(
-        description=(
-            "The order a ``rolling`` decision reads returns in. ``launch``: the order they were "
-            "sent, so a press moves the bill, never the record. ``arrival``: as they come, the "
-            "record then hanging on timing, so a resume replays the order the run read. Read "
-            "under ``rolling`` alone."
         ),
     )
 

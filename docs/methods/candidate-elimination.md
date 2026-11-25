@@ -72,11 +72,12 @@ cut from the origin's own round, which `sp_budget_origin` sizes and must cover.
 
 ## Who answers a block's calls
 
-`pobb.shape` says it (`race.py::PoBBRace.choose_rows`, the loop's one rows hook,
-`query_loop.py::BlockRace.choose_rows`, answering each live walk's row order and its share of the
-block's calls). `per_candidate` hands every survivor `block_size` calls on the same
+`pobb.shape` says it, through the row policy any eliminator hands its view to
+(`row_policy.py::send_rows`, off its `RowKnobs` and the field its cut last fit; the race's one answer
+to the loop is `race_protocol.py::Decider.decide`: the stops it cuts, each survivor's row order and
+the calls it sends). `per_candidate` hands every survivor `block_size` calls on the same
 next rows. `per_round` (the default) hands the block's `block_size × survivors` calls one at a time
-(`race.py::_hand_out`) to the walk whose next answer tells the decision most; a walk handed none
+(`row_policy.py::_hand_out`) to the walk whose next answer tells the decision most; a walk handed none
 waits out the block, and the block closes once the calls it handed out are back.
 
 The derivation, to first order. The decision on arm k is the cut, P_k < ε(n_k), and past it the
@@ -93,20 +94,25 @@ way (a sure cut, a sure leader) draws few calls while a contested one remains; o
 them all. Under `per_round` the parent catches up on every row a candidate takes it never answered,
 so its bill grows with the union of the rows.
 
-`pobb.dispatch` says when the decision runs. `batch` closes a block once every call
-it handed out is back. `rolling` (the default) decides on every returned row through the same close, cut and
-`choose_rows`, with no block every survivor closes together (no readout block line, no `block` on
-the arm). Each decision hands calls by the same arg-max, as many as § How many calls a rolling
-decision sends derives, the calls out keeping their seats. `pobb.read_order` says which returned
-row a decision reads next. `launch` reads them in the order they were sent, so the record is the
-press's invariant. `arrival` reads them as they come, files that order on the ledger
-(`ledger_scan.py::StandingRounds.reads`), and a resume reads the order filed
+`pobb.dispatch` says when the decision runs (`race_protocol.py::Trigger`). `batch` decides once
+every call it sent is back, each decision closing a block. `rolling` (the default) decides on every
+returned row through the same `decide`, with no block every survivor closes together (no readout
+block line, no `block` on the arm). Each decision hands calls by the same arg-max, as many as § How
+many calls a rolling decision sends derives, the calls out keeping their seats. `pobb.read_order`
+says which returned row a decision reads next. `launch` reads them in the order they were sent, so
+the record is the press's invariant. `arrival` reads them as they come, files that order on the
+ledger (`ledger_scan.py::StandingRounds.reads`), and a resume reads the order filed
 (`query_loop.py::run_walks`).
+
+**The press sends ahead only under `batch`** (`Trigger.ahead`): there a call past the decided ones
+lands on rows the next decision may still take, so a cut wastes at most the press. Under `rolling`
+every read decides, so a call past the decided ones would be no decision's: it would file a send and,
+under `arrival`, move the read order, so the press bounds the calls out and never adds one.
 
 ## How many calls a rolling decision sends
 
 A rolling decision sends a walk calls only while the calls it has out cannot settle the cut on it
-(`race.py::_settles`), and none where they can. Calls out settle nothing before they reach the depth
+(`row_policy.py::_settles`), and none where they can. Calls out settle nothing before they reach the depth
 the cut first reads, `elimination_n_min`, so a young walk is sent at least that far. Past it, the
 I_out of information those calls carry moves z_k by about √(v_k·I_out / (1 + v_k·I_out)) in its
 posterior's standard units (one preposterior sd). An arm whose z_k lies inside that reach can cross
@@ -145,13 +151,13 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 
 The first signal ends the candidate: fatal beats rate beats PoBB.
 
-**Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a rule's cut discards at most one call. A block race's close bounds no launch: a walk has at most the press's cells out past it, on the rows the last open chose, each re-seated by its sample where the next open moves its row, so a cut there discards at most the press; under `rolling` a walk sends no row past those its decisions committed, and a cut discards at most its calls out, the press. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
+**Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a rule's cut discards at most one call. A `batch` decision bounds no launch: a walk has at most the press's cells out past the rows it sent, on the order the last decision ranked, each re-seated by its sample where the next decision moves its row, so a cut there discards at most the press; under `rolling` a walk sends no row past those its decisions sent, and a cut discards at most its calls out, the press. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
 
 **One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; one answer where the parent answered apart on the same cells is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 
 ## CAPO's race — the `blocks` sampler and the `paired_t` eliminator
 
-CAPO's survival selection (arXiv 2504.16005 §4, App. B) takes PoBB's row 5 for its own manifest. A **block race**, as PoBB's: `run_walks(blocks=)` turns every live arm once per block and the race's `close` decides them together. `DegradationCheck` still runs per arm.
+CAPO's survival selection (arXiv 2504.16005 §4, App. B) takes PoBB's row 5 for its own manifest. A **block race**, as PoBB's under `batch`: each decision cuts the arms its paired t loses together and sends every survivor its next block (`race_protocol.py::next_block`). `DegradationCheck` still runs per arm.
 
 - **`blocks` (sampler)** — `block_size` (b), `max_blocks` (z_max): the first `max_blocks` whole blocks of the search split in bank order, the same every round, never shuffled (App. C.4); `RoundSamples.block_size` hands the boundaries over; a pool short of one block refuses.
 - **`paired_t` (eliminator)** — `alpha`, `length_penalty` (γ), and μ = the `population` selector's `size` (one knob). At each block's close every live arm meets every other in a one-sided paired t (`shared/statistics.py::paired_mean_t`) on CAPO's objective over the same k blocks; arms that μ others significantly beat are cut together off pre-cut readings — App. B's `n_sig_better ≥ μ` (§4's prose says "more than") — with no multiple-test correction, as CAPO races. At μ or fewer the race is settled (`locked_in`), and only then or at `max_blocks`: a survivor set above μ walks the next block (App. B, `while |P| > μ and i < z_max`). A first block that cuts the set to μ settles the race there, as CAPO's does — with c offspring and μ parents a common case, since γ makes an offspring longer than a parent it ties on fitness significantly worse on every shared cell — so `max_blocks` binds only where cuts come slower. `Elimination.context.gate` reads `outscored` / `settled`, with its `block` and `raced_against`; the stream's `p_best` is the smallest `p_better`.
