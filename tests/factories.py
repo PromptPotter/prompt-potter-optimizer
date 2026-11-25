@@ -105,7 +105,7 @@ from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult, WallClock
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, LaunchMove
-from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
+from promptpotter.domain.l4.cells import InnerCell, InnerCells
 from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
@@ -1092,22 +1092,12 @@ def inner_cells(
     assert dataset is None or len(optimizers) == 1, "two seats never share a dataset"
     on = {name: dataset or f"{name}ds" for name in optimizers}
     laid = campaign or defaulted_config({})
-    by_dataset: dict[str, InnerCell] = {}
-    specs: dict[str, InnerTaskSpec] = {}
-    for name in optimizers:
-        selected = select_optimizer(bench_choice(name))
-        treatment = selected.treatment(frozenset(Presumption), PackShelf(account=None)).digest
-        by_dataset[on[name]] = InnerCell(laid, None, cell_optimizer(selected), treatment)
-        specs[name] = InnerTaskSpec(
-            inner_dataset=on[name],
-            optimizer_treatment=treatment,
-            run_seed=0,
-            campaign=laid.identity(),
-            nodes=None,
-            estimator="e",
-        )
+    by_dataset = {
+        on[name]: InnerCell(laid, cell_optimizer(select_optimizer(bench_choice(name))))
+        for name in optimizers
+    }
     cells = tuple(Seat(kind="seat", id=name, inner_dataset=on[name]) for name in optimizers)
-    return InnerCells(cells=cells, by_dataset=by_dataset, specs=specs, estimator="e")
+    return InnerCells(cells=cells, by_dataset=by_dataset, datasets=on, estimator="e")
 
 
 def pobb_knobs(**bend: Any) -> PoBBKnobs:

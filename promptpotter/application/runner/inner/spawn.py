@@ -41,13 +41,13 @@ from promptpotter.application.runner.inner.tasks import (
     panel_cell,
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
-from promptpotter.domain.campaign import Campaign, CampaignCycle
-from promptpotter.domain.campaign_config import CycleConfig
+from promptpotter.domain.campaign import Campaign, CampaignCycle, Optimize
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import InnerRun
-from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
+from promptpotter.domain.l4.cells import InnerCells, cell_key
 from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
@@ -119,10 +119,11 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int, query: str) -> dic
     }
 
 
-def inner_campaign_id(spec: InnerTaskSpec, overrides: Overrides) -> str:
-    """Content, never asker: the cell's key and the arm's edits, at a root cycle id's width."""
-    edits = stable_hash([spec.key(), resolved_overrides(overrides)], length=12)
-    return f"{dataset_id_prefix(spec.inner_dataset)}__{edits}"
+def inner_campaign_id(dataset: str, key: str, overrides: Overrides) -> str:
+    """Content, never asker: the cell's key (`cell_key`) and the arm's edits, at a root cycle id's
+    width."""
+    edits = stable_hash([key, resolved_overrides(overrides)], length=12)
+    return f"{dataset_id_prefix(dataset)}__{edits}"
 
 
 class _InnerCell(NamedTuple):
@@ -130,7 +131,7 @@ class _InnerCell(NamedTuple):
 
     ctx: InnerSpawnContext
     cell: Seat
-    spec: InnerTaskSpec
+    dataset: str
     overrides: Overrides
     campaign_id: str
 
@@ -142,11 +143,11 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
             "promptpotter connector: this run has no cycle to spawn an inner campaign under"
         )
     cells = _cells(ctx)
-    cell = panel_cell(sample)
-    arm = cells.own(cell, payload.get("optimizer_prompt_overrides") or {})
-    spec = cells.spec(cell)
-    campaign_id = inner_campaign_id(spec, arm)
-    return _InnerCell(ctx, cell, spec, arm, campaign_id)
+    pinned = panel_cell(sample)
+    arm = cells.own(pinned.cell, payload.get("optimizer_prompt_overrides") or {})
+    dataset = cells.dataset(pinned.cell)
+    campaign_id = inner_campaign_id(dataset, pinned.instrument, arm)
+    return _InnerCell(ctx, pinned.cell, dataset, arm, campaign_id)
 
 
 def claim_sandbox(ctx: InnerSpawnContext) -> Stores:
@@ -235,34 +236,65 @@ def arm_layer(overrides: Overrides) -> Layer[str]:
     return Layer("arm", {"optimization": {"nodes": nodes}} if nodes else {})
 
 
+def _seat_rows(session: Session, dataset: str) -> list[Sample]:
+    if not (rows := list(session.bank.samples)):
+        raise ValueError(f"inner dataset {dataset!r} loaded zero samples")
+    return rows
+
+
+def _laid_seat(
+    session: Session, cells: InnerCells, cell: Seat, overrides: Overrides
+) -> tuple[Session, CampaignConfig]:
+    """*cell*'s instrument with the arm's edits laid last: what its seat runs, and its key reads."""
+    instrument = inner_instrument_config(
+        cell, cells.held(cell).campaign, solver=session.pipeline_schema.prompt_nodes()
+    )
+    armed = instrument.overlaid(arm_layer(overrides))
+    # The instrument stands in for the cell dataset's block: the outer campaign set every knob.
+    return laid_session(
+        session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))
+    )
+
+
+async def panel_rows(stores: Stores, panel: ResolvedInnerPanel) -> list[dict[str, Any]]:
+    """THE build of an outer's bank: each seat keyed (`cell_key`) by the origin it plans under
+    `Optimize`, before any purpose binds, in one session per seat dataset. A refusal any seat
+    owes refuses here, before the outer mints. ``ground_truth`` is ``None``: an L4 cell is graded
+    by its outer proxies, never a label."""
+    cells = panel.cells(stores)
+    keys: dict[str, str] = {}
+    for name in sorted(cells.by_dataset):
+        async with init_services(
+            dataset_name=name, identity=stores.identity, stores=stores
+        ) as session:
+            rows = _seat_rows(session, name)
+            for seat in (s for s in cells.cells if cells.dataset(s) == name):
+                plan = resolve_cycle_plan(*_laid_seat(session, cells, seat, {}), Optimize(), rows)
+                rounds = plan.cycle.config.optimization.budget.rounds
+                assert rounds is not None, "a panel lays its seats' rounds (`resolve_cells`)"
+                keys[seat.id] = cell_key(
+                    plan.cycle_id, rounds, plan.treatment.digest, cells.estimator
+                )
+    return panel.samples(keys)
+
+
 @asynccontextmanager
 async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
-    ctx, spec = cell.ctx, cell.spec
+    ctx = cell.ctx
     # The campaign that exists decides, never an id its origin content derives: a drifted origin
     # reaches the drift refusal rather than a fresh root.
     campaign = store.campaigns.load_campaign(cell.campaign_id)
     if campaign is not None and (refused := campaign_refusal(store, campaign)) is not None:
         raise CellUnscoreableError(str(refused), spent={}) from refused
     async with init_services(
-        dataset_name=spec.inner_dataset, identity=store.identity, stores=store
+        dataset_name=cell.dataset, identity=store.identity, stores=store
     ) as session:
         session.state.control = RunControl(
             commands=store.commands, enclosing=ctx.enclosing, acting=ctx.acting
         )
-        train_data = list(session.bank.samples)
-        if not train_data:
-            raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
-        instrument = inner_instrument_config(
-            spec,
-            _cells(ctx).held(cell.cell).campaign,
-            solver=session.pipeline_schema.prompt_nodes(),
-        )
+        train_data = _seat_rows(session, cell.dataset)
         try:
-            armed = instrument.overlaid(arm_layer(cell.overrides))
-            # The instrument stands in for the cell dataset's block: the outer campaign set every knob.
-            session, config = laid_session(
-                session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))
-            )
+            session, config = _laid_seat(session, _cells(ctx), cell.cell, cell.overrides)
             plan = (
                 resolve_cycle_plan(session, config, ctx.purpose, train_data)
                 if campaign is None
@@ -279,7 +311,7 @@ async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
             admit_slotless,
             plan.cycle.config,
             stores=store,
-            holder=InnerRun(spec.inner_dataset),
+            holder=InnerRun(cell.dataset),
             at=None if campaign is None else plan.session.at,
             requested=Budget(),
             step_rounds=None,
@@ -431,7 +463,7 @@ def _pipeline_declaration(stores: Stores, experiment: ResolvedInnerPanel | None)
 def _identity_config(
     stores: Stores, experiment: ResolvedInnerPanel | None, _base_url: str
 ) -> dict[str, dict[str, Any]]:
-    """What reads every cell's number alike; what measures ONE cell is in its pin (`InnerTaskSpec.key`)."""
+    """What reads every cell's number alike; what measures ONE cell is in its pin (`cell_key`)."""
     cells = _inner_cells(stores, experiment)
     return {cells.chain[0]: {INNER_ORIGIN_KEY: cells.estimator}}
 
@@ -454,11 +486,6 @@ def promptpotter_wire_adapter(
     return payload
 
 
-def _extract_experiment(panel: ResolvedInnerPanel) -> list[dict[str, Any]]:
-    """``ground_truth`` is ``None``: an L4 cell is graded by its outer proxies, never a label."""
-    return panel.samples()
-
-
 async def _in_process_run(
     _workload: InProcessWorkload, sample: Sample, payload: dict[str, Any], _pairs: object
 ) -> dict[str, Any]:
@@ -478,7 +505,7 @@ CONNECTOR = Connector(
     name="promptpotter",
     execution="in_process",
     wire_adapter=promptpotter_wire_adapter,
-    extract_experiment=_extract_experiment,
+    extract_experiment=panel_rows,
     experiment_model=ResolvedInnerPanel,
     declared_panel_model=InnerTasks,
     in_process_run=_in_process_run,

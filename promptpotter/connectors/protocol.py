@@ -172,10 +172,11 @@ class Connector:
     self_optimization: bool = False
     """The recursion: a campaign on it is an L4 outer loop."""
 
-    extract_experiment: Callable[[Any], list[dict[str, Any]]] | None = None
-    """Set = the dataset's ``panel`` OWNS its rows, else the row ladder's. Rows in panel order:
-    ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape. Every experiment
-    hook is handed the ``experiment_model`` instance."""
+    extract_experiment: Callable[[Stores, Any], Awaitable[list[dict[str, Any]]]] | None = None
+    """Set = the dataset's ``panel`` OWNS its rows, else the row ladder's: THE build of its bank,
+    awaited at run init (`wiring.py::session_bank`), which a read outside a run never repeats.
+    Rows in panel order: ``source_pin`` enters ``Sample.key``; a ``None`` ground truth IS the shape.
+    Every experiment hook is handed the ``experiment_model`` instance."""
 
     experiment_model: type[BaseModel] | None = None
     """What a panel parses to; an owned panel needs one. A pinned panel is its unset-free dump."""

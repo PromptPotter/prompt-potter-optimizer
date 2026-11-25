@@ -127,7 +127,7 @@ from promptpotter.application.run_phase_control import FlightGauge, RunControl, 
 from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
-from promptpotter.application.runner.inner.tasks import enter_inner_cell
+from promptpotter.application.runner.inner.tasks import enter_inner_cell, panel_cell
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.mint import stand_held_budget
 from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
@@ -1650,9 +1650,7 @@ async def test_a_seat_its_admission_refuses_mints_no_campaign_and_opens_no_obser
         pytest.raises(MachineBusyError),
     ):
         await spawn.run_inner_cycle(cell, {})
-    seats = spawning.cells
-    assert seats is not None
-    asked = spawn.inner_campaign_id(seats.spec(seats.cells[0]), {})
+    asked = spawn.inner_campaign_id(LAUNCHED_DATASET, panel_cell(cell).instrument, {})
     assert (
         sandbox_store(spawning.stores, spawning.inside[-1]).campaigns.load_campaign(asked) is None
     ), "a seat refused at its admission left its minted campaign"

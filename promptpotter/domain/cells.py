@@ -39,7 +39,7 @@ class Seat(FrozenModel):
     inner_route_order: list[str] | None = None
 
     def pin(self) -> dict[str, JsonValue]:
-        """What the cell IS, never its seat; its depth is the instrument's (`InnerTaskSpec.key`): a
+        """What the cell IS, never its seat; its depth is the instrument's (`l4/cells.py::cell_key`): a
         default is one key spelled or not."""
         return self.model_dump(mode="json", exclude_defaults=True, exclude={"held_out"})
 

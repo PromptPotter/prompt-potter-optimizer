@@ -292,16 +292,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   **Rides with:** bkeys-2. **Re-test:** renaming a field the trace reads leaves `behaviour_keys.json`
   unchanged.
 
-- **An L4 cell's key holds its config, not what its session loads** (✓): `InnerTaskSpec`
-  (`runner/inner/tasks.py::InnerTasks`: node config, laid campaign identity, treatment, estimator)
-  skips what the inner session loads live (`wiring.py:228-307`: `origin.yaml`, the `source:`
-  cut and recipe, `task.md` framing, the pipelines walk, the backend revision), and pins freeze at outer
-  run init while the session loads at each spawn; over-keying: `Seat.id` a label inside the pin, axes
-  key order and mixed-manifest chain order. Root: the instrument hashes the seat's
-  `MintPlan.origin_hash` plus its `measured_address`, resolved at the outer run's init (one async
-  resolve and one backend read per seat), which `dataset_access.py::dataset_experiment`'s synchronous
-  resolve cannot host. **Rides with:** bkeys-2. **Re-test:** an edit to an inner `task.md` moves the
-  pin of every seat on that dataset.
 - **The paid L4 browser walk's stop was sized for one inner round** (reported):
   `research/datasets/promptpotter-self/e2e/dataset.yaml:30`'s `usd: 0.05` predates the depth-2 floor,
   and the same stop now pays the held-out seat's outer bench passes (the origin's, one per adoption),

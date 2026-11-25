@@ -460,20 +460,6 @@ def dataset_experiment(
     return PanelRead(connector.experiment(stores, panel), directory)
 
 
-def extract_panel_rows(
-    connector: Connector, dataset_name: str, experiment: BaseModel
-) -> list[dict[str, Any]]:
-    assert connector.extract_experiment is not None, "a panel is read only where one is owned"
-    try:
-        return connector.extract_experiment(experiment)
-    except (KeyError, TypeError, AttributeError, IndexError) as exc:
-        # Every guard above this seam catches `ValueError`; a raw `KeyError` walks through to a 500.
-        raise ValueError(
-            f"Connector {connector.name!r} could not read {dataset_name!r}'s panel: "
-            f"{type(exc).__name__}: {exc}"
-        ) from exc
-
-
 def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
     """``None`` where the definition names no backend (`connector_of`)."""
     try:
@@ -481,13 +467,6 @@ def dataset_connector(dataset: ResolvedDataset) -> Connector | None:
     except FileUnreadableError:
         return None
     return None if definition is None else definition.owner
-
-
-def dataset_panel_rows(stores: Stores, dataset: ResolvedDataset) -> list[dict[str, Any]] | None:
-    if (connector := dataset_connector(dataset)) is None:
-        return None
-    read = dataset_experiment(stores, dataset, connector)
-    return None if read is None else extract_panel_rows(connector, dataset.name, read.experiment)
 
 
 def readable_task_context(stores: Stores, dataset: ResolvedDataset) -> TaskDecomposition:

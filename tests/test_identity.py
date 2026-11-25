@@ -16,6 +16,7 @@ import json
 import math
 import random
 import re
+import shutil
 import sys
 import time
 import zipfile
@@ -31,6 +32,7 @@ import openpyxl
 import pytest
 from factories import (
     BENCH_TARGET,
+    LAUNCHED_DATASET,
     PARENT,
     PROMPT_INFO,
     arm_state,
@@ -42,6 +44,7 @@ from factories import (
     inner_seat,
     jumping_clock,
     laid_ledger,
+    launched_bank,
     ledger_records,
     loop_session,
     measurement,
@@ -213,7 +216,11 @@ from promptpotter.application.runner.inner.spawn import (
     inner_campaign_id,
     promptpotter_wire_adapter,
 )
-from promptpotter.application.runner.inner.tasks import InnerTasks, inner_instrument_config
+from promptpotter.application.runner.inner.tasks import (
+    InnerTasks,
+    ResolvedInnerPanel,
+    inner_instrument_config,
+)
 from promptpotter.application.runner.round import author_arm, run_init
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
@@ -273,7 +280,7 @@ from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBloc
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
-from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells, InnerTaskSpec
+from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells
 from promptpotter.domain.layer_fold import (
     UNBOUNDED,
     Lay,
@@ -410,14 +417,7 @@ def _install(name: str) -> ResolvedDataset:
     return install_dataset(_DATASETS, name)
 
 
-_SPEC = InnerTaskSpec(
-    inner_dataset="justlogic/d234",
-    optimizer_treatment="o",
-    run_seed=3,
-    campaign={"optimization": {"budget": {"rounds": 4}}},
-    nodes=None,
-    estimator="e",
-)
+_INNER = "justlogic/d234"
 # A panel's `inner_campaign` that reads a held-out area: two rounds, a bench, every adoption graded.
 _GEOMETRY: dict[str, Any] = {
     "sp_budget_origin": 40,
@@ -630,48 +630,22 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     )
 
 
-def test_the_inner_campaign_id_separates_candidates_seeds_treatments_estimators_and_geometry(
-    built_stores: Stores,
-) -> None:
+def test_the_inner_campaign_id_separates_candidates_and_cell_keys(built_stores: Stores) -> None:
     capo = select_optimizer(bench_choice("capo"))
     every = frozenset(Presumption)
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
-    ids = {inner_campaign_id(_SPEC, o) for o in (c1, c2, {}, _CAPO_MUTATED)}
+    ids = {inner_campaign_id(_INNER, "k", o) for o in (c1, c2, {}, _CAPO_MUTATED)}
     assert len(ids) == 4, (
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
     )
     breaching = {"l1_critique": {"layout": {"thinking_style": ["no_such_panel"]}}}
-    assert inner_campaign_id(_SPEC, breaching) != inner_campaign_id(_SPEC, {}), (
+    assert inner_campaign_id(_INNER, "k", breaching) != inner_campaign_id(_INNER, "k", {}), (
         "a refused layout arm continued the floor arm's inner campaign"
     )
-    assert inner_campaign_id(_SPEC.model_copy(update={"run_seed": 6}), c1) != inner_campaign_id(
-        _SPEC, c1
-    ), "two seeds share one inner campaign"
-    moved = _SPEC.model_copy(update={"estimator": "f"})
-    assert inner_campaign_id(_SPEC, c1) != inner_campaign_id(moved, c1), (
-        "a moved estimator resumed the campaign the old one banked"
-    )
-    deeper = _SPEC.model_copy(update={"campaign": {"optimization": {"budget": {"rounds": 6}}}})
-    assert inner_campaign_id(deeper, c1) != inner_campaign_id(_SPEC, c1), (
-        "a deeper cell resumed the shallow one's campaign, so its banked rows read as the deeper's"
-    )
-    wider = _SPEC.model_copy(
-        update={"campaign": {**_SPEC.campaign, "dataset_split": {"bench": 30}}}
-    )
-    assert inner_campaign_id(wider, c1) != inner_campaign_id(_SPEC, c1), "a new draw resumed"
-    cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
-    as_run, as_cut = (
-        select_optimizer(OptimizerChoice(call_target=BENCH_TARGET, optimizer="potter", nodes=n))
-        .treatment(every, built_stores.block_packs)
-        .digest
-        for n in ({}, cut)
-    )
-    assert inner_campaign_id(
-        _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1
-    ) != inner_campaign_id(_SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1), (
-        "a moved optimizer knob ran under the inner campaign of the unmoved one"
+    assert inner_campaign_id(_INNER, "k", c1) != inner_campaign_id(_INNER, "j", c1), (
+        "two cell keys share one inner campaign, so one cell's banked rows read as another's"
     )
     rewalked = capo.manifest.model_copy(update={"initial_population_walks": "alone"})
     assert replace(capo, manifest=rewalked).treatment(every, built_stores.block_packs).digest != (
@@ -1118,48 +1092,50 @@ def test_a_task_text_on_the_unframed_ablation_pays_no_framing_and_writes_none(
     ), "a task text on the unframed ablation paid a check-in and overwrote the committed framing"
 
 
-def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: Stores) -> None:
-    # A cell is keyed by its own instrument and no other cell's: adding an inner dataset re-keys no
-    # banked cell, and an edit to a seat's dataset re-keys that seat alone, off the tier it runs.
+def test_a_cell_is_keyed_by_what_its_session_loads_and_no_other_cells(
+    built_stores: Stores, offline: Router
+) -> None:
+    # A cell is keyed by what its seat's session loads and no other cell's: adding an inner dataset
+    # re-keys no banked cell, and an edit to a seat dataset's `task.md` re-keys every seat on it alone.
+    launched_bank(built_stores, offline, samples(80, "TRUE", query="claim "))
+    family = built_stores.install_datasets_root / LAUNCHED_DATASET.split("/")[0]
+    other_dataset = f"{LAUNCHED_DATASET}-copy"
+    shutil.copytree(built_stores.install_datasets_root / LAUNCHED_DATASET, family / "d234-copy")
+    seats = [{"kind": "seat", "id": f"seed-{s}", "run_seed": s} for s in (0, 1)]
     panel: dict[str, Any] = {
-        "inner_benchmark": "innerbench",
+        "inner_benchmark": LAUNCHED_DATASET,
         "inner_campaign": _GEOMETRY,
-        "tasks": [{"kind": "seat", "id": "seed-0"}],
+        "tasks": seats,
     }
-    campaign = {"optimization": {"budget": {"rounds": 2}, "degradation_threshold": 0.4}}
-    tenant_copy = built_stores.tenant_datasets.dataset_dir("innerbench")
-    for root in (tenant_copy, built_stores.install_datasets_root / "otherbench"):
-        write_yaml(
-            root / DEFINITION_FILE,
-            {"pipeline": {"nodes": {"llm_only": {"config": {"model": "a"}}}}, "campaign": campaign},
-        )
-
-    resolve, extract, identity_of = (
-        CONNECTOR.resolve_experiment,
-        CONNECTOR.extract_experiment,
-        CONNECTOR.identity_config,
-    )
-    assert resolve is not None and extract is not None and identity_of is not None
+    identity_of = CONNECTOR.identity_config
+    assert identity_of is not None
 
     def keyed(declared: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
-        resolved = resolve(built_stores, declared)
-        rows = samples_from_dicts(extract(resolved))
+        resolved = ResolvedInnerPanel.read(built_stores, declared)
+        rows = samples_from_dicts(asyncio.run(spawn.panel_rows(built_stores, resolved)))
         return {s.query: s.key for s in rows}, identity_of(built_stores, resolved, "")
 
     before, fingerprint = keyed(panel)
-    other = {"kind": "seat", "id": "other", "inner_dataset": "otherbench"}
-    grown = {**panel, "tasks": [*panel["tasks"], other]}
+    assert before["seed-0"] != before["seed-1"], "two seeds share one cell key"
+    deeper = {**panel, "inner_campaign": {**_GEOMETRY, "optimization": {"budget": {"rounds": 3}}}}
+    assert keyed(deeper)[0]["seed-0"] != before["seed-0"], (
+        "a deeper cell kept the shallow one's key, so its banked rows read as the deeper's"
+    )
+    other = {"kind": "seat", "id": "other", "inner_dataset": other_dataset}
+    grown = {**panel, "tasks": [*seats, other]}
     after, grown_fingerprint = keyed(grown)
     assert after["seed-0"] == before["seed-0"] and grown_fingerprint == fingerprint, (
         "adding an inner dataset re-keyed a banked cell"
     )
-    write_yaml(
-        tenant_copy / DEFINITION_FILE,
-        {"pipeline": {"nodes": {"llm_only": {"config": {"model": "b"}}}}, "campaign": campaign},
-    )
+    framed = built_stores.install_datasets_root / LAUNCHED_DATASET / FRAMING_FILE
+    framed.write_text("Judge each claim by its weakest premise.\n", encoding="utf-8")
     edited, _ = keyed(grown)
-    assert edited["seed-0"] != before["seed-0"], "an edit to a seat's dataset re-keyed nothing"
-    assert edited["other"] == after["other"], "one seat's edit re-keyed another seat"
+    assert edited["seed-0"] != after["seed-0"] and edited["seed-1"] != after["seed-1"], (
+        "an edit to a seat dataset's task.md re-keyed a seat on it nothing"
+    )
+    assert edited["other"] == after["other"], "one dataset's edit re-keyed another dataset's seat"
+    tenant_copy = built_stores.tenant_datasets.dataset_dir("innerbench")
+    write_yaml(tenant_copy / DEFINITION_FILE, {"pipeline": {"connector": "termnorm"}})
     sandbox = build_stores(
         built_stores.identity,
         projects_root=inner_sandboxes_dir(built_stores.shared_root) / "cell",
@@ -2956,9 +2932,7 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     panel = InnerTasks(inner_benchmark="decl", inner_campaign=_GEOMETRY, tasks=seats)
     cells = panel.resolve_cells(stores)
     (l4_seat,) = cells.cells
-    seat_config = inner_instrument_config(
-        cells.spec(l4_seat), cells.held(l4_seat).campaign, solver=[solve]
-    )
+    seat_config = inner_instrument_config(l4_seat, cells.held(l4_seat).campaign, solver=[solve])
     clamp = seat_config.optimization.determinism
     laid = (
         seat_config.sp_budget_origin,
@@ -3325,7 +3299,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         ruler=0,
     )
     inner_hop = CycleHop(
-        campaign_id=inner_campaign_id(seats.spec(inner_seat), seats.own(inner_seat, {})),
+        campaign_id=inner_campaign_id("decl", "i", seats.own(inner_seat, {})),
         cycle_id="cycle-0",
     )
     stored_campaign(
@@ -4426,19 +4400,12 @@ def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
         "inner_campaign": _GEOMETRY,
     }
 
-    def resolved(*tasks: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "inner_panel": {**seats, "tasks": list(tasks)},
-            "instruments": {task["id"]: "i", other["id"]: "j"},
-            "datasets": {task["id"]: "gsm_hard", other["id"]: "hotpotqa"},
-        }
+    def rows(*tasks: dict[str, Any]) -> list[Sample]:
+        panel = ResolvedInnerPanel(inner_panel=InnerTasks.model_validate({**seats, "tasks": tasks}))
+        return samples_from_dicts(panel.samples({task["id"]: "i", other["id"]: "j"}))
 
-    extract = CONNECTOR.extract_experiment
-    assert extract is not None
-    seated, drawn = samples_from_dicts(
-        extract(CONNECTOR.pinned(resolved({**task, "held_out": True}, other)))
-    )
-    searched, _ = samples_from_dicts(extract(CONNECTOR.pinned(resolved(task, other))))
+    seated, drawn = rows({**task, "held_out": True}, other)
+    searched, _ = rows(task, other)
     assert seated.held_out and not searched.held_out, "a held-out environment was searched"
     assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
         "the seat entered the pin, so the held-out cell never replays once searched"
