@@ -146,7 +146,7 @@ def served_round(
         election=closed.election,
         candidates=[
             ServedArm.of(row.reading, closed.arms[row.reading.arm.key])
-            for row in closed.scoreboard
+            for row in closed.ranked()
             if row.reading.role.is_proposal
         ],
         headline=closed.headline,
@@ -195,7 +195,7 @@ def export_cycle(stores: Stores, path: CyclePath, tier: ExportTier) -> ExportFil
             campaign_id=hop.campaign_id,
             cycle_id=hop.cycle_id,
             dataset_name=campaign.dataset_name,
-            dataset_hash=campaign.declaration.dataset_hash,
+            dataset_hash=campaign.declaration.spec.dataset_hash,
             treatment=campaign.treatment,
             models=models,
             ledger_offset=offset,

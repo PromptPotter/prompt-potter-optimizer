@@ -2,24 +2,27 @@ from __future__ import annotations
 
 import functools
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
 
 from promptpotter.application import optimizers
 from promptpotter.application.optimizers.nodes import (
+    BEHAVIOUR_KEYS_FILE,
     NODE_MEMBERS,
+    BehaviourKeys,
     CountKnob,
     DrawSize,
     Initializer,
     LengthKnobs,
     Reviewer,
     RoundWalk,
-    behaviour_key,
     llm_nodes,
+    member_package_dir,
 )
 from promptpotter.config.paths import (
+    PACKAGE_ROOT,
     checkin_assets_root,
     checkin_manifest_path,
     optimizer_manifest_path,
@@ -70,7 +73,8 @@ from promptpotter.shared.errors import (
     PotterError,
     unknown_slots_said,
 )
-from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.hashing import normalized_module, stable_hash
+from promptpotter.shared.import_walk import import_closure, package_imports
 
 if TYPE_CHECKING:
     from promptpotter.application.optimizers.nodes import (
@@ -999,6 +1003,50 @@ def select_optimizer(choice: OptimizerChoice) -> SelectedOptimizer:
         raise PayloadInvalidError(
             f"optimization.nodes refused by optimizer {name!r}: {exc}", code="optimizer_overlay"
         ) from exc
+
+
+def _files_hash(roots: Iterable[Path]) -> str:
+    """Code less its prose (`normalized_module`), any other file as it stands; read live."""
+    return stable_hash(
+        {
+            path.relative_to(root.parent).as_posix(): (
+                normalized_module(text) if path.suffix == ".py" else text
+            )
+            for root in sorted(roots)
+            for path in sorted(root.rglob("*"))
+            if path.is_file()
+            and path.suffix not in (".pyc", ".md")
+            and (text := path.read_text(encoding="utf-8"))
+        }
+    )
+
+
+def behaviour_key(name: str, members: Sequence[NodeMember], manifests: Sequence[Path]) -> str:
+    """L4 identity (architecture §0.5): a built-in's fingerprint on the offline world and the
+    world's version, so a rename on a line the world ran re-keys nothing, an edit to one it never
+    ran does. A manifest outside the package has no trace, so it keys by all it can run: its
+    members' packages and its manifest directories as they stand, and the package code their
+    imports and this module's reach (the run every optimizer takes), so an edit to code a plugin
+    can reach re-keys it and an edit to a built-in it never imports never does. A built-in
+    missing from `BEHAVIOUR_KEYS_FILE` raises: a stale key is a refused commit, never a second
+    identity."""
+    keys = BehaviourKeys.held()
+    if not all(directory.is_relative_to(PACKAGE_ROOT) for directory in manifests):
+        roots = {*map(member_package_dir, members), *manifests}
+        plugin_files = (
+            p for r in roots if not r.is_relative_to(PACKAGE_ROOT) for p in r.rglob("*.py")
+        )
+        reached = {__name__, *(type(m).__module__ for m in members)}
+        reached.update(n for path in plugin_files for n in package_imports(path))
+        return stable_hash(
+            {"code": _files_hash(roots), "engine": import_closure(reached), "world": keys.world}
+        )
+    if name not in keys.fingerprints:
+        raise LookupError(
+            f"{BEHAVIOUR_KEYS_FILE.name} holds no {name!r}: give it any fingerprint there, and "
+            "`scripts/offline_run.py` regenerates its own"
+        )
+    return stable_hash({"fingerprint": keys.fingerprints[name], "world": keys.world})
 
 
 @dataclass(frozen=True)

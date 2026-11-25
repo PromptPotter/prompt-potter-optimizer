@@ -1964,7 +1964,7 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
             parent_arm = closed.arms[parent]
             assert isinstance(parent_arm, Cut | Measured), f"{case}: the parent never concluded"
             held = session.store.ruler.rows(session_ruler_scope(session), ruler_clock(session))
-            observed = {cell for walked, cell, _ in held if walked == parent_arm.sp_hash}
+            observed = {cell for walked, cell, _ in held if walked == parent_arm.config_key}
             assert {cell.key for cell in closed.rows(parent)} <= observed, (
                 f"{case}: a parent's observation never reached the δ fit its election read"
             )
@@ -3953,7 +3953,7 @@ def test_the_bar_applies_on_the_theta_scale_only() -> None:
             best=HighWater(composite_fitness=comp, series=series, theta_round=rnd),
             escalation_ladder=EscalationLadder.FULL,
             l2_patience=9,
-            l3_patience=None,
+            l3_patience="unbounded",
             admission=0.85,
         )
         return asked.l2.stall_count, asked.l2.comparator
@@ -4979,7 +4979,13 @@ def _evidence_campaign(
     for cycle in {root, hop}:
         stores.campaigns.mint_cycle(cycle)
         stores.campaigns.append(
-            cycle, PartitionRecord.of(partition, dataset_hash=held.dataset_hash)
+            cycle,
+            PartitionRecord.of(
+                partition,
+                dataset_hash=held.dataset_hash,
+                cell_identity={},
+                instrument_id=held.dataset_hash,
+            ),
         )
         ledgers[cycle] = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(cycle)))
         arm_walk(
@@ -5804,7 +5810,7 @@ def declared_head_to_heads() -> _Declared:
         purpose=Compare(arm=Arm(head_to_head_id="any", arm_key="any", replicate=1)),
     ).declaration
     for h2h_id in ("real4", "real5", "real6", "real7", "real8"):
-        alike = declared.shared_part()
+        alike = declared.spec.shared_part()
         if h2h_id == "real8":
             # Declared over defaults its arms no longer run under.
             alike = alike.model_copy(update={"bench_defaults_pin": "moved"})
@@ -5813,6 +5819,7 @@ def declared_head_to_heads() -> _Declared:
                 head_to_head_id=h2h_id,
                 created_at="",
                 origin="origin",
+                cell_identity={},
                 shared=alike,
                 ruler_version=0,
             )
@@ -6032,7 +6039,8 @@ def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by
             head_to_head_id="seeds",
             created_at="",
             origin="origin",
-            shared=declared.shared_part(),
+            cell_identity={},
+            shared=declared.spec.shared_part(),
             ruler_version=0,
         )
     )

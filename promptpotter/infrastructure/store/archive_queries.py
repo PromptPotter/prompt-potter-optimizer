@@ -108,7 +108,7 @@ def bench_reads(stores: Stores, *, bank: Bank, sample_keys: frozenset[str]) -> i
             answer.role == MeasurementRole.BENCH
             for answer in stores.archive.measured(entry, sample_keys)
         ):
-            graded.add(entry.individual)
+            graded.add(entry.config_key)
     return len(graded)
 
 

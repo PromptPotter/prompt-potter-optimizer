@@ -18,7 +18,7 @@ import {
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
 import { liftOf, type LiftSide } from "@/lib/derivations";
-import { fmtLogits, sideTone } from "@/lib/format";
+import { fmtEstimate, fmtLogits, sideTone } from "@/lib/format";
 
 type Lift = {
   round: number;
@@ -59,7 +59,7 @@ function AdvanceBadge({ advance }: { advance: RoundAdvance }) {
 }
 
 function LiftRow({ d, domain, latest }: { d: Lift; domain: IntervalDomain; latest: boolean }) {
-  const value = d.estimate.text;
+  const value = fmtEstimate(d.estimate);
   return (
     <IntervalRow
       className={cx(sideTone(d.side), latest && "ov-latest")}
@@ -112,7 +112,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
         <>
           <p className="note-lede">
             <AdvanceBadge advance={latest.advance} /> Round {latest.round}&rsquo;s pick{" "}
-            {latest.label} lifts <strong>{latest.estimate.text}</strong>
+            {latest.label} lifts <strong>{fmtEstimate(latest.estimate)}</strong>
  over the origin, on the origin
             panel.
           </p>
@@ -136,7 +136,7 @@ export const OuterSignalPanel = memo(function OuterSignalPanel() {
           {fmtLogits(walked.lift_prior.mu0_se)} over their parent, τ{" "}
           {fmtLogits(walked.lift_prior.tau)} across {walked.lift_prior.pairs} pairs.
           {held?.hold_up
-            ? ` Round ${held.round}'s promotion holds ${held.hold_up.text} over the parent it beat.`
+            ? ` Round ${held.round}'s promotion holds ${fmtEstimate(held.hold_up)} over the parent it beat.`
             : ""}
         </p>
       ) : null}

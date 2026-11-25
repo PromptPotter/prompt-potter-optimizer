@@ -3,7 +3,7 @@ import { Badge, CardFrame, DataTable, FailureLine, Term, type Column } from "@/c
 import { MeasurementsPane } from "@/components/measurements/MeasurementsPane";
 import { PairedLift } from "@/components/searchpoint/PairedLift";
 import type { PairedReading, ServedArm } from "@/lib/api/types";
-import { fmtSigned, fmtUnit, PLACEHOLDER } from "@/lib/format";
+import { fmtEstimate, fmtSigned, fmtUnit, PLACEHOLDER } from "@/lib/format";
 import { failureOf, readyData } from "@/lib/hooks/useRead";
 import { useRound } from "@/lib/hooks/useRound";
 import type { CyclePath } from "@/lib/ids";
@@ -13,7 +13,7 @@ function ArmLift({ reading }: { reading: PairedReading | null }) {
   if (reading === null) return <>—</>;
   return (
     <PairedLift reading={reading}>
-      {({ estimate }) => estimate.text}
+      {({ estimate }) => fmtEstimate(estimate)}
     </PairedLift>
   );
 }
@@ -44,14 +44,14 @@ function scoreboardColumns(
       label: "Fitness",
       width: "6rem",
       align: "end",
-      cell: ({ reading: s }) => s.own?.fitness?.text ?? PLACEHOLDER,
+      cell: ({ reading: s }) => fmtEstimate(s.own?.fitness) ?? PLACEHOLDER,
     },
     {
       id: "composite",
       label: "Composite",
       width: "6rem",
       align: "end",
-      cell: ({ reading: s }) => s.own?.composite?.text ?? PLACEHOLDER,
+      cell: ({ reading: s }) => fmtEstimate(s.own?.composite) ?? PLACEHOLDER,
     },
     {
       id: "theta",
@@ -64,7 +64,7 @@ function scoreboardColumns(
       ),
       width: "5rem",
       align: "end",
-      cell: ({ reading: s }) => s.ability?.theta?.text ?? PLACEHOLDER,
+      cell: ({ reading: s }) => fmtEstimate(s.ability?.theta) ?? PLACEHOLDER,
     },
     {
       id: "lift",
@@ -116,7 +116,7 @@ export function RoundFileView({
           <Badge className="round-file-badge">round {round}</Badge>
           {own && (
             <>
-              <span>fitness {own.fitness?.text ?? PLACEHOLDER}</span>
+              <span>fitness {fmtEstimate(own.fitness) ?? PLACEHOLDER}</span>
 
               {Object.entries(headline.fitness_terms).map(([name, value]) => (
                 <span key={name}>

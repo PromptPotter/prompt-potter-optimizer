@@ -12,12 +12,13 @@ from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.scoring.formula.compiler import compile_scorer, split_scoring_block
 from promptpotter.application.scoring.judges.registry import judge_instrument, two_valued_terms
 from promptpotter.config.paths import install_datasets_root
-from promptpotter.domain.campaign import Environment, Purpose, RunDeclaration
+from promptpotter.domain.campaign import Environment, RunSpec
 from promptpotter.domain.campaign_config import CAMPAIGN_RULE, CampaignConfig
 from promptpotter.domain.draft_edit import CampaignLayer
-from promptpotter.domain.layer_fold import Folded, Layer, fold_layers, wire_patch
+from promptpotter.domain.layer_fold import UNBOUNDED, Folded, Layer, fold_layers, patch_between
 from promptpotter.domain.pipeline_schema import KnobLayer
 from promptpotter.domain.scoring import Scorer
+from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.store.dataset_access import (
     DEFAULTS_FILE,
     DEFINITION_FILE,
@@ -105,35 +106,25 @@ _ENVIRONMENT_KEYS = frozenset(
 def declare_run(
     config: CampaignConfig,
     *,
-    purpose: Purpose,
     dataset_hash: str,
     connector: str,
     bench_defaults_pin: str,
-) -> RunDeclaration:
-    """Every door's config becomes ONE declaration: what it states over today's defaults."""
+) -> RunSpec:
+    """Every door's config becomes ONE spec: the fold patch it lays over today's defaults."""
     defaults = defaults_config()
-    under = defaults.model_dump(mode="json")
-    named = {k: v for k, v in config.model_dump(mode="json").items() if under[k] != v}
-    named.pop("optimization", None)
-    held = under["optimization"]
-    optimization = {
-        k: v
-        for k, v in config.optimization.model_dump(mode="json").items()
-        if k != "budget" and held[k] != v
-    }
+    named = patch_between(CAMPAIGN_RULE, _unbudgeted(defaults), _unbudgeted(config))
     budget, standing = config.optimization.budget, defaults.optimization.budget
-    return RunDeclaration(
-        purpose=purpose,
+    return RunSpec(
         dataset_hash=dataset_hash,
-        run_seed=named.pop("run_seed", None),
-        loop={
-            **{k: v for k, v in named.items() if k not in _ENVIRONMENT_KEYS},
-            "optimization": optimization,
-        },
-        budget=budget.only(
-            a
-            for a in budget.named
-            if a not in standing.named or getattr(budget, a) != getattr(standing, a)
+        run_seed=config.run_seed if "run_seed" in named else None,
+        loop={k: v for k, v in named.items() if k not in _ENVIRONMENT_KEYS | {"run_seed"}},
+        # An axis the defaults bound and the config cleared runs with none: the declaration lifts it.
+        budget=Budget(**dict.fromkeys(standing.named - budget.named, UNBOUNDED)).over(
+            budget.only(
+                a
+                for a in budget.named
+                if a not in standing.named or getattr(budget, a) != getattr(standing, a)
+            )
         ),
         environment=Environment(
             connector=connector,
@@ -143,25 +134,30 @@ def declare_run(
     )
 
 
-def effective_config(declaration: RunDeclaration) -> CampaignConfig:
-    """The ONE derivation of what a declaration runs: today's defaults under its parts."""
+def effective_config(declaration: RunSpec) -> CampaignConfig:
+    """The ONE derivation of what a declaration runs: its patch laid over today's defaults."""
     defaults = defaults_config()
-    loop = declaration.loop
     seed = {} if declaration.run_seed is None else {"run_seed": declaration.run_seed}
-    budget = defaults.optimization.budget.over(declaration.budget)
-    return CampaignConfig.model_validate(
-        {
-            **defaults.model_dump(mode="json"),
-            **loop,
-            **declaration.environment.target,
-            **seed,
-            "optimization": {
-                **defaults.optimization.model_dump(mode="json"),
-                **loop["optimization"],
-                "budget": budget.model_dump(mode="json", exclude_unset=True),
-            },
-        }
+    sent = {**declaration.loop, **declaration.environment.target, **seed}
+    # A lift over the defaults leaves no bound beneath it: the run's budget names its bounds alone.
+    budget = defaults.optimization.budget.over(declaration.budget).model_dump()
+    laid = fold_layers(
+        CAMPAIGN_RULE,
+        [
+            Layer("defaults", _unbudgeted(defaults)),
+            Layer("campaign", sent),
+            Layer(
+                "campaign",
+                {"optimization": {"budget": {a: v for a, v in budget.items() if v != UNBOUNDED}}},
+            ),
+        ],
     )
+    return CampaignConfig.model_validate(laid.document)
+
+
+def _unbudgeted(config: CampaignConfig) -> dict[str, Any]:
+    """*config* as a fold document, less its budget: a declaration states the budget's axes apart."""
+    return config.model_dump(mode="json", exclude={"optimization": {"budget"}})
 
 
 class ConfigLayers(NamedTuple):
@@ -182,14 +178,10 @@ class ConfigLayers(NamedTuple):
         return cls(campaign_defaults(), stated.model_dump(mode="json", exclude_unset=True))
 
     def over(self, optimization: Mapping[str, Any]) -> ConfigLayers:
-        """*optimization*, as a door sent it (`layer_fold.py::wire_patch`), laid into the edit,
-        last; its ``budget`` is the payload's own, where a null axis is unbounded, never a clear."""
-        sent = {k: v for k, v in optimization.items() if k != "budget"}
-        budget = {"budget": optimization["budget"]} if "budget" in optimization else {}
-        laid = wire_patch(CAMPAIGN_RULE, sent, "optimization")
+        """*optimization*, as a door sent it, laid into the edit, last."""
         layers = [
             Layer("campaign", self.campaign),
-            Layer("campaign", {"optimization": {**laid, **budget}}),
+            Layer("campaign", {"optimization": dict(optimization)}),
         ]
         return self._replace(campaign=fold_layers(CAMPAIGN_RULE, layers).document)
 

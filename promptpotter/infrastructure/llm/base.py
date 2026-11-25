@@ -75,6 +75,14 @@ class Tool:
     parameters: dict[str, Any]
 
 
+PROVIDER_DEFAULT_EFFORT = "default"
+"""The one rung that OMITS the field; ``none`` is a provider value, reasoning OFF, never absent."""
+
+
+def sent_effort(effort: str | None) -> str | None:
+    return None if effort == PROVIDER_DEFAULT_EFFORT else effort
+
+
 @dataclass(frozen=True)
 class ChatRequest:
     """``None`` = not asked for; a client refuses an asked field it cannot send (``OpenAICompatibleClient.SENDS``)."""
@@ -90,6 +98,13 @@ class ChatRequest:
     seed: int | None = None
     route_order: list[str] | None = None
     tools: tuple[Tool, ...] | None = None
+
+    def __post_init__(self) -> None:
+        # An empty route pins nothing and the provider's default rung sends nothing: neither is
+        # a request, so each is unset once, here, for the send and its `hash_call` key alike.
+        if not self.route_order:
+            object.__setattr__(self, "route_order", None)
+        object.__setattr__(self, "reasoning_effort", sent_effort(self.reasoning_effort))
 
     @functools.cached_property
     def wire_schema(self) -> dict[str, Any] | None:

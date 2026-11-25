@@ -42,12 +42,6 @@ row it closes.
   `git grep -n "cut_operator_fork(\|admit(" -- promptpotter/application/commands/launching.py` lists the
   admission before the cut. Measured at +60 in `promptpotter` as its own door (`wip/valid-2` d75eb7e is
   the reference build), so it rides admit-2's one admission door.
-- **An arm is planned on a replicate it does not have yet**: `command_kinds.py::HeadToHeadRequest.purpose`
-  declares replicate 1 and `jobs/mint.py::_numbered` overwrites it under the record hold; the placeholder
-  reaches the root id, so admission prices plans whose ids are not final. Action: a purpose-free run spec
-  feeds `resolve_cycle_plan`, `effective_config` and `shared_part`; the plan carries
-  `Optimize | ArmSeat(head_to_head_id, arm_key)`, and the mint builds `Compare(Arm(…, replicate))` once.
-  **Rides with:** admit-2. **Re-test:** `git grep -n "replicate=1" -- promptpotter`.
 - **A mint takes no claim until `admission.py::claim_cycle`**: `mint()` has no job, and the L4 inner and
   embedded mints hold no claim at all, so the landing tells a live mint from a torn one by the job
   registry alone (`maintenance/landing.py::plan_landing` asks `maintenance/reset.py::holder_in_reach` of
@@ -247,20 +241,13 @@ cfg-2 laid every door's patch through one wire rule and every campaign default i
 and derived the knob couplings from each member's draws and the escalation ladder.
 
 - **The node document is typed two ways and the L2 steer is a side memory**: every door now parses a
-  patch through `layer_fold.py::wire_patch`, but L2's steer is read through `L2Memory.steered` /
+  patch through `layer_fold.py::fold_layers` (a null clears), but L2's steer is read through `L2Memory.steered` /
   `steered_layout` beside the fold, not as a named layer of `l1_generate`'s config, and about 58 of
   the engine's `dict[str, Any]` sites are node-config bags (`dict[str, NodeCall]` on `CycleStart`,
   `dict[str, dict[str, Any]]` on `ForkStart`, which carries a null clear and text a `NodeCall` refuses
   before the schema types it), and schema, parsing, overlay and knobs each hold a view of the document
   (~11 modules). Action: one typed node document with knobs a view on it; the steer a named layer. It
   closes the pipeline-switch row. **Rides with:** cfg.
-- **Potter's demo axis is dead wherever a dataset holds out no demo pool**: the derived coupling
-  `l1_generate.shots_without_demo_pool` (`application/config_map.py::_draw_couplings`) now badges every default potter
-  campaign, because `defaults.yaml` holds out no `dataset_split.demo` and only justlogic declares one
-  (`demo: 50`), while `l1_generate.k_max` is 5. The badge is true; the default is the fork. Action
-  (operator's call): hold out a demo split by default (every split re-keys, search loses rows) or drop
-  the axis from the default (`k_max: 0`, re-keys potter). **Re-test:** a default potter campaign on a
-  shipped dataset raises no `inert` coupling.
 
 ### valid (after rk-dec, before the behaviour keys)
 
@@ -307,19 +294,15 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### bkeys-2 (what bkeys left at its landing)
 
-- **A rename re-keys every banked L4 cell's treatment**: the cell estimator is the L4 leg's behaviour
-  (`nodes.py::BehaviourKeys.cell_estimator`), but `nodes.py::behaviour_key` still hashes each
-  optimizer package's source into `InnerTaskSpec.optimizer_treatment`, so ren's renames moved all five
-  treatment digests, every request byte-identical, and l4-outer-6's `Frontier` → `Parent` re-keyed
-  every banked cell for potter, capo-pobb and gepa. Root: a treatment keyed by its fingerprint alone.
-  **Rides with:** bkeys-2. **Re-test:** a rename in `optimizers/potter/` leaves `treatment:potter`
-  (`offline_run.py --digests`) unchanged.
-- **The trace hashes a display field** (rec's landing, reported): `MemberAddress.pass_role` has no
-  reader but rides the round-file readings the trace hashes, so deleting it moves the behaviour keys.
-  Root: the behaviour key reads the decisions, not the display fields nor their spelling: ren's renames
-  re-keyed `behaviour_keys.json` by field names alone (decisions identical once normalized), and its
-  landing wiped the banked origins with them. **Rides with:** bkeys-2. **Re-test:** deleting
-  `pass_role`, or renaming a trace field, leaves `behaviour_keys.json` unchanged.
+- **The trace hashes a field's spelling** (rec's landing, reported; bkeys-3 took `Estimate`'s words;
+  `MemberAddress.pass_role` is no display field: `paired.py::read_pair`'s address equality reads it,
+  and capo-pobb's `same_individual` moved without it): `offline_run.py::behaviour_keys` hashes the
+  trace with its keys, and the trace keeps whole
+  sub-documents (`ELECTION_KEYS`' `fit`, `LEDGER_KEYS`' `election.fit`, `run.bench`, `round_index`),
+  so ren's renames re-keyed `behaviour_keys.json` by field names alone (decisions identical once
+  normalized). Root: the trace names each decision it reads, so a model rename moves only its pick.
+  **Rides with:** bkeys-2. **Re-test:** renaming a field the trace reads leaves `behaviour_keys.json`
+  unchanged.
 
 - **An L4 cell's key holds its config, not what its session loads** (✓): `InnerTaskSpec`
   (`runner/inner/tasks.py::InnerTasks`: node config, laid campaign identity, treatment, estimator)
@@ -464,16 +447,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   answer identity. **Rides with:** xconn 3, after TermNorm's `xconn` reaches the box. **Re-test:** a
   launch against a backend one contract behind fails at the probe, naming both numbers;
   `connectors/termnorm.py` probes `/version`.
-- **An identity re-key moves offline decisions**: an arm's content id carries identity-only keys
-  (`pipeline_resolve.py::identity_layer`). A pure re-key therefore changes which cells are drawn and
-  raced. xconn 3's revision leaf alone moved potter's crossed leader (C2.6 → C2.7) and p_best/θ in
-  capo-pobb, levi and potter (`wip/xconn` f70980fe7). Action: an arm's id derives from what the arm
-  sends, never from its identity keys. **Rides with:** xconn 3, before it lands. **Re-test:**
-  `wip/xconn`'s run against its base moves only `backend_revision` leaves.
-- **A moved capability or backend revision alone passes a resume**: it is a drift cause only when the
-  origin hash also mismatches (`jobs/mint.py::resolve_resume`, `::_revision_moved`). Action: a resume
-  refuses a moved capability or backend revision. **Rides with:** xconn 3. **Re-test:** a resume after a
-  backend revision bump is refused naming it.
 - **TermNorm words a warning's step into its message** (`research_pipeline.py`), though `StepWarning`
   carries the step as a field. Fixed only on TermNorm's `xconn` branch (11b1dbe); master (ce4f15b) and
   the box still word it (master `research_pipeline.py:278`). Action: the message is the fault alone.
@@ -685,11 +658,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `jobs/interlock.py`, `jobs/registry.py::close_for_landing` and `deploy-linux/update.sh` (a box change:
   that hunk asks). **Re-test:** a landing that moves no record shape refuses while a run is live; a
   deploy killed after close-admission leaves no marker the next launch refuses on.
-- **A reader's helper body is not keyed** (land-order's report): `landing.py::landing_key` hashes
-  each reader's and migration's own source, so a helper a reader calls (the record validators behind
-  `ledger_line`) or a pydantic validator on a row's model can change what loads without moving the
-  key. Root: a shape's loading behaviour has no digest beyond its JSON schema. **Rides with:** rel.
-  **Re-test:** edit a validator a survivor's model runs; `landing_key()` moves.
 
 ### wave-5 · store (what store-2f, store-2g and store-3b left at their landing)
 
@@ -701,18 +669,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   babysit act, decisions.md § 0005) and read it there. **Re-test:** a launch at a fork whose line
   narrowed a model steers to the root-only model and reads `babysat`.
 
-### wave-5 · cfg (what cfg-3 and cfg-4 left at their landing)
-
-- **A run declaration lays today's defaults by a second merge beside the one fold** (cfg-4's report):
-  `datasets/authored.py::effective_config` lays `defaults_config()` under a declaration's parts by a
-  shallow `**` merge, and `declare_run` diffs whole top-level values against the defaults dump, so a
-  declaration is a replace-per-key document while `layer_fold.py::fold_layers` lays a mapping key by
-  key (lists by `SUBSET`/`UNION`). It is right today only because `declare_run` dumps complete values;
-  `CampaignConfig.overlaid` in its place would keep a default's mapping key a declaration dropped.
-  Root: a `RunDeclaration`'s `loop` / `environment.target` is a fold patch (`CLEAR` for a dropped key)
-  laid over `defaults.yaml` by `fold_layers`; it reshapes the measured address every root id hashes
-  (wipes run data, moves root ids). **Re-test:** `git grep -cE "\*\*defaults\." --
-  promptpotter/application/datasets/authored.py` == 0 (now 2).
 
 ### wave-5 · readings (what readings-4, readings-5 and readings-6 left at their landing)
 
@@ -847,15 +803,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 These land in the re-key windows, `W1` (keys, address, cell key and archive row, one wipe) and `W2`
 (ledger record shapes), each row naming its window and chain.
 
-- **Served words are written to the ledger, and two digests read them: a banked proposal's and the
-  behaviour keys'**: `domain/paired_reading.py::Estimate` dumps three `@computed_field`s (`band`,
-  `point`, `text`; its module allows one) and reads back on `extra="ignore"`: 14,201 desk
-  `sample_scored` records carry them, and six other kinds. `results.py::round_document_digest` hashes
-  them into `consumed` (`round.py::operator_arms`, `resume.py::_stale_generation`) and
-  `offline_run.py::LEDGER_KEYS` keeps `election.fit` whole, so a `lift_text` edit stales every banked
-  proposal and re-keys `behaviour_keys.json`. New beside "The trace hashes a display field": the stored
-  form, and `consumed`, which no trace filter reaches. Root: a stored model holds facts, a served one
-  words them. **Window:** W1 · bkeys-3. **Re-test:** an `Estimate`'s `model_dump(mode="json")` holds no `band`, `point` or `text`.
 - **An inner campaign's id is 24 bits of its content**: `runner/inner/spawn.py::inner_campaign_id`
   cuts `stable_hash([spec.key(), resolved_overrides(overrides)], length=6)`, and `_open_seat` lets the
   campaign that exists decide, so two `(cell, arm edit)` pairs on one id continue one campaign
@@ -891,14 +838,6 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   decision records addresses and its replay reads every side through the one scorer it runs; a
   run-data wipe, and `offline_run.py::LEDGER_KEYS` keeps `inputs_ref` whole, so the behaviour keys
   move. **Window:** W1 · potter-w1 (else W3). **Re-test:** `git grep -n "prior_histories" -- promptpotter` is empty; open: does a rival-only re-grade reach `elimination_cut`'s replay?
-- **An unset lever is spelled two ways in the reply-cache key**: `store/llm_reuse_cache.py::hash_call`
-  hashes `temperature`, `json_schema`, `seed`, `max_tokens` and `reasoning_effort` always (a `None`
-  included), but `route_order` and `top_p` "only when set: an unconditional `null` re-keys every
-  banked reply", so the key's shape records the order its levers were added: a compatibility rule
-  inside an identity. `optimizer_reuse` and `judge_reuse` are CACHE, so once users hold paid replies it
-  can never be normalized. Root: the key hashes the request as sent, by one rule (set fields, nulls
-  dropped); every banked reply misses once. **Window:** W1 · cache key, a file-disjoint link beside
-  W1's C0 re-ask. **Re-test:** `git grep -n "if request\." -- promptpotter/infrastructure/store/llm_reuse_cache.py` is empty.
 - **The neutral round envelope stores one backend's ranking report and a second copy of its cells**:
   `domain/results.py::RoundOutcome.diagnostics` is a `round_diagnostics.py::RoundDiagnostics`
   (`rank_buckets`, `top_k_accuracy`, `near_misses`, per-sample `rank` / `gt_in_*`) that

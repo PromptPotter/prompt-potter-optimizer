@@ -1,7 +1,7 @@
 import {
+  type Estimate,
   type MeasuredLift,
   type MeasuredUnit,
-  type MetricSpec,
   LIFT_SIDE_TONE,
   RECENT_STEP_S,
   SAMPLE_TAG_DIGITS,
@@ -102,15 +102,28 @@ const COMPACT_STEPS: [number, string][] = [
   [1_000, "k"],
 ];
 
-// `arm_reading.py::_number`: a compact unit steps a thousand or more to one digit of k or M.
-function numberIn(f: UnitFormat, v: number, digits: number, signed: boolean): string {
-  const scaled = f.scale * v;
-  const step = f.compact ? COMPACT_STEPS.find(([size]) => Math.abs(scaled) >= size) : undefined;
-  const text = step ? `${(scaled / step[0]).toFixed(1)}${step[1]}` : scaled.toFixed(digits);
-  return signed && scaled >= 0 ? `+${text}` : text;
+// Python's `f"{v:.{digits}f}"` on |v|: an exact binary tie rounds to even, where `toFixed` rounds
+// it away from zero (1/40 as a rate reads `2%`, never `3%`). `toFixed(100)` is the exact expansion.
+function fixed(v: number, digits: number): string {
+  const exact = v.toFixed(100);
+  const cut = exact.indexOf(".") + 1 + digits;
+  const down = exact.slice(0, digits ? cut : cut - 1);
+  const tie = /^50*$/.test(exact.slice(cut));
+  return tie && Number(down.at(-1)) % 2 === 0 ? down : v.toFixed(digits);
 }
 
-// A level in its unit, as `arm_reading.py::level_text` prints it.
+// `paired_reading.py::_number`: a compact unit steps a thousand or more to one digit of k or M;
+// −0 keeps its sign, as Python prints it.
+function numberIn(f: UnitFormat, v: number, digits: number, signed: boolean): string {
+  const scaled = f.scale * v;
+  const size = Math.abs(scaled);
+  const step = f.compact ? COMPACT_STEPS.find(([at]) => size >= at) : undefined;
+  const text = step ? `${fixed(size / step[0], 1)}${step[1]}` : fixed(size, digits);
+  if (scaled < 0 || Object.is(scaled, -0)) return `-${text}`;
+  return signed ? `+${text}` : text;
+}
+
+// A level in its unit, as `paired_reading.py::level_text` prints it.
 export function fmtUnit(unit: MeasurandUnit, v: number | null | undefined): string {
   if (!finite(v)) return PLACEHOLDER;
   const f = UNIT_FORMATS[unit];
@@ -126,18 +139,35 @@ function signedIn(unit: MeasurandUnit, v: number): string {
   return numberIn(f, v, f.lift_digits, true);
 }
 
-// A lift in its measurand's unit, as `arm_reading.py::lift_text` prints it on every other surface.
+// A lift in its measurand's unit, as `paired_reading.py::lift_text` prints it on every other surface.
 export function fmtLift(unit: MeasurandUnit, v: number | null | undefined): string {
   if (!finite(v)) return PLACEHOLDER;
   return `${signedIn(unit, v)}${NBSP}${UNIT_FORMATS[unit].lift_word}`;
 }
 
+// An estimate is served as facts alone (`paired_reading.py::Estimate`); `fmtMetric`, `fmtBand`
+// and `fmtEstimate` word it as its `point`, `band` and `text` do (the fixture
+// `estimate-words.generated.json` holds them to Python's words).
+// The value of an estimate, or of a metric's cell, in its unit: only a lift earns a sign.
+export function fmtMetric(
+  e: (Pick<Estimate, "unit" | "form"> & { value: number | null | undefined }) | null | undefined,
+): string {
+  if (e == null) return PLACEHOLDER;
+  return e.form === "lift" ? fmtLift(e.unit, e.value) : fmtUnit(e.unit, e.value);
+}
 
-export type MetricFormat = Pick<MetricSpec, "unit" | "lift">;
+export function fmtBand(e: Estimate | null | undefined): string | null {
+  if (e == null || e.ci_lo === null || e.ci_hi === null) return null;
+  if (e.form === "level") return `[${fmtUnit(e.unit, e.ci_lo)}, ${fmtUnit(e.unit, e.ci_hi)}]`;
+  return `[${signedIn(e.unit, e.ci_lo)},${NBSP}${signedIn(e.unit, e.ci_hi)}]`;
+}
 
-// A value of a read metric: only a lift earns a sign.
-export function fmtMetric(metric: MetricFormat, v: number | null | undefined): string {
-  return metric.lift ? fmtLift(metric.unit, v) : fmtUnit(metric.unit, v);
+export function fmtEstimate(e: Estimate): string;
+export function fmtEstimate(e: Estimate | null | undefined): string | null;
+export function fmtEstimate(e: Estimate | null | undefined): string | null {
+  if (e == null) return null;
+  const band = fmtBand(e);
+  return band === null ? fmtMetric(e) : `${fmtMetric(e)} ${band}`;
 }
 
 

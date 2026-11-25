@@ -10,6 +10,7 @@ from promptpotter.domain.arm_reading import ArmReading
 from promptpotter.domain.arms import ArmState, Proposed
 from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.l4.proxies import PanelPrecision
+from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.opt_search_point import EvidenceGrounding, NodePrompt
 from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
 from promptpotter.domain.paired_reading import ArmKey, ArmName, Estimate, ReadingState
@@ -194,8 +195,8 @@ class OptimizerLimit(FrozenModel):
     node: str
     knob: str
     label: str
-    # ``None`` where the knob is declared off.
-    value: float | None
+    # ``None`` where the knob is declared off; ``unbounded`` where it binds nothing.
+    value: float | Unbounded | None
     # A whole count; otherwise a fraction in [0, 1].
     integer: bool
 

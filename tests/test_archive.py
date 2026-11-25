@@ -124,7 +124,7 @@ from promptpotter.application.runner.termination import RUN_STOPS, end_run_on
 from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
-from promptpotter.application.scoring.search_point_scorer import replayable_on
+from promptpotter.application.scoring.search_point_scorer import filed_entry, replayable_on
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.application.views.render.phase import acts_line
 from promptpotter.config.paths import MEASUREMENTS_DIR, user_data_root
@@ -1762,6 +1762,8 @@ def scenario_line(built_stores: Stores) -> _Scenario:
     drawn = PartitionRecord.of(
         partition_bank(bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0),
         dataset_hash="bank",
+        cell_identity={},
+        instrument_id="bank",
     )
     store.append(scenario, drawn)
     unheld = (
@@ -2783,7 +2785,10 @@ def repair(built_stores: Stores) -> _Repair:
         stored_campaign(stores, minted_campaign(hop))
         stores.campaigns.mint_cycle(hop)
         drawn = partition_bank(repair_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
-        stores.campaigns.append(hop, PartitionRecord.of(drawn, dataset_hash="bank"))
+        stores.campaigns.append(
+            hop,
+            PartitionRecord.of(drawn, dataset_hash="bank", cell_identity={}, instrument_id="bank"),
+        )
         rows = [
             measurement(i, 1.0, sample_key=s.key, predicted="g") for i, s in enumerate(repair_bank)
         ]
@@ -2809,7 +2814,7 @@ def repair(built_stores: Stores) -> _Repair:
             position=ArmPosition(round=1, idx=0, total=1),
             individual=child,
             resolved_params=sp.config_params.dump(),
-            sp_hash=sp.sp_hash(cycle.session.pipeline_schema),
+            filed=filed_entry(sp, cycle.session),
         )
         line = [
             cycle.origin_round.model_copy(update={"optimizer_state": cycle.close_state(0)}),

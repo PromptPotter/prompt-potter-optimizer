@@ -10,5 +10,5 @@ arms:
   gepa: {optimizer: gepa}
 replicates: 3
 budgets:
-  usd2: {usd: 2.0, rounds: null}
-  usd8: {usd: 8.0, rounds: null}
+  usd2: {usd: 2.0, rounds: unbounded}
+  usd8: {usd: 8.0, rounds: unbounded}

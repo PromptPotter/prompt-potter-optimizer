@@ -34,7 +34,7 @@ from promptpotter.application.jobs.launcher.admission import (
     claim_cycle,
     slotless_share,
 )
-from promptpotter.application.jobs.mint import declare, mint_framed_cycle
+from promptpotter.application.jobs.mint import mint_framed_cycle, run_spec
 from promptpotter.application.jobs.quota import sends_on
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.optimizer_manifest import (
@@ -60,6 +60,7 @@ from promptpotter.application.runner.loop import walk_round_zero
 from promptpotter.application.runner.mint import open_launch
 from promptpotter.application.scoring.formula.compiler import compile_scorer
 from promptpotter.application.scoring.paired import MemberRows, grade_measurands, mean_lift
+from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.config.paths import default_projects_root, install_datasets_root, user_data_root
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.connectors.protocol import (
@@ -97,7 +98,7 @@ from promptpotter.domain.bench import (
     bench_status,
     partition_bank,
 )
-from promptpotter.domain.campaign import Campaign, Optimize, Purpose
+from promptpotter.domain.campaign import Campaign, Optimize, Purpose, RunDeclaration
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
@@ -198,6 +199,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     campaign_defaults,
     install_dataset,
     resolve_dataset,
+    runnable_definition,
 )
 from promptpotter.infrastructure.store.io import write_json, write_yaml
 from promptpotter.infrastructure.store.layout import inner_sandbox_dir, sandbox_owner_path
@@ -338,10 +340,11 @@ def arm_state(
     invalid_reason: ValidationReason | None = None,
     locked_in: bool = False,
     elimination: dict[str, Any] | None = None,
+    filed: ArchiveEntry | None = None,
     **overrides: Any,
 ) -> Cut | Measured:
     """A concluded arm whose individual is named by *name*; ``position=None`` is a reference arm, a
-    round-0 position the origin."""
+    round-0 position the origin. *filed* is the entry its cells are filed under, else *name* ids it."""
     failures = (
         [ValidationFailure(axis="prompt_fields", value="", allowed=[], reason=invalid_reason)]
         if invalid_reason
@@ -359,7 +362,8 @@ def arm_state(
         "position": position,
         "individual": prompted(instruction=name),
         "validation_failures": failures,
-        "sp_hash": name,
+        "sp_hash": name if filed is None else filed.prompt_fields_id,
+        "config_key": name if filed is None else filed.config_key,
         "resolved_params": {},
         "expected_samples": total,
     } | overrides
@@ -602,7 +606,6 @@ def loop_session(
     )
     session.state.scoring = ScorerSetup(
         scorer=scorer or scorer_of(),
-        display_metric="fitness",
         partition=partition
         or BankPartition(defaulted_config().dataset_split, tuple(samples), (), ()),
         degradation_checks=(),
@@ -688,7 +691,7 @@ def seat(
             position=ArmPosition(round=0, idx=0, total=1),
             individual=individual,
             resolved_params=sp.config_params.dump(),
-            sp_hash=sp.sp_hash(session.pipeline_schema),
+            filed=filed_entry(sp, session),
         )
         seated = Cycle.start(
             ReadArm(ArmKey(individual.id), c0, read(session)),
@@ -716,6 +719,11 @@ def launched_bank(stores: Stores, world: Router, bank: Sequence[Sample]) -> None
     source = definition_source(resolve_dataset(stores, LAUNCHED_DATASET))
     assert source is not None, f"{LAUNCHED_DATASET} names a source"
     stores.tenant_datasets.record_cut(source.identity, Bank.of(bank))
+
+
+def declaration_of(session: Session, config: CampaignConfig, purpose: Purpose) -> RunDeclaration:
+    """*config* declared under *purpose*, as a mint numbers an arm."""
+    return RunDeclaration(spec=run_spec(session, config, purpose), purpose=purpose)
 
 
 async def run_init_round(
@@ -746,12 +754,11 @@ async def run_init_round(
         dataset_name=LAUNCHED_DATASET, identity=stores.identity, stores=entered
     ) as session:
         session, config = laid_session(session, ConfigLayers(campaign_defaults(), raw))
-        declaration = declare(session, config, purpose=Optimize())
 
         async def run(held: HeldBudget) -> tuple[RoundContext, CycleResult]:
             minted = await mint_framed_cycle(
                 session,
-                declaration,
+                config,
                 session.bank.samples,
                 task_text=None,
             )
@@ -768,7 +775,11 @@ async def run_init_round(
             at=None,
             requested=Budget(),
             step_rounds=None,
-            sends=sends_on(stores, config, declaration.environment.connector),
+            sends=sends_on(
+                stores,
+                config,
+                runnable_definition(resolve_dataset(stores, LAUNCHED_DATASET)).connector,
+            ),
         )
         try:
             ctx, ended = await run(held)
@@ -860,12 +871,14 @@ def minted_campaign(
         treatment=select_optimizer(config.optimization).treatment(
             frozenset(Presumption), PackShelf(account=None)
         ),
-        declaration=declare_run(
-            config,
+        declaration=RunDeclaration(
+            spec=declare_run(
+                config,
+                dataset_hash=fields.pop("dataset_hash", "bank"),
+                connector=fields.pop("connector", "termnorm"),
+                bench_defaults_pin=bench_defaults_pin(),
+            ),
             purpose=purpose,
-            dataset_hash=fields.pop("dataset_hash", "bank"),
-            connector=fields.pop("connector", "termnorm"),
-            bench_defaults_pin=bench_defaults_pin(),
         ),
         **fields,
     )

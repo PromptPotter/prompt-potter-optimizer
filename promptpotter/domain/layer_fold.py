@@ -10,9 +10,11 @@ import types
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Annotated, Any, Union, get_args, get_origin
+from typing import Annotated, Any, Literal, Union, get_args, get_origin
 
 from pydantic import BaseModel
+
+from promptpotter.shared.errors import PayloadInvalidError
 
 
 class Lay(Enum):
@@ -24,7 +26,7 @@ class Lay(Enum):
     WHOLE = "whole"
     # A node's call: key by key, and a new model laid without a route drops the old route.
     CALL = "call"
-    # A list keeps, in the layer's order, what both name; a ``None`` layer keeps the fold's.
+    # A list keeps, in the layer's order, what both name.
     SUBSET = "subset"
     # A list gains, in order, what it lacks.
     UNION = "union"
@@ -59,13 +61,9 @@ def untyped_rule(_at: tuple[str, ...]) -> Laid:
     return Laid(Lay.KEYS)
 
 
-class _Clear:
-    def __repr__(self) -> str:
-        return "CLEAR"
-
-
-# A patch value that removes its key, so the layer below shows through.
-CLEAR: Any = _Clear()
+# A knob's "no bound", on every layer and every wire: ``null`` is no value but a clear.
+Unbounded = Literal["unbounded"]
+UNBOUNDED: Unbounded = "unbounded"
 
 
 @dataclass(frozen=True)
@@ -117,16 +115,17 @@ def _laid[N: str](
             _unstamp(stamps, (*at, key), itself=True)
     for key, value in patch.items():
         path = (*at, key)
-        if value is CLEAR:
+        # A null removes its key on every layer, so the layer below shows through.
+        if value is None:
             out.pop(key, None)
             _unstamp(stamps, path, itself=True)
             continue
         current = out.get(key)
         lay = rule(path).lay
         if lay is Lay.SUBSET and isinstance(current, list):
-            out[key] = [v for v in value if v in current] if isinstance(value, list) else current
+            out[key] = _list_laid(lay, current, value) if isinstance(value, list) else current
         elif lay is Lay.UNION and isinstance(current, list) and isinstance(value, list):
-            out[key] = [*current, *(v for v in value if v not in current)]
+            out[key] = _list_laid(lay, current, value)
         elif lay in (Lay.KEYS, Lay.CALL) and isinstance(value, Mapping):
             base: Mapping[str, object] = current if isinstance(current, Mapping) else {}
             if base is not current:
@@ -153,28 +152,60 @@ def _laid[N: str](
 
 def _only_clears(patch: Mapping[str, object]) -> bool:
     """A container a patch only clears, left empty, goes with it: it reads as never laid."""
-    return all(v is CLEAR or (isinstance(v, Mapping) and _only_clears(v)) for v in patch.values())
+    return all(v is None or (isinstance(v, Mapping) and _only_clears(v)) for v in patch.values())
 
 
-def wire_patch(rule: Rule, sent: Mapping[str, object], *at: str) -> dict[str, object]:
-    """A patch as every door sends it, laid as the fold reads it: an absent key leaves its value,
-    ``null`` is `CLEAR` (the layer below shows through), and ``""`` is the empty string. A value
-    *rule* lays whole is the value, nulls inside it included."""
+def patch_between(
+    rule: Rule, under: Mapping[str, object], over: Mapping[str, object], *at: str
+) -> dict[str, object]:
+    """The patch (``null`` clears) *rule* lays over *under* to make
+    *over*: what *over* states beyond *under*, and nothing *under* already holds. A list no
+    patch lays (a subset that widens, a union that is not *under*'s plus extras) is refused."""
     out: dict[str, object] = {}
-    for key, value in sent.items():
-        if value is None:
-            out[key] = CLEAR
-        elif isinstance(value, Mapping) and rule((*at, key)).lay in (Lay.KEYS, Lay.CALL):
-            out[key] = wire_patch(rule, value, *at, key)
-        else:
+    rescoped = {
+        k
+        for k in under
+        if (scope := rule((*at, k)).scope) is not None and over.get(scope[0]) != under.get(scope[0])
+    }
+    for key in under.keys() - over.keys() - rescoped:
+        out[key] = None
+    for key, value in over.items():
+        path = (*at, key)
+        held = {} if key in rescoped else under.get(key)
+        lay = rule(path).lay
+        if lay in (Lay.KEYS, Lay.CALL) and isinstance(value, Mapping) and isinstance(held, Mapping):
+            sub = patch_between(rule, held, value, *path)
+            if sub or key not in under or key in rescoped:
+                out[key] = sub
+        elif key not in under or held != value:
+            if (
+                lay in (Lay.SUBSET, Lay.UNION)
+                and isinstance(held, list)
+                and isinstance(value, list)
+                and _list_laid(lay, held, value) != value
+            ):
+                raise PayloadInvalidError(
+                    f"`{'.'.join(path)}` lays as a {lay.value} over {held!r}, so no patch "
+                    f"makes it {value!r}",
+                    code="fold_unexpressible",
+                )
             out[key] = value
     return out
 
 
+def _list_laid(lay: Lay, held: list[object], value: list[object]) -> list[object]:
+    if lay is Lay.SUBSET:
+        return [v for v in value if v in held]
+    return [*held, *(v for v in value if v not in held)]
+
+
 def wire_value(raw: str, *, text: bool) -> Any:
     """A value typed in as text, read by its declared type: a field taking text keeps the word,
-    any other reads *raw* as JSON (``null`` the `CLEAR` `wire_patch` lays); every door's typing."""
+    any other reads *raw* as JSON (``null`` the clear), the bare ``unbounded`` its word; every
+    door's typing."""
     if text:
+        return raw
+    if raw == UNBOUNDED:
         return raw
     try:
         return json.loads(raw)

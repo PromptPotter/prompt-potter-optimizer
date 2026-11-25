@@ -275,6 +275,17 @@ def reread_cells(
     return ctx.scorer.sheet(held[s.id].replayed() for s in dataset if s.id in ctx.rereads)
 
 
+def filed_entry(search_point: JobSearchPoint, session: Session) -> ArchiveEntry:
+    """The entry *search_point*'s cells are filed under in *session*: its dataset, schema and cell
+    identity."""
+    return archive_entry(
+        search_point,
+        dataset_hash=session.bank.dataset_hash,
+        pipeline_schema=session.pipeline_schema,
+        cell_identity=session.cell_identity,
+    )
+
+
 def open_walk(
     search_point: JobSearchPoint,
     dataset: list[Sample],
@@ -289,11 +300,7 @@ def open_walk(
 ) -> Walk:
     """Writes nothing: an answer is filed as its cell is taken, so a walk never taken leaves no trace."""
     store = session.store
-    pipeline_schema = session.pipeline_schema
-
-    entry = archive_entry(
-        search_point, dataset_hash=session.bank.dataset_hash, pipeline_schema=pipeline_schema
-    )
+    entry = filed_entry(search_point, session)
     row = PASSES[kind]
     node_configs = [] if row.fresh else entry.node_configs
     # No node configs, no cell identity: every such searchpoint would share one claim per sample.

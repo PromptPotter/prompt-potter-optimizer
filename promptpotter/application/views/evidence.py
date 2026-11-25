@@ -235,7 +235,7 @@ def _bench_set_text(bench_set: BenchSet | None, field: str) -> str:
 
 
 def _axes_text(model: BaseModel | None) -> str:
-    # Named axes only, and a named null is a lift: printed, never dropped.
+    # Named axes only, a lift printed as its word, never dropped.
     if model is None:
         return _ABSENT
     return ", ".join(f"{k}={v}" for k, v in model.model_dump().items()) or _ABSENT

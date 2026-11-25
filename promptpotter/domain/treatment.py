@@ -14,7 +14,7 @@ class Treatment(FrozenModel):
     # The manifest with its overlay laid on and its members' knobs resolved, code defaults in: a
     # knob, a walk, a roster edit or a moved member default is a new treatment.
     manifest: str
-    # Its behaviour key (`optimizers/nodes.py::behaviour_key`) beside its initializers' material.
+    # Its behaviour key (`optimizer_manifest.py::behaviour_key`) beside its initializers' material.
     behaviour: str
 
     @property

@@ -1214,7 +1214,7 @@ class _AgentModel:
             max_tokens=call.max_tokens,
             reasoning_effort=call.reasoning_effort,
             top_p=call.top_p,
-            route_order=call.route_order or None,
+            route_order=call.route_order,
         )
         try:
             reply = await self._client.chat(request, label=_AGENT_SEND)

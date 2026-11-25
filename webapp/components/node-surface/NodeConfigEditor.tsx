@@ -390,7 +390,7 @@ export function KnobValue({
   className,
   onCommit,
 }: {
-  type: ValueType & { options: readonly string[] };
+  type: ValueType;
   name: string;
   text: string;
   blank: "inherit" | "null";
@@ -427,7 +427,10 @@ export function KnobValue({
   const field = {
     value: text,
     disabled,
-    placeholder: blank === "inherit" ? "inherit" : type.nullable ? "off" : undefined,
+    placeholder:
+      [blank === "inherit" ? "inherit" : type.nullable ? "off" : "", ...type.options]
+        .filter(Boolean)
+        .join(" · ") || undefined,
     "aria-label": name,
     validate,
     onCommit,

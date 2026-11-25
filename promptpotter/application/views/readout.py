@@ -143,7 +143,7 @@ class ReadoutProjection(Projection):
         self.sample_counter = 0
         # Folded off the launch's INIT, and the wiring's display metric.
         self._formula: CellFormula | None = None
-        self._display_metric: DisplayMetric = "fitness"
+        self._display_metric: DisplayMetric | None = None
         # The look-ahead last read: cells per candidate, candidates at once.
         self._sample_lookahead: tuple[int, int | Literal["all"]] | None = None
         self._round_best_key: ScoreboardRankKey | None = None
@@ -521,6 +521,7 @@ class ReadoutProjection(Projection):
         # Round 0 is the origin's read, no election's verdict.
         verdict = rn > 0
         if verdict:
+            assert self._display_metric is not None, "a round closes under its launch's wiring"
             self._write(
                 render_round_verdict(
                     round_result,

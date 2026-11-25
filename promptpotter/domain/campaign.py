@@ -10,15 +10,14 @@ from pydantic import Field
 
 from promptpotter.domain.bench import CampaignRefusal, DatasetSplit
 from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.paired_reading import CellSet, instrument_of
-from promptpotter.domain.pipeline_params import PipelineParams
+from promptpotter.domain.paired_reading import CellSet
+from promptpotter.domain.pipeline_params import CellIdentity, PipelineParams
 from promptpotter.domain.pipeline_schema import ParamSource
 from promptpotter.domain.records.run_records import LaunchClockRecord
 from promptpotter.domain.spend import Budget, CeilingMeter
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.treatment import Treatment
 from promptpotter.shared.errors import ConflictError
-from promptpotter.shared.hashing import stable_hash
 from promptpotter.shared.worded import Worded
 
 
@@ -41,11 +40,12 @@ def bench_set_of(
     split: DatasetSplit | None,
     bench_rows: CellSet,
     scorer_id: str,
+    instrument_id: str,
     origin_params: PipelineParams | None,
     origin: str,
 ) -> BenchSet:
     return BenchSet(
-        instrument_id=instrument_of(dataset_hash, origin_params),
+        instrument_id=instrument_id,
         dataset_hash=dataset_hash,
         split=split,
         bench_rows=bench_rows,
@@ -109,11 +109,16 @@ class DeterminismClamp(StrictModel):
 ArmName = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")]
 
 
-class Arm(FrozenModel):
-    """The head-to-head a campaign is an arm of, frozen at mint."""
+class ArmSeat(FrozenModel):
+    """An arm as its head-to-head names it: what a plan holds before the mint numbers it."""
 
     head_to_head_id: ArmName
     arm_key: ArmName
+
+
+class Arm(ArmSeat):
+    """The head-to-head a campaign is an arm of, frozen at mint."""
+
     # Arms of one replicate share its draws (`run_clamp`); numbered at the mint by treatment.
     replicate: int = Field(ge=1)
 
@@ -147,9 +152,9 @@ def run_clamp(clamp: DeterminismClamp | None, purpose: Purpose) -> DeterminismCl
 
 
 class Environment(FrozenModel):
-    """What the target runs on and is graded by (``target``: the set keys of its node models, host
-    pins, chain, framing and grader), behind ``connector``, whose identity contributions derive
-    from it and the dataset."""
+    """What the target runs on and is graded by, behind ``connector``, whose identity contributions
+    derive from it and the dataset: ``target`` is its node models', host pins', chain's, framing's
+    and grader's fold patch over the defaults (``null`` clears), as ``RunSpec.loop`` is the loop's."""
 
     connector: str = Field(min_length=1)
     target: dict[str, Any]
@@ -167,25 +172,19 @@ class SharedPart(FrozenModel):
     bench_defaults_pin: str
 
 
-class RunDeclaration(FrozenModel):
-    """What a campaign, an L4 seat and a head-to-head arm each ARE: every part is what a layer
-    named, never a default restated, beside ``bench_defaults_pin``, the bench defaults it is a
-    delta over as they stood when it was declared — its optimizer's are its campaign's ``Treatment``."""
+class RunSpec(FrozenModel):
+    """What a run runs, before what it is FOR: every part is what a layer named, never a default
+    restated, beside ``bench_defaults_pin``, the bench defaults it is a delta over as they stood
+    when it was declared — its optimizer's are its campaign's ``Treatment``."""
 
     dataset_hash: str = Field(min_length=1)
     run_seed: int | None
-    # The loop's own set keys, less the budget and the run seed.
+    # The loop's fold patch over the defaults (`null` clears), less the budget and the run seed.
     loop: dict[str, Any]
     # Only the axes that differ from the default.
     budget: Budget
     environment: Environment
-    # Part of what an arm IS, so two arms of one content never share a run id.
-    purpose: Purpose
     bench_defaults_pin: str = Field(min_length=1)
-
-    @property
-    def digest(self) -> str:
-        return stable_hash(self.model_dump(mode="json"))
 
     def shared_part(self) -> SharedPart:
         return SharedPart(
@@ -196,6 +195,14 @@ class RunDeclaration(FrozenModel):
             environment=self.environment,
             bench_defaults_pin=self.bench_defaults_pin,
         )
+
+
+class RunDeclaration(FrozenModel):
+    """What a campaign, an L4 seat and a head-to-head arm each ARE: its spec and its purpose."""
+
+    spec: RunSpec
+    # Part of what an arm IS, so two arms of one content never share a run id.
+    purpose: Purpose
 
 
 # The loop keys every arm of a head-to-head runs alike.
@@ -212,7 +219,10 @@ def _pinned(loop: Mapping[str, Any], keys: Mapping[str, Any]) -> dict[str, Any]:
         if key not in loop:
             continue
         value = loop[key]
-        out[key] = _pinned(value, sub) if isinstance(sub, dict) else value
+        if not isinstance(sub, dict):
+            out[key] = value
+        elif pinned := _pinned(value, sub):
+            out[key] = pinned
     return out
 
 
@@ -261,6 +271,8 @@ class HeadToHeadRecord(FrozenModel):
     head_to_head_id: str
     created_at: str
     origin: str
+    # What every arm's cells are graded under (`PartitionRecord.cell_identity`), beside its origin.
+    cell_identity: CellIdentity
     shared: SharedPart
     # The tenant ruler's version at open: every arm reads it plus its own lines, never another arm's.
     ruler_version: int = Field(ge=0)
@@ -341,7 +353,7 @@ class Campaign(FrozenModel):
     @property
     def connector(self) -> str:
         """FROZEN at mint: a campaign outlives its dataset dir, so re-pointing a slug must not re-kind it."""
-        return self.declaration.environment.connector
+        return self.declaration.spec.environment.connector
 
     @property
     def active(self) -> bool:

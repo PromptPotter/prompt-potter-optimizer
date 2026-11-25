@@ -1137,7 +1137,7 @@
             "$ref": "#/components/schemas/ArmSamples"
           },
           "sp_hash": {
-            "description": "The archive address of this arm's measurements (`prompt_fields_id`). Not a key: a re-proposed configuration shares it across rounds. Empty before it is measured.",
+            "description": "This arm's id, what it sends (the archive's `prompt_fields_id`; its address is `config_key`). Not a key: a re-proposed configuration shares it across rounds. Empty before it is measured.",
             "title": "Sp Hash",
             "type": "string"
           },
@@ -2278,7 +2278,7 @@
       },
       "Budget": {
         "additionalProperties": false,
-        "description": "What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.\n``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and\nseconds are what each arm's money bought, and differ by arm.",
+        "description": "What bounds a run per axis: a named axis binds, ``unbounded`` lifts (read back as ``None``,\nno bound), and an omitted or null one inherits, as a null clears on every layer.\n``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and\nseconds are what each arm's money bought, and differ by arm.",
         "properties": {
           "rounds": {
             "anyOf": [
@@ -2288,6 +2288,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "description": "Closed rounds after the origin, per cycle, read at each round boundary; 0 measures the origin only.",
@@ -2301,6 +2305,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "description": "The campaign's billed tokens, shared like `usd`; the axis that still binds where a model has no rate on file.",
@@ -2314,6 +2322,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "description": "The campaign's USD, in its ceiling meter: one book its live cycles share.",
@@ -2327,6 +2339,10 @@
               },
               {
                 "type": "null"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               }
             ],
             "description": "Seconds ONE launch runs, its clock afresh at every launch; a remote cell still open at the edge is cut and the run stops `wall_clock`.",
@@ -2377,7 +2393,7 @@
           },
           "display_metric": {
             "$ref": "#/components/schemas/DisplayMetric",
-            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `fitness` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ where the selector stamps one, and fitness where it stamps none; under a per-round resubset fitness is subset-relative, so `ability` leads. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
           },
           "exclude_nodes": {
             "items": {
@@ -2650,7 +2666,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `fitness` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ where the selector stamps one, and fitness where it stamps none; under a per-round resubset fitness is subset-relative, so `ability` leads. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
           },
           "exclude_nodes": {
             "anyOf": [
@@ -4590,7 +4606,7 @@
                 "type": "null"
               }
             ],
-            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ (a logit, jargon) where the selector stamps one — defaults to `fitness` so θ is never forced on an operator who didn't ask for it. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
+            "description": "Which fitness number the operator's round and candidate views display first (lineage node value, Best tile, sidebar). DISPLAY config, not search state — the optimizer's selector decides on its own objective, and the campaign's headline is the bench score; this only picks the number the human READS, client-overridable per session. `ability` shows θ where the selector stamps one, and fitness where it stamps none; under a per-round resubset fitness is subset-relative, so `ability` leads. Rides the `composite_fitness_formula` serve path to `dashboard.json::display_metric`; never on `OptSearchPoint`."
           },
           "exclude_nodes": {
             "anyOf": [
@@ -6735,7 +6751,7 @@
                 "type": "null"
               }
             ],
-            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `scoreboard`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
             "title": "Leading"
           },
           "reelection": {
@@ -6938,21 +6954,9 @@
         "type": "object"
       },
       "Estimate": {
-        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nEvery surface prints `text`, or `band` (the interval alone); none prints a bound of its own.",
+        "additionalProperties": false,
+        "description": "THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.\nIt holds facts alone, so a stored or hashed estimate never reads a word; a surface words it\nwhere it prints it (`text`, or `band`, the interval alone), never a bound of its own.",
         "properties": {
-          "band": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "SERVED: the interval alone, its bounds in the unit `point` names; null with no spread.",
-            "readOnly": true,
-            "title": "Band"
-          },
           "ci_hi": {
             "anyOf": [
               {
@@ -6996,12 +7000,6 @@
             "description": "The cells it was read on; null where none was counted.",
             "title": "N"
           },
-          "point": {
-            "description": "SERVED: the value alone, as a person reads it in its unit.",
-            "readOnly": true,
-            "title": "Point",
-            "type": "string"
-          },
           "se": {
             "anyOf": [
               {
@@ -7013,12 +7011,6 @@
             ],
             "description": "Its standard error; null where none was taken.",
             "title": "Se"
-          },
-          "text": {
-            "description": "SERVED: `point`, then `band` where there is one; no surface prints an estimate of its own.",
-            "readOnly": true,
-            "title": "Text",
-            "type": "string"
           },
           "unit": {
             "$ref": "#/components/schemas/MeasurandUnit"
@@ -7035,10 +7027,7 @@
           "n",
           "se",
           "unit",
-          "form",
-          "band",
-          "point",
-          "text"
+          "form"
         ],
         "title": "Estimate",
         "type": "object"
@@ -11245,6 +11234,15 @@
             "title": "Expression",
             "type": "string"
           },
+          "form": {
+            "description": "`lift` where each value is a difference off an origin, so it reads signed; worded as an `Estimate` of this form is",
+            "enum": [
+              "level",
+              "lift"
+            ],
+            "title": "Form",
+            "type": "string"
+          },
           "higher_is_better": {
             "anyOf": [
               {
@@ -11264,11 +11262,6 @@
             "title": "Label",
             "type": "string"
           },
-          "lift": {
-            "description": "Each value is a difference off an origin, so it reads signed, as a lift does",
-            "title": "Lift",
-            "type": "boolean"
-          },
           "unit": {
             "$ref": "#/components/schemas/MeasurandUnit"
           }
@@ -11278,7 +11271,7 @@
           "label",
           "expression",
           "unit",
-          "lift",
+          "form",
           "higher_is_better",
           "description",
           "axis_label"
@@ -11960,7 +11953,6 @@
               "free_tier",
               "start",
               "model_floor",
-              "identity",
               "evolved",
               "unset"
             ],
@@ -12402,7 +12394,7 @@
           },
           "budget": {
             "$ref": "#/components/schemas/Budget",
-            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
+            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; ``unbounded`` leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. An ``unbounded`` axis lifts; a null one clears. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
           "call_target": {
             "$ref": "#/components/schemas/CallTarget",
@@ -12483,7 +12475,7 @@
                 "type": "null"
               }
             ],
-            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: null}``."
+            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
           },
           "nodes": {
             "additionalProperties": {
@@ -12565,7 +12557,7 @@
                 "type": "null"
               }
             ],
-            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; null leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. A null axis is unbounded. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
+            "description": "The campaign's own layer of the run's budget. ``usd`` / ``tokens`` bound the CAMPAIGN's cumulative spend (optimizer + backend), shared by its live cycles and checked at the next boundary; ``rounds`` caps one cycle's closed rounds after the origin (0 measures the origin and stops; ``unbounded`` leaves only ``HARD_CAP_ARMS``); ``wall_clock_s`` bounds one launch, cutting a remote cell still open at its edge. A fork start, a standing ``set-limits`` and a launch flag each lay over it axis by axis, and the account admits the result whole or refuses the launch. An ``unbounded`` axis lifts; a null one clears. ``tokens`` is unset by default: a token is worth a different amount on every route, so set it only where a backend bills but reports no cost (``unpriced_tokens`` on the dashboard is the tell)."
           },
           "call_target": {
             "anyOf": [
@@ -12695,7 +12687,7 @@
                 "type": "null"
               }
             ],
-            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: null}``."
+            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
           },
           "nodes": {
             "anyOf": [
@@ -12960,6 +12952,10 @@
             "anyOf": [
               {
                 "type": "number"
+              },
+              {
+                "const": "unbounded",
+                "type": "string"
               },
               {
                 "type": "null"
@@ -15773,7 +15769,6 @@
               "free_tier",
               "start",
               "model_floor",
-              "identity",
               "evolved",
               "unset"
             ],

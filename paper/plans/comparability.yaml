@@ -10,5 +10,5 @@ arms:
   gepa: {optimizer: gepa}
 replicates: 3
 budgets:
-  # `rounds: null` lifts the dataset's round cap, so the money alone binds.
-  usd4: {usd: 4.0, rounds: null}
+  # `rounds: unbounded` lifts the dataset's round cap, so the money alone binds.
+  usd4: {usd: 4.0, rounds: unbounded}

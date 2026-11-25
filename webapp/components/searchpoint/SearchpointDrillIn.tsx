@@ -10,7 +10,7 @@ import type { PipelineAt } from "@/lib/hooks/useConnector";
 import type { ReadFailure } from "@/lib/read-cache";
 import { liftOf, NOT_SEPARABLE, type ObserveConfig } from "@/lib/derivations";
 import { FailureLine, Said, Term } from "@/components/ui";
-import { fmtUnit, PLACEHOLDER, sideTone } from "@/lib/format";
+import { fmtEstimate, fmtMetric, fmtUnit, PLACEHOLDER, sideTone } from "@/lib/format";
 import { NodeSurface } from "@/components/node-surface/NodeSurface";
 
 export function SearchpointDrillIn({
@@ -78,7 +78,7 @@ export function SearchpointDrillIn({
             {own != null && fitness != null && (
               <Fact
                 k="fitness"
-                v={`${fitness.text}${onPanel(reading.samples)}`}
+                v={`${fmtEstimate(fitness)}${onPanel(reading.samples)}`}
               />
             )}
             {(benchPass != null || bench != null) && (
@@ -89,10 +89,10 @@ export function SearchpointDrillIn({
                   benchPass?.failed_as != null
                     ? <FailedPass state={benchPass.failed_as} />
                     : benchPass != null
-                    ? `${benchPass.level?.point ?? PLACEHOLDER} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
+                    ? `${fmtMetric(benchPass.level)} so far · ${benchPass.scored} of ${benchPass.rows} in flight`
                     : bench?.level == null
                       ? `${PLACEHOLDER} of ${bench?.n}`
-                      : `${bench.level.text} of ${bench.n}`
+                      : `${fmtEstimate(bench.level)} of ${bench.n}`
                 }
               />
             )}
@@ -109,7 +109,7 @@ export function SearchpointDrillIn({
                 hint="Mean per-cell (candidate − parent) across the cells both measured, Student-t bracketed. Pairing removes the parent's cell-to-cell variation, so this is sharper than the candidate's own mean band."
                 v={
                   <>
-                    {paired.estimate.text}
+                    {fmtEstimate(paired.estimate)}
                     {paired.side !== "spans" ? (
                       " clears 0"
                     ) : (
@@ -123,7 +123,7 @@ export function SearchpointDrillIn({
               <Fact
                 k="ability"
                 hint="Difficulty-adjusted Rasch ability — the metric the round winner is elected on. Clearing harder samples is worth more than more wins on easy ones, so a higher θ can beat a higher fitness."
-                v={reading.ability.theta.text}
+                v={fmtEstimate(reading.ability.theta)}
 
               />
             )}

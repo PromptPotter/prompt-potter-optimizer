@@ -30,8 +30,9 @@ class MetricSpec(StrictModel):
     label: str
     expression: str
     unit: MeasurandUnit
-    lift: bool = Field(
-        description="Each value is a difference off an origin, so it reads signed, as a lift does"
+    form: EstimateForm = Field(
+        description="`lift` where each value is a difference off an origin, so it reads signed; "
+        "worded as an `Estimate` of this form is"
     )
     # `None` on a composed expression: `lift / latency` is up, `latency / lift` down, and nothing can tell.
     higher_is_better: bool | None
@@ -89,10 +90,8 @@ def merge_cells(values: dict[str, float], metric: MetricSpec) -> Estimate | None
         return None
     # Unbounded: a merged metric may be a lift.
     value, lo, hi, _, _ = paired_mean_t(ordered, [0.0] * len(ordered))
-
-    form: EstimateForm = "lift" if metric.lift else "level"
     return Estimate(
-        value=value, ci_lo=lo, ci_hi=hi, n=len(ordered), se=None, unit=metric.unit, form=form
+        value=value, ci_lo=lo, ci_hi=hi, n=len(ordered), se=None, unit=metric.unit, form=metric.form
     )
 
 
@@ -102,7 +101,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Final lift",
         expression="final_lift",
         unit="theta",
-        lift=True,
+        form="lift",
         higher_is_better=True,
         description=(
             "Where the seed's inner campaign ENDED, against its own origin — not the mean over "
@@ -115,7 +114,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Peak lift",
         expression="peak_lift",
         unit="theta",
-        lift=True,
+        form="lift",
         higher_is_better=True,
         description="The best level the seed's inner campaign ever reached, against its own origin.",
     ),
@@ -124,7 +123,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Origin level",
         expression="origin",
         unit="theta",
-        lift=False,
+        form="level",
         higher_is_better=True,
         description=(
             "The floor each seed started from. Carried because a lift alone cannot say whether a "
@@ -136,7 +135,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Rounds run",
         expression="rounds",
         unit="rounds",
-        lift=False,
+        form="level",
         higher_is_better=False,
         description="How many L1 rounds each seed's inner campaign got through before it stopped.",
     ),
@@ -145,7 +144,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Rounds available",
         expression="round_budget",
         unit="rounds",
-        lift=False,
+        form="level",
         higher_is_better=None,
         description=(
             "How many L1 rounds each seed's inner campaign was GIVEN. Read beside Rounds run: "
@@ -157,7 +156,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Time not working",
         expression="unworked",
         unit="seconds",
-        lift=False,
+        form="level",
         higher_is_better=False,
         description=(
             "Seconds the cell was blocked rather than working — the machine suspended, or queued "
@@ -172,7 +171,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Time to reply",
         expression="latency",
         unit="seconds",
-        lift=False,
+        form="level",
         higher_is_better=False,
         description=(
             "Seconds across the pipeline's steps, as measured when the cell was scored. A replayed "
@@ -184,7 +183,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Cost",
         expression="cost",
         unit="usd",
-        lift=False,
+        form="level",
         higher_is_better=False,
         description=(
             "Dollars per cell. On the recursion that is the seed's whole inner campaign; elsewhere "
@@ -197,7 +196,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Tokens",
         expression="tokens",
         unit="tokens",
-        lift=False,
+        form="level",
         higher_is_better=False,
         description="Tokens per cell, on the same two sources as Cost.",
     ),
@@ -206,7 +205,7 @@ _ENTRIES: tuple[MetricSpec, ...] = (
         label="Ground-truth rank",
         expression="ground_truth_rank",
         unit="rank",
-        lift=False,
+        form="level",
         higher_is_better=False,
         description="Where the true answer landed in the pipeline's ranking. Lower is better.",
     ),
@@ -217,7 +216,7 @@ _COMPOSITE_FITNESS = MetricSpec(
     label="Composite fitness",
     expression="fitness",
     unit="score",
-    lift=False,
+    form="level",
     higher_is_better=True,
     description=(
         "What the one scoring formula every campaign here declares makes of the measurand."
@@ -235,7 +234,7 @@ def catalogue_for(available: frozenset[str]) -> tuple[MetricSpec, ...]:
                 label="Lift over origin" if seed_lift else "Fitness",
                 expression="lift" if seed_lift else "fitness",
                 unit="theta" if seed_lift else "score",
-                lift=seed_lift,
+                form="lift" if seed_lift else "level",
                 higher_is_better=True,
                 description=(
                     "How far each seed's own inner campaign moved off its own origin, averaged "
@@ -280,7 +279,7 @@ def resolve_metric(
                 label=expression,
                 expression=expression,
                 unit="score",
-                lift=False,
+                form="level",
                 higher_is_better=None,
                 description="Composed from the channels this selection carries.",
             ),

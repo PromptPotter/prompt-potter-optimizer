@@ -214,9 +214,10 @@ Surface whose work is invisible to a sweep that counts readers. A PR touching on
 - **Connectors** (`promptpotter/connectors/`) — the only place backend identity is named.
 - **`infrastructure/producer_lock.py` and `jobs/interlock.py`** — the OS locks are the only box
   facts that outlive a process; a heartbeat has a window where the answer is wrong.
-- **An optimizer's behaviour key** — L4 identity is its own package's code and prompts, its
-  fingerprint on the offline world, and the world's version (generated `behaviour_keys`,
-  re-derived by the gate); the whole-tree hash is recorded beside it, never keyed on.
+- **An optimizer's behaviour key** — L4 identity is a built-in's fingerprint on the offline world
+  and the world's version (generated `behaviour_keys`, re-derived by the gate): what the world ran
+  is keyed by its behaviour, what it never ran by its source, so a rename on a run line re-keys no
+  cell; the whole-tree hash is recorded beside it, never keyed on.
 - **The core/extra split** — moving a package into core charges every embedder.
 - **Resume and fork-on-divergence** (`ResumeCheckpointRecord`, `CheckpointInputs`).
 - **No campaign fact on a side file** — a campaign's result is a fold of its line's ledgers. <!-- probe: git grep -cE "result\.json" -- promptpotter/infrastructure/store/layout.py == 0 -->

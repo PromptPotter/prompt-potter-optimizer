@@ -57,7 +57,6 @@ def scorer_setup(
             campaign_config,
             verifier_graded=all_verifier_graded(s.ground_truth for s in session.bank.samples),
         ),
-        display_metric=campaign_config.display_metric,
         partition=partition,
         degradation_checks=tuple(build_degradation_checks(campaign_config)),
         judges=build_evaluators(

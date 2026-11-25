@@ -20,7 +20,7 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.phases import WalkEnd
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.sample import ArchiveEntry
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.validators import BrokenSignal
 from promptpotter.domain.wounds import NurseOwner, RuntimeFailure
@@ -72,21 +72,23 @@ def read_breakage(
 def measuring(
     arm: Proposed,
     sp: JobSearchPoint,
-    schema: PipelineSchema,
+    entry: ArchiveEntry,
     *,
     expected: int,
     sample_order: Sequence[int] = (),
     n_priors: int = 0,
     block: Mapping[str, int] | None = None,
 ) -> Measuring:
+    """*entry* is the one *sp*'s cells are filed under (`search_point_scorer.py::filed_entry`):
+    ``sp_hash`` what it sends, ``config_key`` its archive address."""
     return Measuring(
         role=arm.role,
         position=arm.position,
         individual=arm.individual,
         overlay=arm.overlay,
         validation_failures=arm.validation_failures,
-        # Off the object the gateway hands `archive_entry`: one id for the arm and its cells' filing.
-        sp_hash=sp.sp_hash(schema),
+        sp_hash=entry.prompt_fields_id,
+        config_key=entry.config_key,
         resolved_params=sp.config_params.dump(),
         sample_order=list(sample_order),
         n_priors=n_priors,

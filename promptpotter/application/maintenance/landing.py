@@ -10,11 +10,11 @@ import inspect
 import math
 import sys
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from pydantic import ConfigDict, Field, ValidationError
+from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
 
 from promptpotter import connectors
 from promptpotter.application import health, optimizers
@@ -43,6 +43,7 @@ from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import JOB_ADAPTER
+from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.optimizer_state import STATE_KINDS
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.strict_model import FrozenModel
@@ -87,6 +88,7 @@ from promptpotter.infrastructure.store.stores import (
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PotterError
 from promptpotter.shared.hashing import stable_hash
+from promptpotter.shared.import_walk import import_closure
 from promptpotter.shared.named_rows import walked
 
 
@@ -502,21 +504,44 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
     return applied
 
 
+def _ran(schema: object, modules: set[str]) -> None:
+    """The module of every function and class a core schema calls: its validators and models."""
+    if isinstance(schema, Mapping):
+        for value in schema.values():
+            _ran(value, modules)
+    elif isinstance(schema, list | tuple):
+        for value in schema:
+            _ran(value, modules)
+    elif callable(schema):
+        modules.add(inspect.unwrap(getattr(schema, "func", schema)).__module__)
+
+
+def loading_modules() -> dict[str, str]:
+    """Every package module whose code a load runs, less its prose: the import closure of each row's reader and
+    the validators and models its shape builds, and of every migration. A load dispatches by name
+    through a `KindTable` alone (a ledger line's record kind, a state kind a record nests), so
+    every table's every kind is walked: the importlib loads that registered them, never."""
+    modules: set[str] = set()
+    for kind in KINDS:
+        if isinstance(kind.shape, TypeAdapter):
+            _ran(kind.shape.core_schema, modules)
+        elif isinstance(kind.shape, Parsed | FoldedLines):
+            # A parsed or a folded row's reader is its shape's first field.
+            _ran(kind.shape[0], modules)
+            if not isinstance(kind.shape.model, KindTable):
+                _ran(TypeAdapter(kind.shape.model).core_schema, modules)
+    for table in KindTable.every:
+        _ran([TypeAdapter(one).core_schema for one in table.registered().values()], modules)
+    _ran(list(MIGRATIONS.values()), modules)
+    return import_closure(modules)
+
+
 @functools.cache
 def landing_key() -> str:
-    """Every row's patterns, fate, shape (a ledger row's the record kinds it parses by) and reader's
-    body, every state kind a record nests, and every migration's body: a change to any lands again."""
+    """Every row's patterns, fate and shape, and the code of every module a load runs, less its
+    prose: a helper a validator calls changes what loads as surely as a field does."""
     rows = {kind.name: row_schema(kind) for kind in KINDS}
-    source = inspect.getsource
-    # A parsed or a folded row's reader is its shape's first field.
-    readers = {
-        k.name: source(k.shape[0]) for k in KINDS if isinstance(k.shape, Parsed | FoldedLines)
-    }
-    migrations = {name: source(migration) for name, migration in MIGRATIONS.items()}
-    state = STATE_KINDS.schemas()
-    return stable_hash(
-        {"rows": rows, "readers": readers, "state": state, "migrations": migrations}, length=16
-    )
+    return stable_hash({"rows": rows, "code": loading_modules()}, length=16)
 
 
 def _stamp(projects_root: Path) -> Path:

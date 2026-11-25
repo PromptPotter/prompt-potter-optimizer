@@ -8,7 +8,7 @@ from promptpotter.application.initialization.session import Session
 from promptpotter.application.optimizer_manifest import SelectedOptimizer, checkin_manifest
 from promptpotter.application.optimizers.nodes import unfit_pipeline
 from promptpotter.connectors.protocol import Connector
-from promptpotter.domain.campaign import Arm
+from promptpotter.domain.campaign import ArmSeat
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.phase_acts import (
     CapUnderRound,
@@ -175,7 +175,7 @@ def run_preflight_checks(
 
 
 def refuse_arm_below_round(
-    arm: Arm,
+    arm: ArmSeat,
     config: CampaignConfig,
     selected: SelectedOptimizer,
     *,
@@ -335,6 +335,6 @@ def refuse_unpriced(unpriced: Sequence[str]) -> None:
         raise PayloadInvalidError(
             f"no rate prices {', '.join(unpriced)}, so a dollar ceiling cannot bound what it "
             "sends. Pick a model the rate table prices, or drop the dollar cap and bound the run "
-            "in tokens (`budget: {usd: null, tokens: N}`).",
+            "in tokens (`budget: {usd: unbounded, tokens: N}`).",
             code="model_unpriced",
         )

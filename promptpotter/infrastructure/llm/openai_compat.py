@@ -25,6 +25,7 @@ from promptpotter.infrastructure.llm.base import (
     hold_ceiling,
     post_json,
     send_bound,
+    sent_effort,
     strip_titles,
     wire_client,
 )
@@ -190,13 +191,6 @@ PROVIDER_REQUEST_PARAMS: frozenset[str] = frozenset(
 
 # An axis outside this set is one the optimizer can open, search and never move.
 assert PARAM_SCOPE_KEYS <= PROVIDER_REQUEST_PARAMS
-
-PROVIDER_DEFAULT_EFFORT = "default"
-"""The one rung that OMITS the field; ``none`` is a provider value, reasoning OFF, never absent."""
-
-
-def sent_effort(effort: str | None) -> str | None:
-    return None if effort == PROVIDER_DEFAULT_EFFORT else effort
 
 
 @dataclass(frozen=True)
@@ -535,8 +529,8 @@ class OpenAICompatibleClient:
             max_price=None if ceiling is None else ceiling.dearest(),
         )
         # Top-level only off a gateway, and omitted when unset: a provider must never see a null.
-        if body is None and (effort := sent_effort(request.reasoning_effort)) is not None:
-            request_params["reasoning_effort"] = effort
+        if body is None and request.reasoning_effort is not None:
+            request_params["reasoning_effort"] = request.reasoning_effort
         if seed is not None:
             request_params["seed"] = seed
         if top_p is not None:

@@ -487,6 +487,10 @@ round.
      candidates scored held out. It is valid once it ranks dyck's known-sign pair as the full cells
      do (+17.2 pts, 3 of 4 on the matched ruler: benchmarks § What the roster decided), at the arm
      level, and it doubles as authored mode's "the edit changes what the node emits" check.
+     **Validated on multistep's known-sign pair instead** (2026-11-19, $0.36: the no-cut proposal
+     matrix reads the crippled arm −4.2 ± 0.9 where the cells read −3.5; benchmarks § Every dataset
+     we measured, bbh-multistep), but neither cheaper nor faster than a cell: it screens an
+     authored arm before a cell is bought, it does not replace the cell.
    - *Wall clock binds before dollars.* `--abreast` trades money for clock and is the operator's ask.
    - *Noise knobs: one `inner_campaign` edit, re-measured once.* Bench 20→100, the inner adoption
      bar (scored offline first), rounds × variants. The outer clip (±0.5) ties dyck's best arms at

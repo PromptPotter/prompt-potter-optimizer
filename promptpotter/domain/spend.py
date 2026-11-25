@@ -4,7 +4,7 @@ import operator
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from functools import reduce
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple, get_args
+from typing import TYPE_CHECKING, Annotated, Any, Literal, NamedTuple, get_args
 
 from pydantic import (
     Field,
@@ -13,10 +13,12 @@ from pydantic import (
     SerializerFunctionWrapHandler,
     field_validator,
     model_serializer,
+    model_validator,
 )
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import CoreSchema
 
+from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
 from promptpotter.domain.strict_model import (
     FrozenModel,
     NonNegativeWireFloat,
@@ -220,38 +222,68 @@ CEILING_METER_LABELS: Worded[CeilingMeter, str] = Worded(
 NESTED_NODE_PREFIX = "inner:"
 
 
+@dataclass(frozen=True, slots=True)
+class LiftWord:
+    """A budget axis's lift: ``None`` in memory, :data:`UNBOUNDED` on the wire (``Budget``'s
+    validator and serializer translate), so its schema and TS type name the word beside the number."""
+
+    def __get_pydantic_json_schema__(
+        self, core: CoreSchema, handler: GetJsonSchemaHandler
+    ) -> JsonSchemaValue:
+        schema = handler(core)
+        return {**schema, "anyOf": [*schema["anyOf"], {"const": UNBOUNDED, "type": "string"}]}
+
+
+LIFTED = LiftWord()
+
+
 class Budget(FrozenModel):
-    """What bounds a run per axis: a named axis binds, a named null lifts, an omitted one inherits.
+    """What bounds a run per axis: a named axis binds, ``unbounded`` lifts (read back as ``None``,
+    no bound), and an omitted or null one inherits, as a null clears on every layer.
     ``usd`` is the ONE axis a head-to-head holds equal across its arms: cells, tokens, rounds and
     seconds are what each arm's money bought, and differ by arm."""
 
-    usd: NonNegativeWireFloat | None = Field(
+    usd: Annotated[NonNegativeWireFloat | None, LIFTED] = Field(
         default=None,
         description="The campaign's USD, in its ceiling meter: one book its live cycles share.",
     )
-    tokens: WireInt | None = Field(
+    tokens: Annotated[WireInt | None, LIFTED] = Field(
         default=None,
         ge=0,
         description="The campaign's billed tokens, shared like `usd`; the axis that still binds "
         "where a model has no rate on file.",
     )
-    rounds: WireInt | None = Field(
+    rounds: Annotated[WireInt | None, LIFTED] = Field(
         default=None,
         ge=0,
         description="Closed rounds after the origin, per cycle, read at each round boundary; "
         "0 measures the origin only.",
     )
-    wall_clock_s: PositiveWireFloat | None = Field(
+    wall_clock_s: Annotated[PositiveWireFloat | None, LIFTED] = Field(
         default=None,
         description="Seconds ONE launch runs, its clock afresh at every launch; a remote cell "
         "still open at the edge is cut and the run stops `wall_clock`.",
     )
 
+    def __init__(self, **axes: float | Unbounded | None) -> None:
+        super().__init__(**axes)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _lifted(cls, data: object) -> object:
+        if not isinstance(data, Mapping):
+            return data
+        return {a: None if v == UNBOUNDED else v for a, v in data.items() if v is not None}
+
     @model_serializer(mode="wrap")
     def _named_only(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
-        """An unnamed axis written as ``null`` would read back as a lift nobody asked for."""
+        """Named axes only, a lift spelled ``unbounded``: an unnamed one inherits on read back."""
         data: dict[str, object] = handler(self)
-        return {axis: value for axis, value in data.items() if axis in self.model_fields_set}
+        return {
+            axis: UNBOUNDED if value is None else value
+            for axis, value in data.items()
+            if axis in self.model_fields_set
+        }
 
     @classmethod
     def __get_pydantic_json_schema__(
@@ -276,13 +308,13 @@ class Budget(FrozenModel):
         return hash(self._axes())
 
     def over(self, *layers: Budget) -> Budget:
-        values = {axis: getattr(self, axis) for axis in self.model_fields_set}
-        for layer in layers:
-            values |= {axis: getattr(layer, axis) for axis in layer.model_fields_set}
-        return Budget(**values)
+        return Budget.model_validate(
+            reduce(operator.or_, (b.model_dump() for b in (self, *layers)))
+        )
 
     def only(self, axes: Iterable[str]) -> Budget:
-        return Budget(**{axis: getattr(self, axis) for axis in self.named.intersection(axes)})
+        kept = frozenset(axes)
+        return Budget.model_validate({a: v for a, v in self.model_dump().items() if a in kept})
 
     # The two reads of a Budget carrying an AMOUNT (metered, spent), which names both money axes.
     @property
@@ -333,16 +365,16 @@ class Remainder(NamedTuple):
     def budget(self) -> Budget:
         """What is left as a bound: an overdraft bounds at nothing."""
         return Budget(
-            usd=None if self.usd is None else max(0.0, self.usd),
-            tokens=None if self.tokens is None else max(0, self.tokens),
+            usd=UNBOUNDED if self.usd is None else max(0.0, self.usd),
+            tokens=UNBOUNDED if self.tokens is None else max(0, self.tokens),
         )
 
     def bound_over(self, spent: Budget) -> Budget:
         """The bound that leaves this past *spent* (an amount)."""
         room = self.budget
         return Budget(
-            usd=None if room.usd is None else room.usd + spent.usd_amount,
-            tokens=None if room.tokens is None else room.tokens + spent.token_amount,
+            usd=UNBOUNDED if room.usd is None else room.usd + spent.usd_amount,
+            tokens=UNBOUNDED if room.tokens is None else room.tokens + spent.token_amount,
         )
 
 

@@ -3,7 +3,7 @@ import type { MeasuredLift, PairedReading } from "@/lib/api/types";
 import { cx } from "@/lib/cx";
 import { readPaired } from "@/lib/derivations";
 import { PairedLift } from "@/components/searchpoint/PairedLift";
-import { PLACEHOLDER, sideTone } from "@/lib/format";
+import { fmtEstimate, PLACEHOLDER, sideTone } from "@/lib/format";
 
 // Null where the pair was not read; its sentence fills the lift column.
 export interface PairedCells {
@@ -38,7 +38,7 @@ export function liftColumns<R extends LiftRow>(label: string): Column<R>[] {
             <PairedLift reading={row.reading} unread="sentence" />
           </span>
         ) : (
-          <span className={cx("l4-effect", sideTone(lift.side))}>{lift.estimate.text}</span>
+          <span className={cx("l4-effect", sideTone(lift.side))}>{fmtEstimate(lift.estimate)}</span>
 
         ),
     },

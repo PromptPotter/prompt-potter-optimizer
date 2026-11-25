@@ -69,7 +69,8 @@ nodes:
       # Above the largest of 199 measured L1 proposals (+785 chars on the `run` C0's inner runs,
       # every one of them a growth).
       length_budget: 800
-      k_max: 5
+      # No shots unless a dataset holds out a demo pool and names its `k_max` (justlogic does).
+      k_max: 0
       pool_window: 8
       # Recombination by an LLM host, off at 0; `mating` + `locus_crossover` host it by a draw.
       recombine: 0

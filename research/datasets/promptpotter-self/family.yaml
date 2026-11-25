@@ -80,7 +80,7 @@ campaign:
           length_budget: 2000
           # A seat's whole inner run, every round and arm: 4.8–6.3k chars on the `run` C0.
           transcripts: 2
-          transcript_chars: null
+          transcript_chars: unbounded
           # `run__265c4d`'s round-2 generate dropped a 5,518-char seat from the manifest's 11,000,
           # so both fit at 16,518; the rest is room for a 6.3k seat.
           discretionary_chars: 18000
@@ -88,8 +88,8 @@ campaign:
       # they sit outside its share: 33,191 of its 38,524 chars on `run__265c4d`.
       l1_critique:
         config:
-          transcripts: null
-          transcript_chars: null
+          transcripts: unbounded
+          transcript_chars: unbounded
       l2_context:
         config:
           # `rendered_prompt` is placed whole or dropped: the subject renders 7,485 chars at the
@@ -147,7 +147,8 @@ panel:
       determinism: {temperature: 0.0}
       nodes:
         adaptive_queue: {config: {sp_budget_round: 40, per_round_resubset: false}}
-        l1_generate: {config: {n_variants: 3}}
+        # justlogic's own `k_max: 5` would open shots over the `demo: 0` above.
+        l1_generate: {config: {n_variants: 3, k_max: 0}}
   #
   # A panel spans THREE benchmarks, two search seats each, so an edit that helps one task family
   # and hurts another reads as the mixture it is. Each inner campaign reads its own benchmark's δ

@@ -27,6 +27,24 @@ if TYPE_CHECKING:
 # Where the laid document names the chain beside its nodes: the wire's spelling, and the dump's.
 STEPS_KEY = "steps"
 
+# Per running node, what keys its cells beside what it sends, never sent (`PipelineParams.keyed_by`).
+CellIdentity = dict[str, dict[str, Any]]
+
+
+def moved_leaves(
+    recorded: Mapping[str, Mapping[str, object]],
+    running: Mapping[str, Mapping[str, object]],
+    *,
+    joint: str = ".",
+) -> list[str]:
+    """``outer{joint}inner`` of every leaf *running* moved, added or dropped against *recorded*."""
+    return sorted(
+        f"{outer}{joint}{inner}"
+        for outer in {*recorded, *running}
+        for inner in {*recorded.get(outer, {}), *running.get(outer, {})}
+        if recorded.get(outer, {}).get(inner) != running.get(outer, {}).get(inner)
+    )
+
 
 class _Roster(Enum):
     """Which roster an engine call key joins; a key carries its rosters on its `NodeCall` field."""
@@ -88,8 +106,9 @@ class NodeCall(FrozenModel):
     def _keeps_order(cls, laid: object, handler: ModelWrapValidatorHandler[Self]) -> Self:
         if not isinstance(laid, Mapping):
             return handler(laid)
-        # A null call key is unset: equality and the digest read one shape.
-        laid = {k: v for k, v in laid.items() if v is not None or k not in cls.model_fields}
+        # A null key is unset, a backend's as a call key (null clears on every layer): equality
+        # and the digest read one shape.
+        laid = {k: v for k, v in laid.items() if v is not None}
         call = handler(laid)
         call._laid = _LaidOrder(laid)
         return call
@@ -178,6 +197,17 @@ class PipelineParams(FrozenModel):
 
     def with_nodes(self, nodes: Mapping[str, NodeCall | Mapping[str, object]]) -> Self:
         return self.model_validate({**self._laid_steps, **nodes})
+
+    def keyed_by(self, identity: Mapping[str, Mapping[str, object]]) -> Self:
+        """As the archive files a cell of it: each node's *identity* (what keys a cell, never sent)
+        laid over what it sends. A point's own params never hold it, so its id is what it sends."""
+        laid = self.laid_nodes
+        return self.with_nodes(
+            {
+                node: {**laid.get(node, {}), **identity.get(node, {})}
+                for node in [*laid, *(n for n in identity if n not in laid)]
+            }
+        )
 
     def overlaid(self, overlay: Mapping[str, Mapping[str, Any]], schema: PipelineSchema) -> Self:
         """*overlay* laid over its nodes; a node *schema* does not declare refuses."""

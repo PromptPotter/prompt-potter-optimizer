@@ -1,4 +1,4 @@
-"""Imports no sibling that reads a round; no ``@computed_field`` but `Estimate.text`, which says why, since a reading is banked on ``extra="forbid"``."""
+"""Imports no sibling that reads a round; no ``@computed_field``: a reading is banked and hashed, so it holds facts and a surface words them."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from enum import StrEnum
 from statistics import NormalDist
 from typing import Literal, NamedTuple, NewType, Self, assert_never
 
-from pydantic import ConfigDict, Field, computed_field, model_validator
+from pydantic import Field, model_validator
 
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.inner_origin import inner_origin_of
@@ -260,6 +260,7 @@ class MemberAddress(FrozenModel):
     arm: ArmName | None = Field(
         description="The arm the individual was measured as; null for a pass that is no arm."
     )
+    # Read by `scoring/paired.py::read_pair`'s address equality: one individual on two passes is a pair.
     pass_role: MeasurementRole | None = Field(
         description="Which pass, where the same individual is read by more than one."
     )
@@ -444,10 +445,8 @@ _Z95 = NormalDist().inv_cdf(0.975)
 
 class Estimate(FrozenModel):
     """THE estimate off cells — a level or a lift, in its unit, with its two-sided 95% interval.
-    Every surface prints `text`, or `band` (the interval alone); none prints a bound of its own."""
-
-    # `extra="ignore"`: the computed words are dumped beside the fields and must read back.
-    model_config = ConfigDict(extra="ignore")
+    It holds facts alone, so a stored or hashed estimate never reads a word; a surface words it
+    where it prints it (`text`, or `band`, the interval alone), never a bound of its own."""
 
     value: float
     ci_lo: float | None = Field(
@@ -476,12 +475,9 @@ class Estimate(FrozenModel):
             value=value, ci_lo=value - half, ci_hi=value + half, n=n, se=se, unit=unit, form=form
         )
 
-    @computed_field(  # type: ignore[prop-decorator]
-        description="SERVED: the interval alone, its bounds in the unit `point` names; null with "
-        "no spread."
-    )
     @property
     def band(self) -> str | None:
+        """The interval alone, its bounds in the unit `point` names; `None` with no spread."""
         if self.ci_lo is None or self.ci_hi is None:
             return None
         if self.form == "level":
@@ -489,19 +485,16 @@ class Estimate(FrozenModel):
         fmt = UNIT_FORMATS[self.unit]
         return f"[{_signed(self.ci_lo, fmt)},{_NBSP}{_signed(self.ci_hi, fmt)}]"
 
-    @computed_field(description="SERVED: the value alone, as a person reads it in its unit.")  # type: ignore[prop-decorator]
     @property
     def point(self) -> str:
+        """The value alone, as a person reads it in its unit."""
         if self.form == "lift":
             return lift_text(self.value, self.unit)
         return level_text(self.value, self.unit)
 
-    @computed_field(  # type: ignore[prop-decorator]
-        description="SERVED: `point`, then `band` where there is one; no surface prints an "
-        "estimate of its own."
-    )
     @property
     def text(self) -> str:
+        """`point`, then `band` where there is one."""
         band = self.band
         return self.point if band is None else f"{self.point} {band}"
 

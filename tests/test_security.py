@@ -42,6 +42,7 @@ from factories import (
     billed_call,
     close_round,
     cycle_result,
+    declaration_of,
     defaulted_config,
     inner_sandbox,
     laid_ledger,
@@ -91,6 +92,7 @@ from promptpotter.application.commands.dispatcher import Applier, CommandCall, C
 from promptpotter.application.commands.launching import launch_cancels
 from promptpotter.application.cycle_addressing import cycle_target, followed_cycle
 from promptpotter.application.cycle_files import FileScope, read_cycle_file
+from promptpotter.application.datasets.authored import effective_config
 from promptpotter.application.datasets.draft_campaign import new_draft, owned_draft
 from promptpotter.application.datasets.ingest import ingest_draft
 from promptpotter.application.datasets.tabular_ingest import IngestError
@@ -127,7 +129,6 @@ from promptpotter.application.jobs.launcher.launch import Launched
 from promptpotter.application.jobs.launcher.run_job import JobSpec
 from promptpotter.application.jobs.machine_status import machine_status, machine_version
 from promptpotter.application.jobs.mint import (
-    declare,
     fresh_campaign_id,
     mint,
     resolve_cycle_plan,
@@ -181,6 +182,7 @@ from promptpotter.config.paths import (
     user_data_root,
 )
 from promptpotter.config.settings import CODE_REVISION, TERMS_VERSION
+from promptpotter.domain import kinds as kinds_module
 from promptpotter.domain.arms import ArmPosition, Broken, Cut
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import CampaignRefusedError, Optimize
@@ -3221,6 +3223,23 @@ def test_older_code_refuses_to_land_a_root_newer_code_landed_and_drops_nothing(
     assert fold.exists(), "older code dropped a file the newer code landed"
 
 
+def test_an_edit_to_code_a_load_runs_lands_the_root_again() -> None:
+    # Every ledger line and banked state part parses through `KindTable.parse`, a module no schema
+    # names: an edit there changes what loads, so a root landed before it is walked again.
+    helper = Path(kinds_module.__file__)
+    landed = landing_module.landing_key.__wrapped__()
+    read = Path.read_text
+    with pytest.MonkeyPatch.context() as edited:
+        edited.setattr(
+            Path,
+            "read_text",
+            lambda path, *a, **kw: read(path, *a, **kw) + ("\nEDITED = 1\n" * (path == helper)),
+        )
+        assert landing_module.landing_key.__wrapped__() != landed, (
+            "an edit to `KindTable.parse`, which every ledger load runs, left the landing key"
+        )
+
+
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_dry_run_landing_at_a_root_older_code_landed_writes_nothing(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
@@ -4114,8 +4133,8 @@ async def test_a_starts_mint_lands_its_drafts_commands_on_the_cycle_and_its_retr
     starting = loop_session(
         stores, pipeline_schema([solve]), rows, dataset=resolve_dataset(stores, "acts")
     )
-    declared = declare(starting, defaulted_config(unframed), purpose=Optimize())
-    plan = resolve_cycle_plan(starting, declared, rows)
+    declared = declaration_of(starting, defaulted_config(unframed), Optimize())
+    plan = resolve_cycle_plan(starting, effective_config(declared.spec), declared.purpose, rows)
     moved, edit = await drafted("moved")
 
     async def _started(_: object) -> Applier[Launched]:

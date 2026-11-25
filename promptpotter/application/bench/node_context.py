@@ -36,7 +36,7 @@ from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
 from promptpotter.application.runner.inner.transcript import inner_transcript
 from promptpotter.application.scoring.arm_states import conclude, measuring
 from promptpotter.application.scoring.formula.matchers import admits
-from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.application.scoring.search_point_scorer import filed_entry, score_search_point
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.connector import MeasuredUnit
@@ -211,7 +211,7 @@ async def measure_as_parent(
     arm = measuring(
         Proposed(role=role, position=walked_position(cycle.rounds, key), individual=individual),
         sp,
-        session.pipeline_schema,
+        filed_entry(sp, session),
         expected=len(asked),
         sample_order=[s.id for s in cells],
     )

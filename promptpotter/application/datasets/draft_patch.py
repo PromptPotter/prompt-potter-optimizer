@@ -38,7 +38,7 @@ from promptpotter.domain.campaign_config import CAMPAIGN_RULE
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBasis
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit
-from promptpotter.domain.layer_fold import CLEAR, Layer, fold_layers, wire_patch
+from promptpotter.domain.layer_fold import Layer, fold_layers
 from promptpotter.domain.origin_provenance import Provenance
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import (
@@ -106,17 +106,13 @@ async def plan_draft_patch(
         changes["answer_terms"] = library
 
     was = draft_pipeline(stores, draft, held)
-    sent = (
-        {}
-        if patch.config is None
-        else wire_patch(CAMPAIGN_RULE, patch.config.model_dump(mode="json", exclude_unset=True))
-    )
+    sent = {} if patch.config is None else patch.config.model_dump(mode="json", exclude_unset=True)
     if patch.config is not None:
         layers = [Layer("draft", config), Layer("edit", sent)]
         config = _stamp_optimizer(
             fold_layers(CAMPAIGN_RULE, layers).document, was.config.optimization.optimizer
         )
-        if "scoring" in sent and sent["scoring"] is not CLEAR:
+        if "scoring" in sent and sent["scoring"] is not None:
             config["scoring"] = _folded_scoring(
                 was.config.scoring, sent["scoring"], campaign_terms(served.connector)
             )

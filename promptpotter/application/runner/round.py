@@ -57,6 +57,7 @@ from promptpotter.application.scoring.query_loop import Walk, run_walks
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     close_walk,
+    filed_entry,
     open_walk,
     reread_cells,
     score_search_points,
@@ -864,7 +865,6 @@ async def _walk_population(
     cycle = ctx.cycle
     round_num = ctx.round_num
     panel = ctx.panel
-    schema = cycle.session.pipeline_schema
     proposed = population.arms(round_num)
     rows: dict[ArmKey, CellSheet] = {}
     concluded: dict[ArmKey, Concluded] = {}
@@ -885,7 +885,13 @@ async def _walk_population(
         )
     asked = {key: ctx.asked(key, panel.order) for key in proposed}
     states = {
-        key: measuring(arm, sps[key], schema, expected=len(asked[key]), sample_order=order)
+        key: measuring(
+            arm,
+            sps[key],
+            filed_entry(sps[key], cycle.session),
+            expected=len(asked[key]),
+            sample_order=order,
+        )
         for key, arm in proposed.items()
     }
     session = cycle.session

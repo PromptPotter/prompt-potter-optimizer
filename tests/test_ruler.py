@@ -643,7 +643,7 @@ def traced() -> _Traced:
         tenant.fold(
             scope,
             [
-                (rr.arms[k].sp_hash, c.key, c.grade.objective)
+                (rr.arms[k].config_key, c.key, c.grade.objective)
                 for k, sh in rr.cells.items()
                 for c in sh
             ],

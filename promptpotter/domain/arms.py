@@ -160,6 +160,9 @@ class Proposed(_Arm):
 class _Walked(_Arm):
     # Stamped, never re-derived: it covers each node's rendered ``prompt``.
     sp_hash: str
+    # Its archive address (`ArchiveConfig.config_key`): the identity-keyed key its cells file under
+    # and its ruler rows are addressed by.
+    config_key: str
     # Origin floor ⊕ this individual's delta, schema-resolved: what a steered fork seeds from.
     resolved_params: dict[str, Any]
     expected_samples: int

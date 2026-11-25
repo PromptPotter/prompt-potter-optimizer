@@ -13,7 +13,7 @@ import {
   useChartReading,
 } from "@/components/ui";
 import { cx } from "@/lib/cx";
-import { fmtMetric, PLACEHOLDER } from "@/lib/format";
+import { fmtBand, fmtMetric, PLACEHOLDER } from "@/lib/format";
 
 import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
 import { cssPx, getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
@@ -83,7 +83,7 @@ export const EvidenceCharts = memo(function EvidenceCharts({
       {cell === undefined
         ? null
         : `${cell} · ${series
-            .map((s) => `${s.label} ${fmtMetric(evidence.metric.spec, s.values[cell])}`)
+            .map((s) => `${s.label} ${fmtMetric({ ...evidence.metric.spec, value: s.values[cell] })}`)
             .join(" · ")}`}
     </ChartReading>
   );
@@ -237,8 +237,8 @@ function MergedRow({
   ink: string;
   className: string;
 }) {
-  const value = row.estimate?.point ?? PLACEHOLDER;
-  const interval = row.estimate?.band ?? PLACEHOLDER;
+  const value = fmtMetric(row.estimate);
+  const interval = fmtBand(row.estimate) ?? PLACEHOLDER;
   const cells = `${row.n_cells} cell${row.n_cells === 1 ? "" : "s"}`;
   return (
     <IntervalRow

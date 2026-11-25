@@ -45,7 +45,7 @@ rows ([`../research/benchmarks.md`](../research/benchmarks.md) § The winner's o
 line that closed no round declared none.
 
 **The graded result is the CAMPAIGN's, never a cycle's**: the fold of its line's ledgers. **When passes are
-sent is the campaign's `bench_trigger`; the default (`manual`) sends none**, and a Compare run's `manual` reads `at_end` (`jobs/mint.py::declare`). Where the bench stands is ONE
+sent is the campaign's `bench_trigger`; the default (`manual`) sends none**, and a Compare run's `manual` reads `at_end` (`jobs/mint.py::run_spec`). Where the bench stands is ONE
 served status every door reads.
 
 ## Rescore-on-load
