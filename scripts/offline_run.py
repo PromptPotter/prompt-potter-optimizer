@@ -1527,7 +1527,8 @@ _SHORT_HEX = re.compile(r"\b[0-9a-f]{6,12}\b")
 _CYCLE_ID = re.compile(r"cycle_[0-9a-f]{8,}")
 _FORK_ID = re.compile(r"cycle_[0-9a-f]{8,}_fork_[0-9a-f]{8}")
 _CAMPAIGN_ID = re.compile(
-    f"(?:{'|'.join(re.escape(dataset_id_prefix(d)) for d in (DATASET, L4_DATASET))})__[0-9a-f]{{6}}"
+    # A root campaign's 6 hex, an inner one's 12 (`spawn.py::inner_campaign_id`).
+    f"(?:{'|'.join(re.escape(dataset_id_prefix(d)) for d in (DATASET, L4_DATASET))})__[0-9a-f]{{6}}(?:[0-9a-f]{{6}})?"
 )
 _SESSION_ID = re.compile(r"\bs_[0-9a-f]{8}\b")
 _WIN_PATH = re.compile(r"(?:\\\\\?\\)?[A-Za-z]:[\\/][^\s'\"<>|]*")

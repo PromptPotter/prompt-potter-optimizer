@@ -15,18 +15,12 @@ row it closes.
 
 ### batch/26 · admit-2 (links 1-5 landed; the rows its cap left)
 
-- **A seat refused before it runs keeps its observers**: `runner/inner/spawn.py` (~:364) never releases
-  the observers it opened when `admission.py::slotless_share` refuses. Action: the observers open after
-  admission, or close on its refusal. **Rides with:** the slotless-doors row below. **Re-test:** a test
-  refuses a seat at `slotless_share` and finds no open observer.
-- **The embedded and inner runs still open their cycles their own way**: `jobs/launcher/launch.py::hold`
-  opens every held launch's cycle, but `embedded_run.py::run_campaign` and
-  `runner/inner/spawn.py::_open_seat` mint or resume through `admission.py::slotless_share`, and the
-  embedded resume opens its cycle before it admits (its campaign's own refusals,
-  `admission.py::refuse_campaign`, are already asked first there). Action: a fork is opened under a
-  carried admission, and the slotless doors open through the request kind's one `open`.
-  **Rides with:** admit-2, whose Owns gain `runner/inner/spawn.py::_open_seat`. **Re-test:**
-  `git grep -n "slotless_share(" -- promptpotter/application` lists no opener of its own.
+- **A fork is not opened under a carried admission**: `jobs/launcher/launch.py::hold` opens every held
+  launch's cycle, and the slotless doors (`embedded_run.py::run_campaign`,
+  `runner/inner/spawn.py::_open_seat`) admit through `admission.py::admit_slotless` before they mint
+  and run through `held_job.py::run_held_job`, but mint or resume beside it. Action: a fork is opened
+  under a carried admission, and the slotless doors open through the request kind's one `open`.
+  **Rides with:** admit-2. **Re-test:** `git grep -n "mint(" -- promptpotter/application/runner/inner/spawn.py promptpotter/application/embedded_run.py` is empty.
 - **A start's release is still hand-rolled at each start site**: `admission.py::RunStart.release` is the
   one release, but 8 `except BaseException: … release(exc)` blocks across `jobs/launcher/` and
   `commands/launching.py`, and `embedded_run.py`'s `to_thread(start.release, exc`, call it by hand, and `jobs/launcher/head_to_head.py::AdmittedHeadToHead.launched`
@@ -52,7 +46,7 @@ row it closes.
   `git grep -n "unit.parent.parent" -- promptpotter/application/maintenance/landing.py` is empty.
 - **The embedded launch is not a command**: `embedded_run.py::run_campaign` and `::run_head_to_head`
   open their own session but file no `CommandRecord`; `run_campaign` admits through
-  `admission.py::slotless_share` and mints itself, because a DSPy `program` is an in-memory object no
+  `admission.py::admit_slotless` and mints itself, because a DSPy `program` is an in-memory object no
   payload carries. Action: `run_campaign` files `mint-campaign` or `start-run` with an `EmbeddedRun`
   holder, the program held by the filing process. **Rides with:** admit-2. **Re-test:** an embedded
   `run_campaign` leaves a `CommandRecord` in the commands log (today `commands/dispatcher.py` builds the
@@ -63,12 +57,6 @@ row it closes.
   re-checks admission and spawns it when the slot frees; `jobs/CLAUDE.md`'s rule ("a queued job's intent
   never leaves the process that authenticated it") is restated in the same link. **Rides with:**
   admit-2. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when the slot frees.
-- **The inner door mints its seat before its admission**: `runner/inner/spawn.py::_run_inner_campaign`
-  calls `_open_seat` (`mint(` at `:335`) and only then `slotless_share` (`:367`) admits, so a refusal
-  leaves a minted seat. Action: admit, then mint; the reorder moves the enclosing book's room and the L4
-  equals-main, so it lands with a paid L4 re-measure. **Rides with:** admit-2, whose Owns hold
-  `spawn.py::_open_seat`. **Re-test:** `git grep -n "mint(\|slotless_share(" -- promptpotter/application/runner/inner/spawn.py`
-  lists the admission before the mint.
 - **Three launch faults from a code review (reported; verify each at its line first)**: `jobs/launcher/head_to_head.py:178`
   leaves a partial mint's arms unstamped, so a retry refuses `arm_taken`; `mint_and_start.py:108` and
   `checkin.py:93` leak the `BackendClient` they open when the mint is refused; ties between
@@ -803,14 +791,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 These land in the re-key windows, `W1` (keys, address, cell key and archive row, one wipe) and `W2`
 (ledger record shapes), each row naming its window and chain.
 
-- **An inner campaign's id is 24 bits of its content**: `runner/inner/spawn.py::inner_campaign_id`
-  cuts `stable_hash([spec.key(), resolved_overrides(overrides)], length=6)`, and `_open_seat` lets the
-  campaign that exists decide, so two `(cell, arm edit)` pairs on one id continue one campaign
-  (`_continue_inner_campaign`: a drift refusal or a divergence fork, never a fresh mint). One desk
-  sandbox holds 92 inner campaigns (birthday bound ~0.03 %, ~3 % at 1,000 cells; no collision seen),
-  and the id is what `InnerRunAddress.campaign_id` files in the archive. Root: a content-derived id is
-  cut at the width its population needs (12 hex, as a root cycle id); every inner campaign directory
-  renames. **Window:** W1 · l4-key, with the row below. **Re-test:** `git grep -n "length=6" -- promptpotter/application/runner/inner/spawn.py` is empty.
 - **An archived answer carries its run's vocabulary and its run's address, and both are run data**:
   the CACHE row's `domain/l4/inner_facts.py::InnerCellFacts` holds `stop_reason: StopReason`, a
   `floor_reason` sentence and `run: InnerRunAddress`, so a `StopReason` rename fails every archived
@@ -878,11 +858,6 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   hotpotqa's `escalation.l1_patience: 5` differs from the others; `runner/inner/tasks.py::_lever`
   leaves knobs out, so nothing flags it. Action: one inner measurand and one ladder across seats, or a
   refusal. **Held:** a decision. **Re-test:** the three definitions' `scoring` and `escalation` blocks.
-- **Two builders of one sandbox store**: `infrastructure/store/stores.py::inner_sandbox_store` (the
-  reader, from `(stores, hop)`) and `runner/inner/spawn.py::sandbox_stores` (the writer, from an
-  `infrastructure/run_scope.py::InnerSpawnContext`, which carries the spawner's fields but not its
-  `Stores`, so it cannot call the reader). Action: the spawn context carries the spawner's `Stores`,
-  and the writer builds through the one builder, its existence checks off. **Held:** none claims it. **Re-test:** `git grep -n "def inner_sandbox_store\|def sandbox_stores" -- promptpotter`.
 - **The outer reads θ beside a held-out lift that carries no SE**: Shape: no panel ranks on θ
   (`potter/dispatch/injections/panels.py::_transcript_plan` sorts on `grade.fitness`), but the
   in-sample θ lift (`InnerCellFacts.mean_round_delta`, which scores nothing) rides

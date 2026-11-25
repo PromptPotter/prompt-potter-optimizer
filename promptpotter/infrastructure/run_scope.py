@@ -18,7 +18,6 @@ from promptpotter.domain.cycle_paths import CyclePath, Subject
 from promptpotter.domain.l4.cells import InnerCells
 from promptpotter.domain.spend import TokenUsageKind
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.shared.identity import IdentityContext
 from promptpotter.shared.measurement_context import MeasuredPass
 
 if TYPE_CHECKING:
@@ -40,14 +39,9 @@ UNBOUND: Literal[Unbound.UNBOUND] = Unbound.UNBOUND
 
 @dataclass(frozen=True)
 class InnerSpawnContext:
-    """``shared_root`` stays the REAL workspace root: sandboxing the shared caches re-scores every inner origin."""
-
-    inner_sandbox_root: Path
-    identity: IdentityContext
-    shared_root: Path
-    # The spawner's tiers, so a cell resolves its dataset where the spawner does.
-    install_datasets_root: Path
-    research_datasets_root: Path | None
+    # The spawner's, so a cell resolves its dataset where the spawner does and its sandbox is built
+    # by the one builder (`stores.py::sandbox_store`), on the REAL shared root.
+    stores: Stores
     # The chain the cell's sandbox sits in, ending at its owner: the spawner's cycle.
     inside: CyclePath
     # Outermost first, ending at the asker's: a pause filed on any of them stops the cell.

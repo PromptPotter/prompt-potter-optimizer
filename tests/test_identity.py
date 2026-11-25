@@ -39,7 +39,6 @@ from factories import (
     declaration_of,
     defaulted_config,
     inner_cells,
-    inner_sandbox,
     inner_seat,
     jumping_clock,
     laid_ledger,
@@ -384,7 +383,7 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores, sandbox_store
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.presentation.cli.commands import launch as cli_launch
 from promptpotter.shared.errors import (
@@ -2991,25 +2990,12 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     assert l4.spec.run_seed == 3, "an L4 seat's declaration lost the seed its seat names"
     # The seat's inner run opens that ACCOUNT definition inside its sandbox: a sandbox isolates
     # campaign state, never the account's datasets, or a tenant seat refuses every arm.
-    sandboxed = spawn.sandbox_stores(
-        InnerSpawnContext(
-            inner_sandbox_root=inner_sandboxes_dir(default_projects_root()) / "sandbox",
-            identity=stores.identity,
-            shared_root=stores.shared_root,
-            install_datasets_root=stores.install_datasets_root,
-            research_datasets_root=stores.research_datasets_root,
-            inside=(CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"),),
-            enclosing=(),
-            acting=(),
-            purpose=Optimize(),
-            ruler=0,
-        )
-    )
+    sandboxed = sandbox_store(stores, CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"))
     assert resolve_dataset(sandboxed, "decl") == resolve_dataset(stores, "decl"), (
         "an inner run resolved its seat's account dataset elsewhere than the panel that seated it"
     )
     assert sandboxed.campaigns.campaign_root_dir("c").is_relative_to(
-        inner_sandboxes_dir(default_projects_root()) / "sandbox"
+        inner_sandboxes_dir(stores.shared_root)
     ), "an inner run's campaign state left its sandbox for the account's"
     l4_arm = declaration_of(
         opened,
@@ -3330,11 +3316,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     (inner_seat,) = seats.cells
     owner = held_campaign.root_hop
     spawning = InnerSpawnContext(
-        inner_sandbox_root=inner_sandbox(stores, owner.campaign_id, owner.cycle_id),
-        identity=stores.identity,
-        shared_root=stores.shared_root,
-        install_datasets_root=stores.install_datasets_root,
-        research_datasets_root=None,
+        stores=stores,
         inside=(owner,),
         enclosing=(),
         acting=(),
@@ -3346,7 +3328,10 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         campaign_id=inner_campaign_id(seats.spec(inner_seat), seats.own(inner_seat, {})),
         cycle_id="cycle-0",
     )
-    stored_campaign(spawn.sandbox_stores(spawning), minted_campaign(inner_hop, dataset_name="decl"))
+    stored_campaign(
+        sandbox_store(spawning.stores, spawning.inside[-1]),
+        minted_campaign(inner_hop, dataset_name="decl"),
+    )
     pin = PinnedCell(cell=inner_seat, instrument="i").pin()
     with (
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
@@ -3390,20 +3375,7 @@ def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _De
     )
     labelled = stores.tenant_datasets.labels()
     assert "decl" in labelled, "a campaign's mint named no bank"
-    sandboxed = spawn.sandbox_stores(
-        InnerSpawnContext(
-            inner_sandbox_root=inner_sandboxes_dir(default_projects_root()) / "sandbox",
-            identity=stores.identity,
-            shared_root=stores.shared_root,
-            install_datasets_root=stores.install_datasets_root,
-            research_datasets_root=stores.research_datasets_root,
-            inside=(CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"),),
-            enclosing=(),
-            acting=(),
-            purpose=Optimize(),
-            ruler=0,
-        )
-    )
+    sandboxed = sandbox_store(stores, CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"))
     inner_rows = rows_30[:-1]
     inner = loop_session(
         sandboxed, pipeline_schema([solve]), inner_rows, dataset=resolve_dataset(sandboxed, "decl")

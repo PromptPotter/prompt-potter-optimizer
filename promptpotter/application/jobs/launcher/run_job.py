@@ -18,18 +18,16 @@ from pydantic import TypeAdapter, model_validator
 
 from promptpotter.application.jobs.capacity import resolve_run_capacity
 from promptpotter.application.jobs.launcher.admission import RunStart, refuse_campaign
+from promptpotter.application.jobs.launcher.held_job import run_held_job
 from promptpotter.application.jobs.launcher.mint_and_start import ExistingCycle
-from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
+from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.landing import land_at_entry
-from promptpotter.application.run_observers import build_run_observers
-from promptpotter.application.runner.entry import run_optimization
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.paths import READOUT_POINTER, user_data_root
 from promptpotter.domain.campaign import CampaignRefusedError
 from promptpotter.domain.campaign_config import CycleConfig
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
-from promptpotter.domain.job import LaunchMove
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.spend import Budget, HeldBudget
@@ -164,50 +162,6 @@ def _tell_spawner() -> None:
     sys.stdout.buffer.write(_ADOPTED)
     sys.stdout.buffer.flush()
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
-
-
-async def run_held_job(
-    start: RunStart,
-    session: Session,
-    cycle: CycleConfig,
-    *,
-    mode: RunMode,
-    budget: HeldBudget,
-    optimizer: SelectedOptimizer,
-    readout_sink: Callable[[str], None] | None = None,
-) -> tuple[Session, CycleResult]:
-    """THE run of a held launch at every door: START, the run, its END. Answers the session the
-    run ENDED on (`run_optimization`). Its START, its hold and its END wait on gates, off the loop."""
-    await asyncio.to_thread(start.job_registry.move, start.job_id, LaunchMove.START)
-    # Unstamped until its observers stand: nothing of this launch reached the cycle before, whose
-    # own producer may still be running it.
-    stamps: CycleHop | None = None
-    try:
-        observers = await asyncio.to_thread(
-            build_run_observers,
-            session=session,
-            campaign_config=cycle.config,
-            readout_sink=readout_sink,
-        )
-        stamps = session.hop
-        ended, result = await run_optimization(
-            list(session.bank.samples),
-            cycle,
-            session=session,
-            observers=observers,
-            mode=mode,
-            budget=budget,
-            optimizer=optimizer,
-        )
-    except BaseException as exc:
-        # An interrupt is the pause flag's SYNTHETIC one, its pause already declared; anything else
-        # fired OUTSIDE the runner's try, so this stamps it.
-        await asyncio.to_thread(
-            start.release, exc, stamps=None if launch_interrupted(exc) else stamps
-        )
-        raise
-    await asyncio.to_thread(start.release, result)
-    return ended, result
 
 
 @dataclass(frozen=True, slots=True)

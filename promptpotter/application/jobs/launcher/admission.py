@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
@@ -91,11 +91,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
-
-
-# A share's run: started under its hold, it answers what it ran and the result its job's release
-# records.
-type SharedRun[S] = Callable[[HeldBudget], Awaitable[tuple[S, CycleResult]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -488,7 +483,7 @@ def admit_arms(
     holder: CampaignLaunch | EmbeddedRun,
 ) -> list[tuple[Job, HeldBudget]]:
     """Every arm's job and share, each at its budget and sends, or none, under one gate. An
-    embedded host holds no slot (`slotless_share`)."""
+    embedded host holds no slot (`admit_slotless`)."""
     with job_registry.admission_gate(launching=True):
         jobs: list[Job] = []
         try:
@@ -627,37 +622,6 @@ def admit_slotless(
         start.release(exc)
         raise
     return start, held
-
-
-async def slotless_share[S](
-    config: CampaignConfig,
-    *,
-    stores: Stores,
-    holder: InnerRun,
-    at: CampaignCycle,
-    sends: tuple[Send, ...],
-    run: SharedRun[S],
-) -> tuple[S, CycleResult]:
-    """An inner run on the cycle its spawn minted: admitted (`admit_slotless`), then *run* under
-    its hold, whose result the job's release records."""
-    start, held = await asyncio.to_thread(
-        admit_slotless,
-        config,
-        stores=stores,
-        holder=holder,
-        at=at,
-        requested=Budget(),
-        step_rounds=None,
-        sends=sends,
-    )
-    try:
-        await asyncio.to_thread(start.job_registry.move, start.job_id, LaunchMove.START)
-        ran = await run(held)
-    except BaseException as exc:
-        await asyncio.to_thread(start.release, exc)
-        raise
-    await asyncio.to_thread(start.release, ran[1])
-    return ran
 
 
 def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[RunStart, SpendBook]:

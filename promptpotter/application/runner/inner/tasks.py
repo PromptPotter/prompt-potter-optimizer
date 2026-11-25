@@ -27,7 +27,6 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
 )
 from promptpotter.domain.cells import PinnedCell, Seat
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.cells import CellOptimizer, InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.layer_fold import LaidAs, Layer
 from promptpotter.domain.pipeline_params import NodeCall
@@ -50,7 +49,6 @@ from promptpotter.infrastructure.run_scope import (
 from promptpotter.infrastructure.store.archive_queries import ArmOf, CampaignWalks
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
 from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeline, resolve_dataset
-from promptpotter.infrastructure.store.layout import inner_sandbox_dir
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, DatasetAccessError, PayloadInvalidError
 
@@ -370,20 +368,9 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
     cycle_id = session.cycle_id
     if not cycle_id or session.dataset is None or not session.campaign_id:
         return None
-    # Never this store's ``projects_root``, which inside a sandbox already IS the sandbox.
-    shared_root = session.store.shared_root
-    inner_root = inner_sandbox_dir(
-        shared_root,
-        session.store.tenant_id,
-        CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
-    )
     client = session.backend_client
     return InnerSpawnContext(
-        inner_sandbox_root=inner_root,
-        identity=session.store.identity,
-        shared_root=shared_root,
-        install_datasets_root=session.store.install_datasets_root,
-        research_datasets_root=session.store.research_datasets_root,
+        stores=session.store,
         inside=(*session.store.inside, session.hop),
         enclosing=(*session.state.control.enclosing, session.store.subject(session.hop)),
         acting=session.state.control.acting,

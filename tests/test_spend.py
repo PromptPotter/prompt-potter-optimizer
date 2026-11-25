@@ -23,7 +23,7 @@ import urllib.request
 import uuid
 from collections.abc import Callable, Coroutine, Iterator, Sequence
 from pathlib import Path
-from typing import Any, NamedTuple, cast, get_args
+from typing import Any, NamedTuple, NoReturn, cast, get_args
 from unittest import mock
 
 import httpx
@@ -91,6 +91,7 @@ from promptpotter.application.head_to_head_price import (
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.jobs import interlock, mint, quota
 from promptpotter.application.jobs.account_activity import account_activity
+from promptpotter.application.jobs.launcher import held_job
 from promptpotter.application.jobs.launcher import run_job as run_job_mod
 from promptpotter.application.jobs.launcher.admission import (
     RunStart,
@@ -362,7 +363,7 @@ from promptpotter.infrastructure.store.read_model import (
     scan_last,
 )
 from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores, sandbox_store
 from promptpotter.infrastructure.store.user_store import User
 from promptpotter.infrastructure.store.wallet_store import ChargeBook
 from promptpotter.presentation.api.routers import commands as commands_api
@@ -379,6 +380,7 @@ from promptpotter.shared.errors import (
     FileUnreadableError,
     HostAllowanceExhaustedError,
     LaunchRefusalReason,
+    MachineBusyError,
     NoApiKeyError,
     NotFoundError,
     PayloadInvalidError,
@@ -1564,11 +1566,7 @@ def _inner_seat(stores: Stores, seats: InnerCells) -> tuple[InnerSpawnContext, S
     """An outer cycle's one seat, and the cell that asks it."""
     owner = CycleHop(campaign_id="ppself__aaaaaa", cycle_id="cycle_deadbeef0000")
     spawning = InnerSpawnContext(
-        inner_sandbox_root=inner_sandbox(stores, owner.campaign_id, owner.cycle_id),
-        identity=stores.identity,
-        shared_root=stores.shared_root,
-        install_datasets_root=stores.install_datasets_root,
-        research_datasets_root=None,
+        stores=stores,
         inside=(owner,),
         enclosing=(),
         acting=(),
@@ -1627,6 +1625,38 @@ async def test_an_inner_runs_stop_reaches_its_outer_cell_off_the_cycle_it_ended_
     assert "Insufficient credits" in str(refused.value), (
         "the outer cell read the stop off the cycle its run rebased from, not the one it ended on"
     )
+
+
+@pytest.mark.usefixtures("run_bound")
+async def test_a_seat_its_admission_refuses_mints_no_campaign_and_opens_no_observer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores, offline: Any
+) -> None:
+    launched_bank(built_stores, offline, samples(40, "TRUE"))
+    laid = defaulted_config({"optimization": {"optimizer": "potter", "degradation_threshold": 0.0}})
+    spawning, cell = _inner_seat(
+        built_stores, inner_cells("potter", dataset=LAUNCHED_DATASET, campaign=laid)
+    )
+    opened: list[object] = []
+    monkeypatch.setattr(held_job, "build_run_observers", lambda **kw: opened.append(kw))
+
+    def _refused(*_a: object, **_kw: object) -> NoReturn:
+        raise MachineBusyError(holding="", holder_user="", started_at=None)
+
+    monkeypatch.setattr(spawn, "admit_slotless", _refused)
+    with (
+        scoped(account=built_stores),
+        scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
+        scoped(book=spend_book(1000.0), round=0),
+        pytest.raises(MachineBusyError),
+    ):
+        await spawn.run_inner_cycle(cell, {})
+    seats = spawning.cells
+    assert seats is not None
+    asked = spawn.inner_campaign_id(seats.spec(seats.cells[0]), {})
+    assert (
+        sandbox_store(spawning.stores, spawning.inside[-1]).campaigns.load_campaign(asked) is None
+    ), "a seat refused at its admission left its minted campaign"
+    assert not opened, "a seat refused at its admission opened its observers"
 
 
 @pytest.mark.usefixtures("run_bound", "offline")

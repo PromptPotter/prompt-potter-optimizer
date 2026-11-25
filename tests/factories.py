@@ -32,7 +32,6 @@ from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
 from promptpotter.application.jobs.launcher.admission import (
     admit_slotless,
     claim_cycle,
-    slotless_share,
 )
 from promptpotter.application.jobs.mint import mint_framed_cycle, run_spec
 from promptpotter.application.jobs.quota import sends_on
@@ -105,7 +104,7 @@ from promptpotter.domain.cells import PinnedCell, Seat
 from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult, WallClock
-from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, InnerRun, LaunchMove
+from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, LaunchMove
 from promptpotter.domain.l4.cells import InnerCell, InnerCells, InnerTaskSpec
 from promptpotter.domain.l4.inner_facts import InnerRunAddress
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
@@ -1062,11 +1061,7 @@ async def inner_seat(
     (cell_seat,) = seats.cells
     owner = CycleHop(campaign_id="outer", cycle_id="cycle-0")
     spawning = InnerSpawnContext(
-        inner_sandbox_root=inner_sandbox(stores, owner.campaign_id, owner.cycle_id),
-        identity=stores.identity,
-        shared_root=stores.shared_root,
-        install_datasets_root=stores.install_datasets_root,
-        research_datasets_root=None,
+        stores=stores,
         inside=(owner,),
         enclosing=(),
         acting=(),
@@ -1080,17 +1075,10 @@ async def inner_seat(
     with scoped(account=stores), scoped(spawn=spawning, book=spend_book(1000.0)), scoped(round=0):
         cell = spawn._resolve_inner_cell(asked, {"optimizer_prompt_overrides": overrides})
         async with spawn._open_seat(cell, spawn.claim_sandbox(spawning)) as opened:
-            session = opened.session
-            ctx, _ = await slotless_share(
-                opened.cycle.config,
-                stores=session.store,
-                holder=InnerRun(LAUNCHED_DATASET),
-                at=session.at,
-                sends=(),
-                run=lambda held: launched_round(
-                    session, opened.cycle, opened.optimizer, held, round_num=round_num
-                ),
+            ctx, ended = await launched_round(
+                opened.session, opened.cycle, opened.optimizer, opened.held, round_num=round_num
             )
+            await asyncio.to_thread(opened.start.release, ended)
             return ctx
 
 
