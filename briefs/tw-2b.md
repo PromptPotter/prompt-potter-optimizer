@@ -4,8 +4,13 @@
 your id and your base, `<BASE>`:
 - **tw-s:** `origin/land/test-world` at `3625a6687`. That is the combine `7dce00a96`, tw-0…tw-4, tw-m (the
   app's memory) and tw-r's links 1, 2 and 4. tw-s runs beside chain tw-r2 (`briefs/tw-r2.md`), which
-  owns the press/memory root.
-- **tw-j and tw-x:** `origin/land/test-world` at `<BASE-JX>`, which is `3625a6687` plus tw-r2.
+  owns the press/memory root. **tw-s has landed** (`out/tw-s-report`). What it left is assigned to tw-j and
+  tw-x below.
+- **tw-x:** `origin/land/test-world` at `<BASE-X>` = `71bc072c5`, which is `3625a6687` plus tw-r2, tw-s and
+  my fix to the dspy children's import root. tw-x runs beside
+  chain tw-r3 (`briefs/tw-r3.md`), which owns `application/scoring/**`, `offline_run.py`, and the
+  archive's filing and memory reads.
+- **tw-j:** `origin/land/test-world` at `<BASE-J>`, which is `<BASE-X>` plus tw-r3.
 
 Replace the ancestor check with `git merge-base --is-ancestor 9cd30b5a7 <BASE>`. Equals-main runs against
 `<BASE>`'s offline home.
@@ -66,7 +71,7 @@ fact gets its own assertion.
   | chain | production it may edit |
   |---|---|
   | tw-j | `application/bench/node_context.py`, `application/scoring/**`, `application/optimizers/**`, `application/runner/**` except `runner/inner/**`, `application/intelligence/**` |
-  | tw-x | `application/bench/difficulty.py`, `domain/ruler.py`, `application/commands/**`, `application/runner/inner/**`, `infrastructure/store/**` except the three spend stores below |
+  | tw-x | `application/bench/difficulty.py`, `domain/ruler.py`, `application/commands/**`, `application/runner/inner/**`, `infrastructure/store/**` except the three spend stores below, `archive_queries.py` and `measurement_archive.py` (tw-r3's) |
   | tw-s | `infrastructure/llm/**`, `domain/spend.py`, `infrastructure/store/{wallet_store,account_spend,llm_reuse_cache}.py` |
 
 ## The three chains
@@ -90,6 +95,11 @@ builder left with zero callers at integration.
   them (`test_a_replayed_grading_is_metered…` through `test_an_inner_runs_stop_reaches_its_outer_cell…`).
   tw-r restored the base's sp:1714, sp:1780 and sp:1925 as legs (`potter/arrived`, and the bills and
   priced keys the resumed legs hold), so those facts already have a home.
+- test_spend's own `# Journeys awaiting a leg` block, which tw-s parked: two journeys, with their leg specs
+  in `out/tw-s-report:report.md` § Appendix A. One is concurrent inner runs on one backend, the other a
+  resumed cycle with its ceiling spent on cells another campaign filed.
+- tw-r3's legs are at your base. A leg you add reads what tw-r3 made true, and you leave its assertions
+  standing.
 
 **Per fact, in this order of preference:**
 1. an assertion over a record an existing leg already writes, which costs no run time;
@@ -108,8 +118,8 @@ body, and its cost in seconds and MB.
 
 **Owns:**
 - `scripts/offline_run.py` and `scripts/offline_world.py`, within the frozen exports above;
-- the four journeys blocks, each deleted when it is empty;
-- test_spend's `_walk`, `_round` and their 11 callers;
+- the five journeys blocks, test_spend's included, each deleted when it is empty;
+- test_spend's `_walk`, `_round` and their 11 callers, and its journeys block;
 - in production, the tw-j row of the table. Two rows are already filed there, both in
   `application/bench/node_context.py`:
   - tw-1's row: `closed_round` takes a whole `Cycle` and reads three fields, so narrow it to those three;
@@ -138,6 +148,16 @@ Update `tests/CLAUDE.md` § The world in the same link.
 - test_scoring's `_evidence_campaign` and the head-to-head door tests that call it.
 - test_ruler's five `traced` tests. tw-4's row 2: expose the series fold from `DifficultyView`'s inputs
   (`application/bench/difficulty.py`) as a pure function, so those tests become a table.
+- test_spend's three `loop_session` callers that are not tw-j's (tw-s's row 1). The real opening lays no
+  `ScorerSetup` before `open_launch`, so those facts have no door to stand on. Build that door in
+  production (the tw-x row) and move them onto it.
+- **The world run per fact (tw-s's row 2).** test_spend's in-suite time went from 8.0 s to 17.7 s, at
+  about 0.5 s per world run. One world fixture shared by every fact that reads the same run, scoped in
+  `conftest.py`. State the in-suite time before and after.
+- **One dspy child (tw-s's row 3).** `test_spend::dspy_billed` and `test_connectors::dspy_cells` build the
+  same student in two child processes. Fold them into one child fixture in `conftest.py`, run once for
+  both files. Keep the repo root first on the child's `PYTHONPATH`. Without it, a worktree's child
+  imports the installed checkout's `promptpotter`, which is the integration fix on your base.
 
 A door the world lacks is built in production, in its own link, never as a test seam. tw-3 found that
 `factories.loop_session` builds a Session the real opening refuses (an LLM node with no owned model).
@@ -147,7 +167,7 @@ if no caller is left.
 **Owns:**
 - `tests/world.py`, `tests/conftest.py`, `tests/factories.py` and `tests/CLAUDE.md`;
 - `tests/test_archive.py` above its journeys block, and `tests/test_ruler.py`;
-- the named hunks of test_identity and test_scoring;
+- the named hunks of test_identity, test_scoring and test_spend, and test_connectors' dspy fixture;
 - in production, the tw-x row of the table.
 
 ### tw-s: the test_spend census (Opus)
