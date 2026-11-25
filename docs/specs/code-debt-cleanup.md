@@ -787,11 +787,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `e2e/harness.ts::everyTapLands` re-reads a cover two frames on for it. Root: CSS anchor
   positioning, no JS follow. **Held:** iOS before 26 lacks it. **Re-test:**
   `git grep -c requestAnimationFrame -- webapp/components/ui/overlay.ts webapp/e2e/harness.ts` is 0.
-- **The walk serves a stale bundle as the page under test**: against an old `webapp/out` the app
-  says "This page is out of date" (`promptpotter/main.py`'s `webapp` Said), which shrinks the panes,
-  and a bare `npx playwright test` does not refuse it (the gate rebuilds first). Root: the walk
-  server refuses a bundle older than its sources. **Re-test:** a walk run on a stale build fails at
-  start, naming the build.
 
 ### wave-5 · drift (the 2026-11-19 backbone hunt)
 

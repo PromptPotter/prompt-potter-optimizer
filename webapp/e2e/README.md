@@ -6,7 +6,7 @@ to [`../CLAUDE.md`](../CLAUDE.md) § Testing posture; this page is the runbook.
 ```bash
 cd webapp
 npm run e2e                 # build the app, then walk it (walk + cold)
-npm run e2e:fast            # skip the build — iterating on specs
+npm run e2e:fast            # skip the build — iterating on specs; a build of another webapp/ refuses to serve
 npm run e2e:watch           # the same, in a browser you can watch
 npm run e2e:ui              # step, time-travel, pick locators
 npx playwright test --project=walk -g "theme"    # one slice

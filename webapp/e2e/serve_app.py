@@ -27,6 +27,14 @@ def main(argv: list[str]) -> int:
         return 2
     if backend == "--backend=offline":
         _install_offline_world()
+    from promptpotter.application import health
+
+    # The page under test is this checkout's build, by the check the app's own `/health` says.
+    bundle = health.webapp_bundle()
+    if bundle is None or bundle.state != "held":
+        said = "no webapp/out/ built" if bundle is None else bundle.said
+        print(f"[e2e] REFUSING to serve webapp/out/: {said}; {health.REBUILD}", file=sys.stderr)
+        return 2
     import uvicorn
 
     uvicorn.run("promptpotter.main:app", host="127.0.0.1", port=int(port))

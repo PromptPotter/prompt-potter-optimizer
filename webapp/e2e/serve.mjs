@@ -22,14 +22,10 @@ if (BACKEND !== "offline" && BACKEND !== "live") {
   process.exit(2);
 }
 
-for (const [what, where, remedy] of [
-  ["venv interpreter", PYTHON, "python scripts/gate.py"],
-  ["built app", path.join(WEBAPP, "out", "index.html"), "npm run build"],
-]) {
-  if (!existsSync(where)) {
-    console.error(`[e2e] no ${what} at ${where} — run \`${remedy}\``);
-    process.exit(2);
-  }
+// The build is `serve_app.py`'s to refuse: missing or stale, by the app's own bundle check.
+if (!existsSync(PYTHON)) {
+  console.error(`[e2e] no venv interpreter at ${PYTHON} — run \`python scripts/gate.py\``);
+  process.exit(2);
 }
 
 // PROMPTPOTTER_HOME is read once at import (`config/paths.py`), so it must be set before spawn.
