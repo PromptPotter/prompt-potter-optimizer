@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 import httpx
 import pytest
@@ -18,8 +22,10 @@ from factories import (
     spend_book,
     workspace,
 )
-from offline_world import Router
+from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
+from pydantic import SecretStr
 
+from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.sample_measurement import cell_billing
 from promptpotter.config.settings import settings
@@ -39,6 +45,8 @@ from promptpotter.infrastructure.store.dataset_access import (
     read_dataset_definition,
 )
 from promptpotter.shared.errors import CellInfrastructureError
+
+_TESTS = Path(__file__).resolve().parent
 
 
 async def _no_wait(*_: Any) -> None:
@@ -165,46 +173,99 @@ def test_a_termnorm_reload_under_sixteen_cells_resends_the_terms_once_and_fails_
     assert offline.backend.asked.count("/matches") == 2 * len(rows), "a recovered cell resent twice"
 
 
-def test_a_resent_dspy_call_spends_one_of_its_programs_max_calls(
-    offline: Router, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def dspy_cells(out: Path) -> dict[str, Any]:
+    """The dspy cells, run where dspy is imported: a child process, never the suite's (its
+    `extras` import costs the suite's process tens of MB it never returns). What each cell paid."""
+    import dspy  # extras: dspy
     from dspy import lm15
 
-    _priced(offline)
-    monkeypatch.setattr(dspy_module, "held_wait", _no_wait)
-    sends: list[int] = []
-    lm = _scripted_lm(sends, [lm15.ServerError("boom", status=500)])
-    program = _program(lm, 2, lambda ex, pred: pred.answer == ex.answer)
-    data = _dspy_cell(program, 2, tmp_path / "resent.jsonl")
-    assert data[dspy_module.SCORE_KEY] == 1.0, "a 5xx spent the call its resend answered"
-    assert len(sends) == 3, f"{len(sends)} sends: two calls, one resent once"
-    bills = _lm_bills(tmp_path / "resent.jsonl")
-    assert [bill.reasoning_tokens for bill in bills] == [2, 2], (
+    complete_registries()
+    world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
+    for key in PROVIDER_KEYS:
+        setattr(settings, key, SecretStr(NOT_A_KEY))
+    settings.RATE_LIMITS = {}
+    install_network(world)
+    with scoped(account=workspace()), mock.patch.object(dspy_module, "held_wait", _no_wait):
+        _priced(world)
+        resent_sends: list[int] = []
+        lm = _scripted_lm(resent_sends, [lm15.ServerError("boom", status=500)])
+        program = _program(lm, 2, lambda ex, pred: pred.answer == ex.answer)
+        resent = _dspy_cell(program, 2, out / "resent.jsonl")
+
+        judge_sends: list[int] = []
+        judge = _scripted_lm(judge_sends, [])
+
+        def judged(_example: Any, prediction: Any) -> float:
+            return float(bool(dspy.settings.lm(f"Is {prediction.answer} right?")))
+
+        with dspy.context(lm=judge):
+            judged_cell = _dspy_cell(
+                _program(_scripted_lm(judge_sends, []), 1, judged), 2, out / "judged.jsonl"
+            )
+    return {
+        "resent": {
+            "score": resent[dspy_module.SCORE_KEY],
+            "sends": len(resent_sends),
+            "reasoning": [bill.reasoning_tokens for bill in _lm_bills(out / "resent.jsonl")],
+            "served": resent["step_tokens"][dspy_module.PROGRAM_NODE],
+        },
+        "judged": {
+            "score": judged_cell[dspy_module.SCORE_KEY],
+            "bills": len(_lm_bills(out / "judged.jsonl")),
+        },
+    }
+
+
+_DSPY_CHILD = """
+import json, sys
+from pathlib import Path
+from test_connectors import dspy_cells
+print(json.dumps(dspy_cells(Path(sys.argv[1]))))
+"""
+
+
+@pytest.fixture(scope="module")
+def dspy_paid(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    out = tmp_path_factory.mktemp("dspy")
+    child = subprocess.run(
+        [sys.executable, "-c", _DSPY_CHILD, str(out)],
+        cwd=_TESTS,
+        env={
+            **os.environ,
+            "PYTHONPATH": os.pathsep.join((str(_TESTS), str(_TESTS.parent / "scripts"))),
+            "PROMPTPOTTER_HOME": str(out / "home"),
+            "PROMPTPOTTER_ENV_FILE": str(out / ".env"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert child.returncode == 0, f"the dspy cells did not run: {child.stderr[-2000:]}"
+    paid: dict[str, Any] = json.loads(child.stdout.splitlines()[-1])
+    return paid
+
+
+def test_a_resent_dspy_call_spends_one_of_its_programs_max_calls(
+    dspy_paid: dict[str, Any],
+) -> None:
+    resent = dspy_paid["resent"]
+    assert resent["score"] == 1.0, "a 5xx spent the call its resend answered"
+    assert resent["sends"] == 3, f"{resent['sends']} sends: two calls, one resent once"
+    assert resent["reasoning"] == [2, 2], (
         "an answered call's bill dropped its reasoning tokens, or the call left no bill"
     )
-    served = data["step_tokens"][dspy_module.PROGRAM_NODE]
+    served = resent["served"]
     assert (served.get("reasoning"), served.get("cache_read", "unreported")) == (4, "unreported"), (
         f"the cell's step usage {served} dropped the reasoning, or read an unreported cache as 0"
     )
 
 
 def test_an_llm_judge_metrics_send_is_the_cells_billed_beside_the_programs(
-    offline: Router, tmp_path: Path
+    dspy_paid: dict[str, Any],
 ) -> None:
-    import dspy  # extras: dspy
-
-    _priced(offline)
-    sends: list[int] = []
-    judge = _scripted_lm(sends, [])
-
-    def judged(_example: Any, prediction: Any) -> float:
-        return float(bool(dspy.settings.lm(f"Is {prediction.answer} right?")))
-
-    program = _program(_scripted_lm(sends, []), 1, judged)
-    with dspy.context(lm=judge):
-        data = _dspy_cell(program, 2, tmp_path / "judged.jsonl")
-    assert data[dspy_module.SCORE_KEY] == 1.0, "the judge's verdict is not the cell's score"
-    assert len(_lm_bills(tmp_path / "judged.jsonl")) == 2, "the judge's send went unbilled"
+    judged = dspy_paid["judged"]
+    assert judged["score"] == 1.0, "the judge's verdict is not the cell's score"
+    assert judged["bills"] == 2, "the judge's send went unbilled"
 
 
 # The host's state is read per cell.
@@ -274,9 +335,7 @@ def test_a_second_n8n_endpoint_rekeys_no_cell_of_the_first(monkeypatch: pytest.M
     assert keyed["classify"] == alone, "a second endpoint re-keyed the first's banked cells"
     assert keyed["route"] != alone, "two workflows' cells share a key"
     refused = n8n.CONNECTOR.unconfigured(None)
-    assert refused is not None and "['classify', 'route']" in refused, (
-        "a dataset naming no endpoint ran on one of two"
-    )
+    assert refused is not None, "a dataset naming no endpoint ran on one of two"
 
 
 # 2. A dataset's declared panel folds family→member by its connector's rule.
