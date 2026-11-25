@@ -768,10 +768,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### wave-5 · webapp (what webapp-1 left)
 
-- **A short landscape screen leaves its pane a 30px strip**: at 844×390 on touch the masthead
-  (~200px), nav (56px) and remote bar (~60px) stay fixed; nothing is under the bar any more, but a
-  pane shows less than one row. Root: the masthead scrolls away with the pane on a short viewport.
-  **Re-test:** at landscape-844 touch the samples pane shows ≥ 3 rows.
 - **An open panel lags its trigger by a frame**: `ui/overlay.ts::useAnchored` re-places a popover
   from `requestAnimationFrame`, and follows a trigger scrolled out of its pane over the masthead;
   `e2e/harness.ts::everyTapLands` re-reads a cover two frames on for it. Root: CSS anchor

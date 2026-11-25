@@ -96,7 +96,7 @@ without being identical — each run leaves inner-cycle residue the next re-meas
 what took the third pass to 80.4%. It is there to catch a tape that has stopped answering at all; a
 bar tuned to whatever last passed asserts nothing.
 
-## Three rules for anything added here
+## Four rules for anything added here
 
 Each binds one helper in `harness.ts` and is argued where it binds:
 
@@ -106,3 +106,5 @@ Each binds one helper in `harness.ts` and is argued where it binds:
 - **The console guard is the point** (`BENIGN`, `EXPECTED_4XX`) — it is `auto`, so no spec can
   forget it, and it stays empty of anything the app itself emits.
 - **A hash-only `goto` does not remount** (`open`) — navigate with it, never `page.goto`.
+- **A layout check reads what is drawn** (`drawn`, the `reads` fixture) — it waits until no read
+  the document sent is open, so a row its read has not yet answered can never pass unchecked.
