@@ -5,7 +5,8 @@ from __future__ import annotations
 import functools
 import glob
 import re
-from collections.abc import Callable, Mapping
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping
 from enum import Enum
 from io import BytesIO
 from pathlib import Path, PurePosixPath
@@ -80,6 +81,8 @@ from promptpotter.infrastructure.store.io import (
     complete_lines,
     parse_yaml,
     read_bytes_optional,
+    read_lines,
+    rewrite_lines,
     write_lock_name,
 )
 from promptpotter.infrastructure.store.layout import (
@@ -141,7 +144,8 @@ class Fate(Enum):
     # is: kept, and one that does not load refuses a landing until a migration rewrites it.
     SURVIVOR = "SURVIVOR"
     # Kept while it loads, and dropped by a landing once it does not, which says so: what is
-    # content-keyed and paid for, or a sign-in its person makes again.
+    # content-keyed and paid for, or a sign-in its person makes again. A line file drops by the
+    # row (`Kind.drops_rows`), counted by why.
     CACHE = "CACHE"
     # Dropped by a reset. One a landing cannot prove (it does not load, or its fold refuses) goes
     # with its run unit (`run_unit`), which the landing says; one a live run reaches refuses it.
@@ -231,6 +235,11 @@ class Kind(NamedTuple):
     @property
     def per_line(self) -> bool:
         return self.glob.endswith(".jsonl") and not isinstance(self.shape, FoldedLines)
+
+    @property
+    def drops_rows(self) -> bool:
+        """A line cache a landing proves row by row: a row that does not load drops, the rest kept."""
+        return self.fate is Fate.CACHE and self.per_line and not isinstance(self.shape, Opaque)
 
     @property
     def authored(self) -> bool:
@@ -737,15 +746,51 @@ def load(path: Path, found: Found, staged: bytes | None) -> None:
 LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError, EOFError)
 
 
+def _why(exc: Exception) -> str:
+    if isinstance(exc, ValidationError):
+        return f"ValidationError: {validation_reason(exc, shown=3)}"
+    return " ".join(f"{type(exc).__name__}: {exc}".split())
+
+
 def unloadable_why(path: Path, found: Found, *, staged: bytes | None) -> str | None:
     """Names where and why, never the refused value: a survivor's may be a key."""
     try:
         load(path, found, staged)
-    except ValidationError as exc:
-        return f"ValidationError: {validation_reason(exc, shown=3)}"
-    except LOAD_ERRORS as exc:
-        return " ".join(f"{type(exc).__name__}: {exc}".split())
+    except (ValidationError, *LOAD_ERRORS) as exc:
+        return _why(exc)
     return None
+
+
+def _kept_rows(kind: Kind, lines: Iterable[str]) -> tuple[list[str], Counter[str]]:
+    """Each line *kind*'s reader takes, and each it refuses counted by why."""
+    shape = kind.shape
+    assert isinstance(shape, TypeAdapter | Parsed), f"{kind.name} drops no rows: it parses none"
+    kept: list[str] = []
+    dropped: Counter[str] = Counter()
+    for line in lines:
+        try:
+            if line.strip():
+                _check(shape, kind, line.encode("utf-8"))
+        except (ValidationError, *LOAD_ERRORS) as exc:
+            dropped[_why(exc)] += 1
+        else:
+            kept.append(line)
+    return kept, dropped
+
+
+def unloadable_rows(path: Path, found: Found) -> Counter[str]:
+    """A `Kind.drops_rows` file's rows its reader refuses, by why: what `drop_unloadable_rows` drops."""
+    return _kept_rows(found.kind, read_lines(path))[1]
+
+
+def drop_unloadable_rows(path: Path, kind: Kind) -> Counter[str]:
+    """Asked again at the act, under the file's write lock, carrying what an append landed since."""
+
+    def keep(lines: list[str]) -> tuple[list[str] | None, Counter[str]]:
+        kept, dropped = _kept_rows(kind, lines)
+        return (kept if dropped else None), dropped
+
+    return rewrite_lines(path, keep)
 
 
 def _schema(shape: Shape) -> object:

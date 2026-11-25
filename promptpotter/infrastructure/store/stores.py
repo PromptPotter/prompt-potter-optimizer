@@ -260,22 +260,28 @@ def tenant_stores(projects_root: Path, workspace: WorkspaceDir) -> Stores:
     return build_stores(default_identity(tenant_id=workspace.name), projects_root=projects_root)
 
 
-def inner_sandbox_store(stores: Stores, outer: CycleHop) -> Stores | None:
-    """Anchored on ``shared_root``, invariant across depth, exactly as the sandbox's writer is. The
-    key is flat, so the outer hop must be a cycle of *stores*: else a chain splices in any sandbox."""
-    if not stores.campaigns.cycle_dir(outer).is_dir():
-        return None
-    sandbox_root = inner_sandbox_dir(stores.shared_root, str(stores.tenant_id), outer)
-    if not (sandbox_root / stores.tenant_id).is_dir():
-        return None
+def sandbox_store(stores: Stores, outer: CycleHop) -> Stores:
+    """THE build of *outer*'s L4 sandbox under *stores*: anchored on ``shared_root``, invariant
+    across depth. Only campaign STATE is sandboxed; the caches stay on the real tenant tree."""
     built = build_stores(
         stores.identity,
-        projects_root=sandbox_root,
+        projects_root=inner_sandbox_dir(stores.shared_root, str(stores.tenant_id), outer),
         install_datasets_root=stores.install_datasets_root,
         research_datasets_root=stores.research_datasets_root,
         shared_root=stores.shared_root,
     )
     return replace(built, inside=(*stores.inside, outer))
+
+
+def inner_sandbox_store(stores: Stores, outer: CycleHop) -> Stores | None:
+    """A reader's: the key is flat, so the outer hop must be a cycle of *stores*, else a chain
+    splices in any sandbox; ``None`` where none was written."""
+    if not stores.campaigns.cycle_dir(outer).is_dir():
+        return None
+    sandbox_root = inner_sandbox_dir(stores.shared_root, str(stores.tenant_id), outer)
+    if not (sandbox_root / stores.tenant_id).is_dir():
+        return None
+    return sandbox_store(stores, outer)
 
 
 def descend_store(stores: Stores, hops: CyclePath) -> Stores:

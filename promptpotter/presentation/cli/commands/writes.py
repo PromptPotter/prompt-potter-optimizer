@@ -167,6 +167,8 @@ def _render_landing(landing: Landing, *, written: bool, last: LandedStamp | None
     lines += landing.said
     lines += [f"unknown {path}" for path in landing.unknown]
     lines += [f"unloadable {one.said}" for one in landing.unloadable]
+    if landing.tally:
+        lines.append(f"in all: {landing.tally}")
     if landing.refusal is None:
         lines.append(f"{'landed' if written else 'would land'}: proven {landing.proven:,} file(s)")
     else:
@@ -222,9 +224,6 @@ def _render(mode: str, report: ArchiveReport, *, dataset: str | None) -> str:
     lines += [f"  {note}" for note in report.notes]
     for role, n in sorted(report.rows_skipped_by_role.items()):
         lines.append(f"  skipped {n:5d} x {role}")
-    if report.breaks:
-        verb = "broke" if report.applied else "breaks"
-        lines.append(f"  {verb} {len(report.breaks)} run(s): {', '.join(report.breaks)}")
     if not report.applied and report.files_touched:
         lines.append("\nDry run. Re-run with --apply to write.")
     if mode in ("purge-cold", "reclaim") and not report.applied and report.files_touched:
@@ -247,11 +246,6 @@ def _render_inventory(inv: ArchiveInventory, *, dataset: str | None) -> str:
                 f"  {row.key[:23]:<24}{row.configurations:>8}{row.answers:>9}"
                 f"{row.hot_bytes / _MB:>10.2f}{row.cold_bytes / _MB:>10.2f}"
             )
-    lines.append(f"\n  {'entry':<24}{'dataset':<24}runs it serves")
-    for entry in inv.serves:
-        lines.append(
-            f"  {entry.config_key[:23]:<24}{entry.dataset[:23]:<24}{', '.join(entry.runs)}"
-        )
     if inv.orphan_index_rows:
         lines.append(
             f"\n{inv.orphan_index_rows} index row(s) have no answer behind them — a claim rather "

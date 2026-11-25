@@ -399,7 +399,7 @@ def _resolve_tasks(panel: Mapping[str, Any]) -> dict[str, Any]:
     return {**panel, "tasks": [by_id[i] for i in wanted]}
 
 
-def _extract_experiment(panel: HarborPanel) -> list[dict[str, Any]]:
+async def _extract_experiment(_stores: Stores, panel: HarborPanel) -> list[dict[str, Any]]:
     if not (panel.agent or {}).get("environment"):
         raise PayloadInvalidError(
             "harbor connector: the panel's `agent` declares no `environment`."

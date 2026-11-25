@@ -279,7 +279,8 @@ class MeasuredCell:
 
     @classmethod
     def from_wire(cls, row: Mapping[str, object]) -> MeasuredCell:
-        """Tolerant of what a producer omits, deaf to undeclared keys, strict on the sample key."""
+        """Tolerant of what a producer omits, deaf to undeclared keys (a filed answer refuses them:
+        `FiledAnswer.from_wire`), strict on the sample key."""
         key = row.get("sample_key")
         if not isinstance(key, str) or not key:
             raise KeyError(f"a measured cell names its sample; this record carries {key!r}")
@@ -350,6 +351,7 @@ _CELL = WireRecord.of(
     "MeasuredCellRecord",
     "A :class:`MeasuredCell` on the wire, as :meth:`MeasuredCell.wire` writes it.",
 )
+CELL_KEYS: frozenset[str] = _CELL.keys
 
 _SAYS_EVERYTHING = MeasuredCell(
     sample_key="k",

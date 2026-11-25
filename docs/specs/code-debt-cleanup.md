@@ -15,18 +15,12 @@ row it closes.
 
 ### batch/26 · admit-2 (links 1-5 landed; the rows its cap left)
 
-- **A seat refused before it runs keeps its observers**: `runner/inner/spawn.py` (~:364) never releases
-  the observers it opened when `admission.py::slotless_share` refuses. Action: the observers open after
-  admission, or close on its refusal. **Rides with:** the slotless-doors row below. **Re-test:** a test
-  refuses a seat at `slotless_share` and finds no open observer.
-- **The embedded and inner runs still open their cycles their own way**: `jobs/launcher/launch.py::hold`
-  opens every held launch's cycle, but `embedded_run.py::run_campaign` and
-  `runner/inner/spawn.py::_open_seat` mint or resume through `admission.py::slotless_share`, and the
-  embedded resume opens its cycle before it admits (its campaign's own refusals,
-  `admission.py::refuse_campaign`, are already asked first there). Action: a fork is opened under a
-  carried admission, and the slotless doors open through the request kind's one `open`.
-  **Rides with:** admit-2, whose Owns gain `runner/inner/spawn.py::_open_seat`. **Re-test:**
-  `git grep -n "slotless_share(" -- promptpotter/application` lists no opener of its own.
+- **A fork is not opened under a carried admission**: `jobs/launcher/launch.py::hold` opens every held
+  launch's cycle, and the slotless doors (`embedded_run.py::run_campaign`,
+  `runner/inner/spawn.py::_open_seat`) admit through `admission.py::admit_slotless` before they mint
+  and run through `run_job.py::run_held_job`, but mint or resume beside it. Action: a fork is opened
+  under a carried admission, and the slotless doors open through the request kind's one `open`.
+  **Rides with:** admit-2. **Re-test:** `git grep -n "mint(" -- promptpotter/application/runner/inner/spawn.py promptpotter/application/embedded_run.py` is empty.
 - **A start's release is still hand-rolled at each start site**: `admission.py::RunStart.release` is the
   one release, but 8 `except BaseException: … release(exc)` blocks across `jobs/launcher/` and
   `commands/launching.py`, and `embedded_run.py`'s `to_thread(start.release, exc`, call it by hand, and `jobs/launcher/head_to_head.py::AdmittedHeadToHead.launched`
@@ -52,7 +46,7 @@ row it closes.
   `git grep -n "unit.parent.parent" -- promptpotter/application/maintenance/landing.py` is empty.
 - **The embedded launch is not a command**: `embedded_run.py::run_campaign` and `::run_head_to_head`
   open their own session but file no `CommandRecord`; `run_campaign` admits through
-  `admission.py::slotless_share` and mints itself, because a DSPy `program` is an in-memory object no
+  `admission.py::admit_slotless` and mints itself, because a DSPy `program` is an in-memory object no
   payload carries. Action: `run_campaign` files `mint-campaign` or `start-run` with an `EmbeddedRun`
   holder, the program held by the filing process. **Rides with:** admit-2. **Re-test:** an embedded
   `run_campaign` leaves a `CommandRecord` in the commands log (today `commands/dispatcher.py` builds the
@@ -63,12 +57,6 @@ row it closes.
   re-checks admission and spawns it when the slot frees; `jobs/CLAUDE.md`'s rule ("a queued job's intent
   never leaves the process that authenticated it") is restated in the same link. **Rides with:**
   admit-2. **Re-test:** `resume --step-rounds 1` behind a running cycle; it starts when the slot frees.
-- **The inner door mints its seat before its admission**: `runner/inner/spawn.py::_run_inner_campaign`
-  calls `_open_seat` (`mint(` at `:335`) and only then `slotless_share` (`:367`) admits, so a refusal
-  leaves a minted seat. Action: admit, then mint; the reorder moves the enclosing book's room and the L4
-  equals-main, so it lands with a paid L4 re-measure. **Rides with:** admit-2, whose Owns hold
-  `spawn.py::_open_seat`. **Re-test:** `git grep -n "mint(\|slotless_share(" -- promptpotter/application/runner/inner/spawn.py`
-  lists the admission before the mint.
 - **Three launch faults from a code review (reported; verify each at its line first)**: `jobs/launcher/head_to_head.py:178`
   leaves a partial mint's arms unstamped, so a retry refuses `arm_taken`; `mint_and_start.py:108` and
   `checkin.py:93` leak the `BackendClient` they open when the mint is refused; ties between
@@ -304,16 +292,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   **Rides with:** bkeys-2. **Re-test:** renaming a field the trace reads leaves `behaviour_keys.json`
   unchanged.
 
-- **An L4 cell's key holds its config, not what its session loads** (✓): `InnerTaskSpec`
-  (`runner/inner/tasks.py::InnerTasks`: node config, laid campaign identity, treatment, estimator)
-  skips what the inner session loads live (`wiring.py:228-307`: `origin.yaml`, the `source:`
-  cut and recipe, `task.md` framing, the pipelines walk, the backend revision), and pins freeze at outer
-  run init while the session loads at each spawn; over-keying: `Seat.id` a label inside the pin, axes
-  key order and mixed-manifest chain order. Root: the instrument hashes the seat's
-  `MintPlan.origin_hash` plus its `measured_address`, resolved at the outer run's init (one async
-  resolve and one backend read per seat), which `dataset_access.py::dataset_experiment`'s synchronous
-  resolve cannot host. **Rides with:** bkeys-2. **Re-test:** an edit to an inner `task.md` moves the
-  pin of every seat on that dataset.
 - **The paid L4 browser walk's stop was sized for one inner round** (reported):
   `research/datasets/promptpotter-self/e2e/dataset.yaml:30`'s `usd: 0.05` predates the depth-2 floor,
   and the same stop now pays the held-out seat's outer bench passes (the origin's, one per adoption),
@@ -358,7 +336,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   validator and the readers' None branches deleted. A reshape wipes run data. **Re-test:**
   `git grep -c "_state_fits_content" -- promptpotter/domain/paired_reading.py` is 0.
 - **Fields written, never read: 27 left** (`scripts/complexity_ledger.py::_unread_fields`, the
-  `p_unread_fields` ceiling). `InnerCellFacts.origin_headroom` sits in the hashed `l4/proxies.py`. Action: each goes, or names its reader. **Re-test:** the ceiling is 0.
+  `p_unread_fields` ceiling). Action: each goes, or names its reader. **Re-test:** the ceiling is 0.
 - **`SampleScoredRecord.running` stamps a running fold on every cell** (9.3 % of a 1.5 MB ledger). Its
   readers (`Narration.fold`, `StandingArm.fold`, the live board's rows) need the scorer's evaluators,
   which no domain fold holds. Action: the readers fold `StandingArm.cells` through
@@ -460,12 +438,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `_MAX_ATTEMPTS` reads closed after that merge while the relay still resends; count the relay's
   resends for one 5xx instead (`grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
   on master, `max_attempts` in `pipeline.json` on `xconn`).
-- **An L4 launch never probes the connectors its inner cells name** (the C0 re-measure at landing 72
-  halted on `TERMNORM_ENDPOINTS is unset` after its mint): `admission.py::probe_backend` probes the outer
-  backend alone, so an inner cell's connector fails per cell inside `runner/inner/spawn.py`, once the
-  cycle is minted and billed. Root: the outer preflight probes every connector its inner cells
-  resolve. **Rides with:** xconn 3, the probe's link. **Re-test:** an L4 launch with an inner
-  connector's endpoints unset is refused before its mint, naming the connector.
 
 ### batch/29 · mcp
 
@@ -503,10 +475,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   for a cheap model; `usd_text` and webapp `fmtUsd` are one rule; `run_standing.py` spells a third.
   Open (operator): the rule (significant digits under a dollar is one candidate). **Rides with:** forks 1.
   **Re-test:** `git grep -c -E '\$\{[^}]*:[,]?\.[0-9]f\}' -- promptpotter`.
-- **An archived answer's outputs are read off today's backend**: `scoring/measurement_log.py::open_cell`
-  reads the live declaration, because an `ArchiveEntry` records only `node_configs`. Action: a per-node
-  output-key map filed with the answer; a replay reads the bank. **Rides with:** forks 2. **Re-test:**
-  `git grep -n "dataset_pipeline(" -- promptpotter/application/scoring/measurement_log.py`.
 - **`api_keys.json` holds account keys in plaintext at rest.** Action: encrypt under a box key, with its
   survivor migration. **Rides with:** forks 4. **Re-test:** `cat` one.
 
@@ -710,7 +678,7 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `enclosed_as` line instead of calling it; `tests/factories.py::spend_book(enclosing=…)` nests a book a
   second way; `spend_book.py::_ENCLOSED = "backend"` is what a nested book falls back to where its
   spawner's pass names no kind; `RunScope.depth` / `InstrumentMode.depth` restate `instrument is not
-  None` at `MAX_INSTRUMENT_DEPTH = 1`. Root: `enter_inner_cell` nests the book (enclosing book and
+  None` (L4 is one level deep, `docs/concepts/l4.md` § Depth). Root: `enter_inner_cell` nests the book (enclosing book and
   kind together, every spawning pass naming its kind), and depth goes. **Held:** `_ENCLOSED` is also
   the hold tree's kind for a nested cell's hold with no resource (`SpendBook._filed`, `_out`), where
   an outer search's inner cell IS its backend: decide what names that kind before cutting it.
@@ -808,32 +776,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 These land in the re-key windows, `W1` (keys, address, cell key and archive row, one wipe) and `W2`
 (ledger record shapes), each row naming its window and chain.
 
-- **An inner campaign's id is 24 bits of its content**: `runner/inner/spawn.py::inner_campaign_id`
-  cuts `stable_hash([spec.key(), resolved_overrides(overrides)], length=6)`, and `_open_seat` lets the
-  campaign that exists decide, so two `(cell, arm edit)` pairs on one id continue one campaign
-  (`_continue_inner_campaign`: a drift refusal or a divergence fork, never a fresh mint). One desk
-  sandbox holds 92 inner campaigns (birthday bound ~0.03 %, ~3 % at 1,000 cells; no collision seen),
-  and the id is what `InnerRunAddress.campaign_id` files in the archive. Root: a content-derived id is
-  cut at the width its population needs (12 hex, as a root cycle id); every inner campaign directory
-  renames. **Window:** W1 · l4-key, with the row below. **Re-test:** `git grep -n "length=6" -- promptpotter/application/runner/inner/spawn.py` is empty.
-- **An archived answer carries its run's vocabulary and its run's address, and both are run data**:
-  the CACHE row's `domain/l4/inner_facts.py::InnerCellFacts` holds `stop_reason: StopReason`, a
-  `floor_reason` sentence and `run: InnerRunAddress`, so a `StopReason` rename fails every archived
-  cell that stopped on it; `domain/sample.py::FiledAnswer.filed_by` is `CycleHop | None` (11,997 desk
-  rows unstamped, `archive_maintenance.py::_UNSTAMPED`), carries no `Job.workspace`, and on 48,589 of
-  111,614 stamped rows names a wiped campaign. New beside "`floor_reason` and the bench read different
-  rounds" and "The abort knob and the floor disagree": those say what it says, this that it is filed. Root: an archived cell holds what was measured, not its run's enum or
-  address; one strict reshape with "An archived answer's outputs are read off today's backend", a row
-  that no longer fits dropped. **Window:** W1 · l4-key. **Re-test:** `git grep -nE "StopReason|filed_by: CycleHop \| None" -- promptpotter/domain/l4/inner_facts.py promptpotter/domain/sample.py` is empty.
-- **The archive is a cache no landing proves: its row reads tolerant, its nested facts strict**:
-  `store/data_root.py::_ARCHIVE_SHAPES` proves a cell file by `Parsed(answer_of, FiledAnswer)`, deaf
-  to undeclared keys (`domain/scoring.py::MeasuredCell.from_wire`) over an open `cell_report`, while
-  `domain/l4/proxies.py::inner_facts_of` reads `InnerCellFacts` on `extra="forbid"`: on the desk
-  `FiledAnswer` loads 123,611 of 123,611 rows and `inner_facts_of` raises on 50 of 325 L4 outer cells
-  (four `cell_report.inner` generations; 6,582 rows keep a retired `source`). New beside "An archived
-  L4 outer cell carries no `floored`": the proof stops at `FiledAnswer`, so no landing says it. Root:
-  the row's `Shape` is its one strict reader, nested reports typed by their connector; a row that no
-  longer loads is dropped at the landing, said. **Window:** W1 · l4-key, last. **Re-test:** does `compact-archive inventory` on a copy of the desk root read every L4 outer cell without a `ValidationError`?
 - **A race decision names its own cells and copies its rivals'**: `potter/race.py::_RaceDecision`
   holds `candidate_cells` (keys, re-read at replay) beside `prior_histories` (every rival's per-cell
   `fitness`/`objective` by value), since `resume_and_fork/replayers.py::ReplayContext` holds "ONE round
@@ -887,45 +829,17 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
-- **The inner measurand differs by benchmark**: justlogic seats inherit `justlogic/family.yaml`'s
-  `per_cell` token discount while hotpotqa and legalbench score raw `em_match` / `label_match`, and
-  hotpotqa's `escalation.l1_patience: 5` differs from the others; `runner/inner/tasks.py::_lever`
-  leaves knobs out, so nothing flags it. Action: one inner measurand and one ladder across seats, or a
-  refusal. **Held:** a decision. **Re-test:** the three definitions' `scoring` and `escalation` blocks.
-- **Two builders of one sandbox store**: `infrastructure/store/stores.py::inner_sandbox_store` (the
-  reader, from `(stores, hop)`) and `runner/inner/spawn.py::sandbox_stores` (the writer, from an
-  `infrastructure/run_scope.py::InnerSpawnContext`, which carries the spawner's fields but not its
-  `Stores`, so it cannot call the reader). Action: the spawn context carries the spawner's `Stores`,
-  and the writer builds through the one builder, its existence checks off. **Held:** none claims it. **Re-test:** `git grep -n "def inner_sandbox_store\|def sandbox_stores" -- promptpotter`.
-- **The outer reads θ beside a held-out lift that carries no SE**: Shape: no panel ranks on θ
-  (`potter/dispatch/injections/panels.py::_transcript_plan` sorts on `grade.fitness`), but the
-  in-sample θ lift (`InnerCellFacts.mean_round_delta`, which scores nothing) rides
-  `domain/l4/proxies.py` as the cell's `lift` term (`_FACT_OF_KEY`) and as `_level`, the level
-  `panel_precision` reads, and reaches the outer prompt in each cell's reply
-  (`runner/inner/spawn.py`: `D{delta}` beside `B{held_out_lift}`), while
-  `OuterSampleProxies.held_out_lift` has no SE to separate on. Action: serve the held-out lift's SE
-  (a binomial 20-row bench a pass) and rank and separate on it; θ stays a column. **Held:** a served
-  SE. **Re-test:** `OuterSampleProxies.model_fields` holds an SE beside `held_out_lift` (today
-  `floored`, `held_out_lift`).
+- **The held-out lift's SE is never served**: `OuterSampleProxies.held_out_lift_se` reads
+  `BenchCurve.area`'s estimate, which `scoring/paired.py::_lift` builds with `se=None` although
+  `shared/statistics.py::paired_diff_posterior` took it, so `domain/l4/proxies.py::panel_precision`
+  reads no L4 panel and the outer reply (`runner/inner/spawn.py`) carries no band. Action: a paired
+  t's `Estimate` carries its SE. **Held:** `scoring/` is ml-6/ml-7's. **Re-test:**
+  `git grep -c "se=None" -- promptpotter/application/scoring/paired.py` (today 1, target 0).
 - **"Which benchmark a row measures" is spelled twice**: Shape: `potter/members.py::_strata` reads
   `measured_dataset or ""` where every other reader takes `Sample.measured_dataset` raw (None = the
   filed one), and `BenchScope` partitions by benchmark under the word `RulerScope` owns. Action:
   `_strata` keys on the field raw; `BenchScope` takes a benchmark name. **Held:** l4-outer owns
   `potter/`, l4-runs `runner/bench.py`. **Re-test:** `git grep -n "measured_dataset or\|BenchScope" -- promptpotter`.
-- **`floor_reason` and the bench read different rounds**: Shape: `domain/l4/proxies.py::floor_reason`
-  reads the ended cycle's standing closes (`runner/inner/spawn.py::_run_inner_campaign`), while the
-  bench and `n_rounds_after_origin` read the line (`runner/entry.py`), so after a fork "no proposal
-  reached a cell" is judged without the rounds the rebase discarded. Action: the spawn reads the
-  line's spent rounds (`LineSpan.own`). **Re-test:** a forked inner line whose pre-fork rounds all spoiled.
-- **The abort knob and the floor disagree**: Shape: `potter/knobs.py`'s `terminate_capability` names
-  an unrecoverable upstream fault as an abort's intended use, while `domain/l4/proxies.py::floor_reason`
-  floors every `OPTIMIZER_ABORT` as prompt-owned, one after a real held-out gain included. Action: an
-  abort carries who owns it, and only a prompt-owned one floors. **Held:** a decision. **Re-test:** an
-  inner run aborted on a backend fault reads `floored` 1.
-- **An archived L4 outer cell carries no `floored`**: rows banked before `floored` became a row term
-  leave the `per_sample` of `research/datasets/promptpotter-self/family.yaml` unscored; no reader reads both
-  shapes. Action: none past the landing that ships it, which re-measures C0. **Held:** that landing.
-  **Re-test:** after it, `promptpotter-self` scores every outer cell it reads.
 - **`locus_crossover` re-crosses a measured or hosted child**: it edits every two-parent proposal, so
   a hosted recombination and a rejoined crossover child are crossed again (one call: the re-crossed
   id differs; l4-outer-5's report). Action: a crossover applies to a proposal it drew, never one it

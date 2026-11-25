@@ -164,7 +164,7 @@ async def price_head_to_head(stores: Stores, plan: HeadToHeadPlan) -> HeadToHead
     configs = [merge.cfg for merge in merges]
     # Every arm runs one environment (`SharedPart.environment`): the first resolves what all run.
     config = configs[0]
-    bank, _ = session_bank(stores, dataset, connector=connector, experiment=experiment)
+    bank, _ = await session_bank(stores, dataset, connector=connector, experiment=experiment)
     partition = partition_bank(bank.samples, config.dataset_split, seed=config.run_seed)
     cell = measured_cell_price(stores, bank.dataset_hash, merges[0].layers.fold().params)
     if cell is None:

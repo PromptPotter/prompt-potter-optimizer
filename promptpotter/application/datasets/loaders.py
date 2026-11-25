@@ -24,7 +24,7 @@ from promptpotter.infrastructure.store.dataset_access import (
     MATERIALIZED_PANEL_FILE,
     ResolvedDataset,
     dataset_connector,
-    dataset_panel_rows,
+    dataset_experiment,
     read_dataset_definition,
 )
 from promptpotter.infrastructure.store.io import write_bytes
@@ -426,7 +426,11 @@ def source_extra(dataset: ResolvedDataset) -> Extra | None:
     return None if src is None else src.kind.extra
 
 
-def has_source(dataset: ResolvedDataset) -> bool:
+def builds_bank(dataset: ResolvedDataset) -> bool:
+    """Whether rows no read holds are built: by a fetch's recipe, or at run init off the panel its
+    connector owns."""
+    if (connector := dataset_connector(dataset)) is not None and connector.owns_panel:
+        return True
     src = definition_source(dataset)
     return src is not None and (src.recipe in BANK_RECIPES or src.recipe in PANEL_RECIPES)
 
@@ -447,9 +451,8 @@ def _cut(loader: BankLoader) -> Bank:
 
 
 def fetch_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
-    """The ladder's last rung: it records the bank its recipe cut, and moves no label."""
-    if build_panel(stores, dataset):
-        return held_bank(stores, dataset) or Bank.of(())
+    """The ladder's last rung: it records the bank its recipe cut, and moves no label. A panel's
+    bank is built at run init alone (`wiring.py::session_bank`)."""
     src = definition_source(dataset)
     if src is None or src.recipe not in BANK_RECIPES:
         return Bank.of(())
@@ -459,11 +462,13 @@ def fetch_bank(stores: Stores, dataset: ResolvedDataset) -> Bank:
 
 
 def held_bank(stores: Stores, dataset: ResolvedDataset) -> Bank | None:
-    """No fetch, no write; a connector owning a panel answers from it ALONE, since a same-named bank is another instrument."""
+    """No fetch, no write; a connector owning a panel answers with the bank its newest mint
+    labelled ALONE (its build is run init's), since a same-named cut is another instrument; a panel
+    it cannot read raises as it would at that build."""
     connector = dataset_connector(dataset)
     if connector is not None and connector.owns_panel:
-        rows = dataset_panel_rows(stores, dataset)
-        return None if rows is None else Bank.of(samples_from_dicts(rows))
+        dataset_experiment(stores, dataset, connector)
+        return stores.tenant_datasets.labelled(dataset.name)
     src = definition_source(dataset)
     if src is None or src.recipe not in BANK_RECIPES:
         return stores.tenant_datasets.labelled(dataset.name)

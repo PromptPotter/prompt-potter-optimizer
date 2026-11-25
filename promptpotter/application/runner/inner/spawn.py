@@ -8,15 +8,20 @@ import asyncio
 import contextlib
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
-from dataclasses import replace
 from typing import Any, NamedTuple
 
 from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.initialization.session import Session
 from promptpotter.application.initialization.wiring import init_services
-from promptpotter.application.jobs.launcher.admission import campaign_refusal, slotless_share
+from promptpotter.application.jobs.launcher.admission import (
+    RunStart,
+    admit_slotless,
+    campaign_refusal,
+)
+from promptpotter.application.jobs.launcher.run_job import run_held_job
 from promptpotter.application.jobs.mint import (
     ConfigDriftError,
+    CyclePlan,
     mint,
     resolve_cycle_plan,
     resolve_resume,
@@ -26,9 +31,8 @@ from promptpotter.application.optimizer_manifest import (
     resolved_overrides,
 )
 from promptpotter.application.pipeline_resolve import laid_session
-from promptpotter.application.run_observers import build_run_observers
 from promptpotter.application.run_phase_control import RunControl
-from promptpotter.application.runner.entry import run_optimization
+from promptpotter.application.runner.bench import line_spans
 from promptpotter.application.runner.inner.tasks import (
     InnerTasks,
     ResolvedInnerPanel,
@@ -38,14 +42,13 @@ from promptpotter.application.runner.inner.tasks import (
     panel_cell,
 )
 from promptpotter.connectors.protocol import Connector, InProcessWorkload
-from promptpotter.domain.campaign import Campaign, CampaignCycle
-from promptpotter.domain.campaign_config import CycleConfig
+from promptpotter.domain.campaign import Campaign, CampaignCycle, Optimize
+from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cells import Seat
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.job import InnerRun
-from promptpotter.domain.l4.cells import InnerCells, InnerTaskSpec
-from promptpotter.domain.l4.inner_facts import InnerRunAddress
+from promptpotter.domain.l4.cells import InnerCells, cell_key
 from promptpotter.domain.l4.inner_origin import INNER_ORIGIN_KEY
 from promptpotter.domain.l4.proxies import (
     BENCH_ROWS_KEY,
@@ -60,14 +63,15 @@ from promptpotter.domain.layer_fold import Layer
 from promptpotter.domain.phases import ERROR_CATEGORY_INFO, StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.records.run_records import (
-    RoundStatement,
     RunPhaseRecord,
     SpawnedBy,
     SpawnedRecord,
 )
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import split_rendered_prompt
+from promptpotter.domain.spend import Budget, HeldBudget
 from promptpotter.infrastructure.llm.telemetry import bound_round
 from promptpotter.infrastructure.run_scope import (
     InnerSpawnContext,
@@ -82,7 +86,7 @@ from promptpotter.infrastructure.store.layout import (
     dataset_id_prefix,
     sandbox_owner_path,
 )
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores, sandbox_store
 from promptpotter.shared.errors import (
     CellSendRefusedError,
     CellUnscoreableError,
@@ -90,7 +94,6 @@ from promptpotter.shared.errors import (
     PayloadInvalidError,
 )
 from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.measurement_context import MAX_INSTRUMENT_DEPTH
 
 # An inner cycle's budget is ROUNDS, never a spend or token cap: those trip on token counts, which jitter.
 
@@ -115,10 +118,11 @@ def _spawn_provenance(ctx: InnerSpawnContext, round_num: int, query: str) -> dic
     }
 
 
-def inner_campaign_id(spec: InnerTaskSpec, overrides: Overrides) -> str:
-    """Content, never asker: the cell's key and the arm's edits, never why a pass ran."""
-    edits = stable_hash([spec.key(), resolved_overrides(overrides)], length=6)
-    return f"{dataset_id_prefix(spec.inner_dataset)}__{edits}"
+def inner_campaign_id(dataset: str, key: str, overrides: Overrides) -> str:
+    """Content, never asker: the cell's key (`cell_key`) and the arm's edits, at a root cycle id's
+    width."""
+    edits = stable_hash([key, resolved_overrides(overrides)], length=12)
+    return f"{dataset_id_prefix(dataset)}__{edits}"
 
 
 class _InnerCell(NamedTuple):
@@ -126,7 +130,7 @@ class _InnerCell(NamedTuple):
 
     ctx: InnerSpawnContext
     cell: Seat
-    spec: InnerTaskSpec
+    dataset: str
     overrides: Overrides
     campaign_id: str
 
@@ -138,35 +142,24 @@ def _resolve_inner_cell(sample: Sample, payload: dict[str, Any]) -> _InnerCell:
             "promptpotter connector: this run has no cycle to spawn an inner campaign under"
         )
     cells = _cells(ctx)
-    cell = panel_cell(sample)
-    arm = cells.own(cell, payload.get("optimizer_prompt_overrides") or {})
-    spec = cells.spec(cell)
-    campaign_id = inner_campaign_id(spec, arm)
-    return _InnerCell(ctx, cell, spec, arm, campaign_id)
-
-
-def sandbox_stores(ctx: InnerSpawnContext) -> Stores:
-    """Only campaign STATE is sandboxed; the caches stay on the real tenant tree via ``shared_root``."""
-    built = build_stores(
-        ctx.identity,
-        projects_root=ctx.inner_sandbox_root,
-        install_datasets_root=ctx.install_datasets_root,
-        research_datasets_root=ctx.research_datasets_root,
-        shared_root=ctx.shared_root,
-    )
-    return replace(built, inside=ctx.inside)
+    pinned = panel_cell(sample, cells.cells)
+    arm = cells.own(pinned.cell, payload.get("optimizer_prompt_overrides") or {})
+    dataset = cells.dataset(pinned.cell)
+    campaign_id = inner_campaign_id(dataset, pinned.instrument, arm)
+    return _InnerCell(ctx, pinned.cell, dataset, arm, campaign_id)
 
 
 def claim_sandbox(ctx: InnerSpawnContext) -> Stores:
     """Inside a cell, never at `tasks.py::inner_spawn_of`, which fires for EVERY cycle."""
     owned_by = ctx.inside[-1]
     owner = SandboxOwner(
-        tenant_id=str(ctx.identity.tenant_id),
+        tenant_id=str(ctx.stores.tenant_id),
         campaign_id=owned_by.campaign_id,
         cycle_id=owned_by.cycle_id,
     )
-    write_text(sandbox_owner_path(ctx.inner_sandbox_root), owner.model_dump_json())
-    return sandbox_stores(ctx)
+    sandbox = sandbox_store(ctx.stores, ctx.inside[-1])
+    write_text(sandbox_owner_path(sandbox.projects_root), owner.model_dump_json())
+    return sandbox
 
 
 def _banked_inner_rounds(store: CampaignStore, root: CycleHop) -> int:
@@ -177,7 +170,7 @@ def _banked_inner_rounds(store: CampaignStore, root: CycleHop) -> int:
 def inner_cell_envelope_s(sample: Sample, payload: dict[str, Any]) -> float:
     """``max(1, …)`` grants a fully-banked cycle the round it needs to replay and finalize."""
     cell = _resolve_inner_cell(sample, payload)
-    store = sandbox_stores(cell.ctx).campaigns
+    store = sandbox_store(cell.ctx.stores, cell.ctx.inside[-1]).campaigns
     campaign = store.load_campaign(cell.campaign_id)
     banked = _banked_inner_rounds(store, campaign.root_hop) if campaign else 0
     rounds = _cells(cell.ctx).held(cell.cell).campaign.optimization.budget.rounds
@@ -188,14 +181,14 @@ def inner_cell_envelope_s(sample: Sample, payload: dict[str, Any]) -> float:
 def inner_cell_hop(sample: Sample, payload: dict[str, Any]) -> CycleHop | None:
     """The hop holding the cell's campaign line, as the outer cell's heartbeat names it."""
     cell = _resolve_inner_cell(sample, payload)
-    store = sandbox_stores(cell.ctx).campaigns
+    store = sandbox_store(cell.ctx.stores, cell.ctx.inside[-1]).campaigns
     campaign = store.load_campaign(cell.campaign_id)
     return None if campaign is None else store.live_cycle(campaign.root_hop)
 
 
 def _continue_inner_campaign(
     session: Session, campaign: Campaign, train_data: Sequence[Sample]
-) -> tuple[Session, CycleConfig, SelectedOptimizer]:
+) -> CyclePlan:
     """``stop_reason_outcome`` governs scoring, never resumption."""
     store = session.store.campaigns
     # A rebase retires the root under `superseded_by`; the banked trajectory is its successor's.
@@ -215,11 +208,9 @@ def _continue_inner_campaign(
         )
     bound = session.bound(CampaignCycle(campaign, hop.cycle_id))
     try:
-        plan = resolve_resume(bound, campaign, train_data)
+        return resolve_resume(bound, campaign, train_data)
     except ConfigDriftError as refused:
         raise CellUnscoreableError(str(refused), spent={}) from refused
-
-    return plan.session, plan.cycle, plan.optimizer
 
 
 def _cells(ctx: InnerSpawnContext) -> InnerCells:
@@ -228,10 +219,13 @@ def _cells(ctx: InnerSpawnContext) -> InnerCells:
 
 
 class _Opened(NamedTuple):
+    """A seat admitted, then minted or resumed: its cycle, under the hold its run releases."""
+
     session: Session
     cycle: CycleConfig
-    train_data: list[Sample]
     optimizer: SelectedOptimizer
+    start: RunStart
+    held: HeldBudget
 
 
 def arm_layer(overrides: Overrides) -> Layer[str]:
@@ -241,91 +235,131 @@ def arm_layer(overrides: Overrides) -> Layer[str]:
     return Layer("arm", {"optimization": {"nodes": nodes}} if nodes else {})
 
 
+def _seat_rows(session: Session, dataset: str) -> list[Sample]:
+    if not (rows := list(session.bank.samples)):
+        raise ValueError(f"inner dataset {dataset!r} loaded zero samples")
+    return rows
+
+
+def _laid_seat(
+    session: Session, cells: InnerCells, cell: Seat, overrides: Overrides
+) -> tuple[Session, CampaignConfig]:
+    """*cell*'s instrument with the arm's edits laid last: what its seat runs, and its key reads."""
+    instrument = inner_instrument_config(
+        cell, cells.held(cell).campaign, solver=session.pipeline_schema.prompt_nodes()
+    )
+    armed = instrument.overlaid(arm_layer(overrides))
+    # The instrument stands in for the cell dataset's block: the outer campaign set every knob.
+    return laid_session(
+        session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))
+    )
+
+
+async def panel_rows(stores: Stores, panel: ResolvedInnerPanel) -> list[dict[str, Any]]:
+    """THE build of an outer's bank: each seat keyed (`cell_key`) by the origin it plans under
+    `Optimize`, before any purpose binds, in one session per seat dataset. A refusal any seat
+    owes refuses here, before the outer mints. ``ground_truth`` is ``None``: an L4 cell is graded
+    by its outer proxies, never a label."""
+    cells = panel.cells(stores)
+    keys: dict[str, str] = {}
+    for name in sorted(cells.by_dataset):
+        async with init_services(
+            dataset_name=name, identity=stores.identity, stores=stores
+        ) as session:
+            rows = _seat_rows(session, name)
+            for seat in (s for s in cells.cells if cells.dataset(s) == name):
+                plan = resolve_cycle_plan(*_laid_seat(session, cells, seat, {}), Optimize(), rows)
+                rounds = plan.cycle.config.optimization.budget.rounds
+                assert rounds is not None, "a panel lays its seats' rounds (`resolve_cells`)"
+                keys[seat.id] = cell_key(
+                    plan.cycle_id, rounds, plan.treatment.digest, cells.estimator
+                )
+    return panel.samples(keys)
+
+
 @asynccontextmanager
 async def _open_seat(cell: _InnerCell, store: Stores) -> AsyncIterator[_Opened]:
-    ctx, spec = cell.ctx, cell.spec
+    ctx = cell.ctx
     # The campaign that exists decides, never an id its origin content derives: a drifted origin
     # reaches the drift refusal rather than a fresh root.
     campaign = store.campaigns.load_campaign(cell.campaign_id)
     if campaign is not None and (refused := campaign_refusal(store, campaign)) is not None:
         raise CellUnscoreableError(str(refused), spent={}) from refused
     async with init_services(
-        dataset_name=spec.inner_dataset, identity=ctx.identity, stores=store
+        dataset_name=cell.dataset, identity=store.identity, stores=store
     ) as session:
         session.state.control = RunControl(
             commands=store.commands, enclosing=ctx.enclosing, acting=ctx.acting
         )
-        train_data = list(session.bank.samples)
-        if not train_data:
-            raise ValueError(f"inner dataset {spec.inner_dataset!r} loaded zero samples")
-        instrument = inner_instrument_config(
-            spec,
-            _cells(ctx).held(cell.cell).campaign,
-            solver=session.pipeline_schema.prompt_nodes(),
-        )
+        train_data = _seat_rows(session, cell.dataset)
         try:
-            armed = instrument.overlaid(arm_layer(cell.overrides))
-            # The instrument stands in for the cell dataset's block: the outer campaign set every knob.
-            session, config = laid_session(
-                session, ConfigLayers({}, armed.model_dump(mode="json", exclude_unset=True))
+            session, config = _laid_seat(session, _cells(ctx), cell.cell, cell.overrides)
+            plan = (
+                resolve_cycle_plan(session, config, ctx.purpose, train_data)
+                if campaign is None
+                else _continue_inner_campaign(session, campaign, train_data)
             )
-            if campaign is None:
-                minted = mint(
-                    resolve_cycle_plan(session, config, ctx.purpose, train_data),
-                    campaign_id=cell.campaign_id,
-                    adopting=None,
-                )
-                session, cycle, optimizer = minted.session, minted.cycle, minted.optimizer
-            else:
-                session, cycle, optimizer = _continue_inner_campaign(session, campaign, train_data)
         except PayloadInvalidError as refused:
             if refused.code != "optimizer_overlay":
                 raise
             # The arm's fault, banked on its cell in the selection's own words, before anything is sent.
             raise CellUnscoreableError(str(refused), spent={}) from refused
-        yield _Opened(session, cycle, train_data, optimizer)
+        # Admitted BEFORE the mint, as every slotless door is: a refusal mints no seat. Each send is
+        # admitted by its own book AND the ROOT's; its share bounds every checkpoint.
+        start, held = await asyncio.to_thread(
+            admit_slotless,
+            plan.cycle.config,
+            stores=store,
+            holder=InnerRun(cell.dataset),
+            at=None if campaign is None else plan.session.at,
+            requested=Budget(),
+            step_rounds=None,
+            sends=(),
+        )
+        stamps: CycleHop | None = None
+        try:
+            if campaign is None:
+                minted = mint(plan, campaign_id=cell.campaign_id, adopting=None)
+                stamps = minted.hop
+                await asyncio.to_thread(start.land, minted.hop, held)
+                session = minted.session
+            else:
+                session = plan.session
+        except BaseException as exc:
+            await asyncio.to_thread(start.release, exc, stamps=stamps)
+            raise
+        yield _Opened(session, plan.cycle, plan.optimizer, start, held)
 
 
 async def _run_inner_campaign(
     cell: _InnerCell,
     minted: list[CycleHop],
     spawned_by: dict[str, Any],
-) -> tuple[CycleResult, list[RoundStatement], str]:
+) -> tuple[CycleResult, list[RoundResult], str]:
     """Runs in a FRESH task, so every ContextVar bound below is this cell's alone. The rounds are
-    the ended cycle's standing closes, and the words its stop was declared in, off its ledger."""
+    the ones its LINE spent (`bench.py::LineSpan.own`), a rebase's discarded ones included, and the
+    words its stop was declared in, off its ledger."""
     store = claim_sandbox(cell.ctx)
     # Over the seat too: its init reads what this cell remembers.
     with scoped(memory=enter_inner_cell(cell.ctx, store.campaigns, cell.campaign_id)):
         async with _open_seat(cell, store) as opened:
-            session, config = opened.session, opened.cycle.config
+            session = opened.session
             session.store.campaigns.append(
                 session.hop, SpawnedRecord(spawned_by=SpawnedBy.model_validate(spawned_by))
             )
             minted.append(session.hop)
-            observers = await asyncio.to_thread(
-                build_run_observers, session=session, campaign_config=config
+            ended, result = await run_held_job(
+                opened.start,
+                session,
+                opened.cycle,
+                mode=RunMode(),
+                budget=opened.held,
+                optimizer=opened.optimizer,
             )
-            # Each send is admitted by its own book AND the ROOT's; its share bounds every checkpoint.
-            ended, result = await slotless_share(
-                config,
-                stores=session.store,
-                holder=InnerRun(cell.spec.inner_dataset),
-                at=session.at,
-                sends=(),
-                run=lambda held: run_optimization(
-                    opened.train_data,
-                    opened.cycle,
-                    session=session,
-                    observers=observers,
-                    budget=held,
-                    mode=RunMode(),
-                    optimizer=opened.optimizer,
-                ),
-            )
-            standing = ended.store.campaigns.standing_rounds(ended.hop, moment=None)
+            spans = line_spans(ended.store, ended.state.scoring.scorer, ended.hop)
             declared = ended.store.campaigns.last(ended.hop, RunPhaseRecord)
     assert declared is not None and declared.stop_reading is not None, "an inner run ends declared"
-    return result, [held.close for held in standing.rounds.values()], declared.stop_reading.said
+    return result, [rr for span in spans for rr in span.own], declared.stop_reading.said
 
 
 def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
@@ -334,7 +368,7 @@ def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
     the parent stands, and a CLI-only run runs no sweep."""
     if cell.ctx.enclosing[-1].cycle_id == cell.ctx.inside[-1].cycle_id:
         return
-    store = sandbox_stores(cell.ctx).campaigns
+    store = sandbox_store(cell.ctx.stores, cell.ctx.inside[-1]).campaigns
     if store.holder(hop) is None:
         store.delete_campaign(cell.campaign_id, keep_results=False)
 
@@ -342,17 +376,14 @@ def _reclaim_forks_partial(cell: _InnerCell, hop: CycleHop) -> None:
 async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, Any]:
     """One cell: an inner hop in the asker's sandbox, read by one law."""
     query = sample.query
-    depth = run_scope().depth
-    if depth >= MAX_INSTRUMENT_DEPTH:
-        raise CellUnscoreableError(
-            f"promptpotter connector: an inner run {depth} level(s) deep spawns no inner campaign "
-            f"(MAX_INSTRUMENT_DEPTH={MAX_INSTRUMENT_DEPTH}): the inner dataset's own connector "
-            "is 'promptpotter' — name an inner_benchmark on another backend in the panel.",
-            spent={},
-        )
     cell = _resolve_inner_cell(sample, payload)
     minted: list[CycleHop] = []
-    fresh = sandbox_stores(cell.ctx).campaigns.load_campaign(cell.campaign_id) is None
+    fresh = (
+        sandbox_store(cell.ctx.stores, cell.ctx.inside[-1]).campaigns.load_campaign(
+            cell.campaign_id
+        )
+        is None
+    )
     # Captured in the OUTER task: the inner task's context copy rebinds the round.
     spawned_by = _spawn_provenance(cell.ctx, bound_round(), query)
 
@@ -386,15 +417,13 @@ async def run_inner_cycle(sample: Sample, payload: dict[str, Any]) -> dict[str, 
     except CellUnscoreableError as unscored:
         # Every other no-evidence shape, which `measure_sample` resolves.
         raise CellUnscoreableError(f"{unscored}; {said}", spent=unscored.spent) from unscored
-    run = InnerRunAddress(sandbox=cell.ctx.inside[-1], campaign_id=cell.campaign_id)
-    facts = inner_cell_facts(result, rounds, run)
-    delta = "—" if facts.mean_round_delta is None else f"{facts.mean_round_delta:+.3f}"
-    held = "floored" if scored.held_out_lift is None else f"B{scored.held_out_lift:+.3f}"
+    lift, se = scored.held_out_lift, scored.held_out_lift_se
+    held = "floored" if lift is None else f"B{lift:+.3f}" + ("" if se is None else f"±{se:.3f}")
 
     data: dict[str, Any] = {
         # A summary line, not an answer to be matched: this cell carries no label, so add no hit/miss reader.
-        INNER_RESULT_KEY: [f"inner:{query} {held} D{delta}"],
-        **inner_cell_report(facts, scored),
+        INNER_RESULT_KEY: [f"inner:{query} {held}"],
+        **inner_cell_report(inner_cell_facts(result), scored),
         **({} if result.curve is None else {BENCH_ROWS_KEY: result.curve.rows}),
         # An inner campaign consumes its optimizer's ENTIRE outer config, so the stamp is its terminal.
         "terminal_node": _cells(cell.ctx).terminal(cell.cell),
@@ -424,7 +453,7 @@ def _pipeline_declaration(stores: Stores, experiment: ResolvedInnerPanel | None)
 def _identity_config(
     stores: Stores, experiment: ResolvedInnerPanel | None, _base_url: str
 ) -> dict[str, dict[str, Any]]:
-    """What reads every cell's number alike; what measures ONE cell is in its pin (`InnerTaskSpec.key`)."""
+    """What reads every cell's number alike; what measures ONE cell is in its pin (`cell_key`)."""
     cells = _inner_cells(stores, experiment)
     return {cells.chain[0]: {INNER_ORIGIN_KEY: cells.estimator}}
 
@@ -447,11 +476,6 @@ def promptpotter_wire_adapter(
     return payload
 
 
-def _extract_experiment(panel: ResolvedInnerPanel) -> list[dict[str, Any]]:
-    """``ground_truth`` is ``None``: an L4 cell is graded by its outer proxies, never a label."""
-    return panel.samples()
-
-
 async def _in_process_run(
     _workload: InProcessWorkload, sample: Sample, payload: dict[str, Any], _pairs: object
 ) -> dict[str, Any]:
@@ -471,7 +495,7 @@ CONNECTOR = Connector(
     name="promptpotter",
     execution="in_process",
     wire_adapter=promptpotter_wire_adapter,
-    extract_experiment=_extract_experiment,
+    extract_experiment=panel_rows,
     experiment_model=ResolvedInnerPanel,
     declared_panel_model=InnerTasks,
     in_process_run=_in_process_run,

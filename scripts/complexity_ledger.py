@@ -231,7 +231,9 @@ BASELINE = {
     # `KindTable` (`kinds.py::KindTable.every`). W1's plugin key (±0): one rule, its own files and
     # the import closure its members, its files and the run reach (`optimizer_manifest.py::behaviour_key`).
     # w1-rebase (±0): W1 (+260 over 112176) replayed on main's 112539, the resolution adding none.
-    "package_lines": 112799,
+    # l4-key-b (+83): the archive row's one strict reader and a landing that drops a line cache's
+    # rows by why (link 9, +105), net of links 1-8; the hunt found no dead code in the arc's files.
+    "package_lines": 112882,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -265,7 +267,9 @@ BASELINE = {
     "escalation_rules": 11,
     # Function-local imports of the package's own modules. The bare invocation's first-run check
     # is an application read, and `--help` loads no use case, so it is named as a string in `main()`.
-    "deferred_imports": 6,
+    # l4-key-b (+1): `embedded_run.py::enter` imports the landing, as `run_job.py`'s entry does,
+    # since only an entry lands.
+    "deferred_imports": 7,
     # `TYPE_CHECKING` imports on a file-level import cycle: a knot hidden, not cut (`_type_cycles`).
     "type_cycles": 81,
     # Files naming three or more `CycleRecord` arms, each a site the next arm must reach.

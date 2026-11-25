@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from typing import Any, assert_never
 
 from promptpotter.application.datasets.loaders import (
+    builds_bank,
     cut_bank,
     fetch_bank,
-    has_source,
     held_bank,
     source_extra,
 )
@@ -113,7 +113,7 @@ def _held_block(dataset: ResolvedDataset, held: Bank | None) -> StartBlock | Non
     the extra that source reads through."""
     if held is not None:
         return rows_block(held.samples)
-    if not has_source(dataset):
+    if not builds_bank(dataset):
         return StartBlock.EMPTY
     return None if _absent(source_extra(dataset)) is None else StartBlock.MISSING_EXTRA
 

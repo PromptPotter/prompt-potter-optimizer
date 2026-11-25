@@ -35,7 +35,6 @@ from promptpotter.infrastructure.llm.capabilities import ensure_model_capabiliti
 from promptpotter.infrastructure.store.dataset_access import (
     ResolvedDataset,
     dataset_experiment,
-    extract_panel_rows,
     resolve_dataset,
     runnable_definition,
 )
@@ -125,23 +124,31 @@ def _verify_package_cache_scope(
     )
 
 
-def session_bank(
+async def session_bank(
     stores: Stores,
     dataset: ResolvedDataset,
     *,
     connector: Connector,
     experiment: BaseModel | None,
 ) -> tuple[Bank, tuple[str, ...]]:
-    """The bank and its answer terms, empty where the connector owns the panel."""
+    """The bank and its answer terms, empty where the connector owns the panel: the ONE build of
+    an owned panel's bank, which a read outside a run takes as its newest mint labelled it."""
     # First, never a fallback: rows cached under the same dataset name describe another instrument.
-    if connector.owns_panel:
+    if connector.extract_experiment is not None:
         if experiment is None:
             raise PayloadInvalidError(
                 f"Connector {connector.name!r} owns {dataset.name!r}'s panel, but its definition "
                 f"declares no `panel:` and no `source:` builds one.",
                 code="pipeline_config_invalid",
             )
-        rows = extract_panel_rows(connector, dataset.name, experiment)
+        try:
+            rows = await connector.extract_experiment(stores, experiment)
+        except (KeyError, TypeError, AttributeError, IndexError) as exc:
+            # Every guard above this seam catches `ValueError`; a raw `KeyError` walks through to a 500.
+            raise ValueError(
+                f"Connector {connector.name!r} could not read {dataset.name!r}'s panel: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
         return Bank.of(samples_from_dicts(rows)), ()
     bank = resolve_bank(stores, dataset)
     if not bank.samples:
@@ -217,7 +224,7 @@ async def _session(
         _verify_required_observation_keys(pipeline_schema, connector, dataset_name)
         _verify_observation_names(pipeline_schema, connector, dataset_name)
         backend_revision = await _read_backend_revision(client, connector)
-        bank, answer_terms = session_bank(
+        bank, answer_terms = await session_bank(
             stores, dataset, connector=connector, experiment=experiment
         )
         # By hash, never a label: every answer this session files names a bank the store holds.

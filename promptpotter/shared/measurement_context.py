@@ -3,9 +3,6 @@ from __future__ import annotations
 import enum
 from dataclasses import dataclass
 
-# L4 runs one level deep: an inner run spawns none (`docs/concepts/l4.md` § Depth).
-MAX_INSTRUMENT_DEPTH = 1
-
 
 class MeasurementRole(enum.StrEnum):
     """Why a scoring pass ran, stamped on every answer it files: provenance an id cannot carry."""
