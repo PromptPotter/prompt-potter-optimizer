@@ -554,7 +554,7 @@ class CapoInit(nodes.Proposer):
             ]
         )
         # The longest initial prompt that stands; where none stands, the origin each was drawn from.
-        live = [p.individual for p in initial.proposals if not p.refused] or [origin]
+        live = [p.individual for p in initial.proposals if not p.invalid] or [origin]
         ctx.put(
             CapoObjective(
                 length_penalty=knobs.length_penalty,
@@ -632,7 +632,7 @@ class CapoMutate(nodes.Proposer):
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Calls, Children, Lineage, Target})
 
     async def propose(self, ctx: NodeContext, proposals: Proposals) -> Proposals:
-        live = [i for i, p in enumerate(proposals.proposals) if not p.refused]
+        live = [i for i, p in enumerate(proposals.proposals) if not p.invalid]
         answers = await ctx.read(Calls).ask_each(
             {i: mutation_prompt(ctx, proposals.individuals[i]) for i in live}
         )

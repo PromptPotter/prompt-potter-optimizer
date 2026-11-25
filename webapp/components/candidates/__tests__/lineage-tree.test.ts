@@ -497,6 +497,32 @@ describe("layout, paired under the bars", () => {
     expect(g.height).toBe(FIRST_ROW_Y + ROW_H + BOTTOM_PAD);
   });
 
+  it("hangs every kid of one parent from one beam, whatever round bred it", () => {
+    // Round 1 elects no one, so C0 breeds again in round 2.
+    const rows = spine([
+      { round: 0, n: 1, winner: 0 },
+      { round: 1, n: 2, winner: null },
+      { round: 2, n: 2, winner: 0 },
+    ]);
+    const g = paired(rows);
+
+    expect(g.beams.map((b) => [b.x1f, b.x2f])).toEqual([[g.nodes[0]!.xf, g.nodes.at(-1)!.xf]]);
+    expect(g.height).toBe(FIRST_ROW_Y + BOTTOM_PAD);
+  });
+
+  it("lays the main line nearest the nodes, a gene guess below it", () => {
+    const rows = spine([
+      { round: 0, n: 1, winner: 0 },
+      { round: 1, n: 2, winner: 1 },
+      { round: 2, n: 1, winner: 0 },
+    ]);
+    const child = rows.find((r) => r.address === "r2_0")!;
+    child.descent = { ...child.descent, genes: [gene("r1_0")] };
+    const ys = (variant: string) => paired(rows).beams.filter((b) => b.variant === variant).map((b) => b.y);
+
+    expect(Math.min(...ys("gene"))).toBeGreaterThan(Math.max(...ys("chain")));
+  });
+
   it("hangs each candidate from the parent it is served as descending from, one beam per parent", () => {
     const rows = spine([
       { round: 0, n: 1, winner: 0 },

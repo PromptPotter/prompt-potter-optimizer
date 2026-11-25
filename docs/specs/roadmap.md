@@ -704,6 +704,10 @@ skill routing before the library grows.
   address (`lib/state/workspace.tsx`); one panel-chrome primitive; the tapped candidate's before/after.
   **Closes when** an arrangement survives a reload on a phone and a desktop.
 - **Run card:** the chat's sample walk alone. Owed: the round that changed each key ("changed in C7.3").
+- **Lineage strip at hundreds of rounds:** the plot reads one point per round by default ("Every
+  candidate" in the card's menu reverses it) and drops its per-point marks below a dot's width, but the
+  paired dendrogram still draws a dot per point, so 300 rounds pile into one bar under the axis.
+  **Closes when** a 300-round run's strip reads on a phone.
 - **Program-aided answers (PAL).** A node runs the program the model writes, once, sandboxed, with a
   time limit, and its printed value is the answer. GSM-Hard is built for this: the answer key is what
   the reference program computes. Without it the 8B does 7-digit arithmetic in its head

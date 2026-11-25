@@ -11,6 +11,7 @@ import {
   type LineageIndex,
 } from "@/lib/derivations";
 import { useWorkspace } from "@/lib/state/workspace";
+import { useEveryCandidate } from "@/lib/prefs/candidates";
 import type { CandidateBar } from "@/lib/types";
 
 export function useCandidateBars(index: LineageIndex) {
@@ -46,6 +47,7 @@ export function useCandidateBars(index: LineageIndex) {
   const areCycles = useMemo(() => barsAreCycles(viewedNode), [viewedNode]);
 
   const marks = dash?.verification;
+  const [every] = useEveryCandidate();
   const views = useMemo<CandidateBar[]>(
     () =>
       candidateBars({
@@ -53,8 +55,9 @@ export function useCandidateBars(index: LineageIndex) {
         inflightByKey,
         sampleSet,
         marks: marks ?? [],
+        every,
       }),
-    [viewedNode, inflightByKey, sampleSet, marks],
+    [viewedNode, inflightByKey, sampleSet, marks, every],
   );
 
   const priorDominated = useMemo(

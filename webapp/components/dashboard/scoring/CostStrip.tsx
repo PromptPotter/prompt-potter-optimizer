@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { Bar } from "react-chartjs-2";
-import { barChartDefaults, ensureChartRegistered } from "@/lib/chart";
+import type { ChartOptions } from "chart.js";
+import { CHART_DEFAULTS, ensureChartRegistered } from "@/lib/chart";
 import { fmtUsd } from "@/lib/format";
 import { seriesColor, useThemeVersion } from "@/lib/theme";
 import { CardFrame, ChartReading, useChartReading } from "@/components/ui";
@@ -26,7 +27,8 @@ export const CostStrip = memo(function CostStrip() {
     borderWidth: 0,
   }));
 
-  const options = barChartDefaults({
+  const options: ChartOptions<"bar"> = {
+    ...CHART_DEFAULTS,
     ...events,
     plugins: {
       legend: { display: true, labels: { boxWidth: 10, font: { size: 10 } } },
@@ -35,7 +37,7 @@ export const CostStrip = memo(function CostStrip() {
       x: { stacked: true, ticks: { font: { size: 9 } }, grid: { display: false } },
       y: { stacked: true, ticks: { font: { size: 9 } } },
     },
-  });
+  };
 
   const round = at === null ? undefined : rounds[at];
   const billed =

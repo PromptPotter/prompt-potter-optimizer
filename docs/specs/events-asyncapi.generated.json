@@ -6495,7 +6495,7 @@
       },
       "Proposal": {
         "additionalProperties": false,
-        "description": "What a proposer hands the round: an individual, its sparse overlay, and why it is refused.",
+        "description": "What a proposer hands the round: an individual, its sparse overlay, and why it is invalid.",
         "properties": {
           "individual": {
             "$ref": "#/components/schemas/OptSearchPoint"

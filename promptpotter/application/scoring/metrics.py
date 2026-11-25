@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from promptpotter.application.scoring.evaluators import materialize_round_values
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.selection import level_band
-from promptpotter.domain.arms import ArmState, arm_end
+from promptpotter.domain.arms import ArmState
 from promptpotter.domain.cell_fold import CellFold, ScoreSummary, field_accuracy, recall_at
 from promptpotter.domain.paired_reading import ArmKey, MeasurandUnit
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -75,5 +75,5 @@ def arm_folds(
     return {
         key: compute_composite_fitness(cells[key], scorer, schema)
         for key, arm in arms.items()
-        if arm_end(arm) != "invalid"
+        if not arm.invalid
     }

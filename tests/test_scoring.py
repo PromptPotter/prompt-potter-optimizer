@@ -4519,7 +4519,7 @@ def test_capo_inits_reply_out_of_form_is_one_refused_child(
             offline.llm.says = lambda _body, said=reply: said  # type: ignore[misc]
             drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
             proposed = asyncio.run(member.propose(drawing, node_contract.Proposals([])))
-        assert [p.refused for p in proposed.proposals] == [True], (
+        assert [p.invalid for p in proposed.proposals] == [True], (
             f"reply {n} out of form drew a child or refused none"
         )
 

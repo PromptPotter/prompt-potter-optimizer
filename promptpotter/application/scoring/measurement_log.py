@@ -31,7 +31,7 @@ from promptpotter.application.scoring.closed_rounds import (
     walked_rows,
 )
 from promptpotter.application.scoring.sample_measurement import interpolate_prompt
-from promptpotter.domain.arms import Cut, Measuring, Proposed, arm_name
+from promptpotter.domain.arms import Measuring, Proposed, arm_name
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.cells import (
@@ -504,7 +504,7 @@ def _cycle_cells(
     headline = None
     for (round_no, arm_key), arm in standing.arms.items():
         state = arm.state
-        if isinstance(state, Cut) and state.kind == "invalid":
+        if state.invalid:
             continue
         label, individual_id = arm_name(arm_key, state, round_no).label, state.individual.id
         key = f"{hop.cycle_id}/{individual_id}"

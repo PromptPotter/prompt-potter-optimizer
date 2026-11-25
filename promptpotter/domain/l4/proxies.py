@@ -5,7 +5,6 @@ from typing import Any, Literal, Self
 
 from pydantic import Field, model_validator
 
-from promptpotter.domain.arms import Cut
 from promptpotter.domain.cell_terms import CellTerm
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.l4.inner_facts import InnerCellFacts, InnerRunAddress, SeriesGap
@@ -229,7 +228,7 @@ def mean_parent_level_se(result: CycleResult) -> float | None:
 
 def _spoiled(rnd: RoundOutcome) -> bool:
     """No proposal reached a cell, whatever the reply's failure: an empty panel is spoiled too."""
-    return all(isinstance(arm, Cut) and arm.kind == "invalid" for arm in rnd.proposed.values())
+    return all(arm.invalid for arm in rnd.proposed.values())
 
 
 def no_evidence_reason(result: CycleResult) -> str | None:

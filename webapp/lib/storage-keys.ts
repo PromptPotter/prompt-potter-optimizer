@@ -7,6 +7,7 @@ export const STORAGE_KEYS = {
   sidebarCollapsed: "promptpotter.sidebar.collapsed",
   sidebarWidth: "promptpotter.sidebar.width",
   treeShowCandidates: "promptpotter.tree.showCandidates",
+  everyCandidate: "promptpotter.candidates.every",
   chunkReloadAt: "promptpotter.chunk-reload-at",
   sidePanel: (panelId: string) => `promptpotter.side-panel.${panelId}` as const,
 } as const;

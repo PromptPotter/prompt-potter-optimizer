@@ -24,7 +24,7 @@ from promptpotter.application.scoring.formula.compiler import (
 )
 from promptpotter.application.scoring.judges.registry import judge_instrument
 from promptpotter.application.scoring.metrics import fold_cells
-from promptpotter.domain.arms import ArmState, Cut, arm_elimination, is_electable
+from promptpotter.domain.arms import ArmState, arm_elimination, is_electable
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import CampaignConfig, start_layer
 from promptpotter.domain.cell_fold import measured_cells
@@ -123,11 +123,7 @@ def load_lineage_spine(difficulty: DifficultyView) -> list[SpineCycle]:
 
 def _mask_eligible(arm: ArmState, sheet: CellSheet, parent: CellSheet) -> bool:
     """``is_electable``, never ``is_leader_eligible``, which lets a collapsed arm top a round that refused it."""
-    return (
-        is_electable(arm, sheet.cells, parent)
-        and not (isinstance(arm, Cut) and arm.kind == "invalid")
-        and not arm.validation_failures
-    )
+    return is_electable(arm, sheet.cells, parent) and not arm.validation_failures
 
 
 def _masked(sheet: CellSheet, samples: frozenset[str]) -> CellSheet:

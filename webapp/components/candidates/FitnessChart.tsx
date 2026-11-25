@@ -1,6 +1,13 @@
 import { memo, useMemo } from "react";
 import { Chart } from "react-chartjs-2";
-import { ensureChartRegistered, lineLook, lineMotion } from "@/lib/chart";
+import {
+  ensureChartRegistered,
+  lineLook,
+  lineMotion,
+  thinTickLabels,
+  unclutteredLabels,
+  type LabelBox,
+} from "@/lib/chart";
 import { fmtMetric } from "@/lib/format";
 import { cssPx, getCss, useThemeVersion } from "@/lib/theme";
 import { useMediaQuery } from "@/lib/hooks/useMediaQuery";
@@ -49,6 +56,17 @@ declare module "chart.js" {
 }
 
 const CROWN = "♛";
+// Clear space between two drawn labels, px.
+const LABEL_GAP = 6;
+// A point's own mark (its dot, a short panel's hexagon, a cut count) needs a dot's width of x-axis;
+// on a narrower slot the line alone carries the reading. Before the first layout (a line's padding
+// asks its point radius) there is no plot area yet: marks are assumed.
+const MARK_ROOM_PX = 4;
+const markRoom = (chart: ChartJS): boolean => {
+  const area = chart.chartArea as ChartJS["chartArea"] | undefined;
+  return !area || area.width / Math.max(1, chart.data.labels?.length ?? 0) >= MARK_ROOM_PX;
+};
+type Caption = LabelBox & { text: string; font: string; ink: string };
 const barCapsPlugin: Plugin<
   "bar",
   { counts: (number | null)[]; standing: number | null; crown: string }
@@ -73,28 +91,40 @@ const barCapsPlugin: Plugin<
     ctx.textAlign = "center";
     ctx.textBaseline = "bottom";
     const mono = getCss("--font-mono");
-    counts.forEach((n, i) => {
-      if (n == null) return;
-      const topY = topOf(i);
-      if (!Number.isFinite(topY)) return;
-      ctx.font = `${getCss("--text-xs")} ${mono}`;
-      ctx.fillStyle = getCss("--color-text-secondary");
-      ctx.fillText(String(n), xScale.getPixelForValue(i), Math.max(topY - 4, chartArea.top + 10));
-    });
+    // `bottom` is the baseline the caption sits on; a caption over an edge column is pulled inside
+    // the canvas, never clipped.
+    const caption = (text: string, size: string, ink: string, at: number, bottom: number, rank: number): Caption => {
+      const font = `${getCss(size)} ${mono}`;
+      ctx.font = font;
+      const w = ctx.measureText(text).width;
+      const h = cssPx(size);
+      const x = Math.min(Math.max(at, w / 2), chart.width - w / 2);
+      return { text, font, ink, x, y: bottom - h / 2, w, h, rank };
+    };
+    const captions: Caption[] = [];
     const w = opts.standing;
     if (w != null && w >= 0) {
       const topY = topOf(w);
       if (Number.isFinite(topY)) {
-        ctx.font = `${getCss("--text-sm")} ${mono}`;
-        ctx.fillStyle = getCss("--color-accent");
         const capY = counts[w] != null ? topY - 15 : topY - 4;
-        ctx.fillText(
-          `${CROWN}${opts.crown}`,
-          xScale.getPixelForValue(w),
-          Math.max(capY, chartArea.top + 10),
-        );
+        const bottom = Math.max(capY, chartArea.top + 10);
+        captions.push(caption(`${CROWN}${opts.crown}`, "--text-sm", getCss("--color-accent"), xScale.getPixelForValue(w), bottom, 0));
       }
     }
+    counts.forEach((n, i) => {
+      if (n == null || !markRoom(chart)) return;
+      const topY = topOf(i);
+      if (!Number.isFinite(topY)) return;
+      const bottom = Math.max(topY - 4, chartArea.top + 10);
+      captions.push(caption(String(n), "--text-xs", getCss("--color-text-secondary"), xScale.getPixelForValue(i), bottom, 1));
+    });
+    const shown = unclutteredLabels(captions, 1);
+    captions.forEach((c, i) => {
+      if (!shown[i]) return;
+      ctx.font = c.font;
+      ctx.fillStyle = c.ink;
+      ctx.fillText(c.text, c.x, c.y + c.h / 2);
+    });
     ctx.restore();
   },
 };
@@ -174,10 +204,7 @@ const ciWhiskerPlugin: Plugin<"bar", BandOpts> = {
         const lo = band.lo[i];
         const hi = band.hi[i];
         if (lo == null || hi == null) continue;
-        const el = bars.data[i] as
-          | { getProps?: (p: string[], final: boolean) => Record<string, number> }
-          | undefined;
-        const x = el?.getProps?.(["x"], true).x;
+        const x = (bars.data[i] as Placed)?.getProps?.(["x"], true).x;
         if (typeof x !== "number") continue;
         // No clamp: the server bounds `fitness_band` to [0,1] and θ's axis is fitted to its data.
         const yLo = yScale.getPixelForValue(lo);
@@ -253,10 +280,7 @@ const inFlightPulsePlugin: Plugin<"bar", { index: number | null }> = {
     let base = -Infinity;
     chart.data.datasets.forEach((ds, di) => {
       if (isMark(ds.label)) return;
-      const el = chart.getDatasetMeta(di).data[idx] as
-        | { getProps?: (p: string[], final: boolean) => Record<string, number> }
-        | undefined;
-      const p = el?.getProps?.(["x", "y", "base", "width"], true);
+      const p = (chart.getDatasetMeta(di).data[idx] as Placed)?.getProps?.(["x", "y", "base", "width"], true);
       const x = p?.x;
       const y = p?.y;
       if (typeof x !== "number" || typeof y !== "number") return;
@@ -296,7 +320,7 @@ const partialPanelsPlugin: Plugin<"bar", { short: boolean[]; picked: number | nu
   id: "partialPanels",
   afterDatasetsDraw(chart, _args, opts) {
     const short = opts.short;
-    if (!short.some(Boolean)) return;
+    if (!short.some(Boolean) || !markRoom(chart)) return;
     const { ctx } = chart;
     ctx.save();
     ctx.lineWidth = 1.4;
@@ -349,7 +373,6 @@ const CHART_PLUGINS = [
   xBridgePlugin,
 ];
 
-const ROTATE_THRESHOLD = 8;
 const LINES_ABOVE = 12;
 
 interface Props {
@@ -373,7 +396,20 @@ export const FitnessChart = memo(function FitnessChart({
   const { views, metrics } = ctx;
   const themeVersion = useThemeVersion();
   const reducedMotion = useMediaQuery("(prefers-reduced-motion: reduce)");
-  const labels = useMemo(() => views.map((v) => v.label), [views]);
+  // The x-axis reads in rounds: a round's label sits under its middle point, and `thinTickLabels`
+  // keeps every 1-2-5-th round where they crowd. A run drawn as a bar is labelled alone.
+  const axis = useMemo(() => {
+    const ordinals = views.map((v, i) => (v.reading ? v.reading.arm.round : i));
+    const labels = views.map((v) => (v.reading ? "" : v.label));
+    views.forEach((v, i) => {
+      if (!v.reading || ordinals[i - 1] === ordinals[i]) return;
+      let end = i + 1;
+      while (end < views.length && ordinals[end] === ordinals[i]) end++;
+      labels[i + Math.floor((end - i - 1) / 2)] = `R${ordinals[i]}`;
+    });
+    return { labels, ordinals };
+  }, [views]);
+  const { labels } = axis;
   const asLines = labels.length > LINES_ABOVE;
 
   const active = useMemo(() => activeSeries(ctx), [ctx]);
@@ -477,8 +513,9 @@ export const FitnessChart = memo(function FitnessChart({
             label: spec.key,
             data,
             ...lineLook(ink),
-            // `partialPanels` draws a short panel's hexagon in place of the dot.
-            pointRadius: labels.map((_, i) => (shortPanels[i] ? 0 : i === picked ? 5 : 2)),
+            // `partialPanels` draws a short panel's hexagon in place of the dot, where there is room.
+            pointRadius: (c: { chart: ChartJS; dataIndex: number }) =>
+              c.dataIndex === picked ? 5 : shortPanels[c.dataIndex] || !markRoom(c.chart) ? 0 : 2,
             pointHoverRadius: labels.map((_, i) => (shortPanels[i] ? 0 : 4)),
             pointBorderColor: labels.map((_, i) =>
               i === picked && selectionBorder ? selectionBorder.colour : ink,
@@ -507,7 +544,6 @@ export const FitnessChart = memo(function FitnessChart({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labels, views, active, ctx, themeVersion, selectionBorder, asLines, shortPanels]);
 
-  const rotate = labels.length > ROTATE_THRESHOLD;
   const options = useMemo<ChartOptions<"bar">>(() => ({
     responsive: true,
     maintainAspectRatio: false,
@@ -526,7 +562,12 @@ export const FitnessChart = memo(function FitnessChart({
       target.style.cursor = elements[0] ? "pointer" : "default";
     },
     scales: {
-      x: { grid: { display: false }, ticks: { color: (t) => getCss(t.index === standingIdx ? "--color-accent" : "--color-text-secondary"), font: (t) => ({ size: rotate ? 10 : cssPx("--text-xs"), family: getCss("--font-mono"), weight: t.index === standingIdx ? "bold" as const : "normal" as const }), autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
+      x: {
+        grid: { display: false },
+        afterTickToLabelConversion: (s) =>
+          thinTickLabels(s, axis.ordinals, `${cssPx("--text-xs")}px ${getCss("--font-mono")}`, LABEL_GAP),
+        ticks: { font: { size: cssPx("--text-xs"), family: getCss("--font-mono") }, autoSkip: false, maxRotation: 0 },
+      },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border") }, ticks: { font: { size: cssPx("--text-xs") }, stepSize: 0.2 } },
       // Declared only while θ shows: the right gutter shifts every dendrogram fraction.
       ...(showAbility
@@ -556,7 +597,7 @@ export const FitnessChart = memo(function FitnessChart({
       xBridge: { onGeometry },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeVersion, ctx, rotate, asLines, reducedMotion, views, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, standingIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
+  }), [themeVersion, ctx, asLines, reducedMotion, views, axis, selectedKey, onSelect, divergenceBoundary, inFlightIndex, showAbility, standingIdx, crown, cutCounts, onGeometry, bands, shortPanels, selectionBorder]);
 
   return (
     <div className="chart-frame">

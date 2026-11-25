@@ -797,6 +797,11 @@ and derived the knob couplings from each member's draws and the escalation ladde
   logging "model capability refresh failed … 403 Forbidden". Root: the walk world serves a pinned
   capability answer and makes no outbound call. **Re-test:** the walk server makes no outbound
   request (a refusing proxy changes no walk result).
+- **A Candidates card draws an empty chart over a served lineage**: campaign
+  `bbh-multistep-arithmetic-8b__244ba5` (history 2, rounds 2) renders `.cand-card`'s canvas blank
+  with no console error, while its hierarchy and dashboard reads serve rows. A state the card enters
+  but does not report; cause not traced. **Re-test:** the card for a campaign with a closed round
+  draws at least one bar or point, or says why it cannot.
 
 ### wave-5 · drift (the 2026-11-19 backbone hunt)
 
@@ -865,6 +870,15 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   `machine_status.py:297-301`) read a released job. Root: a survivor's model imports no run-data enum
   and no served-words model; the ending, refusal and lapse go to run data, in a one-shot migration
   (decisions.md § 0011). **Window:** W2 · surv, before "A queued launch dies with the asking process". **Re-test:** the model `Kind("job", …)` loads holds no `StopReason`, `Refusal` or `JobLapse` field.
+- **An invalid arm is recorded twice**: `domain/arms.py::Invalid`, the `Cut` reason
+  `scoring/arm_states.py::cut_invalid` mints, re-states what `_Arm.invalid` derives from the arm's own
+  fatal `validation_failures`, and readers split between them (`arm_end`, `walked_short`,
+  `arm_reading.py::ArmReading`'s `end` read the reason; the hierarchy, measurement log, folds, mask,
+  transcript and L4 proxies read `.invalid`). They agree on all 42 invalid arms of 1,381 concluded
+  in a 21-campaign home (2026-11-25), held only because `cut_invalid` is the one minter and the
+  fatal roster has not moved. Root: the reason goes, and `arm_end` reads `.invalid`; a
+  `CutKind` and on-disk reshape, so a run-data wipe. **Window:** W2. **Re-test:**
+  `git grep -n "class Invalid" -- promptpotter/domain/arms.py` is empty.
 
 ## Held — no wave-4 chain yet
 

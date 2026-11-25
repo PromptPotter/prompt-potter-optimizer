@@ -42,7 +42,12 @@ from promptpotter.application.runner.bench import (
     reserve_selection_pass,
 )
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
-from promptpotter.application.scoring.arm_states import conclude, cut_past_draw, measuring, refuse
+from promptpotter.application.scoring.arm_states import (
+    conclude,
+    cut_invalid,
+    cut_past_draw,
+    measuring,
+)
 from promptpotter.application.scoring.catch_up import CatchUpPool
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.paired import (
@@ -958,7 +963,7 @@ def _open_arm(
     dataset: list[Sample],
     skip_at: int | None,
 ) -> Walk | None:
-    if arm.refused:
+    if arm.invalid:
         return None
     return open_walk(
         sp,
@@ -982,7 +987,7 @@ def _conclude_arm(
     labels: Mapping[ArmKey, str],
 ) -> tuple[Concluded, CellSheet]:
     if walk is None:
-        return refuse(arm), NO_CELLS
+        return cut_invalid(arm), NO_CELLS
 
     scored = close_walk(walk)
     results, signal = scored.sheet, scored.signal
@@ -1213,14 +1218,14 @@ async def _walked(ctx: RoundContext, walk: RoundWalk) -> Proposals:
         await reread_walk(ctx, banked.reads)
         return Proposals(list(banked.proposals))
     seeds, proposers, _ = walk.walked
-    refused: list[Proposal] = []
+    invalid: list[Proposal] = []
     if seeds:
         seeded = await _walk(ctx, seeds)
-        cycle.population = [p.individual for p in seeded.proposals if not p.refused]
-        # A refused seed is an arm of its round, as every refused child is: its fault is served.
-        refused = [p for p in seeded.proposals if p.refused]
+        cycle.population = [p.individual for p in seeded.proposals if not p.invalid]
+        # An invalid seed is an arm of its round, as every invalid child is: its fault is served.
+        invalid = [p for p in seeded.proposals if p.invalid]
     population = await _walk(ctx, proposers)
-    population = replace(population, proposals=[*population.proposals, *refused])
+    population = replace(population, proposals=[*population.proposals, *invalid])
     bank_walk(ctx, population.proposals)
     return population
 

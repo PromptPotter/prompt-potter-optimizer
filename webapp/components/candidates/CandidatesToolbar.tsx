@@ -32,6 +32,7 @@ import {
 } from "@/lib/api/types";
 import { wordRows } from "@/lib/api/words";
 import { setScoringMask } from "@/lib/state/scoring-mask";
+import { useEveryCandidate } from "@/lib/prefs/candidates";
 
 const lensOptions = (labels: Record<string, string>) =>
   wordRows(labels).map(([value, label]) => ({ value, label }));
@@ -46,6 +47,7 @@ const LENS_OPTIONS: readonly { value?: string; label?: string; heading?: string 
 
 export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
   const { rung, hasOverlap, viewedPath } = m;
+  const [every, setEvery] = useEveryCandidate();
   const overlapNext = [
     hasOverlap
       ? "Read C0 and each new best since on the one set of cells all of them answered. The bars beside it stay on each candidate's own cells."
@@ -149,6 +151,11 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
               >
                 {/* "Replayed", never "cache": `cache` names the provider's prefix discount elsewhere. */}
                 Replayed{m.cacheHitCount > 0 ? ` · ${m.cacheHitCount} of ${m.views.length}` : ""}
+              </MenuCheck>
+            </HoverCard>
+            <HoverCard content="Off, each round shows the one arm its election is read off; the round in flight shows every arm it races.">
+              <MenuCheck on={every} onClick={() => setEvery(!every)}>
+                Every candidate
               </MenuCheck>
             </HoverCard>
             <MenuSep />

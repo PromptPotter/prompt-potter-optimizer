@@ -102,6 +102,7 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
             onGeometry={m.onGeometry}
           />
           <div className="cand-tree-row">
+            <TreePairing freed={m.treeFreed} setFreed={m.setTreeFreed} descendants={m.totalDescendants} />
             {!drilled && !m.treeFreed && (
               <DendrogramStrip
                 views={views}
@@ -113,11 +114,6 @@ function ReadCandidatesCard({ dash }: { dash: ServedDashboard }) {
                 onFreeHierarchy={m.onFreeHierarchy}
               />
             )}
-            <TreePairing
-              freed={m.treeFreed}
-              setFreed={m.setTreeFreed}
-              descendants={m.totalDescendants}
-            />
           </div>
           {!m.areCycles && m.wonOnTheta && (
             <div className="fitness-notes">

@@ -43,6 +43,9 @@ interface CandidateBarsInput {
   inflightByKey: ReadonlyMap<string, ArmReading>;
   sampleSet: number[] | null;
   marks: readonly VerificationMark[];
+  // Off, a held round reads as its leading arm, the one its election is read off; a round not yet
+  // held shows every arm it races.
+  every: boolean;
 }
 
 export function candidateBars({
@@ -50,12 +53,20 @@ export function candidateBars({
   inflightByKey,
   sampleSet,
   marks,
+  every,
 }: CandidateBarsInput): CandidateBar[] {
   const markOf = (kind: VerificationMark["kind"], key: string) =>
     marks.find((m) => m.kind === kind && m.arm.key === key) ?? null;
   // Live side of each supersede cut only — retired tails double a round.
   const nodes: readonly LineageNode[] = viewedNode ? childNodes(viewedNode) : [];
-  return splitRetired(nodes).live.map<CandidateBar>((node, idx) => {
+  const shown = splitRetired(nodes).live.filter(
+    (node) =>
+      every ||
+      node.entry_kind !== "candidate" ||
+      !node.facts.reading.election.held ||
+      node.facts.reading.election.leading,
+  );
+  return shown.map<CandidateBar>((node, idx) => {
     const key = node.address;
     if (node.entry_kind === "cycle") {
       return {

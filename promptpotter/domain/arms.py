@@ -106,7 +106,7 @@ def arm_key(
 
 
 class Proposal(FrozenModel):
-    """What a proposer hands the round: an individual, its sparse overlay, and why it is refused."""
+    """What a proposer hands the round: an individual, its sparse overlay, and why it is invalid."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -116,7 +116,7 @@ class Proposal(FrozenModel):
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
 
     @property
-    def refused(self) -> bool:
+    def invalid(self) -> bool:
         return bool(fatal_validation_failures(self.validation_failures))
 
     def key(self, round_num: int, idx: int) -> ArmKey:
@@ -145,7 +145,7 @@ class _Arm(FrozenModel):
         return "parent" if self.position is None else self.position.label
 
     @property
-    def refused(self) -> bool:
+    def invalid(self) -> bool:
         return bool(fatal_validation_failures(self.validation_failures))
 
     @property

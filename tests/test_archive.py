@@ -194,6 +194,7 @@ from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import GRADE_KEYS, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget
+from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import SendBound
@@ -2880,6 +2881,46 @@ def test_a_correction_a_later_round_read_supersedes_its_parent(repair: _Repair) 
     _, read_branch = repaired("cycle_read", consumed=True)
     assert fork_direction(read_branch) is ForkDirection.SUPERSEDE, (
         "round 2's banked candidates were generated off the hole and carried across as equivalent"
+    )
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_child_hangs_from_the_arm_that_measured_its_parent_never_a_verbatim_copy() -> None:
+    stores = workspace()
+    hop = CycleHop(campaign_id="copied__20260101-000000", cycle_id="cycle_copied")
+    stored_campaign(stores, minted_campaign(hop))
+    stores.campaigns.mint_cycle(hop)
+    origin, bred = prompted(instruction="o"), prompted(instruction="k")
+    bred = bred.model_copy(
+        update={"lineage": bred.lineage.model_copy(update={"parent_ids": [origin.id]})}
+    )
+    o, b, k = _ident("o"), _ident("b"), bred.id
+    copy = ArmKey("copy")
+    # Round 1 re-proposes the origin verbatim, refused before a cell, and elects no one.
+    rounds = [
+        {ArmKey(o): arm_state("o", position=ArmPosition(round=0, idx=0, total=1))},
+        {
+            copy: arm_state(
+                "o",
+                position=ArmPosition(round=1, idx=0, total=2),
+                invalid_reason=ValidationReason.NO_OP_VARIANT,
+            ),
+            ArmKey(b): arm_state("b", position=ArmPosition(round=1, idx=1, total=2)),
+        },
+        {ArmKey(k): arm_state("k", position=ArmPosition(round=2, idx=0, total=1), individual=bred)},
+    ]
+    crowns = [(o, o), (None, b), (k, k)]
+    log = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
+    line: list[RoundResult] = []
+    for n, (arms, (crown, ended)) in enumerate(zip(rounds, crowns, strict=True)):
+        line.append(_round(round=n, arms=arms, election=election(crown, ended_on=ended)))
+        close_round(log, line, cycle=seat(stores).cycle)
+    tree = hierarchy_subtree(stores, Subject(hop.campaign_id).address, None, None, moment=None)
+    cands = [e for e in entries_under(tree) if isinstance(e, HierarchyCandidate)]
+    child = next(e for e in cands if e.facts.individual == bred.id)
+    first = next(e for e in cands if e.facts.individual == o and e.facts.reading.arm.round == 0)
+    assert child.facts.descends_from == first.address, (
+        "a child hangs from a copy of its parent that measured nothing"
     )
 
 

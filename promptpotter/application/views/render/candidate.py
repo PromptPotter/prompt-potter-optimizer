@@ -54,7 +54,7 @@ def individual_summary(
     mutations = fmt_pipeline_overlay(report.overlay)
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 
-    if arm_end(report) == "invalid":
+    if report.invalid:
         out: list[str] = []
         for vf in report.validation_failures:
             allowed_str = ", ".join(vf.allowed[:3]) + (

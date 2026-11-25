@@ -107,7 +107,7 @@ def _concluded_fields(arm: Measuring) -> dict[str, Any]:
     return {name: getattr(arm, name) for name in _CARRIED}
 
 
-def refuse(arm: Measuring) -> Cut:
+def cut_invalid(arm: Measuring) -> Cut:
     return Cut(**_concluded_fields(arm), reason=Invalid())
 
 

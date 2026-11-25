@@ -90,7 +90,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
-| 1 | **Validation skip** — a fatal `Proposal.validation_failures` (`Proposal.refused`) | pre-score | — | opens no walk: no cell, no backend call, keyed by its slot | `ArmState.validation_failures` → `l1_wounds` | `runner/round.py::_open_arm` |
+| 1 | **Validation skip** — a fatal `Proposal.validation_failures` (`Proposal.invalid`) | pre-score | — | opens no walk: no cell, no backend call, keyed by its slot | `ArmState.validation_failures` → `l1_wounds` | `runner/round.py::_open_arm` |
 | 2 | **Stale-data protocol** — a cached result classifies infra or fatal (`is_deprecated`); a repaired, answered row replays | every degraded query | — | annotated + possibly re-measured / swapped | — | `scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; `RuntimeFailure` | `runtime_failures` | `scoring/classification.py` |

@@ -115,7 +115,7 @@ def fork_edge(standing: StandingRounds, cut_round: int, named: RoundArm | None) 
         arm = standing.arms.get((named.round, named.arm))
         if arm is None:
             raise PayloadInvalidError(f"round {named.round} of the parent holds no arm {named.arm}")
-        if arm.state.refused:
+        if arm.state.invalid:
             raise PayloadInvalidError(
                 f"{arm.state.label} of round {named.round} is a refused proposal, keyed by its "
                 "position: it measured no individual to fork from"

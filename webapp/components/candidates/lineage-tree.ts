@@ -20,6 +20,7 @@ import type { CandidateBar } from "@/lib/types";
 // `chain`: a main to what descends from it. `donor`: a declared donor to the child it gave loci.
 // `gene`: a source to the child whose locus, which no declared parent explains, resembles it.
 type DescentVariant = "chain" | "donor" | "gene";
+const RANK: Record<DescentVariant, number> = { chain: 0, donor: 1, gene: 2 };
 
 interface DescentLink<N> {
   from: N;
@@ -57,6 +58,8 @@ export const NODE_ROW_Y = 7;
 const PAIRED_NODE_R = 3;
 export const FIRST_ROW_Y = 16;
 export const ROW_H = 9;
+// A donor or gene link annotates the tree, it is not its shape: its rows pack under the main line's, tighter.
+export const CROSS_ROW_H = 4;
 export const BOTTOM_PAD = 4;
 const FLOOR_H = NODE_ROW_Y + PAIRED_NODE_R + BOTTOM_PAD;
 
@@ -141,46 +144,50 @@ function paired(rows: readonly PairedRow[], centers: readonly number[]): PairedL
   const byAddress = new Map<string, PairedNode>();
   for (const n of nodes) if (!byAddress.has(n.address)) byAddress.set(n.address, n);
 
-  // Strict `<`: a beam touching the row's right edge would render as one merged beam.
-  const rowRight: number[] = [];
-  const place = (x1f: number, x2f: number): number => {
-    for (let d = 0; d < rowRight.length; d++) {
-      if (rowRight[d]! < x1f) {
-        rowRight[d] = x2f;
+  // The first row of its pool clear of the beam. Strict `<`: a beam touching the row's right edge
+  // would render as one merged beam.
+  const main: number[] = [];
+  const cross: number[] = [];
+  const place = (pool: number[], x1f: number, x2f: number): number => {
+    for (let d = 0; d < pool.length; d++) {
+      if (pool[d]! < x1f) {
+        pool[d] = x2f;
         return d;
       }
     }
-    rowRight.push(x2f);
-    return rowRight.length - 1;
+    pool.push(x2f);
+    return pool.length - 1;
   };
 
-  // One beam per main and round, over the kids served as descending from it; one per donor or gene link.
+  // One beam per link and source, over every kid served as descending from it: its bar says the round.
   const families = new Map<string, { from: PairedNode; kids: PairedNode[]; variant: DescentVariant }>();
   for (const kid of nodes) {
     for (const { from, variant } of descentLinks(kid.descent, (a) => byAddress.get(a))) {
-      const key = variant === "chain" ? `c|${kid.round}|${from.key}` : `${variant}|${kid.key}|${from.key}`;
+      const key = `${variant}|${from.key}`;
       const family = families.get(key);
       if (family) family.kids.push(kid);
       else families.set(key, { from, kids: [kid], variant });
     }
   }
-  for (const [key, { from, kids, variant }] of families) {
+  // The main line first, so the crossover rows start under its last; each left to right, so each
+  // pool takes the fewest rows it can.
+  const spans = [...families].map(([key, { from, kids, variant }]) => {
     const xs = [from.xf, ...kids.map((k) => k.xf)];
-    const x1f = Math.min(...xs);
-    const x2f = Math.max(...xs);
-    const y = FIRST_ROW_Y + place(x1f, x2f) * ROW_H;
+    return { key, from, kids, variant, x1f: Math.min(...xs), x2f: Math.max(...xs) };
+  });
+  spans.sort((a, b) => RANK[a.variant] - RANK[b.variant] || a.x1f - b.x1f || a.x2f - b.x2f);
+  for (const { key, from, kids, variant, x1f, x2f } of spans) {
+    const y =
+      variant === "chain"
+        ? FIRST_ROW_Y + place(main, x1f, x2f) * ROW_H
+        : FIRST_ROW_Y + main.length * ROW_H + place(cross, x1f, x2f) * CROSS_ROW_H;
     beams.push({ key, x1f, x2f, y, variant });
     stubs.push({ xf: from.xf, y1: NODE_ROW_Y, y2: y, variant });
     for (const k of kids) stubs.push({ xf: k.xf, y1: y, y2: NODE_ROW_Y, variant });
   }
 
-  const depth = rowRight.length;
-  return {
-    nodes,
-    stubs,
-    beams,
-    height: depth === 0 ? FLOOR_H : FIRST_ROW_Y + (depth - 1) * ROW_H + BOTTOM_PAD,
-  };
+  const deepest = Math.max(...beams.map((b) => b.y));
+  return { nodes, stubs, beams, height: beams.length === 0 ? FLOOR_H : deepest + BOTTOM_PAD };
 }
 
 // ---- FREED: one lane per cycle, one column per round, in pixels.

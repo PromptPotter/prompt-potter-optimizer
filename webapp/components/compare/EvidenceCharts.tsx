@@ -15,7 +15,7 @@ import {
 import { cx } from "@/lib/cx";
 import { fmtBand, fmtMetric, PLACEHOLDER } from "@/lib/format";
 
-import { barChartDefaults, ensureChartRegistered, lineChartDefaults } from "@/lib/chart";
+import { CHART_DEFAULTS, ensureChartRegistered } from "@/lib/chart";
 import { cssPx, getCss, seriesColor, seriesVar, useThemeVersion } from "@/lib/theme";
 
 ensureChartRegistered();
@@ -95,11 +95,12 @@ export const EvidenceCharts = memo(function EvidenceCharts({
           <Line
             aria-label={`${axis} across ${cells.length} cells, one line per subject`}
             data={{ labels, datasets }}
-            options={lineChartDefaults({
+            options={{
+              ...CHART_DEFAULTS,
               ...events,
               plugins: { legend: { display: false } },
               scales: axisScales(axis, false),
-            })}
+            }}
           />
         </div>
         {reading}
@@ -113,11 +114,12 @@ export const EvidenceCharts = memo(function EvidenceCharts({
         <Bar
           aria-label={`${axis} across ${cells.length} cells, one bar per subject`}
           data={{ labels, datasets }}
-          options={barChartDefaults({
+          options={{
+            ...CHART_DEFAULTS,
             ...events,
             plugins: { legend: { display: false } },
             scales: axisScales(axis, view === "overlaid"),
-          })}
+          }}
         />
       </div>
       {reading}

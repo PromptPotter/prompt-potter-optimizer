@@ -50,7 +50,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
         {geo.beams.map((b) => (
           <line
             key={b.key}
-            className={cx("cand-dendro-beam", b.variant !== "chain" && b.variant)}
+            className={cx("family-cladogram-branch", b.variant !== "chain" && b.variant)}
             x1={cssPct(b.x1f)}
             y1={b.y}
             x2={cssPct(b.x2f)}
@@ -60,7 +60,7 @@ export const DendrogramStrip = memo(function DendrogramStrip({
         {geo.stubs.map((s, i) => (
           <line
             key={`s${i}`}
-            className={cx("cand-dendro-stub", s.variant !== "chain" && s.variant)}
+            className={cx("family-cladogram-branch", s.variant !== "chain" && s.variant)}
             x1={cssPct(s.xf)}
             y1={s.y1}
             x2={cssPct(s.xf)}

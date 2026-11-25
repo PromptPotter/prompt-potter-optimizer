@@ -28,6 +28,7 @@ const EMPTY = {
   inflightByKey: new Map<string, ArmReading>(),
   sampleSet: null,
   marks: [],
+  every: true,
 };
 
 type ReadingOver = Parameters<typeof armReading>[0];
@@ -198,6 +199,16 @@ it("drops the tail a supersede cut retired — one round of three, never six", (
   expect(bars.map((b) => b.key)).toEqual(live.map((c) => c.address));
   // `idx` numbers the bars actually drawn — it is the join to the dendrogram beneath them.
   expect(bars.map((b) => b.idx)).toEqual([0, 1]);
+});
+
+it("reads a held round as its leading arm alone, and a round not yet held whole", () => {
+  const led = arm("lead", "C1.2", { election: { held: true, leading: true } });
+  const racing = [arm("r1", "C2.1", { election: { held: false } }), arm("r2", "C2.2", { election: { held: false } })];
+  const viewedNode = cycle([arm("lost", "C1.1"), led, arm("lost2", "C1.3"), ...racing]);
+  const bars = candidateBars({ ...EMPTY, viewedNode, every: false });
+  expect(bars.map((b) => b.key)).toEqual([led, ...racing].map((c) => c.address));
+  expect(bars.map((b) => b.idx)).toEqual([0, 1, 2]);
+  expect(candidateBars({ ...EMPTY, viewedNode })).toHaveLength(5);
 });
 
 it("hangs each pass on the arm it measures, by kind, and on no other", () => {

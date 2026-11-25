@@ -167,10 +167,10 @@ def _similarity(a: object, b: object) -> float:
 
 
 def _earlier(c: _Candidate, everyone: list[_Candidate]) -> dict[str, _Candidate]:
-    """Each individual measured in a round before *c*'s, as its newest measurement."""
+    """Each individual's newest measurement in a round before *c*'s: an invalid copy measured nothing."""
     latest: dict[str, _Candidate] = {}
     for x in sorted(
-        (x for x in everyone if x.round < c.round),
+        (x for x in everyone if x.round < c.round and not x.arm.state.invalid),
         key=lambda x: (c.read_in.holds(x), x.round, x.read_in.cycle is c.read_in.cycle),
     ):
         latest[x.individual.id] = x

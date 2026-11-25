@@ -69,7 +69,7 @@ def _arm_line(close: RoundStatement, key: ArmKey) -> str:
     reasons = ", ".join(sorted({v.reason.value for v in arm.validation_failures}))
     flagged = f" ({reasons})" if reasons else ""
     outcome = (arm.kind if isinstance(arm, Cut) else arm.state) + flagged
-    if isinstance(arm, Cut) and arm.kind == "invalid":
+    if arm.invalid:
         return f"  {arm.label} {outcome} — {mechanism}"
     fit = close.fit(key)
     # A lift read short of the parent's whole set stands on cells its stop selected.
