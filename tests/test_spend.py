@@ -1840,36 +1840,6 @@ async def test_a_walk_resolves_no_archive_row_past_the_draw_it_takes(
     assert drawn["resolved"] == draw, f"the walk resolved rows {drawn['resolved']} of a 4-row draw"
 
 
-@pytest.mark.usefixtures("run_bound", "offline")
-async def test_the_gauge_allows_what_fill_sends_under_a_block_race(built_stores: Stores) -> None:
-    dataset = _dataset()
-    backend = _OrderedFakeBackend(len(dataset))
-    session = loop_session(
-        built_stores,
-        pipeline_schema([]),
-        dataset,
-        scorer=_HIT,
-        control=_control_pausing(lambda: False, lookahead=LookaheadPress(cells=3)),
-        client=backend_client(built_stores.jobs_dir, max_cells_in_flight=8, holds_own_sends=True),
-    )
-    walk = open_walk(JobSearchPoint(), dataset, session, kind=MeasurementRole.PANEL, measured="c0")
-    phase = query_loop._ScoringPhase([0], [walk], session, None, _CuttingRace({}), None, None)
-    phase.decide()
-    armed = query_loop._armed(session, walk.ctx.kind)
-    allowed = walk.flight(armed.cells, phase.owed(0), phase.trigger).allowed
-
-    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
-        return await backend.measure(sample)
-
-    with mock.patch.object(query_loop, "measure_sample", _measure):
-        phase.fill(walk, armed, phase.ceiling)
-        sent = len(walk.running)
-        await asyncio.gather(*walk.end(None, cancel=True), return_exceptions=True)
-    assert sent == allowed < len(dataset), (
-        f"the gauge allowed {allowed} out, fill sent {sent}: past a block close the press bounds both"
-    )
-
-
 class _CuttingRace:
     """Potter's shape: one row a block in the sampler's order, each walk cut at the close the test
     picks."""

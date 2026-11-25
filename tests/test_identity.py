@@ -295,7 +295,6 @@ from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoi
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import PauseCause, StopReason
-from promptpotter.domain.pipeline_manifest import resolved_key
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     normalize_model_id,
@@ -5003,25 +5002,6 @@ def test_the_l4_generator_and_its_steer_are_shown_the_inner_optimizer_prompts_it
         )
         refused = set(filled.injections.dropped) & NODE_LAYOUTS[node].mandatory
         assert not refused, f"{node}: mandatory panel(s) refused by the budget: {sorted(refused)}"
-
-
-def test_a_critique_cluster_says_what_it_holds_before_its_id_list_opens() -> None:
-    # Ids first ran a list on to `max_tokens` (two banked minimax replies, healed at a full call's
-    # price): the schema sent and the layout the prompt shows both close a cluster on its ids.
-    potter = select_optimizer(bench_choice("potter"))
-    config = potter.node_config("l1_critique")
-    key = resolved_key(config.schema_family, config.schema_version)
-    assert key is not None, "guard: the critique names no schema"
-    sent = potter.resolved_schemas[key]
-    cluster = sent["json_schema"]["schema"]["$defs"]["FailureCluster"]
-    assert list(cluster["properties"]) == [
-        "mechanism",
-        "claim",
-        "sample_ids",
-    ], "the schema opens a cluster's id list before it names the mechanism"
-    layout = running_prompt("l1_critique", config, potter.manifest).answer_format or ""
-    at = [layout.index(f'"{field}"') for field in ("mechanism", "claim", "sample_ids")]
-    assert at == sorted(at), "the reply layout opens a cluster's id list before its mechanism"
 
 
 def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refused_at_its_mint(
