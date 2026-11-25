@@ -772,12 +772,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### wave-5 · webapp (what webapp-1 left)
 
-- **A pane's phone layout keys on the screen, not its column**: `measurements.css`, `scoring.css`,
-  `dashboard-pipeline.css`, `remote.css` and `ui/IntervalRow.module.css` switch at
-  `@media (max-width:640px)` though they draw inside a `.view` 413px wide on a 1440 screen. Root:
-  the `column` container `ui/Toolbar.module.css`'s fold reads. **Re-test:**
-  `git grep -c "@media (max-width: *640px)" -- webapp/components webapp/app/styles/domains` reaches
-  the screen-only rules alone.
 - **A short landscape screen leaves its pane a 30px strip**: at 844×390 on touch the masthead
   (~200px), nav (56px) and remote bar (~60px) stay fixed; nothing is under the bar any more, but a
   pane shows less than one row. Root: the masthead scrolls away with the pane on a short viewport.

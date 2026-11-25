@@ -28,7 +28,7 @@ span.criterion-pct{border-color:transparent;background:transparent;font-size:var
 .criterion-summary{width:100%}
 .run-setup .criterion-line{display:inline;margin-inline-start:var(--space-8);font-size:inherit;color:inherit}
 .run-setup .criterion-glyph{width:11px;height:11px;margin-inline-end:var(--space-4);vertical-align:-1px}
-@media (max-width:640px){
+@container column (max-width:640px){
   .criterion-row{grid-template-columns:14px 6.5rem minmax(3rem,1fr) 3.5rem 0.75rem 16px}
   .criterion-name{overflow-wrap:anywhere}
   .criterion-row > .criterion-remove,.criterion-row > span:last-child{grid-column:6;grid-row:1}
