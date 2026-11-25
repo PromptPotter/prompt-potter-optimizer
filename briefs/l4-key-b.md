@@ -1,8 +1,18 @@
 # l4-key-b: what an archived L4 cell holds, and what a cell's floor reads (cloud · W1)
 
-`briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is **`origin/land/w1`
-at the sha the dispatch names** (main plus W1's landed chains, potter-w1 and l4-key-a among them).
-Push to `arc/l4-key-b`.
+`briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is
+**`origin/arc/l4-key-a2` at `080871de0`**: main `da08f4717` (W1) plus l4-key-a and l4-key-a2 (the
+cell key is the seat's minted origin, laid at init; the launch probes nested backends). Replace the
+ancestor check with `git merge-base --is-ancestor da08f4717 080871de0`; equals-main runs against
+`080871de0`'s offline home. Read `git log --format='%h %s%n%b' da08f4717..080871de0` and
+`git show origin/out/l4-key-a2-report:report.md` first. Push to `arc/l4-key-b` as ONE commit, or
+several only where the full gate is green at each; a doc rides the code it describes.
+
+Beside you run, on `land/measuring-loop`, **ml-5** and **potter-w1**. You share two files by
+section: `potter/knobs.py` (ml-5 adds the `dispatch` knob; yours is `terminate_capability`'s
+description alone) and `research/datasets/promptpotter-self/family.yaml` (potter-w1 re-derives the
+`l2_context` share; yours is the inner measurand and ladder, and the citation below). Touch nothing
+else of theirs (`optimizers/potter/`, `scoring/query_loop.py`, `runner/round.py`, `rasch.py`).
 
 **You are in W1, the re-key window** (operator 2026-11-19): every backbone shape drift lands now,
 batched so run data is wiped and L4 cells are voided ONCE. Here L4 cell scores, the estimator key
@@ -36,7 +46,19 @@ transitional step, no bridge, no reader of two shapes, no "kept X, filed the roo
    `campaign.scoring` discount or `escalation.l1_patience` reaches an inner run. Decide the channel
    by the fewest spellings and say why. Re-test: the three seats' resolved inner configs carry one
    `scoring` and one `escalation`; `runner/inner/tasks.py::_lever` names them.
-6. **The archive is a cache no landing proves** (§ wave-5 · drift, D1), LAST, on the settled shape:
+6. **A cell's pin over-keys** (l4-key-a2's row to file): `domain/cells.py::PinnedCell` still holds
+   `Seat.id`, a label, so renaming a seat moves its cell key. The pin drops the seat id. It moves L4
+   cell keys, so it lands in this window. **Re-test:** renaming a seat moves no cell key.
+7. **One depth rule, one door** (l4-key-a2's row): resolve now refuses a seat on a
+   self-optimization dataset (`runner/inner/tasks.py`, `pipeline_config_invalid`), beside the spawn's
+   depth check (`spawn.py::run_inner_cycle`, `measurement_context.py::MAX_INSTRUMENT_DEPTH`). Prove
+   which one a run can reach; keep that one, delete the other, and say so in `docs/concepts/l4.md`
+   § Depth.
+8. **Two loose ends** (l4-key-a2's rows): `embedded_run.py` imports `maintenance.landing` at module
+   scope (:38, :77), as `run_job.py` did; only an entry lands, so move it there (re-test:
+   `git grep -n "maintenance.landing" -- promptpotter/application/embedded_run.py` is empty). And
+   `family.yaml:25` still cites `InnerTaskSpec`: cite `domain/l4/cells.py::cell_key`.
+9. **The archive is a cache no landing proves** (§ wave-5 · drift, D1), LAST, on the settled shape:
    the row's `Shape` in `store/data_root.py::_ARCHIVE_SHAPES` is its ONE strict reader, nested
    reports typed by their connector; a row that no longer loads is dropped at the landing and the
    landing says how many, by reason. Re-test: a fixture per `cell_report.inner` generation and the
