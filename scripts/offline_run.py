@@ -2303,9 +2303,10 @@ def read_warm(
     billed = billed and bill.discarded == bill.served
     failed += not billed
     sent = {leg: BehaviourTrace.read(home / leg) for leg in (WARM, PRESSED)}
-    # Not a fail: a cell a press bought past a close is banked, and the archive's sample fold, which
-    # a later optimizer prompt reads, folds every banked row (`indexes/sample.py::SampleIndex`).
+    # A press moves the bill, never the record: an optimizer request reading a cell the press bought
+    # past a close read the running campaign's banked spend as its memory.
     asked = [n for n, h in sent[PRESSED].requests.items() if sent[WARM].requests.get(n) != h]
+    failed += bool(asked)
     print(
         f"{name}: pressed {PRESS.cells} cells x {PRESS.abreast} on a warm ruler "
         f"(rows {sorted(set(rows[WARM]))}), backend cells "
@@ -2314,7 +2315,7 @@ def read_warm(
         f"record {'UNMOVED' if same_pressed else 'MOVED'}, at depth {bill.depth} a walk wasted "
         f"at most {bill.most_wasted}, {bill.discarded} discarded (dashboard {bill.served})"
         f"{'' if billed else ' (NOT the press it was handed)'}"
-        f"{f', requests reading the banked cells {sorted(asked)}' if asked else ''}"
+        f"{f', requests MOVED {sorted(asked)}' if asked else ', requests UNMOVED'}"
     )
     again = decided(home / RESUMED, after=pause_after)
     same = decided(home / WARM, after=pause_after) == again
