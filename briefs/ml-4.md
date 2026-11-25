@@ -11,7 +11,11 @@
 3. **THE CODE SHRINKS is no target here**: hunt deletions, and name every added line's reason.
 
 Push to `arc/ml-4` as ONE commit, or several only where the full gate is green at each; a doc
-rides the code it describes. You run alone on the loop.
+rides the code it describes. Beside you runs **l4-key-a** on main (`runner/inner/`,
+`domain/l4/cells.py`, `initialization/wiring.py`, `jobs/launcher/admission.py`, `dataset_access.py`,
+`infrastructure/store/stores.py`, `infrastructure/run_scope.py`): leave those alone. **You share
+`jobs/mint.py`**: yours is only the coupling refusal's move out of `refuse_unrunnable`; theirs is
+`MintPlan.origin_hash` and the inner seat.
 
 ## Your base
 Read `git show -s f2afd7e3d`: its message names each slice's seams. In short:
