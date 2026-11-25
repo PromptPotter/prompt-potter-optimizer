@@ -210,7 +210,7 @@
 /* Room for the connector dot at its middle: narrower and the dot sits on the end chips. */
 .wf-hero-nested .wf-hero-arrow{min-width:36px;max-width:56px}
 .wf-hero-nested .wf-hero-node .ico svg{width:20px;height:20px}
-@media (max-width:640px){
+@container column (max-width:640px){
   .wf-hero-nested{padding-left:var(--space-4);padding-right:var(--space-4)}
 }
 

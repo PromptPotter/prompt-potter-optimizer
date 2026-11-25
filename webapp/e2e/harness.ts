@@ -1,7 +1,13 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { test as base, expect, type Locator, type Page, type APIRequestContext } from "@playwright/test";
+import {
+  test as base,
+  expect,
+  type Locator,
+  type Page,
+  type APIRequestContext,
+} from "@playwright/test";
 import {
   STOP_REASON_INFO,
   type CommandPayloads,
@@ -38,7 +44,25 @@ function faultLog(baseURL: string | undefined): string | null {
 let richest: Promise<Campaign | null> | null = null;
 
 // `provide`, not `use`: `react-hooks/rules-of-hooks` reads `use` as React's hook and fails the lint.
-export const test = base.extend<{ problems: Problem[]; rich: Campaign }>({
+export const test = base.extend<{ problems: Problem[]; rich: Campaign; reads: void }>({
+  // Counted in the document, so a reload starts at none: a `fetch` (every read, `lib/api/client.ts`),
+  // never the feed's stream nor a lazy pane's chunk (its `aria-busy` says that).
+  reads: [
+    async ({ page }, provide) => {
+      await page.addInitScript(() => {
+        const w = window as unknown as { __openReads: number; fetch: typeof fetch };
+        const send = w.fetch.bind(window);
+        w.__openReads = 0;
+        w.fetch = (...args) => {
+          w.__openReads++;
+          return send(...args).finally(() => w.__openReads--);
+        };
+      });
+      await provide();
+    },
+    { auto: true },
+  ],
+
   rich: async ({ request }, provide, testInfo) => {
     richest ??= richestCampaign(request);
     const found = await richest;
@@ -358,10 +382,21 @@ export async function hideSidebar(page: Page) {
   if (await row.isVisible()) await press(row);
 }
 
-// The panes, not only the page: `.main` clips and `.content` scrolls, so the document never overflows.
-// Read once no lazy pane is still `aria-busy`, or a pane not yet drawn passes.
-export async function noSidewaysScroll(page: Page) {
+/** The page has drawn every answer it asked for: no request open two frames after the last one closed
+ *  (an answer's render asks the next read), and no lazy pane still `aria-busy`. A layout check reads
+ *  after this, or a row its read has not yet answered is never checked. */
+async function drawn(page: Page) {
+  const open = () => page.evaluate(() => (window as unknown as { __openReads: number }).__openReads);
+  do {
+    await expect.poll(open, { message: "a read is still open" }).toBe(0);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  } while (await open());
   await expect(page.locator('[aria-busy="true"]:visible')).toHaveCount(0);
+}
+
+// The panes, not only the page: `.main` clips and `.content` scrolls, so the document never overflows.
+export async function noSidewaysScroll(page: Page) {
+  await drawn(page);
   const over = await page.evaluate(() =>
     [document.documentElement, ...document.querySelectorAll(".content, .view, .card")]
       .filter((el) => el.getClientRects().length > 0 && el.scrollWidth - el.clientWidth > 1)
@@ -382,6 +417,7 @@ export async function everyTapLands(page: Page) {
     await page.mouse.move(-1, -1);
     await expect(page.locator('body > [role="note"]')).toHaveCount(0);
   }
+  await drawn(page);
   const wrong = await page.evaluate(async (touch) => {
     const settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     const cover = (b: HTMLButtonElement) => {
