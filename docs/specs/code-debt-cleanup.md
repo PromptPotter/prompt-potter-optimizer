@@ -934,15 +934,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   fake races onto the offline legs; the hand-driven `_walk`/`_round` pause, catch-up and ceiling tests
   stay). Root: each becomes an offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and
   `_walk`/`_round` go (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
-- **A press moves what potter's L2 is asked** (tw-0): under `PRESS` the warm record is UNMOVED, but
-  `L2ContextOutput_0`'s persistent failures read 4 → 5, because `indexes/sample.py::SampleIndex` folds
-  every banked row, the running campaign's cells a press bought past a cut included. Root: the running
-  campaign's own bought-but-untaken cells stay out of its own memory, and nothing else does: another
-  campaign's cells, a deleted one's included, stay memory (§ The archive is not scoped by campaign).
-  Narrowing optimize memory to ledger-named answers (tw-r `67b68fa46`) was not taken, because a deleted
-  campaign or a run-data wipe emptied it while the archive still replayed those cells. **Re-test:** the
-  offline run's `potter: pressed …` line names no request, and a deleted campaign's cells still reach the
-  next campaign's `SampleIndex`.
 - **`scoring/query_loop.py::keep_cut` takes a refusal as a row**: `_ScoringPhase.keep_cut` (`:952`) filters
   the cell the ceiling refused back out of `walk.results` (`:960-964`, by `_budget_refusal`), because the
   refused cell was taken as a row before it stopped the phase. Root: a refusal is never a row. **Re-test:**

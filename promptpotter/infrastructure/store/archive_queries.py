@@ -5,10 +5,11 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable, Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NamedTuple, assert_never
+from typing import TYPE_CHECKING, Any, ClassVar, NamedTuple, assert_never
 
 from pydantic import Field
 
+from promptpotter.domain.records.untaken import UntakenBoughtRecord
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer
 from promptpotter.domain.scoring import MeasuredCell, WalkedCell
 from promptpotter.domain.strict_model import FrozenModel
@@ -16,7 +17,12 @@ from promptpotter.infrastructure.run_scope import run_scope
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_answers
 from promptpotter.infrastructure.store.io import write_jsonl
 from promptpotter.infrastructure.store.measurement_archive import ArchiveFile, file_keys, standing
-from promptpotter.infrastructure.store.read_model import LedgerSpan, read_rows
+from promptpotter.infrastructure.store.read_model import (
+    LedgerIndex,
+    LedgerSpan,
+    RecordClasses,
+    read_rows,
+)
 from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
@@ -35,7 +41,11 @@ class CampaignWalks(NamedTuple):
 
 
 class OpenAt(NamedTuple):
-    """Optimize: every campaign's answers as filed, and the ruler version at each round's open."""
+    """Optimize: every campaign's answers as filed but what the running campaign's walks bought and
+    none took (`UntakenBoughtRecord`), and the ruler version at each round's open. A press moves
+    the bill, never the record; ``None``: a read no campaign runs, which leaves nothing out."""
+
+    walks: CampaignWalks | None = None
 
 
 class ArmOf(NamedTuple):
@@ -59,11 +69,38 @@ def memory_scope() -> MemoryScope:
     return scope
 
 
+class _UntakenBought:
+    records: ClassVar[RecordClasses] = (UntakenBoughtRecord,)
+
+    def __init__(self) -> None:
+        self._found: set[str] = set()
+
+    def feed(self, record: UntakenBoughtRecord) -> None:
+        self._found.update(record.answers)
+
+    def value(self) -> frozenset[str]:
+        return frozenset(self._found)
+
+
+LedgerIndex.readers(_UntakenBought)
+
+
+def _left_out(walks: CampaignWalks) -> frozenset[str]:
+    """What the campaign's walks bought and none of them took since: its spans' alone."""
+    spans = walks.spans()
+    bought = frozenset().union(
+        *(LedgerIndex.of(span.path).view(_UntakenBought, span.until) for span in spans)
+    )
+    return bought - scan_ledger_answers(spans) if bought else bought
+
+
 def _remembered() -> Callable[[FiledAnswer], bool] | None:
     """An open span grows with its ledger, so a walk is remembered once its record lands."""
     match scope := memory_scope():
-        case OpenAt():
-            return None
+        case OpenAt(walks=walks):
+            if walks is None or not (out := _left_out(walks)):
+                return None
+            return lambda answer: answer.answer not in out
         case ArmOf(walks=walks):
             own = scan_ledger_answers(walks.spans())
             return lambda answer: answer.answer in own
@@ -129,12 +166,20 @@ def list_populations(stores: Stores, bank: Bank) -> list[ArchiveEntry]:
 
 def signed_populations(stores: Stores, bank: Bank) -> list[tuple[ArchiveEntry, list[list[Any]]]]:
     """Each configuration beside what moves its population: its cell files and, for a task
-    remembering its own walks, how many of them sit in each (a replay moves no file).
+    remembering its own walks, how many of them sit in each (a replay moves no file), or, for one
+    leaving out what its walks bought and none took, how many of those sit in each, negated.
     A configuration in none of a task's walks is left out unread."""
     sigs = stores.archive.cell_signatures()
     own: Counter[str] | None = None
-    if isinstance(scope := memory_scope(), ArmOf):
-        own = Counter(ref.partition(".")[0] for ref in scan_ledger_answers(scope.walks.spans()))
+    left: Counter[str] = Counter()
+    match scope := memory_scope():
+        case ArmOf(walks=walks):
+            own = Counter(ref.partition(".")[0] for ref in scan_ledger_answers(walks.spans()))
+        case OpenAt(walks=walks):
+            if walks is not None:
+                left = Counter(ref.partition(".")[0] for ref in _left_out(walks))
+        case _:
+            assert_never(scope)
     out: list[tuple[ArchiveEntry, list[list[Any]]]] = []
     for entry in _configurations_on(stores, bank, frozenset(bank.position_of)):
         sig = [list(part) for part in stores.archive.signature(entry, sigs) or ()]
@@ -143,6 +188,7 @@ def signed_populations(stores: Stores, bank: Bank) -> list[tuple[ArchiveEntry, l
             if not walked:
                 continue
             sig += walked
+        sig += [[key, -left[key]] for key in file_keys(entry) if left[key]]
         out.append((entry, sig))
     return out
 

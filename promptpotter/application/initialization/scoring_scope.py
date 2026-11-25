@@ -74,13 +74,13 @@ def run_memory(session: Session) -> MemoryScope:
     opened (`runner/inner/spawn.py::_run_inner_campaign`)."""
     if isinstance(cell := run_scope().memory, ArmOf):
         return cell
+    walks = CampaignWalks(session.store.campaigns, session.campaign_id)
     match purpose := session.purpose:
         case Optimize():
-            return OpenAt()
+            return OpenAt(walks)
         case Compare(arm=arm):
             record = session.store.campaigns.load_head_to_head(arm.head_to_head_id)
             assert record is not None, "an arm's mint declares its head-to-head"
-            walks = CampaignWalks(session.store.campaigns, session.campaign_id)
             return ArmOf(walks, record.ruler_version)
         case _:
             assert_never(purpose)

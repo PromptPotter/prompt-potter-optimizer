@@ -2203,7 +2203,8 @@
             "spend_tombstone": "#/components/schemas/SpendTombstoneRecord",
             "standing_budget": "#/components/schemas/StandingBudgetRecord",
             "token_usage": "#/components/schemas/TokenUsageRecord",
-            "trail_tombstone": "#/components/schemas/TrailTombstoneRecord"
+            "trail_tombstone": "#/components/schemas/TrailTombstoneRecord",
+            "untaken_bought": "#/components/schemas/UntakenBoughtRecord"
           },
           "propertyName": "record_type"
         },
@@ -2345,6 +2346,9 @@
           },
           {
             "$ref": "#/components/schemas/TrailTombstoneRecord"
+          },
+          {
+            "$ref": "#/components/schemas/UntakenBoughtRecord"
           }
         ]
       },
@@ -6477,6 +6481,7 @@
               "standing_budget",
               "token_usage",
               "trail_tombstone",
+              "untaken_bought",
               "stream_snapshot"
             ],
             "title": "Kind",
@@ -9573,6 +9578,40 @@
           "chosen"
         ],
         "title": "Unframed",
+        "type": "object"
+      },
+      "UntakenBoughtRecord": {
+        "additionalProperties": false,
+        "description": "The answers a phase's walks BOUGHT and none took (a look-ahead cell its cut discarded,\narrived before the close or after it): filed, so another campaign remembers them, and kept\nout of this campaign's own memory until one of its walks takes them.",
+        "properties": {
+          "answers": {
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Answers",
+            "type": "array"
+          },
+          "record_type": {
+            "const": "untaken_bought",
+            "default": "untaken_bought",
+            "title": "Record Type",
+            "type": "string"
+          },
+          "round": {
+            "title": "Round",
+            "type": "integer"
+          },
+          "timestamp": {
+            "title": "Timestamp",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round",
+          "answers"
+        ],
+        "title": "UntakenBoughtRecord",
         "type": "object"
       },
       "ValidationFailure": {
