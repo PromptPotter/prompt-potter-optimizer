@@ -25,6 +25,7 @@ from promptpotter.application.scoring.race_protocol import (
     survivors,
 )
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.phase_acts import RowsRan
 from promptpotter.domain.ruler import DeltaRuler, RulerEntry
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.strict_model import StrictModel
@@ -86,6 +87,12 @@ class RowKnobs(StrictModel):
     @property
     def trigger(self) -> Trigger:
         return Trigger(self.dispatch == "rolling", self.read_order)
+
+    def rows_ran(self, ruler: DeltaRuler | None) -> RowsRan:
+        """A cold ruler tells every row alike, so ``informative`` there runs the sampler's order."""
+        if self.row_choice == "random":
+            return "random"
+        return "cold" if ruler is None else "informative"
 
 
 @dataclass(frozen=True)

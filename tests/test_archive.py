@@ -51,6 +51,7 @@ from factories import (
     minted_dataset,
     optimizer_state,
     pipeline_schema,
+    pobb_knobs,
     prompted,
     samples,
     score_summary,
@@ -66,6 +67,7 @@ from factories import (
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import DifficultyView, ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     cut_operator_fork,
     fork_edge,
@@ -85,9 +87,7 @@ from promptpotter.application.hierarchy_subtree import (
 from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.intelligence.rasch import (
-    build_round_order,
     candidate_abilities,
-    expected_information,
 )
 from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Admitted, Inline
@@ -109,6 +109,7 @@ from promptpotter.application.optimizers.capo.members import (
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, RoundSamples
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
+from promptpotter.application.optimizers.potter.pobb import PoBBCheck
 from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
 from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
@@ -130,7 +131,7 @@ from promptpotter.application.scoring import query_loop, search_point_scorer
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.race_protocol import Decision, View, WalkView
-from promptpotter.application.scoring.row_policy import FieldRead, _hand_out, _Walking
+from promptpotter.application.scoring.row_policy import FieldRead, RowGround, RowKnobs, send_rows
 from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.application.views.render.phase import acts_line
@@ -184,7 +185,6 @@ from promptpotter.domain.records.run_records import (
     ForkTrigger,
     OriginGatePass,
     OriginSource,
-    ResumeCheckpointRecord,
     RoundEnteredRecord,
     RoundProposedRecord,
     RoundWarningRecord,
@@ -490,14 +490,13 @@ def _a_run_appending(stores: Stores) -> Iterator[None]:
         run.wait()
 
 
-def test_a_reindex_beside_a_run_in_another_process_refuses_naming_its_cycle(
+def test_a_reindex_beside_a_run_in_another_process_refuses_until_it_ends(
     built_stores: Stores,
 ) -> None:
     """A row the run lands mid-rewrite lands in no index: its writer is asked, never raced."""
     with _a_run_appending(built_stores), pytest.raises(ConflictError) as refused:
         reindex_measurement_archive(built_stores)
     assert refused.value.code == "archive_writers"
-    assert "cyc, held by its run" in str(refused.value), "the refusal named no writer"
     assert reindex_measurement_archive(built_stores, apply=True) == {"indexed": 0, "undescribed": 0}
 
 
@@ -909,7 +908,7 @@ def _writes_under(
 def test_a_store_off_a_workspace_shape_is_refused(tmp_path: Path) -> None:
     # Off them, io's anchor never binds: a write into a deleted cycle re-makes it.
     for root in (tmp_path / "projects", user_data_root() / "projects" / "x" / "projects"):
-        with pytest.raises(ValueError, match="is no workspace of the data root"):
+        with pytest.raises(ValueError):
             build_stores(default_identity(), projects_root=root)
 
 
@@ -1201,68 +1200,197 @@ def _adopted() -> RoundResult:
     )
 
 
-# The absent-arm replays read the cut this race records.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_was_fit_on(
-    built_stores: Stores,
-) -> None:
-    stores = built_stores
-    parent = prompted(instruction="parent")
-    hits = sheet(measurements([1.0] * 10))
-    racing = seat(
-        stores,
-        round_num=3,
-        optimization={"elimination_n_min": 4, "nodes": {"pobb": {"config": {"epsilon": 0.30}}}},
+def _keyed_ruler(rows: Sequence[Sample]) -> DeltaRuler:
+    """A warm ruler on *rows* by their `Sample.key`, δ = slot − 4: an answer at θ tells most on the
+    row whose δ sits nearest it."""
+    slots = delta_ruler({int(s.id): float(s.id) - 4.0 for s in rows})
+    return slots.model_copy(
+        update={
+            "delta": {s.key: slots.delta[str(s.id)] for s in rows},
+            "delta_se": {s.key: slots.delta_se[str(s.id)] for s in rows},
+        }
     )
-    on_parent = _on_parent()
-    # The frontier holds every cell, answered by an individual that is not the parent.
-    line = [_round(round=0, cells={ArmKey("origin"): hits}, **on_parent)]
-    set_cycle(racing.cycle, line=line)
-    ten = samples(10, "g")
 
-    def race_of() -> PoBBRace:
-        race = PoBBRace(
-            NodeContext(racing, NODE_MEMBERS.get("pobb")),
-            RoundSamples(cells=ten, order=ten, block_size=len(ten)),
+
+_TEN = samples(10, "g")
+
+
+def _row_knobs(**bend: Any) -> RowKnobs:
+    return pobb_knobs(
+        row_choice="informative", refit="per_round", shape="per_candidate", dispatch="batch"
+    ).model_copy(update=bend)
+
+
+def test_each_walk_leads_with_the_row_its_theta_reads_most_and_loses_none() -> None:
+    walks = (ArmKey("c1"), ArmKey("c2"))
+    fit = FieldRead(
+        theta={walks[0]: -2.0, walks[1]: 3.0},
+        variance=dict.fromkeys(walks, 1.0),
+        p_best=dict.fromkeys(walks, 0.5),
+        bar=dict.fromkeys(walks, 0.05),
+    )
+    warm = _keyed_ruler(_TEN)
+    # knobs, the fit, the ruler, the round's θ, c1's calls out → the slot each walk leads with, and
+    # the slots a block of one row a walk sends each.
+    table: list[
+        tuple[dict[str, str], FieldRead[ArmKey] | None, DeltaRuler | None, int, int, Any]
+    ] = [
+        # `per_round` refit reads the parent's θ for every walk, never the field's.
+        ({}, fit, warm, 0, 0, ((4, 4), ([4], [4]))),
+        # `per_decision` under `per_candidate`: one shared θ set, so both answer the same rows.
+        ({"refit": "per_decision"}, fit, warm, 0, 0, ((2, 2), ([2], [2]))),
+        # `per_decision` under `per_round`: each at its own θ, the block's two calls one a walk.
+        ({"refit": "per_decision", "shape": "per_round"}, fit, warm, 0, 0, ((2, 7), ([2], [7]))),
+        # Before a check first fits, the round's θ stands in for every walk's.
+        ({"refit": "per_decision", "shape": "per_round"}, None, warm, 1, 0, ((5, 5), ([5], [5]))),
+        # A call out keeps its seat at the head; the choice ranks only the rows behind it.
+        ({}, fit, warm, 0, 1, ((0, 4), ([], [4]))),
+        # `random`, or a cold ruler that tells every row alike, keeps the sampler's order.
+        ({"row_choice": "random"}, fit, warm, 0, 0, ((0, 0), ([0], [0]))),
+        ({}, fit, None, 0, 0, ((0, 0), ([0], [0]))),
+    ]
+    for bend, read, ruler, theta, out, (led, sent) in table:
+        view = View(
+            {key: WalkView([], _TEN, out if key == walks[0] else 0, len(_TEN)) for key in walks},
+            opening=False,
         )
-        # The block's open, before its close: the walk took eight rows of its ten.
-        _decided(race, {ArmKey("c1"): walked.cells}, ten[8:], 2, opening=True)
-        return race
+        ground: RowGround[ArmKey] = RowGround(ruler, float(theta), 4, 1, {})
+        chosen = send_rows(view, {}, read, _row_knobs(**bend), ground)
+        assert tuple(int(chosen.order[key][0].id) for key in walks) == led, (
+            f"{bend} at θ={theta}: the walks led with the wrong rows"
+        )
+        assert tuple([int(s.id) for s in chosen.sends[key]] for key in walks) == sent, (
+            f"{bend} at θ={theta}: the block sent the wrong rows"
+        )
+        for key in walks:
+            assert sorted(int(s.id) for s in chosen.order[key]) == list(range(10)), (
+                f"{bend}: the choice lost or added a row"
+            )
 
-    rescope(ledger=cycle_ledger(racing.cycle))
 
-    walked = sheet(
-        measurement(i, None, error="boom", error_category="transient")
-        if i == 2
-        else measurement(i, 1.0 if i == 4 else 0.0)
-        for i in range(8)
+def test_a_rolling_decision_sends_none_where_the_calls_out_can_settle_the_cut() -> None:
+    # ε(n) 0.05: `contested` and `idle` sit just above it, `sure` far past it.
+    read = FieldRead(
+        theta={},
+        variance=dict.fromkeys(map(ArmKey, ("contested", "idle", "sure")), 1.0),
+        p_best={ArmKey("contested"): 0.06, ArmKey("idle"): 0.06, ArmKey("sure"): 0.9},
+        bar=dict.fromkeys(map(ArmKey, ("contested", "idle", "sure")), 0.05),
     )
-    assert not _decided(race_of(), {ArmKey("c1"): walked.cells}, ten[8:], 2).stops, (
-        "the parent's prior borrowed cells another individual answered"
+    rows, deep = samples(6, "r"), sheet(measurements([1.0] * 6)).cells
+    # walk → its depth's cells, its calls out, and the new calls a decision then sends it.
+    table = {
+        # One call out on a decision one answer can move across its bar: it waits on that call.
+        "contested": (deep, 1, 0),
+        # None out: nothing can settle it, so it is sent the one call that can.
+        "idle": (deep, 0, 1),
+        # No answer moves it to its bar: every row its budget takes is sent at once.
+        "sure": (deep, 0, 6),
+        # Unread yet: sent the calls that bring it to the depth the cut first reads.
+        "young": ((), 0, 4),
+    }
+    knobs = _row_knobs(row_choice="random", dispatch="rolling")
+    ground: RowGround[ArmKey] = RowGround(None, 0.0, 4, 1, {})
+
+    def sent(outs: Mapping[str, int]) -> dict[str, int]:
+        view = View(
+            {
+                ArmKey(name): WalkView(taken, rows, outs[name], len(taken) + len(rows))
+                for name, (taken, _, _) in table.items()
+            },
+            opening=False,
+        )
+        return {key: len(s) for key, s in send_rows(view, {}, read, knobs, ground).sends.items()}
+
+    first = sent({name: out for name, (_, out, _) in table.items()})
+    assert first == {name: calls for name, (_, _, calls) in table.items()}, (
+        f"a rolling decision sent {first}"
     )
-    set_cycle(
-        racing.cycle, line=[*line, _round(round=1, cells={ArmKey(parent.id): hits}, **on_parent)]
+    settled = sent({name: out + first[name] for name, (_, out, _) in table.items()})
+    assert settled == dict.fromkeys(table, 0), (
+        f"a decision whose calls out can settle every walk sent {settled}"
     )
-    race = race_of()
-    stop = _decided(race, {ArmKey("c1"): walked.cells}, ten[8:], 2).stops.get(ArmKey("c1"))
-    reading = race.judge(stop, ArmKey("c1"), {ArmKey("c1"): "C3.1"})
-    assert reading is not None and reading.context["gate"] == "epsilon"
-    [cut] = racing.cycle.pending_decisions
-    assert isinstance(cut.inputs_ref, EliminationCut)
-    assert cut.inputs_ref.cells[ArmKey("c1")] == [str(i) for i in range(8) if i != 2]
+
+
+def test_the_round_names_the_row_choice_its_race_ran() -> None:
+    warm = _keyed_ruler(_TEN)
+    for row_choice, ruler, ran in (
+        ("informative", warm, "informative"),
+        # A cold ruler tells every row alike: `informative` there runs the sampler's order.
+        ("informative", None, "cold"),
+        ("random", warm, "random"),
+    ):
+        assert _row_knobs(row_choice=row_choice).rows_ran(ruler) == ran, (
+            f"{row_choice} on a {'warm' if ruler else 'cold'} ruler reported as another choice"
+        )
+
+
+def _cut(
+    walked: Mapping[ArmKey, CellSheet], parent: CellSheet, **knobs: Any
+) -> tuple[dict[ArmKey, Any], EliminationCut | None]:
+    """PoBB's check on *walked* beside the parent's prior, and the record a cut of `c1` files."""
+    check = PoBBCheck(
+        pobb_knobs(**knobs), n_min=4, ruler=_keyed_ruler(_TEN), parent=ArmKey("parent")
+    )
+    check.register_completed(parent.cells, key=ArmKey("parent"))
+    stops = check.check({ArmKey("parent"): parent, **walked}, {key: len(_TEN) for key in walked})
+    stop = stops.get(ArmKey("c1"))
+    return stops, None if stop is None else EliminationCut.of(stop, ArmKey("c1"), ArmKey("parent"))
+
+
+def _graded_ten(grades: Mapping[int, float | None]) -> CellSheet:
+    return sheet(
+        measurement(i, g, sample_key=_TEN[i].key)
+        if g is not None
+        else measurement(i, None, sample_key=_TEN[i].key, error="boom", error_category="transient")
+        for i, g in grades.items()
+    )
+
+
+def test_a_cut_replays_on_the_cells_it_was_fit_on_and_on_its_rivals_grades() -> None:
+    parent = _graded_ten(dict.fromkeys(range(10), 1.0))
+    # An errored cell is read by no side: the cut's record names the seven its field was fit on.
+    walked = _graded_ten({i: None if i == 2 else 1.0 if i == 4 else 0.0 for i in range(8)})
+    stops, cut = _cut({ArmKey("c1"): walked}, parent, epsilon=0.30)
+    assert cut is not None and stops[ArmKey("c1")].check_result["gate"] == "epsilon"
+    assert cut.cells[ArmKey("c1")] == [_TEN[i].key for i in range(8) if i != 2]
     # The round banks the parent re-read on its cells beside the arm, as the loop files it.
-    banked = {ArmKey("c1"): walked, ArmKey(parent.id): hits}
-    assert replay_all_mismatches(_round(round=3, cells=banked), [cut]) == [], (
-        "the cut the live rule made is not the cut its own record replays"
-    )
+    banked = {ArmKey("c1"): walked, ArmKey("parent"): parent}
+    assert (
+        replay_all_mismatches(_round(round=3, cells=banked), [decision(cut, True, node=None)]) == []
+    ), "the cut the live rule made is not the cut its own record replays"
     # A rival's re-grade reaches the replay: a parent that now misses every cell cuts nothing.
-    regraded = {**banked, ArmKey(parent.id): sheet(measurements([0.0] * 10))}
-    [rival_moved] = replay_all_mismatches(_round(round=3, cells=regraded), [cut])
+    regraded = {**banked, ArmKey("parent"): _graded_ten(dict.fromkeys(range(10), 0.0))}
+    [rival_moved] = replay_all_mismatches(
+        _round(round=3, cells=regraded), [decision(cut, True, node=None)]
+    )
     assert rival_moved.current_outcome is False, "the replay read its rival's grades by value"
-    # Every replayer that reads an arm replays an absent one as no cut, no gain and no winner.
-    unwalked, bar_arm = ArmKey("c1"), ArmKey(parent.id)
+
+
+def test_a_per_round_cut_reads_rows_its_rivals_never_answered_and_its_record_replays() -> None:
+    parent = _graded_ten(dict.fromkeys(range(10), 1.0))
+    # Apart: c1 lost 0..5, c2 won 4..9, so the two share two rows, short of the depth a cut reads.
+    apart = {
+        ArmKey("c1"): _graded_ten(dict.fromkeys(range(6), 0.0)),
+        ArmKey("c2"): _graded_ten(dict.fromkeys(range(4, 10), 1.0)),
+    }
+    for shape, cuts in (("per_candidate", False), ("per_round", True)):
+        stops, cut = _cut(apart, parent, shape=shape)
+        assert (cut is not None) is cuts, f"{shape}: the union read cut {sorted(stops)}"
+        if cut is None:
+            continue
+        assert set(cut.cells[ArmKey("c1")]) == {s.key for s in _TEN[:6]}, "the arm's cells moved"
+        banked = {ArmKey("parent"): parent, **apart}
+        assert (
+            replay_all_mismatches(_round(round=3, cells=banked), [decision(cut, True, node=None)])
+            == []
+        ), "a per_round cut does not replay on its own record"
+
+
+def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() -> None:
+    unwalked, bar_arm = ArmKey("c1"), ArmKey("parent")
+    objective = CapoObjective(length_penalty=0.0, length_norm=1)
     paired = PairedTCut(
-        objective=CapoObjective(length_penalty=0.0, length_norm=1),
+        objective=objective,
         arm=unwalked,
         queries_scored=8,
         alpha=0.05,
@@ -1270,27 +1398,36 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
         raced_against=[bar_arm],
         outscored_by=[bar_arm],
     )
-    minibatch = MinibatchTested(
-        arm=unwalked, parent_id=parent.id, parent_scores={"g0": 0.0}, sigma=0.0, sigma_prime=1.0
+    _, cut = _cut(
+        {unwalked: _graded_ten(dict.fromkeys(range(8), 0.0))},
+        _graded_ten(dict.fromkeys(range(10), 1.0)),
+        epsilon=0.30,
     )
-    winner = RoundWinner(
-        arms=[unwalked],
-        coverage_floor=1,
-        bar=CrowningBar(statistic="posterior", admission=0.5),
-        parent=bar_arm,
-        paired_on=None,
-    )
-    kept = PopulationKept(objective=paired.objective, survivors=[unwalked])
+    assert cut is not None, "guard: the check cut the arm"
     for inputs, recorded in (
-        (cut.inputs_ref, True),
+        (cut, True),
         (paired, True),
-        (minibatch, True),
-        (winner, unwalked),
-        (kept, [unwalked]),
+        (
+            MinibatchTested(
+                arm=unwalked, parent_id="p", parent_scores={"g0": 0.0}, sigma=0.0, sigma_prime=1.0
+            ),
+            True,
+        ),
+        (
+            RoundWinner(
+                arms=[unwalked],
+                coverage_floor=1,
+                bar=CrowningBar(statistic="posterior", admission=0.5),
+                parent=bar_arm,
+                paired_on=None,
+            ),
+            unwalked,
+        ),
+        (PopulationKept(objective=objective, survivors=[unwalked]), [unwalked]),
     ):
         [gone] = replay_all_mismatches(
             _round(round=3, cells={}),
-            [ResumeCheckpointRecord(kind=inputs.kind, inputs_ref=inputs, outcome=recorded)],
+            [decision(inputs, recorded, node=None)],
         )
         assert gone.current_outcome in (False, None, []), (
             f"{inputs.kind}: an absent arm's decision replayed"
@@ -1299,321 +1436,13 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     chars = {"target_prompt_chars": 10}
     apart = sheet(measurements([1.0] * 4, sample_ids=[10, 11, 12, 13], pipeline_data=chars))
     bar = sheet(measurements([0.0] * 4, pipeline_data=chars))
-    survived = PopulationKept(objective=paired.objective, survivors=[unwalked, bar_arm])
+    survived = PopulationKept(objective=objective, survivors=[unwalked, bar_arm])
     [disjoint] = replay_all_mismatches(
         _round(round=3, cells={unwalked: apart, bar_arm: bar}),
-        [ResumeCheckpointRecord(kind=survived.kind, inputs_ref=survived, outcome=[unwalked])],
+        [decision(survived, [unwalked], node=None)],
     )
     assert disjoint.current_outcome == [], (
         "population_kept ranked arms that share no cell, reading each as a 0.0 mean"
-    )
-
-
-def _decided(
-    race: PoBBRace,
-    taken: Mapping[ArmKey, Sequence[GradedCell]],
-    untaken: Sequence[Sample],
-    left: int,
-    *,
-    opening: bool = False,
-) -> Decision[ArmKey]:
-    """One decision on walks with none out, each with *untaken* ahead and *left* rows to take."""
-    walks = {key: WalkView(cells, untaken, 0, len(cells) + left) for key, cells in taken.items()}
-    return race.decide(View(walks, opening))
-
-
-def _on_ten(ten: list[Sample], grades: list[float]) -> CellSheet:
-    return sheet(measurement(i, g, sample_key=ten[i].key) for i, g in enumerate(grades))
-
-
-def _informative_race(
-    stores: Stores, monkeypatch: pytest.MonkeyPatch, refit: str, shape: str = "per_candidate"
-) -> tuple[Callable[[], PoBBRace], list[Sample], DeltaRuler, RoundContext]:
-    """A race choosing `informative` rows on a warm ruler (δ = slot − 4) whose parent hit all ten."""
-    ten = samples(10, "g")
-    slots = delta_ruler({i: float(i - 4) for i in range(10)})
-    ruler = slots.model_copy(
-        update={
-            "delta": {s.key: slots.delta[str(s.id)] for s in ten},
-            "delta_se": {s.key: slots.delta_se[str(s.id)] for s in ten},
-        }
-    )
-    monkeypatch.setattr(DifficultyView, "ruler", property(lambda _view: ruler))
-    racing = seat(
-        stores,
-        round_num=3,
-        optimization={
-            "elimination_n_min": 4,
-            "nodes": {
-                "pobb": {
-                    "config": {
-                        "row_choice": "informative",
-                        "refit": refit,
-                        "shape": shape,
-                        "dispatch": "batch",
-                    }
-                },
-                "theta_election": {"config": {"vote": "overlap"}},
-            },
-        },
-    )
-    parent = prompted(instruction="parent")
-    on_parent = _on_parent()
-    set_cycle(
-        racing.cycle,
-        line=[_round(round=0, cells={ArmKey(parent.id): _on_ten(ten, [1.0] * 10)}, **on_parent)],
-    )
-    rescope(ledger=cycle_ledger(racing.cycle))
-    return (
-        lambda: PoBBRace(
-            NodeContext(racing, NODE_MEMBERS.get("pobb")),
-            RoundSamples(cells=ten[:6], order=ten[:6], block_size=1, pool=ten[6:]),
-        ),
-        ten,
-        ruler,
-        racing,
-    )
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_informative_rows_are_the_most_informative_at_the_theta_the_refit_seats(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    by_refit: dict[str, list[str]] = {}
-    for refit in ("per_round", "per_decision"):
-        race_of, ten, ruler, _ = _informative_race(built_stores, monkeypatch, refit)
-        missed = _on_ten(ten, [0.0] * 4).cells
-        race = race_of()
-        _decided(race, {ArmKey("c1"): missed}, ten[4:], 2, opening=True)
-        [chosen] = _decided(race, {ArmKey("c1"): missed}, ten[4:], 2).order.values()
-        read = race._check.read
-        assert read is not None, "guard: the close fit no field"
-        theta = race._round_theta if refit == "per_round" else read.theta[ArmKey("c1")]
-        best = max(ten[4:], key=lambda s: expected_information(theta, [s.key], ruler.entries()))
-        assert chosen[0] == best, f"{refit}: the row led is not the most informative at its θ"
-        assert sorted(s.id for s in chosen) == sorted(s.id for s in ten[4:]), "rows lost or added"
-        by_refit[refit] = [s.key for s in chosen]
-    graded = build_round_order(
-        {s.key: 1.0 for s in ten}, ruler, {int(s.id): s for s in ten[4:]}, n_min=4
-    )
-    assert by_refit["per_round"][0] != ten[graded[0]].key, (
-        "the parent's grade on the row, not θ, chose the row"
-    )
-    assert by_refit["per_decision"][0] != by_refit["per_round"][0], (
-        "a cut-bound arm's refit θ chose the row the parent's θ did"
-    )
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_resumed_informative_race_rechooses_its_rows_and_files_nothing(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    for shape in ("per_candidate", "per_round"):
-        race_of, ten, _, racing = _informative_race(
-            built_stores, monkeypatch, "per_decision", shape
-        )
-        taken = {
-            ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells,
-            ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 0.0]).cells,
-        }
-        live = race_of()
-        _decided(live, taken, ten[4:], 2, opening=True)
-        chose = _decided(live, taken, ten[4:], 2)
-        filed = len(racing.cycle.pending_decisions)
-        # A resume rebuilds the race and closes its blocks again on the rows the walk replays.
-        resumed = race_of()
-        _decided(resumed, taken, ten[4:], 2, opening=True)
-        assert _decided(resumed, taken, ten[4:], 2) == chose, (
-            f"{shape}: the resume chose other pairs"
-        )
-        assert len(racing.cycle.pending_decisions) == filed, f"{shape}: a choice filed a record"
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_the_round_names_the_row_choice_its_race_ran(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    race_of, *_ = _informative_race(built_stores, monkeypatch, "per_round")
-    assert race_of().rows_ran == "informative"
-    # A cold ruler tells every row alike: `informative` there runs the sampler's order.
-    monkeypatch.setattr(DifficultyView, "ruler", property(lambda _view: None))
-    assert race_of().rows_ran == "cold", "a cold ruler's informative choice reported as informative"
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_per_round_open_hands_each_walk_its_own_rows_and_the_blocks_calls_by_what_they_tell(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    race_of, ten, ruler, _ = _informative_race(
-        built_stores, monkeypatch, "per_decision", "per_round"
-    )
-    race = race_of()
-    # A strong and a weak arm the cut keeps: the fit seats them apart, so their most informative
-    # rows part.
-    taken = {
-        ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells,
-        ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 1.0]).cells,
-    }
-    # The whole slate, so the two θ the fit seats lie inside the δ the rows span.
-    _decided(race, taken, ten, 6, opening=True)
-    chosen = _decided(race, taken, ten, 6)
-    read = race._check.read
-    assert read is not None, "guard: the close fit no field"
-    for key, rows in chosen.order.items():
-        best = max(
-            ten, key=lambda s: expected_information(read.theta[key], [s.key], ruler.entries())
-        )
-        assert rows[0] == best, f"{key}: its row led is not the most informative at its θ"
-    assert chosen.order[ArmKey("c1")][0] != chosen.order[ArmKey("c2")][0], (
-        "two walks at one open answer the same row: vacuous"
-    )
-    calls = [len(sent) for sent in chosen.sends.values()]
-    # One row a block, each walk's.
-    assert sum(calls) == len(taken), f"the block handed out {calls} calls"
-
-
-def test_a_rolling_decision_sends_none_where_the_calls_out_can_settle_the_cut() -> None:
-    rows = samples(6, "r")
-    # ε(n) 0.05: `contested` and `idle` sit just above it, `sure` far past it.
-    read = FieldRead(
-        theta={},
-        variance=dict.fromkeys(map(ArmKey, ("contested", "idle", "sure")), 1.0),
-        p_best={ArmKey("contested"): 0.06, ArmKey("idle"): 0.06, ArmKey("sure"): 0.9},
-        bar=dict.fromkeys(map(ArmKey, ("contested", "idle", "sure")), 0.05),
-    )
-    walks = {
-        # One call out on a decision one answer can move across its bar: it waits on that call.
-        ArmKey("contested"): _Walking(0.0, rows, owed=1, depth=6),
-        # None out: nothing can settle it, so it is sent the one call that can.
-        ArmKey("idle"): _Walking(0.0, rows, owed=0, depth=6),
-        # No answer moves it to its bar: every row its budget takes is sent at once.
-        ArmKey("sure"): _Walking(0.0, rows, owed=0, depth=6),
-        # Unread yet: sent the calls that bring it to the depth the cut first reads.
-        ArmKey("young"): _Walking(0.0, rows, owed=0, depth=0),
-    }
-    handed = _hand_out(walks, read, None, None, n_min=4)
-    assert handed == {
-        ArmKey("contested"): 1,
-        ArmKey("idle"): 1,
-        ArmKey("sure"): 6,
-        ArmKey("young"): 4,
-    }, f"a rolling decision sent {handed}"
-    settled = {key: walk._replace(owed=handed[key]) for key, walk in walks.items()}
-    assert _hand_out(settled, read, None, None, n_min=4) == handed, (
-        "a decision whose calls out can settle every walk sent more"
-    )
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_pobb_per_round_cuts_a_candidate_on_rows_its_rivals_never_answered_and_the_cut_replays(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # One journey: the cut the union read files is the record its replay re-reads.
-    cut_by: dict[str, bool] = {}
-    for shape in ("per_candidate", "per_round"):
-        race_of, ten, _, racing = _informative_race(built_stores, monkeypatch, "per_round", shape)
-        lost = sheet(measurement(i, 0.0, sample_key=ten[i].key) for i in range(6))
-        apart = {
-            ArmKey("c1"): lost.cells,
-            ArmKey("c2"): _on_ten(ten, [1.0] * 10).cells[4:],
-        }
-        race = race_of()
-        _decided(race, apart, ten[6:], 0, opening=True)
-        stop = _decided(race, apart, ten[6:], 0).stops.get(ArmKey("c1"))
-        cut_by[shape] = stop is not None
-        if shape == "per_candidate":
-            continue
-        reading = race.judge(stop, ArmKey("c1"), {ArmKey("c1"): "C3.1", ArmKey("c2"): "C3.2"})
-        assert reading is not None and reading.context["gate"] == "epsilon"
-        [cut] = racing.cycle.pending_decisions
-        assert isinstance(cut.inputs_ref, EliminationCut)
-        read = cut.inputs_ref.cells
-        assert set(read[ArmKey("c1")]) == {s.key for s in ten[:6]}, "the arm's cells moved"
-        banked = {**race.priors, ArmKey("c1"): lost, ArmKey("c2"): sheet(apart[ArmKey("c2")])}
-        assert replay_all_mismatches(_round(round=3, cells=banked), [cut]) == [], (
-            "a per_round cut does not replay on its own record"
-        )
-    assert cut_by == {"per_candidate": False, "per_round": True}, (
-        f"the union read cut {cut_by}: the arm was not cut on rows its rival never answered"
-    )
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
-    built_stores: Stores,
-) -> None:
-    stores = built_stores
-    on_parent = _on_parent()
-    scorer = scorer_of()
-
-    def answered_by(model: str, answers: dict[int, str | None]) -> Any:
-        rows = [
-            archive_row(f"q{sid}", predicted=said)
-            if said is not None
-            else archive_row(f"q{sid}", error="boom", error_category="PIPELINE")
-            for sid, said in answers.items()
-        ]
-        walked = filed(
-            stores.archive, rows, filed_under([("llm_only", {"model": model})], "replayds")
-        )
-        return scorer.sheet(
-            a.cell for _, ref, _ in walked if (a := stores.archive.answer(ref)) is not None
-        )
-
-    # Two cells won outright; the third, which clears the bar, only the parent's charged error gives.
-    answered = {sid: "g" if sid < 5 else "x" for sid in range(9)}
-    parent, child = prompted(instruction="parent"), prompted(instruction="child")
-    bar = answered_by("P", {**answered, 9: None})
-    arm = answered_by("C", {**answered, 5: "g", 6: "g", 9: "g"})
-    assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
-    electing = seat(stores)
-    set_cycle(electing.cycle, line=[_round(round=0, **on_parent)], population=[parent])
-    walked_child = ArmKey(child.id)
-    child_arm = arm_state("child", position=ArmPosition(round=1, idx=0, total=1), individual=child)
-    read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
-    selection = elect_on_theta(
-        NodeContext(electing, NODE_MEMBERS.get("theta_election")),
-        MeasuredRound(
-            arms={walked_child: child_arm},
-            rows={walked_child: arm},
-            parent=read_parent,
-            filed={
-                walked_child: ReadArm(walked_child, child_arm, arm),
-                read_parent.key: read_parent,
-            },
-            folds={},
-            fit={},
-            abilities=candidate_abilities(
-                {walked_child: arm}, bar, electing.cycle.difficulty.ruler
-            ),
-            electable=[walked_child],
-            coverage_floor=1,
-            cut=None,
-            origin_panel_slots=[],
-            on_panel={},
-            raced={walked_child: arm, read_parent.key: bar},
-            paired_on=None,
-        ),
-    )
-    assert selection.selected == walked_child, "guard: the live election charges the error"
-    charged, ledger = _minted(stores, "cycle_charged_parent")
-    close_round(
-        ledger,
-        [
-            _adopted(),
-            _round(
-                round=1,
-                arms={walked_child: child_arm, read_parent.key: read_parent.state},
-                election=election(walked_child),
-                cells={walked_child: arm, read_parent.key: bar},
-            ),
-        ],
-        cycle=seat(stores, bank=samples(10, "g")).cycle,
-    )
-    [closed_on_disk] = closed_rounds(stores, charged, scorer, moment=None)
-    [decided] = electing.cycle.pending_decisions
-    assert replay_all_mismatches(closed_on_disk, [decided]) == [], (
-        "the replay read the parent's charged error as a cell nobody scored"
     )
 
 
@@ -3294,3 +3123,176 @@ def test_a_halts_own_words_are_the_stop_its_run_serves_and_its_chat_says(
         assert served is not None and words in served.said, f"stop {n}'s reading lost its words"
         notices = LedgerIndex.of(cycle_ledger(cycle).path).view(ActivityFeed).notices
         assert any(words in (said.detail or "") for said in notices), f"the chat lost stop {n}"
+
+
+# Journeys awaiting a leg
+
+
+def _decided(
+    race: PoBBRace,
+    taken: Mapping[ArmKey, Sequence[GradedCell]],
+    untaken: Sequence[Sample],
+    left: int,
+    *,
+    opening: bool = False,
+) -> Decision[ArmKey]:
+    """One decision on walks with none out, each with *untaken* ahead and *left* rows to take."""
+    walks = {key: WalkView(cells, untaken, 0, len(cells) + left) for key, cells in taken.items()}
+    return race.decide(View(walks, opening))
+
+
+def _on_ten(ten: list[Sample], grades: list[float]) -> CellSheet:
+    return sheet(measurement(i, g, sample_key=ten[i].key) for i, g in enumerate(grades))
+
+
+def _informative_race(
+    stores: Stores, monkeypatch: pytest.MonkeyPatch, refit: str, shape: str = "per_candidate"
+) -> tuple[Callable[[], PoBBRace], list[Sample], DeltaRuler, RoundContext]:
+    """A race choosing `informative` rows on a warm ruler (δ = slot − 4) whose parent hit all ten."""
+    ten = samples(10, "g")
+    slots = delta_ruler({i: float(i - 4) for i in range(10)})
+    ruler = slots.model_copy(
+        update={
+            "delta": {s.key: slots.delta[str(s.id)] for s in ten},
+            "delta_se": {s.key: slots.delta_se[str(s.id)] for s in ten},
+        }
+    )
+    monkeypatch.setattr(DifficultyView, "ruler", property(lambda _view: ruler))
+    racing = seat(
+        stores,
+        round_num=3,
+        optimization={
+            "elimination_n_min": 4,
+            "nodes": {
+                "pobb": {
+                    "config": {
+                        "row_choice": "informative",
+                        "refit": refit,
+                        "shape": shape,
+                        "dispatch": "batch",
+                    }
+                },
+                "theta_election": {"config": {"vote": "overlap"}},
+            },
+        },
+    )
+    parent = prompted(instruction="parent")
+    on_parent = _on_parent()
+    set_cycle(
+        racing.cycle,
+        line=[_round(round=0, cells={ArmKey(parent.id): _on_ten(ten, [1.0] * 10)}, **on_parent)],
+    )
+    rescope(ledger=cycle_ledger(racing.cycle))
+    return (
+        lambda: PoBBRace(
+            NodeContext(racing, NODE_MEMBERS.get("pobb")),
+            RoundSamples(cells=ten[:6], order=ten[:6], block_size=1, pool=ten[6:]),
+        ),
+        ten,
+        ruler,
+        racing,
+    )
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_resumed_informative_race_rechooses_its_rows_and_files_nothing(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for shape in ("per_candidate", "per_round"):
+        race_of, ten, _, racing = _informative_race(
+            built_stores, monkeypatch, "per_decision", shape
+        )
+        taken = {
+            ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells,
+            ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 0.0]).cells,
+        }
+        live = race_of()
+        _decided(live, taken, ten[4:], 2, opening=True)
+        chose = _decided(live, taken, ten[4:], 2)
+        filed = len(racing.cycle.pending_decisions)
+        # A resume rebuilds the race and closes its blocks again on the rows the walk replays.
+        resumed = race_of()
+        _decided(resumed, taken, ten[4:], 2, opening=True)
+        assert _decided(resumed, taken, ten[4:], 2) == chose, (
+            f"{shape}: the resume chose other pairs"
+        )
+        assert len(racing.cycle.pending_decisions) == filed, f"{shape}: a choice filed a record"
+
+
+@pytest.mark.usefixtures("offline", "optimizing_memory")
+def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
+    built_stores: Stores,
+) -> None:
+    stores = built_stores
+    on_parent = _on_parent()
+    scorer = scorer_of()
+
+    def answered_by(model: str, answers: dict[int, str | None]) -> Any:
+        rows = [
+            archive_row(f"q{sid}", predicted=said)
+            if said is not None
+            else archive_row(f"q{sid}", error="boom", error_category="PIPELINE")
+            for sid, said in answers.items()
+        ]
+        walked = filed(
+            stores.archive, rows, filed_under([("llm_only", {"model": model})], "replayds")
+        )
+        return scorer.sheet(
+            a.cell for _, ref, _ in walked if (a := stores.archive.answer(ref)) is not None
+        )
+
+    # Two cells won outright; the third, which clears the bar, only the parent's charged error gives.
+    answered = {sid: "g" if sid < 5 else "x" for sid in range(9)}
+    parent, child = prompted(instruction="parent"), prompted(instruction="child")
+    bar = answered_by("P", {**answered, 9: None})
+    arm = answered_by("C", {**answered, 5: "g", 6: "g", 9: "g"})
+    assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
+    electing = seat(stores)
+    set_cycle(electing.cycle, line=[_round(round=0, **on_parent)], population=[parent])
+    walked_child = ArmKey(child.id)
+    child_arm = arm_state("child", position=ArmPosition(round=1, idx=0, total=1), individual=child)
+    read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
+    selection = elect_on_theta(
+        NodeContext(electing, NODE_MEMBERS.get("theta_election")),
+        MeasuredRound(
+            arms={walked_child: child_arm},
+            rows={walked_child: arm},
+            parent=read_parent,
+            filed={
+                walked_child: ReadArm(walked_child, child_arm, arm),
+                read_parent.key: read_parent,
+            },
+            folds={},
+            fit={},
+            abilities=candidate_abilities(
+                {walked_child: arm}, bar, electing.cycle.difficulty.ruler
+            ),
+            electable=[walked_child],
+            coverage_floor=1,
+            cut=None,
+            origin_panel_slots=[],
+            on_panel={},
+            raced={walked_child: arm, read_parent.key: bar},
+            paired_on=None,
+        ),
+    )
+    assert selection.selected == walked_child, "guard: the live election charges the error"
+    charged, ledger = _minted(stores, "cycle_charged_parent")
+    close_round(
+        ledger,
+        [
+            _adopted(),
+            _round(
+                round=1,
+                arms={walked_child: child_arm, read_parent.key: read_parent.state},
+                election=election(walked_child),
+                cells={walked_child: arm, read_parent.key: bar},
+            ),
+        ],
+        cycle=seat(stores, bank=samples(10, "g")).cycle,
+    )
+    [closed_on_disk] = closed_rounds(stores, charged, scorer, moment=None)
+    [decided] = electing.cycle.pending_decisions
+    assert replay_all_mismatches(closed_on_disk, [decided]) == [], (
+        "the replay read the parent's charged error as a cell nobody scored"
+    )

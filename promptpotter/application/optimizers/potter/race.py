@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
 
 from promptpotter.application.bench.node_context import (
     Bounds,
@@ -47,6 +46,21 @@ class EliminationCut(Replayed, kind="elimination_cut"):
     # Each side's cells the field was read on by `Sample.key`, the arm's and every rival's: the
     # round banks every side (the parent re-read on its cells), so a replay re-reads them all.
     cells: dict[ArmKey, list[str]]
+
+    @classmethod
+    def of(cls, signal: PoBBStop, arm: ArmKey, parent: ArmKey) -> EliminationCut:
+        """The record *signal*'s cut of *arm* files: the field it read, as its replay re-reads it."""
+        context = signal.check_result
+        return cls(
+            arm=arm,
+            parent=parent,
+            queries_scored=context["queries_scored"],
+            p_best=context["p_best"],
+            leader=context["leader"],
+            paired_breakdown=signal.paired_breakdown,
+            epsilon=context["epsilon"],
+            cells=signal.cells,
+        )
 
     def replay(self, ctx: ReplayContext) -> bool:
         """No cut where a cell the live check read is no longer among its side's rescored rows."""
@@ -129,10 +143,7 @@ class PoBBRace(Race):
 
     @property
     def rows_ran(self) -> RowsRan:
-        """A cold ruler tells every row alike, so ``informative`` there runs the sampler's order."""
-        if self._knobs.row_choice == "random":
-            return "random"
-        return "cold" if self._check.ruler is None else "informative"
+        return self._knobs.rows_ran(self._check.ruler)
 
     def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
         stops = {} if view.opening else self._cut(view.walks)
@@ -165,16 +176,6 @@ class PoBBRace(Race):
         if not isinstance(signal, PoBBStop):
             return None
         context = signal.check_result
-        raced: dict[str, Any] = {
-            "arm": key,
-            "parent": self._check.parent,
-            "queries_scored": context["queries_scored"],
-            "p_best": context["p_best"],
-            "leader": context["leader"],
-            "paired_breakdown": signal.paired_breakdown,
-            "epsilon": context["epsilon"],
-            "cells": signal.cells,
-        }
-        self._replay.decide(EliminationCut(**raced), True)
+        self._replay.decide(EliminationCut.of(signal, key, self._check.parent), True)
         named = {**labels, self._check.parent: "parent"}
         return Elimination(reason=_reason(context, named), context=dict(context))
