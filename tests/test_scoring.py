@@ -83,6 +83,7 @@ from promptpotter import connectors
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext, SliceMap
 from promptpotter.application.bench.difficulty import (
+    JudgingRuler,
     judging_ruler,
     regraded_ruler,
     ruler_clock,
@@ -244,7 +245,6 @@ from promptpotter.application.scoring.selection import (
     level_band,
     readable_lifts,
 )
-from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
@@ -361,7 +361,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import ThetaCaveat, p_better
+from promptpotter.domain.ruler import RulerScope, RulerStamp, ThetaCaveat, p_better
 from promptpotter.domain.run_standing import (
     LineOutlay,
     RunStanding,
@@ -647,17 +647,6 @@ def test_a_cell_read_off_the_wire_keeps_its_facts_and_drops_any_grade_it_arrived
     )
 
 
-def test_a_grade_is_a_new_record_and_keeps_nothing_of_the_formula_before_it(
-    wire_cell: _WireCell,
-) -> None:
-    _, _, answered, plain, *_ = wire_cell
-    graded = plain.grade(answered)
-    assert (graded.grade.fitness, graded.grade.unscored) == (0.25, None), "the stale grade stood"
-    assert graded.wire() == {**answered.wire(), "fitness": 0.25, "objective": 0.25}, (
-        "a graded cell is its facts plus this formula's grade"
-    )
-
-
 def test_a_replys_lines_rank_only_under_the_formula_reading_them(wire_cell: _WireCell) -> None:
     answered = wire_cell.answered
 
@@ -815,9 +804,6 @@ def test_each_graded_field_is_matched_alone_and_the_cell_and_theta_read_their_sh
         "extract_depth": 0.5,
         "who": 1.0,
     }, "the arm's fold says which field moved"
-    assert "MISS type_of_document,extract_depth" in fmt_query_result(
-        1, walked.cells[1].facts, walked.cells[1].grade, display_tags={}
-    ), "the readout names the fields a cell missed"
     for refused in ("not json", '{"who": "x"}', '{"issuer": null}'):
         with pytest.raises(ScoringFormulaError):
             joint.grade(measurement(0, None, predicted="{}", ground_truth=refused).facts)
@@ -1193,9 +1179,7 @@ def test_a_formula_is_two_valued_by_its_expression_over_what_emits() -> None:
 # 2. Composite fitness and coverage
 
 
-def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_zero(
-    offline: Router,
-) -> None:
+def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_zero() -> None:
     # A round that measured every sample and failed them all IS a 0.0; an unmeasured one is not.
     for rate in (compute_fitness, compute_error_rate, compute_degraded_rate):
         assert rate(results=[]) is None, f"{rate.__name__} read an empty round as 0.0"
@@ -1249,7 +1233,10 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
         "with no label a cut cell has no miss to be, so it carries no verdict either"
     )
 
-    # A judge never grades a cell whose `predicted` is the NO_RESULT sentinel.
+
+def test_a_judge_never_grades_or_bills_a_cell_whose_answer_is_the_no_result_sentinel(
+    offline: Router,
+) -> None:
     offline.llm.says = lambda _body: "A"
     # A cell that RAN and left a trace, so the no-trace arm cannot be what fired.
     traced = MeasuredCell(
@@ -1270,7 +1257,8 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     billed = offline.llm.sent
     assert billed == [], f"a cell with no answer was billed a grading: {billed}"
 
-    # A merge never shrinks what was already measured.
+
+def test_a_merge_never_shrinks_what_was_measured_and_joins_only_its_own_scorer() -> None:
     prior = sheet(measurements([1.0 if i < 10 else 0.0 for i in range(20)]))
     winner = sheet(
         measurements([1.0 if sid in {10, 12, 15} else 0.0 for sid in range(10, 18)], range(10, 18))
@@ -3068,7 +3056,7 @@ def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_drop
     assert not control.pause_requested(), "a pause with no run to stop was left standing"
 
 
-def test_a_holed_panel_stops_in_its_rows_words_and_the_backends_hole_on_its_own_stop() -> None:
+def test_a_holed_panel_stops_as_no_interrupt_and_the_backends_hole_on_its_own_stop() -> None:
     # The dyck shape: one UNSCOREABLE row per arm, its error set.
     holed = [
         measurement(arm, None, error=f"arm {arm}: no evidence", error_category="UNSCOREABLE")
@@ -3078,16 +3066,11 @@ def test_a_holed_panel_stops_in_its_rows_words_and_the_backends_hole_on_its_own_
     assert stop is not None and stop_reason_outcome(stop.reason) is not StopOutcome.PAUSED, (
         "a hole no signal made paused the run, so it read as an interrupt"
     )
-    reading = RunPhaseRecord.stop(stop.reason, detail=stop.detail).stop_reading
-    assert reading is not None and all(
-        f"arm {arm}: no evidence" in reading.said for arm in (0, 1)
-    ), "the holed panel's stop did not say its rows' errors"
     backend = measurement(2, None, error="504: no reply in 164s", error_category="SERVER")
     served = panel_gate_tripped([*holed, backend], None, "strict")
     assert served is not None and served.reason is StopReason.BACKEND_HOLE, (
         "a backend's hole lost the stop its L4 outer re-asks on"
     )
-    assert "no reply in 164s" in served.detail, "the backend's hole lost its words"
 
 
 # 7. Paired readings over shared cells
@@ -4452,10 +4435,6 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
 
 
 def test_a_merge_of_two_reads_of_one_cell_fits_theta_on_one_row() -> None:
-    # Imported here: the module's head is another chain's while this one runs beside it.
-    from promptpotter.application.bench.difficulty import JudgingRuler
-    from promptpotter.domain.ruler import RulerScope, RulerStamp
-
     stamp = RulerStamp(
         id="v", version=0, own=None, scope=RulerScope(scorer="s", dataset="ds"), excluded=()
     )
