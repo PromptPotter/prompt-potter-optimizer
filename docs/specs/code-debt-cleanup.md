@@ -953,7 +953,8 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   a declined fork is a record the readout names. **Re-test:** a fork under `informative` rows leaves a
   readout line naming its decline.
 - **Under `rolling`, the parent is handed calls no live rival's decision reads**: in
-  `potter/race.py::_settles` the parent "stands no bar", so it never settles, and `_hand_out` gives it
+  the race's settle rule (`_settles`; potter's race module at ml-6, `application/scoring/` after ml-7)
+  the parent "stands no bar", so it never settles, and `_hand_out` gives it
   its whole budget while its rivals are cut. Its later rows have no other answerer. The judging scale
   leaves the parent line out, so those rows carry no δ, and `expected_information` reads 0 on them. In
   the offline fork leg at ml-6 (`fc9a2e7b5`), 24–40 of a line's 68–96 cells sat off the scale.
