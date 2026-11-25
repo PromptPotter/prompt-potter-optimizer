@@ -4279,11 +4279,10 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
     monkeypatch.setattr(registry_module, "_QUEUE_POLL_S", 0.0)
     for status, ending in endings.items():
         key = uuid.uuid4().hex
-        idle = set(launcher_launch._DETACHED_TASKS)
         ran = await CommandDispatcher(caller.stores, job_registry=queuing).dispatch(
             CommandCall(step, key, door=Door.HOST)
         )
-        waiter = set(launcher_launch._DETACHED_TASKS) - idle
+        waiter = set(queuing._detached)
         assert waiter, "guard: the queued step left no waiter to wake"
         assert isinstance(ran.result, launcher_launch.Launched)
         launched = ran.result.launch
@@ -4305,8 +4304,7 @@ async def test_a_reaped_queued_launchs_retry_replays_it_and_its_task_reads_the_j
         read_back = await stepping.answer(TaskStatusOf(task.task_id))
         assert read_back.status == status, f"a reaped {status} launch read {read_back.status}"
         assert not queuing.list_queued(), "a retried launch launched again"
-    for detached in list(launcher_launch._DETACHED_TASKS):
-        detached.cancel()
+    await queuing.close_detached()
 
 
 class _HeldTask(NamedTuple):
@@ -4365,7 +4363,6 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
     from promptpotter.presentation.mcp.server import host_server
 
     stores = host_tenant.caller.stores
-    idle = set(launcher_launch._DETACHED_TASKS)
     session, task, ledger, cycle_dir, job, queuing = await _held_at_arms_gate(
         tmp_path, monkeypatch, stores
     )
@@ -4412,8 +4409,7 @@ async def test_a_task_held_at_its_arms_gate_asks_its_host_and_its_answer_acts_on
     assert tied == {"taskId": task.task_id}, "the input request named no task"
     assert not result.is_error, result.content
     assert len(_arms_filed(stores)) == 1, "an answer retried filed a second submit-arms"
-    for waiter in set(launcher_launch._DETACHED_TASKS) - idle:
-        waiter.cancel()
+    await queuing.close_detached()
 
 
 @pytest.mark.usefixtures("offline")
@@ -4433,7 +4429,6 @@ async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answe
         input_requests: dict[str, dict[str, Any]]
 
     stores = host_tenant.caller.stores
-    idle = set(launcher_launch._DETACHED_TASKS)
     held = await _held_at_arms_gate(tmp_path, monkeypatch, stores)
     task_id = held.task.task_id
     status_of = mcp_types.GetTaskRequest(params=mcp_types.GetTaskRequestParams(task_id=task_id))
@@ -4449,8 +4444,7 @@ async def test_a_task_held_on_a_2026_wire_asks_on_its_status_and_takes_its_answe
         for _ in range(2):  # a host retrying its answer sends it again
             await host.session.send_request(update, mcp_types.EmptyResult)
     assert len(_arms_filed(stores)) == 1, "a task's update filed no answer, or filed it twice"
-    for waiter in set(launcher_launch._DETACHED_TASKS) - idle:
-        waiter.cancel()
+    await held.queuing.close_detached()
 
 
 # An act a refusal serves is pressed as served: its value is the field's own JSON type.

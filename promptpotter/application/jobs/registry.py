@@ -5,7 +5,7 @@ import contextlib
 import secrets
 import time
 from collections import Counter
-from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Coroutine, Iterable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -90,6 +90,22 @@ class JobRegistry:
         # Every thread's and process's, reentrant: under `admission_gate`, `release` retakes it.
         self._gate = AdmissionGate(jobs_dir)
         self._capacity = capacity
+        # Its queued launches' detached waits, held so the loop cannot collect one mid-wait.
+        self._detached: set[asyncio.Task[object]] = set()
+
+    def detach(self, waiting: Coroutine[Any, Any, object]) -> None:
+        """*waiting* runs on past its launch's answer, until `close_detached`; its fault is its
+        job's release (`launch.py::hold`), read here so asyncio never warns it unread."""
+        task = asyncio.ensure_future(waiting)
+        self._detached.add(task)
+        task.add_done_callback(self._detached.discard)
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+
+    async def close_detached(self) -> None:
+        """Its owner's close: each detached wait cancelled, so each releases its job."""
+        for task in self._detached:
+            task.cancel()
+        await asyncio.gather(*self._detached, return_exceptions=True)
 
     def create(
         self,
