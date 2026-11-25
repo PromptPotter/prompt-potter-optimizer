@@ -1922,6 +1922,9 @@ def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
     if result.kept:
         return result
     if peak is not None and peak > check.mb:
+        # Red past its own run: no product it left (`offline_run.py`'s greens) vouches for a rerun.
+        for path in check.builds:
+            shutil.rmtree(REPO / path.format(key=result.key), ignore_errors=True)
         over = f"peaked at {peak} MB, over its {check.mb} MB cap.\n{result.out}"
         return dataclasses.replace(result, rc=result.rc or 1, out=over, peak_mb=peak)
     return dataclasses.replace(result, peak_mb=peak)

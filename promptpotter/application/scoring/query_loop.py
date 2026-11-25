@@ -142,10 +142,6 @@ class QueryLoopResult:
     stop_signal: StopSignal | None = None
 
 
-def _emit_cached_step_tokens(facts: MeasuredCell) -> None:
-    emit_replayed_step_tokens(facts.pipeline.step_tokens, facts.pipeline.step_timings)
-
-
 class WalkRecorder(Protocol):
     def scores(self, results: Sequence[GradedCell]) -> ScoreSummary: ...
 
@@ -494,7 +490,8 @@ class Walk:
         if not acq.fresh:
             # Only if it STAYED a replay: the stale-data protocol may have re-measured for real.
             if acq.result.facts.cached and first:
-                _emit_cached_step_tokens(acq.result.facts)
+                pipeline = acq.result.facts.pipeline
+                emit_replayed_step_tokens(pipeline.step_tokens, pipeline.step_timings)
         elif acq.deprecated_display is not None:
             ctx.sample_scored(acq.deprecated_display, acq.sample, idx, n, running=None)
 

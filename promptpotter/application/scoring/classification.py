@@ -9,7 +9,7 @@ from promptpotter.domain.campaign_config import CampaignConfig
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results_health import classify_result, is_deprecated
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell, MeasuredCell
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.validators import BrokenSignal, StopRule, StopSignal
 
 
@@ -21,10 +21,6 @@ def terminal_ranking(pipeline_data: Mapping[str, Any], schema: PipelineSchema | 
         if node.emits_ranking and (ranking := node.ranking_in(pipeline_data)) is not None:
             return ranking
     return []
-
-
-def extract_warning_types(facts: MeasuredCell) -> list[str]:
-    return classify_result(facts).all_codes
 
 
 def scoreable_rows(results: Iterable[GradedCell]) -> list[GradedCell]:
@@ -68,7 +64,7 @@ class DegradationCheck:
 
         wtypes: Counter[str] = Counter()
         for r in results:
-            wtypes.update(extract_warning_types(r.facts))
+            wtypes.update(classify_result(r.facts).all_codes)
         dominant = max(wtypes, key=wtypes.get) if wtypes else "unknown"  # type: ignore[arg-type]
         return BrokenSignal(
             self.name,
