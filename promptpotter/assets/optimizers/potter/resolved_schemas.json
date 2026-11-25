@@ -232,15 +232,6 @@
           "FailureCluster": {
             "additionalProperties": false,
             "properties": {
-              "sample_ids": {
-                "description": "The rows this cluster spans, by the `[#id]` marks in the panels — at least two, and as many as DETECTABLE MOVE names; an id unmarked or held by an earlier cluster is struck. Two rows that fail for different reasons are two clusters, never one.",
-                "items": {
-                  "type": "integer"
-                },
-                "minItems": 2,
-                "title": "Sample Ids",
-                "type": "array"
-              },
               "mechanism": {
                 "description": "The ONE root cause, as a short label naming the cognitive move that fails.",
                 "title": "Mechanism",
@@ -250,12 +241,21 @@
                 "description": "WHY these rows land wrong, in your own words: the step that breaks and what was said against the truth. General over the cluster, never one row's procedure.",
                 "title": "Claim",
                 "type": "string"
+              },
+              "sample_ids": {
+                "description": "The rows showing this mechanism, by the `[#id]` marks in the panels — at least two, and as many as DETECTABLE MOVE names. Each id appears ONCE in the whole reply: never twice in a list, never in two clusters. Two rows that fail for different reasons are two clusters, never one.",
+                "items": {
+                  "type": "integer"
+                },
+                "minItems": 2,
+                "title": "Sample Ids",
+                "type": "array"
               }
             },
             "required": [
-              "sample_ids",
               "mechanism",
-              "claim"
+              "claim",
+              "sample_ids"
             ],
             "title": "FailureCluster",
             "type": "object"

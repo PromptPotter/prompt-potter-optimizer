@@ -197,16 +197,8 @@ def _renamed_variant(items: tuple[tuple[str, str], ...]) -> type[L1Variant]:
 
 
 class FailureCluster(OptimizerResponseModel):
-    # GENERATION order: the ids commit the cluster to rows before the prose can name one. A host may
-    # ignore `minItems`; `critique_response_model` drops what it does not hold.
-    sample_ids: list[int] = Field(
-        json_schema_extra={"minItems": CLUSTER_ROWS_MIN},
-        description=(
-            "The rows this cluster spans, by the `[#id]` marks in the panels — at least two, and as "
-            "many as DETECTABLE MOVE names; an id unmarked or held by an earlier cluster is struck. "
-            "Two rows that fail for different reasons are two clusters, never one."
-        ),
-    )
+    # GENERATION order: the cluster says what it holds before its list opens, so the list ends at
+    # the last row showing that mechanism; ids first ran a list on to `max_tokens`.
     mechanism: Annotated[
         str, BeforeValidator(_truncate_marked(CLUSTER_MECHANISM_MAX)), AfterValidator(_one_script)
     ] = Field(
@@ -218,6 +210,16 @@ class FailureCluster(OptimizerResponseModel):
         description=(
             "WHY these rows land wrong, in your own words: the step that breaks and what was "
             "said against the truth. General over the cluster, never one row's procedure."
+        ),
+    )
+    # A host may ignore `minItems`; `critique_response_model` drops what it does not hold.
+    sample_ids: list[int] = Field(
+        json_schema_extra={"minItems": CLUSTER_ROWS_MIN},
+        description=(
+            "The rows showing this mechanism, by the `[#id]` marks in the panels — at least two, "
+            "and as many as DETECTABLE MOVE names. Each id appears ONCE in the whole reply: never "
+            "twice in a list, never in two clusters. Two rows that fail for different reasons are "
+            "two clusters, never one."
         ),
     )
 

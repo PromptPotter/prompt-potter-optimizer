@@ -12,6 +12,7 @@ from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.crowning_bar import Vote
 from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.pool import Access
+from promptpotter.domain.sample import Dispatch, ReadOrder
 from promptpotter.domain.scoring import MAX_PASS_ROWS
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.shared.statistics import sign_posterior
@@ -230,6 +231,22 @@ class PoBBKnobs(StrictModel):
             "(``block_size`` per survivor) go to the (candidate, row) pairs that tell PoBB's cut "
             "most, so each candidate answers rows of its own, none, one or several a block; the "
             "cut reads the field on the union of rows (``methods/candidate-elimination.md``)."
+        ),
+    )
+    dispatch: Annotated[Dispatch, Knob(Estimand.SELECTION)] = Field(
+        description=(
+            "When the race decides. ``batch``: once every call a block handed out is back. "
+            "``rolling``: on every returned row, each decision sending as many new calls as the "
+            "information then warrants, none where the calls out can settle the cut, never "
+            "waiting for the rest; the in-flight press caps what is out at once."
+        ),
+    )
+    read_order: Annotated[ReadOrder, Knob(Estimand.SELECTION)] = Field(
+        description=(
+            "The order a ``rolling`` decision reads returns in. ``launch``: the order they were "
+            "sent, so a press moves the bill, never the record. ``arrival``: as they come, the "
+            "record then hanging on timing, so a resume replays the order the run read. Read "
+            "under ``rolling`` alone."
         ),
     )
 

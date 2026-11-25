@@ -747,28 +747,13 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `campaign_count` folds every cycle's unreported, and `SpendCount.beside` goes. **Rides with:** a
   chain owning `domain/spend.py`, `run_observers.py`, `served_dashboard.py`. **Re-test:** a lapsed
   cell on a sibling cycle reads in the campaign cap line and not in this cycle's.
-- **`l1_critique` on minimax runs its first cluster to `max_tokens`** (three sightings 2026-11-18:
-  two dyck inner cells, `bbh-multistep-arithmetic-8b__908474` round 0, 26.7k chars, `finish=length`):
-  the reply fails inside `failure_highlights.0` (`mechanism`, `claim` and `priority_fix` missing), so
-  the run-on is one cluster's body, not the count `schemas.py::L1CritiqueOutput` caps at 3; the
-  prompt's "put each id in the ONE cluster" (`pipeline.yaml`'s `l1_critique/1`) likely enumerates
-  ids without end. `clean_reask` heals it at a full call's price. Action: attribute one banked
-  payload by block, then a tighter prompt bounds the cluster body (CLAUDE.md: the prompt, not a cap).
-  **Re-test:** the three banked inputs re-asked under the new prompt finish `stop`.
-- **A held round's leader is kept for a fresh read that reads no fresh row** (census 2026-11-19):
-  `potter/election.py::_kept_for_a_fresh_read` carries a held round's leader into the next round
-  "once: only the next round's panel says whether it clears the bar", but the panel never moves under
-  the L4 seats' `per_round_resubset: false` (`promptpotter-self/family.yaml`) nor in any campaign
-  while δ is cold ([`verdict-resolution.md`](../methods/verdict-resolution.md) § The between-round draw — blind, so the election reads the pool). Over
-  124 inner cells, 104 rounds carried a kept leader and 104 of 104 re-read only rows it had read, so
-  its verdict cannot move. Case: `bbh-multistep-arithmetic-8b__2d64a7`'s `e35a6671e62a0fb4`, which
-  picked on 75 of judge 2's rows and elected by the round's own election on 75 others crowns in 84%
-  of splits. Root (operator 2026-11-19): evidence is bought in one place, the round's race, up to the
-  round's cap; a leader short of the bar there is dropped, a false negative the bar accepts. The keep
-  goes, its `ranked` branch with it; a round that crowns nothing hands on its parent alone. It moves
-  potter's decisions (W1 · potter-w1). Whether to read past the cap is the roadmap's open "Sample
-  more, or accept the false negative?". **Re-test:** `git grep -c _kept_for_a_fresh_read -- promptpotter`
-  is 0.
+- **`l1_critique` on minimax runs a cluster's id list to `max_tokens`** (three sightings 2026-11-18,
+  `finish=length`, healed by `clean_reask` at a full call's price): ANY cluster's `sample_ids`
+  repeats ids without end (outer `908474` round 1 cycles 12 ids in cluster 0; inner `1544dc`'s
+  cluster 2 re-lists cluster 0's 15). potter-w1 closed both prompt facts feeding it: a cluster now
+  names `mechanism` and `claim` before `sample_ids` in the layout and `schemas.py::FailureCluster`'s
+  order, and each id appears once in the whole reply. Open: the paid proof. **Re-test:** the banked
+  inputs (`.scratch/wave-2/bank/row111/`) re-asked under `l1_critique/1` as it now renders finish `stop`.
 
 ### wave-5 · webapp (what webapp-1 left)
 
@@ -829,15 +814,11 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   L4 outer cell carries no `floored`": the proof stops at `FiledAnswer`, so no landing says it. Root:
   the row's `Shape` is its one strict reader, nested reports typed by their connector; a row that no
   longer loads is dropped at the landing, said. **Window:** W1 · l4-key, last. **Re-test:** does `compact-archive inventory` on a copy of the desk root read every L4 outer cell without a `ValidationError`?
-- **A race decision names its own cells and copies its rivals'**: `potter/race.py::_RaceDecision`
-  holds `arm_cells` (keys, re-read at replay) beside `prior_histories` (every rival's per-cell
-  `fitness`/`objective` by value), since `resume_and_fork/replayers.py::ReplayContext` holds "ONE round
-  and no history". On the desk 147 `decision` records are 13.1 of 111.5 MB of ledger, and
-  `prior_histories` averages 87.6 KB a record against 1.1 KB for the arm's cells; the record is named
-  three ways (`ResumeCheckpointRecord`, `"decision"`, an `inputs_ref` holding inputs whole). Root: a
-  decision records addresses and its replay reads every side through the one scorer it runs; a
-  run-data wipe, and `offline_run.py::LEDGER_KEYS` keeps `inputs_ref` whole, so the behaviour keys
-  move. **Window:** W1 · potter-w1 (else W3). **Re-test:** `git grep -n "prior_histories" -- promptpotter` is empty; open: does a rival-only re-grade reach `elimination_cut`'s replay?
+- **A decision record is named three ways**: `ResumeCheckpointRecord`, its ledger kind `"decision"`,
+  and an `inputs_ref` holding the inputs whole (since potter-w1 a decision's inputs are addresses,
+  `race.py::EliminationCut.cells`). Root: one name for the record and its field, held in
+  `domain/records/run_records.py`, `mask/`, `store/campaign_store/ledger_scan.py` and
+  `bench/cycle.py`; a run-data wipe. **Window:** W3. **Re-test:** `git grep -c ResumeCheckpointRecord -- promptpotter` is 0.
 - **The neutral round envelope stores one backend's ranking report and a second copy of its cells**:
   `domain/results.py::RoundOutcome.diagnostics` is a `round_diagnostics.py::RoundDiagnostics`
   (`rank_buckets`, `top_k_accuracy`, `near_misses`, per-sample `rank` / `gt_in_*`) that
@@ -920,10 +901,6 @@ These land in the re-key windows, `W1` (keys, address, cell key and archive row,
   one length check cannot tell which mutation minted the child. Action: the verdict names the
   mutation kind. **Rides with:** the row above. **Re-test:** a crossover child's OVER_CEILING names
   crossover.
-- **`l2_context`'s subject is discretionary, so its share is sized against a growing prompt**: L1's
-  subject is mandatory, L2's `rendered_prompt` rides the share (`family.yaml` sizes it at 21,000 for
-  a subject that grows `length_budget` a round). Action: decide whether the subject joins L2's
-  mandatory set. **Rides with:** the next l4-outer link. **Re-test:** L2's subject survives any share.
 - **A machine's cell ceiling is counted twice**: `infrastructure/backend.py::MachineSlots` (a
   file-lock pool across processes, for `cells_hold_the_machine` alone) beside flight-share's
   in-process count per backend. The two count different subjects: `infrastructure/backend.py::_SENDING` this

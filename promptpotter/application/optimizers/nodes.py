@@ -49,7 +49,7 @@ from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.sample import Sample, Stretch
+from promptpotter.domain.sample import ReadOrder, Sample, Stretch, Untaken
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.domain.validators import StopSignal
@@ -558,14 +558,19 @@ class Race(Protocol):
         """A prior's caught-up cells, folded onto the rows it holds."""
         return None
 
+    @property
+    def rolling(self) -> ReadOrder | None:
+        """``batch``: a race decides once every call a block handed out is back."""
+        return None
+
     def choose_rows(
         self,
         _taken: Mapping[ArmKey, Sequence[GradedCell]],
-        ahead: Mapping[ArmKey, Sequence[Sample]],
+        ahead: Mapping[ArmKey, Untaken],
     ) -> Mapping[ArmKey, Stretch]:
         """Each walk its sampler's draw, in the sampler's order, a block's rows apiece: the race
         chooses no row."""
-        return {key: Stretch(rows, self.blocks.block_size) for key, rows in ahead.items()}
+        return {key: Stretch(pool.rows, self.blocks.block_size) for key, pool in ahead.items()}
 
     @property
     def rows_ran(self) -> RowsRan:

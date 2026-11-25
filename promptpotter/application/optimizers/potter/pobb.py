@@ -20,7 +20,7 @@ from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.domain.cycle_paths import Lens
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.ruler import DeltaRuler
-from promptpotter.domain.scoring import NO_CELLS, CellSheet, Grade, GradedCell, MeasuredCell
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.validators import StopSignal
 from promptpotter.shared.worded import Worded
 
@@ -58,8 +58,8 @@ class EliminationContext(TypedDict, total=False):
 
 @dataclass(frozen=True)
 class PoBBStop(StopSignal):
-    """What a replay re-fits: ``cells``, the arm's own the field was read on, and ``priors``, each
-    rival's grades on the cells read."""
+    """What a cut read: ``cells``, the arm's own the field was read on, and ``priors``, each
+    rival's rows on the cells read; `race.py::EliminationCut` records their keys."""
 
     check_result: EliminationContext
     cells: list[str]
@@ -81,22 +81,6 @@ class FieldRead:
 def race_sheet(cells: Iterable[GradedCell]) -> CellSheet:
     """An arm's rows as the race holds them; never filed, so it carries no scorer and no declaration."""
     return CellSheet("", frozenset(), tuple(cells))
-
-
-def graded_sheet(grades: Mapping[str, Mapping[str, object]]) -> CellSheet:
-    """A replay's sheet off the grades a stop recorded (`PoBBStop.priors`, `wire_sheet`)."""
-    return race_sheet(
-        GradedCell(MeasuredCell.from_wire({"sample_key": k}), Grade.from_wire(g))
-        for k, g in grades.items()
-    )
-
-
-def wire_sheet(sheet: CellSheet) -> dict[str, dict[str, float | None]]:
-    # What θ and the sign cap read of a cell, never its answer.
-    return {
-        cell.key: {"fitness": cell.grade.fitness, "objective": cell.grade.objective}
-        for cell in sheet.scoreable
-    }
 
 
 def field_p_best(
@@ -135,7 +119,6 @@ class PoBBCheck:
         knobs: PoBBKnobs,
         *,
         n_min: int,
-        n_samples: int,
         ruler: DeltaRuler | None,
         parent: ArmKey,
         on_snapshot: Callable[[RaceSnapshot], None] | None = None,
@@ -149,7 +132,6 @@ class PoBBCheck:
         self.epsilon = knobs.epsilon
         self.epsilon_floor = knobs.epsilon_floor
         self.epsilon_stop = knobs.epsilon_stop
-        self.n_samples = n_samples
         # The GRADED rows, never a binarized hit, degenerate on a graded backend.
         self.priors: dict[ArmKey, CellSheet] = {}
         self.read: FieldRead | None = None
@@ -168,11 +150,12 @@ class PoBBCheck:
         return self.epsilon_floor + (self.epsilon - self.epsilon_floor) * scale
 
     def check(
-        self, field: Mapping[ArmKey, CellSheet], standing: Collection[ArmKey]
+        self, field: Mapping[ArmKey, CellSheet], standing: Mapping[ArmKey, int]
     ) -> dict[ArmKey, PoBBStop]:
         """An arm is cut when its posterior P(best of parent and every arm standing) falls below
         ε(n), n its own depth on the cells the field is read on: under `per_round` the union of the
-        rows the racers answered, else those every racer shares."""
+        rows the racers answered, else those every racer shares. *standing* holds each arm's
+        budget: its rows, a top-up's the prior's it extends."""
         racing = [key for key in standing if key != self.parent]
         if not racing:
             return {}
@@ -214,7 +197,7 @@ class PoBBCheck:
                     "p_best": p_best[key],
                     "leader": max(rivals, key=p_best.__getitem__),
                     "queries_scored": n,
-                    "total_queries": self.n_samples,
+                    "total_queries": standing[key],
                     "n_priors": len(rivals),
                     "gate": _GATE,
                     "epsilon": float(bar[key]),

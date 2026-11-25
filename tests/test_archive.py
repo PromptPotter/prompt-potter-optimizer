@@ -109,7 +109,13 @@ from promptpotter.application.optimizers.capo.members import (
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, RoundSamples
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
-from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
+from promptpotter.application.optimizers.potter.pobb import FieldRead
+from promptpotter.application.optimizers.potter.race import (
+    EliminationCut,
+    PoBBRace,
+    _hand_out,
+    _Walking,
+)
 from promptpotter.application.origin import (
     resolve_origin_opt_search_point,
     try_inherit_fork_origin,
@@ -196,7 +202,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import line_reference, walked_position
-from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
+from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample, Untaken
 from promptpotter.domain.scoring import GRADE_KEYS, CellSheet, MeasuredCell
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
 from promptpotter.domain.spend import Budget
@@ -1219,10 +1225,13 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     ten = samples(10, "g")
 
     def race_of() -> PoBBRace:
-        return PoBBRace(
+        race = PoBBRace(
             NodeContext(racing, NODE_MEMBERS.get("pobb")),
             RoundSamples(cells=ten, order=ten, block_size=len(ten)),
         )
+        # The block's open, before its close: the walk took eight rows of its ten.
+        race.choose_rows({ArmKey("c1"): walked.cells}, {ArmKey("c1"): Untaken(ten[8:], 2)})
+        return race
 
     rescope(ledger=cycle_ledger(racing.cycle))
 
@@ -1244,10 +1253,16 @@ def test_a_cut_the_live_race_made_past_an_errored_cell_replays_on_the_cells_it_w
     assert reading is not None and reading.context["gate"] == "epsilon"
     [cut] = racing.cycle.pending_decisions
     assert isinstance(cut.inputs_ref, EliminationCut)
-    assert cut.inputs_ref.arm_cells == [str(i) for i in range(8) if i != 2]
-    assert replay_all_mismatches(_round(round=3, cells={ArmKey("c1"): walked}), [cut]) == [], (
+    assert cut.inputs_ref.cells[ArmKey("c1")] == [str(i) for i in range(8) if i != 2]
+    # The round banks the parent re-read on its cells beside the arm, as the loop files it.
+    banked = {ArmKey("c1"): walked, ArmKey(parent.id): hits}
+    assert replay_all_mismatches(_round(round=3, cells=banked), [cut]) == [], (
         "the cut the live rule made is not the cut its own record replays"
     )
+    # A rival's re-grade reaches the replay: a parent that now misses every cell cuts nothing.
+    regraded = {**banked, ArmKey(parent.id): sheet(measurements([0.0] * 10))}
+    [rival_moved] = replay_all_mismatches(_round(round=3, cells=regraded), [cut])
+    assert rival_moved.current_outcome is False, "the replay read its rival's grades by value"
     # Every replayer that reads an arm replays an absent one as no cut, no gain and no winner.
     unwalked, bar_arm = ArmKey("c1"), ArmKey(parent.id)
     paired = PairedTCut(
@@ -1353,8 +1368,9 @@ def test_informative_rows_are_the_most_informative_at_the_theta_the_refit_seats(
         race_of, ten, ruler, _ = _informative_race(built_stores, monkeypatch, refit)
         missed = _on_ten(ten, [0.0] * 4).cells
         race = race_of()
+        ahead = {ArmKey("c1"): Untaken(ten[4:], 2)}
+        race.choose_rows({ArmKey("c1"): missed}, ahead)
         race.close({ArmKey("c1"): missed})
-        ahead = {ArmKey("c1"): ten[4:]}
         [stretch] = race.choose_rows({ArmKey("c1"): missed}, ahead).values()
         chosen, read = stretch.rows, race._check.read
         assert read is not None, "guard: the close fit no field"
@@ -1386,13 +1402,15 @@ def test_a_resumed_informative_race_rechooses_its_rows_and_files_nothing(
             ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells,
             ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 0.0]).cells,
         }
-        ahead = {ArmKey("c1"): ten[4:], ArmKey("c2"): ten[4:]}
+        ahead = dict.fromkeys(taken, Untaken(ten[4:], 2))
         live = race_of()
+        live.choose_rows(taken, ahead)
         live.close(taken)
         chose = live.choose_rows(taken, ahead)
         filed = len(racing.cycle.pending_decisions)
         # A resume rebuilds the race and closes its blocks again on the rows the walk replays.
         resumed = race_of()
+        resumed.choose_rows(taken, ahead)
         resumed.close(taken)
         assert resumed.choose_rows(taken, ahead) == chose, f"{shape}: the resume chose other pairs"
         assert len(racing.cycle.pending_decisions) == filed, f"{shape}: a choice filed a record"
@@ -1422,11 +1440,12 @@ def test_a_per_round_open_hands_each_walk_its_own_rows_and_the_blocks_calls_by_w
         ArmKey("c1"): _on_ten(ten, [0.0, 0.0, 0.0, 0.0]).cells,
         ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 1.0]).cells,
     }
+    # The whole slate, so the two θ the fit seats lie inside the δ the rows span.
+    ahead = dict.fromkeys(taken, Untaken(ten, 6))
+    race.choose_rows(taken, ahead)
     race.close(taken)
     read = race._check.read
     assert read is not None, "guard: the close fit no field"
-    # The whole slate, so the two θ the fit seats lie inside the δ the rows span.
-    ahead = dict.fromkeys(taken, ten)
     chosen = race.choose_rows(taken, ahead)
     for key, stretch in chosen.items():
         best = max(
@@ -1438,6 +1457,38 @@ def test_a_per_round_open_hands_each_walk_its_own_rows_and_the_blocks_calls_by_w
     )
     calls = [stretch.calls for stretch in chosen.values()]
     assert sum(calls) == race.block_size * len(taken), f"the block handed out {calls} calls"
+
+
+def test_a_rolling_decision_sends_none_where_the_calls_out_can_settle_the_cut() -> None:
+    rows = samples(6, "r")
+    # ε(n) 0.05: `contested` and `idle` sit just above it, `sure` far past it.
+    read = FieldRead(
+        theta={},
+        variance=dict.fromkeys(map(ArmKey, ("contested", "idle", "sure")), 1.0),
+        p_best={ArmKey("contested"): 0.06, ArmKey("idle"): 0.06, ArmKey("sure"): 0.9},
+        bar=dict.fromkeys(map(ArmKey, ("contested", "idle", "sure")), 0.05),
+    )
+    walks = {
+        # One call out on a decision one answer can move across its bar: it waits on that call.
+        ArmKey("contested"): _Walking(0.0, rows, owed=1, depth=6),
+        # None out: nothing can settle it, so it is sent the one call that can.
+        ArmKey("idle"): _Walking(0.0, rows, owed=0, depth=6),
+        # No answer moves it to its bar: every row its budget takes is sent at once.
+        ArmKey("sure"): _Walking(0.0, rows, owed=0, depth=6),
+        # Unread yet: sent the calls that bring it to the depth the cut first reads.
+        ArmKey("young"): _Walking(0.0, rows, owed=0, depth=0),
+    }
+    handed = _hand_out(walks, read, None, None, n_min=4)
+    assert handed == {
+        ArmKey("contested"): 1,
+        ArmKey("idle"): 1,
+        ArmKey("sure"): 6,
+        ArmKey("young"): 4,
+    }, f"a rolling decision sent {handed}"
+    settled = {key: walk._replace(owed=handed[key]) for key, walk in walks.items()}
+    assert _hand_out(settled, read, None, None, n_min=4) == handed, (
+        "a decision whose calls out can settle every walk sent more"
+    )
 
 
 @pytest.mark.usefixtures("offline", "optimizing_memory")
@@ -1454,6 +1505,7 @@ def test_pobb_per_round_cuts_a_candidate_on_rows_its_rivals_never_answered_and_t
             ArmKey("c2"): _on_ten(ten, [1.0] * 10).cells[4:],
         }
         race = race_of()
+        race.choose_rows(apart, dict.fromkeys(apart, Untaken(ten[6:], 0)))
         stop = race.close(apart).get(ArmKey("c1"))
         cut_by[shape] = stop is not None
         if shape == "per_candidate":
@@ -1462,8 +1514,10 @@ def test_pobb_per_round_cuts_a_candidate_on_rows_its_rivals_never_answered_and_t
         assert reading is not None and reading.context["gate"] == "epsilon"
         [cut] = racing.cycle.pending_decisions
         assert isinstance(cut.inputs_ref, EliminationCut)
-        assert set(cut.inputs_ref.arm_cells) == {s.key for s in ten[:6]}, "the arm's cells moved"
-        assert replay_all_mismatches(_round(round=3, cells={ArmKey("c1"): lost}), [cut]) == [], (
+        read = cut.inputs_ref.cells
+        assert set(read[ArmKey("c1")]) == {s.key for s in ten[:6]}, "the arm's cells moved"
+        banked = {**race.priors, ArmKey("c1"): lost, ArmKey("c2"): sheet(apart[ArmKey("c2")])}
+        assert replay_all_mismatches(_round(round=3, cells=banked), [cut]) == [], (
             "a per_round cut does not replay on its own record"
         )
     assert cut_by == {"per_candidate": False, "per_round": True}, (

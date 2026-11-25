@@ -896,12 +896,13 @@ async def _walk_population(
         for key, arm in proposed.items()
     }
     session = cycle.session
-    skipped = session.store.campaigns.standing_rounds(session.hop, moment=None).skipped
+    standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
     walks: dict[ArmKey, Walk | None] = {}
     for key, arm in proposed.items():
-        walks[key] = _open_arm(ctx, arm, sps[key], panel, skipped.get((round_num, key)))
+        walks[key] = _open_arm(ctx, arm, sps[key], panel, standing.skipped.get((round_num, key)))
 
     blocks = race.blocks if race is not None else None
+    filed: set[ArmKey] = set()
 
     def on_turn(key: ArmKey, block: int | None) -> None:
         if race is not None:
@@ -915,6 +916,10 @@ async def _walk_population(
         moved = chosen != states[key].sample_order
         if block and held is not None and held["racing"] == racing and not moved:
             return
+        # A `rolling` round re-announces a walk at each decision: it files the rows it moved.
+        if block is None and key in filed and not moved:
+            return
+        filed.add(key)
         states[key] = states[key].model_copy(
             update={
                 "sample_order": chosen,
@@ -948,6 +953,7 @@ async def _walk_population(
         blocks=blocks,
         on_turn=on_turn,
         on_decided=on_decided,
+        reads=standing.reads.get(round_num, ()),
     )
     # A prior's caught-up cells are its round reading's rows, so the race and the election read one sheet.
     for key, cells in ({} if pool is None else pool.caught).items():

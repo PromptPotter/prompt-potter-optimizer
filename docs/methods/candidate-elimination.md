@@ -44,9 +44,9 @@ says when to stop BUYING an arm, not when to promote one. An `admission` below `
 = 0.75 is refused, so one discordant cell never promotes. Admission is bounded; the election RANKS on
 the unbounded posterior (bounding it moved a banked crown across a 0.0007 gap). **A pick's crowning
 cells are its discordant wins over its bar**: there its rows are the luck the selection kept, so they
-stay out of every race it judges; a cell it tied on stays in the pool. A held round's leader ahead of
-its parent on θ walks the next round's panel once, ahead of L1's arms: the cells that ranked it first
-are the ones its luck rode.
+stay out of every race it judges; a cell it tied on stays in the pool. **Evidence is bought in one
+place, the round's race, up to the round's cap**: a leader short of the bar there is dropped, a false
+negative the bar accepts, and a round that crowns nothing hands on its parent alone.
 
 **The bar is ONE predicate whose statistic is a switch** (`OptimizationConfig.crowning_bar`,
 `domain/crowning_bar.py::CrowningBar`), read over every readable arm of the round at once; crown,
@@ -93,6 +93,30 @@ way (a sure cut, a sure leader) draws few calls while a contested one remains; o
 them all. Under `per_round` the parent catches up on every row a candidate takes it never answered,
 so its bill grows with the union of the rows.
 
+`pobb.dispatch` says when the decision runs. `batch` (the default) closes a block once every call
+it handed out is back. `rolling` decides on every returned row through the same close, cut and
+`choose_rows`, with no block every survivor closes together (no readout block line, no `block` on
+the arm). Each decision hands calls by the same arg-max, as many as § How many calls a rolling
+decision sends derives, the calls out keeping their seats. `pobb.read_order` says which returned
+row a decision reads next. `launch` reads them in the order they were sent, so the record is the
+press's invariant. `arrival` reads them as they come, files that order on the ledger
+(`ledger_scan.py::StandingRounds.reads`), and a resume reads the order filed
+(`query_loop.py::run_walks`).
+
+## How many calls a rolling decision sends
+
+A rolling decision sends a walk calls only while the calls it has out cannot settle the cut on it
+(`race.py::_settles`), and none where they can. Calls out settle nothing before they reach the depth
+the cut first reads, `elimination_n_min`, so a young walk is sent at least that far. Past it, the
+I_out of information those calls carry moves z_k by about √(v_k·I_out / (1 + v_k·I_out)) in its
+posterior's standard units (one preposterior sd). An arm whose z_k lies inside that reach can cross
+the bar on what is already out, so a further call would be spent before the decision it serves
+could use it. An arm outside the reach cannot, so the next call goes out now, by the arg-max above.
+A sure leader therefore rides to its budget at once, as it would under `batch`, while a contested
+arm waits on its calls out. The parent stands no bar, so its top-up is never settled. With
+`epsilon_stop` off the cut never fires and every walk is sent its whole budget. The press caps what
+is out at once, never what is committed, so a cut wastes at most the press.
+
 ## Two regimes
 
 - **Early — high-signal.** A field member clearly behind loses its share in 3–5 queries (Wilcoxon needed ≥8 at α=0.2, being variance-agnostic).
@@ -121,7 +145,7 @@ Five mechanisms, fixed order, each owning its memory field and display annotatio
 
 The first signal ends the candidate: fatal beats rate beats PoBB.
 
-**Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a rule's cut discards at most one call. A block race's close bounds no launch: a walk has at most the press's cells out past it, on the rows the last open chose, each re-seated by its sample where the next open moves its row, so a cut there discards at most the press. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
+**Each rule answers how EARLY it could fire** — early, never late — so a look-ahead walk launches a cell only if no rule can fire before it, and a rule's cut discards at most one call. A block race's close bounds no launch: a walk has at most the press's cells out past it, on the rows the last open chose, each re-seated by its sample where the next open moves its row, so a cut there discards at most the press; under `rolling` a walk sends no row past those its decisions committed, and a cut discards at most its calls out, the press. A pause, skip or budget stop keeps what is paid for and starts nothing; an in-flight call is cancelled only where that stops its bill; no cell starts that the spend book cannot hold at its bound.
 
 **One comparator, one stop rule — do not add a sixth.** No unpaired answer-collapse cut: one label on a hardest-first `n_min` prefix is no reading against the parent, which the posterior already takes; one answer where the parent answered apart on the same cells is refused at the election instead (`domain/arms.py::is_electable`). No paired-margin futility gate: discordant binary wins are a second comparator beside the θ ruler, re-encode the election's bar, and go inert on a graded backend. Futility, if bought, is one gate **on the θ ruler**.
 
@@ -218,4 +242,4 @@ Departures from the paper:
 
 ## On-disk shape and replay
 
-**A cut record is the replay's entire input — no cross-round lookup, no backfill** — the arm's own cells the field was read on (`race.py::EliminationCut.arm_cells`, re-read off its rows) and each rival's grades on the cells read, whose union is the read, so replay on the fixed δ ruler is bit-for-bit absent a scorer change; under one, the candidate side is rescored and priors stay recorded. Why this family of stop rules: [`../research/landscape.md`](../research/landscape.md) § Why PoBB's family and not another. The fatal-classification rule table: `domain/results_health.py::classify_result`.
+**A cut record names every cell it read by address, once — no cross-round lookup, no backfill** — each side's cells the field was read on, the arm's and every rival's (`race.py::EliminationCut.cells`), whose union is the read. The round banks every side (the parent re-read on its cells), so replay re-reads each off the round's rows: bit-for-bit on the fixed δ ruler absent a scorer change, and under one every side is rescored alike. Why this family of stop rules: [`../research/landscape.md`](../research/landscape.md) § Why PoBB's family and not another. The fatal-classification rule table: `domain/results_health.py::classify_result`.

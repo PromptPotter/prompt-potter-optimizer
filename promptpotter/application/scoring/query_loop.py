@@ -6,6 +6,7 @@ import sys
 import time
 from collections.abc import Callable, Hashable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+from functools import partial
 from typing import TYPE_CHECKING, Any, Protocol
 
 from promptpotter.application.initialization.session import Session
@@ -39,7 +40,7 @@ from promptpotter.domain.records.run_records import (
     StopLoop,
 )
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.sample import FiledAnswer, Sample, Stretch
+from promptpotter.domain.sample import FiledAnswer, ReadOrder, Sample, Stretch, Untaken
 from promptpotter.domain.scoring import (
     MAX_PASS_ROWS,
     CellSheet,
@@ -121,15 +122,21 @@ class BlockRace[K: Hashable](Protocol):
     @property
     def block_size(self) -> int: ...
 
+    @property
+    def rolling(self) -> ReadOrder | None:
+        """``None``: ``batch`` dispatch, a decision once every call a block handed out is back.
+        Else ``rolling``: a decision on every returned row, the rows read in this order."""
+        ...
+
     def close(self, rows: Mapping[K, Sequence[GradedCell]]) -> Mapping[K, StopSignal]: ...
 
     def choose_rows(
-        self, taken: Mapping[K, Sequence[GradedCell]], ahead: Mapping[K, Sequence[Sample]]
+        self, taken: Mapping[K, Sequence[GradedCell]], ahead: Mapping[K, Untaken]
     ) -> Mapping[K, Stretch]:
-        """At each block's open, every live walk's stretch: a block closes once each has taken its
+        """At each decision, every live walk's stretch: a block closes once each has taken its
         calls, its budget capping them, and hands out at least one call while a walk has a row
-        left. Read off the rows taken alone: no cell in flight enters, so a press never moves the
-        choice."""
+        left and no call out. Read off the rows taken and the calls decisions sent alone: no cell
+        a press sent ahead enters, so a press never moves the choice."""
         ...
 
 
@@ -290,6 +297,10 @@ class _Acquired:
     deprecated_display: GradedCell | None = None
 
 
+def _returned(returned: list[tuple[int, int]], call: tuple[int, int], _: object) -> None:
+    returned.append(call)
+
+
 def _returned_row(cell: asyncio.Task[_Acquired]) -> GradedCell | None:
     if not cell.done() or cell.cancelled() or cell.exception() is not None:
         return None
@@ -408,10 +419,22 @@ class Walk:
     outcome: QueryLoopResult | None = None
     # The rows at which a block race next closes, where it may stop this walk. ``None`` outside one.
     boundary: int | None = None
+    # A `rolling` race decides on every returned row: the walk sends only the calls a decision
+    # sent it, up to `boundary`, and is sure of no row it has not taken.
+    rolling: bool = False
 
     @property
     def n(self) -> int:
         return self.budget
+
+    @property
+    def owed(self) -> int:
+        """The calls a decision sent it whose rows it has not taken."""
+        return 0 if self.boundary is None else self.boundary - len(self.results)
+
+    def untaken(self) -> Untaken:
+        head = len(self.results)
+        return Untaken(self.dataset[head:], self.n - head, self.owed)
 
     def enter_block(self, end: int) -> None:
         self.boundary = min(self.n, end)
@@ -447,7 +470,7 @@ class Walk:
         rows = [i for i in range(len(self.results), end) if i not in out]
         if (close := self.boundary) is None:
             return rows
-        past = max(cells - sum(i >= close for i in out), 0)
+        past = 0 if self.rolling else max(cells - sum(i >= close for i in out), 0)
         return [i for i in rows if i < close] + [i for i in rows if i >= close][:past]
 
     def sent(self) -> list[Sample]:
@@ -594,9 +617,10 @@ class Walk:
 
     def bank(self) -> list[Sample]:
         """Only cells this walk was SURE to take: below its horizon, its block race's pending close
-        and the first error."""
+        (under ``rolling``, the next row's decision) and the first error."""
         self.collect()
-        sure = min(m for m in (self.n, self.horizon(self.n - 1), self.boundary) if m is not None)
+        close = len(self.results) if self.rolling else self.boundary
+        sure = min(m for m in (self.n, self.horizon(self.n - 1), close) if m is not None)
         rows: list[GradedCell] = []
         paid: list[Sample] = []
         samples: list[Sample] = []
@@ -650,9 +674,12 @@ async def run_walks[K: Hashable](
     blocks: BlockRace[K] | None = None,
     on_turn: Callable[[K, int | None], None] | None = None,
     on_decided: Callable[[K], None] | None = None,
+    reads: Sequence[tuple[K, int]] = (),
 ) -> StopLoop | None:
-    """Rows, cuts and events land where a SERIAL phase lands them, in *walks*' order; ``keep_cut``
-    returns a budget stop, its words whole, not raises."""
+    """Rows, cuts and events land where a SERIAL phase lands them, in *walks*' order, or under a
+    ``rolling`` race in the order its decisions read them; ``keep_cut`` returns a budget stop, its
+    words whole, not raises. *reads*: the rows, by walk and sample id, an ``arrival`` race read
+    before a pause, which a resume reads in that order."""
     if over := [w.n for w in walks.values() if w is not None and w.n > MAX_PASS_ROWS]:
         raise PayloadInvalidError(
             f"A pass scores at most {MAX_PASS_ROWS} rows, and this one asks for {max(over)}. "
@@ -662,6 +689,8 @@ async def run_walks[K: Hashable](
     phase = _ScoringPhase(
         list(walks), list(walks.values()), session, backfills, blocks, on_turn, on_decided
     )
+    if phase.rolling == "arrival":
+        phase.replaying = [(phase.keys.index(key), sid) for key, sid in reads if walks.get(key)]
     phase.cell = _dearest(
         [
             await cell_bound(session, walk.ctx.search_point.pipeline_params)
@@ -727,8 +756,17 @@ class _ScoringPhase[K: Hashable]:
     draining: set[asyncio.Future[Any]] = field(default_factory=set)
     announced: set[int] = field(default_factory=set)
     decided: set[int] = field(default_factory=set)
+    # Under `rolling`, by walk and sample id: each call a decision sent and no walk has read yet,
+    # in the order sent; each in the order it returned; the reads a resume replays.
+    sent: list[tuple[int, int]] = field(default_factory=list)
+    returned: list[tuple[int, int]] = field(default_factory=list)
+    replaying: list[tuple[int, int]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
+        self.rolling = None if self.blocks is None else self.blocks.rolling
+        for walk in self.walks:
+            if walk is not None:
+                walk.rolling = self.rolling is not None
         self.gauge = self.session.state.flight
         self.client = self.session.backend_client
         self.cancels = self.client.connector.cancel_stops_billing
@@ -772,23 +810,34 @@ class _ScoringPhase[K: Hashable]:
 
     def open_block(self) -> None:
         """Each live walk's next stretch: the order its race takes its untaken pool in, and the
-        row its block closes at."""
-        live = {self.keys[i]: walk for i, walk in self.racing().items()}
-        if self.blocks is None or not live:
+        row its block closes at; under ``rolling``, the calls the decision sends join those out."""
+        racing = self.racing()
+        if self.blocks is None or not racing:
             return
         chosen = self.blocks.choose_rows(
-            {key: walk.results for key, walk in live.items()},
-            {key: walk.dataset[len(walk.results) :] for key, walk in live.items()},
+            {self.keys[i]: walk.results for i, walk in racing.items()},
+            {self.keys[i]: walk.untaken() for i, walk in racing.items()},
         )
-        for key, walk in live.items():
-            walk.reorder(chosen[key].rows)
-            walk.enter_block(len(walk.results) + chosen[key].calls)
-        assert any(not walk.waits for walk in live.values()), "a block handed out no call"
+        for i, walk in racing.items():
+            stretch, head, owed = chosen[self.keys[i]], len(walk.results), walk.owed
+            assert [s.id for s in stretch.rows[:owed]] == [
+                s.id for s in walk.dataset[head : head + owed]
+            ], "a decision moved a call already out"
+            walk.reorder(stretch.rows)
+            walk.enter_block(head + stretch.calls)
+            if self.rolling is not None:
+                self.sent += [(i, s.id) for s in walk.dataset[head + owed : head + walk.owed]]
+                # No block re-files it: a decision that moved its rows does.
+                if i in self.announced:
+                    self.announce(i)
+        assert any(not walk.waits for walk in racing.values()), "a block handed out no call"
 
     def announce(self, i: int) -> None:
         self.announced.add(i)
         if self.on_turn is not None:
-            self.on_turn(self.keys[i], None if self.blocks is None else self.block)
+            # A `rolling` round has no block every survivor closes together.
+            block = None if self.blocks is None or self.rolling is not None else self.block
+            self.on_turn(self.keys[i], block)
 
     def conclude(self, i: int) -> None:
         self.decided.add(i)
@@ -797,9 +846,70 @@ class _ScoringPhase[K: Hashable]:
 
     def first_turn(self) -> bool:
         self.open_block()
+        if self.rolling is None:
+            return self.advance()
+        for i, walk in enumerate(self.walks):
+            if walk is None or not walk.n:
+                self.announce(i)
+                if walk is not None:
+                    walk.end(QueryLoopResult([]), cancel=self.cancels)
+                self.conclude(i)
         return self.advance()
 
+    def roll(self) -> bool:
+        """``rolling``: the turn passes to the walk whose row is read next, the first call out in
+        the order sent; a decision runs first wherever no call is out."""
+        while True:
+            racing = self.racing()
+            self.sent = [call for call in self.sent if call[0] in racing]
+            if self.sent:
+                break
+            if not racing:
+                return False
+            self.close_block()
+        self.seat(self.sent[0][0])
+        return True
+
+    def seat(self, i: int) -> None:
+        self.turn = i
+        if i not in self.announced:
+            self.announce(i)
+        walk = self.walks[i]
+        assert walk is not None
+        walk.release()
+
+    def arrive(self) -> None:
+        """``arrival``: the turn passes to the call that returned first, or the one a resume
+        replays next, its row re-seated at its walk's head."""
+        out = set(self.sent)
+        if self.replaying:
+            assert self.replaying[0] in out, "a resume's next read is no call its decisions sent"
+            call = self.replaying[0]
+        elif not (came := [c for c in self.returned if c in out]):
+            return
+        else:
+            call = came[0]
+        i, sid = call
+        walk = self.walks[i]
+        assert walk is not None
+        head = len(walk.results)
+        if walk.dataset[head].id != sid:
+            rows = walk.dataset[head:]
+            walk.reorder([s for s in rows if s.id == sid] + [s for s in rows if s.id != sid])
+        self.seat(i)
+
+    def read(self, i: int, sample: Sample) -> None:
+        """A rolling turn's row is read: it leaves the calls out."""
+        call = (i, sample.id)
+        self.sent.remove(call)
+        if call in self.returned:
+            self.returned.remove(call)
+        if self.replaying and self.replaying[0] == call:
+            self.replaying.pop(0)
+
     def advance(self) -> bool:
+        if self.rolling is not None:
+            return self.roll()
         while True:
             self.turn += 1
             if self.turn >= len(self.walks):
@@ -845,6 +955,8 @@ class _ScoringPhase[K: Hashable]:
         return bool(self.live())
 
     async def step(self) -> bool:
+        if self.rolling == "arrival" and (held := self.walks[self.turn]) and held.settling is None:
+            self.arrive()
         walk = self.walks[self.turn]
         assert walk is not None
         if self.gauge is not None:
@@ -910,6 +1022,8 @@ class _ScoringPhase[K: Hashable]:
     def take_head(self, walk: Walk, head: asyncio.Task[_Acquired]) -> bool:
         backfills = self.backfills
         sample = walk.dataset[len(walk.results)]
+        if self.rolling is not None:
+            self.read(self.turn, sample)
         if (verdict := walk.take(head)) is not None:
             return self.decide(walk, verdict)
         if backfills is not None and (
@@ -927,6 +1041,10 @@ class _ScoringPhase[K: Hashable]:
     def judged(self, walk: Walk) -> bool:
         if (verdict := walk.judge()) is not None:
             return self.decide(walk, verdict)
+        if self.rolling is not None:
+            # A decision whose block is the one row returned: the close, the cut, the next calls.
+            self.close_block()
+            return self.roll()
         if walk.boundary is not None and len(walk.results) == walk.boundary:
             return self.advance()
         return True
@@ -976,10 +1094,13 @@ class _ScoringPhase[K: Hashable]:
             self.room(walk, armed, ceiling),
             max(self.affordable(), walk.rereads_ahead(unsent[0])),
         )
+        i = next(i for i, w in enumerate(self.walks) if w is walk)
         for _ in walk.sendable(armed.cells, room):
             if room <= 0:
                 break
-            sample, _cell = walk.launch(armed)
+            sample, cell = walk.launch(armed)
+            if self.rolling == "arrival":
+                cell.add_done_callback(partial(_returned, self.returned, (i, sample.id)))
             room -= 1
             if backfills is not None:
                 room -= len(backfills.start_backfill(sample, min(room, self.affordable())))

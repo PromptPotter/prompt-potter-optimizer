@@ -287,6 +287,7 @@ from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoi
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import PauseCause, StopReason
+from promptpotter.domain.pipeline_manifest import resolved_key
 from promptpotter.domain.pipeline_overlay import (
     fold_output_contract,
     normalize_model_id,
@@ -4713,12 +4714,16 @@ def test_an_uploads_start_asks_the_mints_refusals_before_its_dataset_lands(
 
 
 def _view(
-    stores: Stores, parent: OptSearchPoint, framing: TaskDecomposition, schema: PipelineSchema
+    stores: Stores,
+    parent: OptSearchPoint,
+    framing: TaskDecomposition,
+    schema: PipelineSchema,
+    node: str = "l1_generate",
 ) -> PotterView:
-    """What L1's prompt renders from, read off a node context over a cycle started from *parent*."""
+    """What *node*'s prompt renders from, read off a node context over a cycle started from *parent*."""
     seated = seat(stores, schema=schema, framing=framing, origin=(parent, lambda _s: sheet([])))
     run_init(RoundContext(seated.cycle, 0))
-    return PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
+    return PotterView(NodeContext(seated, NODE_MEMBERS.get(node)), Ladder())
 
 
 def _outer(cells: InnerCells) -> tuple[PipelineSchema, OptSearchPoint]:
@@ -4883,11 +4888,11 @@ def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
     )
 
 
-def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
+def test_the_l4_generator_and_its_steer_are_shown_the_inner_optimizer_prompts_it_rewrites(
     built_stores: Stores,
 ) -> None:
     # The INNER campaign's manifest's, as the outer's origin, grown by whole length budgets past
-    # 16,000 chars, shown whole, and no mandatory panel is refused.
+    # 16,000 chars, shown whole at each node's own share, and no mandatory panel is refused.
     potter = select_optimizer(bench_choice("potter"))
     budget = potter.knobs_of("l1_generate", L1GenerateKnobs).length_budget
     schema, start = _outer(inner_cells("potter"))
@@ -4903,14 +4908,35 @@ def test_the_l4_generator_is_shown_the_inner_optimizer_prompts_it_rewrites(
     assert grown_text in shown and subject_chars > 16_000, (
         f"a {start_chars + grown_by}c parent the length budget admits renders as {subject_chars}c"
     )
-    generator = running_prompt("l1_generate", potter.node_config("l1_generate"), potter.manifest)
-    with scoped(book=spend_book()):
-        filled = DispatchHub.fill(generator, inner)
-    assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
-        "the generator was handed no subject — it is rewriting text it cannot see"
-    )
-    refused_panels = set(filled.injections.dropped) & NODE_LAYOUTS["l1_generate"].mandatory
-    assert not refused_panels, f"mandatory panel(s) refused by the budget: {sorted(refused_panels)}"
+    for node in ("l1_generate", "l2_context"):
+        prompt = running_prompt(node, potter.node_config(node), potter.manifest)
+        at_node = _view(built_stores, origin, TaskDecomposition(), schema, node)
+        with scoped(book=spend_book()):
+            filled = DispatchHub.fill(prompt, at_node)
+        assert len(filled.rendered["rendered_prompt"]) >= subject_chars, (
+            f"{node} was handed no subject — it acts on text it cannot see"
+        )
+        refused = set(filled.injections.dropped) & NODE_LAYOUTS[node].mandatory
+        assert not refused, f"{node}: mandatory panel(s) refused by the budget: {sorted(refused)}"
+
+
+def test_a_critique_cluster_says_what_it_holds_before_its_id_list_opens() -> None:
+    # Ids first ran a list on to `max_tokens` (two banked minimax replies, healed at a full call's
+    # price): the schema sent and the layout the prompt shows both close a cluster on its ids.
+    potter = select_optimizer(bench_choice("potter"))
+    config = potter.node_config("l1_critique")
+    key = resolved_key(config.schema_family, config.schema_version)
+    assert key is not None, "guard: the critique names no schema"
+    sent = potter.resolved_schemas[key]
+    cluster = sent["json_schema"]["schema"]["$defs"]["FailureCluster"]
+    assert list(cluster["properties"]) == [
+        "mechanism",
+        "claim",
+        "sample_ids",
+    ], "the schema opens a cluster's id list before it names the mechanism"
+    layout = running_prompt("l1_critique", config, potter.manifest).answer_format or ""
+    at = [layout.index(f'"{field}"') for field in ("mechanism", "claim", "sample_ids")]
+    assert at == sorted(at), "the reply layout opens a cluster's id list before its mechanism"
 
 
 def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refused_at_its_mint(

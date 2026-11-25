@@ -1772,9 +1772,9 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
     assert closest_to_bar(reads, beside=near_key) == "deep"
 
 
-# Round 2 re-reads the leader round 1 held.
+# Round 2 starts from what round 1 handed on.
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
+def test_a_held_rounds_leader_ahead_of_its_parent_is_dropped_and_never_raced_again(
     monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # The cells that ranked it first are the ones its luck rode.
@@ -1799,16 +1799,14 @@ def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
         leader = first.election.leading
         assert leader is not None
         assert "Check" in first.arms[leader].individual.prompts["solve"].fields["instruction"]
-        assert [m.id for m in cycle.population] == [parent_id, leader], (
-            "a held leader ahead of its parent was dropped with its evidence"
+        assert [m.id for m in cycle.population] == [parent_id], (
+            "a held round handed on more than its parent: evidence is bought in its race alone"
         )
         offline.llm.says = _potter_says("Guess.")
         second = asyncio.run(execute_round(cycle, 2)).result
-        assert next(iter(second.proposed)) == leader and second.rows(leader), (
-            "the round after a leader missed the bar did not re-score it, first"
+        assert leader not in second.proposed and not second.rows(leader), (
+            "a leader short of the bar was raced again past its round's cap"
         )
-        assert cycle.output(L1Readout, 2).l1_proposed == 1, "a re-read counted as L1's yield"
-        assert [m.id for m in cycle.population] == [parent_id], "a leader was re-read twice"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -3442,7 +3440,6 @@ def trailing() -> _Trailing:
         check = PoBBCheck(
             cfg,
             n_min=6,
-            n_samples=28,
             ruler=None,
             parent=parent,
         )
@@ -3451,7 +3448,9 @@ def trailing() -> _Trailing:
             parent: sheet(measurements([1.0] * parent_cells)),
             ArmKey("arm"): sheet(measurements([0.0] * misses + [1.0] * (n - misses))),
         }
-        return check.check(field, [ArmKey("winner"), ArmKey("arm")]).get(ArmKey("arm"))
+        return check.check(field, dict.fromkeys([ArmKey("winner"), ArmKey("arm")], 28)).get(
+            ArmKey("arm")
+        )
 
     return _Trailing(cfg, parent, behind_perfect_prior)
 
@@ -3459,13 +3458,12 @@ def trailing() -> _Trailing:
 @pytest.mark.usefixtures("optimizing_memory")
 def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
     cfg, parent, _ = trailing
-    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
+    graded = PoBBCheck(cfg, n_min=6, ruler=None, parent=parent)
     for n, epsilon in ((6, 0.15), (9, 0.225), *((n, 0.30) for n in range(12, 29))):
         assert graded.epsilon_at(n) == pytest.approx(epsilon), f"ε at {n} cells"
     flat = PoBBCheck(
         pobb_knobs(epsilon=0.30, epsilon_floor=0.30),
         n_min=6,
-        n_samples=28,
         ruler=None,
         parent=parent,
     )
@@ -3473,7 +3471,6 @@ def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
     shipped = PoBBCheck(
         pobb_knobs(),
         n_min=6,
-        n_samples=28,
         ruler=None,
         parent=parent,
     )
@@ -3513,7 +3510,6 @@ def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -
     unpaired = PoBBCheck(
         pobb_knobs(epsilon=0.05),
         n_min=4,
-        n_samples=20,
         ruler=None,
         parent=parent,
     )
@@ -3522,7 +3518,7 @@ def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -
         parent: sheet(measurements([0.0] * 20)),
         ArmKey("challenger"): sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8])),
     }
-    assert not unpaired.check(field, [ArmKey("challenger")]), (
+    assert not unpaired.check(field, {ArmKey("challenger"): 28}), (
         "an arm was cut on cells its rival never sat"
     )
 
@@ -3532,10 +3528,8 @@ def test_a_cost_terms_tie_breaks_never_pin_p_best_at_a_coin(trailing: _Trailing)
     cfg, parent, _ = trailing
     longer, terse_parent = _charged_by_length()
     standings: list[node_contract.RaceSnapshot] = []
-    charged = PoBBCheck(
-        cfg, n_min=6, n_samples=34, ruler=None, parent=parent, on_snapshot=standings.append
-    )
-    charged.check({parent: terse_parent, ArmKey("l"): longer}, [ArmKey("l")])
+    charged = PoBBCheck(cfg, n_min=6, ruler=None, parent=parent, on_snapshot=standings.append)
+    charged.check({parent: terse_parent, ArmKey("l"): longer}, {ArmKey("l"): 28})
     assert standings[-1].p_best > 0.5, "a cost term's tie-breaks pinned p_best at a coin"
 
 
@@ -3585,11 +3579,10 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
     unpaired_check = PoBBCheck(
         pobb_knobs(),
         n_min=6,
-        n_samples=28,
         ruler=None,
         parent=parent,
     )
-    assert not unpaired_check.check({ArmKey("c"): sheet(constant)}, [ArmKey("c")]), (
+    assert not unpaired_check.check({ArmKey("c"): sheet(constant)}, {ArmKey("c"): 28}), (
         "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
     )
     # Collapse is read against the parent's answers on the same cells.

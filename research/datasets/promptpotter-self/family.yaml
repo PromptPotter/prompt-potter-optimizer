@@ -90,12 +90,6 @@ campaign:
         config:
           transcripts: unbounded
           transcript_chars: unbounded
-      l2_context:
-        config:
-          # `rendered_prompt` is placed whole or dropped: the subject renders 7,485 chars at the
-          # start and at most 15,485 after four rounds of `length_budget`, beside the 5,500 the
-          # manifest gives the rest.
-          discretionary_chars: 21000
       escalation:
         config:
           # No `optimization.lives`, and its absence is deliberate rather than an omission. It read
