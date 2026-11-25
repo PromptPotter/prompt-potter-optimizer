@@ -438,12 +438,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   `_MAX_ATTEMPTS` reads closed after that merge while the relay still resends; count the relay's
   resends for one 5xx instead (`grep -n "_MAX_ATTEMPTS = " <termnorm>/backend-api/core/llm_providers.py`
   on master, `max_attempts` in `pipeline.json` on `xconn`).
-- **An L4 launch never probes the connectors its inner cells name** (the C0 re-measure at landing 72
-  halted on `TERMNORM_ENDPOINTS is unset` after its mint): `admission.py::probe_backend` probes the outer
-  backend alone, so an inner cell's connector fails per cell inside `runner/inner/spawn.py`, once the
-  cycle is minted and billed. Root: the outer preflight probes every connector its inner cells
-  resolve. **Rides with:** xconn 3, the probe's link. **Re-test:** an L4 launch with an inner
-  connector's endpoints unset is refused before its mint, naming the connector.
 
 ### batch/29 · mcp
 

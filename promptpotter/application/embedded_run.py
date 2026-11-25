@@ -115,7 +115,7 @@ async def _dataset_session(
     """Raises what ``probe_backend`` refuses a launch on; *rows* replace the definition's bank,
     which the mint labels."""
     definition = runnable_definition(resolve_dataset(stores, dataset_name))
-    await refuse_unreachable(definition.connector, definition.endpoint)
+    await refuse_unreachable(stores, dataset_name, definition.connector, definition.endpoint)
     async with init_services(
         dataset_name=dataset_name, identity=stores.identity, stores=stores, program=program
     ) as session:

@@ -227,6 +227,7 @@ from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.config import paths
+from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import (
     block_packs_root,
     default_projects_root,
@@ -274,6 +275,7 @@ from promptpotter.domain.command_kinds import (
     StartCheckinPayload,
     SubmittedArm,
 )
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
@@ -1145,6 +1147,30 @@ def test_a_cell_is_keyed_by_what_its_session_loads_and_no_other_cells(
     assert resolve_dataset(sandbox, "innerbench").directory == tenant_copy, (
         "the cell ran another tier"
     )
+
+
+def test_an_l4_launch_whose_inner_backend_is_unaddressed_is_refused_before_its_mint(
+    built_stores: Stores, offline: Router, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Past the mint, every cell fails on its own once the cycle is billed.
+    launched_bank(built_stores, offline, samples(80, "TRUE", query="claim "))
+    seat = {"kind": "seat", "id": "seed-0", "run_seed": 0}
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("outer") / DEFINITION_FILE,
+        {
+            "pipeline": {"connector": "promptpotter"},
+            "panel": {
+                "inner_benchmark": LAUNCHED_DATASET,
+                "inner_campaign": _GEOMETRY,
+                "tasks": [seat],
+            },
+        },
+    )
+    monkeypatch.setattr(settings_mod.settings, "TERMNORM_ENDPOINTS", {})
+    with pytest.raises(BackendUnreachableError) as refused:
+        asyncio.run(run_campaign("outer", stores=built_stores, budget=Budget(), mode=RunMode()))
+    assert refused.value.details["connector"] == "termnorm", "the refusal named another backend"
+    assert built_stores.campaigns.list_campaign_ids() == [], "the refused launch minted"
 
 
 def test_a_harbor_panel_reads_its_pinned_roster_and_never_dials_out(
