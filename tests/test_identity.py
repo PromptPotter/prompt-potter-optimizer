@@ -20,7 +20,7 @@ import shutil
 import sys
 import time
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -37,7 +37,6 @@ from factories import (
     PROMPT_INFO,
     arm_state,
     arm_walk,
-    backend_client,
     declaration_of,
     defaulted_config,
     inner_cells,
@@ -46,7 +45,6 @@ from factories import (
     laid_ledger,
     launched_bank,
     ledger_records,
-    loop_session,
     measurement,
     minted_campaign,
     pipeline_schema,
@@ -124,8 +122,9 @@ from promptpotter.application.datasets.startability import upload_source
 from promptpotter.application.datasets.tabular_ingest import IngestError, read_tabular
 from promptpotter.application.embedded_run import run_campaign
 from promptpotter.application.hierarchy import entries_version, list_hierarchy
-from promptpotter.application.initialization.scoring_scope import verb_ledger
+from promptpotter.application.initialization.scoring_scope import scorer_setup, verb_ledger
 from promptpotter.application.initialization.session import Session
+from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher import checkin as checkin_launch
 from promptpotter.application.jobs.launcher.admission import request_jobs
@@ -195,6 +194,7 @@ from promptpotter.application.pipeline_resolve import (
     fork_preview,
     identity_layer,
     laid_config,
+    laid_session,
     permitted_narrowing,
     resolve_pipeline_at,
     resolved_output_schemas,
@@ -2587,34 +2587,49 @@ class _Declared(NamedTuple):
     declared: RunDeclaration
 
 
+_DECL = {
+    "pipeline": {
+        "connector": "termnorm",
+        "nodes": {"llm_only": {"config": {"model": "openai/gpt-oss-20b:nitro"}}},
+    },
+    "campaign": {"optimization": {"degradation_threshold": 0.4}},
+}
+
+
+def _opened(
+    stores: Stores, name: str, rows: Sequence[Sample] | None = None
+) -> tuple[Session, CampaignConfig]:
+    """A session on the account's *name* as every door opens one, and the config its definition
+    lays; *rows* replace its labelled bank as a host's rows do (`embedded_run.py::run_campaign`)."""
+
+    async def opening() -> tuple[Session, CampaignConfig]:
+        async with init_services(
+            dataset_name=name, identity=stores.identity, stores=stores
+        ) as session:
+            dataset = session.dataset
+            assert dataset is not None
+            if rows is not None:
+                stores.tenant_datasets.put_bank(bank := Bank.of(rows))
+                session = replace(session, bank=bank)
+            return laid_session(session, ConfigLayers.of(dataset, None))
+
+    return asyncio.run(opening())
+
+
+def _account_dataset(stores: Stores, name: str, rows: Sequence[Sample]) -> None:
+    """The account's own *name* on TermNorm, labelled on *rows*."""
+    write_yaml(stores.tenant_datasets.dataset_dir(name) / DEFINITION_FILE, _DECL)
+    stores.tenant_datasets.put_bank(bank := Bank.of(rows))
+    stores.tenant_datasets.relabel(name, bank.dataset_hash)
+
+
 @pytest.fixture
 def decl(built_stores: Stores) -> _Declared:
     # A session on the account's `decl` dataset, declared through the door every campaign takes.
-    stores = built_stores
-    write_yaml(
-        stores.tenant_datasets.dataset_dir("decl") / DEFINITION_FILE,
-        {
-            "pipeline": {"connector": "termnorm"},
-            "campaign": {"optimization": {"degradation_threshold": 0.4}},
-        },
-    )
     rows_30 = samples(30, "TRUE", query="claim ")
-    solve = PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)
-    opened = loop_session(
-        stores,
-        pipeline_schema([solve]),
-        rows_30,
-        # Bound as run init binds it: to the connector the definition names.
-        client=backend_client(
-            stores.jobs_dir,
-            name="termnorm",
-            max_cells_in_flight=1,
-            cancel_stops_billing=True,
-            holds_own_sends=True,
-        ),
-        dataset=resolve_dataset(stores, "decl"),
-    )
-    door = _connector_config()
+    _account_dataset(built_stores, "decl", rows_30)
+    opened, door = _opened(built_stores, "decl")
+    (solve,) = opened.pipeline_schema.prompt_nodes()
     return _Declared(opened, rows_30, solve, door, declaration_of(opened, door, Optimize()))
 
 
@@ -2631,7 +2646,7 @@ def test_every_door_declares_through_one_seam_as_a_delta_over_todays_defaults(
         {"optimization": {"budget": {"usd": 9.0, "rounds": 3}}},
         {"display_metric": "composite"},
     ):
-        moved = declaration_of(opened, _connector_config(**copy.deepcopy(unmeasured)), Optimize())
+        moved = declaration_of(opened, door.overlaid(Layer("edit", unmeasured)), Optimize())
         assert (
             moved != declared
             and resolve_cycle_plan(
@@ -2720,26 +2735,25 @@ def test_a_declaration_refuses_a_list_its_lay_cannot_make() -> None:
             assert patch_between(rule, under, over) == patch, f"{under} -> {over} patched wrong"
 
 
-def _arming(stores: Stores, decl: _Declared) -> tuple[Session, ConfigLayers, list[Sample]]:
+def _arming(stores: Stores) -> tuple[Session, ConfigLayers, list[Sample]]:
     """An arm's session on 35 rows holding 5 out: an arm is judged on its bench, and capo searches 30."""
     rows = samples(35, "TRUE", query="claim ")
-    door = decl.door.model_dump(mode="json", exclude_unset=True)
-    door_layers = ConfigLayers(
-        {}, {**door, "dataset_split": {"bench": 5, "demo": 0, "tolerance": 0}}
-    )
+    _account_dataset(stores, "arms", rows)
+    arming, door = _opened(stores, "arms")
+    split = {"dataset_split": {"bench": 5, "demo": 0, "tolerance": 0}}
     return (
-        loop_session(stores, decl.opened.pipeline_schema, rows, dataset=decl.opened.dataset),
-        door_layers,
+        arming,
+        ConfigLayers({}, {**door.model_dump(mode="json", exclude_unset=True), **split}),
         rows,
     )
 
 
 def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
-    built_stores: Stores, decl: _Declared
+    built_stores: Stores,
 ) -> None:
     stores = built_stores
-    door = decl.door
-    arming, door_layers, rows = _arming(stores, decl)
+    arming, door_layers, rows = _arming(stores)
+    optimizer = door_layers.config().optimization.optimizer
 
     def arm_of(key: str, budget: Budget, *, h2h: str = "h") -> list[CyclePlan]:
         request = HeadToHeadRequest(
@@ -2747,7 +2761,7 @@ def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
             arms=[
                 ArmRequest(
                     arm_key=key,
-                    optimization=OptimizationOverrides(optimizer=door.optimization.optimizer),
+                    optimization=OptimizationOverrides(optimizer=optimizer),
                 )
             ],
             budget=budget,
@@ -2790,12 +2804,12 @@ def test_an_arm_off_its_head_to_heads_record_is_refused_before_it_mints(
 
 
 def test_a_replicate_is_numbered_at_the_mint_by_its_treatment_across_every_act(
-    built_stores: Stores, decl: _Declared
+    built_stores: Stores,
 ) -> None:
     # A later act's arm on a standing treatment is its next replicate, on its own seed, and arms of
     # one replicate share theirs (common random numbers).
     stores = built_stores
-    arming, door_layers, rows = _arming(stores, decl)
+    arming, door_layers, rows = _arming(stores)
 
     def act(h2h: str, *arms: tuple[str, OptimizationOverrides]) -> dict[str, Compare]:
         request = HeadToHeadRequest(
@@ -2851,7 +2865,7 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
 ) -> None:
     # An arm so declared runs what a campaign minted on that declaration resolves to.
     stores = built_stores
-    opened, _, solve, _, _ = decl
+    opened, rows_30, solve, _, _ = decl
     seats = [Seat(kind="seat", id="decl/seed-3", run_seed=3)]
     panel = InnerTasks(inner_benchmark="decl", inner_campaign=_GEOMETRY, tasks=seats)
     cells = panel.resolve_cells(stores)
@@ -2900,17 +2914,10 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
         seat_config,
         Compare(arm=Arm(head_to_head_id="h4", arm_key="a", replicate=1)),
     )
-    as_campaign = minted_campaign(
-        CycleHop(campaign_id="decl__0000a4", cycle_id="cycle_l4arm"),
-        config=effective_config(l4_arm.spec),
-        purpose=l4_arm.purpose,
-        dataset_name="decl",
-        dataset_hash=opened.bank.dataset_hash,
-    )
-    stores.campaigns.create_campaign(as_campaign)
-    stores.campaigns.mint_cycle(as_campaign.root_hop)
+    planned = resolve_cycle_plan(opened, effective_config(l4_arm.spec), l4_arm.purpose, rows_30)
+    (minted,) = mint_arms([planned], adopting=None)
     assert (
-        cycle_config(stores, as_campaign.root_cycle).config.model_dump()
+        cycle_config(stores, stores.campaigns.campaign_cycle(minted.hop)).config.model_dump()
         == effective_config(l4_arm.spec).model_dump()
     ), "an arm runs another config than a campaign declared that way"
 
@@ -3005,46 +3012,40 @@ class _Held(NamedTuple):
 
 @pytest.fixture
 def held(built_stores: Stores, decl: _Declared) -> _Held:
-    # The door's campaign minted, its partition banked, and its session resumed on the root it holds.
-    stores = built_stores
-    opened, rows_30, _, door, declared = decl
-    plan = resolve_cycle_plan(opened, effective_config(declared.spec), declared.purpose, rows_30)
-    held_campaign = minted_campaign(
-        CycleHop(campaign_id="decl__000001", cycle_id=plan.cycle_id),
-        config=door,
-        dataset_name="decl",
-        root_content_hash=plan.origin_hash,
-        dataset_hash=opened.bank.dataset_hash,
-    )
-    assert held_campaign.declaration == declared, (
+    # The door's campaign as the mint every entry takes lands it, its session bound to the root and
+    # scoring as its launch's run init sets it (`runner/mint.py`).
+    opened, rows_30, _, door, _ = decl
+    minted = asyncio.run(mint_framed_cycle(opened, door, rows_30, task_text=None))
+    campaign = built_stores.campaigns.load_campaign(minted.hop.campaign_id)
+    assert campaign is not None, "the mint stored no campaign"
+    bound = opened.bound(campaign.root_cycle)
+    assert bound.drawn is not None, "the mint drew no partition"
+    bound.state.scoring = scorer_setup(bound, door, partition=bound.drawn)
+    return _Held(bound, campaign)
+
+
+def test_a_minted_campaign_holds_its_declaration_and_no_drifted_origin_remints_it(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # Its banked rounds stand on the origin it holds; a resume past the mint moves no launch.
+    stores, (opened, campaign) = built_stores, held
+    assert campaign.declaration == decl.declared, (
         "the manifest holds another declaration than the door made"
     )
-    manifest_path = stores.campaigns.create_campaign(held_campaign)
-    manifest = json.loads(manifest_path.read_bytes())
+    manifest_path = CampaignLayout(
+        stores.campaigns.campaign_root_dir(campaign.campaign_id)
+    ).manifest
+    manifest = manifest_path.read_bytes()
     with pytest.raises(ConflictError):
-        stores.campaigns.create_campaign(
-            held_campaign.model_copy(update={"root_content_hash": "drift"})
-        )
-    assert json.loads(manifest_path.read_bytes()) == manifest, (
+        stores.campaigns.create_campaign(campaign.model_copy(update={"root_content_hash": "drift"}))
+    assert manifest_path.read_bytes() == manifest, (
         "a drifted origin re-minted over the campaign its banked rounds stand on"
     )
-    stores.campaigns.mint_cycle(held_campaign.root_hop)
-    stores.campaigns.append(
-        held_campaign.root_hop,
-        PartitionRecord.of(
-            partition_bank(rows_30, door.dataset_split, seed=0),
-            dataset_hash=opened.bank.dataset_hash,
-            cell_identity={},
-            instrument_id=opened.bank.dataset_hash,
-        ),
-    )
-    opened = opened.bound(held_campaign.root_cycle)
-    opened.record_resolved_run()
-    resolve_resume(opened, held_campaign, rows_30)
-    assert read_active_pointer(stores.base_dir) != held_campaign.root_hop, (
+    pointed = read_active_pointer(stores.base_dir)
+    resolve_resume(opened, campaign, decl.rows_30)
+    assert read_active_pointer(stores.base_dir) == pointed, (
         "a resume moved the latest launch before its run held the cycle"
     )
-    return _Held(opened, held_campaign)
 
 
 def test_a_factory_default_deep_in_the_tree_refuses_as_a_plain_one_does() -> None:
@@ -3134,14 +3135,7 @@ def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
     stores = built_stores
     rows_30 = decl.rows_30
     opened, held_campaign = held
-    recut = loop_session(
-        stores,
-        opened.pipeline_schema,
-        rows_30[:-1],
-        client=opened.backend_client,
-        dataset=opened.dataset,
-        hop=held_campaign.root_hop,
-    )
+    recut = replace(opened, bank=Bank.of(rows_30[:-1]))
     # A resume over an edited bank never runs on an origin other than its rounds stand on.
     with pytest.raises(ConfigDriftError):
         resolve_resume(recut, held_campaign, rows_30[:-1])
@@ -3156,11 +3150,11 @@ def test_a_resume_never_runs_on_another_origin_than_its_rounds_stand_on(
         held_campaign.root_hop,
         opened.pipeline_read,
         experiment=None,
-        model_capabilities={"": {"m": floored}},
+        model_capabilities={**opened.pipeline_schema.model_capabilities, "": {"m": floored}},
     )
     with pytest.raises(ConfigDriftError) as refused:
         resolve_resume(recut, held_campaign, rows_30[:-1])
-    assert refused.value.details["capabilities_moved"] == ["/m"], (
+    assert "/m" in refused.value.details["capabilities_moved"], (
         "a resume past a moved capability snapshot blamed only the dataset"
     )
     with pytest.raises(ConfigDriftError):
@@ -3316,7 +3310,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
 def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _Declared) -> None:
     # An inner run reads the account's datasets and names none of its banks: the outer's mint does.
     stores = built_stores
-    opened, rows_30, solve, door, declared = decl
+    opened, rows_30, _, door, declared = decl
     mint_arms(
         [resolve_cycle_plan(opened, effective_config(declared.spec), declared.purpose, rows_30)],
         adopting=None,
@@ -3325,9 +3319,7 @@ def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _De
     assert "decl" in labelled, "a campaign's mint named no bank"
     sandboxed = sandbox_store(stores, CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"))
     inner_rows = rows_30[:-1]
-    inner = loop_session(
-        sandboxed, pipeline_schema([solve]), inner_rows, dataset=resolve_dataset(sandboxed, "decl")
-    )
+    inner, _ = _opened(sandboxed, "decl", inner_rows)
     inner_declared = declaration_of(inner, door, Optimize())
     inner_plan = resolve_cycle_plan(
         inner, effective_config(inner_declared.spec), inner_declared.purpose, inner_rows
@@ -4327,26 +4319,16 @@ def test_a_cycles_diagnostics_read_the_partition_its_run_init_drew() -> None:
     )
 
 
-def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(built_stores: Stores) -> None:
-    # Never the newer one.
-    l4_bank, drawn_bank, recut = _recut_banks(built_stores)
-    built_stores.tenant_datasets.relabel("recut", recut.dataset_hash)
-    hop = CycleHop(campaign_id="camp-recut", cycle_id="cycle_recut")
-    built_stores.campaigns.mint_cycle(hop)
-    built_stores.campaigns.append(
-        hop,
-        PartitionRecord.of(
-            partition_bank(l4_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0),
-            dataset_hash=drawn_bank.dataset_hash,
-            cell_identity={},
-            instrument_id=drawn_bank.dataset_hash,
-        ),
-    )
-    relabelled = built_stores.tenant_datasets.labelled("recut")
-    assert relabelled is not None
-    resumed = loop_session(built_stores, pipeline_schema([]), list(relabelled.samples))
-    resumed = resumed.bound(CampaignCycle(minted_campaign(hop), hop.cycle_id))
-    assert resumed.bank == drawn_bank, (
+def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(
+    built_stores: Stores, decl: _Declared, held: _Held
+) -> None:
+    # Never the newer one its dataset's label moved to since.
+    opened, campaign = held
+    recut = [*decl.rows_30[:-1], decl.rows_30[-1].model_copy(update={"query": "x"})]
+    _account_dataset(built_stores, "decl", recut)
+    reopened, _ = _opened(built_stores, "decl")
+    assert reopened.bank != opened.bank, "vacuous — the label never moved"
+    assert reopened.bound(campaign.root_cycle).bank == opened.bank, (
         "a resume after a re-cut switched its cycle onto the new bank"
     )
 
