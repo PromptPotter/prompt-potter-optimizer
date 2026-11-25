@@ -4357,7 +4357,7 @@
                 "type": "null"
               }
             ],
-            "description": "`theta_caveat` over every cell this line read. Non-null, no two of its levels difference, whatever `stamp` says; another line on the stamp keeps its own."
+            "description": "`theta_caveat` over every cell this line read. One that withholds, no two of its levels difference, whatever `stamp` says; another line on the stamp keeps its own."
           },
           "levels": {
             "additionalProperties": {

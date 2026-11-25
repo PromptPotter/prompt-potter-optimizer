@@ -122,6 +122,8 @@ from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
 )
 from promptpotter.application.maintenance.landing import complete_registries
+from promptpotter.application.mask.backprop import ForkDecline, select_branch_round
+from promptpotter.application.mask.record import SpineCycle
 from promptpotter.application.optimizer_manifest import bench_choice, select_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers.capo.members import CapoInit, CapoObjective
@@ -369,6 +371,7 @@ from promptpotter.domain.records.run_records import (
     ForkSpec,
     ForkTrigger,
     LLMCallRecord,
+    RebaseRequest,
     RoundEnteredRecord,
     RoundWarningRecord,
     Running,
@@ -4618,7 +4621,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         refork = _rebase_request(
             forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer
         )
-        assert refork is not None and refork.fork_from_round == 2, (
+        assert isinstance(refork, RebaseRequest) and refork.fork_from_round == 2, (
             "a fork standing on a round-1 arm cuts at round 2"
         )
         hangs_from = refork.hangs_from
@@ -4636,11 +4639,37 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         stood_on_pick = _rebase_request(
             forking, "l2_context", standing(reason="r", stand_on="C1.1"), offer
         )
-        assert stood_on_pick is not None and stood_on_pick.hangs_from is None, (
+        assert isinstance(stood_on_pick, RebaseRequest) and stood_on_pick.hangs_from is None, (
             "a fork on the round's own pick restated an election it already holds"
         )
         with pytest.raises(ValidationError):
             standing.model_validate({"reason": "r", "stand_on": "C9.9"})
+
+
+def test_a_fork_no_spine_node_may_take_is_declined_with_its_reason() -> None:
+    # A fresh store's line whose levels are all withheld: the proposal used to vanish unsaid.
+    def spine(theta: float | None) -> list[SpineCycle]:
+        return [
+            SpineCycle(
+                cycle_id="c",
+                parent_cycle_id=None,
+                cut_round=None,
+                theta_by_round={0: None, 1: theta, 2: None},
+                pick_by_round={1: "C0", 2: "p2"},
+            )
+        ]
+
+    def branch(theta: float | None, *, at: int = 2, changing: bool = False) -> int | ForkDecline:
+        return select_branch_round(
+            spine(theta), cycle_id="c", current_round=at, origin_id="C0", changing=changing
+        )
+
+    assert (branch(None), branch(0.4), branch(0.4, changing=True), branch(0.4, at=3)) == (
+        ForkDecline.NO_THETA,
+        ForkDecline.NOTHING_NEW,
+        1,
+        ForkDecline.NO_PICK,
+    ), "a fork the spine cannot take was declined without the reason its record names"
 
 
 # Each restate banks the fires before it, and the resume seats what they banked.

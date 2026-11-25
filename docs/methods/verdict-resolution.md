@@ -131,8 +131,12 @@ carry a pinned arm. In severity order:
   the ruler's composition, so an unchanged prompt walks up the scale round on round. Silent too.
   **Read the LIFT, never the level, never a level across rounds** — the pin cancels within a round.
 - **Unmeasured difficulty** (`unmeasured_delta`). A cell the judging scale does not carry; θ leaves
-  it out, and two arms can skip different cells, so it does not cancel inside a lift. A later round
-  reads it once this round's rows fold in.
+  it out. **A footnote, never a withholding** (`ThetaCaveat.withholds`, the one fact every reader
+  asks): on one warm `ruler.id` a Rasch θ is item-free, so two levels read on different cells the
+  scale carries still difference, and a skipped cell costs precision (θ's SE, `cells`), not the
+  scale. Adaptive rows (`informative`) read different cells by design, and the parent line's last
+  rows have no other answerer, so a withholding here would leave the default's own series unread.
+  Every surface still shows it; a later round reads the cell once this round's rows fold in.
 - **A ruler HOLE is never graded.** δ=0 is a position, not neutral: against a centre near +2.1 it
   scores an unmeasured cell as easiest and pulls θ down ~2 logits, so θ reads only cells the ruler
   carries.

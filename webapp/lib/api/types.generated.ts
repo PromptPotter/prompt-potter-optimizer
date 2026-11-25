@@ -1926,12 +1926,13 @@ export interface LiftPrior {
   mu0_se: number;
 }
 
-/** A round's level as its series read it, under the one caveat that withholds it. */
+/** A round's level as its series read it, under the one caveat that qualifies it. */
 export interface SeriesReading {
   /** The round's level: the individual it ended on, read on the series' one scale */
   reading: AbilityReading;
-  /** The level's own caveat, else its series'. Null, and it differences any other
-   * level of the series that is null too. */
+  /** The level's own caveat, else its series'. One that withholds
+   * (`ThetaCaveat.withholds`) keeps the level from differencing; a footnote
+   * does not. */
   caveat: 'prior_dominated' | 'cold_ruler' | 'flat_ruler' | 'collapsed_band' | 'prior_pinned' | 'unmeasured_delta' | null;
 }
 
@@ -2939,8 +2940,8 @@ export interface DeterminismClamp {
 }
 
 /** The column a pick's election is quoted on: θ where it was won on θ, unless θ
- * is unread or carries a caveat — there θ is not ability, and the election
- * reads on fitness. */
+ * is unread or withheld (`ThetaCaveat.withholds`): there θ is not ability,
+ * and the election reads on fitness. */
 export interface ElectionColumn {
   /** What the electing round's selector ranked on. */
   elects_on: 'fitness' | 'composite' | 'ability';
@@ -5767,7 +5768,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "e0e743053480ea2d";
+export const SERVED_CONTRACT = "f0c6d8ee41a0ce02";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

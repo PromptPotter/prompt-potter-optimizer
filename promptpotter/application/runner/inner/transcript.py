@@ -10,7 +10,7 @@ from promptpotter.domain.optimizer_state import CritiqueReadout
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.records.run_records import RoundStatement
 from promptpotter.domain.round_audit import RoundAudit
-from promptpotter.domain.ruler import LevelSeries
+from promptpotter.domain.ruler import LevelSeries, withheld
 from promptpotter.infrastructure.projections.audit_trail import round_audits
 from promptpotter.infrastructure.store.stores import Stores, inner_sandbox_store
 
@@ -41,12 +41,13 @@ def _level(series: LevelSeries, rnd: int) -> str:
     read = series.reading(rnd)
     if read is None:
         return "θ: no scored cell"
-    if read.caveat is not None:
+    if withheld(read.caveat):
         return f"θ withheld: {series_reason_head(read.caveat)}"
     origin = series.level(0)
     lift = None if origin is None else read.reading.lift_over(origin)
     over = "" if lift is None else f", {lift.point} over the origin"
-    return f"θ {read.reading.theta:+.2f}{over}"
+    note = "" if read.caveat is None else f" ({series_reason_head(read.caveat)})"
+    return f"θ {read.reading.theta:+.2f}{over}{note}"
 
 
 def _steer(critique: CritiqueReadout | None) -> list[str]:

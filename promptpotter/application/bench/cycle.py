@@ -32,7 +32,7 @@ from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.run_records import ResumeCheckpointRecord, RoundProposedRecord
 from promptpotter.domain.results import Election, InRunCells, RoundOutcome, RoundResult
-from promptpotter.domain.ruler import RulerStamp
+from promptpotter.domain.ruler import RulerStamp, withheld
 from promptpotter.domain.run_standing import RunStanding, declared_selection, measured_arm
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
@@ -273,7 +273,7 @@ class Cycle:
         memo = (self.difficulty.stamp, individual_id)
         if memo not in self._pool_theta:
             read = None if held is None else self.difficulty.judging.frontier(held[1])
-            self._pool_theta[memo] = None if read is None or read.caveat else read.theta
+            self._pool_theta[memo] = None if read is None or withheld(read.caveat) else read.theta
         return self._pool_theta[memo]
 
     def seat_origin(self, origin: ReadArm, optimizer_state: OptimizerState | None) -> None:

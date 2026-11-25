@@ -32,7 +32,7 @@
 
 ## The layer-control channel — `fork_proposal` + `terminate_proposal`
 
-**Each sits behind its capability bit; terminate outranks fork.** A blank terminate reason is ignored; an honored one stops the cycle `optimizer_abort`. `fork_proposal` names no round (UCB picks the node, `mask/backprop.py::select_branch_round`), but behind `reelect_capability` it may name `stand_on`, an arm label from the ELECTIONS table. A layer never moves its own spend ceiling.
+**Each sits behind its capability bit; terminate outranks fork.** A blank terminate reason is ignored; an honored one stops the cycle `optimizer_abort`. `fork_proposal` names no round (UCB picks the node, `mask/backprop.py::select_branch_round`), but behind `reelect_capability` it may name `stand_on`, an arm label from the ELECTIONS table. A proposal no node takes is declined on the layer's step record, its `mask/backprop.py::ForkDecline` worded, never dropped. A layer never moves its own spend ceiling.
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 

@@ -12,7 +12,7 @@ from promptpotter.domain.l4.inner_facts import InnerCellFacts, InnerRunAddress, 
 from promptpotter.domain.paired_reading import READING_STATE_INFO
 from promptpotter.domain.phases import StopOutcome, StopReason, stop_reason_outcome
 from promptpotter.domain.results import RoundOutcome
-from promptpotter.domain.ruler import AbilityReading, ThetaCaveat
+from promptpotter.domain.ruler import AbilityReading, ThetaCaveat, withheld
 from promptpotter.domain.scoring import GradedCell, PipelineData
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.errors import CellUnscoreableError
@@ -142,13 +142,13 @@ def series_reason(result: CycleResult) -> ThetaCaveat | SeriesGap | None:
     series = result.level_series
     if series is None:
         return SeriesGap.NEVER_STARTED
-    if series.caveat is not None:
+    if withheld(series.caveat):
         return series.caveat
     if unread_rounds(result):
         return SeriesGap.UNREAD_ROUND
     for rnd in series.rounds:
         read = series.reading(rnd)
-        if read is not None and read.caveat is not None:
+        if read is not None and withheld(read.caveat):
             return read.caveat
     if len(series.rounds) < 2:
         return SeriesGap.NO_L1_ROUND

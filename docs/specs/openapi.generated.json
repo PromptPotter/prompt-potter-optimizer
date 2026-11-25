@@ -6805,7 +6805,7 @@
       },
       "ElectionColumn": {
         "additionalProperties": false,
-        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\ncarries a caveat — there θ is not ability, and the election reads on fitness.",
+        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\nwithheld (`ThetaCaveat.withholds`): there θ is not ability, and the election reads on fitness.",
         "properties": {
           "ability": {
             "anyOf": [
@@ -16108,7 +16108,7 @@
       },
       "SeriesReading": {
         "additionalProperties": false,
-        "description": "A round's level as its series read it, under the one caveat that withholds it.",
+        "description": "A round's level as its series read it, under the one caveat that qualifies it.",
         "properties": {
           "caveat": {
             "anyOf": [
@@ -16119,7 +16119,7 @@
                 "type": "null"
               }
             ],
-            "description": "The level's own caveat, else its series'. Null, and it differences any other level of the series that is null too."
+            "description": "The level's own caveat, else its series'. One that withholds (`ThetaCaveat.withholds`) keeps the level from differencing; a footnote does not."
           },
           "reading": {
             "$ref": "#/components/schemas/AbilityReading",
