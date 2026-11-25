@@ -194,12 +194,15 @@ def _models_to_rates(models: Mapping[str, RateBody]) -> RateTable:
 def load_rates() -> RateTable:
     """Kept by where it reads and what the files hold: a rates file any process rewrites re-prices
     every reader's next send. The shipped floor refuses, the bug it is, and the fetch lies OVER
-    it: a row upstream never listed keeps the price the bundle gave it."""
+    it: a row upstream never listed keeps the price the bundle gave it. A home listing nothing
+    prices off the floor's one table, so a process opening many homes holds that table once."""
+    home = cache_path()
+    listed = derived(("rates", home), sig=file_sig(home), compute=lambda: _cached().models)
     return derived(
-        ("rates", BUNDLED_PATH, cache_path()),
-        sig=(file_sig(BUNDLED_PATH), file_sig(cache_path())),
+        ("rates", BUNDLED_PATH, home if listed else None),
+        sig=(file_sig(BUNDLED_PATH), file_sig(home) if listed else None),
         compute=lambda: _models_to_rates(
-            RatesFile.model_validate_json(BUNDLED_PATH.read_bytes()).models | _cached().models
+            RatesFile.model_validate_json(BUNDLED_PATH.read_bytes()).models | listed
         ),
     )
 
