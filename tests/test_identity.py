@@ -30,6 +30,7 @@ from unittest.mock import Mock
 
 import openpyxl
 import pytest
+import yaml
 from factories import (
     BENCH_TARGET,
     LAUNCHED_DATASET,
@@ -46,7 +47,6 @@ from factories import (
     launched_bank,
     ledger_records,
     measurement,
-    minted_campaign,
     pipeline_schema,
     prompted,
     round_result,
@@ -55,11 +55,12 @@ from factories import (
     set_cycle,
     sheet,
     spend_book,
-    stored_campaign,
     workspace,
 )
+from offline_run import DATASET
 from offline_world import LLM_ONLY_NODE, Router
 from pydantic import BaseModel, Field, ValidationError
+from world import Shared, World, shared_run
 
 from promptpotter.application import pipeline_resolve
 from promptpotter.application.bench import llm_call as call_mod
@@ -70,7 +71,10 @@ from promptpotter.application.bench.children import (
 )
 from promptpotter.application.bench.cycle import RoundContext
 from promptpotter.application.bench.node_context import Calls, Children, NodeContext
-from promptpotter.application.bench.resume_and_fork.fork_siblings import declare_steered_values
+from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    cut_operator_fork,
+    declare_steered_values,
+)
 from promptpotter.application.bench.task_context import (
     CheckinOutput,
     OriginFinding,
@@ -137,6 +141,8 @@ from promptpotter.application.jobs.mint import (
     ConfigDriftError,
     CyclePlan,
     arm_plans,
+    fresh_campaign_id,
+    mint,
     mint_arms,
     mint_framed_cycle,
     resolve_cycle_plan,
@@ -196,6 +202,7 @@ from promptpotter.application.pipeline_resolve import (
     laid_config,
     laid_session,
     permitted_narrowing,
+    recorded_read,
     resolve_pipeline_at,
     resolved_output_schemas,
 )
@@ -267,6 +274,7 @@ from promptpotter.domain.checkin_draft import DatasetBasis, DraftFile, UploadBas
 from promptpotter.domain.command_kinds import (
     ArmRequest,
     Door,
+    ForkCyclePayload,
     ForkStart,
     HeadToHeadRequest,
     PauseCyclePayload,
@@ -305,7 +313,6 @@ from promptpotter.domain.pipeline_schema import (
     ANSWER_AS_JSON,
     ANSWER_AS_TEXT,
     SCHEMA_TOGGLE_PARAM,
-    KnobLayer,
     ManifestNodeOverlay,
     ModelCapability,
     NodeConfigParam,
@@ -331,11 +338,9 @@ from promptpotter.domain.records.run_records import (
     ArmActRecord,
     BackendRevision,
     ConfigOverrides,
-    CycleMintedRecord,
     CycleStart,
     Hold,
     Lapse,
-    PipelineRead,
     RoundWarningRecord,
     RunPhaseRecord,
     ScoringLockedRecord,
@@ -381,7 +386,12 @@ from promptpotter.infrastructure.store.dataset_access import (
     with_node_templates,
 )
 from promptpotter.infrastructure.store.draft_store import DRAFT_FILE
-from promptpotter.infrastructure.store.io import rmtree_robust, write_json, write_yaml
+from promptpotter.infrastructure.store.io import (
+    rewrite_lines,
+    rmtree_robust,
+    write_json,
+    write_yaml,
+)
 from promptpotter.infrastructure.store.layout import (
     CampaignLayout,
     CycleLayout,
@@ -1269,13 +1279,17 @@ def tiered(tmp_path: Path) -> Stores:
         research_datasets_root=research_root,
     )
     # An account's own written before the install shipped its name: a survivor, read as its own.
-    write_yaml(tiered.tenant_datasets.dataset_dir("carded") / DEFINITION_FILE, _TERMNORM)
-    for campaign_id, name in (("camp-twice", "carded"), ("camp-beside", "miscarded")):
-        hop = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{name}0000")
-        stored_campaign(
-            tiered, minted_campaign(hop, dataset_name=name, root_content_hash=f"origin-{name}")
-        )
-        tiered.campaigns.mint_cycle(hop)
+    write_yaml(tiered.tenant_datasets.dataset_dir("carded") / DEFINITION_FILE, _DECL)
+    # A campaign on a name two tiers hold, and one whose install card an upgrade tore after its mint.
+    torn = install_root / "miscarded" / DEFINITION_FILE
+    card = torn.read_text(encoding="utf-8")
+    write_yaml(torn, _DECL)
+    for name in ("carded", "miscarded"):
+        # Each on rows of its own, so each roots its own origin.
+        tiered.tenant_datasets.put_bank(bank := Bank.of(samples(4, name)))
+        tiered.tenant_datasets.relabel(name, bank.dataset_hash)
+        _minted(tiered, name)
+    torn.write_text(card, encoding="utf-8")
     return tiered
 
 
@@ -1311,12 +1325,16 @@ def test_a_names_second_holder_blocks_no_campaign_or_origin(tiered: Stores) -> N
     ], "the origins survey dropped an origin whose name another tier also holds"
 
 
-def test_a_root_holding_no_resolved_run_serves_its_own_refusal() -> None:
-    # Never one sentence for every refusal, so the reader learns which record to repair.
-    unresolved = build_stores(default_identity(), projects_root=default_projects_root())
-    refused_root = CycleHop(campaign_id="camp-bare", cycle_id="cycle_bare00000000")
-    unresolved.campaigns.create_campaign(minted_campaign(refused_root, dataset_name="carded"))
-    unresolved.campaigns.mint_cycle(refused_root)
+def test_a_root_holding_no_resolved_run_serves_its_own_refusal(built_stores: Stores) -> None:
+    # Never one sentence for every refusal, so the reader learns which record to repair: a root
+    # whose ledger lost the resolved run its mint appended.
+    unresolved = built_stores
+    _account_dataset(unresolved, "carded", samples(4, "TRUE"))
+    root = _minted(unresolved, "carded").hop
+    rewrite_lines(
+        unresolved.campaigns.layout(root).ledger,
+        lambda lines: ([ln for ln in lines if '"resolved_run"' not in ln], None),
+    )
     for depth in (0, 1):
         [entry] = list_hierarchy(
             unresolved,
@@ -1327,9 +1345,8 @@ def test_a_root_holding_no_resolved_run_serves_its_own_refusal() -> None:
             attached_only=False,
             depth=depth,
         ).entries
-        [caveat] = [line for line in entry.lines if line.key == "unresolved"]
-        assert "holds no resolved run" in caveat.label, (
-            f"depth {depth}: a root's refusal was served as {caveat.label!r}, not its own reason"
+        assert [line.key for line in entry.lines].count("unresolved") == 1, (
+            f"depth {depth}: a root that lost its resolved run served no refusal of its own"
         )
 
 
@@ -1463,7 +1480,8 @@ def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
 ) -> None:
     # By its path, through the door that serves it: its code and its status.
     install_root = tmp_path / "install"
-    beside = CycleHop(campaign_id="camp-beside", cycle_id="cycle_miscarded0000")
+    (campaign,) = tiered.campaigns.list_campaigns("miscarded")
+    beside, beside_id = campaign.root_hop, campaign.campaign_id
     held_bank = Bank.of([Sample(id=0, query="q", ground_truth="g")])
     tiered.tenant_datasets.put_bank(held_bank)
     write_yaml(install_root / "badconfig" / DEFINITION_FILE, _TERMNORM)
@@ -1473,13 +1491,13 @@ def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
     draft_file.parent.mkdir(parents=True)
     store = ("file_unreadable", 409)
     stored_config = ("stored_config_invalid", 500)
-    manifest_file = CampaignLayout(tiered.campaigns.campaign_root_dir("camp-beside")).manifest
+    manifest_file = CampaignLayout(tiered.campaigns.campaign_root_dir(beside_id)).manifest
     manifest = json.loads(manifest_file.read_bytes())
     manifest["declaration"]["spec"]["loop"]["no_such_knob"] = 1
     checkin_file = paths.user_data_root() / "checkin" / "pipeline.yaml"
 
     def beside_config() -> CycleConfig:
-        campaign = tiered.campaigns.load_campaign("camp-beside")
+        campaign = tiered.campaigns.load_campaign(beside_id)
         assert campaign is not None
         return declared_config(tiered, campaign)
 
@@ -1498,9 +1516,9 @@ def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
             ("bank_unreadable", 409),
         ),
         (
-            CampaignLayout(tiered.campaigns.campaign_root_dir("camp-beside")).manifest,
+            CampaignLayout(tiered.campaigns.campaign_root_dir(beside_id)).manifest,
             b"{not a manifest",
-            lambda: tiered.campaigns.load_campaign("camp-beside"),
+            lambda: tiered.campaigns.load_campaign(beside_id),
             ("manifest_unreadable", 409),
         ),
         (
@@ -2266,54 +2284,53 @@ def test_a_row_reads_as_the_search_space_its_ticks_and_padlock_drew() -> None:
 def test_a_campaign_runs_the_config_it_froze_whatever_its_dataset_file_says_later(
     built_stores: Stores,
 ) -> None:
-    # Each step appends to the ledger the next step's cycle_config reads.
     stores = built_stores
-    dials = {"per_sample": "exact", "dials": "cost: 0.1"}
-    write_yaml(
-        stores.tenant_datasets.dataset_dir("fz") / DEFINITION_FILE,
-        {
-            "campaign": _connector_config(
-                optimization={"optimizer": "capo", "budget": {"rounds": 3}}
-            ).model_dump(mode="json")
-        },
-    )
-    campaign = minted_campaign(
-        CycleHop(campaign_id="fz__000001", cycle_id="cycle_root"),
-        config=_connector_config(
-            optimization={"budget": {"rounds": 12}},
-            optimizer_narrowing={"a": {"param_keys": ["temperature"]}, "b": {"param_keys": ["k"]}},
-            scoring=dials,
-        ),
-        dataset_name="fz",
-    )
-    stores.campaigns.create_campaign(campaign)
-    stores.campaigns.mint_cycle(campaign.root_hop)
-    ran = cycle_config(stores, campaign.root_cycle).config
+    definition = stores.tenant_datasets.dataset_dir("fz") / DEFINITION_FILE
+    _account_dataset(stores, "fz", samples(4, "TRUE"))
+    write_yaml(definition, {**_DECL, "campaign": {"optimization": {"budget": {"rounds": 12}}}})
+    at = _minted(stores, "fz").at
+    later = _connector_config(optimization={"optimizer": "capo", "budget": {"rounds": 3}})
+    write_yaml(definition, {**_DECL, "campaign": later.model_dump(mode="json")})
+    ran = cycle_config(stores, at).config
     assert (ran.optimization.optimizer, ran.optimization.budget.rounds) == ("potter", 12), (
         "a campaign ran its dataset file's later config instead of the one it froze"
     )
-    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(campaign.root_hop)))
-    ledger.append(ScoringLockedRecord(declared={"dials": "other"}, locked={"per_cell": "0"}))
-    assert cycle_config(stores, campaign.root_cycle).config.scoring == dials, (
-        "a lock declared off other dials governed this campaign"
+
+
+def test_a_cycle_runs_its_origins_locked_criterion_and_each_start_over_its_parents() -> None:
+    # Spans lay root first: a lock declared off other dials governs nothing; a start overrides
+    # only what it names.
+    dials = {"per_sample": "exact", "dials": "cost: 0.1"}
+    declared = _connector_config(
+        optimizer_narrowing={"a": {"param_keys": ["temperature"]}, "b": {"param_keys": ["k"]}},
+        scoring=dials,
     )
     locked = {"per_sample": "exact", "per_cell": "correct - 0.1 * cost"}
-    ledger.append(ScoringLockedRecord(declared=dials, locked=locked))
-    for read in (declared_config(stores, campaign), cycle_config(stores, campaign.root_cycle)):
-        assert read.config.scoring == locked, (
-            "the criterion its origin locked rides the root's ledger, and every cycle runs under it"
-        )
+    other = ScoringLockedRecord(declared={"dials": "other"}, locked={"per_cell": "0"})
     start = CycleStart(
         optimizer_narrowing={"a": NodeSearchNarrowing(param_keys=[])},
         config_overrides=ConfigOverrides(budget=Budget(rounds=4)),
     )
-    seeded = campaign.root_hop.model_copy(update={"cycle_id": "cycle_seeded"})
-    stores.campaigns.mint_cycle(seeded, CycleMintedRecord(start=start))
-    forked = cycle_config(stores, CampaignCycle(campaign, seeded.cycle_id)).config
-    assert forked.optimization.budget.rounds == 4, "a start's override did not reach its cycle"
-    assert [forked.optimizer_narrowing[n].param_keys for n in "ab"] == [[], ["k"]], (
-        "a start's narrowing replaced the nodes it did not name"
-    )
+    for spans, scoring, rounds, keys in (
+        ([LaidSpan(start=None, scoring_lock=other)], dials, None, [["temperature"], ["k"]]),
+        (
+            [
+                LaidSpan(
+                    start=None, scoring_lock=ScoringLockedRecord(declared=dials, locked=locked)
+                ),
+                LaidSpan(start=start, scoring_lock=None),
+            ],
+            locked,
+            4,
+            [[], ["k"]],
+        ),
+    ):
+        laid = CycleConfig.laid(declared, spans).config
+        assert laid.scoring == scoring, "a lock off other dials governed, or the origin's did not"
+        assert rounds in (None, laid.optimization.budget.rounds), "a start's override was dropped"
+        assert [laid.optimizer_narrowing[n].param_keys for n in "ab"] == keys, (
+            "a start's narrowing replaced the nodes it did not name"
+        )
 
 
 def test_a_steer_lays_over_the_campaigns_narrowing_by_part() -> None:
@@ -2362,140 +2379,112 @@ def test_a_steer_lays_over_the_campaigns_narrowing_by_part() -> None:
     ), "an onward seed reopened its parent's closed axis or released a field its line held"
 
 
-def _declaring(rungs: list[str]) -> dict[str, Any]:
-    node = {
-        "type": "llm",
-        "config": {"model": "m", "reasoning_effort": "low", "temperature": 0.0},
-        "optimizer": {
-            "param_keys": ["reasoning_effort", "temperature"],
-            "param_allowed_values": {"reasoning_effort": rungs, "model": ["m", "n"]},
-        },
-    }
-    return {"nodes": {"a": node}, "pipelines": {"default": ["a"]}}
+_SERVED = LLM_ONLY_NODE["optimizer"]["param_allowed_values"]
+_MODELS = ["openai/gpt-oss-20b:nitro", "openai/gpt-oss-20b"]
 
 
-def _fk_dataset(stores: Stores) -> None:
-    write_yaml(
-        stores.tenant_datasets.dataset_dir("fk") / DEFINITION_FILE,
-        {"pipeline": {"connector": "termnorm"}},
-    )
+class _Steered(NamedTuple):
+    stores: Stores
+    root: CampaignCycle
+    fork: CampaignCycle
+
+
+@pytest.fixture(scope="module")
+def steered_line(tmp_path_factory: pytest.TempPathFactory) -> Shared:
+    # A root and its fork, each on the menu the backend served it: the fork's carries one rung more.
+    # Run once for the module (~3.4 s, the suite's first opening included), ~20 ms a fact.
+    async def act(world: World) -> tuple[CampaignCycle, CampaignCycle]:
+        with pytest.MonkeyPatch.context() as served:
+            served.setitem(_SERVED, "model", _MODELS)
+            root = await world.campaign()
+            served.setitem(_SERVED, "reasoning_effort", [*_SERVED["reasoning_effort"], "xhigh"])
+            fork = await world.fork(root.hop, 0)
+        return root.session.at, fork.session.at
+
+    return shared_run(tmp_path_factory, act)
 
 
 @pytest.fixture
-def steered(built_stores: Stores) -> Campaign:
-    # A root and its fork, each on its own recorded menu: the fork's carries one rung more.
-    stores = built_stores
-    _fk_dataset(stores)
-    steered = minted_campaign(
-        CycleHop(campaign_id="fk__000001", cycle_id="cycle_root"),
-        config=_connector_config(),
-        dataset_name="fk",
-    )
-    stores.campaigns.create_campaign(steered)
-    fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
-    for hop, rungs in ((steered.root_hop, ["low", "high"]), (fork, ["low", "high", "xhigh"])):
-        stores.campaigns.mint_cycle(hop)
-        stores.campaigns.write_resolved_run(
-            hop,
-            PipelineRead(declaration=_declaring(rungs), dataset_overlay={}),
-            experiment=None,
-            model_capabilities={},
-        )
-    return steered
+def steered(world: World, steered_line: Shared) -> _Steered:
+    return _Steered(world.adopt(steered_line).stores, *steered_line.made)
 
 
-def test_a_fork_closes_the_axis_its_operator_closed_on_its_own_menu(
-    built_stores: Stores, steered: Campaign
-) -> None:
+def _narrowed(rungs: list[str]) -> dict[str, list[dict[str, Any]]]:
+    closed = [{"key": k, "open": False, "allowed": []} for k in ("temperature", "max_tokens")]
+    return {"llm_only": [{"key": "reasoning_effort", "open": True, "allowed": rungs}, *closed]}
+
+
+def test_a_fork_closes_the_axis_its_operator_closed_on_its_own_menu(steered: _Steered) -> None:
     # Ticks equal to the ROOT's whole menu still close the rung only the fork's menu carries.
-    stores = built_stores
-    fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
+    rungs = _SERVED["reasoning_effort"]
     fork_start = parse_cycle_start(
-        ForkStart.model_validate({"node_narrowing": {"a": _ROWS}}),
-        stores,
-        CampaignCycle(steered, fork.cycle_id),
+        ForkStart.model_validate({"node_narrowing": _narrowed(rungs)}), steered.stores, steered.fork
     )
     assert fork_start.optimizer_narrowing == {
-        "a": NodeSearchNarrowing(
-            param_keys=["reasoning_effort"],
-            param_allowed_values={"reasoning_effort": ["low", "high"]},
+        "llm_only": NodeSearchNarrowing(
+            param_keys=["reasoning_effort"], param_allowed_values={"reasoning_effort": rungs}
         )
     }, "the fork left open a rung its operator closed"
 
 
-def test_a_seed_never_steers_outside_its_own_menu_or_off_its_keys_type(
-    built_stores: Stores, steered: Campaign
-) -> None:
-    stores = built_stores
-    fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
-    with pytest.raises(PayloadInvalidError):
-        parse_cycle_start(
-            ForkStart.model_validate(
-                {
-                    "node_narrowing": {"a": _ROWS},
-                    "pipeline_overlay": {"a": {"reasoning_effort": "xhigh"}},
-                }
-            ),
-            stores,
-            CampaignCycle(steered, fork.cycle_id),
-        )
+def test_a_seed_never_steers_outside_its_own_menu_or_off_its_keys_type(steered: _Steered) -> None:
     # A steer off its engine key's type is refused typed at the door, never minted.
-    with pytest.raises(PayloadInvalidError):
-        parse_cycle_start(
-            ForkStart.model_validate({"pipeline_overlay": {"a": {"temperature": '"warm"'}}}),
-            stores,
-            CampaignCycle(steered, fork.cycle_id),
-        )
+    for asked in (
+        {
+            "node_narrowing": _narrowed(_SERVED["reasoning_effort"]),
+            "pipeline_overlay": {"llm_only": {"reasoning_effort": "xhigh"}},
+        },
+        {"pipeline_overlay": {"llm_only": {"temperature": '"warm"'}}},
+    ):
+        with pytest.raises(PayloadInvalidError):
+            parse_cycle_start(ForkStart.model_validate(asked), steered.stores, steered.fork)
 
 
-def test_a_node_permits_what_its_recorded_schema_serves_under_the_line(
-    built_stores: Stores, steered: Campaign
-) -> None:
-    # So the dataset's optimizer block sanctions a model the campaign's own (empty) layer never names.
-    stores = built_stores
-    fork = CycleHop(campaign_id=steered.campaign_id, cycle_id="cycle_fork")
-    assert fork_preview(stores, steered.campaign_id, {"a": {"model": "n"}}) == ForkPreviewResponse(
-        steer="clean", permitted={"a": ["m", "n"]}
-    ), "a steer inside the dataset's model list was graded the babysit act"
-    assert fork_preview(stores, steered.campaign_id, {"a": {"model": "z"}}).steer != "clean", (
+def test_a_node_permits_what_its_recorded_schema_serves_under_the_line(steered: _Steered) -> None:
+    # So the backend's menu sanctions a model the campaign's own (empty) layer never names.
+    stores, campaign_id = steered.stores, steered.root.campaign.campaign_id
+    plain = {"llm_only": {"model": _MODELS[1]}}
+    assert fork_preview(stores, campaign_id, plain) == ForkPreviewResponse(
+        steer="clean", permitted={"llm_only": _MODELS}
+    ), "a steer inside the served model list was graded the babysit act"
+    assert fork_preview(stores, campaign_id, {"llm_only": {"model": "z"}}).steer != "clean", (
         "a model no layer permits forked clean"
     )
-    at_fork = permitted_narrowing(stores, CampaignCycle(steered, fork.cycle_id))[
-        "a"
-    ].param_allowed_values
+    at_fork = permitted_narrowing(stores, steered.fork)["llm_only"].param_allowed_values
     assert (at_fork["reasoning_effort"], at_fork["model"]) == (
-        ["low", "high", "xhigh"],
-        ["m", "n"],
+        [*_SERVED["reasoning_effort"], "xhigh"],
+        _MODELS,
     ), "a fork's steer was checked against its root's menu, not its own"
 
 
 def test_a_served_row_says_whether_its_reader_may_steer_it_past_permitted(
-    built_stores: Stores, steered: Campaign
+    steered: _Steered,
 ) -> None:
-    # An account without `campaign.babysit` is held there on the model, an axis stays free, and an
-    # account that may babysit is held nowhere.
-    stores = built_stores
+    # An account without `campaign.babysit` is held there on the route (model, provider), an axis
+    # stays free, and an account that may babysit is held nowhere.
+    stores = steered.stores
     unbabysat = replace(
         stores,
         identity=replace(
             stores.identity, capabilities=stores.identity.capabilities - {CAMPAIGN_BABYSIT_CAP}
         ),
     )
-    for reader, held_keys in ((unbabysat, {"model"}), (stores, set())):
-        served_rows = resolve_pipeline_at(reader, steered.campaign_id, "").node_config_schema
-        row_at = {row.key: row for row in served_rows["a"]}
+    for reader, held_keys in ((unbabysat, {"model", "provider"}), (stores, set())):
+        served_rows = resolve_pipeline_at(
+            reader, steered.root.campaign.campaign_id, ""
+        ).node_config_schema
+        row_at = {row.key: row for row in served_rows["llm_only"]}
         assert {k for k, row in row_at.items() if row.pickable != "any"} == held_keys, (
             "a served row let its reader steer past what babysit binds, or held one it does not"
         )
-        assert row_at["model"].permitted == ["m", "n"] and row_at["temperature"].pickable == "any"
+        assert row_at["model"].permitted == _MODELS and row_at["temperature"].pickable == "any"
 
 
 def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
-    built_stores: Stores,
+    steered: _Steered,
 ) -> None:
-    # Never the tier the account is on now; an edit restating the dataset's value is the edit's.
-    stores = built_stores
-    _fk_dataset(stores)
+    # Never the layer today's definition would lay; an edit restating the dataset's value is the edit's.
+    stores = steered.stores
     restated = {"optimization": {"nodes": {"l1_generate": {"config": {"n_variants": 3}}}}}
     on_dataset = defaulted_config(restated).model_dump(mode="json")
     laid = laid_config(
@@ -2504,47 +2493,25 @@ def test_an_optimizer_knob_names_the_layer_its_mint_recorded_behind_it(
     assert laid.knob_layers["l1_generate"]["n_variants"] == "campaign", (
         "an edit restating the dataset's value read as the dataset's"
     )
-    knob_config = defaulted_config(
-        {
-            "optimization": {
-                "degradation_threshold": 0.05,
-                "nodes": {
-                    "l1_generate": {"config": {"n_variants": 3, "k_max": 4, "pool_window": 6}}
-                },
-            }
-        }
-    )
-    layered = minted_campaign(
-        CycleHop(campaign_id="fk__000002", cycle_id="cycle_root"),
-        config=knob_config,
-        dataset_name="fk",
-    )
-    stores.campaigns.create_campaign(layered)
-    stores.campaigns.mint_cycle(layered.root_hop)
-    recorded: dict[str, dict[str, KnobLayer]] = {
-        "l1_generate": {"n_variants": "dataset", "k_max": "free_tier", "pool_window": "campaign"}
-    }
-    stores.campaigns.write_resolved_run(
-        layered.root_hop,
-        PipelineRead(
-            declaration=_declaring(["low"]),
-            dataset_overlay={},
-            knob_layers=recorded,
-        ),
-        experiment=None,
-        model_capabilities={},
-    )
+    # An install upgrade lays the knob at the dataset after the mint recorded it the campaign's.
+    family = stores.install_datasets_root / DATASET.split("/")[0] / "family.yaml"
+    upgraded = yaml.safe_load(family.read_text(encoding="utf-8"))
+    nodes = upgraded.setdefault("campaign", {}).setdefault("optimization", {})
+    nodes.setdefault("nodes", {})["l1_generate"] = {"config": {"n_variants": 5}}
+    write_yaml(family, upgraded)
+    root = steered.root
+    recorded = recorded_read(stores, root.hop).knob_layers["l1_generate"]
     sources = {
         knob.path.rsplit(".", 1)[-1]: knob.source
-        for group in campaign_config_map(stores, layered.campaign_id).groups
+        for group in campaign_config_map(stores, root.campaign.campaign_id).groups
         for knob in group.knobs
         if ".l1_generate." in knob.path
     }
-    assert {k: sources[k] for k in ("n_variants", "k_max", "pool_window")} == {
-        "n_variants": "dataset",
-        "k_max": "free_tier",
-        "pool_window": "campaign",
-    }, "a knob named another layer than its mint recorded behind it"
+    keys = sources.keys() & recorded.keys()
+    assert "n_variants" in keys, "guard: the upgraded knob is one the mint recorded"
+    assert {k: sources[k] for k in keys} == {k: recorded[k] for k in keys}, (
+        "a knob named another layer than its mint recorded behind it"
+    )
 
 
 def test_a_steer_the_campaign_never_sanctioned_cannot_pass_as_a_clean_fork() -> None:
@@ -2615,6 +2582,13 @@ def _opened(
             return laid_session(session, ConfigLayers.of(dataset, None))
 
     return asyncio.run(opening())
+
+
+def _minted(stores: Stores, name: str, rows: Sequence[Sample] | None = None) -> Session:
+    """A campaign on *name* minted through the real door, nothing run, bound to its root cycle."""
+    opened, config = _opened(stores, name, rows)
+    plan = resolve_cycle_plan(opened, config, Optimize(), opened.bank.samples)
+    return mint(plan, campaign_id=fresh_campaign_id(opened), adopting=None).session
 
 
 def _account_dataset(stores: Stores, name: str, rows: Sequence[Sample]) -> None:
@@ -3221,6 +3195,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     capsys: pytest.CaptureFixture[str],
     built_stores: Stores,
     offline: Router,
+    decl: _Declared,
     held: _Held,
 ) -> None:
     # A resume runs on the connector its campaign was minted on: its dataset re-pointed since is
@@ -3228,12 +3203,25 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     # or binds a connector.
     stores = built_stores
     held_campaign = held.campaign
+    # A continuing inner seat: its campaign minted in the outer's sandbox, under the id it spawns at.
+    seats = inner_cells("potter", dataset="decl")
+    (inner_seat,) = seats.cells
+    owner = held_campaign.root_hop
+    spawning = InnerSpawnContext(
+        stores=stores,
+        inside=(owner,),
+        enclosing=(),
+        acting=(),
+        cells=seats,
+        purpose=Optimize(),
+        ruler=0,
+    )
+    sandboxed, inner_config = _opened(sandbox_store(stores, owner), "decl", decl.rows_30)
+    plan = resolve_cycle_plan(sandboxed, inner_config, Optimize(), decl.rows_30)
+    mint(plan, campaign_id=inner_campaign_id("decl", "i", seats.own(inner_seat, {})), adopting=None)
     decl_definition = stores.tenant_datasets.dataset_dir("decl") / DEFINITION_FILE
-    as_minted = {
-        "pipeline": {"connector": "termnorm"},
-        "campaign": {"optimization": {"degradation_threshold": 0.4}},
-    }
-    write_yaml(decl_definition, {**as_minted, "pipeline": {"connector": "n8n"}})
+    as_minted = decl_definition.read_text(encoding="utf-8")
+    write_yaml(decl_definition, {**_DECL, "pipeline": {"connector": "n8n"}})
     asked = (len(offline.backend.asked), len(offline.harness.asked))
     with monkeypatch.context() as cli:
         cli.setattr(
@@ -3255,26 +3243,6 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         "the embedded resume ran a campaign on a connector its dataset no longer names"
     )
     # The inner door asks it of a continuing seat before its session opens: the cell's fault.
-    seats = inner_cells("potter", dataset="decl")
-    (inner_seat,) = seats.cells
-    owner = held_campaign.root_hop
-    spawning = InnerSpawnContext(
-        stores=stores,
-        inside=(owner,),
-        enclosing=(),
-        acting=(),
-        cells=seats,
-        purpose=Optimize(),
-        ruler=0,
-    )
-    inner_hop = CycleHop(
-        campaign_id=inner_campaign_id("decl", "i", seats.own(inner_seat, {})),
-        cycle_id="cycle-0",
-    )
-    stored_campaign(
-        sandbox_store(spawning.stores, spawning.inside[-1]),
-        minted_campaign(inner_hop, dataset_name="decl"),
-    )
     pin = PinnedCell(cell=inner_seat, instrument="i").pin()
     with (
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
@@ -3305,7 +3273,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     assert (bench_read.can_run, bench_read.refusal) == (False, PassRefusal.CONNECTOR_MOVED), (
         "the served bench offers a grade on a connector its dataset no longer names"
     )
-    write_yaml(decl_definition, as_minted)
+    decl_definition.write_text(as_minted, encoding="utf-8")
 
 
 def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _Declared) -> None:
@@ -3335,25 +3303,21 @@ def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _De
 
 
 def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
-    built_stores: Stores, decl: _Declared, held: _Held
+    steered: _Steered,
 ) -> None:
-    # Never a waiver of the root's own drift.
-    stores = built_stores
-    rows_30 = decl.rows_30
-    opened, held_campaign = held
-    steered_hop = CycleHop(campaign_id=held_campaign.campaign_id, cycle_id="cycle_steered")
-    stores.campaigns.mint_cycle(
-        steered_hop,
-        CycleMintedRecord(start=CycleStart(pipeline_overlay={"solve": NodeCall(temperature=0.3)})),
-    )
-    partition = stores.campaigns.last(held_campaign.root_hop, PartitionRecord)
-    assert partition is not None, "the held campaign banked no partition"
-    stores.campaigns.append(steered_hop, partition)
-    steered_fork = opened.bound(CampaignCycle(held_campaign, steered_hop.cycle_id))
+    # Never a waiver of the root's own drift: a fork the operator's door cut off a measured origin.
+    stores, campaign = steered.stores, steered.root.campaign
+    root = campaign.root_hop
+    asked = ForkCyclePayload(campaign_id=root.campaign_id, cycle_id=root.cycle_id)
+    steering = CycleStart(pipeline_overlay={"llm_only": NodeCall(temperature=0.3)})
+    cycle_id = cut_operator_fork(stores, asked, steering).take(stores)
+    opened, _ = _opened(stores, campaign.dataset_name)
+    steered_fork = opened.bound(CampaignCycle(campaign, cycle_id))
     steered_fork.record_resolved_run()
-    resolve_resume(steered_fork, held_campaign, rows_30)
+    rows = opened.bank.samples
+    resolve_resume(steered_fork, campaign, rows)
     with pytest.raises(ConfigDriftError):
-        resolve_resume(steered_fork, held_campaign, rows_30[:-1])
+        resolve_resume(steered_fork, campaign, rows[:-1])
 
 
 def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_lives(
@@ -3489,11 +3453,10 @@ def test_a_store_door_append_under_a_muted_scope_lands_nothing(
 
 
 def test_a_store_door_append_on_the_scopes_own_cycle_lands_through_its_handle(
-    built_stores: Stores, held: _Held
+    steered: _Steered,
 ) -> None:
     # A second handle on one file is a second appender; another cycle's append opens its own.
-    stores = built_stores
-    hop = held.campaign.root_hop
+    stores, hop, other = steered.stores, steered.root.hop, steered.fork.hop
     lent: list[CycleRecord] = []
 
     class _Lent(CycleEventLog):
@@ -3501,8 +3464,6 @@ def test_a_store_door_append_on_the_scopes_own_cycle_lands_through_its_handle(
             lent.extend(records)
             return super().append(*records)
 
-    other = CycleHop(campaign_id=hop.campaign_id, cycle_id="cycle_other")
-    stores.campaigns.mint_cycle(other)
     with scoped(ledger=_Lent(stores.campaigns.ledger(hop))):
         stores.campaigns.append(other, ArmActRecord(act=ArmAct.SKIP))
         assert not lent and ArmAct.SKIP in stores.campaigns.ledger(other).read_text(), (
