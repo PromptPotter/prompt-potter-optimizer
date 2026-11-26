@@ -496,7 +496,12 @@ class ByCallIdentity:
         shown: Any = content
         if attempt < len(script):
             said = invalid(script[attempt], content, model=body["model"])
-            shown = said.json() if isinstance(said, httpx.Response) else said
+            # Its bytes hash into the key, so a price (the rate table's, not the run's) stays off it.
+            shown = (
+                said.json()
+                if isinstance(said, httpx.Response)
+                else {k: v for k, v in said.items() if k != "usage"}
+            )
             # A wound's last send leaves the client no rung to retry it on.
             retried = key in self.heals or attempt + 1 < len(script)
             if schema and script[attempt] is not Heal.REFUSED and retried:

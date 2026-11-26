@@ -25,9 +25,20 @@ import httpx
 
 from promptpotter.config.settings import settings
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
+from promptpotter.domain.pipeline_overlay import normalize_model_id
 from promptpotter.infrastructure import backend as backend_wire
-from promptpotter.infrastructure.llm.pricing import BUNDLED_PATH, UPSTREAM_URL, RatesFile
-from promptpotter.infrastructure.llm.registry import keyed_specs
+from promptpotter.infrastructure.llm.pricing import (
+    BUNDLED_PATH,
+    UPSTREAM_URL,
+    RatesFile,
+    compute_usd,
+)
+from promptpotter.infrastructure.llm.registry import (
+    default_routes,
+    keyed_specs,
+    openai_compat_spec,
+    providers,
+)
 from promptpotter.infrastructure.llm.telemetry import current_round
 
 if TYPE_CHECKING:
@@ -60,11 +71,12 @@ def shown_text(prompt: str, locus: str) -> str:
     return prompt[shown + len(head) :].split("\n\n", 1)[0]
 
 
+# The world's own usage: priced as it leaves the wire (`_wire`), off its model and these tokens by the
+# rate table the production meter reads, 0.0 where the table lists no (provider, model) pair.
 USAGE: dict[str, Any] = {
     "prompt_tokens": 1000,
     "completion_tokens": 200,
     "total_tokens": 1200,
-    "cost": 0.0,
     # The parts a provider breaks out, reported as it reports them: a zero is a reported zero.
     "prompt_tokens_details": {"cache_write_tokens": 0},
     "completion_tokens_details": {"reasoning_tokens": 0},
@@ -72,9 +84,17 @@ USAGE: dict[str, Any] = {
 
 
 def completion(
-    content: str, *, model: str, id: str = "offline", usage: dict[str, Any] | None = USAGE
+    content: str,
+    *,
+    model: str,
+    id: str = "offline",
+    usage: dict[str, Any] | None = USAGE,
+    usd: float | None = None,
 ) -> dict[str, Any]:
-    """A `chat.completion` as an OpenAI-compatible provider sends it; *usage* None reports none."""
+    """A `chat.completion` as an OpenAI-compatible provider sends it; *usage* None reports none,
+    *usd* is the cost the gateway bills it, the world's door for a price a fact states."""
+    if usd is not None:
+        usage = (usage or USAGE) | {"cost": usd}
     return {
         "id": id,
         "object": "chat.completion",
@@ -170,7 +190,25 @@ def _wire(request: httpx.Request, body: dict[str, Any], said: Said) -> httpx.Res
         return said
     if isinstance(said, str):
         said = completion(said, model=body["model"])
+    if said.get("usage") is USAGE:
+        said = said | {"usage": USAGE | {"cost": _priced(request, said["model"])}}
     return _json(200, said, request)
+
+
+def _priced(request: httpx.Request, model: str) -> float:
+    """What production's rate table says `USAGE` costs on the provider whose wire *request* is."""
+    host = urlsplit(str(request.url)).netloc
+    provider = next(
+        (
+            p
+            for p in providers()
+            if (spec := openai_compat_spec(p)) is not None
+            and urlsplit(spec.base_url).netloc == host
+        ),
+        None,
+    )
+    usd = compute_usd(model, USAGE["prompt_tokens"], USAGE["completion_tokens"], provider=provider)
+    return 0.0 if usd is None else usd
 
 
 def _json(status: int, payload: Any, request: httpx.Request) -> httpx.Response:
@@ -414,18 +452,22 @@ async def _never() -> httpx.Response:
     raise AssertionError("unreachable")
 
 
-OPENROUTER_ENDPOINTS = {
-    "data": {
-        "endpoints": [
-            {
-                "tag": "offlinehost",
-                "pricing": {"prompt": "0.0000001", "completion": "0.0000004", "request": "0"},
-                "max_completion_tokens": 32000,
-                "context_length": 131072,
-            }
-        ]
+def openrouter_endpoints(model: str) -> dict[str, Any]:
+    """The hosts OpenRouter lists *model* on: the world's own, and every host production pins it to."""
+    pinned = default_routes().get("openrouter", {}).get(normalize_model_id(model), [])
+    return {
+        "data": {
+            "endpoints": [
+                {
+                    "tag": host,
+                    "pricing": {"prompt": "0.0000001", "completion": "0.0000004", "request": "0"},
+                    "max_completion_tokens": 32000,
+                    "context_length": 131072,
+                }
+                for host in ("offlinehost", *pinned)
+            ]
+        }
     }
-}
 
 
 def _harbor_registry() -> str:
@@ -470,7 +512,7 @@ class Router:
         self.rate_fetches = 0
         # `host/path` of a token endpoint -> the (status, body) it answers every code with.
         self.token_endpoints: dict[str, tuple[int, dict[str, Any]]] = {}
-        # An OpenRouter model -> the hosts its gateway lists; one unnamed lists `OPENROUTER_ENDPOINTS`.
+        # An OpenRouter model -> the hosts its gateway lists; one unnamed lists `openrouter_endpoints`.
         self.hosts: dict[str, dict[str, Any]] = {}
         # OpenRouter unreachable, as a dead host fails `urlopen` on its endpoints list.
         self.openrouter_dead = False
@@ -613,7 +655,9 @@ def install_network(router: Router) -> Callable[[], None]:
             if router.openrouter_dead:
                 raise urllib.error.URLError("offline: OpenRouter's host list is unreachable")
             model = target.partition("/models/")[2].removesuffix("/endpoints")
-            return _Body(json.dumps(router.hosts.get(model, OPENROUTER_ENDPOINTS)).encode())
+            return _Body(
+                json.dumps(router.hosts.get(model) or openrouter_endpoints(model)).encode()
+            )
         if target == UPSTREAM_URL:
             router.rate_fetches += 1
             if router.upstream_dead:

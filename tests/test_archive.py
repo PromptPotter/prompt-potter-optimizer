@@ -55,7 +55,6 @@ from factories import (
     workspace,
 )
 from offline_run import DATASET
-from offline_world import OPENROUTER_ENDPOINTS
 from world import Ran, Shared, World, shared_run
 
 from promptpotter.application.bench.cycle import ReadArm, RoundContext
@@ -342,13 +341,6 @@ def test_two_walks_never_buy_one_cell_and_a_second_release_frees_no_claim(tmp_pa
     beside.retire()
 
 
-def _unrouted(arm: object) -> dict[str, Any]:
-    """The overlay a steered fork off *arm* runs under: its route cleared, since the campaign's
-    dollar cap prices no host the world lists for the route its record pinned (row: offline_world)."""
-    assert isinstance(arm, Measured), arm
-    return {node: {"route_order": None} for node in arm.resolved_params["steps"]}
-
-
 # The `score:F` lens moves the formula alone: the fork's origin replays what its parent paid.
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_cell_banked_under_one_formula_reads_under_another_as_a_fresh_walk_would(
@@ -360,7 +352,7 @@ def test_a_cell_banked_under_one_formula_reads_under_another_as_a_fresh_walk_wou
     key = branch.election.ended_on
     paid = {cell.facts.answer for cell in branch.rows(key)}
     lens = ConfigOverrides(scoring={"per_cell": "0.5 * fitness + 0.25"})
-    start = ForkStart(pipeline_overlay=_unrouted(branch.arms[key]), config_overrides=lens)
+    start = ForkStart(config_overrides=lens)
     fork = asyncio.run(adopted.fork(hop, 1, candidate_id=str(key), start=start))
     read_by = fork.session.state.scoring.scorer
     walked = [
@@ -674,17 +666,14 @@ def origin_forks(tmp_path_factory: pytest.TempPathFactory, line: Shared) -> Shar
         before = _remembered_at(
             stores, ArmOf(CampaignWalks(stores.campaigns, hop.campaign_id), ruler_version=0), bank
         )
-        unrouted = _unrouted(branch.arms[key])
-        unmodified = await world.fork(
-            hop, 1, candidate_id=str(key), start=ForkStart(pipeline_overlay=unrouted)
-        )
+        unmodified = await world.fork(hop, 1, candidate_id=str(key), start=ForkStart())
         # An edited origin re-measures, so the fork walks answers no cycle before it walked.
         [(node, prompt)] = list(branch.arms[key].individual.prompts.items())[:1]
         field, text = next(iter(prompt.fields.items()))
         edited = {
             node: prompt.model_copy(update={"fields": {**prompt.fields, field: f"{text} Anew."}})
         }
-        start = ForkStart(pipeline_overlay=unrouted, origin_prompts=edited)
+        start = ForkStart(origin_prompts=edited)
         steered = await world.fork(hop, 1, candidate_id=str(key), start=start)
         paid = {cell.facts.answer for cell in branch.rows(key)}
         return _OriginForks(hop, scorer, key, paid, before, unmodified.hop, steered.hop)
@@ -2088,13 +2077,6 @@ def family_tree(tmp_path_factory: pytest.TempPathFactory, displaced: Shared) -> 
     async def act(world: World) -> dict[str, CycleHop]:
         trunk, kid = displaced.made.parent, displaced.made.fork
         grand = (await world.fork(kid, 3, keep_rounds=True)).hop
-        # A candidate's record pins the host the world's LLM names, which the world's OpenRouter
-        # host list lacks: listed, so a steer laying that record prices its dollar ceiling.
-        hosts = json.loads(json.dumps(OPENROUTER_ENDPOINTS))
-        hosts["data"]["endpoints"][0]["tag"] = "Groq"
-        world.net.hosts.update(
-            dict.fromkeys(("openai/gpt-oss-20b", "openai/gpt-oss-20b:nitro"), hosts)
-        )
         stood = world.stores.campaigns.standing_rounds(trunk, moment=None)
         uncrowned = next(k for k in stood.rounds[1].close.arms if k != stood.crowns[1])
         steered = (await world.fork(trunk, 1, candidate_id=uncrowned)).hop

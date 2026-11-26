@@ -657,19 +657,10 @@ def test_a_rate_belongs_to_its_provider_model_pair_and_a_cache_read_reprices_ins
 @pytest.mark.usefixtures("run_bound", "offline")
 def test_a_wire_cost_reaches_the_reply_and_a_bill_sums_the_parts_that_named_one() -> None:
     # OpenRouter's real shape: `cost` rides as an EXTRA on the usage object.
-    priced = {
-        "prompt_tokens": 263,
-        "completion_tokens": 152,
-        "total_tokens": 415,
-        "cost": 7.938e-05,
-        "cost_details": {"upstream_inference_cost": 0},
-        "is_byok": False,
-    }
+    def wired(usage: dict[str, Any] | None, usd: float | None = None) -> ChatReply:
+        return ChatReply.model_validate(completion("{}", model="m", usage=usage, usd=usd))
 
-    def wired(usage: dict[str, Any] | None) -> ChatReply:
-        return ChatReply.model_validate(completion("{}", model="m", usage=usage))
-
-    assert wired(priced).cost == 7.938e-05, (
+    assert wired(None, usd=7.938e-05).cost == 7.938e-05, (
         "wire cost never reached the response, so nothing prices the optimizer"
     )
     for usage in ({"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}, None):
@@ -2714,8 +2705,7 @@ def test_a_resent_call_costs_what_its_admissions_booked(tmp_path: Path, offline:
         sent.append(1)
         if len(sent) == 1:
             return httpx.Response(500, json={"error": "blip"})
-        usage = {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8, "cost": 0.0042}
-        return completion("ok", model="gpt-x", usage=usage)
+        return completion("ok", model="gpt-x", usd=0.0042)
 
     offline.llm.says = blip_then_answer
     book = spend_book(0.05)
@@ -5388,8 +5378,7 @@ def test_a_reported_zero_of_reasoning_reaches_a_step_as_zero_and_none_as_unrepor
 async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_the_ceiling(
     tmp_path: Path, built_stores: Stores, offline: Router
 ) -> None:
-    billed_cent = {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15, "cost": 0.01}
-    offline.llm.says = lambda body: completion("ok", model=body["model"], usage=billed_cent)
+    offline.llm.says = lambda body: completion("ok", model=body["model"], usd=0.01)
     loop_reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
     judge_reuse = LLMReuseCache(tmp_path / "reuse", "judge_reuse")
 
