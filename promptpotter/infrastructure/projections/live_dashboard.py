@@ -898,6 +898,7 @@ class DashboardCheckout:
         self._timer: threading.Timer | None = None
         self._dirty = False
         self._cost_s = 0.0
+        self._written: dict[str, Any] | None = None
 
     @property
     def live(self) -> LiveDashboardProjection:
@@ -952,11 +953,13 @@ class DashboardCheckout:
         state = self._index.view(
             LiveDashboardProjection, start=_start(LiveDashboardProjection, self._prefix)
         )
-        if state is None:
+        # A write that changes no byte is not made.
+        if state is None or (data := state.model_dump()) == self._written:
             return
         started = time.perf_counter()
-        write_json(self._path, state.model_dump(), default=str)
+        write_json(self._path, data, default=str)
         self._cost_s = time.perf_counter() - started
+        self._written = data
 
 
 class RunLimitsProjection(Projection):
