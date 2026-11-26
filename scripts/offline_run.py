@@ -102,6 +102,7 @@ from promptpotter.application.pipeline_resolve import cycle_config
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.served_dashboard import ServedDashboard
 from promptpotter.config.paths import (
+    MEASUREMENTS_DIR,
     PACKAGE_ROOT,
     PROJECTS_DIR,
     default_projects_root,
@@ -157,6 +158,7 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_le
 from promptpotter.infrastructure.store.dataset_access import install_dataset, resolve_dataset
 from promptpotter.infrastructure.store.io import rmtree_robust
 from promptpotter.infrastructure.store.layout import dataset_id_prefix, inner_sandboxes_dir
+from promptpotter.infrastructure.store.measurement_archive import ArchiveFile
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.hashing import stable_hash
@@ -203,6 +205,9 @@ PRESS = LookaheadPress(cells=4, abreast="all", auto=True)
 # Potter's warm run reading its rolling race's calls as they return, pressed, paused inside a walk
 # and resumed: the record hangs on timing, so the resume replays the order the run filed.
 ARRIVED = "arrived"
+# Potter's warm run pressed and paused inside a walk, then resumed: what the press bought ahead and
+# no turn took stays out of the campaign's own memory across the pause.
+PRESSED_RESUMED = f"{PRESSED}-{RESUMED}"
 ARRIVAL = {"pobb": {"read_order": "arrival"}}
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # Potter's straight campaign with invalid answers scripted by call, each on the rung that heals it:
@@ -2275,22 +2280,24 @@ def read_warm(
     warm: Future[int],
     pressed: Future[int],
     resumed: Future[int],
+    pressed_resumed: Future[int],
     pause_after: int,
 ) -> int:
-    """*name*'s warm run against the same pressed, and paused inside a walk then resumed: each
-    reads the record the warm run filed, on a ruler that holds a level past round 1."""
+    """*name*'s warm run against the same pressed, and each paused inside a walk then resumed:
+    each reads the record the warm run filed, on a ruler that holds a level past round 1."""
     failed = 0
     for leg, rc in (
         (WARM, warm.result()),
         (PRESSED, pressed.result()),
         (RESUMED, resumed.result()),
+        (PRESSED_RESUMED, pressed_resumed.result()),
     ):
         if rc:
             print(f"{name}: {leg} FAILED (exit {rc}) -- {home / leg / 'run.log'}")
             failed += 1
     if failed:
         return failed
-    rows = {leg: rows_read(home / leg) for leg in (WARM, PRESSED, RESUMED)}
+    rows = {leg: rows_read(home / leg) for leg in (WARM, PRESSED, RESUMED, PRESSED_RESUMED)}
     # Past the origin's round a ruler stands, so a race choosing rows by it never reads cold.
     if cold := [leg for leg, read in rows.items() if "cold" in read[1:]]:
         print(f"{name}: a warm leg chose its rows on a cold ruler past round 1: {cold} {rows}")
@@ -2317,27 +2324,44 @@ def read_warm(
         f"{'' if billed else ' (NOT the press it was handed)'}"
         f"{f', requests MOVED {sorted(asked)}' if asked else ', requests UNMOVED'}"
     )
-    again = decided(home / RESUMED, after=pause_after)
-    same = decided(home / WARM, after=pause_after) == again
+    failed += resumed_leg(name, home, WARM, RESUMED, pause_after)
+    return failed + resumed_leg(name, home, PRESSED, PRESSED_RESUMED, pause_after)
+
+
+def resumed_leg(name: str, home: Path, straight: str, leg: str, pause_after: int) -> int:
+    """*leg* paused inside a walk and resumed against its *straight* twin: the warm run's requests,
+    and its twin's decisions, backend cells, bills, priced keys and filed answers."""
+    again = decided(home / leg, after=pause_after)
+    same = decided(home / straight, after=pause_after) == again
+    traces = {at: BehaviourTrace.read(home / at) for at in (WARM, straight, leg)}
+    # A cell the press bought and no turn took is no memory of its campaign's, however it ended.
+    asked = sorted(n for n, h in traces[leg].requests.items() if traces[WARM].requests.get(n) != h)
     # A cell the race took before the pause, past its opening draw included (potter's `informative`
     # rows), is never bought again, and each is billed and priced once.
     cells = [
-        (BehaviourTrace.read(home / leg).decisions["harness"]["backend_cells"], *bought(home / leg))
-        for leg in (WARM, RESUMED)
+        (traces[at].decisions["harness"]["backend_cells"], *bought(home / at))
+        for at in (straight, leg)
     ]
-    same = same and cells[0] == cells[1]
-    failed += not _graded(again["run"]["bench"]) or not same
-    at, inside = paused_at(home / RESUMED)
+    # A cell filed as it arrived and banked at the pause is filed once, as its twin files it.
+    answers = [filed_answers(home / at) for at in (straight, leg)]
+    refiled = sorted(
+        f"{key[1][:8]} {answers[0][key]}->{answers[1][key]}"
+        for key in {*answers[0], *answers[1]}
+        if answers[0][key] != answers[1][key]
+    )
+    same = same and cells[0] == cells[1] and not refiled and not asked
+    at, inside = paused_at(home / leg)
     # Inside a round past the boundary, whose walk banked.
     landed = inside and at > pause_after
-    failed += not landed
     where = f"inside round {at} past its banked walk" if inside else f"after round {at}"
     print(
-        f"{name}: paused {where}{'' if landed else ' (NOT where its leg pauses)'} and resumed, "
-        f"decisions, backend cells, bills and priced keys {'UNMOVED' if same else 'MOVED'} "
-        f"({cells[0]} -> {cells[1]})"
+        f"{name}: {leg} paused {where}{'' if landed else ' (NOT where its leg pauses)'} and "
+        f"resumed, decisions, requests, backend cells, bills, priced keys and filed answers "
+        f"{'UNMOVED' if same else 'MOVED'} ({cells[0]} -> {cells[1]}"
+        f"{f', requests MOVED {asked}' if asked else ''}"
+        f"{f', {len(refiled)} cells filed otherwise {refiled[:3]}' if refiled else ''})"
     )
-    return failed
+    return int(not _graded(again["run"]["bench"]) or not same) + int(not landed)
 
 
 def arrived_leg(workspace: Path, leg: Future[int], pause_after: int) -> bool:
@@ -2386,6 +2410,14 @@ def bought(workspace: Path) -> tuple[int, int]:
     ledger = leg_ledger(workspace)
     bills = sum((record.get("money") or {}).get("record_type") == "bill" for record in ledger)
     return bills, sum(record.get("record_type") == "priced_key" for record in ledger)
+
+
+def filed_answers(workspace: Path) -> Counter[tuple[str, str]]:
+    """How many answers a leg's archive files per (configuration, sample)."""
+    cells = Path(long_path(data_root(workspace))).glob(
+        f"**/{MEASUREMENTS_DIR}/{ArchiveFile.CELLS.folder}/*"
+    )
+    return Counter((row["config_key"], row["sample_key"]) for path in cells for row in _jsonl(path))
 
 
 def leg_ledger(workspace: Path) -> list[dict[str, Any]]:
@@ -2502,7 +2534,7 @@ def proven_home() -> None:
 def read_children(
     home: Path,
     children: Mapping[str, Future[int]],
-    warm: Mapping[str, tuple[Future[int], Future[int], Future[int]]],
+    warm: Mapping[str, tuple[Future[int], Future[int], Future[int], Future[int]]],
     pause_after: int,
     *,
     controlled: bool,
@@ -2692,7 +2724,7 @@ def main() -> int:
     # Each script wounds a call of the first two rounds.
     wounded = [name for name in due if name in WOUNDS] if legs and args.rounds > 1 else []
     tasks = (
-        4 * len(due) + (len(INTERRUPTED) + 2) * firsts + 7 * potter_legs + len(wounded)
+        5 * len(due) + (len(INTERRUPTED) + 2) * firsts + 7 * potter_legs + len(wounded)
         if legs
         else len(due)
     )
@@ -2773,6 +2805,13 @@ def main() -> int:
             spawn(name, home / name / WARM, warmly),
             spawn(name, home / name / PRESSED, warmly, "--press"),
             spawn(name, home / name / RESUMED, warmly, f"--pause-in-walk={pause_after + 1}"),
+            spawn(
+                name,
+                home / name / PRESSED_RESUMED,
+                warmly,
+                "--press",
+                f"--pause-in-walk={pause_after + 1}",
+            ),
         )
         for name in (due if legs else ())
     }
