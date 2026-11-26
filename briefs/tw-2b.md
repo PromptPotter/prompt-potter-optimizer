@@ -10,7 +10,9 @@ your id and your base, `<BASE>`:
   my fix to the dspy children's import root. tw-x runs beside
   chain tw-r3 (`briefs/tw-r3.md`), which owns `application/scoring/**`, `offline_run.py`, and the
   archive's filing and memory reads.
-- **tw-j:** `origin/land/test-world` at `<BASE-J>`, which is `<BASE-X>` plus tw-r3.
+- **tw-j:** `origin/land/test-world` at `<BASE-J>` = `af224d3bd`, which is `<BASE-X>` plus tw-r3 (read
+  `out/tw-r3-report:report.md`). tw-j runs beside tw-x. Where you share a file with tw-x, edit only your
+  own hunks.
 
 Replace the ancestor check with `git merge-base --is-ancestor 9cd30b5a7 <BASE>`. Equals-main runs against
 `<BASE>`'s offline home.
@@ -86,6 +88,25 @@ Files shared between chains are named. Each chain edits only its own hunks of a 
 builder left with zero callers at integration.
 
 ### tw-j: every parked journey becomes a leg (Opus)
+**First, two links before the journeys, each red first.**
+1. **An L4 outer campaign never names what it bought ahead.** `_ScoringPhase.land()` writes
+   `UntakenBoughtRecord`, and both callers skip it when `phase.cancels` holds
+   (`query_loop.py`: `if not phase.cancels`). `cancels` is the connector's `cancel_stops_billing`, and only
+   the inner connector sets it (`runner/inner/spawn.py::CONNECTOR`, with `MAX_CELLS_IN_FLIGHT = 4`). So on
+   every ending of an L4 outer phase, an inner cell that arrived, was filed under its claim, and was then
+   discarded by a cut stays the outer campaign's own memory. That is tw-r2's bug on the L4 path. tw-r3
+   filed it as "a cancel or a crash" (`out/tw-r3-report` § Rows to file).
+   - **Red:** an L4 outer leg pressed past one cell reads the warm outer run's requests, and is RED at your
+     base. If no red comes, the fact is wrong: say so and stop this link.
+   - **Root:** weigh naming the cell where it is filed (`_acquire`, so every ending is covered, a crash
+     included) against writing the record on the one path every in-process ending runs (`discard`, in
+     `finally`). Choose with the evidence, state the cost in ledger records per round, and delete what
+     the chosen root makes dead (`Walk.dropped`, `untaken_bought`, the `land` hook).
+2. **`potter/arrived` moves with machine load.** In one of tw-r3's runs it read MOVED under load, and a
+   rerun read UNMOVED. A leg bound to the wall clock breaks `tests/CLAUDE.md` § Mocks ("bound a race by an
+   event the writer sets"). Drive the late arrival with an event in `offline_world.py`. The leg then
+   reads the same records on every run: show three runs alike, one of them under a parallel pytest.
+
 **The facts.**
 - The four `# Journeys awaiting a leg` blocks: test_scoring 26, test_identity 8, test_security 3 and
   test_archive 2. Their leg specs (optimizer, dimension, trace assertion) are in
