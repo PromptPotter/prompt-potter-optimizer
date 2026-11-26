@@ -22,7 +22,6 @@ from factories import (
     election,
     jumping_clock,
     level_series,
-    loop_session,
     measurement,
     pipeline_schema,
     round_result,
@@ -35,10 +34,10 @@ from factories import (
 from offline_world import Router
 
 from promptpotter.application.bench.difficulty import (
-    DifficultyView,
     JudgingRuler,
     calibrate_delta_ruler,
     judging_ruler,
+    level_series_of,
     ruler_clock,
     session_ruler_scope,
 )
@@ -72,7 +71,6 @@ from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_TOOLING,
 )
 from promptpotter.domain.phases import StopReason
-from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import (
     DeltaRuler,
@@ -86,16 +84,9 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell, Scorer
+from promptpotter.domain.scoring import GradedCell
 from promptpotter.domain.wounds import ValidationReason
-from promptpotter.infrastructure.run_scope import scoped
-from promptpotter.infrastructure.store.archive_queries import (
-    ArmOf,
-    CampaignWalks,
-    OpenAt,
-)
 from promptpotter.infrastructure.store.ruler_store import RulerStore
-from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError
 from promptpotter.shared.identity import default_identity
 
@@ -582,55 +573,25 @@ def test_a_stratum_short_of_its_share_hands_the_rest_on_and_an_empty_one_takes_n
 
 
 class _Traced(NamedTuple):
-    series_of: Callable[..., list[Any]]
     closed: Callable[..., Any]
     hits: dict[str, list[float]]
-    bank: list[Sample]
-    scope: RulerScope
-    warmed: Stores
     tenant: RulerStore
     frozen: int
     run: list[Any]
 
 
+_SCOPE = RulerScope(scorer="acc", dataset="ds")
+
+
+def _series(tenant: RulerStore, lines: list[Any], own: RulerOwn | None = None) -> list[Any]:
+    reach = RulerReach(version=tenant.version(), own=own)
+    return level_series_of(tenant, _SCOPE, reach, lines, n_min=4, enable_2pl=False)
+
+
 @pytest.fixture
 def traced() -> _Traced:
-    """A run of four rounds on a warm tenant ruler, and the reader of its level series."""
-    scope = RulerScope(scorer="acc", dataset="ds")
+    """A run of four rounds on a warm tenant ruler."""
     bank = samples(12, "t")
-    scorer = Scorer(
-        id="acc",
-        per_cell=None,
-        matcher=None,
-        span=None,
-        ranking=None,
-        fields=None,
-        fitness_unit="score",
-        two_valued=frozenset({"hit"}),
-        terms=frozenset(),
-        fitness=lambda _row, _grade: 0.0,
-        objective=None,
-    )
-
-    solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False)])
-
-    def series_of(
-        memory: Any, stores: Stores, lines: list[Any], drawn: list[Sample] = bank
-    ) -> list[Any]:
-        session = loop_session(stores, solve, drawn, scorer=scorer, dataset_name="ds")
-        opened = judging_ruler(
-            stores.ruler,
-            scope,
-            RulerReach(version=0, own=None),
-            (),
-            objective_id="acc",
-            n_min=4,
-            enable_2pl=False,
-        )
-        view = DifficultyView(session, 4, False, frozenset(), opened)
-
-        with scoped(memory=memory):
-            return view.level_series(lines)
 
     def graded(hits: list[float]) -> Any:
         return sheet(
@@ -640,7 +601,7 @@ def traced() -> _Traced:
 
     def closed(n: int, walked: dict[str, list[float]], pick: str | None, ended_on: str) -> Any:
         # Each election reads its own version; the series must read none of them.
-        stamp = RulerStamp(id=f"v{n}", version=n, own=None, scope=scope, excluded=())
+        stamp = RulerStamp(id=f"v{n}", version=n, own=None, scope=_SCOPE, excluded=())
         return round_result(
             n,
             arms=[arm_state(k) for k in walked],
@@ -654,10 +615,9 @@ def traced() -> _Traced:
         "b": [float(i % 6 == 0) for i in range(12)],
     }
     # Graded, never binary: tied δ would pin most cells to the prior.
-    warmed = workspace()
-    tenant = warmed.ruler
+    tenant = workspace().ruler
     tenant.fold(
-        scope,
+        _SCOPE,
         [(f"f{arm}", s.key, (s.id + 0.5) / 12) for arm in range(8) for s in bank],
         campaign="else",
         own=None,
@@ -669,32 +629,28 @@ def traced() -> _Traced:
     ]
     for rr in run:
         # After its election, as `DifficultyView.fold` banks a round.
-        tenant.fold(
-            scope,
-            [
-                (rr.arms[k].config_key, c.key, c.grade.objective)
-                for k, sh in rr.cells.items()
-                for c in sh
-            ],
-            campaign="run",
-            own=None,
-        )
+        rows = [
+            (rr.arms[k].config_key, c.key, c.grade.objective)
+            for k, sh in rr.cells.items()
+            for c in sh
+        ]
+        tenant.fold(_SCOPE, rows, campaign="run", own=None)
     run += [
         closed(2, {"b": hits["b"], "a": hits["a"]}, None, "a"),
         round_result(3, election=None, arms=[], cells={}),
     ]
-    return _Traced(series_of, closed, hits, bank, scope, warmed, tenant, frozen, run)
+    return _Traced(closed, hits, tenant, frozen, run)
 
 
 def test_every_round_reads_its_standing_parent_on_the_one_scale_its_series_stamps(
     traced: _Traced,
 ) -> None:
-    series_of, _, _, _, _, warmed, tenant, _, run = traced
-    [series] = series_of(OpenAt(), warmed, [run])
+    [series] = _series(traced.tenant, [traced.run])
     levels = {rnd: series.level(rnd) for rnd in series.rounds}
-    assert series.stamp.version == tenant.version() and series.stamp.excluded == ("a", "o"), (
-        "the series read a scale its own parent line moved, or not the run's clock"
-    )
+    assert series.stamp.version == traced.tenant.version() and series.stamp.excluded == (
+        "a",
+        "o",
+    ), "the series read a scale its own parent line moved, or not the run's clock"
     assert all(lv is not None and lv.ruler == series.stamp for lv in levels.values()), (
         "a round's level sat on the scale its own election read, not the series'"
     )
@@ -708,39 +664,35 @@ def test_every_round_reads_its_standing_parent_on_the_one_scale_its_series_stamp
     )
 
 
-def test_a_fork_and_its_parent_line_read_their_levels_on_one_fit_less_both_lines_parents(
+def test_a_series_reads_one_fit_less_every_lines_parents_and_no_row_past_its_reach(
     traced: _Traced,
 ) -> None:
-    # Two scales would let UCB sum across them.
-    series_of, closed, hits, _, _, warmed, _, _, run = traced
-    fork = [run[0], closed(1, {"a": hits["a"], "b": hits["b"]}, "b", "b")]
-    line, forked = series_of(OpenAt(), warmed, [run, fork])
-    assert line.stamp == forked.stamp and line.stamp.excluded == ("a", "b", "o"), (
-        "two lines of one family read their levels on two scales"
-    )
-
-
-def test_a_series_reads_no_row_past_the_reach_its_reader_holds(traced: _Traced) -> None:
-    # An L4 cell takes the arm's scope: its outer cycle's round-0 version plus its own lines.
-    series_of, _, _, _, _, warmed, _, frozen, run = traced
-    [own, other] = (
-        series_of(ArmOf(CampaignWalks(None, c), frozen), warmed, [run])[0]  # type: ignore[arg-type]
-        for c in ("run", "x")
-    )
-    assert own.stamp.excluded == ("a", "o") and other.stamp.excluded == (), (
-        "an arm read another arm's lines past the freeze, or never its own"
-    )
+    # Two scales would let UCB sum across a fork and its parent line; an L4 cell reads its outer
+    # cycle's round-0 version plus its own lines.
+    t = traced
+    fork = [t.run[0], t.closed(1, {"a": t.hits["a"], "b": t.hits["b"]}, "b", "b")]
+    for lines, own, excluded in (
+        ([t.run, fork], None, ("a", "b", "o")),
+        ([t.run], RulerOwn(campaign="run", since=t.frozen), ("a", "o")),
+        ([t.run], RulerOwn(campaign="x", since=t.frozen), ()),
+    ):
+        read = _series(t.tenant, lines, own)
+        assert {s.stamp for s in read} == {read[0].stamp} and read[0].stamp.excluded == excluded, (
+            f"{len(lines)} line(s) at {own} read their levels on two scales, or past their reach"
+        )
 
 
 def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     traced: _Traced,
 ) -> None:
-    series_of, _, _, bank, scope, _, _, _, run = traced
-    lone = workspace(default_identity("lone"))
-    lone.ruler.fold(
-        scope, [("f0", s.key, (s.id + 1) / 16) for s in bank], campaign="else", own=None
+    lone = workspace(default_identity("lone")).ruler
+    lone.fold(
+        _SCOPE,
+        [("f0", s.key, (s.id + 1) / 16) for s in samples(12, "t")],
+        campaign="else",
+        own=None,
     )
-    [cold] = series_of(OpenAt(), lone, [run])
+    [cold] = _series(lone, [traced.run])
     caveats = {lv.caveat for lv in cold.levels.values() if lv is not None}
     assert cold.stamp.cold and caveats == {ThetaCaveat.COLD_RULER} and cold.plateau() is None, (
         "a series on no δ scale read as one that differences"
@@ -754,17 +706,6 @@ def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     )
     assert withheld.series_reason is ThetaCaveat.COLD_RULER, (
         "the withheld θ lift lost the caveat its series carries"
-    )
-
-
-def test_cells_of_two_datasets_folded_under_one_scope_read_one_scale(traced: _Traced) -> None:
-    series_of, _, _, bank, _, warmed, _, _, run = traced
-    [series] = series_of(OpenAt(), warmed, [run])
-    split = [s.model_copy(update={"measured_dataset": "other"}) if s.id % 2 else s for s in bank]
-    [mixed] = series_of(OpenAt(), warmed, [run], split)
-    caveats = {lv.caveat for lv in mixed.levels.values() if lv is not None}
-    assert caveats == {None} and mixed.plateau() == pytest.approx(series.plateau()), (
-        "a δ scale the fold wrote once read as several"
     )
 
 

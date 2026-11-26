@@ -259,7 +259,9 @@ BASELINE = {
     # tw-r2 (+84): what a walk bought and none took is named (`records/untaken.py`, its fold and
     # `Walk.untaken_bought`), so the running campaign leaves out its own press, nothing else.
     # tw-r3 (+3): `_ArchiveRecorder._file` files only a cell no address names (one filing rule).
-    "package_lines": 113712,
+    # tw-x (+22): the level series folds off the ruler, its scope and reach
+    # (`difficulty.py::level_series_of`), so its rules are a table, not a seated session.
+    "package_lines": 113734,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

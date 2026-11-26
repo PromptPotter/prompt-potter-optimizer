@@ -272,16 +272,38 @@ class DifficultyView:
         )
 
     def level_series(self, lines: Sequence[Sequence[RoundResult]]) -> list[LevelSeries]:
-        """ONE fit less every line's parents, so lines' levels sum; each level caveats on its own cells."""
-        judged = frozenset(a for rounds in lines for a in parent_line(rounds))
-        scale = self._read(ruler_clock(self.session), judged)
-        return [
-            LevelSeries(
-                stamp=scale.stamp,
-                levels={rnd: scale.frontier(sheets[i]) for rnd, i in ended.items()},
-            )
-            for ended, sheets in map(_ended_on, lines)
-        ]
+        session = self.session
+        return level_series_of(
+            session.store.ruler,
+            session_ruler_scope(session),
+            ruler_clock(session),
+            lines,
+            n_min=self.n_min,
+            enable_2pl=self.enable_2pl,
+        )
+
+
+def level_series_of(
+    store: RulerStore,
+    scope: RulerScope,
+    reach: RulerReach,
+    lines: Sequence[Sequence[RoundResult]],
+    *,
+    n_min: int,
+    enable_2pl: bool,
+) -> list[LevelSeries]:
+    """ONE fit less every line's parents, so lines' levels sum; each level caveats on its own cells."""
+    judged = frozenset(a for rounds in lines for a in parent_line(rounds))
+    scale = judging_ruler(
+        store, scope, reach, judged, objective_id=scope.scorer, n_min=n_min, enable_2pl=enable_2pl
+    )
+    return [
+        LevelSeries(
+            stamp=scale.stamp,
+            levels={rnd: scale.frontier(sheets[i]) for rnd, i in ended.items()},
+        )
+        for ended, sheets in map(_ended_on, lines)
+    ]
 
 
 def _ended_on(rounds: Sequence[RoundResult]) -> tuple[dict[int, str], dict[str, CellSheet]]:
