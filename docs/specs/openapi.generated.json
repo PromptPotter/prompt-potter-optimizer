@@ -17205,6 +17205,7 @@
               "standing_budget",
               "token_usage",
               "trail_tombstone",
+              "untaken_bought",
               "stream_snapshot"
             ],
             "title": "Kind",

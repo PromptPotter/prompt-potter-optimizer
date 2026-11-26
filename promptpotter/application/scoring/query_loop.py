@@ -47,6 +47,7 @@ from promptpotter.domain.records.run_records import (
     SampleStartedRecord,
     StopLoop,
 )
+from promptpotter.domain.records.untaken import UntakenBoughtRecord
 from promptpotter.domain.results_health import is_deprecated
 from promptpotter.domain.sample import FiledAnswer, Sample
 from promptpotter.domain.scoring import (
@@ -400,6 +401,8 @@ class Walk:
     held: list[LaunchEvent] | None = field(default_factory=list)
     settling: Sample | None = None
     outcome: QueryLoopResult | None = None
+    # Its cells out or back when it ended: what of them was bought, none of its turns took.
+    dropped: list[asyncio.Task[_Acquired]] = field(default_factory=list)
 
     def view(self, out: int) -> WalkView:
         """As its race decides on it, its first *out* untaken rows sent and not yet read."""
@@ -608,8 +611,19 @@ class Walk:
             if cancel:
                 cell.cancel()
             cell.add_done_callback(_quiet)
+        self.dropped += [*self.finished.values(), *draining]
         self.running, self.finished = {}, {}
         return draining
+
+    def untaken_bought(self) -> list[str]:
+        """The answers its dropped cells filed fresh: a replay or a cancelled call bought none."""
+        return [
+            answer
+            for cell in self.dropped
+            if (row := _returned_row(cell)) is not None
+            and cell.result().fresh
+            and (answer := row.facts.answer) is not None
+        ]
 
     def drop_claim_waits(self) -> None:
         for sid, cell in self.running.items():
@@ -1132,6 +1146,11 @@ class _ScoringPhase[K: Hashable]:
         for walking in self.racing().values():
             walking.collect()
         self.draining.clear()
+        # Every call has landed: what the ended walks bought and none took is the campaign's to name.
+        if bought := sorted(
+            a for walk in self.walks if walk is not None for a in walk.untaken_bought()
+        ):
+            append_record(UntakenBoughtRecord(round=bound_round(), answers=bought))
 
     def caught_up(self, walk: Walk, caught: CaughtUp | None) -> None:
         """A catch-up walk records no pass, so its cells reach the ledger here or nowhere."""
