@@ -9,10 +9,12 @@ facts read is run once (`shared_run`) and each fact reads its own copy (`World.a
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import shutil
 from collections.abc import AsyncIterator, Callable, Coroutine, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
+from functools import cached_property
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -45,6 +47,7 @@ from promptpotter.application.embedded_run import run_campaign, run_head_to_head
 from promptpotter.application.initialization.scoring_scope import arm_diagnostic_scoring
 from promptpotter.application.initialization.wiring import init_services
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
+from promptpotter.application.jobs.mint import mint_framed_cycle
 from promptpotter.application.optimizer_manifest import (
     manifest_directories,
     running_prompt,
@@ -75,6 +78,7 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
     from promptpotter.domain.cycle_result import CycleResult
     from promptpotter.domain.records import CycleRecord
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.stores import Stores
 
 
@@ -92,11 +96,20 @@ class Ran:
 
 @dataclass(frozen=True)
 class Script:
-    """What the network answers a campaign with: its config's templates, its rows, their hardness."""
+    """What the network answers a campaign with: its config's templates, its rows, their hardness;
+    each derived once a script, however many facts adopt the run it laid."""
 
     config: CampaignConfig
     rows: int
     hardness: int
+
+    @cached_property
+    def samples(self) -> list[Sample]:
+        return synthetic_rows(self.rows)
+
+    @cached_property
+    def templates(self) -> dict[str, str]:
+        return text_templates(self.config)
 
 
 @dataclass(frozen=True)
@@ -108,12 +121,26 @@ class Shared:
     script: Script
 
     @contextmanager
-    def reading(self) -> Iterator[None]:
-        """Its home as the data root, for a fixture reading what it left in place, never a copy:
-        a sandbox is a workspace of the data root its outer cycle ran under."""
+    def reading(self) -> Iterator[Stores]:
+        """Its home as the data root, for a fact or fixture reading what it left in place, never a
+        copy: a sandbox is a workspace of the data root its outer cycle ran under. A read that
+        wrote fails at its exit, since every later reader shares the home."""
+        before = _tree_digest(self.home)
         with pytest.MonkeyPatch.context() as home:
             home.setenv("PROMPTPOTTER_HOME", str(self.home))
-            yield
+            yield workspace()
+        after = _tree_digest(self.home)
+        moved = {p for p in before.keys() | after.keys() if before.get(p) != after.get(p)}
+        assert not moved, f"a read in place wrote its shared home: {sorted(moved)[:5]}"
+
+
+def _tree_digest(root: Path) -> dict[str, str]:
+    """Each file under *root*, to its bytes' digest."""
+    return {
+        p.relative_to(root).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in root.rglob("*")
+        if p.is_file()
+    }
 
 
 @dataclass
@@ -125,31 +152,33 @@ class World:
     script: Script | None = None
 
     def __post_init__(self) -> None:
-        # The dataset's definition at the install tier the stores read, as a wheel ships it.
+        # The dataset's definition at the install tier the stores read, as a wheel ships it: once
+        # a fact, which every world it builds on its data root reads.
         family = DATASET.split("/")[0]
-        shutil.copytree(
-            install_datasets_root() / family,
-            self.stores.install_datasets_root / family,
-            dirs_exist_ok=True,
-        )
+        if not (installed := self.stores.install_datasets_root / family).is_dir():
+            shutil.copytree(install_datasets_root() / family, installed)
 
-    def _lay(self, script: Script) -> None:
+    def _answer(self, script: Script) -> None:
         """The network answers *script*: every later run of this world, resumes and forks included."""
-        samples = synthetic_rows(script.rows)
         capture = self.scratch / f"requests-{len(self.ran)}"
         capture.mkdir(parents=True, exist_ok=True)
         self.net.llm.says = ByCallIdentity(
-            capture, text_templates(script.config), cites=cited_panel(script.config)
+            capture, script.templates, cites=cited_panel(script.config)
         )
-        self.net.backend = FakeBackend(samples, hardness=script.hardness)
-        stand_in_fetch(self.stores, samples)
+        self.net.backend = FakeBackend(script.samples, hardness=script.hardness)
         self.script = script
 
+    def _lay(self, script: Script) -> None:
+        """*script* answered, its rows the cut of the definition's source."""
+        self._answer(script)
+        stand_in_fetch(self.stores, script.samples)
+
     def adopt(self, shared: Shared) -> World:
-        """This fact's own copy of *shared*'s home, read and run on as if this world had run it."""
+        """This fact's own copy of *shared*'s home, read and run on as if this world had run it: the
+        copy holds the run's cut, so only the network is laid."""
         shutil.copytree(shared.home, user_data_root(), dirs_exist_ok=True)
         adopted = World(workspace(), self.net, self.scratch)
-        adopted._lay(shared.script)
+        adopted._answer(shared.script)
         return adopted
 
     async def campaign(
@@ -183,6 +212,19 @@ class World:
             mode=RunMode(),
         )
         return self._ran(session, result)
+
+    async def minted(self, rows: int = 40) -> CycleHop:
+        """A fresh potter campaign minted as `run_campaign` mints it (`jobs/mint.py::mint_framed_cycle`),
+        no round run and no job admitted: its root cycle, for a fact reading what a mint writes."""
+        config = campaign_config("potter", 0, bench_trigger="at_end")
+        self._lay(Script(config, rows, 0))
+        async with init_services(
+            DATASET, identity=self.stores.identity, stores=self.stores
+        ) as session:
+            assert session.dataset is not None, "a dataset session resolved its dataset"
+            laid, config = laid_session(session, ConfigLayers.of(session.dataset, stated(config)))
+            running = await mint_framed_cycle(laid, config, laid.bank.samples, task_text=None)
+        return running.hop
 
     async def resume(
         self,
@@ -330,7 +372,7 @@ def shared_run[T](
             with offline_network(mp) as net:
                 ran = World(workspace(), net, home.parent / "world")
                 if on is not None:
-                    ran._lay(on.script)
+                    ran._answer(on.script)
                 made = asyncio.run(act(ran))
     finally:
         unrefuse()

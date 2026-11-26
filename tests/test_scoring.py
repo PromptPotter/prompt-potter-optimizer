@@ -4111,7 +4111,7 @@ def test_an_arm_differences_each_rows_replicate_means_and_clusters_on_the_row() 
 @pytest.fixture(scope="module")
 def head_to_head(tmp_path_factory: pytest.TempPathFactory) -> Shared:
     """potter, capo and gepa as the arms of head-to-head `h2h`, and a capo campaign outside it:
-    9.2 s, read by three facts (~3 s each)."""
+    ~3.6 s once, read by three facts (~25 ms each)."""
 
     async def ran(w: World) -> tuple[list[str], str]:
         arms = await w.head_to_head({k: k for k in ("potter", "capo", "gepa")}, "h2h", rows=60)

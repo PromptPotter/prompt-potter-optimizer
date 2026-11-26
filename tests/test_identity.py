@@ -2403,7 +2403,7 @@ class _Steered(NamedTuple):
 @pytest.fixture(scope="module")
 def steered_line(tmp_path_factory: pytest.TempPathFactory) -> Shared:
     # A root and its fork, each on the menu the backend served it: the fork's carries one rung more.
-    # Run once for the module (~3.4 s, the suite's first opening included), ~20 ms a fact.
+    # Run once for the module (~2.7 s), ~25 ms a fact.
     async def act(world: World) -> tuple[CampaignCycle, CampaignCycle]:
         with pytest.MonkeyPatch.context() as served:
             served.setitem(_SERVED, "model", _MODELS)

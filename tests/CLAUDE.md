@@ -28,20 +28,21 @@
 - `await world.resume(hop, from_round=None, on_divergence=HALT, step_rounds=None) -> Ran`: the same entry, resuming; `from_round` rewinds as `--from` does.
 - `await world.fork(hop, round, **ForkCyclePayload) -> Ran`: a fork through the `fork_cycle` command door, run inline.
 - `await world.head_to_head(arms, h2h_id, rounds=1, rows=40) -> list[Ran]`: a head-to-head's arms minted in one act (`embedded_run.py::run_head_to_head`).
+- `await world.minted(rows=40) -> CycleHop`: a potter campaign minted as `run_campaign` mints it (`jobs/mint.py::mint_framed_cycle`), no round run, no job admitted (~50 ms): for a fact reading what a mint writes. A fact needing the origin measured takes `campaign(rounds=0)` (~0.3 s).
 - `async with world.opened(rows=40) as session`: the real opening (`init_services` → `laid_session` → `arm_diagnostic_scoring`), for a fact measuring one cell outside a run.
 - `world.edit_proposer()`: the proposer's template edited in this home's manifest shadow, so a resume diverges.
-- **A run several facts read is run once**: a module-scoped fixture returns `world.py::shared_run(tmp_path_factory, act)` (a `Shared`), and each fact takes `world.adopt(shared)`, its own copy of that home (~20 ms) whose script the network answers, so a fact may rewind, fork or resume it; a fixture reading the run in place takes `shared.reading()`, never a re-pointed `PROMPTPOTTER_HOME`. **Its fixture's line states the run's cost per module** (`# ~3.5 s once, ~20 ms a fact`). The first run of the session also pays the process's cold start (its first imports; the landing's key is built, `maintenance/built_key.py`).
+- **A run several facts read is run once**: a module-scoped fixture returns `world.py::shared_run(tmp_path_factory, act)` (a `Shared`), and a fact that writes takes `world.adopt(shared)`, its own copy of that home (~25 ms) whose script the network answers, so it may rewind, fork or resume it; a fact or fixture that only reads takes `with shared.reading() as stores`, in place (no copy), never a re-pointed `PROMPTPOTTER_HOME`: a read that wrote fails at its exit (the home's bytes are digested before and after). **Its fixture's line states the run's cost per module** (`~2.4 s once, ~25 ms a fact`). The process's cold start (its first imports; the landing's key is built, `maintenance/built_key.py`) is `conftest.py::cold_start`'s, a session fixture minting once after the dspy child: no fact or shared run pays it.
 - **One run per shape, the fewest rows and rounds its facts need**, built `on=` the run it extends:
 
   | run | module | shape | once | facts |
   |---|---|---|---|---|
-  | `line` | archive | potter, 3 rounds, 32 rows (24 starve its elections) | ~2.3 s | 24, through the runs on it |
-  | `displaced` | archive | on `line`: a rewind fork at 2; a paused campaign with a fork cut | ~1.9 s | 8 |
-  | `family_tree` | archive | on `displaced`: a fork of the fork at 3, a steer off an uncrowned arm | ~2.1 s | 1 (the mask; the subtree's rules are tables) |
-  | `origin_forks` | archive | on `line`: two steers off round 1's crown, origin unmodified and edited | ~2.2 s | 2 |
-  | `gated` | archive | an origin the gate halts | ~1.5 s | 2 |
-  | `steered_line` | identity | a root on a served menu, forked at 0 on a wider one | ~4 s | 7 |
-  | `head_to_head` | scoring | potter, capo, gepa as one head-to-head, and a lone capo, 60 rows (gepa's floor) | ~5.5 s | 3 |
+  | `line` | archive | potter, 3 rounds, 32 rows (24 starve its elections) | ~2.4 s | 16, 26 through the runs on it |
+  | `displaced` | archive | on `line`: a rewind fork at 2; a paused campaign with a fork cut | ~1.6 s | 7 |
+  | `family_tree` | archive | on `displaced`: a fork of the fork at 3, a steer off an uncrowned arm | ~1.7 s | 1 (the mask; the subtree's rules are tables) |
+  | `origin_forks` | archive | on `line`: two steers off round 1's crown, origin unmodified and edited | ~1.6 s | 2 |
+  | `gated` | archive | an origin the gate halts | ~0.3 s | 2 (one reads in place) |
+  | `steered_line` | identity | a root on a served menu, forked at 0 on a wider one | ~2.7 s | 7 |
+  | `head_to_head` | scoring | potter, capo, gepa as one head-to-head, and a lone capo, 60 rows (gepa's floor) | ~3.6 s | 3 |
 - `Ran.session`, `Ran.result`, `Ran.hop`; `world.ledger(hop)`, `world.records(hop)`; `world.net` is the `Router` (`net.backend.faults`, `net.llm.sent`, `net.rates`).
 - Its teardown is the fixtures': `offline` restores the network and asserts nothing went unrouted, `own_home`'s tree goes with `tmp_path`.
 

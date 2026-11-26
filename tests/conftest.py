@@ -22,7 +22,7 @@ from offline_world import (
     Router,
     refuse_network,
 )
-from world import World, offline_network
+from world import World, offline_network, shared_run
 
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.infrastructure.run_scope import scoped
@@ -116,6 +116,18 @@ def dspy_child(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     assert child.returncode == 0, f"the dspy cells did not run: {child.stderr[-2000:]}"
     paid: dict[str, Any] = json.loads(child.stdout.splitlines()[-1])
     return paid
+
+
+@pytest.fixture(autouse=True, scope="session")
+def cold_start(request: pytest.FixtureRequest, tmp_path_factory: pytest.TempPathFactory) -> None:
+    """The process's first run pays its cold start (its first imports, the landing's key): paid
+    once here, by a mint, never by whichever fact or shared run comes first. After the dspy child,
+    which runs while this process is small; a session running no world pays neither."""
+    asked = [getattr(item, "fixturenames", ()) for item in request.session.items]
+    if any("dspy_child" in names for names in asked):
+        request.getfixturevalue("dspy_child")
+    if any("world" in names for names in asked):
+        shared_run(tmp_path_factory, lambda world: world.minted())
 
 
 @pytest.fixture

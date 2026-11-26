@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import contextvars
 import enum
+import functools
 import hashlib
 import inspect
 import io
@@ -487,14 +488,18 @@ def _key_checks() -> set[str]:
     return {spec.base_url + spec.key_check for spec, _ in keyed_specs().values()}
 
 
-def _bundled_rates() -> dict[str, dict[str, Any]]:
-    """The shipped floor in upstream's vocabulary, its `lister` upstream's `litellm_provider`."""
+@functools.cache
+def _bundled_listing() -> str:
+    """The shipped floor in upstream's vocabulary, its `lister` upstream's `litellm_provider`:
+    validated once a process, as a world is laid per fact."""
     floor = RatesFile.model_validate_json(BUNDLED_PATH.read_bytes()).models
-    return {
-        name: body.model_dump(exclude={"lister"}, exclude_none=True)
-        | ({"litellm_provider": body.lister} if body.lister else {})
-        for name, body in floor.items()
-    }
+    return json.dumps(
+        {
+            name: body.model_dump(exclude={"lister"}, exclude_none=True)
+            | ({"litellm_provider": body.lister} if body.lister else {})
+            for name, body in floor.items()
+        }
+    )
 
 
 class Router:
@@ -512,7 +517,7 @@ class Router:
         self.catalogue: list[dict[str, Any]] = []
         # Upstream's rows, `provider/model` -> its per-token costs, as `refresh_rates` fetches them:
         # the bundled floor, unless a journey says what upstream lists.
-        self.rates: dict[str, dict[str, Any]] = _bundled_rates()
+        self.rates: dict[str, dict[str, Any]] = json.loads(_bundled_listing())
         # Upstream unreachable, as a dead host fails `urlopen`; every try at it counted alike.
         self.upstream_dead = False
         self.rate_fetches = 0
