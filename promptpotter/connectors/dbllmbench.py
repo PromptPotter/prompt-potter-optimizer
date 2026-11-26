@@ -109,7 +109,7 @@ class DbllmbenchPanel(BaseModel):
     questions: list[dict[str, Any]]
 
 
-def _extract_experiment(panel: DbllmbenchPanel) -> list[dict[str, Any]]:
+async def _extract_experiment(_stores: object, panel: DbllmbenchPanel) -> list[dict[str, Any]]:
     return [
         {
             "query": q["question"],

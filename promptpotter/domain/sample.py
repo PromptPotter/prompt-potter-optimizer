@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Any
 
 from pydantic import ConfigDict, JsonValue, PrivateAttr
 
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.scoring import MeasuredCell
+from promptpotter.domain.scoring import CELL_KEYS, MeasuredCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
 from promptpotter.shared.hashing import dataset_hash, stable_hash
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -160,10 +159,21 @@ def _stamp(row: Mapping[str, object], key: str) -> str | None:
     return None if row.get(key) is None else _stated(row, key)
 
 
+def _output_keys(row: Mapping[str, object]) -> dict[str, tuple[str, ...]]:
+    value = row.get("output_keys")
+    if not isinstance(value, dict) or not all(
+        type(node) is str and isinstance(keys, list) and all(type(k) is str for k in keys)
+        for node, keys in value.items()
+    ):
+        raise TypeError(f"a filed answer states its nodes' output_keys; this row holds {value!r}")
+    return {node: tuple(keys) for node, keys in value.items()}
+
+
 @dataclass(frozen=True, slots=True)
 class FiledAnswer:
     """Filed under ``(config_key, cell.sample_key)``; ``dataset_hash`` is the bank that measured it,
-    ``filed_by`` the run that filed it, ``None`` on an answer filed before the stamp."""
+    ``output_keys`` each node's outputs as the pipeline that answered declared them, so a read
+    attributes the answer by what was filed, never today's declaration."""
 
     cell: MeasuredCell
     config_key: str
@@ -171,13 +181,15 @@ class FiledAnswer:
     role: MeasurementRole
     provenance: str
     created_at: str
-    filed_by: CycleHop | None = None
+    output_keys: Mapping[str, tuple[str, ...]]
     compaction: str | None = None
     purged: str | None = None
 
     @classmethod
     def from_wire(cls, row: Mapping[str, object]) -> FiledAnswer:
-        filed_by = row.get("filed_by")
+        """Refuses a key it does not declare, so a retired one is named where the row drops."""
+        if undeclared := sorted(row.keys() - _FILED_KEYS):
+            raise KeyError(f"a filed answer declares no {', '.join(undeclared)}")
         return cls(
             MeasuredCell.from_wire(row),
             config_key=_stated(row, "config_key"),
@@ -185,7 +197,7 @@ class FiledAnswer:
             role=MeasurementRole(_stated(row, "role")),
             provenance=_stated(row, "provenance"),
             created_at=_stated(row, "created_at"),
-            filed_by=None if filed_by is None else CycleHop.model_validate(filed_by),
+            output_keys=_output_keys(row),
             compaction=_stamp(row, "compaction"),
             purged=_stamp(row, "purged"),
         )
@@ -198,9 +210,8 @@ class FiledAnswer:
             "role": self.role.value,
             "provenance": self.provenance,
             "created_at": self.created_at,
+            "output_keys": {node: list(keys) for node, keys in self.output_keys.items()},
         }
-        if self.filed_by is not None:
-            out["filed_by"] = self.filed_by.model_dump()
         if self.compaction is not None:
             out["compaction"] = self.compaction
         if self.purged is not None:
@@ -212,3 +223,7 @@ class FiledAnswer:
         if (address := self.cell.answer) is None:
             raise TypeError(f"the answer to {self.cell.sample_key} carries no archive address")
         return address
+
+
+# The cell's keys and each stamp's, by its field's name: `FiledAnswer.wire` writes no other.
+_FILED_KEYS = CELL_KEYS | {f.name for f in fields(FiledAnswer) if f.name != "cell"}

@@ -10,7 +10,7 @@ The on-disk shape of [`../architecture.md`](../architecture.md) § Four entities
 |---|---|---|
 | Workspace | `projects/{tenant}/` | the tenant |
 | Dataset | tenant upload `projects/{tenant}/datasets/{slug}/` first, then shipped template `promptpotter/assets/datasets/{name}/` | its content; the slug is a label |
-| Campaign | `campaigns/{campaign_id}/campaign.json` | `{dataset}__{6 hex}`, fresh per `new`; a nested name's `/` is written `.` |
+| Campaign | `campaigns/{campaign_id}/campaign.json` | a root's `{dataset}__{6 hex}`, fresh per `new` (`campaign_store/store.py::CampaignStore.claim_campaign_id`); an L4 inner campaign's `{dataset}__{12 hex}`, its content (`runner/inner/spawn.py::inner_campaign_id`); a nested name's `/` is written `.` |
 | Cycle | `campaigns/{campaign_id}/cycles/{cycle_id}/` | `cycle_{content_hash[:12]}` (+ `_fork_`); a path resolves as `(campaign_id, cycle_id)` |
 
 ### The hierarchy address

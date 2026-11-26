@@ -508,7 +508,6 @@ def test_a_reclaim_deletes_nothing_while_a_run_appends_and_only_what_its_plan_na
             assert archive.population(whole) == before, "a reclaim deleted beside a live producer"
     assert archive_datasets(built_stores).labels == ["compacted"], "the control offers no scope"
     plan = reclaim_dataset(built_stores, dataset="compacted")
-    assert plan.breaks == ("filer/filer",), "the plan named no run its delete breaks"
     assert (plan.rows_moved, archive.population(whole)) == (2, before), "a dry run deleted"
     done = reclaim_dataset(built_stores, dataset="compacted", apply=True)
     assert (done.files_touched, done.rows_moved) == (plan.files_touched, plan.rows_moved)
@@ -821,7 +820,7 @@ def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
         "  optimization:\n    degradation_threshold: 0.4\n",
         encoding="utf-8",
     )
-    opened = asyncio.run(open_cell(built_stores, "compacted-renamed", compacted_refs[q1.query]))
+    opened = open_cell(built_stores, "compacted-renamed", compacted_refs[q1.query])
     assert opened.position == compacted_bank.position_of[q1.key], (
         "an old answer opened at another bank's slot"
     )

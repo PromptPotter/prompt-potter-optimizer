@@ -10,7 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING, Annotated, Any
 
-from pydantic import Field, PrivateAttr, ValidationError, model_validator
+from pydantic import Field, PrivateAttr, model_validator
 
 from promptpotter import connectors
 from promptpotter.application.datasets.authored import dataset_campaign_block
@@ -27,8 +27,7 @@ from promptpotter.domain.campaign_config import (
     OptimizationConfig,
 )
 from promptpotter.domain.cells import PinnedCell, Seat
-from promptpotter.domain.cycle_paths import CycleHop
-from promptpotter.domain.l4.cells import CellOptimizer, InnerCell, InnerCells, InnerTaskSpec
+from promptpotter.domain.l4.cells import CellOptimizer, InnerCell, InnerCells
 from promptpotter.domain.layer_fold import LaidAs, Layer
 from promptpotter.domain.pipeline_params import NodeCall
 from promptpotter.domain.pipeline_schema import (
@@ -36,7 +35,6 @@ from promptpotter.domain.pipeline_schema import (
     NodeSearchNarrowing,
     PipelineNode,
 )
-from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.spend import Budget
 from promptpotter.domain.strict_model import FrozenModel
@@ -49,8 +47,10 @@ from promptpotter.infrastructure.run_scope import (
 )
 from promptpotter.infrastructure.store.archive_queries import ArmOf, CampaignWalks
 from promptpotter.infrastructure.store.campaign_store.store import CampaignStore
-from promptpotter.infrastructure.store.dataset_access import read_dataset_pipeline, resolve_dataset
-from promptpotter.infrastructure.store.layout import inner_sandbox_dir
+from promptpotter.infrastructure.store.dataset_access import (
+    resolve_dataset,
+    runnable_definition,
+)
 from promptpotter.infrastructure.store.stores import Stores
 from promptpotter.shared.errors import CellUnscoreableError, DatasetAccessError, PayloadInvalidError
 
@@ -58,17 +58,18 @@ if TYPE_CHECKING:
     from promptpotter.application.initialization.session import Session
 
 
-def panel_cell(sample: Sample) -> Seat:
+def panel_cell(sample: Sample, seats: Sequence[Seat]) -> PinnedCell:
+    """The seat of *seats* the row's pin IS, whatever it is labelled this campaign."""
     try:
-        return PinnedCell.from_pin(sample.source_pin or {}).cell
-    except ValidationError as exc:
+        return PinnedCell.from_pin(sample.source_pin or {}, seats)
+    except ValueError as exc:
         raise CellUnscoreableError(
             f"{sample.query!r} is no cell of an inner panel: {exc}", spent={}
         ) from exc
 
 
 def _level_slug(value: object) -> str:
-    """The generated cell id is the OUTER QUERY, so it stays byte-stable across runs."""
+    """A generated seat's id, byte-stable across runs."""
     return re.sub(r"[^A-Za-z0-9]+", "-", str(value)).strip("-") or "none"
 
 
@@ -126,12 +127,26 @@ class InnerTasks(FrozenModel):
     def dataset_for(self, cell: Seat) -> str:
         return cell.inner_dataset or self.inner_benchmark
 
+    def query_of(self, cell: Seat) -> str:
+        """The cell's row as the outer reads it, spelled off what it IS (the fields that tell two
+        cells apart, `_cells_are_distinct`'s), so renaming its seat moves no `Sample.key`."""
+        route = "+".join(cell.inner_route_order or ())
+        parts = (cell.inner_model, cell.inner_provider, route)
+        return "/".join([self.dataset_for(cell), f"seed-{cell.run_seed}", *(p for p in parts if p)])
+
     @property
     def datasets(self) -> frozenset[str]:
         return frozenset(self.dataset_for(cell) for cell in self.tasks)
 
     def resolve_cells(self, stores: Stores) -> InnerCells:
         """Each cell runs its own optimizer: the treatment is the cell's."""
+        if "scoring" not in self.inner_campaign:
+            # The inner scoring and ladder are the panel's alone (`_THE_PANELS` clears each seat's).
+            raise PayloadInvalidError(
+                "the panel's `inner_campaign` declares no `scoring`: every seat's inner run is "
+                "scored by the one measurand the panel declares, never its dataset's own",
+                code="pipeline_config_invalid",
+            )
         by_dataset: dict[str, InnerCell] = {}
         for name in sorted(self.datasets):
             try:
@@ -142,8 +157,15 @@ class InnerTasks(FrozenModel):
                     f"seat(s) {seats} measure {name!r}, which no tier this account reads holds",
                     code="pipeline_config_invalid",
                 ) from missing
+            if runnable_definition(dataset).owner.self_optimization:
+                # Its seat keys would be built at this panel's own init, and no inner run spawns one.
+                raise PayloadInvalidError(
+                    f"the panel's seats measure {name!r}, itself an outer dataset: name an "
+                    "inner_benchmark on another backend",
+                    code="pipeline_config_invalid",
+                )
             laid = CampaignConfig.model_validate(dataset_campaign_block(dataset)).overlaid(
-                Layer("panel", self.inner_campaign)
+                Layer("seat", _THE_PANELS), Layer("panel", self.inner_campaign)
             )
             if (refused := _unreadable_geometry(laid)) is not None:
                 raise PayloadInvalidError(
@@ -153,40 +175,13 @@ class InnerTasks(FrozenModel):
             selected = select_optimizer(_inner_optimization(laid.optimization))
             by_dataset[name] = InnerCell(
                 campaign=laid,
-                pipeline=read_dataset_pipeline(dataset),
-                optimizer=cell_optimizer(selected),
-                # Keyed before the cell's chain resolves: every admission, so no drawable edit hides.
-                treatment=selected.treatment(frozenset(Presumption), stores.block_packs).digest,
+                optimizer=cell_optimizer(selected, laid.scoring),
             )
-        measures = BehaviourKeys.held().cell_estimator
         return InnerCells(
             cells=tuple(self.tasks),
             by_dataset=by_dataset,
-            specs={
-                seat.id: self._seat_spec(by_dataset[self.dataset_for(seat)], seat, measures)
-                for seat in self.tasks
-            },
-            estimator=measures,
-        )
-
-    def _seat_spec(self, held: InnerCell, cell: Seat, measures: str) -> InnerTaskSpec:
-        """Depth is the panel's, never the pin's: the laid campaign's identity holds it."""
-        # `config` only: widening a permission list changes nothing the origin does, so it voids no cell.
-        nodes = (
-            {n: (node or {}).get("config") for n, node in held.pipeline["nodes"].items()}
-            if held.pipeline and isinstance(held.pipeline.get("nodes"), dict)
-            else None
-        )
-        return InnerTaskSpec(
-            inner_dataset=self.dataset_for(cell),
-            optimizer_treatment=held.treatment,
-            run_seed=cell.run_seed,
-            campaign=held.campaign.identity(),
-            nodes=nodes,
-            inner_model=cell.inner_model,
-            inner_provider=cell.inner_provider,
-            inner_route_order=cell.inner_route_order,
-            estimator=measures,
+            datasets={seat.id: self.dataset_for(seat) for seat in self.tasks},
+            estimator=BehaviourKeys.held().cell_estimator,
         )
 
     @model_validator(mode="after")
@@ -217,28 +212,18 @@ class InnerTasks(FrozenModel):
 
 
 class ResolvedInnerPanel(FrozenModel):
-    """The panel with each cell's instrument (`read`): the ONE document run init, the samples and
-    the fingerprint read."""
+    """The panel with its cells resolved (`read`): what run init, the graph and the identity read.
+    Each cell's key is laid where the bank is built (`spawn.py::panel_rows`), never here: it
+    reads what each seat's session loads."""
 
     inner_panel: InnerTasks
-    # By cell id.
-    instruments: dict[str, str]
-    # By cell id: the dataset each cell's inner campaign measures, its δ scale's.
-    datasets: dict[str, str]
     _cells: InnerCells | None = PrivateAttr(None)
 
     @classmethod
     def read(cls, stores: Stores, panel: Mapping[str, Any]) -> ResolvedInnerPanel:
-        """Each cell's instrument beside the panel; only what was declared survives the pin's dump,
-        so a field that gains a default re-keys no banked cell."""
         parsed = InnerTasks.model_validate(panel)
-        cells = parsed.resolve_cells(stores)
-        read = cls(
-            inner_panel=parsed,
-            instruments={t.id: cells.spec(t).key() for t in parsed.tasks},
-            datasets={t.id: parsed.dataset_for(t) for t in parsed.tasks},
-        )
-        read._cells = cells
+        read = cls(inner_panel=parsed)
+        read._cells = parsed.resolve_cells(stores)
         return read
 
     def cells(self, stores: Stores) -> InnerCells:
@@ -247,25 +232,17 @@ class ResolvedInnerPanel(FrozenModel):
             self._cells = self.inner_panel.resolve_cells(stores)
         return self._cells
 
-    @model_validator(mode="after")
-    def _every_cell_measured(self) -> ResolvedInnerPanel:
-        ids = {cell.id for cell in self.inner_panel.tasks}
-        if set(self.instruments) != ids or set(self.datasets) != ids:
-            raise ValueError(
-                "a resolved panel carries one instrument and one dataset per cell, and no other"
-            )
-        return self
-
-    def samples(self) -> list[dict[str, Any]]:
-        """``held_out`` seats the cell on the outer bench and stays out of the pin: the seat is where
-        the cell sits this campaign, not what it measures, so its cells replay once it is searched."""
+    def samples(self, keys: Mapping[str, str]) -> list[dict[str, Any]]:
+        """*keys* by seat id (`cell_key`). ``held_out`` seats the cell on the outer bench and stays
+        out of the pin: the seat is where the cell sits this campaign, not what it measures, so its
+        cells replay once it is searched."""
         return [
             {
-                "query": t.id,
+                "query": self.inner_panel.query_of(t),
                 "ground_truth": None,
-                "source_pin": PinnedCell(cell=t, instrument=self.instruments[t.id]).pin(),
+                "source_pin": PinnedCell(cell=t, instrument=keys[t.id]).pin(),
                 "held_out": t.held_out,
-                "measured_dataset": self.datasets[t.id],
+                "measured_dataset": self.inner_panel.dataset_for(t),
             }
             for t in self.inner_panel.tasks
         ]
@@ -276,6 +253,10 @@ def is_self_optimization(connector: str) -> bool:
 
 
 INNER_ARM_GATE: ArmGateMode = "off"
+
+# What no seat's own block lays: one inner measurand and one stall ladder across a panel, so a
+# lift on one benchmark and on another are read on one scale (the panel's `inner_campaign`).
+_THE_PANELS: dict[str, Any] = {"scoring": None, "optimization": {"nodes": {"escalation": None}}}
 
 
 def _unreadable_geometry(laid: CampaignConfig) -> str | None:
@@ -295,14 +276,14 @@ def _inner_optimization(opt: OptimizationConfig) -> OptimizationConfig:
     return opt.model_copy(update={"arm_gate": INNER_ARM_GATE})
 
 
-def cell_optimizer(inner: SelectedOptimizer) -> CellOptimizer:
-    """A cell's optimizer in the outer's terms, read once at resolve."""
+def cell_optimizer(inner: SelectedOptimizer, scoring: object) -> CellOptimizer:
+    """A cell's optimizer in the outer's terms, read once at resolve; *scoring* is its campaign's."""
     llm = [node.name for node in inner.schema.declared_nodes if node.kind is NodeKind.LLM]
     return CellOptimizer(
         name=inner.name,
         declared=tuple(inner.schema.declared_nodes),
         pipelines={name: list(steps) for name, steps in inner.schema.pipelines.items()},
-        levers={node.name: _lever(inner, node.name) for node in inner.schema.declared_nodes},
+        levers={node.name: _lever(inner, node, scoring) for node in inner.schema.declared_nodes},
         outer_levers={name: inner.outer_levers(name) for name in llm},
         fired_on=fired_on(inner.schema),
         measurement=inner.plan.measurement,
@@ -310,15 +291,22 @@ def cell_optimizer(inner: SelectedOptimizer) -> CellOptimizer:
     )
 
 
-def _lever(inner: SelectedOptimizer, node: str) -> dict[str, Any]:
-    declared = inner.manifest.nodes[node].model_dump(
+def _lever(inner: SelectedOptimizer, node: PipelineNode, scoring: object) -> dict[str, Any]:
+    """What an arm's edit to *node* lands on, beside what makes two cells' measurands one: the
+    measurement node's scoring and the controller's ladder (`InnerCells.owners` refuses a split)."""
+    declared = inner.manifest.nodes[node.name].model_dump(
         mode="json", exclude_unset=True, exclude={"config"}
     )
-    return {**declared, "config": inner.call_settings(node)}
+    lever = {**declared, "config": inner.call_settings(node.name)}
+    if node.name == inner.plan.measurement:
+        lever["scoring"] = scoring
+    if node.kind is NodeKind.CONTROLLER:
+        lever["ladder"] = inner.knobs(node.name).model_dump(mode="json")
+    return lever
 
 
 def inner_instrument_config(
-    spec: InnerTaskSpec,
+    cell: Seat,
     base: CampaignConfig,
     *,
     solver: Sequence[PipelineNode],
@@ -343,13 +331,13 @@ def inner_instrument_config(
     narrowing = dict(base.optimizer_narrowing)
     for prompt_node in solver:
         node = po.get(prompt_node.name, NodeCall()).laid_keys()
-        node["seed"] = spec.run_seed
-        if spec.inner_model:
-            node["model"] = spec.inner_model
-            if spec.inner_provider:
-                node["provider"] = spec.inner_provider
-        if spec.inner_route_order:
-            node["route_order"] = list(spec.inner_route_order)
+        node["seed"] = cell.run_seed
+        if cell.inner_model:
+            node["model"] = cell.inner_model
+            if cell.inner_provider:
+                node["provider"] = cell.inner_provider
+        if cell.inner_route_order:
+            node["route_order"] = list(cell.inner_route_order)
         po[prompt_node.name] = NodeCall.model_validate(node)
         # The solver's SPEND AXES — model, effort, output cap, temperature — are the instrument, so the
         # inner generator writes prompt text alone: a lift bought with tokens is not optimizer learning.
@@ -357,7 +345,7 @@ def inner_instrument_config(
         narrowing[prompt_node.name] = own.model_copy(update={"param_keys": []})
     return base.model_copy(
         update={
-            "run_seed": spec.run_seed,
+            "run_seed": cell.run_seed,
             "optimization": base.optimization.model_copy(update=opt_update),
             "pipeline_overlay": po,
             "optimizer_narrowing": narrowing,
@@ -370,20 +358,9 @@ def inner_spawn_of(session: Session) -> InnerSpawnContext | None:
     cycle_id = session.cycle_id
     if not cycle_id or session.dataset is None or not session.campaign_id:
         return None
-    # Never this store's ``projects_root``, which inside a sandbox already IS the sandbox.
-    shared_root = session.store.shared_root
-    inner_root = inner_sandbox_dir(
-        shared_root,
-        session.store.tenant_id,
-        CycleHop(campaign_id=session.campaign_id, cycle_id=cycle_id),
-    )
     client = session.backend_client
     return InnerSpawnContext(
-        inner_sandbox_root=inner_root,
-        identity=session.store.identity,
-        shared_root=shared_root,
-        install_datasets_root=session.store.install_datasets_root,
-        research_datasets_root=session.store.research_datasets_root,
+        stores=session.store,
         inside=(*session.store.inside, session.hop),
         enclosing=(*session.state.control.enclosing, session.store.subject(session.hop)),
         acting=session.state.control.acting,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, NamedTuple, NoReturn, assert_never
@@ -24,7 +24,7 @@ from promptpotter.application.jobs.quota import (
     slot_rate,
 )
 from promptpotter.application.jobs.registry import JobRegistry, launch_interrupted
-from promptpotter.application.pipeline_resolve import cycle_config
+from promptpotter.application.pipeline_resolve import cycle_config, experiment_outside_run
 from promptpotter.application.run_phase_control import ProducerHold, close_dead_bench
 from promptpotter.domain.bench import CampaignRefusal
 from promptpotter.domain.campaign import (
@@ -59,6 +59,7 @@ from promptpotter.domain.phases import (
     StopReason,
     stop_reason_outcome,
 )
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.records.error import ErrorRecord
 from promptpotter.domain.records.run_records import Hold, RunPhaseRecord
 from promptpotter.domain.refusal import Refusal
@@ -74,6 +75,7 @@ from promptpotter.infrastructure.llm.wallet import Send
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.dataset_access import (
     DEFINITION_READ_ERRORS,
+    DatasetDefinition,
     definition_version,
     resolve_dataset,
     runnable_definition,
@@ -91,11 +93,6 @@ from promptpotter.shared.measurement_context import MeasurementRole
 
 if TYPE_CHECKING:
     from promptpotter.application.jobs.launcher.launch import LaunchRequest
-
-
-# A share's run: started under its hold, it answers what it ran and the result its job's release
-# records.
-type SharedRun[S] = Callable[[HeldBudget], Awaitable[tuple[S, CycleResult]]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,9 +175,39 @@ async def probe_backend(
     return None
 
 
-async def refuse_unreachable(name: str, endpoint: str | None) -> None:
-    if (down := await probe_backend(name, endpoint)) is not None:
-        raise down
+async def refuse_unreachable(
+    stores: Stores, dataset_name: str | None, name: str, endpoint: str | None
+) -> None:
+    """THE launch probe, asked at every door before anything mints: the backend *dataset_name*
+    runs on, then each backend a dataset its connector's own declaration nests runs on (an L4
+    panel's seats), each once. A check-in's draft names no dataset yet: its connector serves
+    uploads and owns no panel."""
+    probed = dict.fromkeys(
+        [(name, endpoint)]
+        + [(d.connector, d.endpoint) for d in _nested_definitions(stores, dataset_name, name)]
+    )
+    for backend, at in probed:
+        if (down := await probe_backend(backend, at)) is not None:
+            raise down
+
+
+def _nested_definitions(
+    stores: Stores, dataset_name: str | None, name: str
+) -> list[DatasetDefinition]:
+    """Only a panel the connector declares in-process nests a dataset (`nested_datasets`); a
+    served backend's declaration is read past its probe."""
+    connector = connectors.CONNECTORS.get(name)
+    if dataset_name is None or not connector.owns_panel or connector.pipeline_declaration is None:
+        return []
+    dataset = resolve_dataset(stores, dataset_name)
+    declared = parse_pipeline_response(
+        connector.pipeline_declaration(stores, experiment_outside_run(stores, dataset))
+    )
+    return [
+        runnable_definition(resolve_dataset(stores, nested))
+        for node in declared.declared_nodes
+        for nested in node.nested_datasets
+    ]
 
 
 class _DefinitionRead(NamedTuple):
@@ -398,7 +425,9 @@ async def admit_and_hold(request: LaunchRequest, start: RunStart) -> HeldBudget:
             # never a definition moved while the job waited.
             refuse_campaign(stores, at.campaign)
 
-    await refuse_unreachable(request.connector(stores), request.endpoint(stores))
+    await refuse_unreachable(
+        stores, request.dataset_name, request.connector(stores), request.endpoint(stores)
+    )
     declared, asked = declare_run_budget(
         request.declared_budget(stores), stores=stores, at=at, requested=request.budget
     )
@@ -488,7 +517,7 @@ def admit_arms(
     holder: CampaignLaunch | EmbeddedRun,
 ) -> list[tuple[Job, HeldBudget]]:
     """Every arm's job and share, each at its budget and sends, or none, under one gate. An
-    embedded host holds no slot (`slotless_share`)."""
+    embedded host holds no slot (`admit_slotless`)."""
     with job_registry.admission_gate(launching=True):
         jobs: list[Job] = []
         try:
@@ -627,37 +656,6 @@ def admit_slotless(
         start.release(exc)
         raise
     return start, held
-
-
-async def slotless_share[S](
-    config: CampaignConfig,
-    *,
-    stores: Stores,
-    holder: InnerRun,
-    at: CampaignCycle,
-    sends: tuple[Send, ...],
-    run: SharedRun[S],
-) -> tuple[S, CycleResult]:
-    """An inner run on the cycle its spawn minted: admitted (`admit_slotless`), then *run* under
-    its hold, whose result the job's release records."""
-    start, held = await asyncio.to_thread(
-        admit_slotless,
-        config,
-        stores=stores,
-        holder=holder,
-        at=at,
-        requested=Budget(),
-        step_rounds=None,
-        sends=sends,
-    )
-    try:
-        await asyncio.to_thread(start.job_registry.move, start.job_id, LaunchMove.START)
-        ran = await run(held)
-    except BaseException as exc:
-        await asyncio.to_thread(start.release, exc)
-        raise
-    await asyncio.to_thread(start.release, ran[1])
-    return ran
 
 
 def _admit_call(stores: Stores, holder: PaidCall, provider: str) -> tuple[RunStart, SpendBook]:

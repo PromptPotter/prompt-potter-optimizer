@@ -4900,9 +4900,6 @@ export interface ArchiveReport {
   conflicts: number;
   purged: number;
   rows_skipped_by_role: unknown;
-  /** The runs a reclaim's delete breaks: each that filed an answer it deletes, or
-   * measured one as an L4 inner campaign. */
-  breaks: string[];
   applied: boolean;
   /** What the counts mean where they are not a plain success — the refusal while a
    * cycle can still append, files refused, answers already purged — worded
@@ -5768,7 +5765,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/middleware/headers.py::served_contract).
-export const SERVED_CONTRACT = "0a743eb797031a40";
+export const SERVED_CONTRACT = "2dc24bbcac81f212";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

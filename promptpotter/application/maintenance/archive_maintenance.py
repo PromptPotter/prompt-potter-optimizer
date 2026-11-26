@@ -11,7 +11,6 @@ from typing import Any
 from pydantic import Field, computed_field
 
 from promptpotter.config.paths import jobs_dir
-from promptpotter.domain.l4.proxies import inner_facts_of
 from promptpotter.domain.sample import FiledAnswer
 from promptpotter.domain.scoring import UNREAD_PIPELINE_KEYS, PipelineData
 from promptpotter.domain.strict_model import StrictModel
@@ -120,11 +119,6 @@ class ArchiveReport(StrictModel):
     payload deliberately" and "this was never compacted" are different facts, and collapsing them
     is how a purge starts reading as if it never happened."""
     rows_skipped_by_role: Mapping[str, int] = Field(default_factory=dict)
-    breaks: tuple[str, ...] = Field(
-        default=(),
-        description="The runs a reclaim's delete breaks: each that filed an answer it deletes, or "
-        "measured one as an L4 inner campaign.",
-    )
     applied: bool = False
     notes: tuple[str, ...] = Field(
         default=(),
@@ -185,26 +179,6 @@ def _age_band(created_at: str, *, now: datetime) -> str:
     return next(band for band, upper in _AGE_BANDS if age_days < upper)
 
 
-_UNSTAMPED = "filed before the stamp, naming no run"
-
-
-def _runs_of(answer: FiledAnswer) -> set[str]:
-    """The runs *answer* serves: the one that filed it, and an L4 outer cell's inner campaign."""
-    hop = answer.filed_by
-    runs = {_UNSTAMPED if hop is None else f"{hop.campaign_id}/{hop.cycle_id}"}
-    if (inner := inner_facts_of(answer.cell.pipeline)) is not None:
-        runs.add(f"inner {inner.run.campaign_id}")
-    return runs
-
-
-class EntryRuns(StrictModel):
-    """One archive entry, a configuration under a dataset, and the runs its answers serve."""
-
-    config_key: str
-    dataset: str
-    runs: list[str]
-
-
 class InventoryRow(StrictModel):
     """One cut of the archive — a dataset, a pass role, or an age band."""
 
@@ -249,7 +223,6 @@ class ArchiveInventory(StrictModel):
     by_role: list[InventoryRow]
     by_age: list[InventoryRow]
     total: InventoryRow
-    serves: list[EntryRuns]
     orphan_index_rows: int = 0
     """Index rows no answer stands behind.
 
@@ -303,7 +276,7 @@ def inventory_measurement_archive(
     by_role: dict[str, _Tally] = {}
     by_age: dict[str, _Tally] = {}
     total = _Tally()
-    held: dict[tuple[str, str], set[str]] = {}
+    held: set[tuple[str, str]] = set()
 
     for file_key in archive.keys(ArchiveFile.CELLS):
         answers = _parsed(archive.detail_lines(file_key))
@@ -313,7 +286,7 @@ def inventory_measurement_archive(
             if not _in_scope(answer, digest):
                 continue
             configuration = answer.config_key
-            held.setdefault((configuration, answer.dataset_hash), set()).update(_runs_of(answer))
+            held.add((configuration, answer.dataset_hash))
             hot = len(line.encode("utf-8"))
             cold = cold_each if _moved(answer) else 0.0
             for table, key in (
@@ -334,10 +307,6 @@ def inventory_measurement_archive(
         by_role=_by_bytes(by_role),
         by_age=_in_band_order(by_age),
         total=total.row(dataset or "all"),
-        serves=[
-            EntryRuns(config_key=config, dataset=_label(named, digest), runs=sorted(runs))
-            for (config, digest), runs in sorted(held.items())
-        ],
         orphan_index_rows=orphans,
         archive_writers=len(archive_writers(stores.shared_root)),
     )
@@ -368,7 +337,6 @@ class _FileOutcome:
     change: _Swept | _Purged | _Conflict | None
     skipped: Mapping[str, int] = field(default_factory=dict)
     unrestorable: int = 0
-    breaks: frozenset[str] = frozenset()
 
 
 # A cell or cold file's lines and payload, and the dataset hash it is scoped to, keyword.
@@ -408,10 +376,8 @@ def _each_file(
 def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool, unread: list[str]) -> ArchiveReport:
     touched = rows = before = after = cold = conflicts = purged = unrestorable = 0
     skipped: Counter[str] = Counter()
-    breaks: set[str] = set()
     for outcome in outcomes:
         skipped.update(outcome.skipped)
-        breaks |= outcome.breaks
         unrestorable += outcome.unrestorable
         match outcome.change:
             case _Swept() as moved:
@@ -439,7 +405,6 @@ def _folded(outcomes: Iterable[_FileOutcome], *, applied: bool, unread: list[str
         conflicts=conflicts,
         purged=purged + unrestorable,
         rows_skipped_by_role=dict(skipped),
-        breaks=tuple(sorted(breaks)),
         applied=applied,
         notes=(*_notes(conflicts=conflicts, unrestorable=unrestorable), *unread),
     )
@@ -591,13 +556,12 @@ def _reclaimed(
     deleted = {a.answer for a in gone}
     rest = [moved for moved in cold if moved.answer not in deleted]
     freed = _size(lines) - _size(kept) + cold_size(cold) - cold_size(rest)
-    breaks = frozenset().union(*map(_runs_of, gone))
-    return CellRewrite(kept, rest), _FileOutcome(_Purged(len(gone), freed), breaks=breaks)
+    return CellRewrite(kept, rest), _FileOutcome(_Purged(len(gone), freed))
 
 
 def reclaim_dataset(stores: Stores, *, dataset: str | None, apply: bool = False) -> ArchiveReport:
     """Deletes every answer *dataset* measured, hot and cold, then the index rows left standing on
-    nothing; its plan names the runs the delete breaks."""
+    nothing."""
     if dataset is None:
         raise PayloadInvalidError(
             "A reclaim deletes ONE dataset's answers, and this one is scoped to none: name the "

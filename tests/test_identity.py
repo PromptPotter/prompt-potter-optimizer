@@ -16,6 +16,7 @@ import json
 import math
 import random
 import re
+import shutil
 import sys
 import time
 import zipfile
@@ -31,6 +32,7 @@ import openpyxl
 import pytest
 from factories import (
     BENCH_TARGET,
+    LAUNCHED_DATASET,
     PARENT,
     PROMPT_INFO,
     arm_state,
@@ -39,10 +41,10 @@ from factories import (
     declaration_of,
     defaulted_config,
     inner_cells,
-    inner_sandbox,
     inner_seat,
     jumping_clock,
     laid_ledger,
+    launched_bank,
     ledger_records,
     loop_session,
     measurement,
@@ -214,13 +216,18 @@ from promptpotter.application.runner.inner.spawn import (
     inner_campaign_id,
     promptpotter_wire_adapter,
 )
-from promptpotter.application.runner.inner.tasks import InnerTasks, inner_instrument_config
+from promptpotter.application.runner.inner.tasks import (
+    InnerTasks,
+    ResolvedInnerPanel,
+    inner_instrument_config,
+)
 from promptpotter.application.runner.round import author_arm, run_init
 from promptpotter.application.scoring.formula.compiler import campaign_terms
 from promptpotter.application.scoring.formula.matchers import admits
 from promptpotter.application.scoring.measurement_log import cells_scope, measurement_log
 from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.config import paths
+from promptpotter.config import settings as settings_mod
 from promptpotter.config.paths import (
     block_packs_root,
     default_projects_root,
@@ -268,13 +275,14 @@ from promptpotter.domain.command_kinds import (
     StartCheckinPayload,
     SubmittedArm,
 )
+from promptpotter.domain.connector import BackendUnreachableError
 from promptpotter.domain.cycle_paths import CycleAt, CycleDir, CycleHop
 from promptpotter.domain.dataset_name import validate_dataset_name
 from promptpotter.domain.dataset_start import DatasetUnstartableError, StartBlock
 from promptpotter.domain.draft_edit import EditDraftPatch, NodeOutputEdit, OptimizationOverrides
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.judges import JudgeSpec, JudgeStage
-from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells, InnerTaskSpec
+from promptpotter.domain.l4.cells import OUTER_PROMPT_FIELDS, InnerCells
 from promptpotter.domain.layer_fold import (
     UNBOUNDED,
     Lay,
@@ -384,7 +392,7 @@ from promptpotter.infrastructure.store.layout import (
 from promptpotter.infrastructure.store.llm_reuse_cache import LLMReuseCache, hash_call
 from promptpotter.infrastructure.store.read_model import LedgerIndex, derived, file_sig
 from promptpotter.infrastructure.store.session_pointer import read_active_pointer
-from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.stores import Stores, build_stores, sandbox_store
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.presentation.cli.commands import launch as cli_launch
 from promptpotter.shared.errors import (
@@ -411,16 +419,10 @@ def _install(name: str) -> ResolvedDataset:
     return install_dataset(_DATASETS, name)
 
 
-_SPEC = InnerTaskSpec(
-    inner_dataset="justlogic/d234",
-    optimizer_treatment="o",
-    run_seed=3,
-    campaign={"optimization": {"budget": {"rounds": 4}}},
-    nodes=None,
-    estimator="e",
-)
+_INNER = "justlogic/d234"
 # A panel's `inner_campaign` that reads a held-out area: two rounds, a bench, every adoption graded.
 _GEOMETRY: dict[str, Any] = {
+    "scoring": "label_match(predicted, ground_truth)",
     "sp_budget_origin": 40,
     "dataset_split": {"bench": 20, "demo": 0, "tolerance": 2},
     "bench_trigger": "every_adoption",
@@ -631,48 +633,22 @@ def test_an_l4_override_moves_the_prompt_and_the_hash_of_every_preset(
     )
 
 
-def test_the_inner_campaign_id_separates_candidates_seeds_treatments_estimators_and_geometry(
-    built_stores: Stores,
-) -> None:
+def test_the_inner_campaign_id_separates_candidates_and_cell_keys(built_stores: Stores) -> None:
     capo = select_optimizer(bench_choice("capo"))
     every = frozenset(Presumption)
     c1 = {"l1_generate": {"instruction": "widen the axes"}}
     c2 = {"l1_generate": {"instruction": "narrow the axes"}}
-    ids = {inner_campaign_id(_SPEC, o) for o in (c1, c2, {}, _CAPO_MUTATED)}
+    ids = {inner_campaign_id(_INNER, "k", o) for o in (c1, c2, {}, _CAPO_MUTATED)}
     assert len(ids) == 4, (
         "two candidates differing only in one override field share a campaign — "
         "their measurements merge under one id with no error"
     )
     breaching = {"l1_critique": {"layout": {"thinking_style": ["no_such_panel"]}}}
-    assert inner_campaign_id(_SPEC, breaching) != inner_campaign_id(_SPEC, {}), (
+    assert inner_campaign_id(_INNER, "k", breaching) != inner_campaign_id(_INNER, "k", {}), (
         "a refused layout arm continued the floor arm's inner campaign"
     )
-    assert inner_campaign_id(_SPEC.model_copy(update={"run_seed": 6}), c1) != inner_campaign_id(
-        _SPEC, c1
-    ), "two seeds share one inner campaign"
-    moved = _SPEC.model_copy(update={"estimator": "f"})
-    assert inner_campaign_id(_SPEC, c1) != inner_campaign_id(moved, c1), (
-        "a moved estimator resumed the campaign the old one banked"
-    )
-    deeper = _SPEC.model_copy(update={"campaign": {"optimization": {"budget": {"rounds": 6}}}})
-    assert inner_campaign_id(deeper, c1) != inner_campaign_id(_SPEC, c1), (
-        "a deeper cell resumed the shallow one's campaign, so its banked rows read as the deeper's"
-    )
-    wider = _SPEC.model_copy(
-        update={"campaign": {**_SPEC.campaign, "dataset_split": {"bench": 30}}}
-    )
-    assert inner_campaign_id(wider, c1) != inner_campaign_id(_SPEC, c1), "a new draw resumed"
-    cut = {"pobb": ManifestNodeOverlay.model_validate({"config": {"epsilon": 0.3}})}
-    as_run, as_cut = (
-        select_optimizer(OptimizerChoice(call_target=BENCH_TARGET, optimizer="potter", nodes=n))
-        .treatment(every, built_stores.block_packs)
-        .digest
-        for n in ({}, cut)
-    )
-    assert inner_campaign_id(
-        _SPEC.model_copy(update={"optimizer_treatment": as_run}), c1
-    ) != inner_campaign_id(_SPEC.model_copy(update={"optimizer_treatment": as_cut}), c1), (
-        "a moved optimizer knob ran under the inner campaign of the unmoved one"
+    assert inner_campaign_id(_INNER, "k", c1) != inner_campaign_id(_INNER, "j", c1), (
+        "two cell keys share one inner campaign, so one cell's banked rows read as another's"
     )
     rewalked = capo.manifest.model_copy(update={"initial_population_walks": "alone"})
     assert replace(capo, manifest=rewalked).treatment(every, built_stores.block_packs).digest != (
@@ -1119,48 +1095,51 @@ def test_a_task_text_on_the_unframed_ablation_pays_no_framing_and_writes_none(
     ), "a task text on the unframed ablation paid a check-in and overwrote the committed framing"
 
 
-def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: Stores) -> None:
-    # A cell is keyed by its own instrument and no other cell's: adding an inner dataset re-keys no
-    # banked cell, and an edit to a seat's dataset re-keys that seat alone, off the tier it runs.
+def test_a_cell_is_keyed_by_what_its_session_loads_and_no_other_cells(
+    built_stores: Stores, offline: Router
+) -> None:
+    # A cell is keyed by what its seat's session loads and no other cell's: adding an inner dataset
+    # re-keys no banked cell, and an edit to a seat dataset's `task.md` re-keys every seat on it alone.
+    launched_bank(built_stores, offline, samples(80, "TRUE", query="claim "))
+    family = built_stores.install_datasets_root / LAUNCHED_DATASET.split("/")[0]
+    other_dataset = f"{LAUNCHED_DATASET}-copy"
+    shutil.copytree(built_stores.install_datasets_root / LAUNCHED_DATASET, family / "d234-copy")
+    seats = [{"kind": "seat", "id": f"seed-{s}", "run_seed": s} for s in (0, 1)]
     panel: dict[str, Any] = {
-        "inner_benchmark": "innerbench",
+        "inner_benchmark": LAUNCHED_DATASET,
         "inner_campaign": _GEOMETRY,
-        "tasks": [{"kind": "seat", "id": "seed-0"}],
+        "tasks": seats,
     }
-    campaign = {"optimization": {"budget": {"rounds": 2}, "degradation_threshold": 0.4}}
-    tenant_copy = built_stores.tenant_datasets.dataset_dir("innerbench")
-    for root in (tenant_copy, built_stores.install_datasets_root / "otherbench"):
-        write_yaml(
-            root / DEFINITION_FILE,
-            {"pipeline": {"nodes": {"llm_only": {"config": {"model": "a"}}}}, "campaign": campaign},
-        )
-
-    resolve, extract, identity_of = (
-        CONNECTOR.resolve_experiment,
-        CONNECTOR.extract_experiment,
-        CONNECTOR.identity_config,
-    )
-    assert resolve is not None and extract is not None and identity_of is not None
+    identity_of = CONNECTOR.identity_config
+    assert identity_of is not None
 
     def keyed(declared: dict[str, Any]) -> tuple[dict[str, str], dict[str, Any]]:
-        resolved = resolve(built_stores, declared)
-        rows = samples_from_dicts(extract(resolved))
-        return {s.query: s.key for s in rows}, identity_of(built_stores, resolved, "")
+        resolved = ResolvedInnerPanel.read(built_stores, declared)
+        rows = samples_from_dicts(asyncio.run(spawn.panel_rows(built_stores, resolved)))
+        by_seat = {t["id"]: s.key for t, s in zip(declared["tasks"], rows, strict=True)}
+        return by_seat, identity_of(built_stores, resolved, "")
 
     before, fingerprint = keyed(panel)
-    other = {"kind": "seat", "id": "other", "inner_dataset": "otherbench"}
-    grown = {**panel, "tasks": [*panel["tasks"], other]}
+    assert before["seed-0"] != before["seed-1"], "two seeds share one cell key"
+    deeper = {**panel, "inner_campaign": {**_GEOMETRY, "optimization": {"budget": {"rounds": 3}}}}
+    assert keyed(deeper)[0]["seed-0"] != before["seed-0"], (
+        "a deeper cell kept the shallow one's key, so its banked rows read as the deeper's"
+    )
+    other = {"kind": "seat", "id": "other", "inner_dataset": other_dataset}
+    grown = {**panel, "tasks": [*seats, other]}
     after, grown_fingerprint = keyed(grown)
     assert after["seed-0"] == before["seed-0"] and grown_fingerprint == fingerprint, (
         "adding an inner dataset re-keyed a banked cell"
     )
-    write_yaml(
-        tenant_copy / DEFINITION_FILE,
-        {"pipeline": {"nodes": {"llm_only": {"config": {"model": "b"}}}}, "campaign": campaign},
-    )
+    framed = built_stores.install_datasets_root / LAUNCHED_DATASET / FRAMING_FILE
+    framed.write_text("Judge each claim by its weakest premise.\n", encoding="utf-8")
     edited, _ = keyed(grown)
-    assert edited["seed-0"] != before["seed-0"], "an edit to a seat's dataset re-keyed nothing"
-    assert edited["other"] == after["other"], "one seat's edit re-keyed another seat"
+    assert edited["seed-0"] != after["seed-0"] and edited["seed-1"] != after["seed-1"], (
+        "an edit to a seat dataset's task.md re-keyed a seat on it nothing"
+    )
+    assert edited["other"] == after["other"], "one dataset's edit re-keyed another dataset's seat"
+    tenant_copy = built_stores.tenant_datasets.dataset_dir("innerbench")
+    write_yaml(tenant_copy / DEFINITION_FILE, {"pipeline": {"connector": "termnorm"}})
     sandbox = build_stores(
         built_stores.identity,
         projects_root=inner_sandboxes_dir(built_stores.shared_root) / "cell",
@@ -1170,6 +1149,30 @@ def test_a_cell_is_keyed_by_its_own_instrument_and_no_other_cells(built_stores: 
     assert resolve_dataset(sandbox, "innerbench").directory == tenant_copy, (
         "the cell ran another tier"
     )
+
+
+def test_an_l4_launch_whose_inner_backend_is_unaddressed_is_refused_before_its_mint(
+    built_stores: Stores, offline: Router, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Past the mint, every cell fails on its own once the cycle is billed.
+    launched_bank(built_stores, offline, samples(80, "TRUE", query="claim "))
+    seat = {"kind": "seat", "id": "seed-0", "run_seed": 0}
+    write_yaml(
+        built_stores.tenant_datasets.dataset_dir("outer") / DEFINITION_FILE,
+        {
+            "pipeline": {"connector": "promptpotter"},
+            "panel": {
+                "inner_benchmark": LAUNCHED_DATASET,
+                "inner_campaign": _GEOMETRY,
+                "tasks": [seat],
+            },
+        },
+    )
+    monkeypatch.setattr(settings_mod.settings, "TERMNORM_ENDPOINTS", {})
+    with pytest.raises(BackendUnreachableError) as refused:
+        asyncio.run(run_campaign("outer", stores=built_stores, budget=Budget(), mode=RunMode()))
+    assert refused.value.details["connector"] == "termnorm", "the refusal named another backend"
+    assert built_stores.campaigns.list_campaign_ids() == [], "the refused launch minted"
 
 
 def test_a_harbor_panel_reads_its_pinned_roster_and_never_dials_out(
@@ -2957,9 +2960,7 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     panel = InnerTasks(inner_benchmark="decl", inner_campaign=_GEOMETRY, tasks=seats)
     cells = panel.resolve_cells(stores)
     (l4_seat,) = cells.cells
-    seat_config = inner_instrument_config(
-        cells.spec(l4_seat), cells.held(l4_seat).campaign, solver=[solve]
-    )
+    seat_config = inner_instrument_config(l4_seat, cells.held(l4_seat).campaign, solver=[solve])
     clamp = seat_config.optimization.determinism
     laid = (
         seat_config.sp_budget_origin,
@@ -2991,25 +2992,12 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
     assert l4.spec.run_seed == 3, "an L4 seat's declaration lost the seed its seat names"
     # The seat's inner run opens that ACCOUNT definition inside its sandbox: a sandbox isolates
     # campaign state, never the account's datasets, or a tenant seat refuses every arm.
-    sandboxed = spawn.sandbox_stores(
-        InnerSpawnContext(
-            inner_sandbox_root=inner_sandboxes_dir(default_projects_root()) / "sandbox",
-            identity=stores.identity,
-            shared_root=stores.shared_root,
-            install_datasets_root=stores.install_datasets_root,
-            research_datasets_root=stores.research_datasets_root,
-            inside=(CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"),),
-            enclosing=(),
-            acting=(),
-            purpose=Optimize(),
-            ruler=0,
-        )
-    )
+    sandboxed = sandbox_store(stores, CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"))
     assert resolve_dataset(sandboxed, "decl") == resolve_dataset(stores, "decl"), (
         "an inner run resolved its seat's account dataset elsewhere than the panel that seated it"
     )
     assert sandboxed.campaigns.campaign_root_dir("c").is_relative_to(
-        inner_sandboxes_dir(default_projects_root()) / "sandbox"
+        inner_sandboxes_dir(stores.shared_root)
     ), "an inner run's campaign state left its sandbox for the account's"
     l4_arm = declaration_of(
         opened,
@@ -3029,6 +3017,75 @@ def test_an_l4_seat_declares_through_the_door_every_campaign_takes(
         cycle_config(stores, as_campaign.root_cycle).config.model_dump()
         == effective_config(l4_arm.spec).model_dump()
     ), "an arm runs another config than a campaign declared that way"
+
+
+def test_every_seat_of_a_panel_runs_its_panels_one_measurand_and_one_ladder() -> None:
+    # A seat's own discount or patience reaching its inner run reads its lift on another scale.
+    # A checkout resolves every tier the panel's seats sit in.
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    run = read_dataset_definition(resolve_dataset(stores, "promptpotter-self/run"))
+    assert run is not None and run.panel is not None, "guard"
+    cells = InnerTasks.model_validate(run.panel).resolve_cells(stores)
+    assert len(cells.by_dataset) == 3, "guard: the panel spans three benchmarks"
+    laid = {
+        (
+            str(cell.campaign.scoring),
+            json.dumps(
+                cell.campaign.model_dump(mode="json")["optimization"]["nodes"]["escalation"]
+            ),
+        )
+        for cell in cells.by_dataset.values()
+    }
+    assert laid == {
+        (
+            "em_match(predicted, ground_truth)",
+            json.dumps(
+                {
+                    "config": {
+                        "l1_patience": 3,
+                        "l2_patience": 2,
+                        "l3_patience": 1,
+                        "escalation_ladder": "full",
+                    }
+                }
+            ),
+        )
+    }, "a seat's own scoring or stall ladder reached its inner run"
+    named = {
+        (
+            json.dumps(cell.optimizer.levers[cell.optimizer.measurement]["scoring"]),
+            cell.optimizer.levers["escalation"]["ladder"]["l1_patience"],
+        )
+        for cell in cells.by_dataset.values()
+    }
+    assert named == {('"em_match(predicted, ground_truth)"', 3)}, (
+        "the outer's levers name another measurand or ladder than the inner runs"
+    )
+    hotpot = cells.by_dataset["hotpotqa-distractor"]
+    split = replace(
+        hotpot,
+        optimizer=replace(
+            hotpot.optimizer,
+            levers={
+                **hotpot.optimizer.levers,
+                "escalation": {**hotpot.optimizer.levers["escalation"], "ladder": {"l1": 5}},
+            },
+        ),
+    )
+    with pytest.raises(ValueError):
+        _ = replace(cells, by_dataset={**cells.by_dataset, "hotpotqa-distractor": split}).owners
+
+
+def test_a_panel_seats_no_outer_dataset_so_no_inner_run_spawns() -> None:
+    # L4's one depth door (no spawn checks a depth): a seat on an outer dataset would run its
+    # inner campaign on a connector that spawns.
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    run = read_dataset_definition(resolve_dataset(stores, "promptpotter-self/run"))
+    assert run is not None and run.panel is not None, "guard"
+    nested = {"kind": "seat", "id": "nested", "inner_dataset": "promptpotter-self/e2e"}
+    with pytest.raises(PayloadInvalidError) as refused:
+        InnerTasks.model_validate({**run.panel, "tasks": [nested]}).resolve_cells(stores)
+    assert refused.value.code == "pipeline_config_invalid", "a nested L4 seat resolved"
 
 
 def test_an_account_dataset_stating_one_axis_of_its_split_reads_the_rest_from_the_defaults(
@@ -3330,11 +3387,7 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     (inner_seat,) = seats.cells
     owner = held_campaign.root_hop
     spawning = InnerSpawnContext(
-        inner_sandbox_root=inner_sandbox(stores, owner.campaign_id, owner.cycle_id),
-        identity=stores.identity,
-        shared_root=stores.shared_root,
-        install_datasets_root=stores.install_datasets_root,
-        research_datasets_root=None,
+        stores=stores,
         inside=(owner,),
         enclosing=(),
         acting=(),
@@ -3343,10 +3396,13 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
         ruler=0,
     )
     inner_hop = CycleHop(
-        campaign_id=inner_campaign_id(seats.spec(inner_seat), seats.own(inner_seat, {})),
+        campaign_id=inner_campaign_id("decl", "i", seats.own(inner_seat, {})),
         cycle_id="cycle-0",
     )
-    stored_campaign(spawn.sandbox_stores(spawning), minted_campaign(inner_hop, dataset_name="decl"))
+    stored_campaign(
+        sandbox_store(spawning.stores, spawning.inside[-1]),
+        minted_campaign(inner_hop, dataset_name="decl"),
+    )
     pin = PinnedCell(cell=inner_seat, instrument="i").pin()
     with (
         scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
@@ -3390,20 +3446,7 @@ def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _De
     )
     labelled = stores.tenant_datasets.labels()
     assert "decl" in labelled, "a campaign's mint named no bank"
-    sandboxed = spawn.sandbox_stores(
-        InnerSpawnContext(
-            inner_sandbox_root=inner_sandboxes_dir(default_projects_root()) / "sandbox",
-            identity=stores.identity,
-            shared_root=stores.shared_root,
-            install_datasets_root=stores.install_datasets_root,
-            research_datasets_root=stores.research_datasets_root,
-            inside=(CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"),),
-            enclosing=(),
-            acting=(),
-            purpose=Optimize(),
-            ruler=0,
-        )
-    )
+    sandboxed = sandbox_store(stores, CycleHop(campaign_id="outer__000000", cycle_id="cycle_outer"))
     inner_rows = rows_30[:-1]
     inner = loop_session(
         sandboxed, pipeline_schema([solve]), inner_rows, dataset=resolve_dataset(sandboxed, "decl")
@@ -4454,23 +4497,24 @@ def test_an_l4_pool_seats_a_held_out_environment_out_of_the_pin() -> None:
         "inner_campaign": _GEOMETRY,
     }
 
-    def resolved(*tasks: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "inner_panel": {**seats, "tasks": list(tasks)},
-            "instruments": {task["id"]: "i", other["id"]: "j"},
-            "datasets": {task["id"]: "gsm_hard", other["id"]: "hotpotqa"},
-        }
+    def rows(*tasks: dict[str, Any]) -> list[Sample]:
+        panel = ResolvedInnerPanel(inner_panel=InnerTasks.model_validate({**seats, "tasks": tasks}))
+        return samples_from_dicts(panel.samples({task["id"]: "i", other["id"]: "j"}))
 
-    extract = CONNECTOR.extract_experiment
-    assert extract is not None
-    seated, drawn = samples_from_dicts(
-        extract(CONNECTOR.pinned(resolved({**task, "held_out": True}, other)))
-    )
-    searched, _ = samples_from_dicts(extract(CONNECTOR.pinned(resolved(task, other))))
+    seated, drawn = rows({**task, "held_out": True}, other)
+    searched, _ = rows(task, other)
     assert seated.held_out and not searched.held_out, "a held-out environment was searched"
-    assert seated.source_pin == {**task, "instrument": "i"} and seated.key == searched.key, (
+    content = {k: v for k, v in task.items() if k != "id"}
+    assert seated.source_pin == {**content, "instrument": "i"} and seated.key == searched.key, (
         "the seat entered the pin, so the held-out cell never replays once searched"
     )
+    # A seat's id is its label in the panel: renamed, its banked cells still replay.
+    renamed = {**task, "id": "gsm_hard/renamed"}
+    relabelled = ResolvedInnerPanel(
+        inner_panel=InnerTasks.model_validate({**seats, "tasks": [renamed, other]})
+    )
+    moved, _ = samples_from_dicts(relabelled.samples({renamed["id"]: "i", other["id"]: "j"}))
+    assert moved.key == searched.key, "renaming a seat moved its cell key"
     environments = partition_bank(
         [seated, drawn], DatasetSplit(bench=0, demo=0, tolerance=0), seed=0
     )

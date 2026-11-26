@@ -18,28 +18,15 @@ from promptpotter.domain.pipeline_schema import (
     NodeRole,
     PipelineNode,
 )
-from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.shared.hashing import stable_hash
 
 
-class InnerTaskSpec(FrozenModel):
-    inner_dataset: str
-    # The laid optimization's `Treatment` digest: every node knob inside.
-    optimizer_treatment: str
-    run_seed: int
-    # The laid campaign's `identity()`: its geometry, depth included.
-    campaign: dict[str, Any]
-    # The inner pipeline's node config; ``None`` where its dataset declares no nodes.
-    nodes: dict[str, Any] | None
-    inner_model: str | None = None
-    inner_provider: str | None = None
-    inner_route_order: list[str] | None = None
-    # `BehaviourKeys.cell_estimator`: what reads the cell's number.
-    estimator: str
-
-    def key(self) -> str:
-        """The ONE cell key, depth inside: a deeper cell is another measurand, so no banked row replays it."""
-        return stable_hash(self.model_dump(mode="json"))
+def cell_key(root_cycle_id: str, rounds: int, treatment: str, estimator: str) -> str:
+    """The ONE cell key: the root cycle id its seat's origin mints under `Optimize` (its origin
+    hash and measured address, so whatever its session loads), its depth (*rounds*, a budget the
+    root id addresses not, yet a deeper cell is another measurand) and the treatment digest it
+    mints, read by *estimator*."""
+    return stable_hash([root_cycle_id, rounds, treatment, estimator])
 
 
 # Each inner llm node's prompt fields to the outer; `problem_description` and `answer_format` are
@@ -84,10 +71,7 @@ class CellOptimizer:
 class InnerCell:
     # The dataset's own block with the panel's `inner_campaign` laid over it.
     campaign: CampaignConfig
-    pipeline: Mapping[str, Any] | None
     optimizer: CellOptimizer
-    # The laid optimization's digest.
-    treatment: str
 
 
 @dataclass(frozen=True)
@@ -98,16 +82,16 @@ class InnerCells:
     # As declared, in panel order.
     cells: tuple[Seat, ...]
     by_dataset: Mapping[str, InnerCell]
-    # Each seat's spec, by id: a pinned seat carries no depth, so it is read here, never off the pin.
-    specs: Mapping[str, InnerTaskSpec]
-    # Read once per resolve: the outer identity and every cell's campaign id key on this one value.
+    # By seat id: the dataset its inner campaign measures.
+    datasets: Mapping[str, str]
+    # Read once per resolve: the outer identity and every cell's key (`cell_key`) read this one value.
     estimator: str
 
-    def held(self, cell: Seat) -> InnerCell:
-        return self.by_dataset[self.spec(cell).inner_dataset]
+    def dataset(self, cell: Seat) -> str:
+        return self.datasets[cell.id]
 
-    def spec(self, cell: Seat) -> InnerTaskSpec:
-        return self.specs[cell.id]
+    def held(self, cell: Seat) -> InnerCell:
+        return self.by_dataset[self.dataset(cell)]
 
     @property
     def optimizers(self) -> list[CellOptimizer]:
