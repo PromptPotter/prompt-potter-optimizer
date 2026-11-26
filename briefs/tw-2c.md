@@ -1,8 +1,9 @@
 # tw-c: every hand-seat left after the second pass, onto the world (cloud, Sonnet)
 
 `briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is
-`origin/land/test-world` at `<BASE-C>`. That is `3625a6687` plus tw-r2, tw-s, tw-r3, tw-x and tw-j,
-integrated.
+`origin/land/test-world` at `<BASE-C>`. That is `3625a6687` plus tw-r2, tw-s, tw-r3, tw-x, tw-j and tw-p,
+integrated. tw-p brought the suite's wall and end RSS under the rework's start, and you keep them there:
+every world run you add reuses a run tw-p shares, and your before → after states both.
 Replace the ancestor check with `git merge-base --is-ancestor 9cd30b5a7 <BASE-C>`. Equals-main runs against
 `<BASE-C>`'s offline home. Push to `arc/tw-c`, one commit per link, with the full gate green at the tip.
 
