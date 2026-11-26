@@ -35,6 +35,7 @@ from promptpotter.application.optimizers.nodes import (
     MeasuredRound,
     Proposals,
     RoundOpening,
+    RoundSamples,
     RoundWalk,
 )
 from promptpotter.application.runner.bench import (
@@ -58,7 +59,7 @@ from promptpotter.application.scoring.paired import (
     read_pair,
 )
 from promptpotter.application.scoring.passes import verify_on_saturation
-from promptpotter.application.scoring.query_loop import Walk, run_walks
+from promptpotter.application.scoring.query_loop import Turn, Walk, run_walks
 from promptpotter.application.scoring.search_point_scorer import (
     SCORING_ERROR_ABORT,
     close_walk,
@@ -156,7 +157,7 @@ if TYPE_CHECKING:
         Selection,
         Selector,
     )
-    from promptpotter.application.scoring.query_loop import BlockRace
+    from promptpotter.application.scoring.race_protocol import Decider
     from promptpotter.application.scoring.search_point_scorer import ScoredWalk
 
 
@@ -559,7 +560,7 @@ async def _measure_gaps(
     cycle: Cycle,
     gaps: Mapping[str, tuple[LineStep, list[Sample]]],
     *,
-    top_up: BlockRace[ArmKey] | None = None,
+    top_up: Decider[ArmKey] | None = None,
 ) -> dict[str, ScoredWalk]:
     """Every member's gaps in ONE pass, each on its OWN configuration, never the round subject's;
     *top_up* races them on."""
@@ -577,7 +578,7 @@ async def _measure_gaps(
         cycle.session,
         # One run per (member, cell set), so a re-run of the same round replays it free.
         kind=MeasurementRole.OVERLAP,
-        blocks=top_up,
+        race=top_up,
     )
     return {member: raced[ArmKey(member)] for member in gaps}
 
@@ -587,12 +588,13 @@ async def measure_population(
     population: Proposals,
     pool: list[Sample],
     eliminator: Eliminator | None,
+    race: Race | None,
     selector: Selector,
 ) -> MeasuredRound:
     cycle = ctx.cycle
     panel = ctx.panel
-    arms, rows, cut, race = await _walk_population(
-        ctx, population, eliminator, keep_cut=selector.elects_partial
+    arms, rows, cut = await _walk_population(
+        ctx, population, eliminator, race, keep_cut=selector.elects_partial
     )
     # Clamped so a tiny dataset stays electable.
     coverage_floor = min(cycle.config.optimization.elimination_n_min, len(panel.cells))
@@ -656,7 +658,7 @@ async def measure_population(
         arms,
         declared=[cell.key for cell in parent.rows]
         if cycle.config.optimization.lift_reference == "best_so_far"
-        else [sample.key for sample in panel.cells],
+        else [sample.key for sample in panel.read_on(rows)],
     )
     readings = await _reference_readings(ctx, arms, rows, scored, parent, pair)
     rejects = eliminator is not None and eliminator.stop_disqualifies
@@ -751,7 +753,7 @@ async def _reference_readings(
             ctx,
             individual,
             cycle.points.job(individual),
-            [s for s in ctx.panel.cells if s.key in keys],
+            [s for s in ctx.panel.read_on(rows) if s.key in keys],
             role=MeasurementRole.PARENT,
         )
     walks = ctx.walks
@@ -864,9 +866,10 @@ async def _walk_population(
     ctx: RoundContext,
     population: Proposals,
     eliminator: Eliminator | None,
+    race: Race | None,
     *,
     keep_cut: bool,
-) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopLoop | None, Race | None]:
+) -> tuple[dict[ArmKey, Concluded], dict[ArmKey, CellSheet], StopLoop | None]:
     cycle = ctx.cycle
     round_num = ctx.round_num
     panel = ctx.panel
@@ -877,10 +880,8 @@ async def _walk_population(
     labels = {key: arm.label for key, arm in proposed.items()}
     order = [int(s.id) for s in panel.order]
     sps = {key: cycle.points.job(arm.individual) for key, arm in proposed.items()}
-    race: Race | None = None
     pool: CatchUpPool | None = None
-    if eliminator is not None:
-        race = eliminator.race(NodeContext(ctx, eliminator), panel)
+    if eliminator is not None and race is not None:
         pool = CatchUpPool(
             race,
             cycle.session,
@@ -900,38 +901,36 @@ async def _walk_population(
         for key, arm in proposed.items()
     }
     session = cycle.session
-    skipped = session.store.campaigns.standing_rounds(session.hop, moment=None).skipped
+    standing = session.store.campaigns.standing_rounds(session.hop, moment=None)
     walks: dict[ArmKey, Walk | None] = {}
     for key, arm in proposed.items():
-        walks[key] = _open_arm(ctx, arm, sps[key], panel.order, skipped.get((round_num, key)))
+        walks[key] = _open_arm(ctx, arm, sps[key], panel, standing.skipped.get((round_num, key)))
 
-    blocks = race.blocks if race is not None else None
-
-    def on_turn(key: ArmKey, block: int | None) -> None:
+    def on_turn(key: ArmKey, turn: Turn) -> None:
         if race is not None:
             race.open_turn(key)
-        held = states[key].block
-        racing = sum(1 for w in walks.values() if w is not None and w.outcome is None)
-        # A turn inside a block race files the arm once per checkpoint that moved the field.
-        if block and held is not None and held["racing"] == racing:
-            return
         states[key] = states[key].model_copy(
             update={
+                # The rows its race chose, which the readout heads.
+                "sample_order": order if turn.order is None else [int(s.id) for s in turn.order],
                 "n_priors": race.n_priors if race is not None else 0,
                 "block": None
-                if block is None or blocks is None
+                if turn.block is None
                 else {
-                    "n": block + 1,
-                    "of": -(-len(order) // blocks.block_size),
-                    "size": blocks.block_size,
-                    "racing": racing,
+                    "n": turn.block + 1,
+                    "of": -(-len(order) // panel.block_size),
+                    "size": panel.block_size,
+                    "racing": turn.racing,
                 },
             }
         )
         append_record(ArmRecord(round=round_num, arm=key, state=states[key]))
 
-    def on_decided(key: ArmKey) -> None:
-        arm, results = _conclude_arm(ctx, states[key], walks[key], key, race, labels)
+    def on_decided(key: ArmKey, walked: Sequence[Sample] | None) -> None:
+        if walked is not None:
+            asked[key] = ctx.asked(key, walked)
+        walk = walks[key]
+        arm, results = _conclude_arm(ctx, states[key], walk, key, race, labels)
         rows[key] = results
         concluded[key] = arm
         ctx.walked(ReadArm(key, arm, results), asked[key])
@@ -942,7 +941,7 @@ async def _walk_population(
         cycle.session,
         keep_cut=keep_cut,
         backfills=pool,
-        blocks=blocks,
+        race=race,
         on_turn=on_turn,
         on_decided=on_decided,
     )
@@ -953,21 +952,21 @@ async def _walk_population(
             rows[key] = rows[key].merged(taken)
             ctx.walked(ReadArm(key, concluded[key], taken), asked[key])
     ranked = [key for key in proposed if key in concluded]
-    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut, race
+    return {key: concluded[key] for key in ranked}, {key: rows[key] for key in ranked}, cut
 
 
 def _open_arm(
     ctx: RoundContext,
     arm: Proposed,
     sp: JobSearchPoint,
-    dataset: list[Sample],
+    panel: RoundSamples,
     skip_at: int | None,
 ) -> Walk | None:
     if arm.invalid:
         return None
     return open_walk(
         sp,
-        dataset,
+        panel.walked,
         ctx.cycle.session,
         kind=MeasurementRole.PANEL,
         sample_index=ctx.cycle.sample_index,
@@ -975,6 +974,7 @@ def _open_arm(
         measured=arm.individual.id,
         skip_at=skip_at,
         held=ctx.held(ArmKey(arm.individual.id)),
+        budget=len(panel.order),
     )
 
 
@@ -1283,15 +1283,21 @@ async def _proposed(ctx: RoundContext) -> Proposals:
 
 async def _measured(ctx: RoundContext, population: Proposals, pool: list[Sample]) -> MeasuredRound:
     plan = ctx.cycle.optimizer.plan
+    eliminator = plan.eliminator
+    race = None if eliminator is None else eliminator.race(NodeContext(ctx, eliminator), ctx.panel)
     append_record(
         PhaseRecord(
             phase=CampaignPhase.MEASURE,
             step="enter",
             round=ctx.round_num,
-            act=MeasureOpened(candidates=len(population.proposals), cells=len(ctx.panel.cells)),
+            act=MeasureOpened(
+                candidates=len(population.proposals),
+                cells=len(ctx.panel.cells),
+                rows="random" if race is None else race.rows_ran,
+            ),
         )
     )
-    measured = await measure_population(ctx, population, pool, plan.eliminator, plan.selector)
+    measured = await measure_population(ctx, population, pool, eliminator, race, plan.selector)
     append_record(PhaseRecord(phase=CampaignPhase.MEASURE, step="exit", round=ctx.round_num))
     return measured
 

@@ -154,7 +154,7 @@ export function HeadlineFacts({ row }: { row: HeadToHeadRow }) {
             content={
               <p className="cmp-line-key">
                 The column the pick&rsquo;s round elected it on, and the one to quote it on: a pick
-                won on ability is quoted on θ unless its θ carries a caveat — there θ is not
+                won on ability is quoted on θ unless a caveat withholds its θ — there θ is not
                 ability, and the election reads on fitness.
               </p>
             }

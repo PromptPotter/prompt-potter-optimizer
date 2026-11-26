@@ -4375,7 +4375,7 @@
                 "type": "null"
               }
             ],
-            "description": "`theta_caveat` over every cell this line read. Non-null, no two of its levels difference, whatever `stamp` says; another line on the stamp keeps its own."
+            "description": "`theta_caveat` over every cell this line read. One that withholds, no two of its levels difference, whatever `stamp` says; another line on the stamp keeps its own."
           },
           "levels": {
             "additionalProperties": {
@@ -4553,11 +4553,21 @@
           "cells": {
             "title": "Cells",
             "type": "integer"
+          },
+          "rows": {
+            "enum": [
+              "random",
+              "informative",
+              "cold"
+            ],
+            "title": "Rows",
+            "type": "string"
           }
         },
         "required": [
           "candidates",
-          "cells"
+          "cells",
+          "rows"
         ],
         "title": "MeasureOpened",
         "type": "object"
@@ -8425,10 +8435,6 @@
             "default": 1,
             "title": "Sample Abreast"
           },
-          "sample_idx": {
-            "title": "Sample Idx",
-            "type": "integer"
-          },
           "sample_lookahead": {
             "default": 1,
             "title": "Sample Lookahead",
@@ -8447,7 +8453,6 @@
           "round",
           "individual_id",
           "role",
-          "sample_idx",
           "sample_total",
           "position"
         ],

@@ -8,6 +8,7 @@ from typing import Annotated, Literal
 from pydantic import Field
 
 from promptpotter.application.optimizers.nodes import LengthKnobs
+from promptpotter.application.scoring.row_policy import RowKnobs
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.crowning_bar import Vote
 from promptpotter.domain.layer_fold import Unbounded
@@ -172,7 +173,7 @@ class L1GenerateKnobs(TranscriptKnobs, LengthKnobs):
     )
 
 
-class PoBBKnobs(StrictModel):
+class PoBBKnobs(RowKnobs):
     """Its first decision point is the bench's ``elimination_n_min``, which the δ ruler's warmth shares: aggression lives HERE."""
 
     # Under 0.5, so it never reaches a selector's admission bar and the two stops never cross.

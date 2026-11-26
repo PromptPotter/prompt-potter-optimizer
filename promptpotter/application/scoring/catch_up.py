@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
+from promptpotter.application.scoring.query_loop import QueryLoopResult
 from promptpotter.application.scoring.search_point_scorer import close_walk, open_walk
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.sample import Sample
@@ -132,11 +133,12 @@ def _catch_up(
         measured=prior,
     )
     walk.release()
-    _, cell = walk.launch(LookaheadWindow(1, 1))
+    _, cell = walk.launch(0, LookaheadWindow(1, 1))
 
     def commit() -> Sequence[GradedCell]:
         walk.collect()
-        walk.end(walk.take(cell) or walk.judge(), cancel=True)
+        # Its one row taken, it is done.
+        walk.end(walk.take(cell) or walk.judge() or QueryLoopResult(walk.results), cancel=True)
         return close_walk(walk).sheet.cells
 
     def discard() -> None:

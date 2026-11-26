@@ -312,8 +312,9 @@ class LiveDashboardState(DashboardFacts):
     current_position: int | None = None
     # The last close's; served only as each `ServedRound`'s readings of it.
     level_series: LevelSeries | None = None
-    # A PLAN: an eliminator can stop a candidate before the tail is reached.
-    declared_sample_order: list[int] = Field(default_factory=list)
+    # Each walking arm's rows through its budget as its last turn filed them, those taken leading:
+    # served only as `ServedDashboard.walk`'s axis.
+    walk_orders: dict[ArmKey, list[int]] = Field(default_factory=dict)
 
     waiting_since: float | None = None
 
@@ -375,7 +376,6 @@ class LiveDashboardState(DashboardFacts):
             "error": None,
             "current_query_payload": None,
             "current_position": None,
-            "declared_sample_order": [],
         }
 
 
@@ -645,8 +645,6 @@ class LiveDashboardProjection(Projection):
             self.state.sample_lookahead_discards += sum(
                 1 for k in ended if self._open_samples.pop(k)[2]
             )
-        if isinstance(record.state, Measuring) and record.state.sample_order:
-            self.state.declared_sample_order = record.state.sample_order
 
     def _mark(self, mark: VerificationMark) -> None:
         held = [
@@ -868,6 +866,11 @@ class LiveDashboardProjection(Projection):
                 "at_offset": self.at_offset,
                 "current_round": current,
                 "measuring_arm": s.measuring_arm if measuring else None,
+                "walk_orders": {
+                    key: walking.sample_order
+                    for key in self._narration.announced(self._live)
+                    if isinstance(walking := self._narration.state(self._live, key), Measuring)
+                },
                 "in_flight": in_flight,
                 "lookahead_allowed": allowed,
                 "lookahead_most": most,

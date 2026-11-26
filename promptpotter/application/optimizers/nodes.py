@@ -25,6 +25,7 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
+from promptpotter.application.scoring.race_protocol import BATCH, Decider, Trigger
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
@@ -37,7 +38,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
 from promptpotter.domain.paired_reading import ArmKey
-from promptpotter.domain.phase_acts import StepFact
+from promptpotter.domain.phase_acts import RowsRan, StepFact
 from promptpotter.domain.pipeline_schema import (
     INITIAL_POPULATION,
     MEMBER_KINDS,
@@ -63,12 +64,11 @@ if TYPE_CHECKING:
     from promptpotter.application.config_map import CouplingSeverity
     from promptpotter.application.intelligence.rasch import RoundAbilities
     from promptpotter.application.optimizer_manifest import SelectedOptimizer
-    from promptpotter.application.scoring.query_loop import BlockRace
 
 
 @dataclass(frozen=True)
 class MemberCoupling:
-    """``predicate`` is True in the VIOLATING combination; its third argument is the manifest file's knobs, before any overlay."""
+    """``predicate`` is True in the VIOLATING combination; its third argument is the manifest file's knobs, before any overlay, its fourth the roster they run in. A ``refused`` one reads no bench knob, so every selection asks it (`optimizer_manifest.py::_select`), its config ``None``."""
 
     name: str
     knobs: tuple[str, ...]
@@ -77,7 +77,12 @@ class MemberCoupling:
     relation: str
     consequence: str
     severity: CouplingSeverity
-    predicate: Callable[[CampaignConfig, Any, Any], bool]
+    predicate: Callable[[CampaignConfig | None, Any, Any, SelectedOptimizer], bool]
+
+    def __post_init__(self) -> None:
+        assert self.severity != "refused" or not self.bench_knobs, (
+            f"{self.name}: a refused coupling is asked at the selection, which reads no bench knob"
+        )
 
 
 # How many of the pipeline's prompt nodes a member writes: a `one` refuses any other roster before the mint.
@@ -371,6 +376,18 @@ class RoundSamples:
     cells: list[Sample]
     order: list[Sample]
     block_size: int
+    # The rest of the sampler's pool, its crowning cells dropped: what a race may take past `order`.
+    pool: Sequence[Sample] = ()
+
+    @property
+    def walked(self) -> list[Sample]:
+        """Every row a walk opens on; it takes ``len(order)`` of them, in the order its race chooses."""
+        return [*self.order, *self.pool]
+
+    def read_on(self, rows: Mapping[ArmKey, CellSheet]) -> list[Sample]:
+        """``cells``, then each row of the pool an arm took past them: what the round reads a reference on."""
+        taken = {cell.key for sheet in rows.values() for cell in sheet}
+        return [*self.cells, *(s for s in self.pool if s.key in taken)]
 
 
 @dataclass(frozen=True)
@@ -507,9 +524,10 @@ class RaceSnapshot:
     paired_breakdown: dict[ArmKey, float]
 
 
-class Race(Protocol):
-    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``blocks`` stops every live walk at once.
-    A race whose arms all walk one panel keeps no prior, so it inherits ``priors``, ``admit`` and ``catch_up``."""
+class Race(Decider[ArmKey], Protocol):
+    """``judge`` reads a decided arm BEFORE ``admit`` makes it a prior; ``decide`` (`race_protocol.py`)
+    cuts and sends to every live walk at once. A race whose arms all walk one panel keeps no
+    prior, so it inherits ``priors``, ``admit`` and ``catch_up``."""
 
     @property
     def n_priors(self) -> int: ...
@@ -520,10 +538,7 @@ class Race(Protocol):
         return {}
 
     @property
-    def blocks(self) -> BlockRace[ArmKey]: ...
-
-    @property
-    def top_up(self) -> BlockRace[ArmKey] | None:
+    def top_up(self) -> Decider[ArmKey] | None:
         """The race walked on over the origin panel's top-up; ``None`` where it ends with the draw."""
         return None
 
@@ -540,6 +555,16 @@ class Race(Protocol):
     def catch_up(self, _key: ArmKey, _cells: Sequence[GradedCell]) -> None:
         """A prior's caught-up cells, folded onto the rows it holds."""
         return None
+
+    @property
+    def trigger(self) -> Trigger:
+        """``batch``: a race decides once no call it sent is out."""
+        return BATCH
+
+    @property
+    def rows_ran(self) -> RowsRan:
+        """The row choice it runs, which the round's measure record names."""
+        return "random"
 
 
 class Eliminator(NodeMember, Protocol):
@@ -568,10 +593,10 @@ class Selector(NodeMember, Protocol):
         ...
 
     def parent_cells(
-        self, _ctx: NodeContext, panel: RoundSamples, _rows: Mapping[ArmKey, CellSheet]
+        self, _ctx: NodeContext, panel: RoundSamples, rows: Mapping[ArmKey, CellSheet]
     ) -> list[Sample]:
         """The cells the bench re-scores the parent on: all an arm's lift against it can pair on."""
-        return panel.cells
+        return panel.read_on(rows)
 
     def parent_read(self, panel: DrawSize) -> int:
         """The most of *panel*'s cells ``parent_cells`` names that no arm's walk buys."""

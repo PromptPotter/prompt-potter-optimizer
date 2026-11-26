@@ -13,54 +13,52 @@ from promptpotter.application.bench.node_context import (
     Ruler,
 )
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayContext, Replayed
-from promptpotter.application.optimizers.nodes import RoundSamples
+from promptpotter.application.intelligence.rasch import (
+    fit_theta,
+    responses_binary,
+    responses_of,
+)
+from promptpotter.application.optimizers.nodes import Race, RoundSamples
 from promptpotter.application.optimizers.potter.knobs import PoBBKnobs
 from promptpotter.application.optimizers.potter.pobb import (
     EliminationContext,
     PoBBCheck,
     PoBBStop,
     field_p_best,
-    graded_sheet,
     race_sheet,
-    wire_sheet,
 )
+from promptpotter.application.scoring.race_protocol import Decision, Trigger, View, WalkView
+from promptpotter.application.scoring.row_policy import RowGround, send_rows
 from promptpotter.domain.arms import Elimination
 from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.phase_acts import RowsRan
 from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.validators import StopSignal
 
 
-class _RaceDecision(Replayed, kind=None):
+class EliminationCut(Replayed, kind="elimination_cut"):
     arm: ArmKey
     parent: ArmKey
     queries_scored: int
     p_best: float
     leader: ArmKey
     paired_breakdown: dict[ArmKey, float]
-    # The cells the field was read on by `Sample.key`, each rival's grades as read: a replay re-draws from these.
-    candidate_cells: list[str]
-    prior_histories: dict[ArmKey, dict[str, dict[str, float | None]]]
-
-    def _read(self, ctx: ReplayContext) -> tuple[CellSheet, dict[ArmKey, CellSheet]] | None:
-        """``None`` where a cell the live check read is no longer among the arm's rescored rows."""
-        # A cut in the top-up read the arm's origin-panel rows too.
-        rows = ctx.round_data.raced(self.arm).by_key()
-
-        if any(cell not in rows for cell in self.candidate_cells):
-            return None
-        priors = {pid: graded_sheet(grades) for pid, grades in self.prior_histories.items()}
-        return race_sheet(rows[cell] for cell in self.candidate_cells), priors
-
-
-class EliminationCut(_RaceDecision, kind="elimination_cut"):
     epsilon: float
+    # Each side's cells the field was read on by `Sample.key`, the arm's and every rival's: the
+    # round banks every side (the parent re-read on its cells), so a replay re-reads them all.
+    cells: dict[ArmKey, list[str]]
 
     def replay(self, ctx: ReplayContext) -> bool:
-        read = self._read(ctx)
-        if read is None:
-            return False
-        sheet, rivals = read
-        p_best, _ = field_p_best({**rivals, self.arm: sheet}, self.candidate_cells)
+        """No cut where a cell the live check read is no longer among its side's rescored rows."""
+        field: dict[ArmKey, CellSheet] = {}
+        for side, cells in self.cells.items():
+            # A cut in the top-up read the origin-panel rows too.
+            rows = ctx.round_data.raced(side).by_key()
+            if any(cell not in rows for cell in cells):
+                return False
+            field[side] = race_sheet(rows[cell] for cell in cells)
+        read = dict.fromkeys(cell for cells in self.cells.values() for cell in cells)
+        p_best, _, _ = field_p_best(field, read)
         return self.arm in p_best and p_best[self.arm] < self.epsilon
 
 
@@ -74,7 +72,7 @@ def _reason(ctx: EliminationContext, labels: Mapping[ArmKey, str]) -> str:
     )
 
 
-class PoBBRace:
+class PoBBRace(Race):
     """A block race cut on the family-wise p_best (`PoBBCheck.check`) at each checkpoint the arms share;
     its top-up onto the origin panel is one more stretch of it (`runner/round.py::measure_population`)."""
 
@@ -83,17 +81,29 @@ class PoBBRace:
         lineage = ctx.read(Lineage)
         parent = ArmKey(lineage.parent.id)
         self._progress, self._replay = ctx.read(Progress), ctx.read(Replay)
+        knobs = ctx.knobs(PoBBKnobs)
+        ruler = ctx.read(Ruler).difficulty.ruler
         self._check = PoBBCheck(
-            ctx.knobs(PoBBKnobs),
+            knobs,
             n_min=ctx.read(Bounds).elimination_n_min,
-            n_samples=len(panel.cells),
-            ruler=ctx.read(Ruler).difficulty.ruler,
+            ruler=ruler,
             parent=parent,
             on_snapshot=self._progress.race_standing,
         )
         self._block_size = panel.block_size
-        if parent_results := ctx.read(Parent).own_rows:
-            self._check.register_completed(parent_results, key=parent)
+        self._knobs = knobs
+        own_rows = ctx.read(Parent).own_rows
+        # The round's θ: the parent's on the ruler seated at its start; its centre where it reads none.
+        seated = (
+            None
+            if ruler is None
+            else fit_theta(
+                responses_of(own_rows), ruler.entries(), binary=responses_binary(own_rows)
+            )
+        )
+        self._round_theta = 0.0 if seated is None else seated[0]
+        if own_rows:
+            self._check.register_completed(own_rows, key=parent)
 
     @property
     def n_priors(self) -> int:
@@ -110,24 +120,43 @@ class PoBBRace:
         self._check.extend_prior(key, cells)
 
     @property
-    def blocks(self) -> PoBBRace:
-        return self
-
-    @property
     def top_up(self) -> PoBBRace:
         return self
 
     @property
-    def block_size(self) -> int:
-        return self._block_size
+    def trigger(self) -> Trigger:
+        return self._knobs.trigger
 
-    def close(self, rows: Mapping[ArmKey, Sequence[GradedCell]]) -> dict[ArmKey, StopSignal]:
+    @property
+    def rows_ran(self) -> RowsRan:
+        """A cold ruler tells every row alike, so ``informative`` there runs the sampler's order."""
+        if self._knobs.row_choice == "random":
+            return "random"
+        return "cold" if self._check.ruler is None else "informative"
+
+    def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
+        stops = {} if view.opening else self._cut(view.walks)
+        ground = RowGround(
+            self._check.ruler,
+            self._round_theta,
+            self._check.n_min if self._check.epsilon_stop else None,
+            self._block_size,
+            {key: self._depth(key) for key in self._check.priors},
+        )
+        return send_rows(view, stops, self._check.read, self._knobs, ground)
+
+    def _depth(self, key: ArmKey) -> int:
+        """The rows a walk stands on before its own: a top-up's, the prior's it extends."""
+        return len(self._check.priors.get(key, NO_CELLS).cells)
+
+    def _cut(self, walks: Mapping[ArmKey, WalkView]) -> dict[ArmKey, StopSignal]:
         """An admitted arm walking again is topped up: its rows so far lead the stretch."""
         standing = {
-            key: self._check.priors.get(key, NO_CELLS).merged(race_sheet(walked))
-            for key, walked in rows.items()
+            key: self._check.priors.get(key, NO_CELLS).merged(race_sheet(walk.taken))
+            for key, walk in walks.items()
         }
-        return dict(self._check.check({**self._check.priors, **standing}, standing))
+        budgets = {key: self._depth(key) + walk.budget for key, walk in walks.items()}
+        return dict(self._check.check({**self._check.priors, **standing}, budgets))
 
     def open_turn(self, _key: ArmKey) -> None:
         return None
@@ -146,9 +175,9 @@ class PoBBRace:
             "p_best": context["p_best"],
             "leader": context["leader"],
             "paired_breakdown": signal.paired_breakdown,
-            "candidate_cells": signal.cells,
-            "prior_histories": {pid: wire_sheet(prior) for pid, prior in signal.priors.items()},
+            "epsilon": context["epsilon"],
+            "cells": signal.cells,
         }
-        self._replay.decide(EliminationCut(**raced, epsilon=context["epsilon"]), True)
+        self._replay.decide(EliminationCut(**raced), True)
         named = {**labels, self._check.parent: "parent"}
         return Elimination(reason=_reason(context, named), context=dict(context))

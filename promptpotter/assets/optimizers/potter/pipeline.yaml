@@ -110,12 +110,17 @@ nodes:
       epsilon: 0.05
       epsilon_floor: 0.05
       epsilon_stop: true
+      row_choice: informative
+      refit: per_decision
+      shape: per_round
+      dispatch: rolling
+      read_order: launch
   # The next parent: a θ lift over the parent its paired cells agree with (`elect_round_winner`).
   theta_election:
     type: selector
     config:
       admission: 0.85
-      vote: draw
+      vote: overlap
   l1_critique:
     type: llm
     optimizer: *node_menus
@@ -257,9 +262,11 @@ resolved_prompts:
 
 
       failure_highlights: ONE ENTRY PER CLUSTER, largest first. A cluster is a MECHANISM that at least
-      two rows a panel marks `[#id]` share, and as many as DETECTABLE MOVE names; an id no panel marks,
-      or an earlier cluster holds, is struck, and a cluster left narrower is dropped mechanically; the other clusters stand: read every row of FAILING SAMPLES and put each id in the ONE cluster whose mechanism
-      it shows; a row sharing none is no cluster and is left out. The next L1 targets a cluster by its
+      two rows a panel marks `[#id]` share, and as many as DETECTABLE MOVE names: read every row of
+      FAILING SAMPLES and put each id in the ONE cluster whose mechanism it shows; a row sharing none is
+      no cluster and is left out. Each id appears ONCE in the whole reply, so a cluster's list ends at
+      its last row; an id no panel marks is struck, and a cluster left narrower is dropped
+      mechanically while the other clusters stand. The next L1 targets a cluster by its
       rows and writes ONE edit that must hold for every row the cluster spans, so claim the mechanism
       in GENERAL terms and name the decisive step the rows' reasoning shares, as SAMPLE TRANSCRIPTS
       and each row's last step show it. Before claiming a bias (e.g. "over-hedges"), check it against
@@ -275,11 +282,11 @@ resolved_prompts:
     answer_format: |-
       Return JSON with the fields in EXACTLY this order — failure_highlights FIRST so it is never dropped when the output runs long:
       {
-        "failure_highlights": [{"sample_ids": [<id>, <id>, ...], "mechanism": "<a few words>", "claim": "<one sentence: why these rows land wrong>"}, ...],
+        "failure_highlights": [{"mechanism": "<a few words>", "claim": "<one sentence: why these rows land wrong>", "sample_ids": [<id>, <id>, ...]}, ...],
         "priority_fix": "<axis>: <one sentence naming the change>",
         "suggested_axes": ["<axis>", ...]
       }
-      failure_highlights: at most 3, each with >=2 sample_ids from the panels' `[#id]` marks; a row in two clusters counts in the first only. suggested_axes: at most 4.
+      failure_highlights: at most 3, each with >=2 sample_ids from the panels' `[#id]` marks; each id appears once in the whole reply. suggested_axes: at most 4.
   l2_context/1:
     persona: >-
       You are L2, the attention layer. You never author a candidate prompt yourself — your whole

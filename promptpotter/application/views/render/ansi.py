@@ -39,6 +39,7 @@ from promptpotter.domain.phase_acts import (
     PassOpened,
     ProposeClosed,
     ProposeOpened,
+    RowsRan,
     SettingsFact,
     StepClosed,
     StepFact,
@@ -184,7 +185,15 @@ def _prompt_flat(individual: OptSearchPoint, schema: PipelineSchema) -> dict[str
 
 
 def _render_measure_enter(v: MeasureOpened) -> str:
-    return "\n" + _node_top("MEASURE", f"{v.candidates} candidates on {v.cells} cells")
+    chosen = "" if v.rows == "random" else f", rows {_ROWS_RAN_WORDS[v.rows]}"
+    return "\n" + _node_top("MEASURE", f"{v.candidates} candidates on {v.cells} cells{chosen}")
+
+
+_ROWS_RAN_WORDS: dict[RowsRan, str] = {
+    "random": "in the sampler's order",
+    "informative": "by expected information",
+    "cold": "in the sampler's order (informative, on a cold ruler)",
+}
 
 
 def render_round_verdict(

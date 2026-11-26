@@ -3455,6 +3455,11 @@
           "ManifestSwap": {
             "additionalProperties": false,
             "properties": {
+              "config": {
+                "additionalProperties": true,
+                "title": "Config",
+                "type": "object"
+              },
               "node": {
                 "title": "Node",
                 "type": "string"

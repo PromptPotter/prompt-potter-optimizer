@@ -26,7 +26,7 @@ ADAPTIVE_QUEUE = (
             "A cell missing from a WARM ruler is not that residual — it raises."
         ),
         severity="info",
-        predicate=lambda _c, k, _d: bool(k.per_round_resubset),
+        predicate=lambda _c, k, _d, _s: bool(k.per_round_resubset),
     ),
     MemberCoupling(
         name="display_subset_relative_under_resubset",
@@ -46,7 +46,9 @@ ADAPTIVE_QUEUE = (
         ),
         # `inert`, not `info`: nothing co-moves; one knob's display choice wastes the other's invariance.
         severity="inert",
-        predicate=lambda c, k, _d: bool(k.per_round_resubset) and c.display_metric != "ability",
+        predicate=lambda c, k, _d, _s: (
+            bool(k.per_round_resubset) and c is not None and c.display_metric != "ability"
+        ),
     ),
 )
 
@@ -67,7 +69,37 @@ POBB = (
             "is inert and shallow candidates are cut on the deep bar."
         ),
         severity="inert",
-        predicate=lambda _c, k, _d: k.epsilon_floor > k.epsilon,
+        predicate=lambda _c, k, _d, _s: k.epsilon_floor > k.epsilon,
+    ),
+    MemberCoupling(
+        name="informative_rows_without_overlap",
+        knobs=("row_choice",),
+        bench_knobs=(),
+        estimand=Estimand.SELECTION,
+        relation=(
+            "row_choice=informative takes each block's rows by expected information, which reverses "
+            "the round order's stratified interleave (verdict-resolution.md); the election then "
+            "pairs an arm with its parent on the origin panel alone, theta_election.vote=overlap."
+        ),
+        consequence=(
+            "The selector votes on the rows the race chose, which are no longer a blind draw, so "
+            "the bar would read the race's choice as the arm's ability. Refused before the mint."
+        ),
+        severity="refused",
+        predicate=lambda _c, k, _d, s: k.row_choice == "informative" and s.vote != "overlap",
+    ),
+    MemberCoupling(
+        name="refit_without_informative_rows",
+        knobs=("refit", "row_choice"),
+        bench_knobs=(),
+        estimand=Estimand.SELECTION,
+        relation="refit is the θ row_choice=informative chooses rows on.",
+        consequence=(
+            "refit is set off the manifest's value, but row_choice=random chooses no row, so the "
+            "setting is inert."
+        ),
+        severity="inert",
+        predicate=lambda _c, k, d, _s: k.row_choice == "random" and k.refit != d.refit,
     ),
 )
 
@@ -79,8 +111,10 @@ _READ_ON = {"l1_patience": "fires_l2", "l2_patience": "fires_l3", "l3_patience":
 assert set(_READ_ON) == set(EscalationKnobs.model_fields) - {"escalation_ladder"}, "a rung unread"
 
 
-def _unread(knob: str, rung: str) -> Callable[[object, EscalationKnobs, EscalationKnobs], bool]:
-    return lambda _c, k, d: (
+def _unread(
+    knob: str, rung: str
+) -> Callable[[object, EscalationKnobs, EscalationKnobs, object], bool]:
+    return lambda _c, k, d, _s: (
         not getattr(k.escalation_ladder, rung) and getattr(k, knob) != getattr(d, knob)
     )
 

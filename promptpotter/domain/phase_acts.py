@@ -350,10 +350,16 @@ class ProposeClosed(FrozenModel):
     replayed: bool
 
 
+# The row choice a round's race ran: ``cold`` is ``informative`` on a ruler that tells every row
+# alike, so the sampler's order ran.
+RowsRan = Literal["random", "informative", "cold"]
+
+
 class MeasureOpened(FrozenModel):
     act: Literal["measure_opened"] = "measure_opened"
     candidates: int
     cells: int
+    rows: RowsRan
 
 
 class PassOpened(FrozenModel):

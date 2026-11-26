@@ -122,6 +122,8 @@ from promptpotter.application.jobs.launcher.admission import (
     paid_pass,
 )
 from promptpotter.application.maintenance.landing import complete_registries
+from promptpotter.application.mask.backprop import ForkDecline, select_branch_round
+from promptpotter.application.mask.record import SpineCycle
 from promptpotter.application.optimizer_manifest import bench_choice, select_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers.capo.members import CapoInit, CapoObjective
@@ -232,6 +234,7 @@ from promptpotter.application.scoring.paired import (
     read_pair,
 )
 from promptpotter.application.scoring.passes import verify_member, verify_reading
+from promptpotter.application.scoring.race_protocol import View, WalkView
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
@@ -369,6 +372,7 @@ from promptpotter.domain.records.run_records import (
     ForkSpec,
     ForkTrigger,
     LLMCallRecord,
+    RebaseRequest,
     RoundEnteredRecord,
     RoundWarningRecord,
     Running,
@@ -1711,12 +1715,35 @@ def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
         OptimizerChoice(
             call_target=BENCH_TARGET,
             optimizer="potter",
-            nodes={"theta_election": ManifestNodeOverlay(config={"vote": "overlap"})},
+            nodes={
+                "pobb": ManifestNodeOverlay(config={"row_choice": "random"}),
+                "theta_election": ManifestNodeOverlay(config={"vote": "draw"}),
+            },
         )
     )
-    assert (voting.vote, select_optimizer(bench_choice("potter")).vote) == ("overlap", "draw"), (
+    assert (voting.vote, select_optimizer(bench_choice("potter")).vote) == ("draw", "overlap"), (
         "the election's `vote` never reached the round's pairing"
     )
+
+
+def test_informative_rows_without_an_overlap_vote_are_refused_at_every_selection() -> None:
+    for optimizer, nodes, refused in (
+        ("potter", {"theta_election": {"config": {"vote": "draw"}}}, True),
+        ("capo-pobb", {"pobb": {"config": {"row_choice": "informative"}}}, True),
+        ("potter", {}, False),
+        ("capo-pobb", {}, False),
+    ):
+        # The one door a check-in, a mint and a resume's laid overlay each select through.
+        choice = defaulted_config({"optimization": {"optimizer": optimizer, "nodes": nodes}})
+        if not refused:
+            select_optimizer(choice.optimization)
+            continue
+        with pytest.raises(PayloadInvalidError) as caught:
+            select_optimizer(choice.optimization)
+        assert caught.value.code == "coupling_refused", f"{optimizer}: refused for another reason"
+        assert "optimization.nodes.pobb.config.row_choice" in str(caught.value), (
+            f"{optimizer}: the refusal never named the knob that laid it"
+        )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -1751,9 +1778,9 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
     assert closest_to_bar(reads, beside=near_key) == "deep"
 
 
-# Round 2 re-reads the leader round 1 held.
+# Round 2 starts from what round 1 handed on.
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
+def test_a_held_rounds_leader_ahead_of_its_parent_is_dropped_and_never_raced_again(
     monkeypatch: pytest.MonkeyPatch, offline: Router
 ) -> None:
     # The cells that ranked it first are the ones its luck rode.
@@ -1778,16 +1805,14 @@ def test_a_held_leader_ahead_of_its_parent_is_re_read_once_ahead_of_l1s_own(
         leader = first.election.leading
         assert leader is not None
         assert "Check" in first.arms[leader].individual.prompts["solve"].fields["instruction"]
-        assert [m.id for m in cycle.population] == [parent_id, leader], (
-            "a held leader ahead of its parent was dropped with its evidence"
+        assert [m.id for m in cycle.population] == [parent_id], (
+            "a held round handed on more than its parent: evidence is bought in its race alone"
         )
         offline.llm.says = _potter_says("Guess.")
         second = asyncio.run(execute_round(cycle, 2)).result
-        assert next(iter(second.proposed)) == leader and second.rows(leader), (
-            "the round after a leader missed the bar did not re-score it, first"
+        assert leader not in second.proposed and not second.rows(leader), (
+            "a leader short of the bar was raced again past its round's cap"
         )
-        assert cycle.output(L1Readout, 2).l1_proposed == 1, "a re-read counted as L1's yield"
-        assert [m.id for m in cycle.population] == [parent_id], "a leader was re-read twice"
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -2064,6 +2089,9 @@ def peer_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Compos
     name = "capo"
     capo = yaml.safe_load((optimizers_root() / "capo" / "pipeline.yaml").read_text("utf-8"))
     potter = yaml.safe_load((optimizers_root() / "potter" / "pipeline.yaml").read_text("utf-8"))
+    # Potter's race beside capo's selector runs on the draw, as capo-pobb lays it.
+    switch = yaml.safe_load((optimizers_root() / "capo-pobb" / "pipeline.yaml").read_text("utf-8"))
+    potter["nodes"]["pobb"]["config"] |= switch["swap"]["paired_t"]["config"]
     seed = ["capo_init"]
     walk = ["blocks", "mating", "capo_crossover", "pobb", "score", "population"]
     homes = count()
@@ -3421,7 +3449,6 @@ def trailing() -> _Trailing:
         check = PoBBCheck(
             cfg,
             n_min=6,
-            n_samples=28,
             ruler=None,
             parent=parent,
         )
@@ -3430,7 +3457,9 @@ def trailing() -> _Trailing:
             parent: sheet(measurements([1.0] * parent_cells)),
             ArmKey("arm"): sheet(measurements([0.0] * misses + [1.0] * (n - misses))),
         }
-        return check.check(field, [ArmKey("winner"), ArmKey("arm")]).get(ArmKey("arm"))
+        return check.check(field, dict.fromkeys([ArmKey("winner"), ArmKey("arm")], 28)).get(
+            ArmKey("arm")
+        )
 
     return _Trailing(cfg, parent, behind_perfect_prior)
 
@@ -3438,13 +3467,12 @@ def trailing() -> _Trailing:
 @pytest.mark.usefixtures("optimizing_memory")
 def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
     cfg, parent, _ = trailing
-    graded = PoBBCheck(cfg, n_min=6, n_samples=28, ruler=None, parent=parent)
+    graded = PoBBCheck(cfg, n_min=6, ruler=None, parent=parent)
     for n, epsilon in ((6, 0.15), (9, 0.225), *((n, 0.30) for n in range(12, 29))):
         assert graded.epsilon_at(n) == pytest.approx(epsilon), f"ε at {n} cells"
     flat = PoBBCheck(
         pobb_knobs(epsilon=0.30, epsilon_floor=0.30),
         n_min=6,
-        n_samples=28,
         ruler=None,
         parent=parent,
     )
@@ -3452,7 +3480,6 @@ def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
     shipped = PoBBCheck(
         pobb_knobs(),
         n_min=6,
-        n_samples=28,
         ruler=None,
         parent=parent,
     )
@@ -3492,7 +3519,6 @@ def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -
     unpaired = PoBBCheck(
         pobb_knobs(epsilon=0.05),
         n_min=4,
-        n_samples=20,
         ruler=None,
         parent=parent,
     )
@@ -3501,7 +3527,7 @@ def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -
         parent: sheet(measurements([0.0] * 20)),
         ArmKey("challenger"): sheet(measurements([0.0] * 5, sample_ids=[9, 12, 13, 14, 8])),
     }
-    assert not unpaired.check(field, [ArmKey("challenger")]), (
+    assert not unpaired.check(field, {ArmKey("challenger"): 28}), (
         "an arm was cut on cells its rival never sat"
     )
 
@@ -3511,10 +3537,8 @@ def test_a_cost_terms_tie_breaks_never_pin_p_best_at_a_coin(trailing: _Trailing)
     cfg, parent, _ = trailing
     longer, terse_parent = _charged_by_length()
     standings: list[node_contract.RaceSnapshot] = []
-    charged = PoBBCheck(
-        cfg, n_min=6, n_samples=34, ruler=None, parent=parent, on_snapshot=standings.append
-    )
-    charged.check({parent: terse_parent, ArmKey("l"): longer}, [ArmKey("l")])
+    charged = PoBBCheck(cfg, n_min=6, ruler=None, parent=parent, on_snapshot=standings.append)
+    charged.check({parent: terse_parent, ArmKey("l"): longer}, {ArmKey("l"): 28})
     assert standings[-1].p_best > 0.5, "a cost term's tie-breaks pinned p_best at a coin"
 
 
@@ -3564,11 +3588,10 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
     unpaired_check = PoBBCheck(
         pobb_knobs(),
         n_min=6,
-        n_samples=28,
         ruler=None,
         parent=parent,
     )
-    assert not unpaired_check.check({ArmKey("c"): sheet(constant)}, [ArmKey("c")]), (
+    assert not unpaired_check.check({ArmKey("c"): sheet(constant)}, {ArmKey("c"): 28}), (
         "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
     )
     # Collapse is read against the parent's answers on the same cells.
@@ -3634,12 +3657,12 @@ def test_the_fields_p_best_sums_to_one_discriminates_graded_rows_and_reads_no_sl
     cells = [str(i) for i in range(12)]
     strong, weak = uncharged(*[0.66] * 12), uncharged(*[0.30] * 12)
     field = {ArmKey("a"): weak, ArmKey("b"): strong, ArmKey("c"): weak}
-    p_best, _ = field_p_best(field, cells)
+    p_best, _, _ = field_p_best(field, cells)
     assert sum(p_best.values()) == pytest.approx(1.0), "the field's shares do not sum to 1"
     assert p_best[ArmKey("b")] > 0.8, f"graded rows failed to discriminate: {p_best}"
-    reordered, _ = field_p_best(dict(reversed(field.items())), cells)
+    reordered, _, _ = field_p_best(dict(reversed(field.items())), cells)
     assert reordered == p_best, "the order the field was walked in moved an arm's p_best"
-    ties, _ = field_p_best({ArmKey("a"): weak, ArmKey("c"): weak}, cells)
+    ties, _, _ = field_p_best({ArmKey("a"): weak, ArmKey("c"): weak}, cells)
     assert ties[ArmKey("a")] == pytest.approx(0.5, abs=0.03), "a tie reads as a coin"
 
 
@@ -3818,7 +3841,8 @@ def test_gepas_gate_tests_each_arm_against_the_minibatch_scores_of_its_own_paren
     )
     assert race.priors == {}, "the gate paired a prior, so the bench would catch it up"
     level = [measurement(i, 1.0, objective=0.5) for i in range(2)]
-    stops = race.close({weak_child: level, strong_child: level})
+    walk = WalkView(level, minibatch, 0, len(level))
+    stops = race.decide(View(dict.fromkeys((weak_child, strong_child), walk), False)).stops
     assert (
         list(stops) == [strong_child] and stops[strong_child].check_result["parent_id"] == "p2"
     ), "one arm's parent bar decided another arm's gate"
@@ -4599,7 +4623,7 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         refork = _rebase_request(
             forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer
         )
-        assert refork is not None and refork.fork_from_round == 2, (
+        assert isinstance(refork, RebaseRequest) and refork.fork_from_round == 2, (
             "a fork standing on a round-1 arm cuts at round 2"
         )
         hangs_from = refork.hangs_from
@@ -4617,11 +4641,37 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         stood_on_pick = _rebase_request(
             forking, "l2_context", standing(reason="r", stand_on="C1.1"), offer
         )
-        assert stood_on_pick is not None and stood_on_pick.hangs_from is None, (
+        assert isinstance(stood_on_pick, RebaseRequest) and stood_on_pick.hangs_from is None, (
             "a fork on the round's own pick restated an election it already holds"
         )
         with pytest.raises(ValidationError):
             standing.model_validate({"reason": "r", "stand_on": "C9.9"})
+
+
+def test_a_fork_no_spine_node_may_take_is_declined_with_its_reason() -> None:
+    # A fresh store's line whose levels are all withheld: the proposal used to vanish unsaid.
+    def spine(theta: float | None) -> list[SpineCycle]:
+        return [
+            SpineCycle(
+                cycle_id="c",
+                parent_cycle_id=None,
+                cut_round=None,
+                theta_by_round={0: None, 1: theta, 2: None},
+                pick_by_round={1: "C0", 2: "p2"},
+            )
+        ]
+
+    def branch(theta: float | None, *, at: int = 2, changing: bool = False) -> int | ForkDecline:
+        return select_branch_round(
+            spine(theta), cycle_id="c", current_round=at, origin_id="C0", changing=changing
+        )
+
+    assert (branch(None), branch(0.4), branch(0.4, changing=True), branch(0.4, at=3)) == (
+        ForkDecline.NO_THETA,
+        ForkDecline.NOTHING_NEW,
+        1,
+        ForkDecline.NO_PICK,
+    ), "a fork the spine cannot take was declined without the reason its record names"
 
 
 # Each restate banks the fires before it, and the resume seats what they banked.

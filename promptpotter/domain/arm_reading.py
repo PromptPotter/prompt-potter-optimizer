@@ -32,7 +32,7 @@ from promptpotter.domain.paired_reading import (
     level_text,
     lift_versus,
 )
-from promptpotter.domain.ruler import ThetaCaveat
+from promptpotter.domain.ruler import ThetaCaveat, withheld
 from promptpotter.domain.spend import PrefixReading, TokenAccount
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.verification import VerifyReading
@@ -220,7 +220,7 @@ class ArmAbility(FrozenModel):
 
 class ElectionColumn(FrozenModel):
     """The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or
-    carries a caveat — there θ is not ability, and the election reads on fitness."""
+    withheld (`ThetaCaveat.withholds`): there θ is not ability, and the election reads on fitness."""
 
     elects_on: DisplayMetric = Field(description="What the electing round's selector ranked on.")
     ability: ArmAbility | None = Field(description="The pick's θ on its electing round.")
@@ -228,7 +228,7 @@ class ElectionColumn(FrozenModel):
 
     @classmethod
     def of(cls, elects_on: DisplayMetric, ability: ArmAbility | None) -> ElectionColumn:
-        unread = ability is None or ability.theta is None or ability.caveat is not None
+        unread = ability is None or ability.theta is None or withheld(ability.caveat)
         caveated = elects_on == "ability" and unread
         return cls(
             elects_on=elects_on, ability=ability, reads_on="fitness" if caveated else elects_on

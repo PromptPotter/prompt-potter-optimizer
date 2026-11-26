@@ -29,7 +29,7 @@ from promptpotter.application.intelligence.earned_blocks import (
 )
 from promptpotter.application.intelligence.indexes.axis import AxisIndex
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.mask.backprop import select_branch_round
+from promptpotter.application.mask.backprop import ForkDecline, select_branch_round
 from promptpotter.application.mask.load import load_lineage_spine
 from promptpotter.application.optimizer_manifest import running_prompt
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, CycleRead
@@ -335,8 +335,8 @@ class Lineage(CycleRead):
             position_of=session.bank.position_of,
         )
 
-    def branch_round(self, *, changing: bool) -> int | None:
-        """The closed round a fork of this line stands on (UCB over the campaign's lineage); ``None`` where none may."""
+    def branch_round(self, *, changing: bool) -> int | ForkDecline:
+        """The closed round a fork of this line stands on (UCB over the campaign's lineage), else why none may."""
         return select_branch_round(
             load_lineage_spine(self._cycle.difficulty),
             cycle_id=self._cycle.session.cycle_id,

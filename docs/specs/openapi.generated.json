@@ -4537,6 +4537,7 @@
           "severity": {
             "description": "collision (soundness) | inert (wasted knob) | info (relationship)",
             "enum": [
+              "refused",
               "collision",
               "inert",
               "info"
@@ -6795,7 +6796,7 @@
       },
       "ElectionColumn": {
         "additionalProperties": false,
-        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\ncarries a caveat — there θ is not ability, and the election reads on fitness.",
+        "description": "The column a pick's election is quoted on: θ where it was won on θ, unless θ is unread or\nwithheld (`ThetaCaveat.withholds`): there θ is not ability, and the election reads on fitness.",
         "properties": {
           "ability": {
             "anyOf": [
@@ -16042,15 +16043,15 @@
       },
       "SampleWalk": {
         "additionalProperties": false,
-        "description": "The scoring walk of the arm being measured: the axis it DECLARED plus a cursor. Past the\ncursor is declared, never promised — an eliminator can stop the arm before its tail.",
+        "description": "The scoring walk of the arm being measured, on its own order, plus a cursor. Its cells taken\nlead, so a race that re-chooses its rows at a decision never moves a taken cell; past the\ncursor is chosen, never promised — an eliminator can stop the arm before its tail.",
         "properties": {
           "cursor": {
-            "description": "Where the walk stands in `ids`: the cell in flight, else the one after the last measured.",
+            "description": "Where the walk stands in `ids`: the cell in flight, else the one after the last taken.",
             "title": "Cursor",
             "type": "integer"
           },
           "ids": {
-            "description": "The declared order; before the arm declares one, the cells it has measured and the one in flight.",
+            "description": "The arm's rows through its budget as its last turn filed them: those it took, in the order it took them, then its untaken in the order its race chose.",
             "items": {
               "type": "integer"
             },
@@ -16093,7 +16094,7 @@
       },
       "SeriesReading": {
         "additionalProperties": false,
-        "description": "A round's level as its series read it, under the one caveat that withholds it.",
+        "description": "A round's level as its series read it, under the one caveat that qualifies it.",
         "properties": {
           "caveat": {
             "anyOf": [
@@ -16104,7 +16105,7 @@
                 "type": "null"
               }
             ],
-            "description": "The level's own caveat, else its series'. Null, and it differences any other level of the series that is null too."
+            "description": "The level's own caveat, else its series'. One that withholds (`ThetaCaveat.withholds`) keeps the level from differencing; a footnote does not."
           },
           "reading": {
             "$ref": "#/components/schemas/AbilityReading",
