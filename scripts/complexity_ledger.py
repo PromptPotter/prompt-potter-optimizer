@@ -131,7 +131,7 @@ BASELINE = {
     # small-7 (+3): a line-file rewrite left empty deletes the file, so a reclaim leaves no 0-byte cells.
     # small-7 (+27): `archive-datasets`, the served scopes the archive control picks from.
     # l4-words-fix (+25, all the migration): job files v0.8.20 ended on `panel_cut` land on
-    # `panel_hole` (`migrations/panel_hole_ending.py`); the chain is net 0 beside it.
+    # `panel_hole` (`migrations/job_endings.py`); the chain is net 0 beside it.
     # spend-served (+19): the bench's set-aside is a hold on the payer its cells draw, and the
     # stop record and the dashboard word the book's count by part.
     # panel-rule-2 (+24): `Connector.declared_panel_model` and `layer_fold.py::LaidAs`, so a
@@ -263,7 +263,8 @@ BASELINE = {
     # (`difficulty.py::level_series_of`), so its rules are a table, not a seated session.
     # tw-j (+11): `node_context.py::closed_round` takes the three fields it reads, not the `Cycle`,
     # and `own_rows` is the parent's fold as a pure function, so its facts are a table.
-    "package_lines": 113745,
+    # job-endings (+4): the migration also lands v0.8.20's `converged` on `optimizer_exhausted`.
+    "package_lines": 113601,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

@@ -1877,7 +1877,7 @@ CHECKS: tuple[Check, ...] = (
         reads=(*_WEBAPP_READS, *OFFLINE_RUN_READS, "webapp/out/", os.path.join(_WALK_WORLDS, "")),
     ),
     Check("npm-audit", "release", _npm_audit, mb=115),  # 91
-    Check("pip-audit", "release", _pip_audit, mb=165),  # 130
+    Check("pip-audit", "release", _pip_audit, mb=220),  # 178 on a cold run, 151 warm
     Check("advisories", "release", _advisories, mb=115),  # 93
 )
 

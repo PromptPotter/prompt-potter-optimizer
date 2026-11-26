@@ -736,8 +736,8 @@ Each row names the chain it rides with.
   `Kind("job", …, _SURVIVOR, …)` for the daily quota, but `domain/job.py::Job` holds `ending:
   StopReason | None`, `refusal: Refusal | None` (a served message, `details`, `next_acts`), `lapse`,
   `stepped` and a five-arm `holder`, so a `StopReason`, `Refusal`, `NextAct` or holder rename is a
-  survivor migration or a refused landing (two of the five migrations are jobs': `panel_hole_ending.py`,
-  `live_jobs_index.py`); `ending` and `refusal`'s readers (`admission.py:144`,
+  survivor migration or a refused landing (two of the five migrations are jobs': `job_endings.py`,
+  `live_jobs_index.py`; 5cf502c7b dropped `converged` with none, found at the v0.8.21 cut); `ending` and `refusal`'s readers (`admission.py:144`,
   `machine_status.py:297-301`) read a released job. Root: a survivor's model imports no run-data enum
   and no served-words model; the ending, refusal and lapse go to run data, in a one-shot migration
   (decisions.md § 0011). **Rides with:** surv, before "A queued launch dies with the asking process". **Re-test:** the model `Kind("job", …)` loads holds no `StopReason`, `Refusal` or `JobLapse` field.
