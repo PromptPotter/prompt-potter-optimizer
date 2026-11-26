@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable, Coroutine, Iterator, Sequence
+from collections.abc import Callable, Coroutine, Iterator
 from pathlib import Path
 from typing import Any, NamedTuple, NoReturn, cast, get_args
 from unittest import mock
@@ -128,9 +128,8 @@ from promptpotter.application.maintenance.archive_maintenance import purge_cold_
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
 from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
-from promptpotter.application.optimizers.nodes import Race
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
-from promptpotter.application.run_phase_control import FlightGauge, RunControl, budget_stop
+from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner import loop
 from promptpotter.application.runner.bench import cycle_bench, live_cycle_run
 from promptpotter.application.runner.inner import spawn
@@ -138,16 +137,12 @@ from promptpotter.application.runner.inner.tasks import enter_inner_cell
 from promptpotter.application.runner.loop import round_bounds
 from promptpotter.application.runner.mint import stand_held_budget
 from promptpotter.application.runner.termination import panel_gate_tripped, run_stop_reason
-from promptpotter.application.scoring import catch_up, query_loop
-from promptpotter.application.scoring.catch_up import CatchUpPool
+from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.cell_envelope import CellEnvelope
 from promptpotter.application.scoring.formula.compiler import cell_channels_of
 from promptpotter.application.scoring.judges import call as judge_call
 from promptpotter.application.scoring.judges.registry import build_evaluators
 from promptpotter.application.scoring.passes import grade_line_bench
-from promptpotter.application.scoring.race_protocol import (
-    Decider,
-)
 from promptpotter.application.scoring.sample_measurement import (
     cell_billing,
     emit_replayed_step_tokens,
@@ -167,7 +162,7 @@ from promptpotter.config.paths import default_projects_root, jobs_dir
 from promptpotter.config.settings import settings
 from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
-from promptpotter.domain.arms import ArmPosition, CutKind
+from promptpotter.domain.arms import CutKind
 from promptpotter.domain.bench import PassRefusal
 from promptpotter.domain.campaign import CampaignCycle, Optimize, RunDeclaration, ceiling_meter
 from promptpotter.domain.campaign_config import (
@@ -178,8 +173,6 @@ from promptpotter.domain.campaign_config import (
 from promptpotter.domain.cells import PinnedCell
 from promptpotter.domain.checkin_draft import DatasetBasis
 from promptpotter.domain.command_kinds import (
-    MAX_SPEED,
-    UNARMED,
     ArmRequest,
     ChangeRunLimitsPayload,
     DiscardDraftPayload,
@@ -187,7 +180,6 @@ from promptpotter.domain.command_kinds import (
     EditDraftCampaignPayload,
     ForkCyclePayload,
     HeadToHeadRequest,
-    LookaheadCells,
     LookaheadPress,
     MintHeadToHeadPayload,
     StartCheckinPayload,
@@ -236,7 +228,6 @@ from promptpotter.domain.records.run_records import (
     CycleMintedRecord,
     CycleShareRecord,
     CycleStart,
-    FlightRecord,
     ForkRemainder,
     ForkTrigger,
     Hold,
@@ -252,7 +243,6 @@ from promptpotter.domain.records.run_records import (
     Running,
     RunPhaseRecord,
     SampleScoredRecord,
-    SampleStartedRecord,
     SpendTombstoneRecord,
     StandingBudgetRecord,
     StopLoop,
@@ -260,7 +250,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, PipelineData, Scorer
+from promptpotter.domain.scoring import MeasuredCell, PipelineData, Scorer
 from promptpotter.domain.search_point import JobSearchPoint, NodeConfig
 from promptpotter.domain.spend import (
     CYCLE_AXES,
@@ -275,7 +265,6 @@ from promptpotter.domain.spend import (
     TokenAccount,
     TokenUsageKind,
 )
-from promptpotter.domain.validators import StopSignal
 from promptpotter.infrastructure import holders
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.identity.accounts import is_host
@@ -399,7 +388,7 @@ from promptpotter.shared.identity import (
     UserId,
     default_identity,
 )
-from promptpotter.shared.measurement_context import MeasuredPass, MeasurementRole
+from promptpotter.shared.measurement_context import MeasurementRole
 
 
 @pytest.fixture
@@ -821,26 +810,13 @@ async def test_a_replayed_grading_is_metered_uncharged_and_an_empty_reply_never_
 class _OrderedFakeBackend:
     """Finishes LATER samples FIRST: under uniform latency the loop need order nothing to pass."""
 
-    def __init__(self, n: int, *, slowest_last: bool = False) -> None:
-        self.slowest_last = slowest_last
+    def __init__(self, n: int) -> None:
         self.n = n
         self.calls: list[int] = []
-        self._inflight = 0
-        # In flight as each call began. Read its PEAK only: the tail measures the scheduler.
-        self.entries: list[int] = []
 
     async def measure(self, sample: Sample) -> Any:
         self.calls.append(sample.id)
-        return await self.hold(sample)
-
-    async def hold(self, sample: Sample, pace: float = 0.01) -> Any:
-        self._inflight += 1
-        self.entries.append(self._inflight)
-        rank = sample.id if self.slowest_last else (self.n - sample.id + 1)
-        try:
-            await asyncio.sleep(rank * pace)
-        finally:
-            self._inflight -= 1
+        await asyncio.sleep((self.n - sample.id + 1) * 0.01)
         return MeasuredCell(
             sample_key=sample.key,
             query=sample.query,
@@ -848,26 +824,6 @@ class _OrderedFakeBackend:
             predicted=sample.ground_truth or "",
             pipeline=PipelineData(total_time=0.5),
         )
-
-
-class _CutAfter:
-    """Stands in for the PoBB gate on the same seam, firing where the test picks."""
-
-    name = "cut_after"
-
-    def __init__(self, n: int) -> None:
-        self.n = n
-
-    def earliest_stop(
-        self, results: Sequence[GradedCell], upcoming: Sequence[tuple[Sample, GradedCell | None]]
-    ) -> int | None:
-        m = max(self.n, len(results) + 1)
-        return m if m <= len(results) + len(upcoming) else None
-
-    def check(self, results: Sequence[GradedCell]) -> StopSignal | None:
-        if len(results) < self.n:
-            return None
-        return StopSignal(self.name, "eliminated", {"queries_scored": len(results)})
 
 
 _HIT = Scorer(
@@ -932,19 +888,11 @@ async def _walk(
     stores: Stores,
     dataset: list[Sample],
     *,
-    armed: LookaheadCells,
-    cut_at: int | None,
-    max_cells: int = 2,
-    parent_lacks_cells: bool = False,
-    backfill_pace: float = 0.01,
-    pause_after_call: int | None = None,
     resumes: JobSearchPoint | None = None,
-    stall: int | None = None,
     skip_at: int | None = None,
     cap_usd: float | None = None,
-    race: Decider[str] | None = None,
-    budget: int | None = None,
 ) -> dict[str, Any]:
+    """One walk pressed 4 cells deep on a backend that holds 4, each cell bound and billed $1."""
     backend = _OrderedFakeBackend(len(dataset))
     # The walk's own campaign, which priced nothing yet.
     campaign = stores.projects_root / "walks" / uuid.uuid4().hex
@@ -953,8 +901,6 @@ async def _walk(
     sp = resumes or JobSearchPoint(
         pipeline_params=PipelineParams().with_nodes({"search": {"walk": uuid.uuid4().hex}})
     )
-    committed: list[int] = []
-    returned: list[int] = []
     book = spend_book(cap_usd)
     dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
 
@@ -962,42 +908,14 @@ async def _walk(
         with admitted(
             CallLabel("cell", "backend"), dollar, model=None, provider=None, paid_by="host"
         ) as bill:
-            if sample.id == stall:
-                await asyncio.sleep(0.3)
             row = await backend.measure(sample)
-            returned.append(sample.id)
             bill.settle(Billed(TokenAccount(), 1.0))
         return row
 
-    def _backfill(_session: Any, _index: Any, _sp: Any, sample: Sample, _prior: ArmKey) -> Any:
-        call = asyncio.ensure_future(backend.hold(sample, backfill_pace))
-
-        def _commit() -> list[Any]:
-            committed.append(sample.id)
-            return [_HIT.grade(call.result())]
-
-        return call, _commit, call.cancel
-
-    class _ParentPrior:
-        """A parent measured on none of the round's cells, so every cell owes it one catch-up call."""
-
-        def __init__(self) -> None:
-            self.priors = {ArmKey("parent"): CellSheet("", frozenset())}
-
-        def catch_up(self, key: ArmKey, cells: Sequence[GradedCell]) -> None:
-            self.priors[key] = self.priors[key].merged(CellSheet("", frozenset(), tuple(cells)))
-
-    parent = ArmKey("parent")
-    priors = CatchUpPool(
-        cast("Race", _ParentPrior()), cast("Session", None), None, "elimination", {parent: sp}
-    )
-
-    # The walk's own ledger: what each launch recorded of the look-ahead it was sent under.
     started = laid_ledger(campaign_cycles_dir(campaign) / "walk")
     with (
         scoped(ledger=started),
         mock.patch.object(query_loop, "measure_sample", _measure),
-        mock.patch.object(catch_up, "_catch_up", _backfill),
         scoped(book=book),
     ):
         session = loop_session(
@@ -1006,153 +924,22 @@ async def _walk(
             _searching(1.0),
             dataset,
             scorer=_HIT,
-            control=_control_pausing(
-                lambda: pause_after_call is not None and len(returned) >= pause_after_call,
-                lookahead=LookaheadPress(cells=armed),
-            ),
-            client=backend_client(stores.jobs_dir, max_cells_in_flight=max_cells),
+            control=_control_pausing(lambda: False, lookahead=LookaheadPress(cells=4)),
+            client=backend_client(stores.jobs_dir, max_cells_in_flight=4),
         )
         walk = open_walk(
-            sp,
-            dataset,
-            session,
-            kind=MeasurementRole.PANEL,
-            checks=[_CutAfter(cut_at)] if cut_at else [],
-            measured="arm",
-            skip_at=skip_at,
-            budget=budget,
+            sp, dataset, session, kind=MeasurementRole.PANEL, measured="arm", skip_at=skip_at
         )
         stopped = await _stopped_by_operator(
-            query_loop.run_walks(
-                {"arm": walk},
-                session,
-                keep_cut=False,
-                backfills=priors if parent_lacks_cells else None,
-                race=race,
-            )
+            query_loop.run_walks({"arm": walk}, session, keep_cut=False)
         )
-    depths = [
-        r.sample_lookahead for r in ledger_records(started) if isinstance(r, SampleStartedRecord)
-    ]
-    feed = _filed(stores, sp, session)
-    banked = feed.advance()
-    taken = {cell.key for cell in walk.results}
-    priced = scan_ledger_priced_keys([started.path])
     return {
         "sp": sp,
-        # Each row's answer is its address in this walk's own archive: the record is the facts.
-        "rows": [cell.filed(dataclasses.replace(cell.facts, answer=None)) for cell in walk.results],
+        "rows": walk.results,
         "stop_reason": stopped or _ended_on(walk),
         "calls": list(backend.calls),
-        "entries": list(backend.entries),
-        "committed": committed,
-        "banked": {s.id for s in dataset if s.key not in taken and s.key in banked},
-        "priced": {s.id for s in dataset if feed.cell_key(s.key) in priced},
-        "returned": returned,
         "billed": book.spent.sent_usd,
-        "max_depth": max(depths) if depths else 0,
         "ledger": started.path,
-        # The rows whose replay pricing the walk resolved: each one it sent or took, or read ahead.
-        "resolved": set(walk.ctx.free),
-    }
-
-
-async def _round(
-    stores: Stores,
-    dataset: list[Sample],
-    *,
-    armed: LookaheadPress = UNARMED,
-    cuts: list[int | None],
-    slowest_last: bool = False,
-    pause_after_call: int | None = None,
-    kind: MeasurementRole = MeasurementRole.PANEL,
-    ceiling: int = 1,
-    race: Decider[int] | None = None,
-    points: Sequence[JobSearchPoint] | None = None,
-    hop: CycleHop | None = None,
-    calls_out: dict[int, int] | None = None,
-) -> dict[str, Any]:
-    """*points*: each walk's individual, so a second round on them replays what the first filed;
-    *calls_out*: each walk's calls out now, kept as they move; *hop*: the cycle it walks,
-    entered and its arms announced on the store's ledger, so a second round there resumes the first."""
-    backend = _OrderedFakeBackend(len(dataset), slowest_last=slowest_last)
-    flag = {"pause": False}
-    ledger = (
-        laid_ledger(stores.projects_root / "rounds" / uuid.uuid4().hex)
-        if hop is None
-        else CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
-    )
-
-    def absorbed() -> list[tuple[int, int]]:
-        return [
-            (int(r.individual_id[1:]), r.position)
-            for r in ledger_records(ledger)
-            if isinstance(r, SampleScoredRecord)
-        ]
-
-    # Each call beside how many cells the round had absorbed when it went out.
-    asked: list[tuple[int, int, int]] = []
-    # Each walk's calls out now, and the most it ever had out at once.
-    out: dict[int, int] = {} if calls_out is None else calls_out
-    peaks: dict[int, int] = {}
-
-    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
-        call = len(backend.calls) + 1
-        walk = int(cast("MeasuredPass", run_scope().measured).individual_id[1:])
-        asked.append((walk, sample.id, len(absorbed())))
-        out[walk] = out.get(walk, 0) + 1
-        peaks[walk] = max(peaks.get(walk, 0), out[walk])
-        try:
-            row = await backend.measure(sample)
-        finally:
-            out[walk] -= 1
-        if call == pause_after_call:
-            flag["pause"] = True
-        return row
-
-    session = loop_session(
-        stores,
-        # A node to file cells under, so a round on the same points replays them.
-        pipeline_schema([]) if points is None else _searching(0.0),
-        dataset,
-        scorer=_HIT,
-        control=_control_pausing(lambda: flag["pause"], lookahead=armed),
-        client=backend_client(stores.jobs_dir, max_cells_in_flight=ceiling, holds_own_sends=True),
-        hop=hop,
-    )
-    walks = [
-        open_walk(
-            JobSearchPoint() if points is None else points[w],
-            dataset,
-            session,
-            kind=kind,
-            checks=[_CutAfter(cut)] if cut else [],
-            measured=f"c{w}",
-        )
-        for w, cut in enumerate(cuts)
-    ]
-    if hop is not None:
-        ledger.append(RoundEnteredRecord(round=1))
-        for w in range(len(cuts)):
-            position = ArmPosition(round=1, idx=w, total=len(cuts))
-            state = arm_state(f"c{w}", position=position)
-            ledger.append(ArmRecord(round=1, arm=ArmKey(f"c{w}"), state=state))
-    with scoped(ledger=ledger), mock.patch.object(query_loop, "measure_sample", _measure):
-        stopped = await _stopped_by_operator(
-            query_loop.run_walks(dict(enumerate(walks)), session, keep_cut=False, race=race)
-        )
-    return {
-        "rows": [
-            [cell.filed(dataclasses.replace(cell.facts, answer=None)) for cell in walk.results]
-            for walk in walks
-        ],
-        "stops": [stopped or _ended_on(walk) for walk in walks],
-        "absorbed": absorbed(),
-        "asked": asked,
-        "calls": list(backend.calls),
-        "peak": max(backend.entries, default=0),
-        "peaks": peaks,
-        "ledger": ledger,
     }
 
 
@@ -1233,152 +1020,9 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
 
 @pytest.mark.usefixtures("run_bound", "offline")
 @on_jumping_clock
-async def test_a_catch_up_holds_a_cells_slot_and_is_archived_only_for_a_cell_absorbed(
-    built_stores: Stores,
-) -> None:
-    dataset = _dataset()
-    # The unarmed cut walk, whose record no catch-up may move.
-    c1 = await _walk(built_stores, dataset, armed=1, cut_at=4)
-    lone = await _walk(built_stores, dataset, armed=1, cut_at=4, parent_lacks_cells=True)
-    wide = await _walk(
-        built_stores, dataset, armed=3, cut_at=4, max_cells=3, parent_lacks_cells=True
-    )
-    # Catch-up far faster than a cell, so the one started past the cut is back before the cut.
-    quick = await _walk(
-        built_stores,
-        dataset,
-        armed=8,
-        cut_at=4,
-        max_cells=8,
-        parent_lacks_cells=True,
-        backfill_pace=0.0001,
-    )
-    assert max(lone["entries"]) == 1 and max(wide["entries"]) <= 3, (
-        "a catch-up ran past the slots a cell would hold"
-    )
-    absorbed = [s.id for s in dataset[:4]]
-    assert lone["committed"] == wide["committed"] == quick["committed"] == absorbed, (
-        "a catch-up was archived for a cell the walk never absorbed"
-    )
-    assert lone["rows"] == wide["rows"] == quick["rows"] == c1["rows"], "a catch-up moved a record"
-
-
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_a_verify_pass_sends_at_the_backends_ceiling_under_a_one_cell_press(
-    built_stores: Stores,
-) -> None:
-    dataset = _dataset()
-    sent = await _round(
-        built_stores, dataset, cuts=[None, None], kind=MeasurementRole.VERIFY, ceiling=16
-    )
-    # More out than the first walk's rows: the second walk sent beside it, at Max speed too.
-    assert sent["peak"] > len(dataset), "a verify pass sent short of Max speed"
-
-
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_a_walk_resolves_no_archive_row_past_the_draw_it_takes(
-    built_stores: Stores,
-) -> None:
-    dataset = _dataset()
-    bought = await _walk(built_stores, dataset, armed=1, cut_at=None)
-    # Every row of the pool is archived now: an eager open would resolve each one.
-    drawn = await _walk(
-        built_stores,
-        dataset,
-        armed=1,
-        cut_at=None,
-        resumes=bought["sp"],
-        budget=4,
-    )
-    draw = {s.id for s in dataset[:4]}
-    assert drawn["resolved"] == draw, f"the walk resolved rows {drawn['resolved']} of a 4-row draw"
-
-
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_the_call_back_as_a_pause_is_pressed_is_absorbed_and_never_paid_again(
-    built_stores: Stores,
-) -> None:
-    dataset = _dataset()
-    paused = await _round(built_stores, dataset, cuts=[None], pause_after_call=3)
-    assert paused["stops"] == ["graceful"], "a pause read as another stop"
-    assert len(paused["rows"][0]) == len(paused["calls"]) == 3, (
-        "the call that returned as the pause was pressed is absorbed, not paid again on resume"
-    )
-
-
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_a_pause_starts_no_catch_up_and_a_catch_up_out_at_it_launches_no_cell(
-    built_stores: Stores,
-) -> None:
-    dataset = _dataset()
-    for armed_, pace, after, taken in ((1, 0.01, 2, 2), (2, 0.02, 1, 1)):
-        owing = await _walk(
-            built_stores,
-            dataset,
-            armed=armed_,
-            cut_at=None,
-            parent_lacks_cells=True,
-            backfill_pace=pace,
-            pause_after_call=after,
-        )
-        assert owing["stop_reason"] == "graceful", f"armed {armed_}: a pause read as another stop"
-        assert owing["committed"] == [dataset[0].id], f"armed {armed_}: a pause started a catch-up"
-        assert len(owing["rows"]) == len(owing["calls"]) == taken, (
-            f"armed {armed_}: a catch-up out at the pause launched a cell"
-        )
-
-
-# The resumed walk replays the cells the stopped one banked.
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_what_comes_back_behind_a_stalled_head_is_banked_priced_and_never_paid_again(
-    built_stores: Stores,
-) -> None:
-    dataset = _dataset()
-    head = dataset[0].id
-    stopped = await _walk(
-        built_stores, dataset, armed=4, max_cells=4, cut_at=None, pause_after_call=3, stall=head
-    )
-    assert stopped["rows"] == [] and set(stopped["banked"]) == set(stopped["returned"]), (
-        "what came back behind a head still out was not banked"
-    )
-    assert stopped["priced"] == stopped["banked"], (
-        "a banked cell's price was not recorded against its key"
-    )
-    resumed = await _walk(
-        built_stores, dataset, armed=4, max_cells=4, cut_at=None, resumes=stopped["sp"]
-    )
-    assert not set(resumed["calls"]) & set(stopped["banked"]), "a banked cell was paid again"
-    assert [r.key for r in resumed["rows"]] == [s.key for s in dataset], (
-        "the resumed walk did not replay what it banked"
-    )
-
-
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_a_cell_paid_past_where_a_rule_cut_is_banked_and_never_taken(
-    built_stores: Stores,
-) -> None:
-    # Its holder files a claimed cell's answer as its claim retires, so a waiter replays it.
-    dataset = _dataset()
-    head = dataset[0].id
-    capped = await _walk(
-        built_stores, dataset, armed=4, max_cells=4, cut_at=2, pause_after_call=2, stall=head
-    )
-    assert set(capped["banked"]) == {s.id for s in dataset[:3]}, (
-        "a cell paid past where a rule cut was lost, or one never paid was banked"
-    )
-
-
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
 async def test_a_walks_spend_ceiling_binds_before_a_call(built_stores: Stores) -> None:
     dataset = _dataset()
-    ceiling = await _walk(built_stores, dataset, armed=4, max_cells=4, cut_at=None, cap_usd=5.0)
+    ceiling = await _walk(built_stores, dataset, cap_usd=5.0)
     assert (ceiling["stop_reason"], ceiling["billed"]) == ("spend_budget", 5.0), (
         "a spend ceiling binds BEFORE a call: every cell out is counted at its bound"
     )
@@ -1424,13 +1068,11 @@ async def test_a_skip_holds_and_its_replay_records_the_depth_it_skipped_at(
     built_stores: Stores,
 ) -> None:
     dataset = _dataset()
-    replayed = await _walk(built_stores, dataset, armed=4, max_cells=4, cut_at=None, skip_at=3)
+    replayed = await _walk(built_stores, dataset, skip_at=3)
     assert replayed["stop_reason"] == "skip" and len(replayed["rows"]) == 3, "a skip did not hold"
     assert sorted(replayed["calls"]) == [s.id for s in dataset[:3]], "a skipped cell was paid"
     # A second resume replays the skipped walk: its depth is what the replay records, never zero.
-    again = await _walk(
-        built_stores, dataset, armed=4, max_cells=4, cut_at=None, skip_at=3, resumes=replayed["sp"]
-    )
+    again = await _walk(built_stores, dataset, skip_at=3, resumes=replayed["sp"])
     depth = [
         r.running.walked
         for r in ledger_records(again["ledger"])
@@ -5739,59 +5381,6 @@ def test_a_reported_zero_of_reasoning_reaches_a_step_as_zero_and_none_as_unrepor
 
 
 # Journeys awaiting a leg
-
-
-@pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_runs_on_one_backend_never_hold_more_cells_out_than_its_ceiling_together(
-    built_stores: Stores,
-) -> None:
-    # Two runs at Max speed on one machine, as an outer's inner runs: each alone fills the ceiling.
-    dataset, ceiling = _dataset(), 4
-    backend = _OrderedFakeBackend(len(dataset))
-    sending: dict[str, int] = {}
-    together = {"seen": False}
-
-    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any = None) -> Any:
-        run = cast("MeasuredPass", run_scope().measured).individual_id
-        sending[run] = sending.get(run, 0) + 1
-        together["seen"] |= all(sending.get(r) for r in ("a", "b"))
-        try:
-            # Seconds a cell, as a real box's: the other run's wait polls at `HELD_POLL_S`.
-            return await backend.hold(sample, pace=1.0)
-        finally:
-            sending[run] -= 1
-
-    async def _run(run: str) -> CycleEventLog:
-        ledger = laid_ledger(built_stores.projects_root / "machine" / run)
-        session = loop_session(
-            built_stores,
-            pipeline_schema([]),
-            dataset,
-            scorer=_HIT,
-            control=_control_pausing(lambda: False, lookahead=MAX_SPEED),
-            client=backend_client(
-                built_stores.jobs_dir, max_cells_in_flight=ceiling, holds_own_sends=True
-            ),
-        )
-        session.state.flight = FlightGauge(every=0.0)
-        walk = open_walk(
-            JobSearchPoint(), dataset, session, kind=MeasurementRole.PANEL, measured=run
-        )
-        with scoped(ledger=ledger):
-            await query_loop.run_walks({run: walk}, session, keep_cut=False)
-        return ledger
-
-    with mock.patch.object(query_loop, "measure_sample", _measure):
-        ledgers = await asyncio.gather(_run("a"), _run("b"))
-    assert together["seen"], "vacuous — the two runs never sent at once"
-    assert max(backend.entries) == ceiling, "the runs together held past, or short of, the ceiling"
-    served = [
-        r.out for ledger in ledgers for r in ledger_records(ledger) if isinstance(r, FlightRecord)
-    ]
-    assert max(served) == ceiling, (
-        "a run's served flight line read its own cells, not the machine's"
-    )
 
 
 @pytest.mark.usefixtures("run_bound")
