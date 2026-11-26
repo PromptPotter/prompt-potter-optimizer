@@ -1065,6 +1065,19 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   1.75 s, the live job files and `.live-jobs`, user, consent, tokens, grants). Door: io's doors read
   durability off the file's kind. **Rides with:** wave 6. **Re-test:**
   `git grep -cE "durable=(True|not )" -- promptpotter/*.py` is 0.
+- **Child-process facts idle the parent ~8 s** (tw-v, tw-v2): `conftest.py::dspy_child` (2.9 s), the
+  API-start child (2.7 s) and the stdio host (2.4 s) run serially while the parent waits; each
+  child peaks at 160–165 MB, so overlapping them breaks pytest's 393 MB cap. tw-v2's
+  `-X importtime` ranking finds no extra loaded by a boot that never calls it: `promptpotter.main`
+  (2.6 s) loads the `api` extra and mounts `mcp` at `/mcp` (0.64 s); the CLI (0.45–0.68 s) loads
+  the engine only. The cost is the package's own model graph (`domain/command_kinds.py` 0.40–0.58 s
+  cumulative under the CLI, `application/health.py` 0.82 s under `main`). Door: fewer models built
+  at import. **Rides with:** wave 6. **Re-test:** the child walls fall under 1.5 s each.
+- **Archive's world runs cost ~14 s a session over its hand-seated file** (tw-v, tw-v2):
+  `test_archive.py` runs 17.2–18.6 s at tw-v's tip against 3.5–3.7 s at `7dce00a96` (tw-v2's census,
+  one session), the suite's whole remaining gap; `line`, `origin_forks`, `family_tree`,
+  `displaced` and `gated` are distinct runs, so no shape merges. Door: a cheaper run, not fewer
+  runs. **Rides with:** wave 6. **Re-test:** archive's file wall is under 8 s.
 
 ## Held — no wave-4 chain yet
 
