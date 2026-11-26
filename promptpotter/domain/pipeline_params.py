@@ -80,7 +80,7 @@ class NodeCall(FrozenModel):
     model_config = ConfigDict(strict=True, extra="allow")
     # The dump keeps the laid order (pydantic's lists the declared fields first); a copy, which
     # validates nothing, keeps its source's, and its updated keys follow.
-    _laid: _LaidOrder = PrivateAttr(default_factory=_LaidOrder)
+    _laid: _LaidOrder = PrivateAttr(_LaidOrder())
 
     @classmethod
     def __get_pydantic_json_schema__(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -22,7 +23,7 @@ from promptpotter.domain.pipeline_parsing import merge_node_blocks
 from promptpotter.domain.pipeline_schema import DEFAULT_PIPELINE
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store.io import parse_yaml
-from promptpotter.infrastructure.store.read_model import file_sig, read_file
+from promptpotter.infrastructure.store.read_model import derived, file_sig, read_file
 from promptpotter.shared.errors import (
     DatasetAccessError,
     FileKind,
@@ -124,12 +125,23 @@ def definition_layer(raw: bytes) -> dict[str, Any] | None:
     return data
 
 
+def _read_layer(path: Path) -> dict[str, Any] | None:
+    """*path*'s layer, parsed once per file signature (every session open reads its definition): the
+    caller's own deep copy, since the parse is shared."""
+    layer = derived(
+        ("definition_layer", path),
+        sig=file_sig(path),
+        compute=lambda: read_file(path, definition_layer, FileKind.STORED_CONFIG),
+    )
+    return copy.deepcopy(layer)
+
+
 def _layers(dataset: ResolvedDataset) -> list[tuple[Path, dict[str, Any]]]:
     """Each layer file read whole: one that is no definition layer is refused by its path."""
     return [
         (path, layer)
         for path in definition_files(dataset)
-        if (layer := read_file(path, definition_layer, FileKind.STORED_CONFIG)) is not None
+        if (layer := _read_layer(path)) is not None
     ]
 
 
@@ -209,9 +221,7 @@ def with_node_templates(pipeline: Mapping[str, Any]) -> dict[str, Any]:
 
 def campaign_defaults() -> dict[str, Any]:
     """The shipped ``campaign`` defaults every upload's draft is laid over, as every install definition is."""
-    layer = read_file(
-        install_datasets_root() / DEFAULTS_FILE, definition_layer, FileKind.STORED_CONFIG
-    )
+    layer = _read_layer(install_datasets_root() / DEFAULTS_FILE)
     assert layer is not None, "the wheel ships `defaults.yaml`"
     return _section(layer, "campaign")
 
