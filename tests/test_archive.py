@@ -648,30 +648,65 @@ def _remembered_at(stores: Stores, scope: ArmOf, bank: Bank) -> set[str]:
         }
 
 
+class _OriginForks(NamedTuple):
+    hop: CycleHop
+    scorer: Scorer
+    # The crowned arm of `line`'s round 1, what it paid, and the arm's memory before either fork.
+    key: ArmKey
+    paid: set[str | None]
+    before: set[str]
+    unmodified: CycleHop
+    edited: CycleHop
+
+
+@pytest.fixture(scope="module")
+def origin_forks(tmp_path_factory: pytest.TempPathFactory, line: Shared) -> Shared:
+    """`line` steered at round 1 off its crown twice, its origin unmodified then edited, run once
+    for the module (~2.4 s on `line`'s): each fact adopts its own copy."""
+
+    async def act(world: World) -> _OriginForks:
+        (hop, scorer), stores = line.made, world.stores
+        branch = closed_round(stores, hop, 1, scorer, moment=None)
+        assert branch is not None and branch.election is not None
+        key = branch.election.ended_on
+        bank = stores.tenant_datasets.labelled(DATASET)
+        assert bank is not None
+        before = _remembered_at(
+            stores, ArmOf(CampaignWalks(stores.campaigns, hop.campaign_id), ruler_version=0), bank
+        )
+        unrouted = _unrouted(branch.arms[key])
+        unmodified = await world.fork(
+            hop, 1, candidate_id=str(key), start=ForkStart(pipeline_overlay=unrouted)
+        )
+        # An edited origin re-measures, so the fork walks answers no cycle before it walked.
+        [(node, prompt)] = list(branch.arms[key].individual.prompts.items())[:1]
+        field, text = next(iter(prompt.fields.items()))
+        edited = {
+            node: prompt.model_copy(update={"fields": {**prompt.fields, field: f"{text} Anew."}})
+        }
+        start = ForkStart(pipeline_overlay=unrouted, origin_prompts=edited)
+        steered = await world.fork(hop, 1, candidate_id=str(key), start=start)
+        paid = {cell.facts.answer for cell in branch.rows(key)}
+        return _OriginForks(hop, scorer, key, paid, before, unmodified.hop, steered.hop)
+
+    return shared_run(tmp_path_factory, act, on=line)
+
+
 # Its foreign answers are the `--controlled` leg's (`offline_run.py::run_controlled`): no arm's
 # memory reads one. Here, the fence is its campaign's walks as memory is read, never as it opened.
 @pytest.mark.usefixtures("optimizing_memory")
 def test_a_controlled_arm_remembers_only_the_answers_its_campaign_walked(
-    world: World, line: Shared
+    world: World, origin_forks: Shared
 ) -> None:
-    adopted, (hop, scorer) = world.adopt(line), line.made
-    stores = adopted.stores
+    stores, forks = world.adopt(origin_forks).stores, origin_forks.made
     bank = stores.tenant_datasets.labelled(DATASET)
     assert bank is not None
-    walks = CampaignWalks(stores.campaigns, hop.campaign_id)
+    walks = CampaignWalks(stores.campaigns, forks.hop.campaign_id)
     arm = ArmOf(walks, ruler_version=0)
-    before = _remembered_at(stores, arm, bank)
-    branch = closed_round(stores, hop, 1, scorer, moment=None)
-    assert branch is not None and branch.election is not None
-    key = branch.election.ended_on
-    # An edited origin re-measures, so the fork walks answers no cycle before it walked.
-    [(node, prompt)] = list(branch.arms[key].individual.prompts.items())[:1]
-    field, text = next(iter(prompt.fields.items()))
-    edited = {node: prompt.model_copy(update={"fields": {**prompt.fields, field: f"{text} Anew."}})}
-    start = ForkStart(pipeline_overlay=_unrouted(branch.arms[key]), origin_prompts=edited)
-    asyncio.run(adopted.fork(hop, 1, candidate_id=str(key), start=start))
     after = _remembered_at(stores, arm, bank)
-    assert before < after, "a cycle the campaign forked after the arm's scope opened is not its own"
+    assert forks.before < after, (
+        "a cycle the campaign forked after the arm's scope opened is not its own"
+    )
     assert after <= scan_ledger_answers(walks.spans()), (
         "the arm remembers an answer it never walked"
     )
@@ -806,7 +841,7 @@ def line(tmp_path_factory: pytest.TempPathFactory) -> Shared:
     takes `world.adopt(line)`, its own copy, at ~20 ms."""
 
     async def act(world: World) -> tuple[CycleHop, Scorer]:
-        ran = await world.campaign(rounds=3)
+        ran = await world.campaign(rounds=3, rows=32)
         return ran.hop, ran.session.state.scoring.scorer
 
     return shared_run(tmp_path_factory, act)
@@ -1600,32 +1635,21 @@ def test_an_unreadable_close_refuses_its_cycle_to_every_reader_and_the_remedy_ke
 
 @pytest.mark.usefixtures("optimizing_memory")
 def test_an_unmodified_fork_origin_inherits_the_branch_points_reading_and_an_edited_one_rescores(
-    world: World, line: Shared
+    world: World, origin_forks: Shared
 ) -> None:
-    # Two forks run, ~3 s: the inheritance is read off what each fork's round 0 measured.
-    adopted, (hop, scorer) = world.adopt(line), line.made
-    stores = adopted.stores
-    branch = closed_round(stores, hop, 1, scorer, moment=None)
-    assert branch is not None and branch.election is not None
-    key = branch.election.ended_on
-    paid = {cell.facts.answer for cell in branch.rows(key)}
-    unrouted = _unrouted(branch.arms[key])
+    stores, forks = world.adopt(origin_forks).stores, origin_forks.made
 
-    def origin_answers(start: ForkStart) -> set[str | None]:
-        fork = asyncio.run(adopted.fork(hop, 1, candidate_id=str(key), start=start)).hop
-        origin = closed_round(stores, fork, 0, scorer, moment=None)
+    def origin_answers(fork: CycleHop) -> set[str | None]:
+        origin = closed_round(stores, fork, 0, forks.scorer, moment=None)
         assert origin is not None and origin.election is not None
         return {cell.facts.answer for cell in origin.rows(origin.election.ended_on)}
 
-    assert paid and origin_answers(ForkStart(pipeline_overlay=unrouted)) == paid, (
+    assert forks.paid and origin_answers(forks.unmodified) == forks.paid, (
         "an unmodified fork origin rescored what its parent paid for"
     )
-    [(node, prompt)] = list(branch.arms[key].individual.prompts.items())[:1]
-    field, text = next(iter(prompt.fields.items()))
-    edited = {node: prompt.model_copy(update={"fields": {**prompt.fields, field: f"{text} Anew."}})}
-    assert origin_answers(ForkStart(pipeline_overlay=unrouted, origin_prompts=edited)).isdisjoint(
-        paid
-    ), "an edited fork origin inherited a measurement it never earned"
+    assert origin_answers(forks.edited).isdisjoint(forks.paid), (
+        "an edited fork origin inherited a measurement it never earned"
+    )
 
 
 def _operator_fork(stores: Stores, hop: CycleHop, steer: ForkStart, **asked: Any) -> CycleHop:
