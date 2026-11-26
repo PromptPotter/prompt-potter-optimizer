@@ -54,7 +54,6 @@ function envelope(): { tags: HierarchyTag[]; figures: Figure[]; lines: Said[]; c
 const NO_METER: MeteredSpend = {
   meter: "bill",
   metered_usd: 0,
-  metered_tokens: 0,
   billed_usd: 0,
   rate_priced_usd: 0,
   calls_rate_priced: false,

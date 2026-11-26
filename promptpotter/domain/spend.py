@@ -409,12 +409,8 @@ class SpendCount(FrozenModel):
         )
         return ", ".join(f"{usd_text(part.usd_amount)} {name}" for part, name in parts if part.usd)
 
-    def beside(self, billed: Budget) -> SpendCount:
-        """*billed* (a cycle's, or its campaign's) beside this count's other parts."""
-        return SpendCount(**{**dict(self), "billed": billed})
-
-
-NO_SPEND_COUNT = SpendCount(**dict.fromkeys(SpendCount.model_fields, NOTHING_METERED))
+    def plus(self, other: SpendCount) -> SpendCount:
+        return SpendCount(**{part: mine.plus(getattr(other, part)) for part, mine in self})
 
 
 #: The book a cap reads its used figure off: the campaign's ceiling its live cycles share, this
@@ -984,7 +980,6 @@ class MeteredSpend(StrictModel):
 
     meter: CeilingMeter
     metered_usd: float
-    metered_tokens: int
     # The bill providers REPORTED, a replay free: the figure every surface leads with.
     billed_usd: float
     # Never spent, and counted by every cap.
@@ -1001,12 +996,10 @@ class MeteredSpend(StrictModel):
 
     @classmethod
     def of(cls, spend: SpendRollup, meter: CeilingMeter) -> MeteredSpend:
-        metered = spend.metered(meter)
         counted = METER_KINDS[meter]
         return cls(
             meter=meter,
-            metered_usd=metered.usd_amount,
-            metered_tokens=metered.token_amount,
+            metered_usd=spend.metered(meter).usd_amount,
             billed_usd=spend.total_used_usd,
             rate_priced_usd=spend.total_rate_priced_usd,
             calls_rate_priced=calls_rate_priced(spend.total_rate_priced_usd),
@@ -1027,19 +1020,19 @@ class StopSpend(FrozenModel):
     """A stop's spend: the caps bound the CAMPAIGN, so they pair with its count; the cycle's beside."""
 
     spent: MeteredSpend
-    # The campaign's bills, with the stopping book's other parts (`served_dashboard.campaign_count`).
+    # The stopping cycle's book, and its campaign's: every cycle's (`served_dashboard.spend_counts`).
+    cycle: SpendCount
     campaign: SpendCount
     cap: Budget
     # This cycle's part of the caps, what its run's book bound at the stop.
     share: Budget
 
     def meter_lines(self) -> list[str]:
-        """The metered line, the cycle's bills beside its book's other parts, then a line per cap
-        the CAMPAIGN's count (every cycle's bills, the book's other parts) is set against."""
-        meter, spent, cap = self.spent.meter, self.spent, self.cap
-        cycle = self.campaign.beside(Budget.amount(spent.metered_usd, spent.metered_tokens))
+        """The metered line, the cycle's count, then a line per cap the CAMPAIGN's count (every
+        cycle's book) is set against."""
+        meter, cap = self.spent.meter, self.cap
         label, counted = CEILING_METER_LABELS[meter], self.campaign.counted
-        lines = [metered_line(meter, count=cycle, cap=cap, share=self.share)]
+        lines = [metered_line(meter, count=self.cycle, cap=cap, share=self.share)]
         if cap.usd is not None:
             said = self.campaign.words(label) or label
             lines.append(

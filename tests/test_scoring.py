@@ -5521,7 +5521,8 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     assert verify.fresh.fitness is not None and verify.recorded.fitness is not None
     assert verify.fresh.fitness.value == pytest.approx(0.5), "the fresh cells, never the pool"
     assert verify.recorded.fitness.value == pytest.approx(1.0)
-    assert verify.fitness_increment == pytest.approx(-0.5)
+    assert verify.fitness_difference is not None
+    assert verify.fitness_difference.value == pytest.approx(-0.5)
     pair = verify.vs_origin
     assert pair.coverage is not None and pair.headline is not None
     assert (verify.fresh.n, verify.recorded.n, pair.coverage.scored) == (10, 20, 30)

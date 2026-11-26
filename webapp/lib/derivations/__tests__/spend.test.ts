@@ -23,7 +23,6 @@ function metered(
   return {
     meter: "bill",
     metered_usd: 0,
-    metered_tokens: 0,
     billed_usd: 0,
     rate_priced_usd: 0,
     calls_rate_priced: false,
