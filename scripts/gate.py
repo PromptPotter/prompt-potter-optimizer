@@ -2222,6 +2222,9 @@ def _with_builders(checks: list[Check]) -> list[Check]:
 
 # The kinds that run the engine, so a run holding one runs in the pinned venv.
 _PINNED_KINDS = ("py", "parity")
+# A `--web` gate asks no engine check, yet playwright reads the walk world an engine check builds:
+# what it pulls in must hold a pinned kind, or the run re-execs nowhere.
+assert any(c.kind in _PINNED_KINDS for c in _with_builders([_NAMED["playwright"]]))
 
 
 def _kinds(args: argparse.Namespace) -> set[str]:

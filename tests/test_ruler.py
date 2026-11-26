@@ -341,13 +341,46 @@ def test_one_tenant_ruler_judges_an_arm_only_on_the_rows_it_may_read(tmp_path: P
     )
 
 
-# One warm round (~3 s to open) feeds both: its draws read it, then the re-entry folds on it.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_round_draws_fresh_cells_and_a_reentered_one_orders_on_the_lines_it_opened_on(
-    offline: Router,
-) -> None:
-    # The parent hits the easiest 16 of 40 cells on a graded ruler, and each round's cells must
-    # still be the pool's, or the election reads rows the held-out bench never would.
+class _Warm(NamedTuple):
+    """One warm round on a graded ruler: the parent hits the easiest 16 of 40 cells, and each
+    round's cells must still be the pool's, or the election reads rows the held-out bench never would."""
+
+    drawing: Any
+    pool: list[Any]
+    sampler: Any
+    search: list[Any]
+
+    @property
+    def session(self) -> Any:
+        return self.drawing.cycle.session
+
+    def drawn_on(self, round_num: int) -> list[int]:
+        at = replace(self.drawing, round_num=round_num)
+        return [
+            int(s.id) for s in self.sampler.draw(NodeContext(at, self.sampler), self.search).cells
+        ]
+
+    def ordered(self, round_num: int) -> list[int]:
+        at = replace(self.drawing, round_num=round_num)
+        return [
+            int(s.id) for s in self.sampler.draw(NodeContext(at, self.sampler), self.search).order
+        ]
+
+    def folded(self, arms: str, grade: Callable[[Any], float]) -> None:
+        """A fold of every pool cell by eight arms, the round reopened on the lines it now holds."""
+        self.session.store.ruler.fold(
+            session_ruler_scope(self.session),
+            [(f"{arms}{arm}", s.key, grade(s)) for arm in range(8) for s in self.pool],
+            campaign="else",
+            own=None,
+        )
+        self.drawing.cycle.difficulty.open_round(
+            self.drawing.cycle.rounds, ruler_clock(self.session)
+        )
+
+
+@pytest.fixture
+def warm(offline: Router) -> _Warm:  # ~3 s to open for the first fact, ~0.5 s after
     graded_pool = samples(40, "TRUE", query="d")
     answered = offline.backend.matches
 
@@ -360,23 +393,21 @@ def test_a_round_draws_fresh_cells_and_a_reentered_one_orders_on_the_lines_it_op
     offline.backend.matches = hits_easiest  # type: ignore[method-assign]
     drawing = jumping_clock(run_init_round(workspace(), offline, graded_pool))
     session = drawing.cycle.session
-    session.store.ruler.fold(
-        session_ruler_scope(session),
-        [(f"f{arm}", s.key, 1.0 - (s.id + 0.5) / 40) for arm in range(8) for s in graded_pool],
-        campaign="else",
-        own=None,
+    made = _Warm(
+        drawing,
+        graded_pool,
+        drawing.cycle.optimizer.plan.sampler,
+        list(session.state.scoring.partition.search),
     )
-    drawing.cycle.difficulty.open_round(drawing.cycle.rounds, ruler_clock(session))
+    made.folded("f", lambda s: 1.0 - (s.id + 0.5) / 40)
     assert drawing.cycle.difficulty.ruler is not None, "guard: the draw under test is the warm one"
-    sampler = drawing.cycle.optimizer.plan.sampler
-    search = list(session.state.scoring.partition.search)
+    return made
 
-    def drawn_on(round_num: int) -> list[int]:
-        at = replace(drawing, round_num=round_num)
-        return [int(s.id) for s in sampler.draw(NodeContext(at, sampler), search).cells]
 
-    rounds_drawn = {n: drawn_on(n) for n in range(1, 11)}
-    assert drawn_on(3) == rounds_drawn[3], "a resumed round drew other cells"
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_draws_fresh_cells_off_the_pool_whichever_its_parents_ruler(warm: _Warm) -> None:
+    rounds_drawn = {n: warm.drawn_on(n) for n in range(1, 11)}
+    assert warm.drawn_on(3) == rounds_drawn[3], "a resumed round drew other cells"
     assert len({tuple(sorted(ids)) for ids in rounds_drawn.values()}) == len(rounds_drawn), (
         "a round re-read the cells an earlier round drew"
     )
@@ -389,23 +420,16 @@ def test_a_round_draws_fresh_cells_and_a_reentered_one_orders_on_the_lines_it_op
     assert parent_rate == pytest.approx(16 / 40, abs=0.08), (
         "the parent reads one rate on its rounds' cells and another on the pool"
     )
-    opened_on = drawing.cycle.difficulty.stamp.reach
-    at = replace(drawing, round_num=3)
 
-    def ordered() -> list[int]:
-        return [int(s.id) for s in sampler.draw(NodeContext(at, sampler), search).order]
 
-    live = ordered()
-    session.store.ruler.fold(
-        session_ruler_scope(session),
-        [(f"g{arm}", s.key, (s.id + 0.5) / 40) for arm in range(8) for s in graded_pool],
-        campaign="else",
-        own=None,
-    )
-    drawing.cycle.difficulty.open_round(drawing.cycle.rounds, ruler_clock(session))
-    assert ordered() != live, "guard: the fold moves a draw read on the current lines"
-    drawing.cycle.difficulty.open_round(drawing.cycle.rounds, opened_on)
-    assert ordered() == live, "a re-entered round walked an order its opening never drew"
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_reentered_round_orders_on_the_lines_it_opened_on(warm: _Warm) -> None:
+    opened_on = warm.drawing.cycle.difficulty.stamp.reach
+    live = warm.ordered(3)
+    warm.folded("g", lambda s: (s.id + 0.5) / 40)
+    assert warm.ordered(3) != live, "guard: the fold moves a draw read on the current lines"
+    warm.drawing.cycle.difficulty.open_round(warm.drawing.cycle.rounds, opened_on)
+    assert warm.ordered(3) == live, "a re-entered round walked an order its opening never drew"
 
 
 def test_a_draw_led_by_one_level_still_covers_every_dataset_and_model_of_its_pool() -> None:

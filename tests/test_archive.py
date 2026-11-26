@@ -55,6 +55,7 @@ from factories import (
     workspace,
 )
 from offline_run import DATASET
+from offline_world import Router
 from world import Ran, Shared, World, shared_run
 
 from promptpotter.application.bench.cycle import ReadArm, RoundContext
@@ -850,9 +851,12 @@ def _round(**kw: Any) -> RoundResult:
     )
 
 
-def _minted(stores: Stores, cycle_id: str) -> tuple[CycleHop, CycleEventLog]:
-    hop = CycleHop(campaign_id=_CAMPAIGN, cycle_id=cycle_id)
-    stores.campaigns.mint_cycle(hop)
+def _minted(
+    stores: Stores, offline: Router, tmp_path: Path, name: str = "world"
+) -> tuple[CycleHop, CycleEventLog]:
+    """A campaign minted into *stores* by the world's real entry, no round run: its root cycle and
+    the ledger a held handle appends to."""
+    hop = asyncio.run(World(stores, offline, tmp_path / name).campaign(rounds=0)).hop
     return hop, CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
 
 
@@ -902,8 +906,10 @@ def test_a_store_off_a_workspace_shape_is_refused(tmp_path: Path) -> None:
 
 def test_a_write_past_its_campaigns_delete_answers_not_found_and_makes_no_campaign_dir(
     built_stores: Stores,
+    offline: Router,
+    tmp_path: Path,
 ) -> None:
-    hop, held = _minted(built_stores, "cycle_deleted")
+    hop, held = _minted(built_stores, offline, tmp_path)
     assert built_stores.campaigns.delete_campaign(hop.campaign_id, keep_results=False)
     writes = _writes_under(built_stores, hop, held) | {
         "a fork mint": lambda: built_stores.campaigns.mint_cycle(
@@ -923,8 +929,10 @@ def test_a_write_past_its_campaigns_delete_answers_not_found_and_makes_no_campai
 
 def test_a_write_past_its_cycles_cleanup_answers_not_found_and_makes_no_cycle_dir(
     built_stores: Stores,
+    offline: Router,
+    tmp_path: Path,
 ) -> None:
-    root, _ = _minted(built_stores, "cycle_root")
+    root, _ = _minted(built_stores, offline, tmp_path)
     stub = _mint_sibling(built_stores.campaigns, root, "cycle_stub", _STEERED, cut_round=0)
     held = CycleEventLog.open(CycleDir(built_stores.campaigns.cycle_dir(stub)))
     assert cleanup_stub_fork_if_empty(campaign_store=built_stores.campaigns, hop=stub)[0]
@@ -950,9 +958,9 @@ def test_a_draft_ledger_append_past_its_discard_answers_not_found_and_makes_no_d
 
 
 def test_a_cycle_deleted_under_a_replace_reads_not_found_and_its_projection_warns_nothing(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, offline: Router, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    hop, held = _minted(built_stores, "cycle_replaced")
+    hop, held = _minted(built_stores, offline, tmp_path)
     cycle = built_stores.campaigns.cycle_dir(hop)
     said: list[type[Exception]] = []
 
@@ -982,10 +990,10 @@ def test_a_cycle_deleted_under_a_replace_reads_not_found_and_its_projection_warn
 
 
 def test_a_replace_whose_temporary_was_swept_under_a_standing_cycle_raises_as_itself(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, offline: Router, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A reset's `**/.*.tmp` sweep in the window before the replace: the cycle stands, so no "gone".
-    hop, _ = _minted(built_stores, "cycle_swept")
+    hop, _ = _minted(built_stores, offline, tmp_path)
     cycle = built_stores.campaigns.cycle_dir(hop)
     replace = os.replace
 
@@ -1003,9 +1011,9 @@ def test_a_replace_whose_temporary_was_swept_under_a_standing_cycle_raises_as_it
 
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows deletes no cycle under a held lock")
 def test_an_append_whose_cycle_is_deleted_before_its_cut_answers_not_found(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, offline: Router, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    hop, held = _minted(built_stores, "cycle_cut")
+    hop, held = _minted(built_stores, offline, tmp_path)
     cycle = built_stores.campaigns.cycle_dir(hop)
     with open(held.path, "ab") as torn:
         torn.write(b'{"torn')
@@ -1022,9 +1030,9 @@ def test_an_append_whose_cycle_is_deleted_before_its_cut_answers_not_found(
 
 
 def test_a_relative_write_into_a_deleted_campaign_answers_not_found(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, offline: Router, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    hop, _ = _minted(built_stores, "cycle_relative")
+    hop, _ = _minted(built_stores, offline, tmp_path)
     root = built_stores.campaigns.campaign_root_dir(hop.campaign_id)
     shutil.rmtree(root)
     with monkeypatch.context() as patched:
@@ -1044,9 +1052,11 @@ def test_a_relative_write_into_a_deleted_campaign_answers_not_found(
             assert not root.exists(), "an 8.3 short path re-made a deleted campaign"
 
 
-def test_a_standing_cycles_projection_fault_warns_whatever_its_type(built_stores: Stores) -> None:
+def test_a_standing_cycles_projection_fault_warns_whatever_its_type(
+    built_stores: Stores, offline: Router, tmp_path: Path
+) -> None:
     # A purged archive's `NotFoundError` and a sibling's unreadable index are no gone cycle.
-    _, held = _minted(built_stores, "cycle_standing")
+    _, held = _minted(built_stores, offline, tmp_path)
     faults: tuple[Exception, ...] = (
         NotFoundError("archive no longer holds samples"),
         FileUnreadableError(FileKind.STORE, path="index.json", reason="line 0: invalid"),
@@ -1085,12 +1095,18 @@ def test_a_write_refuses_only_a_campaign_or_cycle_by_its_place_never_a_dir_so_na
     fresh = refused(lambda: write_json(root / "logs" / "x.json", {}))
     stores = workspace()
     tenant = workspace(default_identity("campaigns")).campaigns
-    gone_campaign, _ = _minted(stores, "cycle_kept")
+    # Seated by hand: this data root is the fact's own, which the world's landing refuses once a
+    # stray file stands in it.
+    gone_campaign = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_kept")
+    stores.campaigns.mint_cycle(gone_campaign)
     shutil.rmtree(stores.campaigns.campaign_root_dir(gone_campaign.campaign_id))
     cut = workspace(default_identity("cut"))
-    gone_cycle, _ = _minted(cut, "cycle_cut")
+    gone_cycle = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_cut")
+    cut.campaigns.mint_cycle(gone_cycle)
     shutil.rmtree(cut.campaigns.cycle_dir(gone_cycle))
-    beside = cut.campaigns.cycle_dir(_minted(cut, "cycle_beside")[0])
+    next_door = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_beside")
+    cut.campaigns.mint_cycle(next_door)
+    beside = cut.campaigns.cycle_dir(next_door)
     datasets = stores.tenant_datasets
     writes: dict[str, tuple[Callable[[], object], bool]] = {
         "a dataset named cycles": (
@@ -2456,6 +2472,7 @@ def test_a_resumed_informative_race_rechooses_its_rows_and_files_nothing(
         assert len(racing.cycle.pending_decisions) == filed, f"{shape}: a choice filed a record"
 
 
+# One journey: the live election's decision is the one the closed round is replayed against.
 @pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
     built_stores: Stores,
@@ -2514,7 +2531,9 @@ def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
         ),
     )
     assert selection.selected == walked_child, "guard: the live election charges the error"
-    charged, ledger = _minted(stores, "cycle_charged_parent")
+    charged = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_charged_parent")
+    stores.campaigns.mint_cycle(charged)
+    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(charged)))
     close_round(
         ledger,
         [

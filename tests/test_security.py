@@ -32,12 +32,10 @@ from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, NamedTuple, cast, override
 
-import gate
 import httpx
 import pytest
 from factories import (
     PROMPT_INFO,
-    SANDBOX_CAMPAIGN,
     archive_row,
     billed_call,
     cycle_result,
@@ -47,7 +45,6 @@ from factories import (
     inner_sandbox,
     laid_ledger,
     loop_session,
-    mint_fork,
     minted_campaign,
     minted_dataset,
     on_jumping_clock,
@@ -64,6 +61,7 @@ from fastapi.testclient import TestClient
 from offline_world import Router
 from pydantic import SecretStr, TypeAdapter, ValidationError
 from starlette.types import Message, Receive, Scope, Send
+from world import Shared, World, shared_run
 
 from promptpotter.application import (
     account,
@@ -73,7 +71,7 @@ from promptpotter.application import (
     health,
     notices,
 )
-from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut
+from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_operator_fork
 from promptpotter.application.browser_sign_in import claim_box
 from promptpotter.application.caller import Caller
 from promptpotter.application.command_reading import job_status, read_command
@@ -190,6 +188,7 @@ from promptpotter.domain.command_kinds import (
     DiscardDraftPayload,
     Door,
     EditDraftCampaignPayload,
+    ForkCyclePayload,
     HeadToHeadRequest,
     IngestUploadPayload,
     MintCampaignPayload,
@@ -227,7 +226,6 @@ from promptpotter.domain.l4.proxies import (
     inner_cell_facts,
     inner_cell_report,
 )
-from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.phases import (
     INNER_PAUSE_REFUSAL,
     PRODUCER_STATE_INFO,
@@ -250,10 +248,9 @@ from promptpotter.domain.prompt_block import (
 from promptpotter.domain.records.run_records import (
     ArmsGate,
     Bill,
+    CycleStart,
     Ended,
     ForkDirection,
-    ForkSpec,
-    ForkTrigger,
     Hold,
     Lapse,
     LaunchedEffect,
@@ -625,22 +622,22 @@ def test_a_refused_poll_stops_at_once_and_its_refusal_is_told_once_until_a_poll_
             raise SeenEnoughError  # the channel is held again
         return True
 
+    slept: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        slept.append(seconds)
+        if len(slept) == 3:
+            raise SeenEnoughError
+
     def polled(status: int, body: dict[str, Any]) -> list[float]:
         offline.token_endpoints[f"api.telegram.org/bot{bot_token}/getUpdates"] = (status, body)
-        slept: list[float] = []
-
-        def sleep(seconds: float) -> None:
-            slept.append(seconds)
-            if len(slept) == 3:
-                raise SeenEnoughError
-
-        with monkeypatch.context() as asleep:
-            asleep.setattr(time, "sleep", sleep)
-            with pytest.raises(SeenEnoughError):
-                admin_bot.run_bot(bot_token, "1", None)
-        return slept
+        slept.clear()
+        with pytest.raises(SeenEnoughError):
+            admin_bot.run_bot(bot_token, "1", None)
+        return list(slept)
 
     with monkeypatch.context() as box:
+        box.setattr(time, "sleep", sleep)
         box.setenv("PROMPTPOTTER_HOME", str(tmp_path / "bot-box"))
         box.setattr(notices, "notify_operator", tell)
         box.setattr(notices, "check_and_tell", lambda: [])
@@ -1228,17 +1225,15 @@ class _Exhibit(NamedTuple):
 
 
 @pytest.fixture
-def exhibit(monkeypatch: pytest.MonkeyPatch) -> _Exhibit:
+def exhibit(monkeypatch: pytest.MonkeyPatch, offline: Router, tmp_path: Path) -> _Exhibit:
     """A campaign in the declared host's account, named the exhibit, and a stranger's empty account."""
     monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "host@x.com")
-    monkeypatch.setattr(settings_mod.settings, "EXHIBIT_CAMPAIGN", "camp-exhibit")
     host = workspace(default_identity(tenant_id="host-1"))
     UserStore(host.base_dir).save(
         User(user_id="host-1", tenant_id="host-1", email="host@x.com", created_at="2026-01-01")
     )
-    hop = CycleHop(campaign_id="camp-exhibit", cycle_id="cycle_exhibit")
-    stored_campaign(host, minted_campaign(hop))
-    host.campaigns.mint_cycle(hop)
+    hop = asyncio.run(_mint(host, offline, tmp_path))
+    monkeypatch.setattr(settings_mod.settings, "EXHIBIT_CAMPAIGN", hop.campaign_id)
     stranger = dataclasses.replace(_who("guest-1"), capabilities=OWNER_COMMAND_CAPABILITIES)
     return _Exhibit(hop, workspace(stranger))
 
@@ -1293,7 +1288,7 @@ def test_a_reader_is_offered_only_the_acts_its_capabilities_file(exhibit: _Exhib
     # where it asks nothing (its definition unread): its own refusal stands for every reader.
     hop, follower = exhibit
     host = workspace(default_identity(tenant_id="host-1"))
-    campaign = minted_campaign(hop)
+    campaign = host.campaigns.campaign(hop.campaign_id)
     minted_dataset(host, campaign)
     cycle_dir = host.campaigns.cycle_dir(hop)
     _running(cycle_dir)
@@ -1359,13 +1354,13 @@ def test_a_scoped_reader_of_a_command_is_offered_only_the_acts_its_scope_files()
 
 
 @pytest.mark.usefixtures("offline")
-def test_a_follower_descends_only_into_the_exhibits_own_inner_runs(exhibit: _Exhibit) -> None:
+def test_a_follower_descends_only_into_the_exhibits_own_inner_runs(
+    exhibit: _Exhibit, offline: Router, tmp_path: Path
+) -> None:
     # The sandbox key is flat: a chain naming a private host cycle under the exhibit spliced its run in.
     hop, follower = exhibit
     host = workspace(default_identity(tenant_id="host-1"))
-    private = CycleHop(campaign_id="camp-private", cycle_id="cycle_private")
-    stored_campaign(host, minted_campaign(private))
-    host.campaigns.mint_cycle(private)
+    private = asyncio.run(_mint(host, offline, tmp_path / "private"))
     inner = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
     for outer in (hop, private):
         sandbox = inner_sandbox(host, outer.campaign_id, outer.cycle_id)
@@ -1523,7 +1518,7 @@ def test_a_grant_that_would_chain_or_name_its_own_delegator_is_refused(
 
 @pytest.mark.usefixtures("offline")
 def test_the_hosts_first_sign_in_takes_the_terminals_account_in_one_act_or_asks_again(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, offline: Router, tmp_path: Path
 ) -> None:
     # Refused while both directories stand or a run holds a cycle there (bl4.B4).
     monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "owner-9@x.com")
@@ -1532,9 +1527,7 @@ def test_the_hosts_first_sign_in_takes_the_terminals_account_in_one_act_or_asks_
     UserStore(terminal.campaigns.workspace).save(
         User(user_id="default", tenant_id="default", created_at="2026-01-01T00:00:00Z")
     )
-    live = CycleHop(campaign_id="terminal-camp", cycle_id="cycle_terminal")
-    terminal.campaigns.create_campaign(minted_campaign(live))
-    terminal.campaigns.mint_cycle(live)
+    live = asyncio.run(_mint(terminal, offline, tmp_path))
     hold_cycle(terminal.campaigns.cycle_dir(live))
     (projects / "owner-9").mkdir(parents=True)
 
@@ -1546,18 +1539,18 @@ def test_the_hosts_first_sign_in_takes_the_terminals_account_in_one_act_or_asks_
     assert claim() is not None and (projects / "default").is_dir(), "a claim moved a live run"
     release_cycle(terminal.campaigns.cycle_dir(live))
     assert host_user_id(projects) is None, "a refused claim named a host"
-    assert claim() is None and (projects / "owner-9" / "campaigns" / "terminal-camp").is_dir()
+    assert claim() is None and (projects / "owner-9" / "campaigns" / live.campaign_id).is_dir()
     assert host_user_id(projects) == "owner-9", "the claimed account is not the declared host"
 
 
 @pytest.mark.usefixtures("offline")
-def test_a_pass_registered_on_a_terminal_cycle_refuses_the_hosts_claim() -> None:
+def test_a_pass_registered_on_a_terminal_cycle_refuses_the_hosts_claim(
+    offline: Router, tmp_path: Path
+) -> None:
     projects = default_projects_root()
     terminal = workspace()
-    scored = CycleHop(campaign_id="terminal-camp", cycle_id="cycle_terminal")
-    stored_campaign(terminal, minted_campaign(scored))
-    minted_dataset(terminal, minted_campaign(scored))
-    terminal.campaigns.mint_cycle(scored)
+    scored = asyncio.run(_mint(terminal, offline, tmp_path))
+    minted_dataset(terminal, terminal.campaigns.campaign(scored.campaign_id))
     request_jobs(
         stores=terminal,
         job_registry=JobRegistry(terminal.jobs_dir, capacity=lambda _live: 1),
@@ -1567,7 +1560,7 @@ def test_a_pass_registered_on_a_terminal_cycle_refuses_the_hosts_claim() -> None
     assert claim_box(projects, user_id="owner-9", email=None) is not None, (
         "the host's claim moved a tree a registered pass scores"
     )
-    assert (projects / "default" / "campaigns" / "terminal-camp").is_dir()
+    assert (projects / "default" / "campaigns" / scored.campaign_id).is_dir()
 
 
 @pytest.mark.usefixtures("offline")
@@ -1599,20 +1592,18 @@ def test_a_host_and_its_delegate_read_one_version_of_each_subject(tmp_path: Path
     )
 
 
-def _sandboxed(stores: Stores) -> tuple[CycleHop, Path, str]:
+def _sandboxed(stores: Stores, offline: Router, tmp_path: Path) -> tuple[CycleHop, Path, str]:
     """A campaign whose cycle holds an inner sandbox: the hop, the sandbox, its feed subject."""
-    hop = CycleHop(campaign_id="camp-b", cycle_id="cyc-1")
-    stored_campaign(stores, minted_campaign(hop))
-    stores.campaigns.mint_cycle(hop)
-    return hop, inner_sandbox(stores, hop.campaign_id, hop.cycle_id), "store:camp-b::cyc-1"
+    hop = asyncio.run(_mint(stores, offline, tmp_path / "world"))
+    sandbox = inner_sandbox(stores, hop.campaign_id, hop.cycle_id)
+    return hop, sandbox, f"store:{hop.campaign_id}::{hop.cycle_id}"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_filed_command_answers_its_result_when_a_store_vanishes_under_its_ack(
-    built_stores: Stores, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    built_stores: Stores, offline: Router, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # A 500 for an applied write is a press filed again: the double-filing the ack exists to close.
-    hop, sandbox, subject = _sandboxed(built_stores)
+    hop, sandbox, subject = _sandboxed(built_stores, offline, tmp_path)
     route = next(r for r in commands_api.commands_router.routes if r.name == "rename-campaign")  # type: ignore[attr-defined]
     payload = SetCampaignLabelPayload(campaign_id=hop.campaign_id, label="renamed")
     scandir = os.scandir
@@ -1666,9 +1657,10 @@ def test_a_queued_start_moves_the_read_its_start_control_gates_on(
     )
 
 
-@pytest.mark.usefixtures("offline")
-def test_a_deleted_campaigns_subjects_leave_the_count(built_stores: Stores, tmp_path: Path) -> None:
-    hop, sandbox, subject = _sandboxed(built_stores)
+def test_a_deleted_campaigns_subjects_leave_the_count(
+    built_stores: Stores, offline: Router, tmp_path: Path
+) -> None:
+    hop, sandbox, subject = _sandboxed(built_stores, offline, tmp_path)
     jobs = JobRegistry(tmp_path / "jobs", capacity=lambda _live: 1)
     assert subject in cycle_reads.feed_versions(built_stores, jobs), "guard"
     rmtree_robust(sandbox)
@@ -2057,15 +2049,18 @@ async def test_a_health_check_tells_no_secret_and_never_tells_an_unaddressed_bac
     )
 
 
+async def _mint(stores: Stores, offline: Router, tmp_path: Path, **asked: Any) -> CycleHop:
+    """A campaign minted into *stores* by the world's real entry, no round run."""
+    return (await World(stores, offline, tmp_path / "world").campaign(rounds=0, **asked)).hop
+
+
 @pytest.mark.usefixtures("offline")
 async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_order(
-    ada_signed_in: _SignedIn,
+    ada_signed_in: _SignedIn, offline: Router, tmp_path: Path
 ) -> None:
     _, _, _, identity, stores = ada_signed_in
     # One before every account event and one after, on two subjects: only a merge by time places both.
-    trail_hop = CycleHop(campaign_id="camp-trail", cycle_id="cycle_trail0000000")
-    stores.campaigns.create_campaign(minted_campaign(trail_hop))
-    stores.campaigns.mint_cycle(trail_hop)
+    trail_hop = await _mint(stores, offline, tmp_path)
     stores.commands.append(
         _command(
             StartRunPayload(campaign_id=trail_hop.campaign_id, cycle_id=trail_hop.cycle_id),
@@ -2080,11 +2075,14 @@ async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_
     inner_subject = Subject.of((trail_hop, inner_hop)).key
     inner_run = StartRunPayload(campaign_id=inner_hop.campaign_id, cycle_id=inner_hop.cycle_id)
     stores.commands.append(_command(inner_run, "1999-01-01T00:00:00Z", inner_subject))
-    inner_line = ("start-run", f"camp-trail>{inner_hop.campaign_id}/{inner_hop.cycle_id}")
+    inner_line = (
+        "start-run",
+        f"{trail_hop.campaign_id}>{inner_hop.campaign_id}/{inner_hop.cycle_id}",
+    )
     trail = account.tenant_trail(stores)
     assert trail.lines[0][1:3] == inner_line, "what ran in a campaign's inner sandbox left no line"
     assert [(line.what, line.subject) for line in trail.lines[1:]] == [
-        ("start-run", "camp-trail/cycle_trail0000000"),
+        ("start-run", f"{trail_hop.campaign_id}/{trail_hop.cycle_id}"),
         ("account_created", ""),
         ("signed_in", "google"),
         ("terms_accepted", TERMS_VERSION),
@@ -2108,15 +2106,13 @@ async def test_an_accounts_trail_holds_its_sign_in_consent_and_commands_in_time_
     assert not sandbox.exists()
 
 
-def test_a_deleted_sandboxs_run_stop_is_banked_at_its_cycles_address_in_its_own_words(
-    built_stores: Stores,
+async def test_a_deleted_sandboxs_run_stop_is_banked_at_its_cycles_address_in_its_own_words(
+    built_stores: Stores, offline: Router, tmp_path: Path
 ) -> None:
     # The bank files each inner campaign inside its owner cycle, never the sandbox's directory
     # name, and the trail words the banked stop as it worded the live one.
     stores = built_stores
-    owner = CycleHop(campaign_id="camp-banked", cycle_id="cycle_banked000000")
-    stores.campaigns.create_campaign(minted_campaign(owner))
-    stores.campaigns.mint_cycle(owner)
+    owner = await _mint(stores, offline, tmp_path)
     sandbox = inner_sandbox(stores, owner.campaign_id, owner.cycle_id)
     inner = stores.campaigns.in_sandbox(sandbox)
     (inner_hop,) = inner.cycle_hops()
@@ -2170,7 +2166,7 @@ def test_a_delegate_acts_for_its_owner_under_its_own_id_in_the_owners_workspace(
 
 @pytest.mark.usefixtures("offline")
 def test_an_unreadable_file_costs_the_trail_survey_only_what_it_holds(
-    oidc: _Oidc, ada_signed_in: _SignedIn
+    oidc: _Oidc, ada_signed_in: _SignedIn, offline: Router, tmp_path: Path
 ) -> None:
     # A torn consent file costs its one account; a torn manifest costs its campaign's dataset name.
     projects, stores = oidc.projects, ada_signed_in.stores
@@ -2178,24 +2174,24 @@ def test_an_unreadable_file_costs_the_trail_survey_only_what_it_holds(
         user_id=UserId("bob-id"), tenant_id=TenantId("bob-id"), email="bob@x.com", provider="google"
     )
     account.arrive(workspace(bob), device=None)
+    # Minted first: a run lands the data root, which refuses a torn survivor.
+    hops = [asyncio.run(_mint(stores, offline, tmp_path / f"world-{n}")) for n in range(2)]
     bob_consent = workspace(bob).base_dir / CONSENT_FILE
     bob_consent.write_bytes(bob_consent.read_bytes() + b"{not a row\n")
-    for campaign_id in ("camp-torn", "camp-whole"):
-        hop = CycleHop(campaign_id=campaign_id, cycle_id="cycle_survey000000")
-        stores.campaigns.create_campaign(minted_campaign(hop))
-        stores.campaigns.mint_cycle(hop)
-        run = StartRunPayload(campaign_id=campaign_id, cycle_id=hop.cycle_id)
+    for hop in hops:
+        run = StartRunPayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id)
         stores.commands.append(_command(run, "2001-01-01T00:00:00Z", stores.subject(hop).key))
-    torn = CampaignLayout(stores.campaigns.campaign_root_dir("camp-torn")).manifest
-    torn.write_bytes(b"{not a manifest")
+    torn, whole = hops
+    CampaignLayout(stores.campaigns.campaign_root_dir(torn.campaign_id)).manifest.write_bytes(
+        b"{not a manifest"
+    )
     surveyed, unreadable = account.trails_since(projects, 0.0)
     assert unreadable == ["bob@x.com"], "an unreadable file cost the wrong account, or none"
     [ada_trail] = [trail for trail in surveyed if trail.who == "Ada@x.com"]
     assert {line.subject for line in ada_trail.trail.lines} >= {
-        "camp-torn/cycle_survey000000",
-        "camp-whole/cycle_survey000000",
+        f"{hop.campaign_id}/{hop.cycle_id}" for hop in hops
     }, "an unreadable manifest hid its campaign's lines, or its neighbour's"
-    assert ada_trail.datasets == {"camp-whole": "ds1"}, "an unreadable manifest named a dataset"
+    assert set(ada_trail.datasets) == {whole.campaign_id}, "an unreadable manifest named a dataset"
 
 
 @pytest.mark.usefixtures("offline")
@@ -2245,15 +2241,22 @@ class _HeldCycle(NamedTuple):
     delete_refused: Callable[[JobRegistry], None]
 
 
+@pytest.fixture(scope="module")
+def one_round(tmp_path_factory: pytest.TempPathFactory) -> Shared:
+    """One potter round on 40 rows; # ~3.5 s once, ~20 ms a fact."""
+
+    async def act(world: World) -> CycleHop:
+        return (await world.campaign(rounds=1)).hop
+
+    return shared_run(tmp_path_factory, act)
+
+
 @pytest.fixture
-def held_cycle(built_stores: Stores) -> _HeldCycle:
-    """The sandbox campaign's minted cycle, and the two checks every hold of it must pass."""
+def held_cycle(built_stores: Stores, world: World, one_round: Shared) -> _HeldCycle:
+    """A campaign's run cycle, and the two checks every hold of it must pass."""
     campaigns = built_stores.campaigns
-    hop = CycleHop(campaign_id=SANDBOX_CAMPAIGN, cycle_id="cycle-0")
-    held_campaign = minted_campaign(hop)
-    stored_campaign(built_stores, held_campaign)
-    minted_dataset(built_stores, held_campaign)
-    campaigns.mint_cycle(hop)
+    world.adopt(one_round)
+    hop = one_round.made
     cycle_dir = campaigns.cycle_dir(hop)
 
     def attached_alike() -> None:
@@ -2484,16 +2487,17 @@ async def test_the_dashboard_offers_a_skip_while_its_walk_appends_and_refuses_it
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline", "held_cycle")
+@pytest.mark.usefixtures("optimizing_memory", "offline")
 async def test_a_terminals_act_by_an_id_prefix_reports_the_campaign_it_acted_on_never_the_prefix(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, held_cycle: _HeldCycle
 ) -> None:
     # A command it files, and a bench it grades.
-    prefix = SANDBOX_CAMPAIGN.split("__")[0]
+    held = held_cycle.hop.campaign_id
+    prefix = held.split("__")[0]
     renamed = await cmd_command(
         argparse.Namespace(command="rename-campaign", campaign_id=prefix, label="held", tenant=None)
     )
-    assert renamed.data is not None and renamed.data["campaign_id"] == SANDBOX_CAMPAIGN, (
+    assert renamed.data is not None and renamed.data["campaign_id"] == held, (
         "a terminal's act by an id prefix recorded the prefix as what it acted on"
     )
     score = cycle_result([0.4], 0.3, []).bench
@@ -2507,19 +2511,17 @@ async def test_a_terminals_act_by_an_id_prefix_reports_the_campaign_it_acted_on_
     monkeypatch.setattr(measuring, "held_out", graded)
     benched = await cmd_held_out(argparse.Namespace(campaign=prefix, tenant=None))
     for said in (renamed.human, benched.human):
-        assert said is not None and said.startswith(SANDBOX_CAMPAIGN), "it said the prefix"
+        assert said is not None and said.startswith(held), "it said the prefix"
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_follower_shows_the_running_run_and_a_verb_naming_no_cycle_acts_on_the_paused_latest(
-    built_stores: Stores, held_cycle: _HeldCycle
+    built_stores: Stores, held_cycle: _HeldCycle, offline: Router, tmp_path: Path
 ) -> None:
     # A runs while B, launched last, was paused by Ctrl+C; `resume` acts on B.
     campaigns, (hop, cycle_dir, _, _) = built_stores.campaigns, held_cycle
     _running(cycle_dir)
-    launched_last = CycleHop(campaign_id="ended__20260102-000000", cycle_id="cycle-0")
-    campaigns.mint_cycle(launched_last)
-    stored_campaign(built_stores, minted_campaign(launched_last))
+    launched_last = asyncio.run(_mint(built_stores, offline, tmp_path / "last"))
     campaigns.append(
         launched_last, RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT)
     )
@@ -2549,7 +2551,7 @@ async def test_a_pass_registered_on_a_stub_not_yet_holding_it_refuses_the_stubs_
 ) -> None:
     campaigns, hop = built_stores.campaigns, held_cycle.hop
     passes = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
-    stub = _forked(built_stores, hop, f"{hop.cycle_id}_fork_1")
+    stub = _forked(built_stores, hop)
     stub_delete = DeleteCyclePayload(campaign_id=hop.campaign_id, cycle_id=stub.cycle_id)
     (stub_pass,) = await asyncio.to_thread(
         request_jobs,
@@ -2576,7 +2578,7 @@ async def test_a_fork_stub_a_pass_holds_is_neither_counted_nor_swept(
     campaigns, (hop, cycle_dir, _, _) = built_stores.campaigns, held_cycle
     await asyncio.to_thread(_running, cycle_dir)
     passes = JobRegistry(jobs_dir(default_projects_root()), capacity=lambda _live: 1)
-    fork = _forked(built_stores, hop, f"{hop.cycle_id}_fork_r1")
+    fork = _forked(built_stores, hop)
     family = Subject(hop.campaign_id).address
     sweep = CleanupEmptyCyclesPayload(campaign_id=hop.campaign_id, cycle_id=fork.cycle_id)
 
@@ -2713,7 +2715,7 @@ def test_reclaim_spares_a_sandbox_whose_owner_cycle_exists_and_one_with_no_owner
 ) -> None:
     # Terminal or not; with no `owner.json` its key is a hash, so no owner derives from it.
     hop = held_cycle.hop
-    owned = inner_sandbox(built_stores, SANDBOX_CAMPAIGN, hop.cycle_id)
+    owned = inner_sandbox(built_stores, hop.campaign_id, hop.cycle_id)
     unprovable = inner_sandbox_dir(
         built_stores.shared_root, "t", CycleHop(campaign_id="c__aaaaaa", cycle_id="cycle-x")
     )
@@ -2728,7 +2730,7 @@ def test_reclaim_spares_a_sandbox_whose_owner_cycle_exists_and_one_with_no_owner
 def test_an_orphan_sandbox_the_sweep_cannot_delete_stands_in_machine_status(
     built_stores: Stores, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    orphan = inner_sandbox(built_stores, SANDBOX_CAMPAIGN, "orphaned-outer-cycle")
+    orphan = inner_sandbox(built_stores, "ppself__aaaaaa", "orphaned-outer-cycle")
 
     def refused(*_: object, **__: object) -> None:
         raise PermissionError(13, "Permission denied", str(orphan))
@@ -2749,22 +2751,20 @@ def test_an_orphan_sandbox_the_sweep_cannot_delete_stands_in_machine_status(
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_two_campaigns_on_one_origin_share_no_sandbox_so_deleting_one_spares_the_others(
-    built_stores: Stores,
+    built_stores: Stores, offline: Router, tmp_path: Path
 ) -> None:
     campaigns = built_stores.campaigns
-    same_origin = "cycle_sameorigin"
-    a = inner_sandbox(built_stores, "ppself__aaaaaa", same_origin)
-    b = inner_sandbox(built_stores, "ppself__bbbbbb", same_origin)
+    finished = asyncio.run(_mint(built_stores, offline, tmp_path / "a"))
+    other = asyncio.run(_mint(built_stores, offline, tmp_path / "b"))
+    a = inner_sandbox(built_stores, finished.campaign_id, finished.cycle_id)
+    b = inner_sandbox(built_stores, other.campaign_id, finished.cycle_id)
     assert a != b
-    finished = CycleHop(campaign_id="ppself__aaaaaa", cycle_id=same_origin)
-    campaigns.mint_cycle(finished)
     # Finished, so the delete guard is about the sandbox key and not about liveness.
     CycleEventLog.open(CycleDir(campaigns.cycle_dir(finished))).append(
         RunPhaseRecord(state=Ended(stop_reason=StopReason.ROUNDS_BUDGET))
     )
-    campaigns.create_campaign(minted_campaign(finished, dataset_name="ppself"))
     assert campaigns.delete_campaign(
-        "ppself__aaaaaa",
+        finished.campaign_id,
         keep_results=False,
         inner_sandbox_root=inner_sandboxes_dir(built_stores.shared_root),
     )
@@ -3153,25 +3153,35 @@ def test_a_write_a_crash_cut_short_under_an_authored_tree_is_run_data_never_a_su
     assert found_torn is not None and found_torn.kind.fate is Fate.RUN, "a torn write survived"
 
 
-# One tree: refused by a stray, landed while a run started since its plan holds, landed again.
-@pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_file_refuses(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # It proves the tree as it would stand: the old code never runs on a migrated survivor.
+class _Moved(NamedTuple):
+    """A tree of moved survivors beside run data: the account's events, its identity grants, the
+    host's claim marker over a terminal record, and one minted campaign."""
+
+    stores: Stores
+    kept_hop: Any
+    identity: Any
+    events: Path
+    marker: Path
+    host_dir: Path
+    grants_before: bytes
+
+
+@pytest.fixture
+def moved(
+    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, offline: Router, tmp_path: Path
+) -> _Moved:
     campaigns, data_root = built_stores.campaigns, built_stores.projects_root.parent
+    # Minted first: a run lands the data root, which a stray file refuses.
+    kept_hop = asyncio.run(_mint(built_stores, offline, tmp_path))
     user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
     UserStore(campaigns.workspace).save(user)
-    stray = data_root / "stray.json"
     events = CycleEventLog.workspace_path(campaigns.workspace)
     old = {"record_type": "account_event", "user_id": "u", "timestamp": "2026-01-02T00:00:00Z"}
     append_jsonl(events, old | {"event": "signed_in", "subject": "google", "device": "phone"})
     append_jsonl(events, old | {"event": "request_refused", "subject": "x", "device": None})
-    # The identity survivors the base wrote are migrated, never wiped.
     identity = IdentityPaths(data_root / IDENTITY_DIR)
     # The host's claim marker, over the terminal's record its claim renamed under the host's id,
-    # its terms record on it as the last release wrote it: two migrations reshape that one file, the
-    # acceptance landing under the id the claim moved onto.
+    # its terms record on it as the last release wrote it: two migrations reshape that one file.
     marker = data_root / IDENTITY_DIR / "default_claimed.json"
     write_json(marker, {"user_id": "h", "claimed_at": "2026-01-01T00:00:00Z", "renamed": True})
     host_dir = built_stores.projects_root / "h"
@@ -3181,64 +3191,78 @@ def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_file_r
         user.model_dump(mode="json") | {"user_id": "default", "terms_accepted": accepted},
     )
     monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "h@x.com")
-    write_json(
-        identity.grants,
-        {
-            "grants": {
-                "sub": {
-                    "delegated_by": "u",
-                    "capabilities": [CAMPAIGN_STEP_CAP],
-                    "spend_ceiling_usd": None,
-                    "note": "",
-                }
-            }
-        },
+    grant = {"delegated_by": "u", "capabilities": [CAMPAIGN_STEP_CAP], "spend_ceiling_usd": None}
+    write_json(identity.grants, {"grants": {"sub": grant | {"note": ""}}})
+    return _Moved(
+        built_stores, kept_hop, identity, events, marker, host_dir, identity.grants.read_bytes()
     )
-    before = identity.grants.read_bytes()
-    # Run data that does not load is the landing's own to drop; a file no row names refuses it,
-    # asked to reset or not, and a refused landing writes nothing.
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_file_no_row_names_refuses_a_landing_asked_to_reset_or_not_and_it_writes_nothing(
+    moved: _Moved,
+) -> None:
+    stores = moved.stores
+    stray = stores.projects_root.parent / "stray.json"
     write_json(stray, {})
     for reset in (False, True):
-        refused = plan_landing(built_stores.projects_root, reset=reset)
+        refused = plan_landing(stores.projects_root, reset=reset)
         assert refused.refused and list(refused.unknown) == [stray], "a file no row names landed"
         with pytest.raises(ConflictError):
-            apply_landing(built_stores.projects_root, refused)
+            apply_landing(stores.projects_root, refused)
     assert [one.path for one in refused.runs] == [] and refused.reset is not None
-    assert refused.staged and identity.grants.read_bytes() == before, "a refused landing wrote"
-    assert events.is_file(), "a refused landing dropped run data"
-    stray.unlink()
+    assert refused.staged and moved.identity.grants.read_bytes() == moved.grants_before, (
+        "a refused landing wrote"
+    )
+    assert moved.events.is_file(), "a refused landing dropped run data"
+
+
+# One landing: planned, a run started since, applied (kept), the run released, applied again.
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_landing_keeps_the_files_of_a_run_started_since_its_plan_and_drops_them_once_it_ends(
+    moved: _Moved,
+) -> None:
+    stores = moved.stores
     # What a retired writer left under a campaign is run data no reader takes.
-    kept_hop = CycleHop(campaign_id="c__aaaaaa", cycle_id="x")
-    stored_campaign(built_stores, minted_campaign(kept_hop))
-    retired = Path(campaigns.cycle_dir(kept_hop), "gone.json")
+    retired = Path(stores.campaigns.cycle_dir(moved.kept_hop), "gone.json")
     write_json(retired, {})
-    landed = plan_landing(built_stores.projects_root, reset=False)
+    landed = plan_landing(stores.projects_root, reset=False)
     assert not landed.refused, f"a landing refused run data it drops itself: {landed}"
-    assert {one.path for one in landed.runs} == {events, retired, marker}, (
+    assert {one.path for one in landed.runs} == {moved.events, retired, moved.marker}, (
         "run data no reader takes was kept"
     )
-    since_jobs, since = _pass_started(built_stores, kept_hop)
-    held_runs = apply_landing(built_stores.projects_root, landed)
+    since_jobs, since = _pass_started(stores, moved.kept_hop)
+    held_runs = apply_landing(stores.projects_root, landed)
     assert (
-        events.exists() and retired.exists() and [one.path for one in held_runs.runs] == [marker]
+        moved.events.exists()
+        and retired.exists()
+        and [one.path for one in held_runs.runs] == [moved.marker]
     ), "a landing dropped the files of a run started since its plan"
-    unlanded = last_landing(built_stores.projects_root)
+    unlanded = last_landing(stores.projects_root)
     assert sum(line.startswith("kept ") for line in held_runs.said) == 2, held_runs.said
     assert unlanded is not None and unlanded.key is None, "a landing that kept a run read landed"
     since_jobs.release(since.job_id)
-    apply_landing(built_stores.projects_root, plan_landing(built_stores.projects_root, reset=False))
-    assert not events.exists(), "a landing kept run data this build cannot read"
-    host = UserStore(host_dir).load()
-    assert not marker.exists() and host is not None, "a landing kept the claim marker"
-    assert (host.user_id, host.email) == ("h", "h@x.com") and host_user_id(
-        built_stores.projects_root
-    ) == "h", "a landing lost the host"
-    assert UserStore(host_dir).accepted_terms("h") == TERMS_VERSION, (
+    apply_landing(stores.projects_root, plan_landing(stores.projects_root, reset=False))
+    assert not moved.events.exists(), "a landing kept run data this build cannot read"
+
+
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_landing_migrates_the_host_and_a_grant_whole_and_a_second_landing_has_nothing_to_do(
+    moved: _Moved,
+) -> None:
+    root = moved.stores.projects_root
+    apply_landing(root, plan_landing(root, reset=False))
+    host = UserStore(moved.host_dir).load()
+    assert not moved.marker.exists() and host is not None, "a landing kept the claim marker"
+    assert (host.user_id, host.email) == ("h", "h@x.com") and host_user_id(root) == "h", (
+        "a landing lost the host"
+    )
+    assert UserStore(moved.host_dir).accepted_terms("h") == TERMS_VERSION, (
         "the host is asked consent again"
     )
-    regranted = read_grant(identity.grants, "sub")
+    regranted = read_grant(moved.identity.grants, "sub")
     assert regranted is not None and regranted.delegated_by == "u", "a landing lost a grant"
-    again = plan_landing(built_stores.projects_root, reset=False)
+    again = plan_landing(root, reset=False)
     assert not again.staged and not again.refused, (
         "a second landing migrated again, or left the tree unproven"
     )
@@ -3246,15 +3270,12 @@ def test_a_landing_stages_a_moved_survivor_and_writes_nothing_while_a_run_file_r
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_mint_torn_before_its_manifest_goes_as_a_delete_takes_a_campaign_its_spend_banked(
-    built_stores: Stores,
+    built_stores: Stores, offline: Router, tmp_path: Path
 ) -> None:
     # Listed by no verb, it holds what its draft billed; it never goes while a run holds its
     # workspace.
     campaigns = built_stores.campaigns
-    kept_hop = CycleHop(campaign_id="c__aaaaaa", cycle_id="x")
-    kept_campaign = minted_campaign(kept_hop)
-    stored_campaign(built_stores, kept_campaign)
-    minted_dataset(built_stores, kept_campaign)
+    kept_hop = asyncio.run(_mint(built_stores, offline, tmp_path))
     torn_hop = CycleHop(campaign_id="c__bbbbbb", cycle_id="y")
     laid_ledger(campaigns.cycle_dir(torn_hop)).append(billed_call(0.25))
     torn_dir = campaigns.campaign_root_dir(torn_hop.campaign_id)
@@ -3319,12 +3340,10 @@ class _Log:
     it, `(its status as the log folds it, its reading by id, that reading past its cancel, a
     retry's answer, its acks)`."""
 
-    def __init__(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(self, monkeypatch: pytest.MonkeyPatch, hop: CycleHop) -> None:
         self.stores = stores = workspace()
         self.sender = CommandDispatcher(stores)
-        self.hop = CycleHop(campaign_id="acts", cycle_id="cycle_acts")
-        stores.campaigns.create_campaign(minted_campaign(self.hop))
-        stores.campaigns.mint_cycle(self.hop)
+        self.hop = hop
         self.acts: dict[str, Callable[[], Awaitable[None]]] = {}
         # What the walk a pass's act stands for reads of its run control, by its row.
         self.controls: dict[str, str] = {}
@@ -3423,8 +3442,9 @@ class _Log:
 
 
 @pytest.fixture
-def command_log(monkeypatch: pytest.MonkeyPatch) -> _Log:
-    return _Log(monkeypatch)
+def command_log(monkeypatch: pytest.MonkeyPatch, world: World, one_round: Shared) -> _Log:
+    world.adopt(one_round)
+    return _Log(monkeypatch, one_round.made)
 
 
 def _refusal_said(admission: RunAdmission) -> str:
@@ -3564,23 +3584,21 @@ async def test_a_call_or_a_process_ended_mid_act_ends_its_command_by_what_ended_
 
 
 async def test_deleting_its_campaign_its_cycle_or_its_draft_moves_nothing_of_a_command(
-    monkeypatch: pytest.MonkeyPatch, command_log: _Log
+    monkeypatch: pytest.MonkeyPatch, command_log: _Log, offline: Router, tmp_path: Path
 ) -> None:
     # The log is the account's, so nothing of the command moves; its retry answers off its end,
     # never its target's checks: a verify keeps its answer, an edit reads its draft as it is now.
     log, stores = command_log, command_log.stores
-    for campaign_id, keep in (("kept", True), ("dropped", False)):
-        owner = CycleHop(campaign_id=campaign_id, cycle_id=f"cycle_{campaign_id}")
-        stores.campaigns.create_campaign(minted_campaign(owner))
-        stores.campaigns.mint_cycle(owner)
-        log.acts[campaign_id] = _returns
-        await log.sender.dispatch(log.verify(campaign_id, owner))
-        before = log.standing(campaign_id)
-        gone = DeleteCampaignPayload(campaign_id=campaign_id, keep_results=keep)
+    for name, keep in (("kept", True), ("dropped", False)):
+        owner = await _mint(stores, offline, tmp_path / name)
+        log.acts[name] = _returns
+        await log.sender.dispatch(log.verify(name, owner))
+        before = log.standing(name)
+        gone = DeleteCampaignPayload(campaign_id=owner.campaign_id, keep_results=keep)
         await log.sender.dispatch(CommandCall(gone, door=Door.HOST))
-        assert log.standing(campaign_id) == before, f"deleting {campaign_id} moved its command"
-        assert await log.reading(campaign_id, log.verify(campaign_id, owner)) == _DONE
-    stub = _forked(stores, log.hop, "cycle_acts_fork_1")
+        assert log.standing(name) == before, f"deleting {name} moved its command"
+        assert await log.reading(name, log.verify(name, owner)) == _DONE
+    stub = _forked(stores, log.hop)
     log.acts["stub"] = _returns
     await log.sender.dispatch(log.verify("stub", stub))
     before = log.standing("stub")
@@ -3596,19 +3614,13 @@ async def test_deleting_its_campaign_its_cycle_or_its_draft_moves_nothing_of_a_c
     assert await log.reading("discarded", edit) == discarded_reading
 
 
-def _forked(stores: Stores, parent: CycleHop, cycle_id: str) -> CycleHop:
-    """A fork stub of *parent* at its root, as an operator's rewind mints one."""
-    stub = CycleHop(campaign_id=parent.campaign_id, cycle_id=cycle_id)
-    parent_dir = stores.campaigns.cycle_dir(parent)
-    spec = ForkSpec(
-        trigger=ForkTrigger.OPERATOR_REWIND,
-        reason="",
-        issued_by=SYSTEM_PRINCIPAL,
-        from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
+def _forked(stores: Stores, parent: CycleHop) -> CycleHop:
+    """A fork stub of *parent* at its round 1, cut by the operator's fork door and not yet run."""
+    asked = ForkCyclePayload(
+        campaign_id=parent.campaign_id, cycle_id=parent.cycle_id, round=1, keep_rounds=True
     )
-    cut = CycleEventLog.open(CycleDir(parent_dir)).next_offset
-    mint_fork(stores.campaigns, stub, parent_dir, spec, cut=cut, cut_round=0)
-    return stub
+    taken = cut_operator_fork(stores, asked, CycleStart()).take(stores)
+    return parent.model_copy(update={"cycle_id": taken})
 
 
 async def _drafted(
@@ -3721,13 +3733,11 @@ async def test_an_inner_cycle_takes_its_own_pass_and_refuses_a_kind_never_addres
     assert await log.reading("inner-422", unaddressed) == unfiled
 
 
-async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Log) -> None:
+async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(
+    command_log: _Log, offline: Router, tmp_path: Path
+) -> None:
     stores = command_log.stores
-    held = CycleHop(campaign_id="held", cycle_id="cycle_held")
-    held_campaign = minted_campaign(held)
-    stores.campaigns.create_campaign(held_campaign)
-    minted_dataset(stores, held_campaign)
-    stores.campaigns.mint_cycle(held)
+    held = await _mint(stores, offline, tmp_path)
     said: list[str] = []
     with pytest.raises(PassStoppedError):
         async with paid_pass(
@@ -3737,7 +3747,9 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Log
             declared=Budget(),
             sends=(),
         ):
-            pause = PauseCyclePayload(campaign_id="held", cycle_id="cycle_held", reason="stop")
+            pause = PauseCyclePayload(
+                campaign_id=held.campaign_id, cycle_id=held.cycle_id, reason="stop"
+            )
             await command_log.sender.dispatch(CommandCall(pause, door=Door.HOST))
             campaign = stores.campaigns.campaign(held.campaign_id)
             said.append(_refusal_said(admitted(stores, campaign, stores.run_state(held))))
@@ -3748,23 +3760,23 @@ async def test_a_pause_sent_under_a_pass_parks_its_outer_cycle(command_log: _Log
 
 # Taken and voided are the next states of the one loop's two commands.
 async def test_a_loop_command_accepted_by_its_act_is_taken_by_its_loop_or_voided_as_it_ends(
-    command_log: _Log,
+    command_log: _Log, offline: Router, tmp_path: Path
 ) -> None:
     log, stores = command_log, command_log.stores
     # The looped cycle and this one are the two dead loops the sweep reaps.
     held: list[Path] = []
+    hops: list[CycleHop] = []
     for name in ("ended", "looped"):
-        hop = CycleHop(campaign_id=name, cycle_id=f"cycle_{name}")
-        stores.campaigns.create_campaign(minted_campaign(hop))
-        stores.campaigns.mint_cycle(hop)
+        hop = await _mint(stores, offline, tmp_path / name)
+        hops.append(hop)
         cycle_dir = stores.campaigns.cycle_dir(hop)
         CycleEventLog.open(CycleDir(cycle_dir)).append(RunPhaseRecord(state=Running()))
         await asyncio.to_thread(hold_cycle, cycle_dir)
         held.append(cycle_dir)
     release_cycle(held[0])
-    looped = CycleHop(campaign_id="looped", cycle_id="cycle_looped")
+    looped = hops[1]
     asked = CommandCall(
-        PauseCyclePayload(campaign_id="looped", cycle_id="cycle_looped", reason="stop"),
+        PauseCyclePayload(campaign_id=looped.campaign_id, cycle_id=looped.cycle_id, reason="stop"),
         "loop-pause",
         door=Door.HOST,
     )
@@ -3776,16 +3788,14 @@ async def test_a_loop_command_accepted_by_its_act_is_taken_by_its_loop_or_voided
     )
     taken = ("applied", "completed", "completed", "replayed", 2)
     assert await log.reading("loop-pause", asked) == taken
-    skipped = SkipSearchpointPayload(campaign_id="looped", cycle_id="cycle_looped")
+    skipped = SkipSearchpointPayload(campaign_id=looped.campaign_id, cycle_id=looped.cycle_id)
     await log.sender.dispatch(CommandCall(skipped, "loop-left", door=Door.HOST))
     release_cycle(held[1])
     await asyncio.to_thread(sweep_dead_cycles, stores.projects_root)
-    for dead in ("ended", "looped"):
-        reaped = stores.campaigns.load(
-            CycleHop(campaign_id=dead, cycle_id=f"cycle_{dead}"), moment=None
-        )
+    for dead in hops:
+        reaped = stores.campaigns.load(dead, moment=None)
         assert reaped is not None and reaped.stop_reason is StopReason.PRODUCER_VANISHED, (
-            f"{dead}: a dead loop's cycle was not reaped"
+            f"{dead.campaign_id}: a dead loop's cycle was not reaped"
         )
     voided = ("voided", "cancelled", "cancelled", "-", 2)
     assert await log.reading("loop-left", None) == voided
@@ -3933,12 +3943,11 @@ def host_tenant() -> _HostTenant:
     return _HostTenant(tenant, caller, session, answered, keyed, upload)
 
 
-# One spawned host answers every act; the edits run on the draft its upload opened.
 @pytest.mark.usefixtures("offline")
-async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process_door_does(
+async def test_a_host_over_stdio_lands_a_command_in_the_terminals_account_and_serves_a_refusal_as_in_process(
     host_tenant: _HostTenant,
 ) -> None:
-    tenant, _, session, answered, keyed, upload = host_tenant
+    tenant, _, session, answered, keyed, _ = host_tenant
     async with _stdio_host(tenant) as host:
         # A command lands in the terminal principal's account, which a read then answers alike.
         flipped = not (await answered("user-settings", {}))["demo_mode_enabled"]
@@ -3949,7 +3958,23 @@ async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process
         assert here == there.get("structuredContent") == {"demo_mode_enabled": flipped}, (
             "a command over stdio landed in another account than the terminal's"
         )
+        # A refusal is the value the in-process door raises.
+        run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": "abc"}}
+        with pytest.raises(PotterError) as raised:
+            await session.answer(CallTool("start-run", keyed(run)))
+        called = await host("start-run", keyed(run))
+        refusal = Refusal.of(raised.value).model_dump(mode="json")
+        assert called.get("isError") and json.loads(called["content"][0]["text"]) == refusal, (
+            "a tool call over stdio served a refusal another way"
+        )
 
+
+@pytest.mark.usefixtures("offline")
+async def test_a_host_over_stdio_opens_the_draft_the_in_process_door_opens_and_a_key_names_its_bytes(
+    host_tenant: _HostTenant,
+) -> None:
+    tenant, _, _, answered, keyed, upload = host_tenant
+    async with _stdio_host(tenant) as host:
         # The bytes arrive base64 and open the draft the in-process door opens from them.
         opened = await host("ingest-upload", keyed(upload))
         assert not opened.get("isError"), opened["content"]
@@ -3962,7 +3987,6 @@ async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process
             assert opened_draft["pipeline"].pop("campaign_id") == opened_draft["draft_id"]
         moved = {key for key in draft if draft[key] != beside[key]}
         assert moved == {"draft_id", "created_at"}, f"the two doors parsed one file apart: {moved}"
-
         # A key names one act, its bytes included: a corrected file re-sent under the key of the
         # first is refused, never answered with the first file's draft.
         reused = keyed(upload)
@@ -3977,6 +4001,17 @@ async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process
         assert moved_key.get("isError") and "idempotency_key_reused" in json.dumps(moved_key), (
             "a reused key on other bytes replayed the first act's answer"
         )
+
+
+# One draft: the upload opens it, a patch edits it, a null resets what the patch laid.
+@pytest.mark.usefixtures("offline")
+async def test_a_host_over_stdio_edits_the_draft_its_upload_opened_and_a_null_takes_an_override_back(
+    host_tenant: _HostTenant,
+) -> None:
+    tenant, _, _, _, keyed, upload = host_tenant
+    async with _stdio_host(tenant) as host:
+        opened = await host("ingest-upload", keyed(upload))
+        draft = opened["structuredContent"]
         # A payload nesting a model is digested in a process that built none of it before.
         patched = {"draft_id": draft["draft_id"], "patch": {"slug": "sums-host"}}
         edited = await host("edit-draft-campaign", keyed(patched))
@@ -3999,15 +4034,6 @@ async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process
             laid.append(sent_edit["structuredContent"]["config"])
         assert laid[0] != laid[1] and laid[2] == laid[0], (
             "a reset left the draft's own override in what Start launches"
-        )
-        # A refusal is the value the in-process door raises.
-        run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": "abc"}}
-        with pytest.raises(PotterError) as raised:
-            await session.answer(CallTool("start-run", keyed(run)))
-        called = await host("start-run", keyed(run))
-        refusal = Refusal.of(raised.value).model_dump(mode="json")
-        assert called.get("isError") and json.loads(called["content"][0]["text"]) == refusal, (
-            "a tool call over stdio served a refusal another way"
         )
 
 
@@ -4550,44 +4576,6 @@ def test_a_union_field_refused_at_every_door_is_one_entry_naming_its_bound(
         headers={"Idempotency-Key": uuid.uuid4().hex},
     )
     assert posted.json()["details"]["errors"] == entries, "REST refused the same field another way"
-
-
-def test_a_webapp_gate_runs_the_engine_checks_it_pulls_in_inside_the_pinned_venv() -> None:
-    # CI's webapp job asks no engine check, yet playwright reads the walk world walk-world builds.
-    pulled = gate._query(gate._parser().parse_args(["--web"]), gate.Selection(False, (), ()))
-    assert "walk-world" in {c.name for c in pulled}, "a --web gate dropped the walk world it reads"
-    assert any(c.kind in gate._PINNED_KINDS for c in pulled), "a --web gate re-execs nowhere"
-
-
-def test_the_walk_world_check_under_no_key_builds_and_prunes_nothing(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A tree git lists no key for stands under no world: a prune there would take a keyed one.
-    standing = tmp_path / "a-keyed-world" / "potter" / "data"
-    standing.mkdir(parents=True)
-    monkeypatch.setattr(gate, "_WALK_WORLDS", tmp_path)
-    with pytest.raises(RuntimeError, match="no key"):
-        gate._NAMED["walk-world"].run(gate.Selection(False, (), ()))
-    assert sorted(tmp_path.rglob("*")) == [
-        tmp_path / "a-keyed-world",
-        tmp_path / "a-keyed-world" / "potter",
-        standing,
-    ], "a walk-world check with no key built or pruned a world"
-
-
-def test_a_declared_write_is_what_orders_two_gate_checks() -> None:
-    # An undeclared read is invisible to the gate, so the declared write must be the whole edge.
-    def green(_: gate.Selection) -> tuple[int, str]:
-        return 0, ""
-
-    reader = gate.Check("reader", "py", green, mb=0, reads=("docs/specs/", "webapp/out/"))
-    writer = gate.Check("writer", "py", green, mb=0, reads=("scripts/",))
-    for declared in (
-        dataclasses.replace(writer, writes=("docs/specs/",)),
-        dataclasses.replace(writer, builds=("webapp/out/.built-{key}",)),
-    ):
-        assert gate._producers(reader, (declared, reader)) == (declared,), f"{declared} unordered"
-    assert gate._producers(reader, (writer, reader)) == (), "an undeclared write ordered"
 
 
 # 6. API tokens and the bearer door

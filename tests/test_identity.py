@@ -20,7 +20,7 @@ import shutil
 import sys
 import time
 import zipfile
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
@@ -661,117 +661,129 @@ def test_a_pool_its_readers_could_draw_nothing_from_never_runs(built_stores: Sto
     ), "a demo pool naming a key its partition lacks reached a mint"
 
 
-def test_a_packs_drawable_snippets_key_its_treatment(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, built_stores: Stores
-) -> None:
-    # A pack's drawable snippets are starting content: two packs merging under one treatment is silent.
-    every = frozenset(Presumption)
-    unranked = _unranked()
-    made = Authored(
-        kind="authored",
-        author="t",
-        date=date(2026, 1, 1),
-        experiment="t",
-        version=1,
-        supersedes=None,
-        notes=None,
-    )
-    ranking = {"task_intent": "Pick the single best match.", "answer_format": "End on the answer."}
+class _Packs:
+    """Block packs installed under the fact's own home: a pack's drawable snippets are starting
+    content, so two packs merging under one treatment is silent."""
 
-    def snippet(part: str, text: str, *presumes: Presumption) -> Snippet:
+    def __init__(self, stores: Stores) -> None:
+        self.stores = stores
+        self.every = frozenset(Presumption)
+        self.ranking = {
+            "task_intent": "Pick the single best match.",
+            "answer_format": "End on the answer.",
+        }
+        self.made = Authored(
+            kind="authored",
+            author="t",
+            date=date(2026, 1, 1),
+            experiment="t",
+            version=1,
+            supersedes=None,
+            notes=None,
+        )
+        self.ranked = (
+            self.snippet("task_intent", self.ranking["task_intent"], Presumption.RANKING),
+            self.snippet(
+                "answer_format", self.ranking["answer_format"], Presumption.LAST_LINE_ANSWER
+            ),
+        )
+
+    def snippet(self, part: str, text: str, *presumes: Presumption) -> Snippet:
         return Snippet(
             text=text,
             suits=frozenset({PromptPart(part)}),
             tags=(),
             presumes=frozenset(presumes),
-            provenance=made,
+            provenance=self.made,
         )
 
-    def install(name: str, *snippets: Snippet) -> None:
+    def install(self, name: str, *snippets: Snippet) -> None:
         file = block_packs_root() / name / "pack.json"
         file.parent.mkdir(parents=True, exist_ok=True)
         file.write_text(BlockPack(works={}, snippets=snippets).model_dump_json(), "utf-8")
 
-    ranked = (
-        snippet("task_intent", ranking["task_intent"], Presumption.RANKING),
-        snippet("answer_format", ranking["answer_format"], Presumption.LAST_LINE_ANSWER),
+    def drawing(self, names: list[str], active: list[str]) -> SelectedOptimizer:
+        overlay = ManifestNodeOverlay(config={"packs": names, "active": active})
+        return select_optimizer(
+            OptimizerChoice(
+                call_target=BENCH_TARGET, optimizer="potter", nodes={"block_pool": overlay}
+            )
+        )
+
+    def treated(self, names: list[str], active: list[str], admitted: Any = None) -> Any:
+        return self.drawing(names, active).treatment(
+            admitted or self.every, self.stores.block_packs
+        )
+
+
+@pytest.fixture
+def packs(built_stores: Stores) -> _Packs:
+    return _Packs(built_stores)
+
+
+def test_two_block_packs_seed_two_treatments(packs: _Packs) -> None:
+    packs.install("one", packs.snippet("thinking_style", "Think it through."))
+    packs.install("two", *packs.ranked)
+    assert packs.treated(["one"], ["*"]).behaviour != packs.treated(["two"], ["*"]).behaviour, (
+        "campaigns seeded from two different block packs share one treatment"
     )
-    with monkeypatch.context() as home:
-        home.setenv("PROMPTPOTTER_HOME", str(tmp_path / "packs-home"))
-        install("one", snippet("thinking_style", "Think it through."))
-        install("two", *ranked)
 
-        def drawing(names: list[str], active: list[str]) -> SelectedOptimizer:
-            overlay = ManifestNodeOverlay(config={"packs": names, "active": active})
-            return select_optimizer(
-                OptimizerChoice(
-                    call_target=BENCH_TARGET, optimizer="potter", nodes={"block_pool": overlay}
-                )
-            )
 
-        assert drawing(["one"], ["*"]).treatment(every, built_stores.block_packs).behaviour != (
-            drawing(["two"], ["*"]).treatment(every, built_stores.block_packs).behaviour
-        ), "campaigns seeded from two different block packs share one treatment"
-        # Only what `active` keeps reaches a prompt, so only its edit re-keys the run.
-        intent_only = (
-            drawing(["two"], ["task_intent"]).treatment(every, built_stores.block_packs).digest
+def test_only_an_edit_to_a_snippet_active_keeps_re_keys_the_run(packs: _Packs) -> None:
+    ranked = packs.ranked
+    packs.install("two", *ranked)
+    intent_only = packs.treated(["two"], ["task_intent"]).digest
+    packs.install("two", ranked[0], packs.snippet("answer_format", "Close on the answer."))
+    assert packs.treated(["two"], ["task_intent"]).digest == intent_only, (
+        "an edit to a snippet `active` excludes split one treatment in two"
+    )
+    packs.install("two", packs.snippet("task_intent", "Pick the best match."), ranked[1])
+    assert packs.treated(["two"], ["task_intent"]).digest != intent_only, (
+        "an edit to a drawable snippet ran under the treatment of the unedited one"
+    )
+
+
+def test_only_an_edit_to_what_a_campaigns_chain_admits_re_keys_that_campaign(
+    packs: _Packs,
+) -> None:
+    ranker = PipelineNode(
+        name="rank",
+        kind=NodeKind.LLM,
+        role=NodeRole.RANKER,
+        observation_mappings=[ObservationMapping(pipeline_key="ranking")],
+        current_config={"model": "m"},
+        tunes_llm=False,
+    )
+    admitted_by = {
+        "unranked": admits(_unranked(), "label_match"),
+        "ranked": admits(pipeline_schema([ranker]), "label_match"),
+    }
+    packs.install("two", *packs.ranked)
+    unedited = {k: packs.treated(["two"], ["*"], a).digest for k, a in admitted_by.items()}
+    edited_intent = packs.snippet("task_intent", "Pick the best match.", Presumption.RANKING)
+    packs.install("two", edited_intent, packs.ranked[1])
+    edited = {k: packs.treated(["two"], ["*"], a).digest for k, a in admitted_by.items()}
+    assert edited["unranked"] == unedited["unranked"], (
+        "an edit to a ranking snippet a non-ranking campaign can never draw re-keyed its treatment"
+    )
+    assert edited["ranked"] != unedited["ranked"], (
+        "an edit to a ranking snippet a ranking campaign draws ran under the unedited treatment"
+    )
+
+
+def test_a_block_presuming_what_the_run_lacks_refuses_the_mint(packs: _Packs) -> None:
+    packs.install("two", *packs.ranked)
+    ranks = entry_id("task_intent", packs.ranking["task_intent"])
+    last_line = entry_id("answer_format", packs.ranking["answer_format"])
+    for path, matcher, admitted in (
+        (ranks, "label_match", False),
+        (last_line, "list_rr", False),
+        (last_line, "label_match", True),
+    ):
+        refused = packs.drawing(["two"], [path]).pool_refusals(
+            mint=MintFacts((), admits(_unranked(), matcher), packs.stores.block_packs)
         )
-        install("two", ranked[0], snippet("answer_format", "Close on the answer."))
-        assert (
-            drawing(["two"], ["task_intent"]).treatment(every, built_stores.block_packs).digest
-            == intent_only
-        ), "an edit to a snippet `active` excludes split one treatment in two"
-        install("two", snippet("task_intent", "Pick the best match."), ranked[1])
-        assert (
-            drawing(["two"], ["task_intent"]).treatment(every, built_stores.block_packs).digest
-            != intent_only
-        ), "an edit to a drawable snippet ran under the treatment of the unedited one"
-        # Only what the campaign's chain admits is drawn, so only its edit re-keys that campaign.
-        ranker = PipelineNode(
-            name="rank",
-            kind=NodeKind.LLM,
-            role=NodeRole.RANKER,
-            observation_mappings=[ObservationMapping(pipeline_key="ranking")],
-            current_config={"model": "m"},
-            tunes_llm=False,
-        )
-        admitted_by = {
-            "unranked": admits(unranked, "label_match"),
-            "ranked": admits(pipeline_schema([ranker]), "label_match"),
-        }
-        install("two", *ranked)
-        unedited = {
-            k: drawing(["two"], ["*"]).treatment(a, built_stores.block_packs).digest
-            for k, a in admitted_by.items()
-        }
-        install(
-            "two", snippet("task_intent", "Pick the best match.", Presumption.RANKING), ranked[1]
-        )
-        edited = {
-            k: drawing(["two"], ["*"]).treatment(a, built_stores.block_packs).digest
-            for k, a in admitted_by.items()
-        }
-        assert edited["unranked"] == unedited["unranked"], (
-            "an edit to a ranking snippet a non-ranking campaign can never draw re-keyed its treatment"
-        )
-        assert edited["ranked"] != unedited["ranked"], (
-            "an edit to a ranking snippet a ranking campaign draws ran under the unedited treatment"
-        )
-        install("two", *ranked)
-        # A block presuming what the run lacks is noise in its prompt: naming one refuses the mint.
-        ranks = entry_id("task_intent", ranking["task_intent"])
-        last_line = entry_id("answer_format", ranking["answer_format"])
-        for path, matcher, admitted in (
-            (ranks, "label_match", False),
-            (last_line, "list_rr", False),
-            (last_line, "label_match", True),
-        ):
-            refused = drawing(["two"], [path]).pool_refusals(
-                mint=MintFacts((), admits(unranked, matcher), built_stores.block_packs)
-            )
-            assert (not refused) == admitted, (
-                f"{path} under {matcher}: admission missed a presumption"
-            )
+        assert (not refused) == admitted, f"{path} under {matcher}: admission missed a presumption"
 
 
 @pytest.fixture
@@ -1475,128 +1487,132 @@ def test_an_unoffered_names_404_reads_as_an_absent_ones(
     )
 
 
-def test_every_file_the_store_refuses_whole_is_refused_as_what_it_is(
-    tmp_path: Path, tiered: Stores
+def _refused_as(
+    torn_file: Path, torn: bytes, door: Callable[[], object], expected: tuple[str, int]
+) -> None:
+    """*torn_file* torn, then *door* asked: refused as what it is, naming its path, by code and status."""
+    kept = torn_file.read_bytes() if torn_file.is_file() else None
+    torn_file.parent.mkdir(parents=True, exist_ok=True)
+    torn_file.write_bytes(torn)
+    with pytest.raises(FileUnreadableError) as unread_file:
+        door()
+    said_of = unread_file.value
+    assert (said_of.code, said_of.http_status, said_of.details["path"]) == (
+        *expected,
+        str(torn_file),
+    ), f"{torn_file.name} was refused as another file, or unnamed"
+    if kept is None:
+        torn_file.unlink()
+    else:
+        torn_file.write_bytes(kept)
+
+
+def test_a_campaigns_bank_and_files_the_store_refuses_whole_are_refused_as_what_they_are(
+    tiered: Stores,
 ) -> None:
     # By its path, through the door that serves it: its code and its status.
-    install_root = tmp_path / "install"
     (campaign,) = tiered.campaigns.list_campaigns("miscarded")
     beside, beside_id = campaign.root_hop, campaign.campaign_id
     held_bank = Bank.of([Sample(id=0, query="q", ground_truth="g")])
     tiered.tenant_datasets.put_bank(held_bank)
-    write_yaml(install_root / "badconfig" / DEFINITION_FILE, _TERMNORM)
-    config_file = install_root / "badconfig" / DEFINITION_FILE
-    grants_file, blocks_file = tmp_path / "grants.json", tmp_path / "blocklist.json"
-    draft_file = tiered.drafts.draft_dir("torn") / DRAFT_FILE
-    draft_file.parent.mkdir(parents=True)
-    store = ("file_unreadable", 409)
-    stored_config = ("stored_config_invalid", 500)
     manifest_file = CampaignLayout(tiered.campaigns.campaign_root_dir(beside_id)).manifest
     manifest = json.loads(manifest_file.read_bytes())
     manifest["declaration"]["spec"]["loop"]["no_such_knob"] = 1
-    checkin_file = paths.user_data_root() / "checkin" / "pipeline.yaml"
 
     def beside_config() -> CycleConfig:
         campaign = tiered.campaigns.load_campaign(beside_id)
         assert campaign is not None
         return declared_config(tiered, campaign)
 
+    _refused_as(
+        tiered.campaigns.layout(beside).export,
+        b"{not an export",
+        lambda: tiered.campaigns.read_export(beside),
+        ("export_unreadable", 409),
+    )
+    _refused_as(
+        tiered.tenant_datasets._bank_path(held_bank.dataset_hash),
+        b'{"items": 3}',
+        lambda: tiered.tenant_datasets.bank(held_bank.dataset_hash),
+        ("bank_unreadable", 409),
+    )
+    _refused_as(
+        manifest_file,
+        b"{not a manifest",
+        lambda: tiered.campaigns.load_campaign(beside_id),
+        ("manifest_unreadable", 409),
+    )
+    _refused_as(
+        manifest_file, json.dumps(manifest).encode(), beside_config, ("manifest_unreadable", 409)
+    )
+
+
+def test_a_template_a_job_a_command_log_and_a_draft_the_store_refuses_whole_are_refused_as_what_they_are(
+    tiered: Stores,
+) -> None:
     shipped_checkin = (paths.checkin_assets_root() / "pipeline.yaml").read_text(encoding="utf-8")
-    for torn_file, torn, door, (code, status) in (
+    typo = shipped_checkin.replace(
+        "{{consultation_instruction}}", "{{consultation_instruction}} {{no_such_slot}}"
+    )
+    _refused_as(
+        paths.user_data_root() / "checkin" / "pipeline.yaml",
+        typo.encode(),
+        checkin_template,
+        ("optimizer_prompt_invalid", 500),
+    )
+    _refused_as(
+        tiered.jobs_dir / "torn.json",
+        b'{"job_id": 3}',
+        lambda: JobRegistry.attach(tiered.jobs_dir).get("torn"),
+        ("job_unreadable", 409),
+    )
+    _refused_as(
+        tiered.commands.path,
+        b"{not a filing\n",
+        tiered.commands.book,
+        ("command_log_unreadable", 409),
+    )
+    draft_file = tiered.drafts.draft_dir("torn") / DRAFT_FILE
+    draft_file.parent.mkdir(parents=True)
+    _refused_as(
+        draft_file,
+        b"{not a draft",
+        lambda: tiered.drafts.read_draft("torn"),
+        ("file_unreadable", 409),
+    )
+
+
+def test_a_stored_config_grant_or_blocklist_the_store_refuses_whole_is_refused_as_what_it_is(
+    tmp_path: Path, tiered: Stores
+) -> None:
+    stored_config = ("stored_config_invalid", 500)
+    config_file = tmp_path / "install" / "badconfig" / DEFINITION_FILE
+    write_yaml(config_file, _TERMNORM)
+    for torn, door in (
         (
-            tiered.campaigns.layout(beside).export,
-            b"{not an export",
-            lambda: tiered.campaigns.read_export(beside),
-            ("export_unreadable", 409),
-        ),
-        (
-            tiered.tenant_datasets._bank_path(held_bank.dataset_hash),
-            b'{"items": 3}',
-            lambda: tiered.tenant_datasets.bank(held_bank.dataset_hash),
-            ("bank_unreadable", 409),
-        ),
-        (
-            CampaignLayout(tiered.campaigns.campaign_root_dir(beside_id)).manifest,
-            b"{not a manifest",
-            lambda: tiered.campaigns.load_campaign(beside_id),
-            ("manifest_unreadable", 409),
-        ),
-        (
-            manifest_file,
-            json.dumps(manifest).encode(),
-            beside_config,
-            ("manifest_unreadable", 409),
-        ),
-        (
-            checkin_file,
-            shipped_checkin.replace(
-                "{{consultation_instruction}}", "{{consultation_instruction}} {{no_such_slot}}"
-            ).encode(),
-            checkin_template,
-            ("optimizer_prompt_invalid", 500),
-        ),
-        (
-            tiered.jobs_dir / "torn.json",
-            b'{"job_id": 3}',
-            lambda: JobRegistry.attach(tiered.jobs_dir).get("torn"),
-            ("job_unreadable", 409),
-        ),
-        (
-            tiered.commands.path,
-            b"{not a filing\n",
-            tiered.commands.book,
-            ("command_log_unreadable", 409),
-        ),
-        (
-            config_file,
             b"campaign: [unclosed",
             lambda: dataset_campaign_block(resolve_dataset(tiered, "badconfig")),
-            stored_config,
         ),
+        (b"campaign: [unclosed", lambda: campaign_file_block(config_file)),
+        (b"campaign: 3\n", lambda: campaign_file_block(config_file)),
         (
-            config_file,
-            b"campaign: [unclosed",
-            lambda: campaign_file_block(config_file),
-            stored_config,
-        ),
-        (
-            config_file,
-            b"campaign: 3\n",
-            lambda: campaign_file_block(config_file),
-            stored_config,
-        ),
-        (
-            config_file,
             b"campaign:\n  optimization: 3\n",
             lambda: validated_campaign_config(campaign_file_block(config_file), path=config_file),
-            stored_config,
         ),
-        (
-            blocks_file,
-            b'{"emails": "ada@x.com"}',
-            lambda: grants.block_email(
-                blocks_file, "eve@x.com", actor="o", audit_path=tmp_path / "audit.jsonl"
-            ),
-            stored_config,
-        ),
-        (grants_file, b'{"grants": 3}', lambda: grants.list_grants(grants_file), stored_config),
-        (draft_file, b"{not a draft", lambda: tiered.drafts.read_draft("torn"), store),
     ):
-        kept = torn_file.read_bytes() if torn_file.is_file() else None
-        torn_file.parent.mkdir(parents=True, exist_ok=True)
-        torn_file.write_bytes(torn)
-        with pytest.raises(FileUnreadableError) as unread_file:
-            door()
-        said_of = unread_file.value
-        assert (said_of.code, said_of.http_status, said_of.details["path"]) == (
-            code,
-            status,
-            str(torn_file),
-        ), f"{torn_file.name} was refused as another file, or unnamed"
-        if kept is None:
-            torn_file.unlink()
-        else:
-            torn_file.write_bytes(kept)
+        _refused_as(config_file, torn, door, stored_config)
+    _refused_as(
+        tmp_path / "blocklist.json",
+        b'{"emails": "ada@x.com"}',
+        lambda: grants.block_email(
+            tmp_path / "blocklist.json", "eve@x.com", actor="o", audit_path=tmp_path / "audit.jsonl"
+        ),
+        stored_config,
+    )
+    grants_file = tmp_path / "grants.json"
+    _refused_as(
+        grants_file, b'{"grants": 3}', lambda: grants.list_grants(grants_file), stored_config
+    )
 
 
 def test_a_potter_template_filling_an_undeclared_slot_is_refused_as_its_prompt() -> None:
@@ -3189,21 +3205,22 @@ def test_a_moved_panel_is_banked_as_moved_while_the_measured_roster_stands(
         ), "a launch on another panel than the measured one stood unreported, or never cleared"
 
 
-def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    built_stores: Stores,
-    offline: Router,
-    decl: _Declared,
-    held: _Held,
-) -> None:
-    # A resume runs on the connector its campaign was minted on: its dataset re-pointed since is
-    # refused at the terminal's door, the embedded one and the inner one alike, before any probes
-    # or binds a connector.
-    stores = built_stores
-    held_campaign = held.campaign
-    # A continuing inner seat: its campaign minted in the outer's sandbox, under the id it spawns at.
+class _Moved(NamedTuple):
+    """A campaign whose dataset was re-pointed at another connector since its mint, and what the
+    network was asked before any door refused it."""
+
+    campaign: Campaign
+    seat: Any
+    spawning: InnerSpawnContext
+    asked: tuple[int, int]
+
+
+@pytest.fixture
+def moved(built_stores: Stores, offline: Router, decl: _Declared, held: _Held) -> Iterator[_Moved]:
+    """A resume runs on the connector its campaign was minted on: its dataset re-pointed since is
+    refused, before any probes or binds a connector. A continuing inner seat is minted in the
+    outer's sandbox, under the id it spawns at."""
+    stores, held_campaign = built_stores, held.campaign
     seats = inner_cells("potter", dataset="decl")
     (inner_seat,) = seats.cells
     owner = held_campaign.root_hop
@@ -3223,11 +3240,27 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     as_minted = decl_definition.read_text(encoding="utf-8")
     write_yaml(decl_definition, {**_DECL, "pipeline": {"connector": "n8n"}})
     asked = (len(offline.backend.asked), len(offline.harness.asked))
+    yield _Moved(held_campaign, inner_seat, spawning, asked)
+    decl_definition.write_text(as_minted, encoding="utf-8")
+
+
+def _unprobed(offline: Router, moved: _Moved) -> None:
+    assert (len(offline.backend.asked), len(offline.harness.asked)) == moved.asked, (
+        "a door probed or bound a connector before it refused the moved one"
+    )
+
+
+def test_the_terminals_resume_refuses_a_campaign_whose_connector_moved(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    offline: Router,
+    moved: _Moved,
+) -> None:
     with monkeypatch.context() as cli:
         cli.setattr(
             sys,
             "argv",
-            ["promptpotter", "--json", "resume", "--campaign", held_campaign.campaign_id],
+            ["promptpotter", "--json", "resume", "--campaign", moved.campaign.campaign_id],
         )
         capsys.readouterr()
         with pytest.raises(SystemExit):
@@ -3235,23 +3268,37 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     assert json.loads(capsys.readouterr().out)["code"] == "connector_moved", (
         "the terminal's resume ran a campaign on a connector its dataset no longer names"
     )
+    _unprobed(offline, moved)
+
+
+def test_the_embedded_resume_refuses_a_campaign_whose_connector_moved(
+    built_stores: Stores, offline: Router, moved: _Moved
+) -> None:
     with pytest.raises(CampaignRefusedError) as embedded:
         asyncio.run(
-            run_campaign(held_campaign.root_hop, stores=stores, budget=Budget(), mode=RunMode())
+            run_campaign(
+                moved.campaign.root_hop, stores=built_stores, budget=Budget(), mode=RunMode()
+            )
         )
     assert embedded.value.refusal is CampaignRefusal.CONNECTOR_MOVED, (
         "the embedded resume ran a campaign on a connector its dataset no longer names"
     )
+    _unprobed(offline, moved)
+
+
+def test_the_inner_door_refuses_a_continuing_seat_whose_connector_moved_as_the_cells_fault(
+    tmp_path: Path, offline: Router, moved: _Moved
+) -> None:
     # The inner door asks it of a continuing seat before its session opens: the cell's fault.
-    pin = PinnedCell(cell=inner_seat, instrument="i").pin()
+    pin = PinnedCell(cell=moved.seat, instrument="i").pin()
     with (
-        scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=spawning),
+        scoped(ledger=CycleEventLog(tmp_path / "outer.jsonl"), spawn=moved.spawning),
         scoped(round=0),
         pytest.raises(CellUnscoreableError) as inner,
     ):
         asyncio.run(
             spawn.run_inner_cycle(
-                Sample(id=0, query=inner_seat.id, ground_truth=None, source_pin=pin), {}
+                Sample(id=0, query=moved.seat.id, ground_truth=None, source_pin=pin), {}
             )
         )
     refused_inner = inner.value.__cause__
@@ -3259,10 +3306,14 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     assert refused_inner.refusal is CampaignRefusal.CONNECTOR_MOVED, (
         "the inner seat ran a campaign on a connector its dataset no longer names"
     )
-    assert (len(offline.backend.asked), len(offline.harness.asked)) == asked, (
-        "a door probed or bound a connector before it refused the moved one"
-    )
-    # The served bench reads the one refusal its pass's admission raises: no grade is offered.
+    _unprobed(offline, moved)
+
+
+def test_the_served_bench_offers_no_grade_on_a_moved_connector(
+    built_stores: Stores, moved: _Moved
+) -> None:
+    # The served bench reads the one refusal its pass's admission raises.
+    stores, held_campaign = built_stores, moved.campaign
     holder = stores.campaigns.live_cycle(held_campaign.root_hop)
     bench_config = cycle_config(
         stores, CampaignCycle(held_campaign, holder.cycle_id)
@@ -3273,7 +3324,6 @@ def test_a_resume_on_a_moved_connector_is_refused_at_every_door_before_it_binds(
     assert (bench_read.can_run, bench_read.refusal) == (False, PassRefusal.CONNECTOR_MOVED), (
         "the served bench offers a grade on a connector its dataset no longer names"
     )
-    decl_definition.write_text(as_minted, encoding="utf-8")
 
 
 def test_a_sandboxed_mint_moves_no_account_label(built_stores: Stores, decl: _Declared) -> None:
@@ -3320,65 +3370,91 @@ def test_a_steering_seed_is_its_forks_declared_delta_never_a_waiver_of_drift(
         resolve_resume(steered_fork, campaign, rows[:-1])
 
 
-def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_lives(
-    monkeypatch: pytest.MonkeyPatch,
-    built_stores: Stores,
-    decl: _Declared,
-    held: _Held,
-    offline: Router,
-) -> None:
-    # Another holder joins the very ones they hold; one that drained, or whose exit unwound through
-    # `run_optimization`'s `finally`, leaves neither its ledger's index nor its cycle held.
-    stores = built_stores
-    declared = decl.declared
-    opened, held_campaign = held
-    wired_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop)))
-    root_dir = CycleDir(stores.campaigns.cycle_dir(held_campaign.root_hop))
-    launched = effective_config(declared.spec)
-    # The wiring a launch declares before its observers build.
-    selected = select_optimizer(launched.optimization)
-    declare_run_wiring(opened, launched, selected=selected)
-    address = {"campaign_id": opened.hop.campaign_id, "cycle_id": opened.hop.cycle_id}
+class _Launch(NamedTuple):
+    """A launch whose wiring is declared and whose observers are not yet built."""
 
-    def pause(key: str) -> str:
+    stores: Stores
+    opened: Any
+    campaign: Campaign
+    config: Any
+    selected: Any
+    ledger: CycleEventLog
+    root_dir: CycleDir
+
+    def pause(self, key: str) -> str:
+        address = {"campaign_id": self.opened.hop.campaign_id, "cycle_id": self.opened.hop.cycle_id}
         call = CommandCall(PauseCyclePayload(**address), key, door=Door.HOST)
-        return asyncio.run(CommandDispatcher(stores).dispatch(call)).accepted.command_id
+        return asyncio.run(CommandDispatcher(self.stores).dispatch(call)).accepted.command_id
 
-    def acked(command_id: str) -> str | None:
-        return stores.commands.book().status(command_id)
+    def acked(self, command_id: str) -> str | None:
+        return self.stores.commands.book().status(command_id)
 
+    def let_go(self) -> bool:
+        """Neither its ledger's index nor its cycle held."""
+        return not LedgerIndex.of(self.ledger.path).pinned and not cycle_held(self.root_dir)
+
+
+@pytest.fixture
+def launch(built_stores: Stores, decl: _Declared, held: _Held) -> _Launch:
+    opened, campaign = held
+    root_dir = CycleDir(built_stores.campaigns.cycle_dir(campaign.root_hop))
+    config = effective_config(decl.declared.spec)
+    # The wiring a launch declares before its observers build.
+    selected = select_optimizer(config.optimization)
+    declare_run_wiring(opened, config, selected=selected)
+    return _Launch(
+        built_stores, opened, campaign, config, selected, CycleEventLog.open(root_dir), root_dir
+    )
+
+
+def test_a_pause_filed_while_a_launch_claims_or_folds_its_cycle_is_that_launchs_to_take(
+    monkeypatch: pytest.MonkeyPatch, launch: _Launch
+) -> None:
     # A pause filed while a live launch claims the cycle (bl1.B11), queued, or while the launch
     # folds its ledger (bl1.B10), is that launch's to take.
+    stores, opened = launch.stores, launch.opened
     queue = JobRegistry(stores.jobs_dir, capacity=lambda _live: 0)
     (claiming,) = request_jobs(
         stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=opened.hop
     )
-    claimed = pause("claimed")
+    claimed = launch.pause("claimed")
     folding: list[str] = []
     voids = Stores.void_inbox
 
     def void_after_a_pause(held: Stores, hop: CycleHop, *, sparing: str | None = None) -> None:
-        folding.append(pause("fold"))
+        folding.append(launch.pause("fold"))
         voids(held, hop, sparing=sparing)
 
     with monkeypatch.context() as filing:
         filing.setattr(Stores, "void_inbox", void_after_a_pause)
-        observers = build_run_observers(session=opened, campaign_config=launched)
+        observers = build_run_observers(session=opened, campaign_config=launch.config)
     assert read_active_pointer(stores.base_dir) == opened.hop, (
         "a run held its cycle, and the latest launch names another"
     )
-    assert [acked(claimed), acked(folding[0])] == ["accepted"] * 2, (
+    assert [launch.acked(claimed), launch.acked(folding[0])] == ["accepted"] * 2, (
         "the launch voided a pause filed under its own claim or hold"
     )
     queue.cancel_queued(claiming.job_id)
-    with LedgerIndex.of(wired_ledger.path).projecting() as joiner:
-        assert joiner.add(DashboardCheckout(root_dir)) is observers.dashboard, (
+    observers.release()
+
+
+# One journey: each step's state is the next's input (the run's holders, then its stop and release).
+def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_lives(
+    launch: _Launch,
+) -> None:
+    # Another holder joins the very ones they hold; one that drained leaves neither its ledger's
+    # index nor its cycle held once released.
+    stores, opened, ledger_path = launch.stores, launch.opened, launch.ledger.path
+    root = launch.campaign.root_hop
+    observers = build_run_observers(session=opened, campaign_config=launch.config)
+    with LedgerIndex.of(ledger_path).projecting() as joiner:
+        assert joiner.add(DashboardCheckout(launch.root_dir)) is observers.dashboard, (
             "a second holder folded a dashboard beside the run's, each writing its own file"
         )
     # A store-door append during the run lands through the run's own `index.json` writer, at once.
-    stores.campaigns.append(held_campaign.root_hop, ArmActRecord(act=ArmAct.SKIP))
-    manifest = CycleLayout(root_dir).manifest
-    assert LedgerIndex.of(wired_ledger.path).pinned and ArmAct.SKIP in manifest.read_text(), (
+    stores.campaigns.append(root, ArmActRecord(act=ArmAct.SKIP))
+    manifest = CycleLayout(launch.root_dir).manifest
+    assert LedgerIndex.of(ledger_path).pinned and ArmAct.SKIP in manifest.read_text(), (
         "a store-door append let go of the run's projections, or left its index.json stale"
     )
     # A pause filed between the stop's declaration and the drain dies at the release (B16): only a
@@ -3386,40 +3462,45 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
     declare_run_stop(
         opened, observers, StopReason.ROUNDS_BUDGET, interrupted_by=PauseCause.INTERRUPT
     )
-    late = pause("late")
+    late = launch.pause("late")
     # The drain, then the run's `finally`: draining alone keeps the cycle held.
     observers.drain_all()
-    assert cycle_held(root_dir), "a drain released the cycle it only drains"
+    assert cycle_held(launch.root_dir), "a drain released the cycle it only drains"
     observers.release()
-    assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
-        "a released run kept its ledger's projections or its cycle"
-    )
-    assert acked(late) == "voided", "a release took a pause no producer stopped on"
+    assert launch.let_go(), "a released run kept its ledger's projections or its cycle"
+    assert launch.acked(late) == "voided", "a release took a pause no producer stopped on"
     # Outside a run, the store door holds its one-shot only while its line lands.
-    stores.campaigns.append(held_campaign.root_hop, ArmActRecord(act=ArmAct.SKIP))
-    assert not LedgerIndex.of(wired_ledger.path).pinned, (
+    stores.campaigns.append(root, ArmActRecord(act=ArmAct.SKIP))
+    assert not LedgerIndex.of(ledger_path).pinned, (
         "a store-door append pinned its ledger's index past its own line"
     )
-    # A build that raises past its projections' checkout lets go of them too.
+
+
+def test_a_build_that_raises_past_its_projections_checkout_lets_go_of_them(
+    monkeypatch: pytest.MonkeyPatch, launch: _Launch
+) -> None:
     with monkeypatch.context() as broken, pytest.raises(OSError, match="no observers"):
         broken.setattr(RunObservers, "__init__", Mock(side_effect=OSError("no observers")))
-        build_run_observers(session=opened, campaign_config=launched)
-    assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
-        "a build that raised kept its ledger's projections or its cycle"
-    )
-    observers = build_run_observers(session=opened, campaign_config=launched)
+        build_run_observers(session=launch.opened, campaign_config=launch.config)
+    assert launch.let_go(), "a build that raised kept its ledger's projections or its cycle"
+
+
+def test_a_run_whose_exit_unwound_on_an_error_drains_nothing_and_lets_go(
+    monkeypatch: pytest.MonkeyPatch, launch: _Launch, offline: Router
+) -> None:
+    observers = build_run_observers(session=launch.opened, campaign_config=launch.config)
     # An exit on an error drains nothing: a drain's own fault would replace the error in flight.
     drained = Mock()
     monkeypatch.setattr(DashboardCheckout, "drain", drained)
     offline.rates = {}
     # A formula naming no scoring helper refuses inside the run, past its observers' build.
-    unscored = launched.model_copy(update={"scoring": "no_such_helper(predicted)"})
+    unscored = launch.config.model_copy(update={"scoring": "no_such_helper(predicted)"})
     with pytest.raises(ScoringFormulaError):
         asyncio.run(
             run_optimization(
                 [],
                 CycleConfig.laid(unscored, []),
-                session=opened,
+                session=launch.opened,
                 observers=observers,
                 mode=RunMode(),
                 budget=HeldBudget(
@@ -3429,12 +3510,10 @@ def test_a_launchs_observers_hold_its_ledgers_projections_only_while_the_run_liv
                     step_rounds=None,
                     share=Budget(),
                 ),
-                optimizer=selected,
+                optimizer=launch.selected,
             )
         )
-    assert not LedgerIndex.of(wired_ledger.path).pinned and not cycle_held(root_dir), (
-        "a run whose exit unwound kept its ledger's projections or its cycle"
-    )
+    assert launch.let_go(), "a run whose exit unwound kept its ledger's projections or its cycle"
     assert not drained.called, "a run that raised drained its dashboard on the way out"
 
 
@@ -3537,9 +3616,8 @@ def test_a_stopped_runs_stop_record_counts_its_lapsed_cells_and_its_set_aside(
 ) -> None:
     # The stop record's lines read the count the book stopped on, never the bills alone. A pause
     # grades no selection, so its record lands with the set-aside held (`entry.py::_run_single_cycle`);
-    # a halt that grades it releases the set-aside first, and the bench pass bills what it spends.
-    # The caps bind the campaign, so a sibling cycle's unreported cell counts against them; the
-    # stopping cycle's own line reads its book alone.
+    # the caps bind the campaign, so a sibling cycle's unreported cell counts against them, while
+    # the stopping cycle's own line reads its book alone.
     stores = built_stores
     opened, held_campaign = held
     launched = effective_config(decl.declared.spec)
@@ -3791,50 +3869,72 @@ def test_a_nested_fields_description_folds_into_the_contract_it_names() -> None:
     )
 
 
-def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrote_it_on() -> None:
-    # Each step reads the panel, schema or child the step before resolved.
+class _Outer(NamedTuple):
+    """The L4 outer's panel as a checkout resolves it, and the pipeline schema it is served."""
+
+    stores: Stores
+    dataset: Any
+    panel: dict[str, Any]
+    schema: Any
+
+
+@pytest.fixture
+def outer() -> _Outer:
     # A checkout resolves its research tier with no setting; a seat no committed tier holds is the
     # account's: a panel the account cannot resolve refuses at init, naming the seat.
-    outer_stores = build_stores(default_identity(), projects_root=default_projects_root())
-    outer = resolve_dataset(outer_stores, "promptpotter-self/run")
-    assert (outer.tier, outer.tier_root) == ("research", _RESEARCH), (
-        "a checkout did not resolve the L4 panel from its own research tier"
-    )
-    declared_panel = read_dataset_definition(outer)
+    stores = build_stores(default_identity(), projects_root=default_projects_root())
+    dataset = resolve_dataset(stores, "promptpotter-self/run")
+    declared_panel = read_dataset_definition(dataset)
     assert declared_panel is not None and declared_panel.panel is not None, "guard"
-    unheld = "unheld/seed-0"
-    unheld_seat = {"kind": "seat", "id": unheld, "inner_dataset": "unheld", "run_seed": 0}
-    with pytest.raises(PayloadInvalidError):
-        InnerTasks.model_validate({**declared_panel.panel, "tasks": [unheld_seat]}).resolve_cells(
-            outer_stores
-        )
     for seated in InnerTasks.model_validate(declared_panel.panel).datasets:
         try:
-            resolve_dataset(outer_stores, seated)
+            resolve_dataset(stores, seated)
         except DatasetAccessError:
             write_yaml(
-                outer_stores.tenant_datasets.dataset_dir(seated) / DEFINITION_FILE,
+                stores.tenant_datasets.dataset_dir(seated) / DEFINITION_FILE,
                 {
                     "pipeline": {"connector": "termnorm"},
                     "campaign": {"optimization": {"degradation_threshold": 0.4}},
                 },
             )
-    outer_schema = parse_pipeline_response(
+    schema = parse_pipeline_response(
         asyncio.run(
-            dataset_pipeline(
-                outer_stores, outer, experiment=experiment_outside_run(outer_stores, outer)
-            )
+            dataset_pipeline(stores, dataset, experiment=experiment_outside_run(stores, dataset))
         )
     )
+    return _Outer(stores, dataset, declared_panel.panel, schema)
+
+
+def test_a_checkout_resolves_the_l4_panel_from_its_research_tier_and_refuses_an_unheld_seat(
+    outer: _Outer,
+) -> None:
+    assert (outer.dataset.tier, outer.dataset.tier_root) == ("research", _RESEARCH), (
+        "a checkout did not resolve the L4 panel from its own research tier"
+    )
+    unheld = "unheld/seed-0"
+    unheld_seat = {"kind": "seat", "id": unheld, "inner_dataset": "unheld", "run_seed": 0}
+    with pytest.raises(PayloadInvalidError):
+        InnerTasks.model_validate({**outer.panel, "tasks": [unheld_seat]}).resolve_cells(
+            outer.stores
+        )
+
+
+def test_an_invented_or_mistyped_param_is_refused_by_the_schema_that_declares_none(
+    outer: _Outer,
+) -> None:
     for overlay, reasons in (
         ({"l1_generate": {"invented_knob": 1}}, [("l1_generate.invented_knob", "unknown_param")]),
         ({"l1_critique": {"layout": "hdr"}}, [("l1_critique.layout", "type_mismatch")]),
         ({"l1_critique": {"layout": {"instruction": ["plan"]}}}, []),
     ):
-        judged = overlay_failures(overlay, outer_schema, running=PipelineParams())
+        judged = overlay_failures(overlay, outer.schema, running=PipelineParams())
         assert [(f.axis, f.reason) for f in judged] == reasons, (
             f"{overlay}: admitted a param the schema does not declare, or off its declared type"
         )
+
+
+def _graded(outer_schema: Any) -> Any:
+    """The outer's schema with one more tuned LLM node, `grade`."""
     grade = PipelineNode(
         name="grade",
         kind=NodeKind.LLM,
@@ -3842,7 +3942,13 @@ def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrot
         prompt_info=PROMPT_INFO,
         tunes_llm=True,
     )
-    graded = pipeline_schema([*outer_schema.declared_nodes, grade])
+    return pipeline_schema([*outer_schema.declared_nodes, grade])
+
+
+def test_an_individual_a_variation_wrote_an_invented_knob_on_is_refused_and_a_wipe_is_a_move(
+    outer: _Outer,
+) -> None:
+    graded = _graded(outer.schema)
     # On the outer's origin: each inner node's served start, where its slots stand.
     parent = OptSearchPoint.derive(
         [resolve_origin_opt_search_point(pipeline_params=PipelineParams(), schema=graded)],
@@ -3864,10 +3970,15 @@ def test_an_invented_param_is_rejected_and_so_is_the_individual_a_variation_wrot
     assert [f.axis for f in refusals] == ["l1_generate.invented_knob"], (
         "an invented knob was admitted"
     )
-    # Each carrier writes its own kind: a prompt locus the node does not declare, a config key
-    # aimed at a prompt field, and a node the pipeline lacks are all refused on the child.
+
+
+def test_each_carrier_writes_its_own_kind_and_a_write_off_it_is_refused_on_the_child(
+    outer: _Outer,
+) -> None:
+    # A prompt locus the node does not declare, a config key aimed at a prompt field, and a node the
+    # pipeline lacks are all refused on the child.
     _, config, carried = carried_writes(
-        graded,
+        _graded(outer.schema),
         writer="llm",
         prompt_loci={
             Locus("grade", "invented_field"): "x",
@@ -4295,39 +4406,57 @@ def test_a_resume_after_a_recut_reads_the_bank_its_cycle_drew(
     )
 
 
-def test_a_bank_whose_rows_declare_another_field_is_refused_by_its_path(
-    built_stores: Stores,
-) -> None:
-    # Read as unflagged rows, its held tail is searched. The listing, a survey, lists its one
-    # dataset UNREADABLE beside the rest.
+class _Stale(NamedTuple):
+    """A bank whose rows declare another field (read as unflagged rows, its held tail is searched)
+    beside a good recut one."""
+
+    bank: Bank
+    path: str
+    recut: Bank
+
+
+@pytest.fixture
+def stale(built_stores: Stores) -> _Stale:
     _, drawn_bank, recut = _recut_banks(built_stores)
-    stale = [
+    rows = [
         {"bench_only": True, **{k: v for k, v in row.items() if k != "held_out"}}
         if "held_out" in row
         else row
         for row in drawn_bank.banked()
     ]
-    stale_bank = Bank.of(Sample(id=i, query=f"stale {i}", ground_truth="T") for i in range(3))
-    write_json(built_stores.tenant_datasets._bank_path(stale_bank.dataset_hash), {"items": stale})
-    stale_path = str(built_stores.tenant_datasets._bank_path(stale_bank.dataset_hash))
+    bank = Bank.of(Sample(id=i, query=f"stale {i}", ground_truth="T") for i in range(3))
+    write_json(built_stores.tenant_datasets._bank_path(bank.dataset_hash), {"items": rows})
+    return _Stale(bank, str(built_stores.tenant_datasets._bank_path(bank.dataset_hash)), recut)
+
+
+def _labelled(stores: Stores, name: str, held_hash: str) -> None:
+    write_yaml(
+        stores.tenant_datasets.dataset_dir(name) / DEFINITION_FILE,
+        {"pipeline": {"connector": "termnorm"}},
+    )
+    stores.tenant_datasets.relabel(name, held_hash)
+
+
+def test_a_bank_whose_rows_declare_another_field_is_refused_by_its_path(
+    built_stores: Stores, stale: _Stale
+) -> None:
     for read in (
-        lambda: built_stores.tenant_datasets.bank(stale_bank.dataset_hash),
-        lambda: built_stores.tenant_datasets.rows(stale_bank.dataset_hash, [35]),
+        lambda: built_stores.tenant_datasets.bank(stale.bank.dataset_hash),
+        lambda: built_stores.tenant_datasets.rows(stale.bank.dataset_hash, [35]),
     ):
         with pytest.raises(FileUnreadableError) as unread:
             read()
-        assert (unread.value.kind, unread.value.details["path"]) == (FileKind.BANK, stale_path), (
+        assert (unread.value.kind, unread.value.details["path"]) == (FileKind.BANK, stale.path), (
             "a stale bank was refused unnamed"
         )
-    for name, held_hash in (
-        ("stalebank", stale_bank.dataset_hash),
-        ("goodbank", recut.dataset_hash),
-    ):
-        write_yaml(
-            built_stores.tenant_datasets.dataset_dir(name) / DEFINITION_FILE,
-            {"pipeline": {"connector": "termnorm"}},
-        )
-        built_stores.tenant_datasets.relabel(name, held_hash)
+
+
+def test_the_listing_lists_a_stale_bank_and_a_broken_panel_unreadable_beside_the_rest(
+    built_stores: Stores, stale: _Stale
+) -> None:
+    # The listing, a survey, lists its one dataset UNREADABLE beside the rest.
+    _labelled(built_stores, "stalebank", stale.bank.dataset_hash)
+    _labelled(built_stores, "goodbank", stale.recut.dataset_hash)
     # A materialized panel this build cannot read is the store's one refusal too.
     write_yaml(
         built_stores.tenant_datasets.dataset_dir("brokenpanel") / DEFINITION_FILE,
@@ -4344,7 +4473,13 @@ def test_a_bank_whose_rows_declare_another_field_is_refused_by_its_path(
     assert (listed["goodbank"].n_samples, listed["goodbank"].start_block) == (41, None), (
         "an unreadable dataset beside it hid a readable one"
     )
+
+
+def test_the_dataset_scope_leaderboard_answers_a_stale_bank_as_its_refusal_by_its_path(
+    built_stores: Stores, stale: _Stale
+) -> None:
     # Every other door answers the refusal as itself, by its path: never a 422 that drops it.
+    _labelled(built_stores, "stalebank", stale.bank.dataset_hash)
     stale_scope = cells_scope(
         built_stores,
         "stalebank",
@@ -4366,7 +4501,7 @@ def test_a_bank_whose_rows_declare_another_field_is_refused_by_its_path(
         )
     assert (unread_log.value.code, unread_log.value.details["path"]) == (
         "bank_unreadable",
-        stale_path,
+        stale.path,
     ), "the dataset-scope leaderboard answered a stale bank as another refusal"
 
 
@@ -4850,24 +4985,62 @@ def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refuse
     assert booked(both)[0] == ValidationReason.OVER_CEILING, f"tallied as {booked(both)[0]}"
 
 
-def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifests(
-    built_stores: Stores, offline: Router
+class _Mixed(NamedTuple):
+    """A panel mixing two manifests (potter and capo): its outer schema and the origin parent."""
+
+    potter: Any
+    capo: Any
+    panel: Any
+    schema: Any
+    parent: Any
+
+
+@pytest.fixture
+def mixed() -> _Mixed:
+    panel = inner_cells("potter", "capo")
+    schema, parent = _outer(panel)
+    return _Mixed(
+        select_optimizer(bench_choice("potter")),
+        select_optimizer(bench_choice("capo")),
+        panel,
+        schema,
+        parent,
+    )
+
+
+def test_a_mixed_panels_outer_nodes_are_each_shown_as_their_manifests(
+    built_stores: Stores, mixed: _Mixed
 ) -> None:
-    # A panel mixing two manifests; the edit it admits reaches the inner cell's request.
-    potter = select_optimizer(bench_choice("potter"))
-    capo = select_optimizer(bench_choice("capo"))
-    mixed = inner_cells("potter", "capo")
-    mixed_schema, parent = _outer(mixed)
-    mixed_view = _view(built_stores, parent, TaskDecomposition(), mixed_schema)
-    mixed_shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", mixed_view))
-    base_text = base_optimizer_template(capo, "capo_mutate").instruction
-    assert f"[capo_mutate.instruction]\n{base_text}" in mixed_shown, (
+    view = _view(built_stores, mixed.parent, TaskDecomposition(), mixed.schema)
+    shown = "".join(i.text for i in DispatchHub.render_items("rendered_prompt", view))
+    base_text = base_optimizer_template(mixed.capo, "capo_mutate").instruction
+    assert f"[capo_mutate.instruction]\n{base_text}" in shown, (
         "a CAPO inner's prompt was never shown"
     )
-    potter_base = base_optimizer_template(potter, "l1_generate")
-    assert f"[l1_generate.instruction]\n{potter_base.instruction}" in mixed_shown, (
+    potter_base = base_optimizer_template(mixed.potter, "l1_generate")
+    assert f"[l1_generate.instruction]\n{potter_base.instruction}" in shown, (
         "the potter cell's prompt was never shown beside the CAPO cell's"
     )
+
+
+def _proposed(stores: Stores, mixed: _Mixed, loci: dict[Locus, str]) -> Any:
+    (node,) = {locus.node for locus in loci}
+    proposing = seat(
+        stores, schema=mixed.schema, optimization={"optimizer": mixed.panel.owners[node].name}
+    )
+    return (
+        NodeContext(proposing, NODE_MEMBERS.get(node))
+        .read(Children)
+        .child([mixed.parent], prompt_loci=loci)
+    )
+
+
+def test_an_edit_a_mixed_panel_admits_reaches_the_inner_cells_request_and_one_severing_a_port_is_refused(
+    built_stores: Stores, offline: Router, mixed: _Mixed
+) -> None:
+    # Each step reads the proposals the step before parsed: the edit, then what the inner cell sent.
+    base_text = base_optimizer_template(mixed.capo, "capo_mutate").instruction
+    potter_base = base_optimizer_template(mixed.potter, "l1_generate")
     edit = {Locus("capo_mutate", "instruction"): base_text + " Keep the rewrite under 80 words."}
     severed = {Locus("capo_mutate", "instruction"): "Rewrite the prompt."}
     severed_potter = {
@@ -4876,25 +5049,11 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
         if TEMPLATE_TOKEN_RE.findall(str(getattr(potter_base, f) or ""))
     }
     assert severed_potter, "vacuous — no potter field the outer edits carries a placeholder"
-
-    def proposed(loci: dict[Locus, str]) -> Any:
-        (node,) = {locus.node for locus in loci}
-        proposing = seat(
-            built_stores,
-            schema=mixed_schema,
-            optimization={"optimizer": mixed.owners[node].name},
-        )
-        return (
-            NodeContext(proposing, NODE_MEMBERS.get(node))
-            .read(Children)
-            .child([parent], prompt_loci=loci)
-        )
-
     proposals = parse_population(
-        [proposed(loci) for loci in (edit, severed, severed_potter)],
-        parent,
+        [_proposed(built_stores, mixed, loci) for loci in (edit, severed, severed_potter)],
+        mixed.parent,
         PipelineParams(),
-        mixed_schema,
+        mixed.schema,
         runtime_failures=[],
     )
     assert proposals[0].validation_failures == [], "a valid edit of CAPO's prompt was refused"
@@ -4906,7 +5065,7 @@ def test_a_mixed_panels_outer_nodes_are_each_shown_and_checked_as_their_manifest
         "the edit's locus is missing from the variation that proposed it"
     )
     sent_point = proposals[0].individual.to_job_search_point(
-        schema=mixed_schema, framing=TaskDecomposition(), demo=()
+        schema=mixed.schema, framing=TaskDecomposition(), demo=()
     )
     payload = promptpotter_wire_adapter(
         Sample(id=0, query="justlogic-d234/seed-0", ground_truth=None),

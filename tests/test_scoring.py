@@ -478,95 +478,136 @@ _MEETING_GOLD = (
 )
 
 
-def test_each_matcher_grades_an_answer_against_its_gold() -> None:
-    matcher = {name: m.score for name, m in MATCHERS.items()}
-    for match, args, expected in (
-        (
-            matcher["blocksworld_plan_match"],
-            (
-                "Clear orange first.\n[PLAN]\nunstack the yellow block from on top of the orange "
-                "block\nput down the yellow block\npick up the orange block\nstack the orange block "
-                "on top of the red block\n[PLAN END]",
-                _BLOCKSWORLD_GOLD,
-            ),
-            1.0,
-        ),
-        # The final layout reads right, but the hand still held yellow when orange was picked up.
-        (
-            matcher["blocksworld_plan_match"],
-            (
-                "[PLAN]\nunstack the yellow block from on top of the orange block\npick up the "
-                "orange block\nstack the orange block on top of the red block\n[PLAN END]",
-                _BLOCKSWORLD_GOLD,
-            ),
-            0.0,
-        ),
-        (
-            matcher["meeting_plan_match"],
-            (
-                "Go early and wait. SOLUTION: You start at Marina District at 9:00AM. You travel to "
-                "Mission District in 20 minutes and arrive at 9:20AM. You wait until 10:30AM. You "
-                "meet Stephanie for 120 minutes from 10:30AM to 12:30PM.",
-                _MEETING_GOLD,
-            ),
-            1.0,
-        ),
-        # No wait: the replay reaches Stephanie at 9:20AM, before her window opens.
-        (
-            matcher["meeting_plan_match"],
-            (
-                "SOLUTION: You start at Marina District at 9:00AM. You travel to Mission District "
-                "in 20 minutes and arrive at 9:20AM. You meet Stephanie for 120 minutes from 9:20AM "
-                "to 11:20AM.",
-                _MEETING_GOLD,
-            ),
-            0.0,
-        ),
-        (matcher["aime_match"], (r"First: \boxed{10}. Rechecking: \boxed{42}", "42"), 1.0),
-        (matcher["aime_match"], (r"\boxed{undefined} The answer is 42", "42"), 1.0),
-        (matcher["aime_match"], ("no numbers", "42"), 0.0),
-        (extract_gsm8k_number, ("#### 1,234",), 1234.0),
-        (extract_gsm8k_number, ("I calculated 99 but #### 42",), 42.0),
-        (extract_gsm8k_number, ("no numbers",), None),
-        (matcher["gsm8k_match"], ("42.0", "#### 42"), 1.0),
-        (matcher["gsm8k_match"], ("#### 99", "#### 42"), 0.0),
-        (matcher["label_match"], ("First try **No**. Corrected: **Yes**", "yes"), 1.0),
-        (matcher["label_match"], ("plain text answer", "Plain Text Answer"), 1.0),
-        (matcher["label_match"], ("foo", "bar"), 0.0),
-        (matcher["label_match"], ("so the answer is **D**", "(D)"), 1.0),
-        (matcher["label_match"], ("**(b)**", "B"), 1.0),
-        (matcher["label_match"], ("**C**", "(D)"), 0.0),
-        # Bolds nothing: the last non-empty line answers, the reasoning above it does not.
-        (
-            matcher["label_match"],
-            ("The story is about a merger, a business matter.\n\nBusiness\n", "Business"),
-            1.0,
-        ),
-        (
-            matcher["label_match"],
-            ("The story is about a merger.\n\nBusiness\n\nWorld", "Business"),
-            0.0,
-        ),
-        # SQuAD's normalizer, articles and all, but a number keeps its own point and sign.
-        (matcher["em_match"], ("so it is **the Beatles**", "Beatles"), 1.0),
-        (matcher["em_match"], ("**A.**", "a"), 1.0),
-        (matcher["em_match"], ("", "a"), 0.0),
-        (matcher["em_match"], ("**the**", "a"), 1.0),
-        (matcher["em_match"], ("**13**", "1.3"), 0.0),
-        (matcher["em_match"], ("**.5**", "-.5"), 0.0),
-        (matcher["em_match"], ("**-5 points.**", "-5 points"), 1.0),
-        # The last box wins, braces nest, and the Hendrycks string rules equate spellings.
-        (
-            matcher["math_match"],
-            (r"\boxed{\dfrac{1}{2}} so \boxed{\left( 1, 2 \right)}", "(1,2)"),
-            1.0,
-        ),
-        (matcher["math_match"], (r"\boxed{\dfrac{3}{4}}", r"\frac34"), 1.0),
-        (matcher["math_match"], (r"\boxed{10\text{ cm}}", "10"), 1.0),
-        (matcher["math_match"], ("**x = 5**", "5"), 1.0),
-        (matcher["math_match"], (r"\boxed{0.75}", r"\frac{3}{4}"), 0.0),
-    ):
+_SCORE = {name: m.score for name, m in MATCHERS.items()}
+
+
+def _assert_graded(
+    rows: tuple[tuple[Callable[..., Any], tuple[str, ...], float | None], ...],
+) -> None:
+    for match, args, expected in rows:
         assert match(*args) == expected, f"{match.__name__}{args!r} must grade {expected}"
+
+
+def test_the_blocksworld_matcher_replays_the_plan_against_its_gold() -> None:
+    match = _SCORE["blocksworld_plan_match"]
+    _assert_graded(
+        (
+            (
+                match,
+                (
+                    "Clear orange first.\n[PLAN]\nunstack the yellow block from on top of the "
+                    "orange block\nput down the yellow block\npick up the orange block\nstack the "
+                    "orange block on top of the red block\n[PLAN END]",
+                    _BLOCKSWORLD_GOLD,
+                ),
+                1.0,
+            ),
+            # The final layout reads right, but the hand still held yellow when orange was picked up.
+            (
+                match,
+                (
+                    "[PLAN]\nunstack the yellow block from on top of the orange block\npick up the "
+                    "orange block\nstack the orange block on top of the red block\n[PLAN END]",
+                    _BLOCKSWORLD_GOLD,
+                ),
+                0.0,
+            ),
+        )
+    )
+
+
+def test_the_meeting_matcher_replays_the_plan_against_its_gold() -> None:
+    match = _SCORE["meeting_plan_match"]
+    _assert_graded(
+        (
+            (
+                match,
+                (
+                    "Go early and wait. SOLUTION: You start at Marina District at 9:00AM. You "
+                    "travel to Mission District in 20 minutes and arrive at 9:20AM. You wait until "
+                    "10:30AM. You meet Stephanie for 120 minutes from 10:30AM to 12:30PM.",
+                    _MEETING_GOLD,
+                ),
+                1.0,
+            ),
+            # No wait: the replay reaches Stephanie at 9:20AM, before her window opens.
+            (
+                match,
+                (
+                    "SOLUTION: You start at Marina District at 9:00AM. You travel to Mission "
+                    "District in 20 minutes and arrive at 9:20AM. You meet Stephanie for 120 "
+                    "minutes from 9:20AM to 11:20AM.",
+                    _MEETING_GOLD,
+                ),
+                0.0,
+            ),
+        )
+    )
+
+
+def test_the_aime_and_gsm8k_matchers_read_the_number_they_name() -> None:
+    aime, gsm8k = _SCORE["aime_match"], _SCORE["gsm8k_match"]
+    _assert_graded(
+        (
+            (aime, (r"First: \boxed{10}. Rechecking: \boxed{42}", "42"), 1.0),
+            (aime, (r"\boxed{undefined} The answer is 42", "42"), 1.0),
+            (aime, ("no numbers", "42"), 0.0),
+            (extract_gsm8k_number, ("#### 1,234",), 1234.0),
+            (extract_gsm8k_number, ("I calculated 99 but #### 42",), 42.0),
+            (extract_gsm8k_number, ("no numbers",), None),
+            (gsm8k, ("42.0", "#### 42"), 1.0),
+            (gsm8k, ("#### 99", "#### 42"), 0.0),
+        )
+    )
+
+
+def test_the_label_matcher_reads_the_last_bold_or_the_last_line() -> None:
+    label = _SCORE["label_match"]
+    _assert_graded(
+        (
+            (label, ("First try **No**. Corrected: **Yes**", "yes"), 1.0),
+            (label, ("plain text answer", "Plain Text Answer"), 1.0),
+            (label, ("foo", "bar"), 0.0),
+            (label, ("so the answer is **D**", "(D)"), 1.0),
+            (label, ("**(b)**", "B"), 1.0),
+            (label, ("**C**", "(D)"), 0.0),
+            # Bolds nothing: the last non-empty line answers, the reasoning above it does not.
+            (
+                label,
+                ("The story is about a merger, a business matter.\n\nBusiness\n", "Business"),
+                1.0,
+            ),
+            (label, ("The story is about a merger.\n\nBusiness\n\nWorld", "Business"), 0.0),
+        )
+    )
+
+
+def test_the_exact_matcher_normalizes_as_squad_does_but_a_number_keeps_its_point_and_sign() -> None:
+    em = _SCORE["em_match"]
+    _assert_graded(
+        (
+            (em, ("so it is **the Beatles**", "Beatles"), 1.0),
+            (em, ("**A.**", "a"), 1.0),
+            (em, ("", "a"), 0.0),
+            (em, ("**the**", "a"), 1.0),
+            (em, ("**13**", "1.3"), 0.0),
+            (em, ("**.5**", "-.5"), 0.0),
+            (em, ("**-5 points.**", "-5 points"), 1.0),
+        )
+    )
+
+
+def test_the_math_matcher_takes_the_last_box_and_equates_hendrycks_spellings() -> None:
+    math = _SCORE["math_match"]
+    _assert_graded(
+        (
+            (math, (r"\boxed{\dfrac{1}{2}} so \boxed{\left( 1, 2 \right)}", "(1,2)"), 1.0),
+            (math, (r"\boxed{\dfrac{3}{4}}", r"\frac34"), 1.0),
+            (math, (r"\boxed{10\text{ cm}}", "10"), 1.0),
+            (math, ("**x = 5**", "5"), 1.0),
+            (math, (r"\boxed{0.75}", r"\frac{3}{4}"), 0.0),
+        )
+    )
 
 
 def test_a_formula_reaching_past_the_ast_allowlist_is_refused_at_compile() -> None:
@@ -736,23 +777,26 @@ def test_formula_arithmetic_is_on_floats_so_a_tenant_buys_no_unbounded_cpu_or_me
     )
 
 
-def test_each_graded_field_is_matched_alone_and_the_cell_and_theta_read_their_share() -> None:
-    joint = scorer_of("fields_match(predicted, ground_truth)")
-    gold = json.dumps(
-        {
-            "type_of_document": ["invoice"],
-            "requires_action": [True],
-            "extract_depth": [2, 3],
-            "who": [""],
-            "issuer": None,
-        }
-    )
+_FIELDS_GOLD = json.dumps(
+    {
+        "type_of_document": ["invoice"],
+        "requires_action": [True],
+        "extract_depth": [2, 3],
+        "who": [""],
+        "issuer": None,
+    }
+)
+_FIELDS = ("type_of_document", "requires_action", "extract_depth", "who")
+_JOINT = "fields_match(predicted, ground_truth)"
 
-    def classified(sid: int, said: str) -> MeasuredCell:
-        cell: dict[str, Any] = {"query": f"q{sid}", "predicted": said, "ground_truth": gold}
-        return measurement(sid, None, **cell).facts
 
-    fields = ("type_of_document", "requires_action", "extract_depth", "who")
+def _classified(sid: int, said: str) -> MeasuredCell:
+    cell: dict[str, Any] = {"query": f"q{sid}", "predicted": said, "ground_truth": _FIELDS_GOLD}
+    return measurement(sid, None, **cell).facts
+
+
+def test_each_graded_field_is_matched_alone_and_the_cell_reads_its_share() -> None:
+    joint = scorer_of(_JOINT)
     for said, missed in (
         (
             '{"type_of_document":" Invoice ","requires_action":"TRUE","extract_depth":3,"who":" "}',
@@ -767,26 +811,30 @@ def test_each_graded_field_is_matched_alone_and_the_cell_and_theta_read_their_sh
             ["extract_depth", "who"],
         ),
         ('{"type_of_document":"invoice","requires_action":true,"extract_depth":"2"}', ["who"]),
-        ("NO_RESULT", list(fields)),
+        ("NO_RESULT", list(_FIELDS)),
     ):
-        graded = joint.grade(classified(0, said))
+        graded = joint.grade(_classified(0, said))
         hits = dict(graded.grade.field_hits or ())
         assert [name for name, hit in hits.items() if not hit] == missed, (
             f"{said!r} must miss exactly {missed}: case, spacing, a bool's or a number's spelling "
             "never decide, a listed gold accepts any of its values, '' is a value and a null "
             "gold grades nothing"
         )
-        assert graded.grade.fitness == pytest.approx(1 - len(missed) / len(fields)), (
+        assert graded.grade.fitness == pytest.approx(1 - len(missed) / len(_FIELDS)), (
             "a cell's fitness is the share of its graded fields it got right"
         )
         assert GradedCell.from_wire(graded.wire()) == graded, "the per-field verdicts left the wire"
+
+
+def test_theta_reads_each_cells_share_of_fields_and_the_fold_says_which_field_moved() -> None:
+    joint = scorer_of(_JOINT)
     walked = joint.sheet(
         [
-            classified(
+            _classified(
                 0,
                 '{"type_of_document":"invoice","requires_action":true,"extract_depth":3,"who":""}',
             ),
-            classified(
+            _classified(
                 1,
                 '{"type_of_document":"receipt","requires_action":true,"extract_depth":1,"who":""}',
             ),
@@ -801,6 +849,10 @@ def test_each_graded_field_is_matched_alone_and_the_cell_and_theta_read_their_sh
         "extract_depth": 0.5,
         "who": 1.0,
     }, "the arm's fold says which field moved"
+
+
+def test_a_gold_the_field_matcher_cannot_read_is_refused() -> None:
+    joint = scorer_of(_JOINT)
     for refused in ("not json", '{"who": "x"}', '{"issuer": null}'):
         with pytest.raises(ScoringFormulaError):
             joint.grade(measurement(0, None, predicted="{}", ground_truth=refused).facts)
@@ -946,146 +998,187 @@ async def _init(dataset_name: str, stores: Stores) -> None:
         pass
 
 
-@pytest.mark.usefixtures("offline")
-def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_owner_binds(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Unrefused, a judge named `max` breaks every `max(...)` formula, and a connector term
-    # `n_turns` reads its report on a dial and the turn count in a formula.
-    shipped = connectors.CONNECTORS
+def _probe_term(name: str, **rest: Any) -> CellTerm:
+    return CellTerm(name=name, direction="high", description="A probe term.", **rest)
 
-    def term(name: str, **rest: Any) -> CellTerm:
-        return CellTerm(name=name, direction="high", description="A probe term.", **rest)
 
-    def table_refuses(*, probe: Connector | None = None) -> bool:
-        members = [*connectors._builtins(), *([("probe", probe)] if probe else [])]
-        with monkeypatch.context() as patched:
-            patched.setattr(
-                connectors,
-                "CONNECTORS",
-                Registry(shipped.group, members.copy, connectors._validate),
-            )
-            try:
-                complete_registries()
-            except RuntimeError:
-                return True
-        return False
+def _table_refuses(monkeypatch: pytest.MonkeyPatch, *, probe: Connector | None = None) -> bool:
+    members = [*connectors._builtins(), *([("probe", probe)] if probe else [])]
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            connectors,
+            "CONNECTORS",
+            Registry(connectors.CONNECTORS.group, members.copy, connectors._validate),
+        )
+        try:
+            complete_registries()
+        except RuntimeError:
+            return True
+    return False
 
-    def connector_refuses(**declared: Any) -> bool:
-        return table_refuses(probe=fake_connector("probe", **declared))
 
+def _connector_refuses(monkeypatch: pytest.MonkeyPatch, **declared: Any) -> bool:
+    return _table_refuses(monkeypatch, probe=fake_connector("probe", **declared))
+
+
+def _package_evaluator_refuses(monkeypatch: pytest.MonkeyPatch, name: str) -> bool:
     async def one(**_: Any) -> float:
         return 1.0
 
-    def package_evaluator_refuses(name: str) -> bool:
-        ev = SampleEvaluator(name=name, description="A probe.", compute=one)
-        with monkeypatch.context() as patched:
-            patched.setattr(evaluators, "_SAMPLE_EVALUATORS", (*evaluators._SAMPLE_EVALUATORS, ev))
-            try:
-                evaluators._validate_registry()
-            except ValueError:
-                return True
-            return table_refuses()
+    ev = SampleEvaluator(name=name, description="A probe.", compute=one)
+    with monkeypatch.context() as patched:
+        patched.setattr(evaluators, "_SAMPLE_EVALUATORS", (*evaluators._SAMPLE_EVALUATORS, ev))
+        try:
+            evaluators._validate_registry()
+        except ValueError:
+            return True
+        return _table_refuses(monkeypatch)
 
-    # The campaign's doors are run init's own: a connector reporting `rounds` as L4's does, a
-    # pipeline mapping `env_reward`.
-    reporting = fake_connector("reporting", reported_keys=("rounds",))
+
+# The campaign's doors are run init's own: a connector reporting `rounds` as L4's does, a
+# pipeline mapping `env_reward`.
+def _reporting_connector() -> Connector:
+    return fake_connector("reporting", reported_keys=("rounds",))
+
+
+def _judge_refuses(name: str) -> bool:
+    stores = workspace()
     observed = PipelineNode(
         name="llm_only",
         tunes_llm=False,
         observation_name="llm_only",
         observation_mappings=[ObservationMapping(pipeline_key="env_reward")],
     )
+    session = loop_session(
+        stores,
+        pipeline_schema(nodes=[observed]),
+        samples(2),
+        client=BackendClient(
+            _reporting_connector(), endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
+        ),
+    )
+    spec = JudgeSpec(
+        name="sealqa",
+        stages=[JudgeStage(role="grade", temperature=0.0, model="m", provider="openai")],
+    )
+    config = defaulted_config(
+        {"optimization": {"degradation_threshold": 0.4}, "judges": {name: spec.model_dump()}}
+    )
+    try:
+        scorer_setup(
+            session,
+            config,
+            partition=partition_bank(session.bank.samples, config.dataset_split, seed=0),
+        )
+    except ValueError:
+        return True
+    return False
 
-    def judge_refuses(name: str) -> bool:
-        stores = workspace()
-        session = loop_session(
-            stores,
-            pipeline_schema(nodes=[observed]),
-            samples(2),
-            client=BackendClient(
-                reporting, endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
-            ),
+
+def _observation_refuses(monkeypatch: pytest.MonkeyPatch, name: str) -> bool:
+    stores = workspace()
+    mapping = [
+        {"pipeline_key": "final_ranking", "output_field": "generated_text", "is_llm": True},
+        {"pipeline_key": name, "output_field": name},
+    ]
+    write_yaml(
+        stores.tenant_datasets.dataset_dir("observed") / DEFINITION_FILE,
+        {
+            "pipeline": {
+                "connector": "reporting",
+                "nodes": {"llm_only": {"optimizer": {"observation_mappings": mapping}}},
+            }
+        },
+    )
+    members = [*connectors._builtins(), ("reporting", _reporting_connector())]
+    with monkeypatch.context() as patched:
+        patched.setattr(
+            connectors,
+            "CONNECTORS",
+            Registry(connectors.CONNECTORS.group, members.copy, connectors._validate),
         )
-        spec = JudgeSpec(
-            name="sealqa",
-            stages=[JudgeStage(role="grade", temperature=0.0, model="m", provider="openai")],
-        )
-        config = defaulted_config(
-            {"optimization": {"degradation_threshold": 0.4}, "judges": {name: spec.model_dump()}}
-        )
+        connectors.CONNECTORS.complete()
         try:
-            scorer_setup(
-                session,
-                config,
-                partition=partition_bank(session.bank.samples, config.dataset_split, seed=0),
-            )
-        except ValueError:
-            return True
-        return False
+            asyncio.run(_init("observed", stores))
+        except PayloadInvalidError as exc:
+            # Past this door, the next refusal is the dataset's empty bank.
+            return "refused_observation_keys" in exc.details
+    raise AssertionError("an observation door admitted a dataset holding no rows")
 
-    def observation_refuses(name: str) -> bool:
-        stores = workspace()
-        mapping = [
-            {"pipeline_key": "final_ranking", "output_field": "generated_text", "is_llm": True},
-            {"pipeline_key": name, "output_field": name},
-        ]
-        write_yaml(
-            stores.tenant_datasets.dataset_dir("observed") / DEFINITION_FILE,
-            {
-                "pipeline": {
-                    "connector": "reporting",
-                    "nodes": {"llm_only": {"optimizer": {"observation_mappings": mapping}}},
-                }
-            },
-        )
-        members = [*connectors._builtins(), ("reporting", reporting)]
-        with monkeypatch.context() as patched:
-            patched.setattr(
-                connectors,
-                "CONNECTORS",
-                Registry(shipped.group, members.copy, connectors._validate),
-            )
-            connectors.CONNECTORS.complete()
-            try:
-                asyncio.run(_init("observed", stores))
-            except PayloadInvalidError as exc:
-                # Past this door, the next refusal is the dataset's empty bank.
-                return "refused_observation_keys" in exc.details
-        raise AssertionError("an observation door admitted a dataset holding no rows")
 
-    doors: dict[str, Callable[[str], bool]] = {
-        "connector term": lambda n: connector_refuses(cell_terms=(term(n),)),
-        "reported key": lambda n: connector_refuses(reported_keys=(n,)),
-        "package evaluator": package_evaluator_refuses,
-        "campaign judge": judge_refuses,
-        "observation key": observation_refuses,
+def _namespace_doors(monkeypatch: pytest.MonkeyPatch) -> dict[str, Callable[[str], bool]]:
+    return {
+        "connector term": lambda n: _connector_refuses(monkeypatch, cell_terms=(_probe_term(n),)),
+        "reported key": lambda n: _connector_refuses(monkeypatch, reported_keys=(n,)),
+        "package evaluator": lambda n: _package_evaluator_refuses(monkeypatch, n),
+        "campaign judge": _judge_refuses,
+        "observation key": lambda n: _observation_refuses(monkeypatch, n),
     }
-    for name, admitted_at in (
-        ("fresh_term", set(doors)),
-        ("latency", {"reported key"}),  # a core term: a report answers its channel
-        # Two owners served it once: the grade's rank, and a report's read on the channel alone.
-        ("ground_truth_rank", set()),
-        ("target_prompt_chars", {"observation key"}),  # a PipelineData field, never a report's
-        ("error", set()),  # the cell's message; `PipelineData.error` reaches no formula
-        ("errored", set()),  # a row-health term: the row answers it
-        ("predicted", set()),  # bound off the cell
-        ("label_match", set()),  # a matcher
-        ("max", set()),  # a builtin
-        ("total_time", {"observation key"}),  # a PipelineData key: an observation fills it
-        ("n_turns", set()),  # a turn scalar
-        ("n_tool_calls", set()),
-        ("retrieve_step_turns", set()),  # a step's turn count
-        ("retrieval_shortfall", set()),  # a package evaluator
-        # The L4 connector's term: another connector may declare it, nothing its campaigns read.
-        ("rounds", {"connector term", "reported key"}),
-        ("env_reward", set(doors) - {"campaign judge"}),  # a campaign's observation
-    ):
+
+
+def _assert_owned(monkeypatch: pytest.MonkeyPatch, owned: tuple[tuple[str, set[str]], ...]) -> None:
+    doors = _namespace_doors(monkeypatch)
+    for name, admitted_at in owned:
         refused_at = {door for door, refuses in doors.items() if refuses(name)}
         assert refused_at == set(doors) - admitted_at, f"{name!r} admitted where another owns it"
-    assert connector_refuses(cell_terms=(term("probe_anchor", dial="anchored"),)), (
-        "an anchored term reading higher-is-better was registered: a dial reads it as a cost"
+
+
+# Unrefused, a judge named `max` breaks every `max(...)` formula, and a connector term
+# `n_turns` reads its report on a dial and the turn count in a formula.
+@pytest.mark.usefixtures("offline")
+def test_a_fresh_name_is_admitted_by_every_door_to_the_cell_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_owned(monkeypatch, (("fresh_term", set(_namespace_doors(monkeypatch))),))
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_name_another_owner_binds_is_refused_by_every_door_to_the_cell_namespace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _assert_owned(
+        monkeypatch,
+        (
+            # Two owners served it once: the grade's rank, and a report's read on the channel alone.
+            ("ground_truth_rank", set()),
+            ("error", set()),  # the cell's message; `PipelineData.error` reaches no formula
+            ("errored", set()),  # a row-health term: the row answers it
+            ("predicted", set()),  # bound off the cell
+            ("label_match", set()),  # a matcher
+            ("max", set()),  # a builtin
+            ("n_turns", set()),  # a turn scalar
+            ("n_tool_calls", set()),
+            ("retrieve_step_turns", set()),  # a step's turn count
+            ("retrieval_shortfall", set()),  # a package evaluator
+        ),
     )
+
+
+@pytest.mark.usefixtures("offline")
+def test_a_name_a_report_or_an_observation_may_fill_is_refused_only_where_another_owner_binds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    doors = set(_namespace_doors(monkeypatch))
+    _assert_owned(
+        monkeypatch,
+        (
+            ("latency", {"reported key"}),  # a core term: a report answers its channel
+            ("target_prompt_chars", {"observation key"}),  # a PipelineData field, never a report's
+            ("total_time", {"observation key"}),  # a PipelineData key: an observation fills it
+            # The L4 connector's term: another connector may declare it, nothing its campaigns read.
+            ("rounds", {"connector term", "reported key"}),
+            ("env_reward", doors - {"campaign judge"}),  # a campaign's observation
+        ),
+    )
+
+
+@pytest.mark.usefixtures("offline")
+def test_an_anchored_term_reading_higher_is_better_is_refused_at_registration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert _connector_refuses(
+        monkeypatch, cell_terms=(_probe_term("probe_anchor", dial="anchored"),)
+    ), "an anchored term reading higher-is-better was registered: a dial reads it as a cost"
 
 
 def test_a_reported_core_channel_is_one_value_on_a_dial_and_in_a_formula() -> None:
@@ -1750,47 +1843,53 @@ async def _held_pass(
         raise AssertionError("a stop left the pass running")
 
 
+def _cancels(stores: Stores) -> list[object]:
+    book = stores.commands.book()
+    return [
+        record.payload.command_id
+        for _, record in book.lines()
+        if isinstance(record.payload, CancelPayload) and book.status(record.command_id) == "applied"
+    ]
+
+
+def _passing(
+    stores: Stores, stop: Callable[[], Awaitable[object]]
+) -> Callable[[Any], Awaitable[Any]]:
+    async def _verify(dispatched: Any) -> Applier[None]:
+        return Applier(lambda: _held_pass(stores, stop, dispatched.command_id))
+
+    return _verify
+
+
+def _verify_call(candidate_id: str) -> CommandCall[Any]:
+    return CommandCall(
+        VerifyCandidatePayload(
+            campaign_id=_PEER_HOP.campaign_id,
+            cycle_id=_PEER_HOP.cycle_id,
+            candidate_id=candidate_id,
+        ),
+        door=Door.HOST,
+    )
+
+
+async def _cancel_command(stores: Stores, command_id: str) -> str:
+    sent = CommandCall(CancelPayload(command_id=command_id), door=Door.HOST)
+    return (await CommandDispatcher(stores).dispatch(sent)).ack
+
+
 # The cancel after the pass ended names the task the host cancel opened.
-def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
+def test_a_host_cancel_stops_a_pass_by_its_commands_cancel(
     monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed
 ) -> None:
     stores, cycle_dir = filed_cycle.stores, filed_cycle.cycle_dir
-    # A cancel of a command that ended stands for nothing, so no stop waits for whatever holds
-    # the cycle next.
     host = HostSession(Caller(stores))
-
-    def cancels() -> list[object]:
-        book = stores.commands.book()
-        return [
-            record.payload.command_id
-            for _, record in book.lines()
-            if isinstance(record.payload, CancelPayload)
-            and book.status(record.command_id) == "applied"
-        ]
-
-    def _passing(stop: Callable[[], Awaitable[object]]) -> Callable[[Any], Awaitable[Any]]:
-        async def _verify(dispatched: Any) -> Applier[None]:
-            return Applier(lambda: _held_pass(stores, stop, dispatched.command_id))
-
-        return _verify
-
-    def _verify_call(candidate_id: str) -> CommandCall[Any]:
-        return CommandCall(
-            VerifyCandidatePayload(
-                campaign_id=_PEER_HOP.campaign_id,
-                cycle_id=_PEER_HOP.cycle_id,
-                candidate_id=candidate_id,
-            ),
-            door=Door.HOST,
-        )
-
-    opened_task: dict[str, str] = {}
+    held_task: dict[str, str] = {}
     # The act runs on past the answer, so it can reach its pass before the host holds the id.
     answered = asyncio.Event()
 
     async def _cancel_held() -> HostTask:
         await answered.wait()
-        return await host.answer(CancelTask(opened_task["held"]))
+        return await host.answer(CancelTask(held_task["held"]))
 
     async def _host_cancel() -> tuple[HostTask, str]:
         sent = {
@@ -1801,31 +1900,55 @@ def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
         }
         opened = await host.answer(CallTool("verify-candidate", sent))
         assert opened.task is not None
-        opened_task["held"] = opened.task.task_id
+        held_task["held"] = opened.task.task_id
         answered.set()
         with pytest.raises(PotterError) as stopped:
             await host.answer(TaskResultOf(opened.task.task_id))
         return await host.answer(TaskStatusOf(opened.task.task_id)), stopped.value.code
 
-    before = len(cancels())
+    before = len(_cancels(stores))
     with monkeypatch.context() as patched:
-        patched.setattr(measuring, "verify_candidate", _passing(_cancel_held))
+        patched.setattr(measuring, "verify_candidate", _passing(stores, _cancel_held))
         cancelled, result_code = asyncio.run(_host_cancel())
+    assert cancelled.status == "cancelled" and "cancel by" in cancelled.status_message, (
+        "a host cancel left the pass running"
+    )
+    assert result_code == PassStoppedError.code, "a stopped pass's result is not its refusal"
+    assert len(_cancels(stores)) == before + 1 and held_task["held"] in _cancels(stores), (
+        "a host cancel ended the pass without its cancel"
+    )
+    assert stores.commands.book().stop(held_task["held"]) is None, "a door's stop outlived its pass"
+    assert not cycle_held(cycle_dir), "the pass kept its cycle"
+    # A cancel of a command that ended stands for nothing, so no stop waits for whatever holds
+    # the cycle next.
+    assert asyncio.run(_cancel_command(stores, held_task["held"])) == "applied", (
+        "a cancel of an ended command was refused"
+    )
+    assert stores.commands.book().stop(held_task["held"]) is None, (
+        "a cancel after its pass ended stood"
+    )
+    with pytest.raises(NotFoundError):
+        asyncio.run(_cancel_command(stores, "never-filed"))
+
+
+def test_a_ctrl_c_stops_a_pass_by_its_commands_cancel(
+    monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed
+) -> None:
+    stores, cycle_dir = filed_cycle.stores, filed_cycle.cycle_dir
     landed: list[str] = []
+    pressed_call = _verify_call("pressed")
+
+    async def _press() -> None:
+        signal.raise_signal(signal.SIGINT)
+        # A send already out bills either way: the press stops the pass at its next
+        # checkpoint, never by cancelling the wait on what it paid for.
+        while stores.commands.book().stop(pressed_call.command_id) is None:
+            await asyncio.to_thread(lambda: None)
+        landed.append(pressed_call.command_id)
 
     async def _ctrl_c() -> str:
-        pressed_call = _verify_call("pressed")
-
-        async def _press() -> None:
-            signal.raise_signal(signal.SIGINT)
-            # A send already out bills either way: the press stops the pass at its next
-            # checkpoint, never by cancelling the wait on what it paid for.
-            while stores.commands.book().stop(pressed_call.command_id) is None:
-                await asyncio.to_thread(lambda: None)
-            landed.append(pressed_call.command_id)
-
         with monkeypatch.context() as patched:
-            patched.setattr(measuring, "verify_candidate", _passing(_press))
+            patched.setattr(measuring, "verify_candidate", _passing(stores, _press))
             with (
                 pytest.raises(PassStoppedError) as ended,
                 ctrl_c_stops_pass(CommandDispatcher(stores), pressed_call),
@@ -1833,33 +1956,12 @@ def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
                 await CommandDispatcher(stores).dispatch(pressed_call)
         return str(ended.value)
 
+    before = len(_cancels(stores))
     pressed = asyncio.run(_ctrl_c())
-    assert cancelled.status == "cancelled" and "cancel by" in cancelled.status_message, (
-        "a host cancel left the pass running"
-    )
-    assert result_code == PassStoppedError.code, "a stopped pass's result is not its refusal"
     assert "cancel by" in pressed, "a Ctrl+C left the pass running"
     assert len(landed) == 1, "a Ctrl+C cancelled the pass's in-flight sends (bl1.B2)"
-    assert len(cancels()) == before + 2 and opened_task["held"] in cancels(), (
-        "a host cancel or a Ctrl+C ended the pass without its cancel"
-    )
-    assert stores.commands.book().stop(opened_task["held"]) is None, (
-        "a door's stop outlived its pass"
-    )
+    assert len(_cancels(stores)) == before + 1, "a Ctrl+C ended the pass without its cancel"
     assert not cycle_held(cycle_dir), "the pass kept its cycle"
-
-    async def _cancel(command_id: str) -> str:
-        sent = CommandCall(CancelPayload(command_id=command_id), door=Door.HOST)
-        return (await CommandDispatcher(stores).dispatch(sent)).ack
-
-    assert asyncio.run(_cancel(opened_task["held"])) == "applied", (
-        "a cancel of an ended command was refused"
-    )
-    assert stores.commands.book().stop(opened_task["held"]) is None, (
-        "a cancel after its pass ended stood"
-    )
-    with pytest.raises(NotFoundError):
-        asyncio.run(_cancel("never-filed"))
 
 
 def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
@@ -1947,119 +2049,91 @@ def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
     )
 
 
-def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing() -> None:
-    line_stores = workspace()
+_BENCH_SPENT = PassStop(cause=StopReason.SPEND_BUDGET, warning=None)
+_BENCH_REFUSED = PassStop(cause=WalkEnd.CLIENT_ERROR, warning=None)
+
+
+def _check_bench_row(
+    stores: Stores,
+    banked: dict[str, Any] | None,
+    run: dict[str, Any],
+    state: ReadingState,
+    can_run: bool,
+    lift: float | None,
+    series: tuple[float | None, list[float | None]],
+    stopped: str | None,
+) -> None:
     pick = prompted(instruction="the declared pick")
-    spent = PassStop(cause=StopReason.SPEND_BUDGET, warning=None)
-    refused = PassStop(cause=WalkEnd.CLIENT_ERROR, warning=None)
-    line_scorer = scorer_of(_H2H_FORMULA)
-    line_cases: tuple[
-        tuple[
-            dict[str, Any] | None,
-            dict[str, Any],
-            ReadingState,
-            bool,
-            float | None,
-            tuple[float | None, list[float | None]],
-            str | None,
-        ],
-        ...,
-    ] = (
-        (None, {"trigger": "manual"}, ReadingState.NOT_ASKED, True, None, (None, []), None),
-        (
-            None,
-            {"selecting": True, "ending": None},
-            ReadingState.PENDING,
-            False,
-            None,
-            (None, []),
-            None,
-        ),
-        (
-            None,
-            {"ending": StopReason.CRASHED},
-            ReadingState.RUN_FAILED,
-            True,
-            None,
-            (None, []),
-            None,
-        ),
-        (None, {}, ReadingState.NOT_ASKED, True, None, (None, []), None),
-        # A campaign its pass's admission refuses: no grade is offered.
-        (
-            None,
-            {"refused": CampaignRefusal.NOT_ACTIVE},
-            ReadingState.NOT_ASKED,
-            False,
-            None,
-            (None, []),
-            None,
-        ),
-        (
-            None,
-            {"held_by": "cyc_beside"},
-            ReadingState.HELD_ELSEWHERE,
-            False,
-            None,
-            (None, []),
-            None,
-        ),
-        ({}, {}, ReadingState.READ, False, 1.0, (0.0, [1.0]), None),
-        ({"pick": "origin"}, {}, ReadingState.READ, False, None, (0.0, [None]), None),
-        ({"pick": "displaced"}, {}, ReadingState.NOT_ASKED, True, None, (0.0, [None]), None),
-        ({"cells": 3}, {}, ReadingState.PAST_TOLERANCE, True, None, (0.0, [None]), None),
-        ({"cells": 3, "tolerance": 1}, {}, ReadingState.READ, False, 1.0, (0.0, [1.0]), None),
-        ({"stop": spent}, {}, ReadingState.PASS_STOPPED, True, None, (0.0, [None]), "selected"),
-        (
-            {"origin_stop": refused},
-            {},
-            ReadingState.PASS_STOPPED,
-            True,
-            None,
-            (None, [1.0]),
-            "origin",
-        ),
+    scorer = scorer_of(_H2H_FORMULA)
+    case = f"banked={banked} run={run}"
+    passes: BenchPasses | None = None
+    if banked is not None:
+        origin_stop = banked.get("origin_stop")
+        origin = _bench_pass(
+            stores, "origin", 0.0, cells=4 - 4 * bool(origin_stop), stop=origin_stop
+        )
+        held_pick = banked.get("pick", pick.id)
+        held = (
+            []
+            if held_pick == "origin"
+            else [
+                _bench_pass(
+                    stores,
+                    held_pick,
+                    1.0,
+                    cells=banked.get("cells", 4),
+                    stop=banked.get("stop"),
+                )
+            ]
+        )
+        passes = bench_passes(origin, *held, tolerance=banked.get("tolerance", 0))
+    chosen = "origin" if banked and banked.get("pick") == "origin" else pick.id
+    line = bench_line(
+        ArmName(key=ArmKey(chosen), round=1, label="C1.1"),
+        on_live_cycle="held_by" not in run,
+        **run,
     )
-    for banked, run, state, can_run, lift, series, stopped in line_cases:
-        case = f"banked={banked} run={run}"
-        line_passes: BenchPasses | None = None
-        if banked is not None:
-            origin_stop = banked.get("origin_stop")
-            line_origin = _bench_pass(
-                line_stores, "origin", 0.0, cells=4 - 4 * bool(origin_stop), stop=origin_stop
-            )
-            held_pick = banked.get("pick", pick.id)
-            held = (
-                []
-                if held_pick == "origin"
-                else [
-                    _bench_pass(
-                        line_stores,
-                        held_pick,
-                        1.0,
-                        cells=banked.get("cells", 4),
-                        stop=banked.get("stop"),
-                    )
-                ]
-            )
-            line_passes = bench_passes(line_origin, *held, tolerance=banked.get("tolerance", 0))
-        chosen = "origin" if banked and banked.get("pick") == "origin" else pick.id
-        line = bench_line(
-            ArmName(key=ArmKey(chosen), round=1, label="C1.1"),
-            on_live_cycle="held_by" not in run,
-            **run,
-        )
-        line_bench = read_bench(line_stores, line_passes, line_scorer, line=line)
-        assert (line_bench.status.state, line_bench.status.can_run) == (state, can_run), case
-        headline = line_bench.vs_origin.headline
-        assert (None if headline is None else headline.estimate.value) == lift, case
-        assert line_bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
-        pick_arm = arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1), individual=pick)
-        on_line = round_result(1, arms=[pick_arm], cells={})
-        curve = read_curve(
-            line_stores, line_passes, line_scorer, [LineSpan([on_line], None)], budget=1
-        )
-        assert ((None, []) if curve is None else (curve.origin, curve.levels)) == series, case
+    bench = read_bench(stores, passes, scorer, line=line)
+    assert (bench.status.state, bench.status.can_run) == (state, can_run), case
+    headline = bench.vs_origin.headline
+    assert (None if headline is None else headline.estimate.value) == lift, case
+    assert bench.status.subject == stopped or not stopped, f"{case}: names who stopped"
+    pick_arm = arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1), individual=pick)
+    on_line = round_result(1, arms=[pick_arm], cells={})
+    curve = read_curve(stores, passes, scorer, [LineSpan([on_line], None)], budget=1)
+    assert ((None, []) if curve is None else (curve.origin, curve.levels)) == series, case
+
+
+def test_a_bench_line_with_no_bank_says_why_it_reads_nothing() -> None:
+    stores = workspace()
+    for run, state, can_run in (
+        ({"trigger": "manual"}, ReadingState.NOT_ASKED, True),
+        ({"selecting": True, "ending": None}, ReadingState.PENDING, False),
+        ({"ending": StopReason.CRASHED}, ReadingState.RUN_FAILED, True),
+        ({}, ReadingState.NOT_ASKED, True),
+        # A campaign its pass's admission refuses: no grade is offered.
+        ({"refused": CampaignRefusal.NOT_ACTIVE}, ReadingState.NOT_ASKED, False),
+        ({"held_by": "cyc_beside"}, ReadingState.HELD_ELSEWHERE, False),
+    ):
+        _check_bench_row(stores, None, run, state, can_run, None, (None, []), None)
+
+
+def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing() -> None:
+    stores = workspace()
+    read, past, stop = ReadingState.READ, ReadingState.PAST_TOLERANCE, ReadingState.PASS_STOPPED
+    rows: tuple[tuple[dict[str, Any], ReadingState, bool, float | None, float | None], ...] = (
+        ({}, read, False, 1.0, 1.0),
+        ({"pick": "origin"}, read, False, None, None),
+        ({"pick": "displaced"}, ReadingState.NOT_ASKED, True, None, None),
+        ({"cells": 3}, past, True, None, None),
+        ({"cells": 3, "tolerance": 1}, read, False, 1.0, 1.0),
+    )
+    for banked, state, can_run, lift, level in rows:
+        _check_bench_row(stores, banked, {}, state, can_run, lift, (0.0, [level]), None)
+    spent = {"stop": _BENCH_SPENT}
+    _check_bench_row(stores, spent, {}, stop, True, None, (0.0, [None]), "selected")
+    refused = {"origin_stop": _BENCH_REFUSED}
+    _check_bench_row(stores, refused, {}, stop, True, None, (None, [1.0]), "origin")
 
 
 def _adopting(rnd: int, individual: OptSearchPoint | None) -> RoundResult:
@@ -2287,57 +2361,24 @@ def test_an_origin_reads_its_lift_over_the_constant_answer_on_the_labelled_cells
     assert origin_floor(scorer_of().sheet([unlabelled])) is None, "no label, no constant answer"
 
 
-def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trailing) -> None:
-    # A verifier proves an answer wrong by an unsolved cell, and alike-and-all-solved is NOT
-    # collapsed.
-    _, parent, _ = trailing
+def _answered(fitness: list[float], **over: Any) -> list[GradedCell]:
+    return [
+        GradedCell.from_wire(
+            {"sample_key": str(i), "ground_truth": "", "predicted": "done", "fitness": f, **over}
+        )
+        for i, f in enumerate(fitness)
+    ]
 
-    def answered(fitness: list[float], **over: Any) -> list[GradedCell]:
-        return [
-            GradedCell.from_wire(
-                {
-                    "sample_key": str(i),
-                    "ground_truth": "",
-                    "predicted": "done",
-                    "fitness": f,
-                    **over,
-                }
-            )
-            for i, f in enumerate(fitness)
-        ]
 
-    constant = answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
-    unpaired_check = PoBBCheck(
-        pobb_knobs(),
-        n_min=6,
-        ruler=None,
-        parent=parent,
-    )
-    assert not unpaired_check.check({ArmKey("c"): sheet(constant)}, {ArmKey("c"): 28}), (
-        "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
-    )
-    # Collapse is read against the parent's answers on the same cells.
-    apart = sheet(
+def _parent_answering_apart(constant: list[GradedCell]) -> CellSheet:
+    return sheet(
         GradedCell.from_wire({**cell.wire(), "predicted": "done" if i % 2 else "other"})
         for i, cell in enumerate(constant)
     )
-    assert is_answer_collapsed(constant, apart), (
-        "a constant answerer is refused with no labels to read"
-    )
-    assert not is_answer_collapsed(constant, sheet(constant)), (
-        "one answer the parent gave on every same cell is the draw's, read by θ, not a collapse"
-    )
-    assert not is_answer_collapsed(constant, NO_CELLS), "with no parent answer there is no contrast"
-    assert not is_answer_collapsed(answered([1.0] * 6), apart), (
-        "one answer that solves every cell is not a collapse"
-    )
-    assert not is_answer_collapsed(
-        answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], predicted="NO_RESULT"), apart
-    ), "an agent that wrote no answer file answered nothing, which is not one answer"
-    assert not is_answer_collapsed(
-        answered([0.0] * 6, error_category=ErrorCategory.PIPELINE), apart
-    ), "a backend that broke on every cell is not a verdict on the idea"
-    labelled = [
+
+
+def _labelled_uncertain() -> list[GradedCell]:
+    return [
         GradedCell.from_wire(
             {
                 "sample_key": str(i),
@@ -2348,10 +2389,52 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
         )
         for i in range(6)
     ]
-    truthful = sheet(
+
+
+def _truthful_parent(labelled: list[GradedCell]) -> CellSheet:
+    return sheet(
         GradedCell.from_wire({**cell.wire(), "predicted": cell.facts.ground_truth})
         for cell in labelled
     )
+
+
+def test_one_label_on_an_n_min_prefix_read_against_no_parent_cuts_no_arm(
+    trailing: _Trailing,
+) -> None:
+    _, parent, _ = trailing
+    unpaired_check = PoBBCheck(pobb_knobs(), n_min=6, ruler=None, parent=parent)
+    constant = _answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+    assert not unpaired_check.check({ArmKey("c"): sheet(constant)}, {ArmKey("c"): 28}), (
+        "one label on an n_min prefix, read against no parent, cut an arm the panel never judged"
+    )
+
+
+# A verifier proves an answer wrong by an unsolved cell, and alike-and-all-solved is NOT collapsed.
+# Collapse is read against the parent's answers on the same cells.
+def test_the_collapse_refusal_reads_the_answer_against_the_parents_never_the_labels() -> None:
+    constant = _answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+    apart = _parent_answering_apart(constant)
+    assert is_answer_collapsed(constant, apart), (
+        "a constant answerer is refused with no labels to read"
+    )
+    assert not is_answer_collapsed(constant, sheet(constant)), (
+        "one answer the parent gave on every same cell is the draw's, read by θ, not a collapse"
+    )
+    assert not is_answer_collapsed(constant, NO_CELLS), "with no parent answer there is no contrast"
+    assert not is_answer_collapsed(_answered([1.0] * 6), apart), (
+        "one answer that solves every cell is not a collapse"
+    )
+    assert not is_answer_collapsed(
+        _answered([1.0, 0.0, 0.0, 1.0, 0.0, 0.0], predicted="NO_RESULT"), apart
+    ), "an agent that wrote no answer file answered nothing, which is not one answer"
+    assert not is_answer_collapsed(
+        _answered([0.0] * 6, error_category=ErrorCategory.PIPELINE), apart
+    ), "a backend that broke on every cell is not a verdict on the idea"
+
+
+def test_replies_reasoning_apart_to_one_graded_answer_are_one_answer_collapsed() -> None:
+    labelled = _labelled_uncertain()
+    truthful = _truthful_parent(labelled)
     assert is_answer_collapsed(labelled, truthful)
     reasoned = [
         GradedCell.from_wire(
@@ -2362,11 +2445,15 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
     assert is_answer_collapsed(reasoned, truthful), (
         "two replies reasoning apart to one graded answer were counted as two answers"
     )
+
+
+def test_a_reply_with_no_graded_span_is_not_counted_as_the_answer() -> None:
+    labelled = _labelled_uncertain()
     spanless = [
         GradedCell.from_wire({**cell.wire(), "span": "" if i == 5 else "Uncertain"})
         for i, cell in enumerate(labelled)
     ]
-    assert not is_answer_collapsed(spanless, truthful), (
+    assert not is_answer_collapsed(spanless, _truthful_parent(labelled)), (
         "a reply with no graded span was counted as the answer"
     )
 
@@ -3016,6 +3103,12 @@ def test_a_fork_no_spine_node_may_take_is_declined_with_its_reason() -> None:
     ), "a fork the spine cannot take was declined without the reason its record names"
 
 
+def _human_intervened(space: Any, hop: Any) -> bool:
+    index = space.campaigns.load(hop, moment=None)
+    assert index is not None
+    return bool(index.human_intervened)
+
+
 # Each press reads the inbox and the phase the press before it left.
 def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_dropped() -> None:
     commanded = workspace()
@@ -3037,16 +3130,11 @@ def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_drop
             if isinstance(record, CommandAckRecord) and record.command_id == command_id
         ]
 
-    def intervened() -> bool:
-        index = commanded.campaigns.load(command_hop, moment=None)
-        assert index is not None
-        return index.human_intervened
-
     skip = SkipSearchpointPayload(**address)
     try:
         untaken = press(skip, "skip-1")
         assert acks(untaken) == ["accepted"], "a press was acked as a cut"
-        assert not intervened(), "the press alone marked the cycle babysat"
+        assert not _human_intervened(commanded, command_hop), "the press alone marked it babysat"
         # A second RUNNING record is a new launch: the press the last one never reached is not its.
         commands.append(RunPhaseRecord(state=Running()))
         commanded.void_inbox(command_hop)
@@ -3194,7 +3282,7 @@ def test_a_level_band_covers_its_level_at_the_ends_of_its_support() -> None:
     assert band([1.0], False) == (None, None), "one graded cell brackets nothing"
 
 
-def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
+def _shared_pair() -> tuple[list[Sample], MemberRows, MemberRows, PairedReading]:
     # Samples 0 and 1 are one query under two truths: two cells, wherever a query would key one.
     bank = [
         Sample(id=i, query="same" if i < 2 else f"q{i}", ground_truth=f"t{i}") for i in range(7)
@@ -3213,7 +3301,11 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
         [*measurements([1.0, 1.0, 1.0, 0.0, 1.0, 1.0]), measurement(6, None, unscored="no term")],
         bank,
     )
-    reading = _read_pair(a, b, bank)
+    return bank, a, b, _read_pair(a, b, bank)
+
+
+def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
+    _, _, _, reading = _shared_pair()
     lift, coverage = reading.headline, reading.coverage
     assert lift is not None and coverage is not None and reading.cell_set is not None
     assert reading.cell_set.size == 7
@@ -3233,6 +3325,9 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
     assert lift.p_floor == 0.25, "three cells differ, so no exact test can read below 2/2**3"
     assert lift.flips is not None
     assert (lift.flips.gained, lift.flips.lost, lift.flips.unchanged) == (2, 1, 2)
+
+
+def test_the_floor_gates_a_pair_claim_whose_interval_clears_zero() -> None:
     sparse = samples(34, "t", query="w")
     gained = _read_pair(
         member_rows("a", measurements([0.0] * 34), sparse),
@@ -3243,6 +3338,11 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
     assert (gained.side, gained.p_value) == ("spans", 0.125), (
         "the floor gates the claim: Student-t's interval clears zero, yet four differing cells cap p"
     )
+
+
+def test_a_measurand_beside_the_headline_is_read_over_the_same_scored_cells() -> None:
+    bank, a, b, reading = _shared_pair()
+    assert reading.headline is not None
     composite = Measurand(
         kind=MeasurandKind.GRADE,
         key="objective",
@@ -3250,18 +3350,22 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
         binary=False,
         unit="score",
     )
-    (beside,) = _read_pair(a, b, bank, measurands=[lift.measurand, composite]).beside
+    (beside,) = _read_pair(a, b, bank, measurands=[reading.headline.measurand, composite]).beside
     assert beside.flips is None
-    assert beside.estimate.value == pytest.approx(0.6 * estimate.value), (
+    assert beside.estimate.value == pytest.approx(0.6 * reading.headline.estimate.value), (
         "a measurand beside the headline is read over the SAME scored cells"
     )
+
+
+def test_a_tables_pairs_share_one_holm_correction() -> None:
+    bank, _, _, reading = _shared_pair()
     clear = _read_pair(
         member_rows("a", measurements([0.0] * 6), bank),
         member_rows("b", measurements([1.0] * 6), bank),
         bank,
     )
-    assert clear.headline is not None
-    p_wide, p_clear = lift.p_value, clear.headline.p_value
+    assert reading.headline is not None and clear.headline is not None
+    p_wide, p_clear = reading.headline.p_value, clear.headline.p_value
     assert 2 * p_clear < p_wide
     spanning, unheld, tight = as_family(
         [reading, PairedReading.unread(ReadingState.PENDING), clear], "table"
@@ -3503,19 +3607,27 @@ def test_c0_is_topped_up_on_a_scope_the_line_drew_never_paired_on_its_own_scope_
     )
 
 
-def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin() -> None:
-    def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerifyPass:
-        return VerifyPass(
-            arm=ArmName(key=ArmKey("c"), round=round_num, label="C3.1"),
-            sp_hash="h",
-            cells=[(f"k{sid}", f"r.{sid}", False) for sid in range(100, 110)],
-            sample_keys=[f"k{sid}" for sid in range(100, 110)],
-            stop=None,
-            scorer_id="s",
-            strategy=strategy,
-            seed=1,
-        )
+def _banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerifyPass:
+    return VerifyPass(
+        arm=ArmName(key=ArmKey("c"), round=round_num, label="C3.1"),
+        sp_hash="h",
+        cells=[(f"k{sid}", f"r.{sid}", False) for sid in range(100, 110)],
+        sample_keys=[f"k{sid}" for sid in range(100, 110)],
+        stop=None,
+        scorer_id="s",
+        strategy=strategy,
+        seed=1,
+    )
 
+
+@dataclasses.dataclass(frozen=True)
+class _VerifyRig:
+    scorer: Scorer
+    keyed: Callable[[list[GradedCell]], CellSheet]
+    verified: Callable[..., Any]
+
+
+def _verify_rig() -> _VerifyRig:
     # Its sheets carry the declaration of the scorer that reads them: fitness two-valued.
     scorer = dataclasses.replace(scorer_of(per_cell="0.6 * fitness"), id="s")
 
@@ -3547,7 +3659,11 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
             origin=verify_member(hop, c0, c0_rows, bought=0, instrument_id="bank"),
         )
 
-    verify = verified(banked())
+    return _VerifyRig(scorer, keyed, verified)
+
+
+def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin() -> None:
+    verify = _verify_rig().verified(_banked())
     assert verify.fresh.fitness is not None and verify.recorded.fitness is not None
     assert verify.fresh.fitness.value == pytest.approx(0.5), "the fresh cells, never the pool"
     assert verify.recorded.fitness.value == pytest.approx(1.0)
@@ -3562,28 +3678,47 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     assert verify.held is False, (
         "the recorded level sits above the fresh band, so the round's claim did not survive"
     )
-    assert verified(banked(), keyed(measurements([1.0] * 10, range(100, 110)))).held is True
+
+
+def test_a_verify_holds_where_the_fresh_band_reaches_the_recorded_level() -> None:
+    rig = _verify_rig()
+    assert (
+        rig.verified(_banked(), rig.keyed(measurements([1.0] * 10, range(100, 110)))).held is True
+    )
     # 14/20 against 20/20 is Fisher's p 0.020: two bands overlapping is a ~0.6% test, not a 5% one.
     for hits, held in ((14, False), (19, True)):
-        fell = keyed(measurements([1.0] * hits + [0.0] * (20 - hits), range(100, 120)))
-        assert verified(banked(), fell).held is held, f"{hits}/20 fresh against 20/20 recorded"
-    # A level recorded on four cells is a wide band, never a point the fresh band must reach.
-    assert verified(banked(), recorded=keyed(measurements([1.0] * 4))).held is True, (
+        fell = rig.keyed(measurements([1.0] * hits + [0.0] * (20 - hits), range(100, 120)))
+        assert rig.verified(_banked(), fell).held is held, f"{hits}/20 fresh against 20/20 recorded"
+
+
+def test_a_level_recorded_on_four_cells_is_a_wide_band_never_a_point() -> None:
+    rig = _verify_rig()
+    four = rig.keyed(measurements([1.0] * 4))
+    assert rig.verified(_banked(), recorded=four).held is True, (
         "a verify compared the fresh band against the recorded level's point"
     )
-    # A constant graded side keeps the band its support allows: never a point the other must reach.
-    graded = dataclasses.replace(scorer, two_valued=frozenset({"hit"}))
+
+
+def test_a_constant_graded_side_keeps_the_band_its_support_allows() -> None:
+    rig = _verify_rig()
+    graded = dataclasses.replace(rig.scorer, two_valued=frozenset({"hit"}))
     for level, n, held in ((0.79, 5, True), (0.30, 5, True), (0.30, 6, False)):
         fell, stood = (
             graded.graded(_keyed(row, f"k{row.key}") for row in measurements([value] * n, keys))
             for value, keys in ((level, range(100, 100 + n)), (0.80, range(n)))
         )
-        assert verified(banked(), fell, stood, graded).held is held, f"{n}x{level} vs {n}x0.80"
-    hard = verified(banked("hard"))
+        assert rig.verified(_banked(), fell, stood, graded).held is held, f"{n}x{level} vs {n}x0.80"
+
+
+def test_a_verify_of_hard_picks_reads_no_verdict_from_the_level() -> None:
+    hard = _verify_rig().verified(_banked("hard"))
     assert hard.held is None, (
         "hard picks sit below the level whatever the candidate is worth: no verdict from the level"
     )
-    at_origin = verified(banked(round_num=0))
+
+
+def test_a_verify_of_the_origin_has_nothing_to_be_lifted_over() -> None:
+    at_origin = _verify_rig().verified(_banked(round_num=0))
     assert at_origin.vs_origin.state is ReadingState.SAME_INDIVIDUAL, (
         "the origin has nothing to be lifted over, and 0.0 there would read as no better than C0"
     )
@@ -4027,9 +4162,20 @@ def test_a_two_valued_scorers_headline_separates_under_the_bar_its_paired_test_s
 # 8. A bare-answer backend — the n8n eval harness
 
 
-def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
+_HARNESS_GOLD = '{"requires_action": ["true"]}'
+_HARNESS_CONTRACT = {
+    "output_schema": {"type": "object", "properties": {"requires_action": {"type": "string"}}},
+    "answer_fields": ["requires_action"],
+}
+_HARNESS_CANDIDATE = {
+    "prompt": "## requires_action\nTrue when the sender asks for a reply.",
+    **_HARNESS_CONTRACT,
+}
+_HARNESS_ROW = Sample(id=0, query='{"subject": "Invoice 1023"}', ground_truth=_HARNESS_GOLD)
+
+
+@pytest.fixture
+def harness_cell(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Callable[..., MeasuredCell]:
     monkeypatch.setattr(settings, "N8N_HARNESS_ENDPOINTS", {"classify": FakeHarness.URL})
     monkeypatch.setattr(settings, "N8N_HARNESS_TOKEN", SecretStr("harness-secret"))
     stores = workspace()
@@ -4044,13 +4190,6 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
             harness, endpoint=None, workload=PROBE_WORKLOAD, jobs_dir=stores.jobs_dir
         ),
     )
-    gold = '{"requires_action": ["true"]}'
-    row = Sample(id=0, query='{"subject": "Invoice 1023"}', ground_truth=gold)
-    contract = {
-        "output_schema": {"type": "object", "properties": {"requires_action": {"type": "string"}}},
-        "answer_fields": ["requires_action"],
-    }
-    candidate = {"prompt": "## requires_action\nTrue when the sender asks for a reply.", **contract}
 
     def cell(params: dict[str, Any], book_usd: float | None = None) -> MeasuredCell:
         async def measured() -> MeasuredCell:
@@ -4059,52 +4198,76 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
                 scoped(round=1),
                 scoped(book=spend_book(book_usd, usd_reserve=None)),
             ):
-                return await measure_sample(row, session, PipelineParams.model_validate(params))
+                return await measure_sample(
+                    _HARNESS_ROW, session, PipelineParams.model_validate(params)
+                )
 
         return asyncio.run(measured())
 
-    read = cell({"harness": {**candidate, "model": "another/model"}})
+    return cell
+
+
+def test_an_n8n_cell_delivers_the_candidate_and_reads_the_harnesss_answer(
+    harness_cell: Callable[..., MeasuredCell], offline: Router
+) -> None:
+    read = harness_cell({"harness": {**_HARNESS_CANDIDATE, "model": "another/model"}})
     headers, sent = offline.harness.asked[-1]
     rode = (headers.get("x-eval-secret"), headers.get("authorization"))
     assert rode == ("harness-secret", None), (
         "the secret rode another header than the operator named"
     )
     assert sent == {
-        "case_id": row.key,
-        "input": json.loads(row.query),
-        "expected": json.loads(gold),
-        "prompt": candidate["prompt"],
-        "params": contract,
+        "case_id": _HARNESS_ROW.key,
+        "input": json.loads(_HARNESS_ROW.query),
+        "expected": json.loads(_HARNESS_GOLD),
+        "prompt": _HARNESS_CANDIDATE["prompt"],
+        "params": _HARNESS_CONTRACT,
     }, "the harness was sent another candidate, or a model a dataset aimed it at"
     assert (read.predicted, read.error_category) == ("true", None), (
         "the harness's answer was not what the cell read"
     )
     assert read.cost_s is not None, "a harness cell's round trip went unclocked"
 
+
+def test_an_n8n_object_answer_is_graded_as_its_fields(
+    harness_cell: Callable[..., MeasuredCell], offline: Router
+) -> None:
     offline.harness.says = lambda body: {"case_id": body["case_id"], "answer": {"a": "x"}}
-    assert json.loads(cell({"harness": candidate}).predicted) == {"a": "x"}, (
+    assert json.loads(harness_cell({"harness": _HARNESS_CANDIDATE}).predicted) == {"a": "x"}, (
         "an object answer was graded as anything but its fields"
     )
 
-    cell({"harness": {}})
+
+def test_an_unprompted_n8n_cell_asks_the_harness_for_its_production_text(
+    harness_cell: Callable[..., MeasuredCell], offline: Router
+) -> None:
+    harness_cell({"harness": {}})
     assert offline.harness.asked[-1][1]["prompt"] == "", (
         "an unprompted cell asked the harness for anything but its production text"
     )
 
+
+def test_an_n8n_harness_that_answered_nothing_is_a_hole_never_a_wrong_answer(
+    harness_cell: Callable[..., MeasuredCell], offline: Router
+) -> None:
     replies: tuple[Callable[[dict[str, Any]], dict[str, Any] | httpx.Response], ...] = (
         lambda body: {"case_id": body["case_id"], "answer": "  ", "raw": {}},
         lambda _body: httpx.Response(403, json={"message": "Authorization data is wrong!"}),
     )
     for reply in replies:
         offline.harness.says = reply
-        hole = cell({"harness": candidate})
+        hole = harness_cell({"harness": _HARNESS_CANDIDATE})
         assert hole.errored and hole.predicted != NO_RESULT, (
             "a harness that answered nothing was graded as a wrong answer"
         )
 
+
+def test_an_n8n_cell_no_rate_prices_is_refused_under_a_dollar_ceiling(
+    harness_cell: Callable[..., MeasuredCell], offline: Router
+) -> None:
     asked = len(offline.harness.asked)
     with pytest.raises(SendRefusedError):
-        cell({"harness": candidate}, book_usd=0.5)
+        harness_cell({"harness": _HARNESS_CANDIDATE}, book_usd=0.5)
     assert len(offline.harness.asked) == asked, (
         "a cell no rate prices was sent under a dollar ceiling it cannot be held to"
     )
