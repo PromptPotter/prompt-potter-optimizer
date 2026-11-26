@@ -1,19 +1,22 @@
 # tw-j2: the journeys tw-j left parked, each a leg, a rule or a delete (cloud, Opus)
 
 `briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is `origin/land/tw-xjp` at
-`<BASE-J2>` = `86b7b4eb4`. That is `land/test-world`'s `af224d3bd` plus tw-x, tw-j, tw-p, tw-w and tw-c, integrated:
-tw-w hosted and priced the offline world (`out/tw-w-report`), so a spend fact has its door; tw-c moved
-test_security's hand-seats onto the world (`out/tw-c-report`). You are the last chain of the test
-rework. Chain tw-q runs beside you (`briefs/tw-q.md`) to make a world run cheaper in production. Read
+`<BASE-J2>` = `66e345523`, green on the operator's desk (pytest's job peak 386 of 393 MB). That is `land/test-world`'s `af224d3bd` plus tw-x, tw-j, tw-p, tw-w, tw-c and tw-q,
+integrated: tw-w hosted and priced the offline world (`out/tw-w-report`), so a spend fact has its door;
+tw-c moved test_security's hand-seats onto the world (`out/tw-c-report`); tw-q settled the landing key
+at build and ranked every production frame a world run pays (`out/tw-q-report`). You are the last chain
+of the test rework. Chain tw-r runs beside you (`briefs/tw-r.md`) on two of tw-q's production rows. Read
 `out/tw-j-report:report.md` first: you finish its brief (`briefs/tw-2b.md` § tw-j), whose menu, order of
 preference and budget rule bind you unchanged. Replace the ancestor check with
 `git merge-base --is-ancestor 9cd30b5a7 <BASE-J2>`. Equals-main runs against `<BASE-J2>`'s offline home.
 Push to `arc/tw-j2`, one commit per link, with the full gate green at the tip.
 
-**`tests/CLAUDE.md` binds whole**, the admission rule and § Budget per test above all. The suite's wall
-is above the rework's start (`7dce00a96`: 82.3 s; tw-p's tip: 109.0 s, in tw-p's session), and tw-q is
-winning it back in production. You add no cost to it: a journey turned into a leg leaves pytest's wall,
-and your before → after states the suite's wall and end RSS.
+**`tests/CLAUDE.md` binds whole**, the admission rule and § Budget per test above all. The operator asked
+that the rework leave the suite faster and smaller than it found it (`7dce00a96`). In tw-q's session the
+end RSS is met (335.9 → 301.7 MB) and the wall is not (70.8 → 84.1 s). Almost all of the excess is
+test_archive (3.8 → 23.5 s), in its shared world runs. tw-q ranked their production frames and left
+each one with its reason, so what remains is the suite's shape (link 6). Your before → after states the
+suite's wall and end RSS at `7dce00a96`, `<BASE-J2>` and your tip, in your session.
 
 ## Why
 tw-j's brief gave it 39 parked journeys and test_spend's walks. It moved test_security's 3 and
@@ -24,7 +27,7 @@ over captured requests", which is preference 1, and `offline_run.py::outside_the
 
 ## Links
 Work the files in this order, pushing `wip/tw-j2` as each lands whole: test_archive, test_spend,
-test_identity, test_scoring, then links 3, 4 and 5. A session that runs short hands back whole files,
+test_identity, test_scoring, then links 3, 4, 5 and 6. A session that runs short hands back whole files,
 never a half-moved one.
 1. **Every `# Journeys awaiting a leg` block empties and is deleted**: test_archive, test_spend,
    test_identity, test_scoring. The helpers only they call go with them (`_peer_cycle`, `_bench_cycle`,
@@ -59,17 +62,29 @@ never a half-moved one.
    `loop_session` ×2, `minted_campaign` ×2; test_spend `loop_session` ×2 (tw-x's row 3: no in-process
    connector door). Each moves to the world's door for the state it seats, or is a row with the door it
    lacks, shown missing. Then `tests/factories.py`'s builders left with zero callers are deleted, and
-   your report lists them.
+   your report lists them. tw-c also left three tests over budget: test_security's `refused_poll`
+   (62 lines), its stdio-host test (78 lines, one function so one spawned host answers every act; the
+   door it lacks is a host spawned once for the module), and the world's cold first run (~4 s against
+   the 2 s budget; state what it costs at `<BASE-J2>`, after tw-q's link 1). Cut each to budget or file
+   it as a row naming its door.
+6. **test_archive's world runs, the fewest shapes its facts need.** It holds five module-scoped shared
+   runs (tw-q § Symptoms). Per run, list the facts that read it and the shape each fact needs (rows,
+   rounds, forks, a wound). Where one run's shape carries another's facts, those facts move onto it and
+   the other run is deleted. `tests/CLAUDE.md` § The world's table and each fixture's cost line follow.
+   No fact is cut to close the gap, and no run is shrunk below what a fact it carries reads. A run a
+   fact needs alone keeps its line, with that fact named. **Accepted when** the suite's wall is below
+   `7dce00a96`'s in your session, beside tw-r. If this link and tw-r cannot close it, report the gap
+   with each run's cost and its facts, and stop.
 
 ## Owns
-Every line of `tests/` except `tests/conftest.py` and `tests/CLAUDE.md` § The world, plus
-`scripts/offline_run.py` and `scripts/offline_world.py`. In production, `application/scoring/**` for
-links 3 and 4, and a rule link 1 exposes, each named in its commit. A world door you need that tw-x did
-not build is a row, never a door you build.
+Every line of `tests/`, plus `scripts/offline_run.py` and `scripts/offline_world.py`. In production,
+`application/scoring/**` for links 3 and 4, and a rule link 1 exposes, each named in its commit. A world
+door you need that tw-x did not build is a row, never a door you build.
 
-**NOT yours:** tw-q owns the rest of production, `tests/conftest.py` and `tests/CLAUDE.md` § The world,
-and may add one check to `scripts/gate.py`. Where you and tw-q both edit a production module, keep to
-your own hunks; I merge them at integration.
+**NOT yours:** tw-r owns `domain/opt_search_point.py`, `domain/pipeline_params.py`, `domain/arms.py`,
+`application/runner/output.py`, and `scoring/measurement_log.py::cycle_hard_samples` with its callers'
+hunks. It may re-point a test's call to a signature it changes, in that hunk alone; I merge both at
+integration.
 
 ## Proof
 - Census per block: parked → leg / dimension / edge / rule / deleted-by-mutation (each mutation and the

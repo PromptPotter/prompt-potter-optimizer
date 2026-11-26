@@ -1,84 +1,52 @@
-# tw-r: the three loop bugs tw-0's warm legs exposed, rooted, and every pin it dropped restored (cloud)
+# tw-r: a resolved config is resolved once, by its owner (cloud, Opus)
 
-`briefs/common.md` binds you (read BASE FIRST), with ONE override. The base is
-**`origin/land/test-world` at `a591e6b87`**: the combine `7dce00a96` plus tw-0…tw-4 integrated. Replace
-the ancestor check with `git merge-base --is-ancestor 7dce00a96 a591e6b87`. Equals-main runs against
-`a591e6b87`'s offline home.
+`briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is `origin/land/tw-xjp` at
+`<BASE-R>` = `66e345523`, green on the operator's desk. That is `land/test-world`'s `af224d3bd` plus tw-x, tw-j, tw-p, tw-w, tw-c and tw-q, integrated.
+Read `out/tw-q-report:report.md` first: its § Rows to file are your two links. Replace the ancestor
+check with `git merge-base --is-ancestor 9cd30b5a7 <BASE-R>`. Equals-main runs against `<BASE-R>`'s
+offline home. Push to `arc/tw-r`, one commit per link, with the full gate green at the tip.
 
-The base is RED on purpose. `offline_run.py` fails `capo-pobb/resumed` (bug 1), so
-`behaviour_keys.json` was not regenerated. Regenerate it once, at your green tip.
+## Why
+The operator asked that the test rework bring the suite's wall and memory below where it started
+(`7dce00a96`). tw-q met the memory and stopped 13 s short on the wall (70.8 → 84.1 s, in its session),
+with every production frame it measured ranked. Two of them re-derive a value their caller already
+holds. A world run is production running a small campaign, so each of these seconds is also paid by
+every real round close and every cell a real run builds.
 
-Checked at integration against `7dce00a96`'s home: `potter/l4` moves 4 of 5 requests, and only because
-the outer prompt names the inner run `justlogic.d234__<treatment digest>`. tw-4's re-key moved that
-digest. It is not a behaviour move. Prompt hygiene is tw-4's row 4; don't chase it here.
+## Links
+1. **A round close re-resolves the config it holds.** `runner/output.py::RunArtifacts._render` →
+   `_render_cycle_log_md` → `scoring/measurement_log.py::cycle_hard_samples` re-runs `cycle_config` and
+   `campaign_scorer` on every close (~0.4 s across the suite). The close already holds the resolved
+   config (`RunArtifacts._config`) and the session's scorer. Pass what the round holds down to the
+   reader that needs it, so `cycle_hard_samples` resolves nothing a caller has. Its other caller
+   (`measurement_log.py:460`) supplies what it holds the same way, or keeps the one resolution it
+   needs, named in the commit.
+2. **`to_job_search_point` re-resolves a resolved config.** `domain/opt_search_point.py::to_job_search_point`
+   calls `_resolved_config` and then `PipelineParams.with_nodes`, 8,609 calls and 2.29 s across the
+   suite. Find the owner of a point's resolved params (one resolution per point, wherever the point is
+   built or first resolved) and resolve there once. `domain/CLAUDE.md` binds: `PipelineParams` is
+   built only by reading the laid document it dumps back to, and a child `OptSearchPoint` is made by
+   `derive` / `edited` alone. A cache keyed by object identity is not the root. The id of a point is
+   its content and never moves.
 
-Push to `arc/tw-r`, one commit per link, with the full gate green at the tip. That tip is the first
-green the test rework has.
-
-**Why this blocks the release.** tw-0's warm, pressed and resumed legs
-(`scripts/offline_run.py::read_warm`) turned three silent loop bugs into failures. They sit inside the
-measuring loop being landed. The operator's rule: a loose end inside the mechanism being landed is
-built before the landing.
-
-## The bugs (from `out/tw-0-report`, rows 1–3; reproduce each before you fix it)
-1. **A resume replays a cut without the catch-ups another arm filed.** No fold feeds
-   `RaceCatchUpRecord` back into `raced`. `offline_run.py` is RED on `capo-pobb/resumed`,
-   deterministically. The bug was already at `7dce00a96`; the cold resumed leg never reached it.
-2. **An arrival-order walk, resumed, elects otherwise in round 2.**
-   - `read_order` came in with the combine (`87cf6680a`, `9d6e18f93`).
-   - Its pin was `test_a_rolling_arrival_race_reads_as_calls_return_and_a_resume_replays_that_order`
-     (base test_spend.py:1780). tw-0 deleted it with the fake races.
-3. **A press moves potter's L2 request**: `intelligence/indexes/sample.py::SampleIndex` folds the
-   cells a press bought past a close. The invariant is **a press moves the bill, never the record**,
-   and the next round's proposer request is the record's input.
-   - Today `read_warm` prints a moved request as "Not a fail" (`asked`), so the leg hides the bug.
-   - Make a moved request a FAIL first, then fix the root. Decide what the fold reads, and justify it
-     in the commit body: cells a press bought past a close are banked spend, never evidence the record
-     took.
-
-For each bug: reproduce it on the leg, find the root (the layer that should make it true), fix it
-there, and turn its leg green. Patches downstream of the root are refused (CLAUDE.md
-`<root-fix>`).
-
-## Pins tw-0 dropped that nothing else holds (restore each as a leg, a rule table, or a test)
-- `test_a_rolling_race_decides_on_each_returned_row_and_cuts_before_its_slowest_call`
-  (base sp:1714): under `each_read`, one row per decision, and a cut lands before the slowest call
-  returns.
-- base sp:1780: the arrival order is filed, and a resume replays that order (bug 2's guard).
-- `test_a_row_a_race_takes_past_the_opening_budget_is_priced_and_bought_once_on_resume`
-  (base sp:1925): a swapped-in row is priced, and bought once across a resume.
-- `query_loop.py::_ScoringPhase.arrive` and `::filed_reads` ran at the base but not at the tip. They
-  run again, or are deleted as dead code with the proof.
-
-A leg dimension (rolling dispatch, arrival order) is preferred where the fact is "the record does not
-move". A rule table goes where the fact is a pure decision.
-
-## Also yours
-- **The gate's offline-run verdict.** After a red full run, `gate.py --only offline-run` reran green in
-  1.9 s (tw-4's symptom). Find whether a cache serves a verdict the tree no longer earns. If so,
-  root-fix it: a red the gate cannot reproduce is a state the system can enter but not report.
-- **Caps: leave them.** The cloud prints `-` for the job peak, because the gate meters a Windows job.
-  I re-derive pytest's and offline-run's caps locally at your tip.
+A speed fix decides nothing. Equals-main must read every optimizer and leg UNMOVED, the digests must be
+identical, and `promptpotter/assets/behaviour_keys.json` must be unchanged. A key that moves is a
+behaviour change: stop and report it.
 
 ## Owns
-- the race, replay, walk and round modules the three roots live in (`application/scoring/**`,
-  `application/optimizers/*/race.py`, `application/runner/round.py`,
-  `application/intelligence/indexes/sample.py`, and others your census names);
-- `scripts/offline_run.py`, `scripts/offline_world.py`, `tests/world.py`, `tests/test_spend.py`, and
-  `scripts/gate.py`'s offline-run entry.
+`domain/opt_search_point.py`, `domain/pipeline_params.py`, `domain/arms.py` (the caller of link 2),
+`application/runner/output.py`, and in `application/scoring/measurement_log.py` only
+`cycle_hard_samples` and its callers' hunks.
 
-**NOT yours:** `promptpotter/main.py`, `application/jobs/launcher/**`,
-`infrastructure/llm/registry.py`, `host_surface.py` and `tests/test_security.py` (chain tw-m runs
-beside you). The other test files are yours only where a fix forces a re-point; name those hunks.
+**NOT yours:** chain tw-j2 runs beside you (`briefs/tw-j2.md`). It owns `tests/`, `scripts/offline_run.py`,
+`scripts/offline_world.py` and the rest of `application/scoring/**`. A test that calls a signature you
+change is re-pointed in that call's hunk alone, named in your commit.
 
 ## Proof
-- `scripts/offline_run.py` run DIRECTLY (not through the gate's row) is green. Every warm, pressed and
-  resumed leg is UNMOVED against its warm record, requests included.
-- Equals-main against `a591e6b87` for the straight, crossed, healed, wounded, diverged and l4 legs:
-  - UNMOVED where no fix reaches them;
-  - where a fix moves one, name the leg and the decision, and say why the new one is right.
-- The digest moves, the run data each fix reshapes (count it), and any wipe.
+- Per link: the frame's cumulative seconds before and after, under cProfile on the same shared world
+  run, and the suite's wall at `<BASE-R>` and the tip, same session.
+- `scripts/offline_run.py`'s wall at `<BASE-R>` and the tip.
+- Equals-main against `<BASE-R>`: every optimizer and leg UNMOVED, digests identical.
 - Full gate green at the tip.
 
-**Report:** follow common.md's FINAL REPORT on `out/tw-r-report`. For each bug give the root (file and
-function), the fix, the leg that now proves it, and the red → green evidence.
+**Report:** common.md's FINAL REPORT on `out/tw-r-report`.
