@@ -133,10 +133,6 @@ _SPEND_KEYS = ("step_tokens", "step_timings")
 _UNROUTED: PricedPair = (None, None)
 
 
-def priced_pairs(session: Session, calls: Mapping[str, NodeCall]) -> dict[str, PricedPair]:
-    return {name: session.backend_client.priced_as(cfg) for name, cfg in calls.items()}
-
-
 def _reply_spend(data: Mapping[str, Any], pairs: Mapping[str, PricedPair]) -> PipelineData:
     spent = PipelineData.from_wire({key: data.get(key) for key in _SPEND_KEYS})
     return replace(spent, step_tokens=_reported_usage(spent.step_tokens, pairs))
@@ -485,7 +481,7 @@ async def measure_sample(
     try:
         wire_params = interpolate_pipeline_params(pipeline_params, sample.model_dump())
         calls = wire_params.nodes
-        pairs = priced_pairs(session, calls)
+        pairs = {name: session.backend_client.priced_as(cfg) for name, cfg in calls.items()}
         data, spent, envelope = await _send_cell(sample, session, wire_params, calls, pairs)
 
         ranked = terminal_ranking(data, pipeline_schema)

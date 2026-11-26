@@ -930,9 +930,19 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `domain/cells.py:131` (the heatmap's hard-sample order, `list[str]`). Root: one name per thing, the
   heatmap's renamed for what it orders. **Re-test:**
   `git grep -nE "sample_order\s*:" -- promptpotter/domain` returns one line.
-- **`tests/test_spend.py` holds the walk's tests**: 6,141 lines, 87 lines naming a walk. Root: the file's
-  name stopped describing its contents; the walk's tests move to a file named for the walk, with its
-  `tests/CLAUDE.md` row. **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
+- **`tests/test_spend.py` holds the walk's tests**: 6,021 lines, 70 lines naming a walk (tw-0 moved the
+  fake races onto the offline legs; the hand-driven `_walk`/`_round` pause, catch-up and ceiling tests
+  stay). Root: each becomes an offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and
+  `_walk`/`_round` go (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
+- **A press moves what potter's L2 is asked** (tw-0): under `PRESS` the warm record is UNMOVED, but
+  `L2ContextOutput_0`'s persistent failures read 4 → 5, because `indexes/sample.py::SampleIndex` folds
+  every banked row, the running campaign's cells a press bought past a cut included. Root: the running
+  campaign's own bought-but-untaken cells stay out of its own memory, and nothing else does: another
+  campaign's cells, a deleted one's included, stay memory (§ The archive is not scoped by campaign).
+  Narrowing optimize memory to ledger-named answers (tw-r `67b68fa46`) was not taken, because a deleted
+  campaign or a run-data wipe emptied it while the archive still replayed those cells. **Re-test:** the
+  offline run's `potter: pressed …` line names no request, and a deleted campaign's cells still reach the
+  next campaign's `SampleIndex`.
 - **`scoring/query_loop.py::keep_cut` takes a refusal as a row**: `_ScoringPhase.keep_cut` (`:952`) filters
   the cell the ceiling refused back out of `walk.results` (`:960-964`, by `_budget_refusal`), because the
   refused cell was taken as a row before it stopped the phase. Root: a refusal is never a row. **Re-test:**
@@ -941,6 +951,23 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
   **Re-test:** `git grep -n "class FiledAnswer" -- promptpotter/domain/sample.py` is empty.
+- **Every process that lands recomputes the landing key** (tw-m): `maintenance/landing.py::landing_key`
+  (`:577`, `functools.cache` per process) hashes every row's schema and the code of every module a load
+  runs, which costs +20.5 MB committed (3 MB live) and 2.6 s at each entry that lands, an API's lifespan
+  among them. Root: the key is settled at build, a generated module a gate check regenerates, as
+  `presentation/api/served_contract.py` is. **Re-test:** `landing_key` is deleted and an API's first
+  open/close commits under 5 MB.
+- **Queue and task-result waits re-read on a clock** (tw-m): `application/jobs/registry.py::_QUEUE_POLL_S`
+  and `host_surface.py::_SETTLE_POLL_S` each wait on a write another process makes, and no signal in
+  this process carries it, so tests patch both to 0 (`test_security.py::_held_at_arms_gate` and the
+  reaped-queued test). Root: a cross-process wake on the jobs dir or ledger write (a lock handoff or a
+  file watch). **Re-test:** neither constant exists and no test patches a poll.
+- **`config/` has no layering row**: `scripts/gate.py::_LAYERING` (`:189`) lists application, shared,
+  domain, infrastructure and connectors but not `config/`, so nothing bars it from `application/` or
+  `presentation/`. It imports `infrastructure/` once (`config/first_run.py:9`, `store.io.write_text`)
+  while 17 infrastructure files import `config/`. Root: `config/` gets its row, and first-run's write
+  moves to the side the row puts below it. **Re-test:** `_LAYERING` names `config/` and the gate's
+  `layering` check is green.
 
 ## Held — no wave-4 chain yet
 

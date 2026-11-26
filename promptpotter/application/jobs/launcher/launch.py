@@ -23,10 +23,6 @@ from promptpotter.domain.records.run_records import LaunchedJob
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.infrastructure.store.stores import Stores
 
-# Detached queued launches, held so the event loop cannot collect one mid-wait.
-_DETACHED_TASKS: set[asyncio.Task[object]] = set()
-
-
 type LaunchRequest = FreshMint | ExistingCycle | CheckinStart
 
 
@@ -117,7 +113,7 @@ class Admitted(LaunchOutcome):
             return held.session.hop
 
         if job.queued:
-            _detach(hold_and_detach())
+            self.start.job_registry.detach(hold_and_detach())
             return Launched(LaunchedJob.of(job), None)
         return Launched(LaunchedJob.of(job, await hold_and_detach()), None)
 
@@ -143,11 +139,3 @@ def admit(
     if inline is not None and job.queued and inline.no_wait:
         refuse_as_busy(job_registry, job)
     return Admitted(RunStart(stores, job_registry, job), request, mode, inline)
-
-
-def _detach(coro: Coroutine[Any, Any, object]) -> None:
-    task = asyncio.ensure_future(coro)
-    _DETACHED_TASKS.add(task)
-    task.add_done_callback(_DETACHED_TASKS.discard)
-    # Its fault is its job's release (`hold`), read here so asyncio never warns it unread.
-    task.add_done_callback(lambda t: t.cancelled() or t.exception())

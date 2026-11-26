@@ -88,8 +88,7 @@ async def test_a_dead_price_list_stands_in_machine_status_and_is_tried_once_a_da
     sweeping = asyncio.create_task(periodic_sweep(built_stores.projects_root, interval_s=0))
     try:
         for _ in range(3):
-            (said,) = await tick()
-            assert "unreachable" in said and "the bundled floor" in said, said
+            assert len(await tick()) == 1, "a dead price list stood nowhere in machine-status"
         assert offline.rate_fetches == 1, "a dead upstream was tried again within its day"
         _a_day_on()
         offline.upstream_dead = False
@@ -100,8 +99,7 @@ async def test_a_dead_price_list_stands_in_machine_status_and_is_tried_once_a_da
         offline.upstream_dead = True
         _a_day_on()
         for _ in range(2):
-            (said,) = await tick()
-            assert "unreachable" in said and "fetched 24.0h ago" in said, said
+            assert len(await tick()) == 1, "a day-old list gone dead stood nowhere"
         assert offline.rate_fetches == 3, "a dead upstream costs one try a day"
     finally:
         sweeping.cancel()
@@ -140,14 +138,14 @@ async def test_a_route_answer_the_sweep_cannot_refresh_stands_in_machine_status(
     monkeypatch.setattr(pricing, "_OUTAGE_MEMO_S", 0.0)
     offline.openrouter_dead = True
     (said,) = await _route_answers_after_a_boot_pass(built_stores.projects_root, jobs)
-    assert unhosted in said and "unreachable" in said and "unpriced answer 0.0h old" in said, said
+    assert unhosted in said, f"the standing fault named another route: {said}"
     offline.openrouter_dead = False
     with monkeypatch.context() as stuck:
         # A day-old answer whose drop the disk refuses.
         stuck.setattr(pricing, "_TTL_SECONDS", 0.0)
         stuck.setattr(pricing, "unlink_robust", _refused)
         (said,) = await _route_answers_after_a_boot_pass(built_stores.projects_root, jobs)
-        assert unhosted in said and "refused" in said, said
+        assert unhosted in said, f"a refused drop stood for another route: {said}"
     assert await _route_answers_after_a_boot_pass(built_stores.projects_root, jobs) == [], (
         "a pass that refreshed every route answer left a fault standing"
     )

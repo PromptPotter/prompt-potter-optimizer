@@ -24,6 +24,7 @@ from offline_world import (
     refuse_network,
 )
 from pydantic import SecretStr
+from world import World
 
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.config.settings import settings
@@ -89,3 +90,9 @@ def offline(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
     send_pacing.cache_clear()
     # A refused request reads as a provider error, which a journey can assert past unseen.
     assert not world.unrouted, f"a journey sent what the world does not answer: {world.unrouted}"
+
+
+@pytest.fixture
+def world(built_stores: Stores, offline: Router, tmp_path: Path) -> World:
+    """The edge tier's world (`world.py`): campaigns run through the real entry, offline."""
+    return World(built_stores, offline, tmp_path / "world")

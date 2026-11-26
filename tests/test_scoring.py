@@ -83,6 +83,7 @@ from promptpotter import connectors
 from promptpotter.application.bench import node_context
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext, SliceMap
 from promptpotter.application.bench.difficulty import (
+    JudgingRuler,
     judging_ruler,
     regraded_ruler,
     ruler_clock,
@@ -132,7 +133,7 @@ from promptpotter.application.optimizers.gepa.members import (
     MinibatchBars,
     MinibatchGate,
 )
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, RoundSamples
+from promptpotter.application.optimizers.nodes import NODE_MEMBERS, RoundSamples
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.layout import (
     NODE_LAYOUTS,
@@ -142,10 +143,9 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L3PlanOutput,
     fork_proposal_model,
 )
-from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
+from promptpotter.application.optimizers.potter.election import RoundWinner
 from promptpotter.application.optimizers.potter.escalation import (
     EscalationInputs,
-    Fire,
     HighWater,
     LadderAsk,
     LayerReading,
@@ -200,7 +200,6 @@ from promptpotter.application.runner.round import (
     bar_pairing,
     execute_round,
     hold_for_operator,
-    round_origin_panel,
     run_init,
 )
 from promptpotter.application.runner.termination import panel_gate_tripped, standing_tripped
@@ -230,11 +229,12 @@ from promptpotter.application.scoring.paired import (
     absent_pair,
     as_family,
     grade_measurands,
+    origin_floor,
     read_arms,
     read_pair,
 )
 from promptpotter.application.scoring.passes import verify_member, verify_reading
-from promptpotter.application.scoring.race_protocol import View, WalkView
+from promptpotter.application.scoring.race_protocol import Trigger, View, WalkView
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
@@ -245,13 +245,6 @@ from promptpotter.application.scoring.selection import (
     level_band,
     readable_lifts,
 )
-from promptpotter.application.views.readout import ReadoutProjection
-from promptpotter.application.views.render.ansi import (
-    render_population,
-    render_round_start,
-    to_text,
-)
-from promptpotter.application.views.render.sample import fmt_query_result
 from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
@@ -260,16 +253,13 @@ from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
 from promptpotter.domain.arms import (
     ArmPosition,
     BankedSearchPointError,
-    Broken,
     Concluded,
     Cut,
     CutKind,
     Measured,
-    Measuring,
     PointContext,
     Proposed,
     Refused,
-    degradation_reading,
     is_leader_eligible,
 )
 from promptpotter.domain.bench import (
@@ -309,9 +299,8 @@ from promptpotter.domain.command_kinds import (
 )
 from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
-from promptpotter.domain.dashboard_rows import RoundHealth
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
-from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint
+from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_panel import (
     OverlapReading,
@@ -338,15 +327,6 @@ from promptpotter.domain.paired_reading import (
     RoundArm,
 )
 from promptpotter.domain.pass_kinds import IndividualWalk, individual_cells
-from promptpotter.domain.phase_acts import (
-    FitnessFact,
-    ProposeClosed,
-    ProposeOpened,
-    SettingsFact,
-    StepClosed,
-    StepOpened,
-    TextFact,
-)
 from promptpotter.domain.phases import (
     PauseCause,
     RunPhase,
@@ -381,7 +361,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import ThetaCaveat, p_better
+from promptpotter.domain.ruler import RulerScope, RulerStamp, ThetaCaveat, p_better
 from promptpotter.domain.run_standing import (
     LineOutlay,
     RunStanding,
@@ -501,7 +481,6 @@ _MEETING_GOLD = (
 )
 
 
-@pytest.mark.usefixtures("offline")
 def test_each_matcher_grades_an_answer_against_its_gold() -> None:
     matcher = {name: m.score for name, m in MATCHERS.items()}
     for match, args, expected in (
@@ -593,7 +572,6 @@ def test_each_matcher_grades_an_answer_against_its_gold() -> None:
         assert match(*args) == expected, f"{match.__name__}{args!r} must grade {expected}"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_formula_reaching_past_the_ast_allowlist_is_refused_at_compile() -> None:
     # The AST allowlist is the boundary: a restricted `eval()` namespace is bypassable.
     for formula in (
@@ -658,7 +636,6 @@ def wire_cell() -> _WireCell:
     return _WireCell(banked, stale, answered, plain, composed, channels)
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_cell_read_off_the_wire_keeps_its_facts_and_drops_any_grade_it_arrived_with(
     wire_cell: _WireCell,
 ) -> None:
@@ -670,19 +647,6 @@ def test_a_cell_read_off_the_wire_keeps_its_facts_and_drops_any_grade_it_arrived
     )
 
 
-@pytest.mark.usefixtures("offline")
-def test_a_grade_is_a_new_record_and_keeps_nothing_of_the_formula_before_it(
-    wire_cell: _WireCell,
-) -> None:
-    _, _, answered, plain, *_ = wire_cell
-    graded = plain.grade(answered)
-    assert (graded.grade.fitness, graded.grade.unscored) == (0.25, None), "the stale grade stood"
-    assert graded.wire() == {**answered.wire(), "fitness": 0.25, "objective": 0.25}, (
-        "a graded cell is its facts plus this formula's grade"
-    )
-
-
-@pytest.mark.usefixtures("offline")
 def test_a_replys_lines_rank_only_under_the_formula_reading_them(wire_cell: _WireCell) -> None:
     answered = wire_cell.answered
 
@@ -706,7 +670,6 @@ def test_a_replys_lines_rank_only_under_the_formula_reading_them(wire_cell: _Wir
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_grading_writes_no_fact_and_a_regrade_reads_only_its_own_formula(
     wire_cell: _WireCell,
 ) -> None:
@@ -731,7 +694,6 @@ def test_grading_writes_no_fact_and_a_regrade_reads_only_its_own_formula(
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_cell_the_formula_cannot_grade_is_unscored_and_a_regrade_recovers_it(
     wire_cell: _WireCell,
 ) -> None:
@@ -748,7 +710,6 @@ def test_a_cell_the_formula_cannot_grade_is_unscored_and_a_regrade_recovers_it(
     assert (recovered.grade.fitness, recovered.scored) == (1.0, True), "a regrade recovers it"
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_formula_that_raises_halts_loud_and_an_errored_row_never_evaluates_it(
     wire_cell: _WireCell,
 ) -> None:
@@ -762,7 +723,6 @@ def test_a_formula_that_raises_halts_loud_and_an_errored_row_never_evaluates_it(
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_formula_arithmetic_is_on_floats_so_a_tenant_buys_no_unbounded_cpu_or_memory(
     wire_cell: _WireCell,
 ) -> None:
@@ -779,7 +739,6 @@ def test_formula_arithmetic_is_on_floats_so_a_tenant_buys_no_unbounded_cpu_or_me
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_each_graded_field_is_matched_alone_and_the_cell_and_theta_read_their_share() -> None:
     joint = scorer_of("fields_match(predicted, ground_truth)")
     gold = json.dumps(
@@ -845,9 +804,6 @@ def test_each_graded_field_is_matched_alone_and_the_cell_and_theta_read_their_sh
         "extract_depth": 0.5,
         "who": 1.0,
     }, "the arm's fold says which field moved"
-    assert "MISS type_of_document,extract_depth" in fmt_query_result(
-        1, walked.cells[1].facts, walked.cells[1].grade, display_tags={}
-    ), "the readout names the fields a cell missed"
     for refused in ("not json", '{"who": "x"}', '{"issuer": null}'):
         with pytest.raises(ScoringFormulaError):
             joint.grade(measurement(0, None, predicted="{}", ground_truth=refused).facts)
@@ -877,7 +833,6 @@ def token_cells() -> _TokenCells:
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_dial_reads_its_term_against_the_origin_and_never_sums_a_raw_unit(
     token_cells: _TokenCells,
 ) -> None:
@@ -916,7 +871,6 @@ def test_a_dial_reads_its_term_against_the_origin_and_never_sums_a_raw_unit(
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(
     token_cells: _TokenCells,
 ) -> None:
@@ -971,7 +925,6 @@ def test_a_miss_is_charged_its_cost_and_a_solved_cell_scores_its_composite(
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_connectors_declared_dial_parses_and_anchors_as_a_core_one_does() -> None:
     core = CELL_TERMS
     l4 = compiler.campaign_terms(connectors.CONNECTORS.get("promptpotter"))
@@ -1138,7 +1091,6 @@ def test_every_door_admitting_a_name_to_the_cell_namespace_refuses_one_another_o
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_reported_core_channel_is_one_value_on_a_dial_and_in_a_formula() -> None:
     spent = measurement(
         0,
@@ -1154,7 +1106,6 @@ def test_a_reported_core_channel_is_one_value_on_a_dial_and_in_a_formula() -> No
     )
 
 
-@pytest.mark.usefixtures("offline")
 def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
     # A step named `n` keeps the total.
     turns = [
@@ -1182,7 +1133,6 @@ def test_a_conversation_reaches_the_formula_only_as_projected_scalars() -> None:
     ), "a formula reads the projected scalars"
 
 
-@pytest.mark.usefixtures("offline")
 def test_the_scorer_id_names_the_grading_function(
     token_cells: _TokenCells, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1229,9 +1179,7 @@ def test_a_formula_is_two_valued_by_its_expression_over_what_emits() -> None:
 # 2. Composite fitness and coverage
 
 
-def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_zero(
-    offline: Router,
-) -> None:
+def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_zero() -> None:
     # A round that measured every sample and failed them all IS a 0.0; an unmeasured one is not.
     for rate in (compute_fitness, compute_error_rate, compute_degraded_rate):
         assert rate(results=[]) is None, f"{rate.__name__} read an empty round as 0.0"
@@ -1285,7 +1233,10 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
         "with no label a cut cell has no miss to be, so it carries no verdict either"
     )
 
-    # A judge never grades a cell whose `predicted` is the NO_RESULT sentinel.
+
+def test_a_judge_never_grades_or_bills_a_cell_whose_answer_is_the_no_result_sentinel(
+    offline: Router,
+) -> None:
     offline.llm.says = lambda _body: "A"
     # A cell that RAN and left a trace, so the no-trace arm cannot be what fired.
     traced = MeasuredCell(
@@ -1306,7 +1257,8 @@ def test_a_round_scores_the_cells_its_prompt_answered_and_never_an_absence_as_ze
     billed = offline.llm.sent
     assert billed == [], f"a cell with no answer was billed a grading: {billed}"
 
-    # A merge never shrinks what was already measured.
+
+def test_a_merge_never_shrinks_what_was_measured_and_joins_only_its_own_scorer() -> None:
     prior = sheet(measurements([1.0 if i < 10 else 0.0 for i in range(20)]))
     winner = sheet(
         measurements([1.0 if sid in {10, 12, 15} else 0.0 for sid in range(10, 18)], range(10, 18))
@@ -1351,138 +1303,7 @@ def _charged_by_length() -> tuple[CellSheet, CellSheet]:
     return walked(set(range(17)), 2768), walked(set(range(14, 18)), 692)
 
 
-_PEER_BANK = samples(16)
-# Each search row's place in the order the search reads it, under the peer cycle's own split.
-_PEER_READ_ORDER = {
-    s.id: n
-    for n, s in enumerate(
-        partition_bank(_PEER_BANK, DatasetSplit(bench=0, demo=2, tolerance=0), seed=0).search
-    )
-}
-
-
 _PEER_HOP = CycleHop(campaign_id="peer", cycle_id="cycle_peer")
-
-
-@contextmanager
-def _peer_cycle(
-    stores: Stores,
-    hop: CycleHop,
-    monkeypatch: Any,
-    optimizer: str,
-    nodes: dict[str, Any],
-    solves: Callable[[str, Sample], bool | None],
-    *,
-    bench: int = 0,
-    control: RunControl | None = None,
-    book: SpendBook | None = None,
-    origin_replicates: int | None = None,
-    **optimization: Any,
-) -> Iterator[tuple[Cycle, CycleEventLog]]:
-    """Bound as a run seam binds it; the backend answers right where ``solves`` says, errs on None."""
-
-    async def _measure(
-        sample: Sample, _session: Any, pipeline_params: PipelineParams
-    ) -> MeasuredCell:
-        prompt = pipeline_params.node("solve").laid_keys()["prompt"]
-        solved = solves(prompt, sample)
-        row: dict[str, Any] = {
-            "sample_key": sample.key,
-            "query": sample.query,
-            "ground_truth": sample.ground_truth,
-            "predicted": sample.ground_truth if solved else "wrong",
-            "error": None,
-            "cached": False,
-            "pipeline_data": {"total_time": 0.1, "target_prompt_chars": len(prompt)},
-        }
-        if solved is None:
-            row["error_category"] = "SERVER"
-        return MeasuredCell.from_wire(row)
-
-    monkeypatch.setattr(query_loop, "measure_sample", _measure)
-    schema = pipeline_schema(
-        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)],
-    )
-    origin = OptSearchPoint(
-        prompts={
-            "solve": NodePrompt(
-                fields={"instruction": "Answer.", "answer_format": "Reply with the letter."}
-            )
-        }
-    ).configured(PipelineParams(), schema)
-
-    def measured_origin(session: Session) -> CellSheet:
-        rows = [
-            asyncio.run(
-                _measure(
-                    s, session, PipelineParams.model_validate({"solve": {"prompt": "Answer."}})
-                )
-            )
-            for s in list(session.state.scoring.partition.search)[:4]
-        ]
-        return session.state.scoring.scorer.sheet(rows)
-
-    with scoped(round=1):
-        seated = seat(
-            stores,
-            schema=schema,
-            bank=_PEER_BANK,
-            bench=bench,
-            demo=2,
-            # The campaign's composite REWARDS length, the opposite of CAPO's objective.
-            scorer=scorer_of(
-                "label_match(predicted, ground_truth)",
-                "fitness * min(1.0, target_prompt_chars / 200.0)",
-            ),
-            optimization={
-                "optimizer": optimizer,
-                "elimination_n_min": 2,
-                "nodes": nodes,
-                **optimization,
-            },
-            dataset_name=f"{optimizer}-e2e",
-            control=control,
-            hop=hop,
-            origin=(origin, measured_origin),
-            framing=TaskDecomposition(pipeline_purpose="Answer each query with its letter."),
-            origin_replicates=origin_replicates,
-        )
-        cycle, ledger = seated.cycle, cycle_ledger(seated.cycle)
-        with scoped(
-            ledger=ledger,
-            spawn=inner_spawn_of(cycle.session),
-            determinism=cycle.config.optimization.determinism,
-        ):
-            run_init(RoundContext(cycle, 0))
-            with scoped(book=spend_book() if book is None else book):
-                yield cycle, ledger
-
-
-def _asked(body: dict[str, Any]) -> str:
-    """What an optimizer call sent the provider, every message of it."""
-    return "\n".join(str(m["content"]) for m in body["messages"])
-
-
-def _potter_says(*instructions: str) -> Callable[[dict[str, Any]], str]:
-    """Potter's L1 proposing one variant per instruction, in order; every other node a critique."""
-
-    def says(body: dict[str, Any]) -> str:
-        if body.get("response_format", {}).get("json_schema", {}).get("name") != "L1GenerateOutput":
-            return json.dumps({"priority_fix": "instruction: check each premise"})
-        anchor = shown_text(_asked(body), "solve.instruction")
-        variants = [
-            {
-                "mechanism": text,
-                "targets_rows": [],
-                "edits": [
-                    {"at": "solve.instruction", "op": "replace", "anchor": anchor, "text": text}
-                ],
-            }
-            for text in instructions
-        ]
-        return json.dumps({"variants": variants})
-
-    return says
 
 
 def _bench_pass(
@@ -1543,7 +1364,6 @@ def _elect(
     return winner, abilities
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     ruler = _easy_low_hard_high()
     bar = CrowningBar(statistic="posterior", admission=election_knobs().admission)
@@ -1577,7 +1397,6 @@ def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     # `coverage_floor` IS PoBB's `n_min`.
     ruler, bar = (
@@ -1627,7 +1446,6 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     ), "a cost term's tie-break was counted as a verdict lost"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
     # The bar is what the parent can do, not the luck that crowned it: no later race reads those cells.
     crowned_on = sheet(measurements([1.0] * 4 + [0.0], range(30, 35)))
@@ -1643,53 +1461,26 @@ def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_overlap_vote_elects_on_the_origin_panel_an_arm_its_draw_held_back(
-    built_stores: Stores,
-) -> None:
+def test_an_overlap_vote_elects_on_the_origin_panel_an_arm_its_draw_held_back() -> None:
     # Campaign bigbench-multistep-d22x4-8b__f866d6, round 5, arm C5.3: θ lift +0.504, se 0.458.
     c53, parent = ArmKey("C5.3"), ArmKey("parent")
     # Cells 0-9 are the panel, won 7-3; cells 10-14 lost; 15-24 tied: the draw reads 7-8.
     rows = sheet(measurements([1.0] * 7 + [0.0] * 8 + [1.0] * 10))
     bar = sheet(measurements([0.0] * 7 + [1.0] * 18))
-    panel = frozenset(str(i) for i in range(10))
+    panel = sorted(str(i) for i in range(10))
     abilities = RoundAbilities(
         theta={c53: 0.504}, theta_se={c53: 0.458}, bar={c53: (0.0, 0.0)}, cells={c53: 25}
     )
-    electing = seat(built_stores)
-    set_cycle(electing.cycle, line=[round_result(0)])
-    ctx = NodeContext(electing, NODE_MEMBERS.get("theta_election"))
-    assert election_knobs().admission == 0.85, "guard: the admission the campaign ran"
-
-    def measured(paired_on: frozenset[str] | None) -> MeasuredRound:
-        return MeasuredRound(
-            arms={c53: arm_state("C5.3", position=ArmPosition(round=5, idx=2, total=3))},
-            rows={c53: rows},
-            parent=ReadArm(parent, arm_state("parent"), bar),
-            filed={},
-            folds={},
-            fit={},
-            abilities=abilities,
-            electable=[c53],
-            coverage_floor=6,
-            cut=None,
-            origin_panel_slots=list(range(10)),
-            on_panel={},
-            raced={c53: rows, parent: bar},
-            paired_on=paired_on,
+    crowning = CrowningBar(statistic="posterior", admission=election_knobs().admission)
+    for paired_on, elected, why in (
+        (None, None, "the draw elected an arm that lost more of its cells than it won"),
+        (panel, c53, "the overlap vote held back an arm that won its panel rows 7-3"),
+    ):
+        vote = RoundWinner(
+            arms=[c53], coverage_floor=6, bar=crowning, parent=parent, paired_on=paired_on
         )
-
-    assert elect_on_theta(ctx, measured(None)).selected is None, (
-        "the draw elected an arm that lost more of its cells than it won"
-    )
-    assert elect_on_theta(ctx, measured(panel)).selected == c53, (
-        "the overlap vote held back an arm that won its panel rows 7-3"
-    )
-    banked = electing.cycle.pending_decisions[-1].inputs_ref
-    assert isinstance(banked, RoundWinner) and banked.paired_on == sorted(panel)
-    assert banked.elect({c53: rows}, bar, abilities) == c53, (
-        "the replay re-elects on other rows than the live vote read"
-    )
+        # The banked inputs are what a replay re-elects on: the live vote is this same call.
+        assert vote.elect({c53: rows}, bar, abilities) == elected, why
 
 
 def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
@@ -1746,7 +1537,6 @@ def test_informative_rows_without_an_overlap_vote_are_refused_at_every_selection
         )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads() -> None:
     bar, deep_key = (
         CrowningBar(statistic="posterior", admission=election_knobs().admission),
@@ -1778,93 +1568,6 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
     assert closest_to_bar(reads, beside=near_key) == "deep"
 
 
-# Round 2 starts from what round 1 handed on.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_held_rounds_leader_ahead_of_its_parent_is_dropped_and_never_raced_again(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # The cells that ranked it first are the ones its luck rode.
-    def one_more_than_parent(prompt: str, sample: Sample) -> bool:
-        order = _PEER_READ_ORDER[sample.id]
-        if "Guess." in prompt:
-            return order % 4 == 0
-        return order % 2 == 0 or ("Check each premise." in prompt and order == 1)
-
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {"l1_generate": {"config": {"n_variants": 2}}},
-        one_more_than_parent,
-    ) as (cycle, _):
-        parent_id = cycle.parent.id
-        offline.llm.says = _potter_says("Check each premise.", "Guess.")
-        first = asyncio.run(execute_round(cycle, 1)).result
-        assert first.election is not None and first.election.selected is None, "round 1 held"
-        leader = first.election.leading
-        assert leader is not None
-        assert "Check" in first.arms[leader].individual.prompts["solve"].fields["instruction"]
-        assert [m.id for m in cycle.population] == [parent_id], (
-            "a held round handed on more than its parent: evidence is bought in its race alone"
-        )
-        offline.llm.says = _potter_says("Guess.")
-        second = asyncio.run(execute_round(cycle, 2)).result
-        assert leader not in second.proposed and not second.rows(leader), (
-            "a leader short of the bar was raced again past its round's cap"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # The election's scale re-read off the archive: unchanged under its own formula, moved under
-    # an edited one, since every row the ruler holds is re-graded, not only the record's own cells.
-    def every_other(prompt: str, sample: Sample) -> bool:
-        return _PEER_READ_ORDER[sample.id] % 2 == 0 or "Check" in prompt
-
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {"l1_generate": {"config": {"n_variants": 3}}},
-        every_other,
-    ) as (cycle, _):
-        offline.llm.says = _potter_says("Check each premise.", "Guess.", "Check twice.")
-        asyncio.run(execute_round(cycle, 1))
-
-        # Round 1's cells fold after its election, so round 2 is the first to read them.
-        offline.llm.says = _potter_says("Guess.")
-        second = asyncio.run(execute_round(cycle, 2)).result
-    assert second.election is not None
-    stamp, stores = second.election.ruler, cycle.session.store
-
-    opt = cycle.config.optimization
-    n_min, two_pl = opt.elimination_n_min, opt.enable_2pl_graduation
-    read = judging_ruler(
-        stores.ruler,
-        stamp.scope,
-        stamp.reach,
-        stamp.excluded,
-        objective_id=stamp.scope.scorer,
-        n_min=n_min,
-        enable_2pl=two_pl,
-    ).ruler
-    own = cycle.session.state.scoring.scorer
-    same = regraded_ruler(stores, stamp, own, n_min=n_min, enable_2pl=two_pl)
-    assert read is not None and same is not None and same.delta == read.delta, (
-        "ab re-fit the election's scale differently under the formula the election read it with"
-    )
-    edited = scorer_of("label_match(predicted, ground_truth)", "1.0 - fitness")
-    moved = regraded_ruler(stores, stamp, edited, n_min=n_min, enable_2pl=two_pl)
-    assert moved is not None and moved.delta != read.delta, (
-        "ab replayed an edited formula on the scale the old formula fit"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
 def test_only_an_invalid_measurement_bars_an_arm_from_leading() -> None:
     # A STOP IS NOT A VERDICT.
     for arm, eligible in (
@@ -1887,178 +1590,6 @@ def test_only_an_invalid_measurement_bars_an_arm_from_leading() -> None:
         assert is_leader_eligible(arm) is eligible, f"{arm.label} decides leading wrongly"
 
 
-_CAPO_NODES = {
-    "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
-    "capo_init": {"config": {"size": 3, "k_max": 0}},
-    "mating": {"config": {"offspring": 2}},
-    "few_shot": {"config": {"k_max": 0}},
-    "survival": {"config": {"size": 3}},
-}
-
-
-def _capo_says() -> Callable[[dict[str, Any]], str]:
-    """CAPO's seed batch, three prompts, then each mutation a fresh one."""
-    minted: list[str] = []
-
-    def says(body: dict[str, Any]) -> str:
-        if "Create overall 15 prompts" in _asked(body):
-            return json.dumps(["Solve the task, A.", "Solve the task, B.", "Solve the task, C."])
-        minted.append(f"Go {len(minted)}.")
-        return f"<prompt>{minted[-1]}</prompt>"
-
-    return says
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # Round 1 races the seeds with its offspring; its parent is the origin, never bought a cell.
-    def cut_by_budget(
-        cut_round: int, budget: int, replayed: int, parent_cells: int, panel_gate: str
-    ) -> None:
-        case = f"round {cut_round} cut under panel_gate={panel_gate}"
-
-        paid: list[int] = []
-        book = spend_book(None, usd_reserve=None)
-        # Empty while the origin is measured, which no round's budget pays for.
-        running: list[bool] = []
-        cutting: list[bool] = []
-
-        def even_cells(_prompt: str, sample: Sample) -> bool:
-            if running:
-                paid.append(sample.id)
-                if cutting and len(paid) >= budget:
-                    book.share = Budget(usd=0.0)
-            return _PEER_READ_ORDER[sample.id] % 2 == 0
-
-        with _peer_cycle(
-            workspace(default_identity(f"cut-{cut_round}-{panel_gate}")),
-            _PEER_HOP,
-            monkeypatch,
-            "capo",
-            _CAPO_NODES,
-            even_cells,
-            book=book,
-            panel_gate=panel_gate,
-        ) as (cycle, _):
-            offline.llm.says = _capo_says()
-            session = cycle.session
-            running.append(True)
-            search = list(session.state.scoring.partition.search)
-            if cut_round == 1:
-                # Run init scores the origin through the gateway — here on half of CAPO's first block.
-                asyncio.run(
-                    score_search_point(
-                        cycle.parent_point,
-                        search[:2],
-                        session,
-                        kind=MeasurementRole.ORIGIN,
-                        measured=None,
-                    )
-                )
-            else:
-                uncut = asyncio.run(execute_round(cycle, 1)).cut
-                assert uncut is None, f"{case}: round 1 ran inside its budget"
-            paid.clear()
-            parent = ArmKey(cycle.parent.id)
-            cutting.append(True)
-            cut_walk = execute_round(cycle, cut_round)
-            if panel_gate == "strict":
-                with pytest.raises(StopLoop) as halted:
-                    asyncio.run(cut_walk)
-                assert halted.value.reason is StopReason.SPEND_BUDGET, (
-                    f"{case}: the bound that cut it names the stop"
-                )
-                assert cycle.rounds[-1].round == cut_round - 1, (
-                    f"{case}: an arm was crowned on a holed panel"
-                )
-                return
-            _, closed, cut, _ = asyncio.run(cut_walk)
-            assert cut is not None and cut.reason is StopReason.SPEND_BUDGET, (
-                f"{case}: the round names its cut"
-            )
-            assert cut.detail, f"{case}: a kept cut halts the loop with no words"
-            rows = {key: closed.rows(key) for key in closed.proposed}
-            assert sum(len(closed.rows(key)) for key in closed.arms) == (
-                replayed + len(paid) + parent_cells
-            ), f"{case}: a cell nobody elects on, or a parent read where the archive lacks it"
-            assert (parent in closed.proposed) is (cut_round == 2), (
-                f"{case}: a retained parent is ONE arm, its re-read folded into its own cells"
-            )
-            parent_arm = closed.arms[parent]
-            assert isinstance(parent_arm, Cut | Measured), f"{case}: the parent never concluded"
-            held = session.store.ruler.rows(session_ruler_scope(session), ruler_clock(session))
-            observed = {cell for walked, cell, _ in held if walked == parent_arm.config_key}
-            assert {cell.key for cell in closed.rows(parent)} <= observed, (
-                f"{case}: a parent's observation never reached the δ fit its election read"
-            )
-            [short] = [key for key in rows if len(rows[key]) == 1]
-            assert closed.folds[short].fitness == 1.0, (
-                f"{case}: the cut arm reads perfect on its one cell"
-            )
-            carried = [ind.id for ind in cycle.population]
-            assert len(carried) == 3 and short not in carried, f"{case}: elected below the floor"
-            full = next(key for key in list(rows)[3:] if key != short)
-            assert full in carried, f"{case}: an offspring the budget paid for in full was dropped"
-            assert cycle.rounds[-1].round == cut_round
-            cycle.unwind_unclosed()
-            assert [rr.round for rr in cycle.rounds] == [0] and cycle.selection.round == 0, (
-                f"{case}: a stop between this election and its close leaves no result"
-            )
-
-    # Round 2's parent is a retained member: its re-read lands on cells its own walk holds.
-    for cut_round, budget, replayed, parent_cells in ((1, 17, 0, 2), (2, 5, 12, 0)):
-        for panel_gate in ("strict", "off"):
-            cut_by_budget(cut_round, budget, replayed, parent_cells, panel_gate)
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at_mu(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    def raced(failing: str) -> RoundResult:
-
-        def misses_after_block_one(prompt: str, sample: Sample) -> bool:
-            block = _PEER_READ_ORDER[sample.id] // 4
-            return block == 0 or not any(f"task, {arm}." in prompt for arm in failing)
-
-        with _peer_cycle(
-            workspace(default_identity(f"race-{failing}")),
-            _PEER_HOP,
-            monkeypatch,
-            "capo",
-            _CAPO_NODES,
-            misses_after_block_one,
-        ) as (cycle, _):
-            offline.llm.says = _capo_says()
-            return asyncio.run(execute_round(cycle, 1)).result
-
-    def fates(closed: RoundResult) -> dict[str, list[int]]:
-        out: dict[str, list[int]] = {}
-        for key in closed.proposed:
-            arm = closed.arms[key]
-            state = (
-                arm.kind
-                if isinstance(arm, Cut)
-                else "locked_in"
-                if isinstance(arm, Measured) and arm.locked_in is not None
-                else "measured"
-            )
-            out.setdefault(state, []).append(len(closed.rows(key)))
-        return out
-
-    # Five arms, μ 3: nobody falls on block 1; C falls on block 2, and four still race block 3.
-    assert fates(raced("C")) == {"eliminated": [8], "measured": [12] * 4}, (
-        "a survivor set above μ stopped racing before max_blocks"
-    )
-    # B and C fall together on block 2, which leaves μ: the race is settled there.
-    assert fates(raced("BC")) == {"eliminated": [8, 8], "locked_in": [8] * 3}, (
-        "a race at μ survivors walked on, or settled before its cut"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_survey_rounds_starts_and_reference_are_arms_and_its_matrix_their_cells() -> None:
     starts = {arm_key(f"c{i}"): sheet(measurements([1.0, 0.0, float(i % 2)])) for i in range(3)} | {
         PARENT: sheet(measurements([0.0] * 3))
@@ -2149,7 +1680,6 @@ def peer_composition(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> _Compos
     return _Composition(name, walk, composed, crossover_says, crossed, composed_nodes)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_potters_queue_in_a_peers_roster_sizes_its_panel_off_its_own_knobs(
     peer_composition: _Composition,
 ) -> None:
@@ -2167,51 +1697,6 @@ def test_potters_queue_in_a_peers_roster_sizes_its_panel_off_its_own_knobs(
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_one_round_composes_a_peers_crossover_and_selector_with_potters_race(
-    monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
-) -> None:
-    name, walk, composed, crossover_says, crossed, composed_nodes = peer_composition
-    with (
-        composed(walk),
-        _peer_cycle(
-            workspace(),
-            _PEER_HOP,
-            monkeypatch,
-            name,
-            composed_nodes,
-            lambda prompt, _s: "Merged." in prompt,
-        ) as (cycle, _),
-    ):
-        offline.llm.says = crossover_says
-        assert not cycle.population
-        _, closed, cut, _ = asyncio.run(execute_round(cycle, 1))
-    assert cut is None
-    assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
-        "a crossover saw one parent"
-    )
-    assert cycle.slices.get(CapoObjective).length_norm, (
-        "CAPO's initial population banked no length norm for the objective its selector ranks on"
-    )
-    for panel_arm in closed.proposed.values():
-        lineage = panel_arm.individual.lineage
-        assert [(made.node, made.mode) for made in lineage.variations] == [
-            (f"{name}:mating", "deterministic"),
-            (f"{name}:capo_crossover", "llm"),
-        ], "an arm's lineage names the peer's mating and crossover"
-        assert len(set(lineage.parent_ids)) == 2, "a crossover child has two parents"
-    assert closed.election is not None
-    winner = closed.election.selected
-    assert winner is not None
-    assert "Merged." in closed.arms[winner].individual.prompts["solve"].fields["instruction"], (
-        "CAPO's selector elected it off potter's race"
-    )
-    assert cycle.population[0].id == winner, (
-        "the individual the next round mutates from does not lead the population the run carries"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_crossover_donor_gives_a_minority_of_the_loci_the_two_differ_on() -> None:
     # A crossover child continues its main.
     solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
@@ -2230,229 +1715,19 @@ def test_a_crossover_donor_gives_a_minority_of_the_loci_the_two_differ_on() -> N
         )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_cut_theta_round_reads_its_cold_parent_on_the_cells_the_archive_holds_graded(
-    monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
-) -> None:
-    # The guard and the election alike.
-    name, walk, composed, crossover_says, _, composed_nodes = peer_composition
-    theta_book = spend_book(None, usd_reserve=None)
-    # Empty until round 1 walks, so the origin's cells pay toward no cut.
-    theta_walking: list[bool] = []
-    theta_paid: list[int] = []
-
-    def paid_then_cut(_prompt: str, sample: Sample) -> bool:
-        if theta_walking:
-            theta_paid.append(sample.id)
-            if len(theta_paid) >= 2:
-                theta_book.share = Budget(usd=0.0)
-        return True
-
-    async def unpriced(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
-        # No `target_prompt_chars`, so the composite cannot grade the row it files.
-        return MeasuredCell.from_wire(
-            {
-                "sample_key": sample.key,
-                "query": sample.query,
-                "ground_truth": sample.ground_truth,
-                "predicted": sample.ground_truth,
-                "error": None,
-                "cached": False,
-                "pipeline_data": {"total_time": 0.1},
-            }
-        )
-
-    with (
-        composed([*walk[:-1], "theta_election"]),
-        _peer_cycle(
-            workspace(),
-            _PEER_HOP,
-            monkeypatch,
-            name,
-            composed_nodes,
-            paid_then_cut,
-            book=theta_book,
-            panel_gate="off",
-        ) as (cycle, _),
-    ):
-        offline.llm.says = crossover_says
-        session = cycle.session
-        search = list(session.state.scoring.partition.search)
-        with monkeypatch.context() as patched:
-            patched.setattr(query_loop, "measure_sample", unpriced)
-            asyncio.run(
-                score_search_point(
-                    cycle.parent_point,
-                    search[1:2],
-                    session,
-                    kind=MeasurementRole.ORIGIN,
-                    measured=None,
-                )
-            )
-        asyncio.run(
-            score_search_point(
-                cycle.parent_point,
-                search[:1],
-                session,
-                kind=MeasurementRole.ORIGIN,
-                measured=None,
-            )
-        )
-        theta_walking.append(True)
-        with pytest.raises(StopLoop) as unwound:
-            asyncio.run(execute_round(cycle, 1))
-    assert unwound.value.reason is StopReason.SPEND_BUDGET
-    assert cycle.rounds[-1].round == 0, "a cut round stood with no arm its selector could read"
-
-
-def _bench_says(body: dict[str, Any]) -> str:
-    if "Create overall 15 prompts" in _asked(body):
-        return json.dumps(["Solve it GOOD.", "Solve it OK."])
-    return "<prompt>Solve it BAD.</prompt>"
-
-
-class _PeerBench(NamedTuple):
-    cycle: Cycle
-    ledger: CycleEventLog
-    session: Session
+class _Filed(NamedTuple):
     stores: Stores
     cycle_dir: Path
 
 
-class _Bench(NamedTuple):
-    cycle: Cycle
-    ledger: CycleEventLog
-    session: Session
-    stores: Stores
-    cycle_dir: Path
-    picked: RoundResult
-    head: Cut | Measured
-    fold: ScoreSummary
-    origin_pass: BenchPass
-    graded: Callable[..., BenchPasses]
-
-
-_PEER_PAUSE = PauseCyclePayload(
-    campaign_id=_PEER_HOP.campaign_id, cycle_id=_PEER_HOP.cycle_id, reason="stop"
-)
-
-
-@contextmanager
-def _peer_bench(monkeypatch: pytest.MonkeyPatch, offline: Router) -> Iterator[_PeerBench]:
-    """The bench's CAPO cycle seated, and its campaign filed so a command reaches it."""
-    bench_nodes = {
-        "blocks": {"config": {"block_size": 4, "max_blocks": 2}},
-        "capo_init": {"config": {"size": 2, "k_max": 0}},
-        "mating": {"config": {"offspring": 1}},
-        "few_shot": {"config": {"k_max": 0}},
-        "survival": {"config": {"size": 2}},
-    }
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "capo",
-        bench_nodes,
-        lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0),
-        bench=4,
-    ) as (cycle, ledger):
-        offline.llm.says = _bench_says
-        stores = cycle.session.store
-        peer = minted_campaign(_PEER_HOP)
-        stores.campaigns.create_campaign(peer)
-        minted_dataset(stores, peer)
-        stores.campaigns.mint_cycle(_PEER_HOP)
-        yield _PeerBench(
-            cycle, ledger, cycle.session, stores, stores.campaigns.cycle_dir(_PEER_HOP)
-        )
-
-
-@contextmanager
-def _bench_cycle(monkeypatch: pytest.MonkeyPatch, offline: Router) -> Iterator[_Bench]:
-    """Its round, whose declared pick tops a higher-composite arm, and the origin's bench pass."""
-    with _peer_bench(monkeypatch, offline) as (cycle, ledger, session, stores, cycle_dir):
-        picked = asyncio.run(execute_round(cycle, 1)).result
-        head, fold = picked.head, picked.fold
-        assert head is not None and fold is not None and fold.fitness is not None
-        origin = cycle.origin_round.origin.individual
-        origin_pass = asyncio.run(
-            score_on_bench(
-                session,
-                cycle.points.measured(cycle.measured(origin.id)),
-                individual_id=origin.id,
-                subject="origin",
-                label="C0",
-                round_num=0,
-            )
-        )
-
-        def graded(*held: BenchPass) -> BenchPasses:
-            banked = bench_passes(origin_pass, *held)
-            return asyncio.run(
-                bench_selection(
-                    session, cycle.rounds, points=cycle.points, banked=banked, trigger="at_end"
-                )
-            )
-
-        yield _Bench(
-            cycle, ledger, session, stores, cycle_dir, picked, head, fold, origin_pass, graded
-        )
-
-
-def _pause_mid_pass(
-    bench: _Bench, monkeypatch: pytest.MonkeyPatch
-) -> tuple[list[RunPhase], list[str], Any]:
-    """A pause sent as the bench pass walks its second cell; the last graded view it filed."""
-    cycle, ledger, session, stores = bench.cycle, bench.ledger, bench.session, bench.stores
-    loop_control, session.state.control = (
-        session.state.control,
-        RunControl(commands=stores.commands, enclosing=(stores.subject(_PEER_HOP),)),
-    )
-    measure = vars(query_loop)["measure_sample"]
-    walked: list[int] = []
-    phases: list[RunPhase] = []
-    acks: list[str] = []
-
-    async def _stopped_mid_pass(sample: Sample, at: Any, pipeline_params: Any) -> MeasuredCell:
-        walked.append(sample.id)
-        if len(walked) == 2:
-            phases.append(stores.run_state(_PEER_HOP).run_phase)
-            acks.append(
-                (
-                    await CommandDispatcher(stores).dispatch(
-                        CommandCall(_PEER_PAUSE, door=Door.HOST)
-                    )
-                ).ack
-            )
-            phases.append(stores.run_state(_PEER_HOP).run_phase)
-        cell: MeasuredCell = await measure(sample, at, pipeline_params)
-        return cell
-
-    async def _bench_pick() -> BenchPasses:
-        async with paid_pass(
-            stores=stores,
-            pass_kind=MeasurementRole.BENCH,
-            at=stores.campaigns.campaign_cycle(_PEER_HOP),
-            declared=Budget(),
-            sends=(),
-        ):
-            return await bench_selection(
-                session,
-                cycle.rounds,
-                points=cycle.points,
-                banked=bench_passes(bench.origin_pass),
-                trigger="at_end",
-            )
-
-    with monkeypatch.context() as patched:
-        patched.setattr(query_loop, "measure_sample", _stopped_mid_pass)
-        with pytest.raises(PassStoppedError):
-            asyncio.run(_bench_pick())
-    session.state.control = loop_control
-    [*_, stopped_view] = [
-        record for record in ledger_records(ledger) if isinstance(record, PassGradedRecord)
-    ]
-    return phases, acks, stopped_view
+@pytest.fixture
+def filed_cycle() -> _Filed:
+    """A campaign minted at `_PEER_HOP` with its dataset and its cycle: what a command door finds."""
+    stores, peer = workspace(), minted_campaign(_PEER_HOP)
+    stores.campaigns.create_campaign(peer)
+    minted_dataset(stores, peer)
+    stores.campaigns.mint_cycle(_PEER_HOP)
+    return _Filed(stores, stores.campaigns.cycle_dir(_PEER_HOP))
 
 
 async def _held_pass(
@@ -2478,517 +1753,203 @@ async def _held_pass(
         raise AssertionError("a stop left the pass running")
 
 
-class _ClosedOrigin(NamedTuple):
-    drawn: list[Sample]
-    session: Session
-    origin_sp: JobSearchPoint
-
-
-def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
-    """Round 0 closed on the origin's walk, and its session on the bank less one row it recorded,
-    so a band's rescore can only read the rest."""
-    cycle, ledger, session = bench.cycle, bench.ledger, bench.session
-    origin = cycle.origin_round.origin.individual
-    c0_arm = cycle.origin_round.proposed[ArmKey(origin.id)]
-    ledger.append(RoundEnteredRecord(round=0))
-    ledger.append(
-        ArmRecord(
-            round=0,
-            arm=ArmKey(origin.id),
-            state=Proposed(
-                role=c0_arm.role, position=c0_arm.position, individual=c0_arm.individual
-            ),
-        )
-    )
-    with scoped(round=0):
-        c0_walk = asyncio.run(
-            score_search_point(
-                cycle.points.measured(cycle.measured(origin.id)),
-                list(session.state.scoring.partition.search)[:4],
-                session,
-                kind=MeasurementRole.ORIGIN,
-                measured=origin.id,
-            )
-        )
-    c0_round = cycle.origin_round.model_copy(
-        update={
-            "optimizer_state": optimizer_state(),
-            "cells": {ArmKey(origin.id): c0_walk.sheet},
-        }
-    )
-    close_round(ledger, [c0_round], cycle=cycle)
-    round_zero = bench.stores.campaigns.standing_rounds(_PEER_HOP, moment=None).rounds[0].close
-    assert round_zero.election is not None
-    recorded_keys = {key for key, _, _ in round_zero.cells.arms[round_zero.election.ended_on]}
-    drawn = [s for s in session.bank.samples if s.key in recorded_keys]
-    kept = [s for s in session.bank.samples if s.key != drawn[0].key]
-    return _ClosedOrigin(
-        drawn, dataclasses.replace(session, bank=Bank.of(kept)), cycle.points.job(origin)
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_arm_is_read_on_the_theta_its_election_takes_on_the_scale_its_race_read(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _bench_cycle(monkeypatch, offline) as bench:
-        cycle, picked, fold = bench.cycle, bench.picked, bench.fold
-        assert picked.election is not None
-        crowned = picked.election.selected
-        assert crowned is not None
-        [bar] = [picked.rows(key) for key in picked.arms if key not in picked.proposed]
-        # The scale the round OPENED on: its own cells fold after the election.
-        opened = cycle.difficulty.ruler_of(picked.election.ruler)
-        read = candidate_abilities({crowned: picked.rows(crowned)}, bar, opened)
-
-        fit = picked.fit(crowned)
-        assert fit is not None and (fit.theta, fit.theta_se) == (
-            read.theta[crowned],
-            read.theta_se[crowned],
-        ), "an arm carries the θ the election takes of its rows, on the scale it stamped"
-        optimization = cycle.config.optimization.model_copy(
-            update={"halt_at_fitness": fold.fitness, "lives": None}
-        )
-        unpaid = LineOutlay(search_usd=None, worked_s=None)
-        standing = RunStanding.after(list(cycle.rounds), lives=None, outlay=unpaid)
-        assert fold.total == 4 and standing_tripped(standing, optimization) is None, (
-            "a 4-cell point estimate met the target: the ceiling reads the paired lower bound"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_pause_reaches_a_bench_pass_in_flight_and_it_banks_as_stopped_on_the_cells_it_walked(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _bench_cycle(monkeypatch, offline) as bench:
-        stores, cycle_dir = bench.stores, bench.cycle_dir
-        phases, acks, stopped_view = _pause_mid_pass(bench, monkeypatch)
-        assert (phases, acks) == ([RunPhase.SCORING, RunPhase.PAUSED], ["accepted"]), (
-            "a pause was refused by a pass in flight, or the cycle never read as scoring"
-        )
-        assert isinstance(stopped_view, PassGradedRecord)
-        paused_pass = stopped_view.verification
-        assert stopped_view.state is ReadingState.PENDING and paused_pass.stop is not None, (
-            "a paused pass read as faulted, when `resume` sends it again"
-        )
-        assert paused_pass.stop.cause is StopReason.PAUSED and 0 < len(paused_pass.cells) < 4, (
-            "a paused pass banked no record of the cells it walked, or never stopped"
-        )
-        assert stores.inbox(_PEER_HOP).pause is None and not cycle_held(cycle_dir), (
-            "the pass left its pause unapplied, or kept the cycle after it stopped"
-        )
-
-
 # The cancel after the pass ended names the task the host cancel opened.
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_host_cancel_and_a_ctrl_c_each_stop_a_pass_by_its_commands_cancel(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
+    monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed
 ) -> None:
-    with _peer_bench(monkeypatch, offline) as bench:
-        stores, cycle_dir = bench.stores, bench.cycle_dir
-        # A cancel of a command that ended stands for nothing, so no stop waits for whatever holds
-        # the cycle next.
-        host = HostSession(Caller(stores))
+    stores, cycle_dir = filed_cycle.stores, filed_cycle.cycle_dir
+    # A cancel of a command that ended stands for nothing, so no stop waits for whatever holds
+    # the cycle next.
+    host = HostSession(Caller(stores))
 
-        def cancels() -> list[object]:
-            book = stores.commands.book()
-            return [
-                record.payload.command_id
-                for _, record in book.lines()
-                if isinstance(record.payload, CancelPayload)
-                and book.status(record.command_id) == "applied"
-            ]
-
-        def _passing(stop: Callable[[], Awaitable[object]]) -> Callable[[Any], Awaitable[Any]]:
-            async def _verify(dispatched: Any) -> Applier[None]:
-                return Applier(lambda: _held_pass(stores, stop, dispatched.command_id))
-
-            return _verify
-
-        def _verify_call(candidate_id: str) -> CommandCall[Any]:
-            return CommandCall(
-                VerifyCandidatePayload(
-                    campaign_id=_PEER_HOP.campaign_id,
-                    cycle_id=_PEER_HOP.cycle_id,
-                    candidate_id=candidate_id,
-                ),
-                door=Door.HOST,
-            )
-
-        opened_task: dict[str, str] = {}
-        # The act runs on past the answer, so it can reach its pass before the host holds the id.
-        answered = asyncio.Event()
-
-        async def _cancel_held() -> HostTask:
-            await answered.wait()
-            return await host.answer(CancelTask(opened_task["held"]))
-
-        async def _host_cancel() -> tuple[HostTask, str]:
-            sent = {
-                "campaign_id": _PEER_HOP.campaign_id,
-                "cycle_id": _PEER_HOP.cycle_id,
-                "candidate_id": "held",
-                IDEMPOTENCY_KEY: "held",
-            }
-            opened = await host.answer(CallTool("verify-candidate", sent))
-            assert opened.task is not None
-            opened_task["held"] = opened.task.task_id
-            answered.set()
-            with pytest.raises(PotterError) as stopped:
-                await host.answer(TaskResultOf(opened.task.task_id))
-            return await host.answer(TaskStatusOf(opened.task.task_id)), stopped.value.code
-
-        before = len(cancels())
-        with monkeypatch.context() as patched:
-            patched.setattr(measuring, "verify_candidate", _passing(_cancel_held))
-            cancelled, result_code = asyncio.run(_host_cancel())
-        landed: list[str] = []
-
-        async def _ctrl_c() -> str:
-            pressed_call = _verify_call("pressed")
-
-            async def _press() -> None:
-                signal.raise_signal(signal.SIGINT)
-                # A send already out bills either way: the press stops the pass at its next
-                # checkpoint, never by cancelling the wait on what it paid for.
-                while stores.commands.book().stop(pressed_call.command_id) is None:
-                    await asyncio.to_thread(lambda: None)
-                landed.append(pressed_call.command_id)
-
-            with monkeypatch.context() as patched:
-                patched.setattr(measuring, "verify_candidate", _passing(_press))
-                with (
-                    pytest.raises(PassStoppedError) as ended,
-                    ctrl_c_stops_pass(CommandDispatcher(stores), pressed_call),
-                ):
-                    await CommandDispatcher(stores).dispatch(pressed_call)
-            return str(ended.value)
-
-        pressed = asyncio.run(_ctrl_c())
-        assert cancelled.status == "cancelled" and "cancel by" in cancelled.status_message, (
-            "a host cancel left the pass running"
-        )
-        assert result_code == PassStoppedError.code, "a stopped pass's result is not its refusal"
-        assert "cancel by" in pressed, "a Ctrl+C left the pass running"
-        assert len(landed) == 1, "a Ctrl+C cancelled the pass's in-flight sends (bl1.B2)"
-        assert len(cancels()) == before + 2 and opened_task["held"] in cancels(), (
-            "a host cancel or a Ctrl+C ended the pass without its cancel"
-        )
-        assert stores.commands.book().stop(opened_task["held"]) is None, (
-            "a door's stop outlived its pass"
-        )
-        assert not cycle_held(cycle_dir), "the pass kept its cycle"
-
-        async def _cancel(command_id: str) -> str:
-            sent = CommandCall(CancelPayload(command_id=command_id), door=Door.HOST)
-            return (await CommandDispatcher(stores).dispatch(sent)).ack
-
-        assert asyncio.run(_cancel(opened_task["held"])) == "applied", (
-            "a cancel of an ended command was refused"
-        )
-        assert stores.commands.book().stop(opened_task["held"]) is None, (
-            "a cancel after its pass ended stood"
-        )
-        with pytest.raises(NotFoundError):
-            asyncio.run(_cancel("never-filed"))
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _peer_bench(monkeypatch, offline) as bench:
-        stores = bench.stores
-        # The command addresses the leaf by the id prefix a read takes, below its chain, so the act
-        # reaches the leaf's campaign under its full id.
-        leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
-        sandbox = inner_sandbox(stores, _PEER_HOP.campaign_id, _PEER_HOP.cycle_id)
-        (sandbox / stores.tenant_id).mkdir(exist_ok=True)
-        inner = descend_store(stores, (_PEER_HOP,))
-        inner.campaigns.create_campaign(minted_campaign(leaf))
-        inner.campaigns.mint_cycle(leaf)
-        reached: list[CycleHop] = []
-
-        async def _verify_reached(dispatched: Any) -> Any:
-            reached.append(dispatched.at.hop)
-            raise ConflictError("reached")
-
-        addressed = Subject.parse(
-            f"candidate:innerds/{leaf.cycle_id}/r1/c1;in={_PEER_HOP.campaign_id}::{_PEER_HOP.cycle_id}"
-        )
-        verify = VerifyCandidatePayload.model_validate(
-            {**addressed.command_fields, "candidate_id": addressed.candidate_id}
-        )
-        with monkeypatch.context() as patched:
-            patched.setattr(measuring, "verify_candidate", _verify_reached)
-            with pytest.raises(ConflictError):
-                asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(verify, door=Door.HOST)))
-        assert reached == [leaf], "a command resolved its leaf by another rule than a read's"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_campaigns_command_by_a_prefix_acts_on_its_full_id_as_a_cycles_does(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _peer_bench(monkeypatch, offline) as bench:
-        stores = bench.stores
-        benched: list[str] = []
-
-        async def _bench_reached(dispatched: Any) -> Any:
-            benched.append(dispatched.payload.campaign_id)
-            raise ConflictError("reached")
-
-        bench_by_prefix = HeldOutPayload(campaign_id=_PEER_HOP.campaign_id[:3])
-        with monkeypatch.context() as patched:
-            patched.setattr(measuring, "held_out", _bench_reached)
-            with pytest.raises(ConflictError):
-                asyncio.run(
-                    CommandDispatcher(stores).dispatch(CommandCall(bench_by_prefix, door=Door.HOST))
-                )
-        assert benched == [_PEER_HOP.campaign_id], "a campaign's command acted on the typed prefix"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _peer_bench(monkeypatch, offline) as bench:
-        stores = bench.stores
-        host = HostSession(Caller(stores))
-        # The filing names the pass's cycle even once another campaign shares the sent prefix.
-        sent_by_prefix = {
-            "campaign_id": _PEER_HOP.campaign_id[:3],
-            "cycle_id": _PEER_HOP.cycle_id,
-            "candidate_id": "c1",
-            IDEMPOTENCY_KEY: "verify-by-prefix",
-        }
-
-        async def _tracked_by_prefix() -> HostTask:
-            opened = await host.answer(CallTool("verify-candidate", sent_by_prefix))
-            assert opened.task is not None
-            return opened.task
-
-        async def _verify_filed(_: Any) -> Applier[None]:
-            async def _reached() -> None:
-                raise ConflictError("reached")
-
-            return Applier(_reached)
-
-        with monkeypatch.context() as patched:
-            patched.setattr(measuring, "verify_candidate", _verify_filed)
-            tracked = asyncio.run(_tracked_by_prefix())
-        filed = stores.commands.book().filing(tracked.task_id)
-        assert filed is not None and isinstance(filed.payload, VerifyCandidatePayload), filed
-        assert filed.payload.campaign_id == _PEER_HOP.campaign_id, (
-            "a host task filed the prefix it was sent by, which a later mint can make ambiguous"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_rescored(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _peer_bench(monkeypatch, offline) as bench:
-        ledger = bench.ledger
-        drawn, session, origin_sp = _closed_origin(bench)
-        with scoped(ledger=ledger):
-            band = asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
-        assert isinstance(band.reading, NoiseBand) and len(band.reading.raw) == 2
-        assert band.reading.recorded.n == len(band.verification.sample_keys) == len(drawn) - 1, (
-            "the band stood beside a recorded level over rows it never re-scored (bl3.B2)"
-        )
-        assert band in [
-            record for record in ledger_records(ledger) if isinstance(record, PassGradedRecord)
-        ], "the band was not filed on its cycle's ledger"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_noise_floor_that_scored_cells_and_read_no_band_files_them_unread(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _peer_bench(monkeypatch, offline) as bench:
-        _, session, origin_sp = _closed_origin(bench)
-        replicates: list[int] = []
-
-        async def _second_stops(*args: Any, **kwargs: Any) -> Any:
-            walk = await score_search_point(*args, **kwargs)
-            replicates.append(len(replicates))
-            return (
-                walk
-                if len(replicates) == 1
-                else dataclasses.replace(walk, stopped=WalkEnd.CLIENT_ERROR)
-            )
-
-        with monkeypatch.context() as patched, scoped(ledger=bench.ledger):
-            patched.setattr(held_out, "score_search_point", _second_stops)
-            band = asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
-    assert band.verification.cells and band.reading is None, "the scored cells were not kept"
-    assert band.state is ReadingState.MEMBER_UNSCOREABLE, "a band read from one replicate"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorded_rows(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    offline.llm.says = _bench_says
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "capo",
-        {"capo_init": {"config": {"size": 2, "k_max": 0}}},
-        lambda prompt, s: "OK" in prompt or s.id % 2 == 0,
-        origin_replicates=2,
-    ) as (cycle, ledger):
-        stores, peer = cycle.session.store, minted_campaign(_PEER_HOP)
-        stores.campaigns.create_campaign(peer)
-        minted_dataset(stores, peer)
-        session = cycle.session
-        session.state.clock = LaunchClock.now()
-        # The origin walked in round 0's door, which the round file's cells name.
-        ledger.append(RoundEnteredRecord(round=0))
-        walked = list(session.state.scoring.partition.search)[:4]
-        with scoped(round=0):
-            asyncio.run(open_origin_round(cycle, walked, resumed_ending=None))
-        bands = [
-            record
-            for record in ledger_records(ledger)
-            if isinstance(record, PassGradedRecord)
-            and record.verification.kind is MeasurementRole.NOISE_FLOOR
+    def cancels() -> list[object]:
+        book = stores.commands.book()
+        return [
+            record.payload.command_id
+            for _, record in book.lines()
+            if isinstance(record.payload, CancelPayload)
+            and book.status(record.command_id) == "applied"
         ]
-    assert len(bands) == 1, "round 0 filed no band, or one per replicate"
-    (band,) = bands
-    assert isinstance(band.reading, NoiseBand) and len(band.reading.raw) == 2
-    rows = band.verification.sample_keys
-    assert sorted(rows) == sorted(s.key for s in walked), (
-        "the band re-scored rows round 0 never recorded"
-    )
-    assert len(band.verification.cells) == 2 * len(rows), "a replicate re-scored a partial set"
 
+    def _passing(stop: Callable[[], Awaitable[object]]) -> Callable[[Any], Awaitable[Any]]:
+        async def _verify(dispatched: Any) -> Applier[None]:
+            return Applier(lambda: _held_pass(stores, stop, dispatched.command_id))
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _peer_bench(monkeypatch, offline) as bench:
-        ledger = bench.ledger
-        _, session, origin_sp = _closed_origin(bench)
+        return _verify
 
-        async def _outage(*_: object, **__: object) -> NoReturn:
-            raise RuntimeError("the rescore raised")
-
-        failed_from = ledger.next_offset
-        with monkeypatch.context() as patched, scoped(ledger=ledger):
-            patched.setattr(held_out, "score_search_point", _outage)
-            with pytest.raises(RuntimeError):
-                asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
-        dashboard = LiveDashboardProjection()
-        dashboard.feed(run_wiring("solve"))
-        for at, record in enumerate(ledger_records(ledger)):
-            if at >= failed_from:
-                dashboard.feed(record)
-        served = dashboard.value()
-        assert served is not None
-        assert [(m.state, m.failed_as) for m in served.verification if m.kind == "noise_floor"] == [
-            ("failed", ReadingState.PASS_STOPPED)
-        ], "a noise floor that raised left its mark running"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_spent_budget_stops_the_bench_pass_and_the_held_passes_beside_it_stand(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _bench_cycle(monkeypatch, offline) as bench:
-        origin_pass, head, graded = bench.origin_pass, bench.head, bench.graded
-        earlier = origin_pass.model_copy(
-            update={"arm": ArmName(key=ArmKey("an earlier pick"), round=7, label="C7.1")}
+    def _verify_call(candidate_id: str) -> CommandCall[Any]:
+        return CommandCall(
+            VerifyCandidatePayload(
+                campaign_id=_PEER_HOP.campaign_id,
+                cycle_id=_PEER_HOP.cycle_id,
+                candidate_id=candidate_id,
+            ),
+            door=Door.HOST,
         )
-        book = require_spend_book("the bench journey")
-        unspent, book.share = book.share, Budget(usd=0.0)
-        short = graded(earlier)
-        book.share = unspent
-        stop = short.selections[head.individual.id].stop
-        assert stop is not None and stop.cause is StopReason.SPEND_BUDGET, (
-            "a spent budget stops the pass and names the bound"
-        )
-        assert short.selections[earlier.arm.key] is earlier, "a held pass was dropped"
 
+    opened_task: dict[str, str] = {}
+    # The act runs on past the answer, so it can reach its pass before the host holds the id.
+    answered = asyncio.Event()
 
-# The refused pass holds the cells the paused pass banked.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_refusal_mid_walk_banks_the_cells_the_pass_held_never_zero_over_paid_rows(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _bench_cycle(monkeypatch, offline) as bench:
-        head, graded = bench.head, bench.graded
-        paused_pass = _pause_mid_pass(bench, monkeypatch)[2].verification
+    async def _cancel_held() -> HostTask:
+        await answered.wait()
+        return await host.answer(CancelTask(opened_task["held"]))
 
-        async def _refused_mid_pass(*_: Any) -> MeasuredCell:
-            raise SendRefusedError("no rate for this model", category=ErrorCategory.NO_RATE)
+    async def _host_cancel() -> tuple[HostTask, str]:
+        sent = {
+            "campaign_id": _PEER_HOP.campaign_id,
+            "cycle_id": _PEER_HOP.cycle_id,
+            "candidate_id": "held",
+            IDEMPOTENCY_KEY: "held",
+        }
+        opened = await host.answer(CallTool("verify-candidate", sent))
+        assert opened.task is not None
+        opened_task["held"] = opened.task.task_id
+        answered.set()
+        with pytest.raises(PotterError) as stopped:
+            await host.answer(TaskResultOf(opened.task.task_id))
+        return await host.answer(TaskStatusOf(opened.task.task_id)), stopped.value.code
+
+    before = len(cancels())
+    with monkeypatch.context() as patched:
+        patched.setattr(measuring, "verify_candidate", _passing(_cancel_held))
+        cancelled, result_code = asyncio.run(_host_cancel())
+    landed: list[str] = []
+
+    async def _ctrl_c() -> str:
+        pressed_call = _verify_call("pressed")
+
+        async def _press() -> None:
+            signal.raise_signal(signal.SIGINT)
+            # A send already out bills either way: the press stops the pass at its next
+            # checkpoint, never by cancelling the wait on what it paid for.
+            while stores.commands.book().stop(pressed_call.command_id) is None:
+                await asyncio.to_thread(lambda: None)
+            landed.append(pressed_call.command_id)
 
         with monkeypatch.context() as patched:
-            patched.setattr(query_loop, "measure_sample", _refused_mid_pass)
-            no_rate = graded().selections[head.individual.id]
-        assert no_rate.stop is not None and no_rate.stop.cause is StopReason.NO_RATE, (
-            "a refused pass did not name its refusal"
-        )
-        assert {key for key, _, _ in paused_pass.cells} <= {key for key, _, _ in no_rate.cells}, (
-            "a refused pass banked none of the cells it held (bl3.B4)"
-        )
+            patched.setattr(measuring, "verify_candidate", _passing(_press))
+            with (
+                pytest.raises(PassStoppedError) as ended,
+                ctrl_c_stops_pass(CommandDispatcher(stores), pressed_call),
+            ):
+                await CommandDispatcher(stores).dispatch(pressed_call)
+        return str(ended.value)
+
+    pressed = asyncio.run(_ctrl_c())
+    assert cancelled.status == "cancelled" and "cancel by" in cancelled.status_message, (
+        "a host cancel left the pass running"
+    )
+    assert result_code == PassStoppedError.code, "a stopped pass's result is not its refusal"
+    assert "cancel by" in pressed, "a Ctrl+C left the pass running"
+    assert len(landed) == 1, "a Ctrl+C cancelled the pass's in-flight sends (bl1.B2)"
+    assert len(cancels()) == before + 2 and opened_task["held"] in cancels(), (
+        "a host cancel or a Ctrl+C ended the pass without its cancel"
+    )
+    assert stores.commands.book().stop(opened_task["held"]) is None, (
+        "a door's stop outlived its pass"
+    )
+    assert not cycle_held(cycle_dir), "the pass kept its cycle"
+
+    async def _cancel(command_id: str) -> str:
+        sent = CommandCall(CancelPayload(command_id=command_id), door=Door.HOST)
+        return (await CommandDispatcher(stores).dispatch(sent)).ack
+
+    assert asyncio.run(_cancel(opened_task["held"])) == "applied", (
+        "a cancel of an ended command was refused"
+    )
+    assert stores.commands.book().stop(opened_task["held"]) is None, (
+        "a cancel after its pass ended stood"
+    )
+    with pytest.raises(NotFoundError):
+        asyncio.run(_cancel("never-filed"))
 
 
-# A pass after the stop replays the cells the paused pass banked, and each regrade reads the last.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composite_round(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
+def test_a_command_resolves_an_l4_leaf_by_the_rule_a_read_takes(
+    monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed
 ) -> None:
-    with _bench_cycle(monkeypatch, offline) as picked:
-        cycle, session, head, graded = picked.cycle, picked.session, picked.head, picked.graded
-        paused_pass = _pause_mid_pass(picked, monkeypatch)[2].verification
-        passes = graded()
-        [taken] = passes.selections.values()
-        assert (taken.arm.key, taken.arm.round, taken.stop) == (head.individual.id, 1, None), (
-            "the bench grades the pick the optimizer declared"
-        )
-        assert {key for key, _, _ in paused_pass.cells} <= {
-            key for key, _, replayed in taken.cells if replayed
-        }, "the pass after a stop bought again a cell the stopped pass had banked"
-        assert graded(taken).selections[taken.arm.key] is taken, "a held pass was sent again"
-        left = taken.model_copy(update={"sp_hash": "a pick the line left"})
-        resent = graded(left).selections[taken.arm.key]
-        assert [c[:2] for c in resent.cells] == [c[:2] for c in taken.cells]
-        assert all(replayed for *_, replayed in resent.cells), "a resent pass bought a cell again"
-        bench = read_bench(
-            session.store,
-            passes,
-            session.state.scoring.scorer,
-            line=bench_line(
-                taken.arm,
-                hop=session.hop,
-                instrument_id="capo-e2e",
-            ),
-        )
-        assert bench.selected is not None and bench.origin is not None
-        selected_accuracy, origin_fitness = bench.selected.fitness, bench.origin.fitness
-        assert selected_accuracy is not None and origin_fitness is not None
-        assert (selected_accuracy.value, origin_fitness.value) == (1.0, 0.0)
-        session.state.clock = LaunchClock.now()
-        result = build_cycle_result(
-            cycle,
-            session,
-            stop_reason=StopReason.ROUNDS_BUDGET,
-            stepped=False,
-            cycle_error=None,
-            finished_at="",
-            spend=None,
-            bench=bench,
-            selected=select_optimizer(cycle.config.optimization),
-            fitness_ceiling=None,
-        )
-        assert result.result_round == bench.selected.round == 1, "the result names the round graded"
+    stores = filed_cycle.stores
+    # The command addresses the leaf by the id prefix a read takes, below its chain, so the act
+    # reaches the leaf's campaign under its full id.
+    leaf = CycleHop(campaign_id="innerds__20260101-000000", cycle_id="inner-cycle-0")
+    sandbox = inner_sandbox(stores, _PEER_HOP.campaign_id, _PEER_HOP.cycle_id)
+    (sandbox / stores.tenant_id).mkdir(exist_ok=True)
+    inner = descend_store(stores, (_PEER_HOP,))
+    inner.campaigns.create_campaign(minted_campaign(leaf))
+    inner.campaigns.mint_cycle(leaf)
+    reached: list[CycleHop] = []
+
+    async def _verify_reached(dispatched: Any) -> Any:
+        reached.append(dispatched.at.hop)
+        raise ConflictError("reached")
+
+    addressed = Subject.parse(
+        f"candidate:innerds/{leaf.cycle_id}/r1/c1;in={_PEER_HOP.campaign_id}::{_PEER_HOP.cycle_id}"
+    )
+    verify = VerifyCandidatePayload.model_validate(
+        {**addressed.command_fields, "candidate_id": addressed.candidate_id}
+    )
+    with monkeypatch.context() as patched:
+        patched.setattr(measuring, "verify_candidate", _verify_reached)
+        with pytest.raises(ConflictError):
+            asyncio.run(CommandDispatcher(stores).dispatch(CommandCall(verify, door=Door.HOST)))
+    assert reached == [leaf], "a command resolved its leaf by another rule than a read's"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
+def test_a_campaigns_command_by_a_prefix_acts_on_its_full_id_as_a_cycles_does(
+    monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed
+) -> None:
+    stores = filed_cycle.stores
+    benched: list[str] = []
+
+    async def _bench_reached(dispatched: Any) -> Any:
+        benched.append(dispatched.payload.campaign_id)
+        raise ConflictError("reached")
+
+    bench_by_prefix = HeldOutPayload(campaign_id=_PEER_HOP.campaign_id[:3])
+    with monkeypatch.context() as patched:
+        patched.setattr(measuring, "held_out", _bench_reached)
+        with pytest.raises(ConflictError):
+            asyncio.run(
+                CommandDispatcher(stores).dispatch(CommandCall(bench_by_prefix, door=Door.HOST))
+            )
+    assert benched == [_PEER_HOP.campaign_id], "a campaign's command acted on the typed prefix"
+
+
+def test_a_host_task_is_filed_at_the_address_its_dispatch_acted_on(
+    monkeypatch: pytest.MonkeyPatch, filed_cycle: _Filed
+) -> None:
+    stores = filed_cycle.stores
+    host = HostSession(Caller(stores))
+    # The filing names the pass's cycle even once another campaign shares the sent prefix.
+    sent_by_prefix = {
+        "campaign_id": _PEER_HOP.campaign_id[:3],
+        "cycle_id": _PEER_HOP.cycle_id,
+        "candidate_id": "c1",
+        IDEMPOTENCY_KEY: "verify-by-prefix",
+    }
+
+    async def _tracked_by_prefix() -> HostTask:
+        opened = await host.answer(CallTool("verify-candidate", sent_by_prefix))
+        assert opened.task is not None
+        return opened.task
+
+    async def _verify_filed(_: Any) -> Applier[None]:
+        async def _reached() -> None:
+            raise ConflictError("reached")
+
+        return Applier(_reached)
+
+    with monkeypatch.context() as patched:
+        patched.setattr(measuring, "verify_candidate", _verify_filed)
+        tracked = asyncio.run(_tracked_by_prefix())
+    filed = stores.commands.book().filing(tracked.task_id)
+    assert filed is not None and isinstance(filed.payload, VerifyCandidatePayload), filed
+    assert filed.payload.campaign_id == _PEER_HOP.campaign_id, (
+        "a host task filed the prefix it was sent by, which a later mint can make ambiguous"
+    )
+
+
 def test_a_bench_line_reads_the_pick_it_holds_or_says_why_it_reads_nothing() -> None:
     line_stores = workspace()
     pick = prompted(instruction="the declared pick")
@@ -3123,7 +2084,6 @@ def _area_passes(stores: Stores, first: str, second: str) -> tuple[BenchPass, ..
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_the_held_out_area_averages_each_row_over_the_round_budget_against_the_origin() -> None:
     stores = workspace()
     scorer = scorer_of(_H2H_FORMULA)
@@ -3160,7 +2120,6 @@ def test_the_held_out_area_averages_each_row_over_the_round_budget_against_the_o
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_rebase_discarded_adoption_stays_in_the_held_out_area() -> None:
     stores = workspace()
     scorer = scorer_of(_H2H_FORMULA)
@@ -3181,252 +2140,7 @@ def test_a_rebase_discarded_adoption_stays_in_the_held_out_area() -> None:
     assert curve.area.estimate.value == pytest.approx(0.35)
 
 
-def _adopting_twice(picked: _Bench, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
-    """An earlier round of the line adopting the round's other measured arm: the pick and it."""
-    cycle, head, round_ = picked.cycle, picked.head, picked.picked
-    origin = cycle.origin_round.origin.individual.id
-    other = next(
-        key
-        for key, arm in round_.arms.items()
-        if key not in {head.individual.id, origin} and isinstance(arm, Measured | Cut)
-    )
-    assert round_.election is not None
-    earlier = round_.model_copy(
-        update={
-            "election": round_.election.model_copy(update={"selected": other, "ended_on": other})
-        }
-    )
-    spans = line_bench.line_spans
-    monkeypatch.setattr(
-        line_bench, "line_spans", lambda *a: [LineSpan([earlier], None), *spans(*a)]
-    )
-    return head.individual.id, other
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_every_adoption_grades_each_selection_the_line_adopted_once(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _bench_cycle(monkeypatch, offline) as picked:
-        cycle, session = picked.cycle, picked.session
-        adopted = set(_adopting_twice(picked, monkeypatch))
-
-        def graded(trigger: BenchTrigger, banked: BenchPasses) -> BenchPasses:
-            return asyncio.run(
-                bench_selection(
-                    session, cycle.rounds, points=cycle.points, banked=banked, trigger=trigger
-                )
-            )
-
-        assert set(graded("at_end", bench_passes(picked.origin_pass)).selections) == {
-            picked.head.individual.id
-        }, "`at_end` graded more than the final selection"
-        every = graded("every_adoption", bench_passes(picked.origin_pass))
-        assert set(every.selections) == adopted, "an adoption of the line went ungraded"
-        again = graded("every_adoption", every)
-        assert all(again.selections[key] is every.selections[key] for key in adopted), (
-            "a pass that answers was sent again"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_member_whose_point_moved_banks_its_pass_refused_and_the_roster_grades_on(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _bench_cycle(monkeypatch, offline) as picked:
-        cycle, session = picked.cycle, picked.session
-        head, moved = _adopting_twice(picked, monkeypatch)
-        measured = PointContext.measured
-
-        def rebuild(points: PointContext, arm: Concluded) -> JobSearchPoint:
-            if arm.individual.id == moved:
-                raise BankedSearchPointError("moved under it")
-            return measured(points, arm)
-
-        monkeypatch.setattr(PointContext, "measured", rebuild)
-        line_bench.graded(session, picked.origin_pass, subject="origin")
-        banked = asyncio.run(
-            bench_selection(
-                session,
-                cycle.rounds,
-                points=cycle.points,
-                banked=bench_passes(picked.origin_pass),
-                trigger="every_adoption",
-            )
-        )
-        folded = line_bench.line_passes(session.store, session.bound_campaign)
-        assert folded is not None and folded.refused == banked.refused == {
-            moved: "moved under it"
-        }, "the moved member's refusal was not banked on its pass"
-        assert not folded.selections[moved].cells and folded.selections[head].cells, (
-            "the refusal spent on the moved member, or stopped the rest of the roster"
-        )
-        read = line_bench._read_pass(
-            session.store,
-            folded.selections[moved],
-            session.state.scoring.scorer,
-            tolerance=folded.tolerance,
-            refused=folded.refused,
-        )
-        assert read.outcome.state is ReadingState.MEMBER_UNSCOREABLE, (
-            "the fold read a refused pass as anything but unscoreable"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_every_adoption_sets_aside_one_pass_per_selection_it_will_grade(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _bench_cycle(monkeypatch, offline) as picked:
-        cycle, session = picked.cycle, picked.session
-        _adopting_twice(picked, monkeypatch)
-        monkeypatch.setattr(line_bench, "cell_channels_of", lambda *_: {"cost": 0.01})
-        book = require_spend_book("the set-aside")
-        held: dict[BenchTrigger, float] = {}
-        for trigger in ("at_end", "every_adoption"):
-            # A set-aside the fold reads (`Budget.amount` keeps 6 places), below one pass's price.
-            book.set_aside(0.001, 1, paid_by="host")
-            cycle.config = cycle.config.model_copy(update={"bench_trigger": trigger})
-            line_bench.reserve_selection_pass(cycle, session)
-            held[trigger] = book.count().set_aside.usd_amount
-        assert held["at_end"] > 0.001, "vacuous — the selection's pass never raised the set-aside"
-        assert held["every_adoption"] == pytest.approx(2 * held["at_end"]), (
-            "the set-aside does not price every adoption the end pass grades"
-        )
-
-
 # 4. An authored round — the operator's arm in the seat a proposer fills
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    authored = workspace()
-    hop, cycle_dir = walking_cycle(authored)
-    measured: list[str] = []
-
-    def operator_solves(prompt: str, _sample: Sample) -> bool:
-        measured.append(prompt)
-        return "Operator" in prompt
-
-    def submit(key: str) -> Any:
-        payload = SubmitArmsPayload(
-            campaign_id=hop.campaign_id,
-            cycle_id=hop.cycle_id,
-            arms=[
-                SubmittedArm(
-                    prompt_fields={"solve": {"instruction": "Operator wrote this."}},
-                    changes_description="the operator's own wording",
-                )
-            ],
-        )
-        return CommandDispatcher(authored).dispatch(CommandCall(payload, key, door=Door.HOST))
-
-    # What earlier runs earned on this answer space reaches the origin's critique, not round 1 alone.
-    monkeypatch.setattr(
-        node_context, "earned_blocks_for", lambda *_a: {"persona": ("Answer tersely.",)}
-    )
-    try:
-        with _peer_cycle(
-            authored,
-            hop,
-            monkeypatch,
-            "potter",
-            {},
-            operator_solves,
-            control=RunControl(commands=authored.commands, cycle=authored.subject(hop)),
-            arm_gate="author",
-        ) as (cycle, _):
-            offline.llm.says = lambda _body: "ok"
-            at_origin = RoundContext(cycle=cycle, round_num=0)
-            origin_read = PotterView(
-                NodeContext(at_origin, NODE_MEMBERS.get("l1_critique")), Ladder()
-            )
-            assert [b.text for b in origin_read.block_window().get("persona", ())[:1]] == [
-                "Answer tersely."
-            ], "round 0's critique composed before the block pool was seeded"
-            l1 = cast("node_contract.Proposer", NODE_MEMBERS.get("l1_generate"))
-            seed = cast("node_contract.Proposer", NODE_MEMBERS.get("mating"))
-            seeded = node_contract.RoundWalk("default", (seed,), (l1,), "author")
-            blank = node_contract.RoundOpening({}, None, replayed=False)
-            stated = l1.opening(NodeContext(at_origin, l1), blank)
-            assert announce_opening(at_origin, seeded) == stated != blank, (
-                "a seed walking ahead of L1 stated the round's standing and arms in L1's place"
-            )
-            measured.clear()
-
-            async def at_the_hold() -> RoundResult:
-                with pytest.raises(ConflictError):
-                    await submit("arms-before-the-hold")
-
-                held = asyncio.Event()
-
-                async def gate_declared(*args: Any, **kwargs: Any) -> Any:
-                    held.set()
-                    return await hold_for_operator(*args, **kwargs)
-
-                monkeypatch.setattr(
-                    "promptpotter.application.runner.round.hold_for_operator", gate_declared
-                )
-
-                async def answer() -> None:
-                    await held.wait()
-                    assert authored.run_state(hop).run_phase is RunPhase.GATE, (
-                        "the hold never reached the ledger"
-                    )
-                    await submit("arms-at-the-hold")
-
-                (_, held_round, held_cut, _), _ = await asyncio.gather(
-                    execute_round(cycle, 1), answer()
-                )
-                assert held_cut is None
-                return held_round
-
-            # The hold polls on the loop's clock, which jumps past each wait.
-            offline.llm.sent.clear()
-            closed = jumping_clock(at_the_hold())
-            # The critique still reads the round; every other call it made filled the seat.
-            critique_node = NODE_MEMBERS.get("l1_critique")
-            assert isinstance(critique_node, node_contract.LlmNode)
-            assert critique_node.response_model is not None
-            critique = critique_node.response_model.__name__
-            asked = [
-                body.get("response_format", {}).get("json_schema", {}).get("name")
-                for body in offline.llm.sent
-            ]
-            assert all(name == critique for name in asked), (
-                f"an authored round called a model beside its critique: {asked}"
-            )
-            # A resume re-seats the pool its banked round names, never one a later write left.
-            banked = closed.model_copy(update={"optimizer_state": cycle.close_state(1)})
-            set_cycle(cycle, slices=[BlockPool(entries=())])
-            cycle.replay_priors([banked])
-            resumed = PotterView(
-                NodeContext(
-                    dataclasses.replace(at_origin, round_num=2),
-                    NODE_MEMBERS.get("l1_generate"),
-                ),
-                Ladder(),
-            )
-            assert [b.text for b in resumed.block_window().get("persona", ())[:1]] == [
-                "Answer tersely."
-            ], "a resumed run handed its proposer a pool its banked round does not name"
-            l3: Any = NODE_MEMBERS.get("l3_plan")
-            replanning = NodeContext(at_origin, l3)
-            set_cycle(cycle, slices=[L3Memory(plan="attack the default label")])
-            l3.land(replanning, l3.parse(replanning, L3PlanOutput(plan="")))
-            assert cycle.slices.get(L3Memory).plan == "", (
-                "an empty replan kept the plan it replaced: every later prompt read a dropped strategy"
-            )
-    finally:
-        release_cycle(cycle_dir)
-    [arm] = closed.proposed.values()
-    assert arm.individual.prompts["solve"].fields["instruction"] == "Operator wrote this.", (
-        "the operator's arm ran"
-    )
-    assert any("Operator wrote this." in prompt for prompt in measured), "it was measured"
-    assert [made.mode for made in arm.individual.lineage.variations] == ["operator"]
 
 
 # 5. Elimination — who is cut, and when
@@ -3464,7 +2178,6 @@ def trailing() -> _Trailing:
     return _Trailing(cfg, parent, behind_perfect_prior)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
     cfg, parent, _ = trailing
     graded = PoBBCheck(cfg, n_min=6, ruler=None, parent=parent)
@@ -3488,7 +2201,6 @@ def test_epsilon_ramps_in_from_its_floor(trailing: _Trailing) -> None:
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_an_arm_behind_a_perfect_prior_is_cut_on_the_epsilon_that_fired(
     trailing: _Trailing,
 ) -> None:
@@ -3513,7 +2225,6 @@ def test_an_arm_behind_a_perfect_prior_is_cut_on_the_epsilon_that_fired(
     assert late.check_result["epsilon"] == pytest.approx(0.30)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -> None:
     _, parent, _ = trailing
     unpaired = PoBBCheck(
@@ -3532,7 +2243,6 @@ def test_an_arm_is_never_cut_on_cells_its_rival_never_sat(trailing: _Trailing) -
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_cost_terms_tie_breaks_never_pin_p_best_at_a_coin(trailing: _Trailing) -> None:
     cfg, parent, _ = trailing
     longer, terse_parent = _charged_by_length()
@@ -3542,29 +2252,27 @@ def test_a_cost_terms_tie_breaks_never_pin_p_best_at_a_coin(trailing: _Trailing)
     assert standings[-1].p_best > 0.5, "a cost term's tie-breaks pinned p_best at a coin"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_origin_round_serves_its_lift_over_the_constant_answer_on_the_cells_it_scored(
-    offline: Router,
-) -> None:
-    bank = [
-        Sample(id=i, query=f"q{i}", ground_truth="TRUE" if i < 9 else "FALSE") for i in range(12)
-    ]
-    origin = jumping_clock(run_init_round(workspace(), offline, bank)).cycle.origin_round
-    floor = origin.health.constant_floor
-    assert floor is not None and (floor.label, floor.floor) == ("TRUE", 0.75), (
-        f"the floor is not the modal truth's share: {floor}"
-    )
-    fitness = origin.results.column(ROW_GRADES["fitness"])
-    truth = {cell.key: cell.facts.ground_truth for cell in origin.results.scoreable}
-    paired = fmean(fitness[key] - (truth[key] == "TRUE") for key in fitness)
-    assert floor.lift.value == pytest.approx(paired), "the lift is not the origin paired per cell"
-    served = RoundHealth.of(0, origin.health).floor
-    assert served is not None and (served.key == "floor_rewards_collapse") is (paired < 0), (
-        "the served verdict disagrees with the floor's side of the origin"
-    )
+def test_an_origin_reads_its_lift_over_the_constant_answer_on_the_labelled_cells_it_scored() -> (
+    None
+):
+    truths = ["TRUE"] * 9 + ["FALSE"] * 3
+    for said in (truths, ["TRUE"] * 12, ["FALSE"] * 12):
+        walked = scorer_of().sheet(
+            measurement(i, None, predicted=p, ground_truth=t).facts
+            for i, (p, t) in enumerate(zip(said, truths, strict=True))
+        )
+        unlabelled = measurement(12, None, predicted="TRUE", ground_truth="").facts
+        floor = origin_floor(walked.merged(scorer_of().sheet([unlabelled])))
+        assert floor is not None and (floor.label, floor.floor) == ("TRUE", 0.75), (
+            f"the floor is not the modal truth's share: {floor}"
+        )
+        paired = fmean(float(p == t) - (t == "TRUE") for p, t in zip(said, truths, strict=True))
+        assert floor.lift.value == pytest.approx(paired), (
+            "the lift is not the origin paired per cell"
+        )
+    assert origin_floor(scorer_of().sheet([unlabelled])) is None, "no label, no constant answer"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trailing) -> None:
     # A verifier proves an answer wrong by an unsolved cell, and alike-and-all-solved is NOT
     # collapsed.
@@ -3649,7 +2357,16 @@ def test_the_collapse_refusal_reads_the_answer_never_the_labels(trailing: _Trail
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
+def test_a_rolling_race_sends_only_what_it_decided_and_banks_only_the_rows_it_took() -> None:
+    # A rolling decision reads one returned row, so nothing past its decided calls is sent ahead
+    # and a stop banks no cell a later decision might never have taken.
+    rolling, batch = Trigger(each_read=True), Trigger(each_read=False)
+    for trigger, cells, past, ahead in ((rolling, 4, 0, 0), (batch, 4, 1, 3), (batch, 2, 3, 0)):
+        assert trigger.ahead(cells, past) == ahead, f"{trigger} at {cells}/{past} sent ahead"
+    for trigger, taken, decided, sure in ((rolling, 3, 2, 3), (batch, 3, 2, 5)):
+        assert trigger.sure(taken, decided) == sure, f"{trigger} banked past {sure}"
+
+
 def test_the_fields_p_best_sums_to_one_discriminates_graded_rows_and_reads_no_slot() -> None:
     def uncharged(*values: float) -> CellSheet:
         return sheet(measurement(i, v, objective=v) for i, v in enumerate(values))
@@ -3666,7 +2383,6 @@ def test_the_fields_p_best_sums_to_one_discriminates_graded_rows_and_reads_no_sl
     assert ties[ArmKey("a")] == pytest.approx(0.5, abs=0.03), "a tie reads as a coin"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does() -> None:
     def warned(kind: str | None) -> dict[str, Any]:
         warning = {"step": "entity_profiling", "code": "json_validate_failed"}
@@ -3697,7 +2413,6 @@ def test_a_fatal_row_ends_a_candidate_on_one_sighting_and_an_advisory_never_does
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_an_empty_answer_is_a_graded_miss_and_cuts_only_by_the_rate() -> None:
     """banking77, 2026-11-18: one stop-finished empty answer at row 18 cut an arm that answered 17."""
     empty: dict[str, Any] = {
@@ -3718,33 +2433,6 @@ def test_an_empty_answer_is_a_graded_miss_and_cuts_only_by_the_rate() -> None:
     assert cut is not None and cut.check_result["fatal"] is not True, "the rate did not cut it"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_block_line_counts_an_arm_the_degradation_check_cut(built_stores: Stores) -> None:
-    """banking77, 2026-11-18: the one arm racing, cut broken at row 18, read `none cut · 1 survive`."""
-    readout = ReadoutProjection(seat(built_stores).cycle.session, sink=None)
-    walked = arm_state("c1", position=ArmPosition(round=1, idx=1, total=1), total=18, cut="broken")
-    assert isinstance(walked, Cut) and isinstance(walked.reason, Broken)
-    reading = degradation_reading(
-        source="degradation",
-        degraded_count=1,
-        total_scored=18,
-        warning_types={"llm_only:content_filtered": 1},
-        dominant_warning="llm_only:content_filtered",
-        fatal=True,
-    )
-    broken = walked.model_copy(
-        update={"reason": Broken(failure=walked.reason.failure, degradation=reading)}
-    )
-    block = {"n": 1, "of": 100, "size": 18, "racing": 1}
-    readout.on_arm_measuring(
-        Measuring(**walked.model_dump(exclude={"state", "reason"}), block=block)
-    )
-    readout.on_arm_concluded(broken, score_summary(total=18, walked=18))
-    (line,) = readout._render_block_lines()
-    assert line.endswith(f"cut {broken.label} · 0 survive"), line
-
-
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_rung_the_endpoint_refuses_reads_refused_on_its_arm_never_broken(offline: Router) -> None:
     said = {"detail": "Unsupported value: 'reasoning_effort' does not support 'high' here."}
     offline.backend.faults["/matches"] = [httpx.Response(400, json=said) for _ in range(12)]
@@ -3763,7 +2451,6 @@ def test_a_rung_the_endpoint_refuses_reads_refused_on_its_arm_never_broken(offli
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_hole_is_neither_a_stop_nor_a_deprecated_row() -> None:
     # `scored_samples - total` would count both.
     def hole_row(sample_id: int, predicted: str = "TRUE", **extra: Any) -> GradedCell:
@@ -3803,7 +2490,6 @@ def test_a_hole_is_neither_a_stop_nor_a_deprecated_row() -> None:
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_cell_a_declared_bound_cut_is_settled_and_never_re_measured() -> None:
     def bounded(category: ErrorCategory) -> RoundResult:
         rows = [
@@ -3818,34 +2504,6 @@ def test_a_cell_a_declared_bound_cut_is_settled_and_never_re_measured() -> None:
     assert repair_cut([bounded(ErrorCategory.UNSCOREABLE)]).rounds == [1], (
         "a cell that ran to its own end can answer differently on a re-measure"
     )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_gepas_gate_tests_each_arm_against_the_minibatch_scores_of_its_own_parent(
-    built_stores: Stores,
-) -> None:
-    bars = MinibatchBars(
-        bars={
-            "weak_parent_child": MinibatchBar(parent_id="p1", objectives={"0": 0.1, "1": 0.1}),
-            "strong_parent_child": MinibatchBar(parent_id="p2", objectives={"0": 0.9, "1": 0.9}),
-        }
-    )
-    weak_child, strong_child = (ArmKey(cid) for cid in bars.bars)
-    gated = seat(built_stores, optimization={"optimizer": "gepa"})
-    gated.cycle.emit(bars, gated.round_num)
-    gate = MinibatchGate()
-    minibatch = samples(2)
-
-    race = gate.race(
-        NodeContext(gated, gate), RoundSamples(cells=minibatch, order=minibatch, block_size=2)
-    )
-    assert race.priors == {}, "the gate paired a prior, so the bench would catch it up"
-    level = [measurement(i, 1.0, objective=0.5) for i in range(2)]
-    walk = WalkView(level, minibatch, 0, len(level))
-    stops = race.decide(View(dict.fromkeys((weak_child, strong_child), walk), False)).stops
-    assert (
-        list(stops) == [strong_child] and stops[strong_child].check_result["parent_id"] == "p2"
-    ), "one arm's parent bar decided another arm's gate"
 
 
 # 6. Escalation and stop — live, and folded back on resume
@@ -3929,7 +2587,6 @@ def _high_water(comp: float | None, thetas: list[float], se: float) -> HighWater
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
     # θ advances once for real (+0.467), then by noise.
     stall_rounds = [
@@ -3961,7 +2618,6 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_the_bar_applies_on_the_theta_scale_only() -> None:
     # A composite-scale verdict has no error term.
     series = level_series(0.34, [0.35, 0.60, 0.80], ses=[0.20, 0.20, 0.20])
@@ -3992,7 +2648,6 @@ def test_the_bar_applies_on_the_theta_scale_only() -> None:
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_the_l1_only_arm_reaches_no_layer_above_it_over_the_whole_predicate_space() -> None:
     # A deferral that never fires in one run is no suppression.
     grid = list(product([0, 1, 5], [0, 3], [False, True], [False, True], [False, True]))
@@ -4019,7 +2674,6 @@ def test_the_l1_only_arm_reaches_no_layer_above_it_over_the_whole_predicate_spac
 
 
 # Each stretch climbs the ladder the one before it left.
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_heal_fire_spends_no_l3_patience() -> None:
     healed = Ladder()
     seen: list[float] = []
@@ -4058,7 +2712,6 @@ def test_a_heal_fire_spends_no_l3_patience() -> None:
 
 
 # Each fire lands on the ladder the fire before it left.
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_landed_fire_moves_the_ladder_and_an_unlanded_one_moves_nothing() -> None:
     landed = Ladder()
     trace: list[tuple[int, int, float | None, int, int, float | None, int]] = []
@@ -4135,7 +2788,6 @@ def stall_reads() -> _StallReads:
     return _StallReads(close, observed)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_the_l1_stall_and_the_lives_bank_read_the_same_rounds(stall_reads: _StallReads) -> None:
     close, observed = stall_reads
     sequence = [(True, 2), (True, 2), (True, 2), (True, 2), (False, 0), (False, 2), (False, 2)]
@@ -4170,7 +2822,6 @@ def test_the_l1_stall_and_the_lives_bank_read_the_same_rounds(stall_reads: _Stal
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
     stall_reads: _StallReads,
 ) -> None:
@@ -4216,7 +2867,6 @@ def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_pick_one_panel_cell_holed_reads_on_the_cells_both_scored() -> None:
     holed = _line_read(1, True, ("C1.1", [*_CLEAN_PANEL[:8], None]), c0=_C0_PANEL)
     assert holed.lead.coverage is not None and holed.lead.headline is not None
@@ -4226,7 +2876,6 @@ def test_a_pick_one_panel_cell_holed_reads_on_the_cells_both_scored() -> None:
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_no_pair_to_read_stands_alone_and_a_pair_owed_refused_or_unlanded_is_no_evidence() -> None:
     lead = _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL).lead
     alone, no_evidence = RoundAdvance.ADVANCED_UNPAIRED, RoundAdvance.UNREAD
@@ -4256,183 +2905,63 @@ def test_no_pair_to_read_stands_alone_and_a_pair_owed_refused_or_unlanded_is_no_
         assert round_advance(0, True, pair, _TODAYS_BAR) is RoundAdvance.ORIGIN, state
 
 
-def _lived_peer(
-    monkeypatch: pytest.MonkeyPatch,
-) -> AbstractContextManager[tuple[Cycle, CycleEventLog]]:
-    """A CAPO peer on a life bank of 2 capped at 4."""
-    return _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "capo",
-        {},
-        lambda _p, _s: True,
-        lives={"start": 2, "cap": 4},
-    )
+_LIVED = defaulted_config({"optimization": {"lives": {"start": 2, "cap": 4}}}).optimization
+_UNPAID = LineOutlay(search_usd=None, worked_s=None)
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_the_bench_stops_a_peer_on_spent_lives(monkeypatch: pytest.MonkeyPatch) -> None:
-    with _lived_peer(monkeypatch) as (cycle, _):
-        lives = cycle.config.optimization.lives
-        assert lives is not None
-        origin_arm = arm_state(
-            "C0", position=ArmPosition(round=0, idx=0, total=1), individual=cycle.parent
-        )
-        origin = round_result(0, arms=[origin_arm], cells={})
+def test_the_bench_stops_a_line_on_spent_lives() -> None:
+    lives = _LIVED.lives
+    assert lives is not None
+    origin_arm = arm_state("C0", position=ArmPosition(round=0, idx=0, total=1))
+    origin = round_result(0, arms=[origin_arm], cells={})
 
-        def stop_after(*closes: tuple[bool, int]) -> tuple[int | None, StopReason | None]:
-            line = [
-                origin,
-                *(
-                    round_result(n, improved=improved, voted={"electable": electable})
-                    for n, (improved, electable) in enumerate(closes, 1)
-                ),
-            ]
-            paid = LineOutlay(search_usd=None, worked_s=None)
-            set_cycle(
-                cycle, line=line, standing=RunStanding.after(line, lives=lives.bank, outlay=paid)
-            )
-            assert cycle.standing is not None
-            return stalls_left(line, lives.bank), standing_tripped(
-                cycle.standing, cycle.config.optimization
-            )
-
-        held, promoted, uncompared = (False, 2), (True, 2), (False, 0)
-        assert stop_after(held) == (1, None)
-        assert stop_after(held, held) == (0, StopReason.LIVES_EXHAUSTED)
-        assert stop_after(held, uncompared) == (1, None), (
-            "a round no arm reached the election of is evidence about the proposer, no life"
-        )
-        assert stop_after(promoted, promoted, promoted, held, held) == (2, None), (
-            "the bank fills to its cap"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resolved(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    with _lived_peer(monkeypatch) as (cycle, _):
-        readings = {
-            RoundAdvance.ADVANCED: _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
-            RoundAdvance.NOT_SEPARATED: _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL),
-            RoundAdvance.ADVANCED_UNPAIRED: OverlapReading.unpaired(ReadingState.NOT_HELD, 1, True),
-            RoundAdvance.UNREAD: OverlapReading.unpaired(ReadingState.PASS_STOPPED, 1, True),
-        }
-        assert all(reading.advance is advance for advance, reading in readings.items())
-
-        # One ceiling stop: the pick's own level on the origin panel at its one-sided anytime-valid
-        # lower bound, `halt_at_fitness` its target; no pair, no stop.
-        def outcome(reading: OverlapReading, target: float) -> StopReason | None:
-            closing = round_result(1, improved=True, overlap=reading)
-            folds = {key: score_summary(composite_fitness=1.0) for key in closing.folds}
-            line = [round_result(0, improved=False), closing.model_copy(update={"folds": folds})]
-            set_cycle(
-                cycle,
-                line=line,
-                standing=RunStanding.after(
-                    line, lives=None, outlay=LineOutlay(search_usd=None, worked_s=None)
-                ),
-            )
-            assert cycle.standing is not None
-            optimization = cycle.config.optimization.model_copy(update={"halt_at_fitness": target})
-            return standing_tripped(cycle.standing, optimization)
-
-        for advance in (RoundAdvance.ADVANCED_UNPAIRED, RoundAdvance.UNREAD):
-            assert outcome(readings[advance], 0.0) is None, f"{advance} met a ceiling unpaired"
-        swept = _line_read(1, True, ("C1.1", [1.0] * 9), c0=[0.0] * 9)
-        assert outcome(swept, 0.55) is StopReason.TARGET_HIT, (
-            "a pick whose anytime lower bound clears the target ran on"
-        )
-        assert outcome(swept, 0.6) is None, (
-            "9 of 9 stopped at a 0.6 ceiling: a short draw's rate is no level at every look"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_stands(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    member = NODE_MEMBERS.get("l1_generate")
-    assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {"l1_generate": {"config": {"n_variants": 8}}},
-        lambda _p, _s: True,
-    ) as (cycle, _):
-        parent = cycle.parent.prompts["solve"].fields["instruction"]
-
-        def edit(op: str, anchor: str, text: str) -> dict[str, Any]:
-            return {"at": "solve.instruction", "op": op, "anchor": anchor, "text": text}
-
-        edits = [
-            [edit("replace", parent, parent)],
-            [edit("replace", "a span the parent never held", "Check.")],
-            # Two edits on one field: the second anchors on the text the first left.
-            [edit("insert_after", parent, " Zq7."), edit("replace", "Zq7.", "Check twice.")],
-            # A span the text holds twice names no place to edit.
-            [edit("insert_after", parent, " Zq7. Zq7."), edit("replace", "Zq7.", "Check.")],
-            [edit("replace", "", "Rewritten whole.")],
-            [edit("insert_after", parent, " Zq9.")],
-            # Past the length budget, the edits summed.
-            [edit("insert_after", parent, " Zq7."), edit("insert_after", "Zq7.", " Zq8." * 200)],
-            # A hard-wrapped span quoted with its line break reflowed still names its one place.
-            [edit("insert_after", parent, " Zq7\n  Zq8."), edit("replace", "Zq7 Zq8.", "Check.")],
+    def stop_after(*closes: tuple[bool, int]) -> tuple[int | None, StopReason | None]:
+        line = [
+            origin,
+            *(
+                round_result(n, improved=improved, voted={"electable": electable})
+                for n, (improved, electable) in enumerate(closes, 1)
+            ),
         ]
+        standing = RunStanding.after(line, lives=lives.bank, outlay=_UNPAID)
+        return stalls_left(line, lives.bank), standing_tripped(standing, _LIVED)
 
-        def says(body: dict[str, Any]) -> str:
-            # A line of one panel, cited under no name; two lines joined are held by none.
-            prompt = body["messages"][0]["content"]
-            line = prompt[prompt.index("ESCALATION: ") :].splitlines()[0]
-            cites = [None, None, line, None, None, "SCORED: 1 | true: 2", None, None]
-            return json.dumps(
-                {
-                    "variants": [
-                        {
-                            "evidence_grounding": None if c is None else {"citation": c},
-                            "mechanism": "m",
-                            "targets_rows": [],
-                            "edits": e,
-                        }
-                        for e, c in zip(edits, cites, strict=True)
-                    ]
-                }
-            )
+    held, promoted, uncompared = (False, 2), (True, 2), (False, 0)
+    for closes, expected, why in (
+        ((held,), (1, None), "one held round spends one life"),
+        ((held, held), (0, StopReason.LIVES_EXHAUSTED), "the bank empties and stops"),
+        ((held, uncompared), (1, None), "a round no arm reached the election of costs no life"),
+        ((promoted, promoted, promoted, held, held), (2, None), "the bank fills to its cap"),
+    ):
+        assert stop_after(*closes) == expected, why
 
-        offline.llm.says = says
-        offline.llm.sent.clear()
-        generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
-        readout = cycle.output(L1Readout, 1)
-    assert len(offline.llm.sent) == 1, "a reply the invariants refuse per arm bought a repair"
-    fatal = [
-        [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
-        for cp in proposed.proposals
-    ]
-    missed, unheld, long = "edit_anchor_not_one_span", "citation_not_in_panel", "over_ceiling"
-    assert fatal == [["no_op_variant"], [missed], [], [missed], [], [unheld], [long], []], (
-        "a restating, mis-anchored, unheld-citing or overlong variant was not refused as its own arm"
-    )
-    assert "at most 800 characters" in json.dumps(offline.llm.sent[0]), (
-        "the length budget the variant was refused by was never stated on the wire"
-    )
-    written = [cp.individual.prompts["solve"].fields["instruction"] for cp in proposed.proposals]
-    assert written[2] == f"{parent} Check twice.", "two edits on one field did not apply in order"
-    assert written[4] == "Rewritten whole.", "an empty anchor did not rewrite the whole field"
-    assert written[7] == f"{parent} Check.", "an anchor reflowing a line break missed its span"
-    grounding = proposed.proposals[2].individual.lineage.evidence_grounding
-    assert grounding is not None and grounding.field == "escalation_panel", (
-        "a quote of a panel line was not filed under the panel holding it"
-    )
-    assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
-        None,
-        8,
-        {"no_op_variant": 1, missed: 2, unheld: 1, long: 1},
-    ), "a round's per-arm refusals were not booked against what L1 generated"
+
+def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resolved() -> None:
+    readings = {
+        RoundAdvance.ADVANCED: _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
+        RoundAdvance.NOT_SEPARATED: _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL),
+        RoundAdvance.ADVANCED_UNPAIRED: OverlapReading.unpaired(ReadingState.NOT_HELD, 1, True),
+        RoundAdvance.UNREAD: OverlapReading.unpaired(ReadingState.PASS_STOPPED, 1, True),
+    }
+    assert all(reading.advance is advance for advance, reading in readings.items())
+
+    # One ceiling stop: the pick's own level on the origin panel at its one-sided anytime-valid
+    # lower bound, `halt_at_fitness` its target; no pair, no stop.
+    def outcome(reading: OverlapReading, target: float) -> StopReason | None:
+        closing = round_result(1, improved=True, overlap=reading)
+        folds = {key: score_summary(composite_fitness=1.0) for key in closing.folds}
+        line = [round_result(0, improved=False), closing.model_copy(update={"folds": folds})]
+        standing = RunStanding.after(line, lives=None, outlay=_UNPAID)
+        return standing_tripped(standing, _LIVED.model_copy(update={"halt_at_fitness": target}))
+
+    swept = _line_read(1, True, ("C1.1", [1.0] * 9), c0=[0.0] * 9)
+    for reading, target, stop, why in (
+        (readings[RoundAdvance.ADVANCED_UNPAIRED], 0.0, None, "an unpaired pick met a ceiling"),
+        (readings[RoundAdvance.UNREAD], 0.0, None, "an unread pick met a ceiling"),
+        (swept, 0.55, StopReason.TARGET_HIT, "a pick whose anytime bound clears it ran on"),
+        (swept, 0.6, None, "9 of 9 at a 0.6 ceiling: a short draw's rate is no level"),
+    ):
+        assert outcome(reading, target) is stop, why
 
 
 def test_a_citation_names_the_panel_holding_its_words_whole_and_in_order() -> None:
@@ -4445,207 +2974,6 @@ def test_a_citation_names_the_panel_holding_its_words_whole_and_in_order() -> No
             f"{citation!r} was filed under a panel holding it only inside another word"
         )
         assert bool(failures) == (panel is None), f"{citation!r} cited nothing yet stood"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_optimizer_call_whose_send_raises_leaves_its_record_and_still_raises(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # A call announced and never closed reads as one still waiting, whatever it cost.
-    member = NODE_MEMBERS.get("l1_generate")
-    assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {},
-        lambda _p, _s: True,
-    ) as (cycle, ledger):
-        offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
-        generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-        with pytest.raises(FailedSendError):
-            asyncio.run(member.propose(generating, node_contract.Proposals([])))
-        record = scan_last([LedgerSpan(ledger.path)], LLMCallRecord)
-    assert record is not None and record.node == "l1_generate", "the failed call left no record"
-    assert (
-        "FailedSendError" in record.payload["error"] and "refused" in record.payload["content"]
-    ), "the record names no failure, or drops the refusal's body"
-    assert record.payload["template_fields"] and record.payload["response_schema"], (
-        "the record cannot rebuild the request that failed"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # The scorer parses answer_format.
-    member = cast("L1Generate", NODE_MEMBERS.get("l1_generate"))
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {},
-        lambda _p, _s: True,
-    ) as (cycle, _):
-        fields = cycle.parent.prompts["solve"].fields
-        writes = [("answer_format", "Say anything."), ("instruction", "Check each premise.")]
-        offline.llm.says = lambda _body: json.dumps(
-            {
-                "variants": [
-                    {
-                        "mechanism": "edit",
-                        "edits": [
-                            {
-                                "at": f"solve.{field}",
-                                "op": "replace",
-                                "anchor": fields.get(field, ""),
-                                "text": text,
-                            }
-                        ],
-                    }
-                    for field, text in writes
-                ]
-            }
-        )
-        generating = NodeContext(
-            RoundContext(cycle=cycle, round_num=1),
-            NODE_MEMBERS.get("l1_generate"),
-        )
-        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
-    fatal = [
-        [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
-        for cp in proposed.proposals
-    ]
-    assert fatal == [["forbidden_axis"], []], "an L1 edit of answer_format reached the backend"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_capo_inits_reply_out_of_form_is_one_refused_child(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # An array of blanks seeds nothing; read as in form, it left the round without one arm or a word.
-    # A reply nested past the parser's stack crashed the init instead of refusing it.
-    member = cast("CapoInit", NODE_MEMBERS.get("capo_init"))
-    for n, reply in enumerate(
-        (json.dumps(["  ", ""]), "[" * 5000 + "]" * 5000, "[" + "1+" * 20000 + "1]")
-    ):
-        with _peer_cycle(
-            workspace(default_identity(f"init-{n}")),
-            _PEER_HOP,
-            monkeypatch,
-            "capo",
-            {"capo_init": {"config": {"size": 2, "k_max": 0}}},
-            lambda _p, _s: True,
-        ) as (cycle, _):
-            offline.llm.says = lambda _body, said=reply: said  # type: ignore[misc]
-            drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-            proposed = asyncio.run(member.propose(drawing, node_contract.Proposals([])))
-        assert [p.invalid for p in proposed.proposals] == [True], (
-            f"reply {n} out of form drew a child or refused none"
-        )
-
-
-# Round 3's fork offer reads the rounds the disk-faulted closes landed.
-@pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # The round the fork hangs from is restated electing that arm, so the line continues from it.
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {},
-        lambda _p, _s: True,
-    ) as (cycle, ledger):
-        origin_arm = arm_state(
-            "C0", position=ArmPosition(round=0, idx=0, total=1), individual=cycle.parent
-        )
-        # Walked on no cell this cycle's bank draws, so no panel renders a row the bank lacks.
-        c0, c1, c2 = keys = [arm_key(f"c{i}") for i in range(3)]
-        unwalked = dict.fromkeys(keys, sheet(()))
-        line = [
-            round_result(0, arms=[origin_arm], cells={}),
-            round_result(1, candidates_scored=3, optimizer_state=optimizer_state(), cells=unwalked),
-        ]
-        forking = NodeContext(
-            RoundContext(cycle=cycle, round_num=2),
-            NODE_MEMBERS.get("l2_context"),
-        )
-        set_cycle(cycle, line=line)
-        assert PotterView(forking, Ladder()).reelect_offer == {}, (
-            "an improving line, which builds on its parent, was offered a fork"
-        )
-        # A round file the disk refuses is its ledger's one warning: the close lands, and so
-        # does the next round's file, with no second warning.
-        session = cycle.session
-        round_files = session.store.campaigns.layout(session.hop)
-        with LedgerIndex.of(ledger.path).projecting() as checkout:
-            checkout.add(RoundFileProjection(session.store, session.hop, session.state))
-            with monkeypatch.context() as unwritable:
-                unwritable.setattr(closed_rounds, "write_json", Mock(side_effect=OSError("full")))
-                close_round(ledger, line, cycle=cycle)
-            line.append(
-                round_result(
-                    2,
-                    improved=False,
-                    candidates_scored=1,
-                    optimizer_state=optimizer_state(),
-                    cells={},
-                )
-            )
-            set_cycle(cycle, line=line)
-            close_round(ledger, line, cycle=cycle)
-        warned = [r.kind for r in ledger_records(ledger) if isinstance(r, RoundWarningRecord)]
-        assert warned == ["derived_file_stale"] and round_files.round_file(2).exists(), (
-            "a round file's disk fault unwound its close, went unreported, or stopped the next"
-        )
-        forking = NodeContext(
-            RoundContext(cycle=cycle, round_num=3),
-            NODE_MEMBERS.get("l2_context"),
-        )
-        stalled = PotterView(forking, Ladder())
-        offer = stalled.reelect_offer
-        # c0 sits on both rounds' panels: one entry, its first listing.
-        assert offer == {
-            "C1.1": RoundArm(round=1, arm=c0),
-            "C1.2": RoundArm(round=1, arm=c1),
-            "C1.3": RoundArm(round=1, arm=c2),
-        }, "a stalled layer may stand a fork on another arm than the picks and those they outranked"
-        assert "ELECTIONS" in DispatchHub.render("rebase_capability", stalled), (
-            "an arm two rounds list kept the layer's prompt from composing"
-        )
-        standing = fork_proposal_model(tuple(offer))
-        refork = _rebase_request(
-            forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer
-        )
-        assert isinstance(refork, RebaseRequest) and refork.fork_from_round == 2, (
-            "a fork standing on a round-1 arm cuts at round 2"
-        )
-        hangs_from = refork.hangs_from
-        assert hangs_from is not None and hangs_from.election is not None
-        assert (hangs_from.election.selected, hangs_from.optimizer_state.population) == (
-            c1,
-            [line[1].arms[c1].individual],
-        ), "the restated round elects another arm than the one the layer stood the fork on"
-        assert line[1].election is not None and line[1].election.selected == c0, "guard"
-        assert (
-            hangs_from.election.reelection
-            == Reelection(by=Principal("l2_context/round_3", "l2_context"), reason="r")
-            and hangs_from.election.verdict_reason == line[1].election.verdict_reason
-        ), "a re-election is not told apart from the selector's own verdict"
-        stood_on_pick = _rebase_request(
-            forking, "l2_context", standing(reason="r", stand_on="C1.1"), offer
-        )
-        assert isinstance(stood_on_pick, RebaseRequest) and stood_on_pick.hangs_from is None, (
-            "a fork on the round's own pick restated an election it already holds"
-        )
-        with pytest.raises(ValidationError):
-            standing.model_validate({"reason": "r", "stand_on": "C9.9"})
 
 
 def test_a_fork_no_spine_node_may_take_is_declined_with_its_reason() -> None:
@@ -4674,69 +3002,7 @@ def test_a_fork_no_spine_node_may_take_is_declined_with_its_reason() -> None:
     ), "a fork the spine cannot take was declined without the reason its record names"
 
 
-# Each restate banks the fires before it, and the resume seats what they banked.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_closed(
-    tmp_path: Path,
-) -> None:
-    # What a layer fires is on no close.
-    cycle_dir = CycleDir(tmp_path / "fired")
-    fired_ledger = laid_ledger(cycle_dir)
-    # Appended here, as the store appends a restate.
-    carried = select_optimizer(bench_choice("potter")).slices
-    live = SliceMap(carried)
-    closed = round_result(1, optimizer_state=optimizer_state(), cells={})
-    line = [round_result(0, optimizer_state=optimizer_state(), cells={}), closed]
-    closing = seat(workspace()).cycle
-    for n in (1, 2):
-        close_round(fired_ledger, line[:n], cycle=closing)
-
-    def restate() -> None:
-        state = closed.closed_state.holding(
-            live.get(L2Memory), live.get(L3Memory), live.get(Ladder)
-        )
-        standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
-        fired_ledger.append(standing[1].close.restated(state))
-
-    def fired(record: Callable[[Ladder], Ladder]) -> None:
-        live.put(record(live.get(Ladder)))
-
-    floor = NODE_LAYOUTS["l1_generate"].floor
-    moved = coerce_l1_layout({"persona": ["critique"]}, base=floor)
-    assert moved is not None and moved != floor
-    handed = live.get(L2Memory)
-    live.put(
-        handed.steered_onto(
-            "l1_generate", {"layout": moved.model_dump(mode="json"), "n_variants": 5}
-        )
-    )
-    assert handed == L2Memory() and live.get(L2Memory) != handed, (
-        "a fire answers the NEXT memory: the one it was handed is what the closed round banked"
-    )
-    fired(lambda ladder: l2_fired(ladder, LayerReading(1, 0.5, None, None)))
-    restate()
-    live.put(L3Memory(plan="attack the default label"))
-    fired(lambda ladder: l3_fired(ladder, None))
-    restate()
-
-    def resumed(last: int) -> tuple[L2Memory, L3Memory, Ladder]:
-        standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
-        state = SliceMap(carried)
-        state.seat(standing[last].close.closed_state)
-        return state.get(L2Memory), state.get(L3Memory), state.get(Ladder)
-
-    kept = resumed(1)
-    assert kept == (live.get(L2Memory), live.get(L3Memory), live.get(Ladder)), (
-        "paused inside round 2: both fires belong to the boundary the resume keeps"
-    )
-    assert kept[2].l3.fires == 1 and kept[1].plan
-    assert resumed(0) == (L2Memory(), L3Memory(), Ladder()), (
-        "rewound to re-run round 1: the fires are discarded with it"
-    )
-
-
 # Each press reads the inbox and the phase the press before it left.
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_dropped() -> None:
     commanded = workspace()
     command_hop, command_dir = walking_cycle(commanded)
@@ -4800,75 +3066,7 @@ def test_a_loop_command_is_acted_on_by_the_loop_it_reached_or_refused_never_drop
     assert not control.pause_requested(), "a pause with no run to stop was left standing"
 
 
-def test_a_step_says_each_fact_by_its_kind_and_cuts_one_only_in_its_enter_box() -> None:
-    # A fitness reads in its scorer's unit, a knob as the number it is set to.
-    decided = "the critique names the framing, " * 4
-    facts: dict[str, Any] = {
-        "parent fitness": FitnessFact(value=0.6, unit="rate"),
-        "peak fitness": FitnessFact(value=0.61234),
-        "l1_overrides": SettingsFact(value={"temperature": 0.7, "n_variants": 3}),
-        "decided": TextFact(value=decided),
-    }
-    entered = to_text("refine_strategy", StepOpened(node="l2", activity="refining", facts=facts))
-    closed = to_text("refine_strategy", StepClosed(facts=facts, audit=None))
-    for said in ("60%", "0.6123", "temperature=0.7", "n_variants=3"):
-        assert said in entered and said in closed, f"a step's box worded a fact as {said!r} not"
-    assert decided.strip() in closed and decided.strip() not in entered, (
-        "a step's rationale was cut on its exit, or printed whole in its enter box"
-    )
-
-
-def test_a_round_start_reads_its_parents_fitness_in_its_scorers_unit() -> None:
-    schema = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
-    parent = round_result(1, improved=False, folds={PARENT: score_summary(fitness=0.6)})
-    opened = ProposeOpened(
-        node="l1_generate",
-        budget_rounds=None,
-        parent_round=1,
-        arms=3,
-        facts={},
-        model=None,
-        run_standing=None,
-    )
-    assert "60%" in render_round_start(opened, 2, parent, schema), (
-        "the round's header lost the parent's fitness, or read it off its scorer's unit"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_l2s_box_banks_its_parents_fitness_in_its_scorers_unit(
-    built_stores: Stores,
-) -> None:
-    # The parent takes half its origin cells; the run's peak stands elsewhere.
-    hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(40)]
-    seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
-    run_init(RoundContext(seated.cycle, 0))
-    l2: Any = NODE_MEMBERS.get("l2_context")
-    fire = Fire(cause="l1_patience", ask=None, best=_high_water(0.9, [], 0.1))
-    said = l2.enter_act(NodeContext(seated, l2), fire).facts["parent fitness"]
-    assert said == FitnessFact(value=0.5, unit="rate"), (
-        "L2's box lost the parent's fitness, or said it off its scorer's unit"
-    )
-
-
-def test_a_population_table_holds_each_candidates_own_rendered_prompt() -> None:
-    # Start and parent render alike, so only a candidate's own render moves the row.
-    schema = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
-    table = render_population(
-        ProposeClosed(replayed=False),
-        2,
-        proposer="l1_generate",
-        origin=round_result(0, improved=False),
-        parent=round_result(1, improved=False),
-        arms=[arm_state("changed", position=ArmPosition(round=2, idx=0, total=1))],
-        schema=schema,
-    )
-    assert Locus("solve", "prompt").name in table, (
-        "the diff table dropped a candidate's rendered prompt"
-    )
-
-
-def test_a_holed_panel_stops_in_its_rows_words_and_the_backends_hole_on_its_own_stop() -> None:
+def test_a_holed_panel_stops_as_no_interrupt_and_the_backends_hole_on_its_own_stop() -> None:
     # The dyck shape: one UNSCOREABLE row per arm, its error set.
     holed = [
         measurement(arm, None, error=f"arm {arm}: no evidence", error_category="UNSCOREABLE")
@@ -4878,29 +3076,10 @@ def test_a_holed_panel_stops_in_its_rows_words_and_the_backends_hole_on_its_own_
     assert stop is not None and stop_reason_outcome(stop.reason) is not StopOutcome.PAUSED, (
         "a hole no signal made paused the run, so it read as an interrupt"
     )
-    reading = RunPhaseRecord.stop(stop.reason, detail=stop.detail).stop_reading
-    assert reading is not None and all(
-        f"arm {arm}: no evidence" in reading.said for arm in (0, 1)
-    ), "the holed panel's stop did not say its rows' errors"
     backend = measurement(2, None, error="504: no reply in 164s", error_category="SERVER")
     served = panel_gate_tripped([*holed, backend], None, "strict")
     assert served is not None and served.reason is StopReason.BACKEND_HOLE, (
         "a backend's hole lost the stop its L4 outer re-asks on"
-    )
-    assert "no reply in 164s" in served.detail, "the backend's hole lost its words"
-
-
-def test_a_holed_panels_detail_is_bounded_and_never_says_none() -> None:
-    # An L4 outage holes every cell, each in words of its own; one row carries no error at all.
-    outage = [
-        measurement(arm, None, error=f"cell {arm}: 503", error_category="SERVER")
-        for arm in range(9)
-    ]
-    bare = measurement(9, None, error_category="UNSCOREABLE")
-    stop = panel_gate_tripped([*outage, bare], None, "strict")
-    assert stop is not None and "None" not in stop.detail, "a row with no error said 'None'"
-    assert stop.detail.count("503") == 3 and stop.detail.endswith("; 7 more"), (
-        f"an outage's detail grew with its holes: {stop.detail}"
     )
 
 
@@ -4908,7 +3087,6 @@ def test_a_holed_panels_detail_is_bounded_and_never_says_none() -> None:
 
 
 def _reference_reading(
-    stores: Stores,
     reference: Sequence[float | None],
     arm: Sequence[float | None],
     *,
@@ -4933,10 +3111,13 @@ def _reference_reading(
         arm_state("C1.1", position=ArmPosition(round=1, idx=0, total=1), cut=cut),
     )
     reference_rows = rows(reference)
-    pairs = ReferencePairs.of_round(
-        seat(stores, bank=bank, scorer=scorer),
-        {key: scored},
+    pairs = ReferencePairs(
+        path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
+        instrument_id="bank",
+        scorer=scorer,
+        dataset_hash=Bank.of(bank).dataset_hash,
         declared=[cell.key for cell in reference_rows],
+        names={key: ArmName(key=key, round=1, label="C1.1")},
     )
     against = ArmKey(bar.id)
     reference_arm = ReadArm(against, arm_state("parent"), reference_rows)
@@ -5143,7 +3324,6 @@ def _evidence_campaign(
 _PAIRED_CAND = [0.90, 0.10, 0.85, 0.20, 0.75, 0.30, 0.95, 0.05]
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_the_paired_t_matches_ttest_rel_and_brackets_the_evidence_it_tests() -> None:
     cand = _PAIRED_CAND
     prior = [0.10, 0.85, 0.15, 0.80, 0.20, 0.70, 0.05, 0.90]
@@ -5170,7 +3350,6 @@ def test_the_paired_t_matches_ttest_rel_and_brackets_the_evidence_it_tests() -> 
     assert paired_mean_t([0.5], [0.1])[1:] == (None,) * 4, "one cell brackets nothing"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_level_band_covers_its_level_at_the_ends_of_its_support() -> None:
     def band(grades: list[float], declared: bool) -> tuple[float | None, float | None]:
         # `label_match` declares its fitness two-valued; a bare sheet's scorer declares nothing.
@@ -5198,7 +3377,6 @@ def test_a_level_band_covers_its_level_at_the_ends_of_its_support() -> None:
     assert band([1.0], False) == (None, None), "one graded cell brackets nothing"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
     # Samples 0 and 1 are one query under two truths: two cells, wherever a query would key one.
     bank = [
@@ -5303,7 +3481,6 @@ def test_an_arm_of_one_replicate_reads_its_declaration_and_a_pooled_one_the_t() 
     assert pooled.flips is None, "a mean over two replicates is no 0/1 cell: the t reads it"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     four = samples(4, "t")
 
@@ -5354,7 +3531,6 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
         ROW_GRADES["fitness"].read(ungraded.sheet.cells[-1])
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_pair_that_cannot_be_read_says_why_instead_of_reading_zero() -> None:
     six = samples(6, "t")
     panel = six[:4]
@@ -5406,8 +3582,7 @@ def test_a_pair_that_cannot_be_read_says_why_instead_of_reading_zero() -> None:
         said(ReadingState.READ)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_arm_is_read_on_the_cells_its_reference_was_read_on(built_stores: Stores) -> None:
+def test_an_arm_is_read_on_the_cells_its_reference_was_read_on() -> None:
     whole_panel: list[float | None] = [1.0, 0.0, 1.0, 0.0, 1.0, 0.0]
     for ref_grades, arm_grades, cut, coverage_state, scored, size, rates, level in (
         # The reference sat four of the six cells: 5/6 over the arm's own walk, 3/4 on those four.
@@ -5444,9 +3619,7 @@ def test_an_arm_is_read_on_the_cells_its_reference_was_read_on(built_stores: Sto
             None,
         ),
     ):
-        on_reference = _reference_reading(
-            built_stores, ref_grades, arm_grades, cut=cast(CutKind | None, cut)
-        )
+        on_reference = _reference_reading(ref_grades, arm_grades, cut=cast(CutKind | None, cut))
         lift, coverage, set_read = (
             on_reference.headline,
             on_reference.coverage,
@@ -5461,31 +3634,21 @@ def test_an_arm_is_read_on_the_cells_its_reference_was_read_on(built_stores: Sto
         )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_the_origin_panel_holds_a_rounds_cells_unless_its_own_size_is_set(
-    built_stores: Stores,
-) -> None:
-    bank = samples(50)
-    origin = sheet(measurement(s.id, 1.0, sample_key=s.key) for s in bank)
-
-    def panel(cells: int | None) -> tuple[list[int], int]:
-        cycle = seat(
-            built_stores,
-            bank=bank,
-            origin=(OptSearchPoint(), lambda _s: origin),
-            origin_panel_cells=cells,
-        ).cycle
-        pool = list(cycle.session.state.scoring.partition.search)
-        return round_origin_panel(cycle, pool), cycle.optimizer.round_cells(len(pool))
-
-    held, round_cells = panel(None)
-    assert len(held) == round_cells == 20, "unset, the panel left a round's own size"
-    assert len(panel(30)[0]) == 30, "the panel's own size was not the one it holds"
+def test_the_origin_panel_holds_the_size_it_is_given_of_the_cells_c0_walked() -> None:
+    # Unset, `round_origin_panel` passes the round's own size: every offline leg runs that default.
+    for size in (20, 30, 40):
+        held = origin_panel(
+            range(40),
+            line_cells=(),
+            poolable=range(50),
+            benchmark_of=dict.fromkeys(range(50)),
+            size=size,
+        )
+        assert len(held) == size and set(held) <= set(range(40)), f"a panel of {size} held {held}"
     with pytest.raises(ValidationError):
         defaulted_config({"origin_panel_cells": 41})  # past the origin's 40 cells
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_c0_is_topped_up_on_a_scope_the_line_drew_never_paired_on_its_own_scope_only() -> None:
     # C0 sat scope `a` alone; the line drew `b`.
     seated = [
@@ -5523,7 +3686,6 @@ def test_c0_is_topped_up_on_a_scope_the_line_drew_never_paired_on_its_own_scope_
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin() -> None:
     def banked(strategy: VerifyStrategy = "random", round_num: int = 3) -> VerifyPass:
         return VerifyPass(
@@ -5611,7 +3773,6 @@ def test_a_verify_reads_its_fresh_cells_alone_and_pairs_its_lift_over_the_origin
     assert at_origin.vs_origin.headline is None
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_an_individuals_cells_are_one_set_and_a_decision_never_reads_an_overlap_row() -> None:
     def walk(tag: str, graded: dict[int, float]) -> CellSheet:
         return sheet(
@@ -5653,7 +3814,6 @@ def test_an_individuals_cells_are_one_set_and_a_decision_never_reads_an_overlap_
     assert [cell.key for cell in rounds[1].sheet_of(origin_sp.id)] == ["k2", "k3"]
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_cell_is_its_samples_content_whatever_query_it_shares_or_slot_it_holds(
     built_stores: Stores,
 ) -> None:
@@ -5754,7 +3914,6 @@ def standing_run() -> _StandingRun:
     return _StandingRun(run, closed, stands, first_line, newest, reread, second_pick, third_pick)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_run_stands_on_its_selection_read_against_the_origin_it_was_promoted_from(
     standing_run: _StandingRun,
 ) -> None:
@@ -5813,7 +3972,6 @@ def test_a_run_stands_on_its_selection_read_against_the_origin_it_was_promoted_f
     assert held_on.rounds_without_advance == 1
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_the_climb_prices_c0s_lift_by_what_the_line_paid_and_an_absent_denominator_says_why(
     standing_run: _StandingRun,
 ) -> None:
@@ -6287,10 +4445,6 @@ def test_an_n8n_cell_delivers_the_candidate_and_grades_only_an_answer_it_read(
 
 
 def test_a_merge_of_two_reads_of_one_cell_fits_theta_on_one_row() -> None:
-    # Imported here: the module's head is another chain's while this one runs beside it.
-    from promptpotter.application.bench.difficulty import JudgingRuler
-    from promptpotter.domain.ruler import RulerScope, RulerStamp
-
     stamp = RulerStamp(
         id="v", version=0, own=None, scope=RulerScope(scorer="s", dataset="ds"), excluded=()
     )
@@ -6304,4 +4458,1591 @@ def test_a_merge_of_two_reads_of_one_cell_fits_theta_on_one_row() -> None:
     folded = judging.frontier(standing)
     assert folded is not None and (reading.theta, reading.se) == (folded.theta, folded.se), (
         "θ over the merge is not θ over the cells it stands on"
+    )
+
+
+# Journeys awaiting a leg
+
+
+_PEER_BANK = samples(16)
+
+
+# Each search row's place in the order the search reads it, under the peer cycle's own split.
+_PEER_READ_ORDER = {
+    s.id: n
+    for n, s in enumerate(
+        partition_bank(_PEER_BANK, DatasetSplit(bench=0, demo=2, tolerance=0), seed=0).search
+    )
+}
+
+
+@contextmanager
+def _peer_cycle(
+    stores: Stores,
+    hop: CycleHop,
+    monkeypatch: Any,
+    optimizer: str,
+    nodes: dict[str, Any],
+    solves: Callable[[str, Sample], bool | None],
+    *,
+    bench: int = 0,
+    control: RunControl | None = None,
+    book: SpendBook | None = None,
+    origin_replicates: int | None = None,
+    **optimization: Any,
+) -> Iterator[tuple[Cycle, CycleEventLog]]:
+    """Bound as a run seam binds it; the backend answers right where ``solves`` says, errs on None."""
+
+    async def _measure(
+        sample: Sample, _session: Any, pipeline_params: PipelineParams
+    ) -> MeasuredCell:
+        prompt = pipeline_params.node("solve").laid_keys()["prompt"]
+        solved = solves(prompt, sample)
+        row: dict[str, Any] = {
+            "sample_key": sample.key,
+            "query": sample.query,
+            "ground_truth": sample.ground_truth,
+            "predicted": sample.ground_truth if solved else "wrong",
+            "error": None,
+            "cached": False,
+            "pipeline_data": {"total_time": 0.1, "target_prompt_chars": len(prompt)},
+        }
+        if solved is None:
+            row["error_category"] = "SERVER"
+        return MeasuredCell.from_wire(row)
+
+    monkeypatch.setattr(query_loop, "measure_sample", _measure)
+    schema = pipeline_schema(
+        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)],
+    )
+    origin = OptSearchPoint(
+        prompts={
+            "solve": NodePrompt(
+                fields={"instruction": "Answer.", "answer_format": "Reply with the letter."}
+            )
+        }
+    ).configured(PipelineParams(), schema)
+
+    def measured_origin(session: Session) -> CellSheet:
+        rows = [
+            asyncio.run(
+                _measure(
+                    s, session, PipelineParams.model_validate({"solve": {"prompt": "Answer."}})
+                )
+            )
+            for s in list(session.state.scoring.partition.search)[:4]
+        ]
+        return session.state.scoring.scorer.sheet(rows)
+
+    with scoped(round=1):
+        seated = seat(
+            stores,
+            schema=schema,
+            bank=_PEER_BANK,
+            bench=bench,
+            demo=2,
+            # The campaign's composite REWARDS length, the opposite of CAPO's objective.
+            scorer=scorer_of(
+                "label_match(predicted, ground_truth)",
+                "fitness * min(1.0, target_prompt_chars / 200.0)",
+            ),
+            optimization={
+                "optimizer": optimizer,
+                "elimination_n_min": 2,
+                "nodes": nodes,
+                **optimization,
+            },
+            dataset_name=f"{optimizer}-e2e",
+            control=control,
+            hop=hop,
+            origin=(origin, measured_origin),
+            framing=TaskDecomposition(pipeline_purpose="Answer each query with its letter."),
+            origin_replicates=origin_replicates,
+        )
+        cycle, ledger = seated.cycle, cycle_ledger(seated.cycle)
+        with scoped(
+            ledger=ledger,
+            spawn=inner_spawn_of(cycle.session),
+            determinism=cycle.config.optimization.determinism,
+        ):
+            run_init(RoundContext(cycle, 0))
+            with scoped(book=spend_book() if book is None else book):
+                yield cycle, ledger
+
+
+def _asked(body: dict[str, Any]) -> str:
+    """What an optimizer call sent the provider, every message of it."""
+    return "\n".join(str(m["content"]) for m in body["messages"])
+
+
+def _potter_says(*instructions: str) -> Callable[[dict[str, Any]], str]:
+    """Potter's L1 proposing one variant per instruction, in order; every other node a critique."""
+
+    def says(body: dict[str, Any]) -> str:
+        if body.get("response_format", {}).get("json_schema", {}).get("name") != "L1GenerateOutput":
+            return json.dumps({"priority_fix": "instruction: check each premise"})
+        anchor = shown_text(_asked(body), "solve.instruction")
+        variants = [
+            {
+                "mechanism": text,
+                "targets_rows": [],
+                "edits": [
+                    {"at": "solve.instruction", "op": "replace", "anchor": anchor, "text": text}
+                ],
+            }
+            for text in instructions
+        ]
+        return json.dumps({"variants": variants})
+
+    return says
+
+
+# Round 2 starts from what round 1 handed on.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_held_rounds_leader_ahead_of_its_parent_is_dropped_and_never_raced_again(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # The cells that ranked it first are the ones its luck rode.
+    def one_more_than_parent(prompt: str, sample: Sample) -> bool:
+        order = _PEER_READ_ORDER[sample.id]
+        if "Guess." in prompt:
+            return order % 4 == 0
+        return order % 2 == 0 or ("Check each premise." in prompt and order == 1)
+
+    with _peer_cycle(
+        workspace(),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {"l1_generate": {"config": {"n_variants": 2}}},
+        one_more_than_parent,
+    ) as (cycle, _):
+        parent_id = cycle.parent.id
+        offline.llm.says = _potter_says("Check each premise.", "Guess.")
+        first = asyncio.run(execute_round(cycle, 1)).result
+        assert first.election is not None and first.election.selected is None, "round 1 held"
+        leader = first.election.leading
+        assert leader is not None
+        assert "Check" in first.arms[leader].individual.prompts["solve"].fields["instruction"]
+        assert [m.id for m in cycle.population] == [parent_id], (
+            "a held round handed on more than its parent: evidence is bought in its race alone"
+        )
+        offline.llm.says = _potter_says("Guess.")
+        second = asyncio.run(execute_round(cycle, 2)).result
+        assert leader not in second.proposed and not second.rows(leader), (
+            "a leader short of the bar was raced again past its round's cap"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # The election's scale re-read off the archive: unchanged under its own formula, moved under
+    # an edited one, since every row the ruler holds is re-graded, not only the record's own cells.
+    def every_other(prompt: str, sample: Sample) -> bool:
+        return _PEER_READ_ORDER[sample.id] % 2 == 0 or "Check" in prompt
+
+    with _peer_cycle(
+        workspace(),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {"l1_generate": {"config": {"n_variants": 3}}},
+        every_other,
+    ) as (cycle, _):
+        offline.llm.says = _potter_says("Check each premise.", "Guess.", "Check twice.")
+        asyncio.run(execute_round(cycle, 1))
+
+        # Round 1's cells fold after its election, so round 2 is the first to read them.
+        offline.llm.says = _potter_says("Guess.")
+        second = asyncio.run(execute_round(cycle, 2)).result
+    assert second.election is not None
+    stamp, stores = second.election.ruler, cycle.session.store
+
+    opt = cycle.config.optimization
+    n_min, two_pl = opt.elimination_n_min, opt.enable_2pl_graduation
+    read = judging_ruler(
+        stores.ruler,
+        stamp.scope,
+        stamp.reach,
+        stamp.excluded,
+        objective_id=stamp.scope.scorer,
+        n_min=n_min,
+        enable_2pl=two_pl,
+    ).ruler
+    own = cycle.session.state.scoring.scorer
+    same = regraded_ruler(stores, stamp, own, n_min=n_min, enable_2pl=two_pl)
+    assert read is not None and same is not None and same.delta == read.delta, (
+        "ab re-fit the election's scale differently under the formula the election read it with"
+    )
+    edited = scorer_of("label_match(predicted, ground_truth)", "1.0 - fitness")
+    moved = regraded_ruler(stores, stamp, edited, n_min=n_min, enable_2pl=two_pl)
+    assert moved is not None and moved.delta != read.delta, (
+        "ab replayed an edited formula on the scale the old formula fit"
+    )
+
+
+_CAPO_NODES = {
+    "blocks": {"config": {"block_size": 4, "max_blocks": 3}},
+    "capo_init": {"config": {"size": 3, "k_max": 0}},
+    "mating": {"config": {"offspring": 2}},
+    "few_shot": {"config": {"k_max": 0}},
+    "survival": {"config": {"size": 3}},
+}
+
+
+def _capo_says() -> Callable[[dict[str, Any]], str]:
+    """CAPO's seed batch, three prompts, then each mutation a fresh one."""
+    minted: list[str] = []
+
+    def says(body: dict[str, Any]) -> str:
+        if "Create overall 15 prompts" in _asked(body):
+            return json.dumps(["Solve the task, A.", "Solve the task, B.", "Solve the task, C."])
+        minted.append(f"Go {len(minted)}.")
+        return f"<prompt>{minted[-1]}</prompt>"
+
+    return says
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once_closed(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # Round 1 races the seeds with its offspring; its parent is the origin, never bought a cell.
+    def cut_by_budget(
+        cut_round: int, budget: int, replayed: int, parent_cells: int, panel_gate: str
+    ) -> None:
+        case = f"round {cut_round} cut under panel_gate={panel_gate}"
+
+        paid: list[int] = []
+        book = spend_book(None, usd_reserve=None)
+        # Empty while the origin is measured, which no round's budget pays for.
+        running: list[bool] = []
+        cutting: list[bool] = []
+
+        def even_cells(_prompt: str, sample: Sample) -> bool:
+            if running:
+                paid.append(sample.id)
+                if cutting and len(paid) >= budget:
+                    book.share = Budget(usd=0.0)
+            return _PEER_READ_ORDER[sample.id] % 2 == 0
+
+        with _peer_cycle(
+            workspace(default_identity(f"cut-{cut_round}-{panel_gate}")),
+            _PEER_HOP,
+            monkeypatch,
+            "capo",
+            _CAPO_NODES,
+            even_cells,
+            book=book,
+            panel_gate=panel_gate,
+        ) as (cycle, _):
+            offline.llm.says = _capo_says()
+            session = cycle.session
+            running.append(True)
+            search = list(session.state.scoring.partition.search)
+            if cut_round == 1:
+                # Run init scores the origin through the gateway — here on half of CAPO's first block.
+                asyncio.run(
+                    score_search_point(
+                        cycle.parent_point,
+                        search[:2],
+                        session,
+                        kind=MeasurementRole.ORIGIN,
+                        measured=None,
+                    )
+                )
+            else:
+                uncut = asyncio.run(execute_round(cycle, 1)).cut
+                assert uncut is None, f"{case}: round 1 ran inside its budget"
+            paid.clear()
+            parent = ArmKey(cycle.parent.id)
+            cutting.append(True)
+            cut_walk = execute_round(cycle, cut_round)
+            if panel_gate == "strict":
+                with pytest.raises(StopLoop) as halted:
+                    asyncio.run(cut_walk)
+                assert halted.value.reason is StopReason.SPEND_BUDGET, (
+                    f"{case}: the bound that cut it names the stop"
+                )
+                assert cycle.rounds[-1].round == cut_round - 1, (
+                    f"{case}: an arm was crowned on a holed panel"
+                )
+                return
+            _, closed, cut, _ = asyncio.run(cut_walk)
+            assert cut is not None and cut.reason is StopReason.SPEND_BUDGET, (
+                f"{case}: the round names its cut"
+            )
+            assert cut.detail, f"{case}: a kept cut halts the loop with no words"
+            rows = {key: closed.rows(key) for key in closed.proposed}
+            assert sum(len(closed.rows(key)) for key in closed.arms) == (
+                replayed + len(paid) + parent_cells
+            ), f"{case}: a cell nobody elects on, or a parent read where the archive lacks it"
+            assert (parent in closed.proposed) is (cut_round == 2), (
+                f"{case}: a retained parent is ONE arm, its re-read folded into its own cells"
+            )
+            parent_arm = closed.arms[parent]
+            assert isinstance(parent_arm, Cut | Measured), f"{case}: the parent never concluded"
+            held = session.store.ruler.rows(session_ruler_scope(session), ruler_clock(session))
+            observed = {cell for walked, cell, _ in held if walked == parent_arm.config_key}
+            assert {cell.key for cell in closed.rows(parent)} <= observed, (
+                f"{case}: a parent's observation never reached the δ fit its election read"
+            )
+            [short] = [key for key in rows if len(rows[key]) == 1]
+            assert closed.folds[short].fitness == 1.0, (
+                f"{case}: the cut arm reads perfect on its one cell"
+            )
+            carried = [ind.id for ind in cycle.population]
+            assert len(carried) == 3 and short not in carried, f"{case}: elected below the floor"
+            full = next(key for key in list(rows)[3:] if key != short)
+            assert full in carried, f"{case}: an offspring the budget paid for in full was dropped"
+            assert cycle.rounds[-1].round == cut_round
+            cycle.unwind_unclosed()
+            assert [rr.round for rr in cycle.rounds] == [0] and cycle.selection.round == 0, (
+                f"{case}: a stop between this election and its close leaves no result"
+            )
+
+    # Round 2's parent is a retained member: its re-read lands on cells its own walk holds.
+    for cut_round, budget, replayed, parent_cells in ((1, 17, 0, 2), (2, 5, 12, 0)):
+        for panel_gate in ("strict", "off"):
+            cut_by_budget(cut_round, budget, replayed, parent_cells, panel_gate)
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at_mu(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    def raced(failing: str) -> RoundResult:
+
+        def misses_after_block_one(prompt: str, sample: Sample) -> bool:
+            block = _PEER_READ_ORDER[sample.id] // 4
+            return block == 0 or not any(f"task, {arm}." in prompt for arm in failing)
+
+        with _peer_cycle(
+            workspace(default_identity(f"race-{failing}")),
+            _PEER_HOP,
+            monkeypatch,
+            "capo",
+            _CAPO_NODES,
+            misses_after_block_one,
+        ) as (cycle, _):
+            offline.llm.says = _capo_says()
+            return asyncio.run(execute_round(cycle, 1)).result
+
+    def fates(closed: RoundResult) -> dict[str, list[int]]:
+        out: dict[str, list[int]] = {}
+        for key in closed.proposed:
+            arm = closed.arms[key]
+            state = (
+                arm.kind
+                if isinstance(arm, Cut)
+                else "locked_in"
+                if isinstance(arm, Measured) and arm.locked_in is not None
+                else "measured"
+            )
+            out.setdefault(state, []).append(len(closed.rows(key)))
+        return out
+
+    # Five arms, μ 3: nobody falls on block 1; C falls on block 2, and four still race block 3.
+    assert fates(raced("C")) == {"eliminated": [8], "measured": [12] * 4}, (
+        "a survivor set above μ stopped racing before max_blocks"
+    )
+    # B and C fall together on block 2, which leaves μ: the race is settled there.
+    assert fates(raced("BC")) == {"eliminated": [8, 8], "locked_in": [8] * 3}, (
+        "a race at μ survivors walked on, or settled before its cut"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_one_round_composes_a_peers_crossover_and_selector_with_potters_race(
+    monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
+) -> None:
+    name, walk, composed, crossover_says, crossed, composed_nodes = peer_composition
+    with (
+        composed(walk),
+        _peer_cycle(
+            workspace(),
+            _PEER_HOP,
+            monkeypatch,
+            name,
+            composed_nodes,
+            lambda prompt, _s: "Merged." in prompt,
+        ) as (cycle, _),
+    ):
+        offline.llm.says = crossover_says
+        assert not cycle.population
+        _, closed, cut, _ = asyncio.run(execute_round(cycle, 1))
+    assert cut is None
+    assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
+        "a crossover saw one parent"
+    )
+    assert cycle.slices.get(CapoObjective).length_norm, (
+        "CAPO's initial population banked no length norm for the objective its selector ranks on"
+    )
+    for panel_arm in closed.proposed.values():
+        lineage = panel_arm.individual.lineage
+        assert [(made.node, made.mode) for made in lineage.variations] == [
+            (f"{name}:mating", "deterministic"),
+            (f"{name}:capo_crossover", "llm"),
+        ], "an arm's lineage names the peer's mating and crossover"
+        assert len(set(lineage.parent_ids)) == 2, "a crossover child has two parents"
+    assert closed.election is not None
+    winner = closed.election.selected
+    assert winner is not None
+    assert "Merged." in closed.arms[winner].individual.prompts["solve"].fields["instruction"], (
+        "CAPO's selector elected it off potter's race"
+    )
+    assert cycle.population[0].id == winner, (
+        "the individual the next round mutates from does not lead the population the run carries"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_cut_theta_round_reads_its_cold_parent_on_the_cells_the_archive_holds_graded(
+    monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
+) -> None:
+    # The guard and the election alike.
+    name, walk, composed, crossover_says, _, composed_nodes = peer_composition
+    theta_book = spend_book(None, usd_reserve=None)
+    # Empty until round 1 walks, so the origin's cells pay toward no cut.
+    theta_walking: list[bool] = []
+    theta_paid: list[int] = []
+
+    def paid_then_cut(_prompt: str, sample: Sample) -> bool:
+        if theta_walking:
+            theta_paid.append(sample.id)
+            if len(theta_paid) >= 2:
+                theta_book.share = Budget(usd=0.0)
+        return True
+
+    async def unpriced(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
+        # No `target_prompt_chars`, so the composite cannot grade the row it files.
+        return MeasuredCell.from_wire(
+            {
+                "sample_key": sample.key,
+                "query": sample.query,
+                "ground_truth": sample.ground_truth,
+                "predicted": sample.ground_truth,
+                "error": None,
+                "cached": False,
+                "pipeline_data": {"total_time": 0.1},
+            }
+        )
+
+    with (
+        composed([*walk[:-1], "theta_election"]),
+        _peer_cycle(
+            workspace(),
+            _PEER_HOP,
+            monkeypatch,
+            name,
+            composed_nodes,
+            paid_then_cut,
+            book=theta_book,
+            panel_gate="off",
+        ) as (cycle, _),
+    ):
+        offline.llm.says = crossover_says
+        session = cycle.session
+        search = list(session.state.scoring.partition.search)
+        with monkeypatch.context() as patched:
+            patched.setattr(query_loop, "measure_sample", unpriced)
+            asyncio.run(
+                score_search_point(
+                    cycle.parent_point,
+                    search[1:2],
+                    session,
+                    kind=MeasurementRole.ORIGIN,
+                    measured=None,
+                )
+            )
+        asyncio.run(
+            score_search_point(
+                cycle.parent_point,
+                search[:1],
+                session,
+                kind=MeasurementRole.ORIGIN,
+                measured=None,
+            )
+        )
+        theta_walking.append(True)
+        with pytest.raises(StopLoop) as unwound:
+            asyncio.run(execute_round(cycle, 1))
+    assert unwound.value.reason is StopReason.SPEND_BUDGET
+    assert cycle.rounds[-1].round == 0, "a cut round stood with no arm its selector could read"
+
+
+def _bench_says(body: dict[str, Any]) -> str:
+    if "Create overall 15 prompts" in _asked(body):
+        return json.dumps(["Solve it GOOD.", "Solve it OK."])
+    return "<prompt>Solve it BAD.</prompt>"
+
+
+class _PeerBench(NamedTuple):
+    cycle: Cycle
+    ledger: CycleEventLog
+    session: Session
+    stores: Stores
+    cycle_dir: Path
+
+
+class _Bench(NamedTuple):
+    cycle: Cycle
+    ledger: CycleEventLog
+    session: Session
+    stores: Stores
+    cycle_dir: Path
+    picked: RoundResult
+    head: Cut | Measured
+    fold: ScoreSummary
+    origin_pass: BenchPass
+    graded: Callable[..., BenchPasses]
+
+
+_PEER_PAUSE = PauseCyclePayload(
+    campaign_id=_PEER_HOP.campaign_id, cycle_id=_PEER_HOP.cycle_id, reason="stop"
+)
+
+
+@contextmanager
+def _peer_bench(monkeypatch: pytest.MonkeyPatch, offline: Router) -> Iterator[_PeerBench]:
+    """The bench's CAPO cycle seated, and its campaign filed so a command reaches it."""
+    bench_nodes = {
+        "blocks": {"config": {"block_size": 4, "max_blocks": 2}},
+        "capo_init": {"config": {"size": 2, "k_max": 0}},
+        "mating": {"config": {"offspring": 1}},
+        "few_shot": {"config": {"k_max": 0}},
+        "survival": {"config": {"size": 2}},
+    }
+    with _peer_cycle(
+        workspace(),
+        _PEER_HOP,
+        monkeypatch,
+        "capo",
+        bench_nodes,
+        lambda prompt, s: "GOOD" in prompt or ("OK" in prompt and s.id % 2 == 0),
+        bench=4,
+    ) as (cycle, ledger):
+        offline.llm.says = _bench_says
+        stores = cycle.session.store
+        peer = minted_campaign(_PEER_HOP)
+        stores.campaigns.create_campaign(peer)
+        minted_dataset(stores, peer)
+        stores.campaigns.mint_cycle(_PEER_HOP)
+        yield _PeerBench(
+            cycle, ledger, cycle.session, stores, stores.campaigns.cycle_dir(_PEER_HOP)
+        )
+
+
+@contextmanager
+def _bench_cycle(monkeypatch: pytest.MonkeyPatch, offline: Router) -> Iterator[_Bench]:
+    """Its round, whose declared pick tops a higher-composite arm, and the origin's bench pass."""
+    with _peer_bench(monkeypatch, offline) as (cycle, ledger, session, stores, cycle_dir):
+        picked = asyncio.run(execute_round(cycle, 1)).result
+        head, fold = picked.head, picked.fold
+        assert head is not None and fold is not None and fold.fitness is not None
+        origin = cycle.origin_round.origin.individual
+        origin_pass = asyncio.run(
+            score_on_bench(
+                session,
+                cycle.points.measured(cycle.measured(origin.id)),
+                individual_id=origin.id,
+                subject="origin",
+                label="C0",
+                round_num=0,
+            )
+        )
+
+        def graded(*held: BenchPass) -> BenchPasses:
+            banked = bench_passes(origin_pass, *held)
+            return asyncio.run(
+                bench_selection(
+                    session, cycle.rounds, points=cycle.points, banked=banked, trigger="at_end"
+                )
+            )
+
+        yield _Bench(
+            cycle, ledger, session, stores, cycle_dir, picked, head, fold, origin_pass, graded
+        )
+
+
+def _pause_mid_pass(
+    bench: _Bench, monkeypatch: pytest.MonkeyPatch
+) -> tuple[list[RunPhase], list[str], Any]:
+    """A pause sent as the bench pass walks its second cell; the last graded view it filed."""
+    cycle, ledger, session, stores = bench.cycle, bench.ledger, bench.session, bench.stores
+    loop_control, session.state.control = (
+        session.state.control,
+        RunControl(commands=stores.commands, enclosing=(stores.subject(_PEER_HOP),)),
+    )
+    measure = vars(query_loop)["measure_sample"]
+    walked: list[int] = []
+    phases: list[RunPhase] = []
+    acks: list[str] = []
+
+    async def _stopped_mid_pass(sample: Sample, at: Any, pipeline_params: Any) -> MeasuredCell:
+        walked.append(sample.id)
+        if len(walked) == 2:
+            phases.append(stores.run_state(_PEER_HOP).run_phase)
+            acks.append(
+                (
+                    await CommandDispatcher(stores).dispatch(
+                        CommandCall(_PEER_PAUSE, door=Door.HOST)
+                    )
+                ).ack
+            )
+            phases.append(stores.run_state(_PEER_HOP).run_phase)
+        cell: MeasuredCell = await measure(sample, at, pipeline_params)
+        return cell
+
+    async def _bench_pick() -> BenchPasses:
+        async with paid_pass(
+            stores=stores,
+            pass_kind=MeasurementRole.BENCH,
+            at=stores.campaigns.campaign_cycle(_PEER_HOP),
+            declared=Budget(),
+            sends=(),
+        ):
+            return await bench_selection(
+                session,
+                cycle.rounds,
+                points=cycle.points,
+                banked=bench_passes(bench.origin_pass),
+                trigger="at_end",
+            )
+
+    with monkeypatch.context() as patched:
+        patched.setattr(query_loop, "measure_sample", _stopped_mid_pass)
+        with pytest.raises(PassStoppedError):
+            asyncio.run(_bench_pick())
+    session.state.control = loop_control
+    [*_, stopped_view] = [
+        record for record in ledger_records(ledger) if isinstance(record, PassGradedRecord)
+    ]
+    return phases, acks, stopped_view
+
+
+class _ClosedOrigin(NamedTuple):
+    drawn: list[Sample]
+    session: Session
+    origin_sp: JobSearchPoint
+
+
+def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
+    """Round 0 closed on the origin's walk, and its session on the bank less one row it recorded,
+    so a band's rescore can only read the rest."""
+    cycle, ledger, session = bench.cycle, bench.ledger, bench.session
+    origin = cycle.origin_round.origin.individual
+    c0_arm = cycle.origin_round.proposed[ArmKey(origin.id)]
+    ledger.append(RoundEnteredRecord(round=0))
+    ledger.append(
+        ArmRecord(
+            round=0,
+            arm=ArmKey(origin.id),
+            state=Proposed(
+                role=c0_arm.role, position=c0_arm.position, individual=c0_arm.individual
+            ),
+        )
+    )
+    with scoped(round=0):
+        c0_walk = asyncio.run(
+            score_search_point(
+                cycle.points.measured(cycle.measured(origin.id)),
+                list(session.state.scoring.partition.search)[:4],
+                session,
+                kind=MeasurementRole.ORIGIN,
+                measured=origin.id,
+            )
+        )
+    c0_round = cycle.origin_round.model_copy(
+        update={
+            "optimizer_state": optimizer_state(),
+            "cells": {ArmKey(origin.id): c0_walk.sheet},
+        }
+    )
+    close_round(ledger, [c0_round], cycle=cycle)
+    round_zero = bench.stores.campaigns.standing_rounds(_PEER_HOP, moment=None).rounds[0].close
+    assert round_zero.election is not None
+    recorded_keys = {key for key, _, _ in round_zero.cells.arms[round_zero.election.ended_on]}
+    drawn = [s for s in session.bank.samples if s.key in recorded_keys]
+    kept = [s for s in session.bank.samples if s.key != drawn[0].key]
+    return _ClosedOrigin(
+        drawn, dataclasses.replace(session, bank=Bank.of(kept)), cycle.points.job(origin)
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_arm_is_read_on_the_theta_its_election_takes_on_the_scale_its_race_read(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(monkeypatch, offline) as bench:
+        cycle, picked, fold = bench.cycle, bench.picked, bench.fold
+        assert picked.election is not None
+        crowned = picked.election.selected
+        assert crowned is not None
+        [bar] = [picked.rows(key) for key in picked.arms if key not in picked.proposed]
+        # The scale the round OPENED on: its own cells fold after the election.
+        opened = cycle.difficulty.ruler_of(picked.election.ruler)
+        read = candidate_abilities({crowned: picked.rows(crowned)}, bar, opened)
+
+        fit = picked.fit(crowned)
+        assert fit is not None and (fit.theta, fit.theta_se) == (
+            read.theta[crowned],
+            read.theta_se[crowned],
+        ), "an arm carries the θ the election takes of its rows, on the scale it stamped"
+        optimization = cycle.config.optimization.model_copy(
+            update={"halt_at_fitness": fold.fitness, "lives": None}
+        )
+        unpaid = LineOutlay(search_usd=None, worked_s=None)
+        standing = RunStanding.after(list(cycle.rounds), lives=None, outlay=unpaid)
+        assert fold.total == 4 and standing_tripped(standing, optimization) is None, (
+            "a 4-cell point estimate met the target: the ceiling reads the paired lower bound"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_pause_reaches_a_bench_pass_in_flight_and_it_banks_as_stopped_on_the_cells_it_walked(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(monkeypatch, offline) as bench:
+        stores, cycle_dir = bench.stores, bench.cycle_dir
+        phases, acks, stopped_view = _pause_mid_pass(bench, monkeypatch)
+        assert (phases, acks) == ([RunPhase.SCORING, RunPhase.PAUSED], ["accepted"]), (
+            "a pause was refused by a pass in flight, or the cycle never read as scoring"
+        )
+        assert isinstance(stopped_view, PassGradedRecord)
+        paused_pass = stopped_view.verification
+        assert stopped_view.state is ReadingState.PENDING and paused_pass.stop is not None, (
+            "a paused pass read as faulted, when `resume` sends it again"
+        )
+        assert paused_pass.stop.cause is StopReason.PAUSED and 0 < len(paused_pass.cells) < 4, (
+            "a paused pass banked no record of the cells it walked, or never stopped"
+        )
+        assert stores.inbox(_PEER_HOP).pause is None and not cycle_held(cycle_dir), (
+            "the pass left its pause unapplied, or kept the cycle after it stopped"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_noise_band_stands_beside_the_recorded_level_of_exactly_the_rows_it_rescored(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _peer_bench(monkeypatch, offline) as bench:
+        ledger = bench.ledger
+        drawn, session, origin_sp = _closed_origin(bench)
+        with scoped(ledger=ledger):
+            band = asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
+        assert isinstance(band.reading, NoiseBand) and len(band.reading.raw) == 2
+        assert band.reading.recorded.n == len(band.verification.sample_keys) == len(drawn) - 1, (
+            "the band stood beside a recorded level over rows it never re-scored (bl3.B2)"
+        )
+        assert band in [
+            record for record in ledger_records(ledger) if isinstance(record, PassGradedRecord)
+        ], "the band was not filed on its cycle's ledger"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_noise_floor_that_scored_cells_and_read_no_band_files_them_unread(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _peer_bench(monkeypatch, offline) as bench:
+        _, session, origin_sp = _closed_origin(bench)
+        replicates: list[int] = []
+
+        async def _second_stops(*args: Any, **kwargs: Any) -> Any:
+            walk = await score_search_point(*args, **kwargs)
+            replicates.append(len(replicates))
+            return (
+                walk
+                if len(replicates) == 1
+                else dataclasses.replace(walk, stopped=WalkEnd.CLIENT_ERROR)
+            )
+
+        with monkeypatch.context() as patched, scoped(ledger=bench.ledger):
+            patched.setattr(held_out, "score_search_point", _second_stops)
+            band = asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
+    assert band.verification.cells and band.reading is None, "the scored cells were not kept"
+    assert band.state is ReadingState.MEMBER_UNSCOREABLE, "a band read from one replicate"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_0_with_replicates_files_one_band_over_k_rescores_of_its_recorded_rows(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    offline.llm.says = _bench_says
+    with _peer_cycle(
+        workspace(),
+        _PEER_HOP,
+        monkeypatch,
+        "capo",
+        {"capo_init": {"config": {"size": 2, "k_max": 0}}},
+        lambda prompt, s: "OK" in prompt or s.id % 2 == 0,
+        origin_replicates=2,
+    ) as (cycle, ledger):
+        stores, peer = cycle.session.store, minted_campaign(_PEER_HOP)
+        stores.campaigns.create_campaign(peer)
+        minted_dataset(stores, peer)
+        session = cycle.session
+        session.state.clock = LaunchClock.now()
+        # The origin walked in round 0's door, which the round file's cells name.
+        ledger.append(RoundEnteredRecord(round=0))
+        walked = list(session.state.scoring.partition.search)[:4]
+        with scoped(round=0):
+            asyncio.run(open_origin_round(cycle, walked, resumed_ending=None))
+        bands = [
+            record
+            for record in ledger_records(ledger)
+            if isinstance(record, PassGradedRecord)
+            and record.verification.kind is MeasurementRole.NOISE_FLOOR
+        ]
+    assert len(bands) == 1, "round 0 filed no band, or one per replicate"
+    (band,) = bands
+    assert isinstance(band.reading, NoiseBand) and len(band.reading.raw) == 2
+    rows = band.verification.sample_keys
+    assert sorted(rows) == sorted(s.key for s in walked), (
+        "the band re-scored rows round 0 never recorded"
+    )
+    assert len(band.verification.cells) == 2 * len(rows), "a replicate re-scored a partial set"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_rescore_that_raises_ends_the_bands_mark_at_its_brackets_exit(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _peer_bench(monkeypatch, offline) as bench:
+        ledger = bench.ledger
+        _, session, origin_sp = _closed_origin(bench)
+
+        async def _outage(*_: object, **__: object) -> NoReturn:
+            raise RuntimeError("the rescore raised")
+
+        failed_from = ledger.next_offset
+        with monkeypatch.context() as patched, scoped(ledger=ledger):
+            patched.setattr(held_out, "score_search_point", _outage)
+            with pytest.raises(RuntimeError):
+                asyncio.run(held_out.measure_noise_floor(session, origin_sp, 2))
+        dashboard = LiveDashboardProjection()
+        dashboard.feed(run_wiring("solve"))
+        for at, record in enumerate(ledger_records(ledger)):
+            if at >= failed_from:
+                dashboard.feed(record)
+        served = dashboard.value()
+        assert served is not None
+        assert [(m.state, m.failed_as) for m in served.verification if m.kind == "noise_floor"] == [
+            ("failed", ReadingState.PASS_STOPPED)
+        ], "a noise floor that raised left its mark running"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_spent_budget_stops_the_bench_pass_and_the_held_passes_beside_it_stand(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(monkeypatch, offline) as bench:
+        origin_pass, head, graded = bench.origin_pass, bench.head, bench.graded
+        earlier = origin_pass.model_copy(
+            update={"arm": ArmName(key=ArmKey("an earlier pick"), round=7, label="C7.1")}
+        )
+        book = require_spend_book("the bench journey")
+        unspent, book.share = book.share, Budget(usd=0.0)
+        short = graded(earlier)
+        book.share = unspent
+        stop = short.selections[head.individual.id].stop
+        assert stop is not None and stop.cause is StopReason.SPEND_BUDGET, (
+            "a spent budget stops the pass and names the bound"
+        )
+        assert short.selections[earlier.arm.key] is earlier, "a held pass was dropped"
+
+
+# The refused pass holds the cells the paused pass banked.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_refusal_mid_walk_banks_the_cells_the_pass_held_never_zero_over_paid_rows(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(monkeypatch, offline) as bench:
+        head, graded = bench.head, bench.graded
+        paused_pass = _pause_mid_pass(bench, monkeypatch)[2].verification
+
+        async def _refused_mid_pass(*_: Any) -> MeasuredCell:
+            raise SendRefusedError("no rate for this model", category=ErrorCategory.NO_RATE)
+
+        with monkeypatch.context() as patched:
+            patched.setattr(query_loop, "measure_sample", _refused_mid_pass)
+            no_rate = graded().selections[head.individual.id]
+        assert no_rate.stop is not None and no_rate.stop.cause is StopReason.NO_RATE, (
+            "a refused pass did not name its refusal"
+        )
+        assert {key for key, _, _ in paused_pass.cells} <= {key for key, _, _ in no_rate.cells}, (
+            "a refused pass banked none of the cells it held (bl3.B4)"
+        )
+
+
+# A pass after the stop replays the cells the paused pass banked, and each regrade reads the last.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_the_bench_grades_the_pick_the_optimizer_declared_over_a_higher_composite_round(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(monkeypatch, offline) as picked:
+        cycle, session, head, graded = picked.cycle, picked.session, picked.head, picked.graded
+        paused_pass = _pause_mid_pass(picked, monkeypatch)[2].verification
+        passes = graded()
+        [taken] = passes.selections.values()
+        assert (taken.arm.key, taken.arm.round, taken.stop) == (head.individual.id, 1, None), (
+            "the bench grades the pick the optimizer declared"
+        )
+        assert {key for key, _, _ in paused_pass.cells} <= {
+            key for key, _, replayed in taken.cells if replayed
+        }, "the pass after a stop bought again a cell the stopped pass had banked"
+        assert graded(taken).selections[taken.arm.key] is taken, "a held pass was sent again"
+        left = taken.model_copy(update={"sp_hash": "a pick the line left"})
+        resent = graded(left).selections[taken.arm.key]
+        assert [c[:2] for c in resent.cells] == [c[:2] for c in taken.cells]
+        assert all(replayed for *_, replayed in resent.cells), "a resent pass bought a cell again"
+        bench = read_bench(
+            session.store,
+            passes,
+            session.state.scoring.scorer,
+            line=bench_line(
+                taken.arm,
+                hop=session.hop,
+                instrument_id="capo-e2e",
+            ),
+        )
+        assert bench.selected is not None and bench.origin is not None
+        selected_accuracy, origin_fitness = bench.selected.fitness, bench.origin.fitness
+        assert selected_accuracy is not None and origin_fitness is not None
+        assert (selected_accuracy.value, origin_fitness.value) == (1.0, 0.0)
+        session.state.clock = LaunchClock.now()
+        result = build_cycle_result(
+            cycle,
+            session,
+            stop_reason=StopReason.ROUNDS_BUDGET,
+            stepped=False,
+            cycle_error=None,
+            finished_at="",
+            spend=None,
+            bench=bench,
+            selected=select_optimizer(cycle.config.optimization),
+            fitness_ceiling=None,
+        )
+        assert result.result_round == bench.selected.round == 1, "the result names the round graded"
+
+
+def _adopting_twice(picked: _Bench, monkeypatch: pytest.MonkeyPatch) -> tuple[str, str]:
+    """An earlier round of the line adopting the round's other measured arm: the pick and it."""
+    cycle, head, round_ = picked.cycle, picked.head, picked.picked
+    origin = cycle.origin_round.origin.individual.id
+    other = next(
+        key
+        for key, arm in round_.arms.items()
+        if key not in {head.individual.id, origin} and isinstance(arm, Measured | Cut)
+    )
+    assert round_.election is not None
+    earlier = round_.model_copy(
+        update={
+            "election": round_.election.model_copy(update={"selected": other, "ended_on": other})
+        }
+    )
+    spans = line_bench.line_spans
+    monkeypatch.setattr(
+        line_bench, "line_spans", lambda *a: [LineSpan([earlier], None), *spans(*a)]
+    )
+    return head.individual.id, other
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_every_adoption_grades_each_selection_the_line_adopted_once(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(monkeypatch, offline) as picked:
+        cycle, session = picked.cycle, picked.session
+        adopted = set(_adopting_twice(picked, monkeypatch))
+
+        def graded(trigger: BenchTrigger, banked: BenchPasses) -> BenchPasses:
+            return asyncio.run(
+                bench_selection(
+                    session, cycle.rounds, points=cycle.points, banked=banked, trigger=trigger
+                )
+            )
+
+        assert set(graded("at_end", bench_passes(picked.origin_pass)).selections) == {
+            picked.head.individual.id
+        }, "`at_end` graded more than the final selection"
+        every = graded("every_adoption", bench_passes(picked.origin_pass))
+        assert set(every.selections) == adopted, "an adoption of the line went ungraded"
+        again = graded("every_adoption", every)
+        assert all(again.selections[key] is every.selections[key] for key in adopted), (
+            "a pass that answers was sent again"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_member_whose_point_moved_banks_its_pass_refused_and_the_roster_grades_on(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(monkeypatch, offline) as picked:
+        cycle, session = picked.cycle, picked.session
+        head, moved = _adopting_twice(picked, monkeypatch)
+        measured = PointContext.measured
+
+        def rebuild(points: PointContext, arm: Concluded) -> JobSearchPoint:
+            if arm.individual.id == moved:
+                raise BankedSearchPointError("moved under it")
+            return measured(points, arm)
+
+        monkeypatch.setattr(PointContext, "measured", rebuild)
+        line_bench.graded(session, picked.origin_pass, subject="origin")
+        banked = asyncio.run(
+            bench_selection(
+                session,
+                cycle.rounds,
+                points=cycle.points,
+                banked=bench_passes(picked.origin_pass),
+                trigger="every_adoption",
+            )
+        )
+        folded = line_bench.line_passes(session.store, session.bound_campaign)
+        assert folded is not None and folded.refused == banked.refused == {
+            moved: "moved under it"
+        }, "the moved member's refusal was not banked on its pass"
+        assert not folded.selections[moved].cells and folded.selections[head].cells, (
+            "the refusal spent on the moved member, or stopped the rest of the roster"
+        )
+        read = line_bench._read_pass(
+            session.store,
+            folded.selections[moved],
+            session.state.scoring.scorer,
+            tolerance=folded.tolerance,
+            refused=folded.refused,
+        )
+        assert read.outcome.state is ReadingState.MEMBER_UNSCOREABLE, (
+            "the fold read a refused pass as anything but unscoreable"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_every_adoption_sets_aside_one_pass_per_selection_it_will_grade(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    with _bench_cycle(monkeypatch, offline) as picked:
+        cycle, session = picked.cycle, picked.session
+        _adopting_twice(picked, monkeypatch)
+        monkeypatch.setattr(line_bench, "cell_channels_of", lambda *_: {"cost": 0.01})
+        book = require_spend_book("the set-aside")
+        held: dict[BenchTrigger, float] = {}
+        for trigger in ("at_end", "every_adoption"):
+            # A set-aside the fold reads (`Budget.amount` keeps 6 places), below one pass's price.
+            book.set_aside(0.001, 1, paid_by="host")
+            cycle.config = cycle.config.model_copy(update={"bench_trigger": trigger})
+            line_bench.reserve_selection_pass(cycle, session)
+            held[trigger] = book.count().set_aside.usd_amount
+        assert held["at_end"] > 0.001, "vacuous — the selection's pass never raised the set-aside"
+        assert held["every_adoption"] == pytest.approx(2 * held["at_end"]), (
+            "the set-aside does not price every adoption the end pass grades"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_authored_round_measures_the_operators_arm_and_asks_no_proposer(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    authored = workspace()
+    hop, cycle_dir = walking_cycle(authored)
+    measured: list[str] = []
+
+    def operator_solves(prompt: str, _sample: Sample) -> bool:
+        measured.append(prompt)
+        return "Operator" in prompt
+
+    def submit(key: str) -> Any:
+        payload = SubmitArmsPayload(
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
+            arms=[
+                SubmittedArm(
+                    prompt_fields={"solve": {"instruction": "Operator wrote this."}},
+                    changes_description="the operator's own wording",
+                )
+            ],
+        )
+        return CommandDispatcher(authored).dispatch(CommandCall(payload, key, door=Door.HOST))
+
+    # What earlier runs earned on this answer space reaches the origin's critique, not round 1 alone.
+    monkeypatch.setattr(
+        node_context, "earned_blocks_for", lambda *_a: {"persona": ("Answer tersely.",)}
+    )
+    try:
+        with _peer_cycle(
+            authored,
+            hop,
+            monkeypatch,
+            "potter",
+            {},
+            operator_solves,
+            control=RunControl(commands=authored.commands, cycle=authored.subject(hop)),
+            arm_gate="author",
+        ) as (cycle, _):
+            offline.llm.says = lambda _body: "ok"
+            at_origin = RoundContext(cycle=cycle, round_num=0)
+            origin_read = PotterView(
+                NodeContext(at_origin, NODE_MEMBERS.get("l1_critique")), Ladder()
+            )
+            assert [b.text for b in origin_read.block_window().get("persona", ())[:1]] == [
+                "Answer tersely."
+            ], "round 0's critique composed before the block pool was seeded"
+            l1 = cast("node_contract.Proposer", NODE_MEMBERS.get("l1_generate"))
+            seed = cast("node_contract.Proposer", NODE_MEMBERS.get("mating"))
+            seeded = node_contract.RoundWalk("default", (seed,), (l1,), "author")
+            blank = node_contract.RoundOpening({}, None, replayed=False)
+            stated = l1.opening(NodeContext(at_origin, l1), blank)
+            assert announce_opening(at_origin, seeded) == stated != blank, (
+                "a seed walking ahead of L1 stated the round's standing and arms in L1's place"
+            )
+            measured.clear()
+
+            async def at_the_hold() -> RoundResult:
+                with pytest.raises(ConflictError):
+                    await submit("arms-before-the-hold")
+
+                held = asyncio.Event()
+
+                async def gate_declared(*args: Any, **kwargs: Any) -> Any:
+                    held.set()
+                    return await hold_for_operator(*args, **kwargs)
+
+                monkeypatch.setattr(
+                    "promptpotter.application.runner.round.hold_for_operator", gate_declared
+                )
+
+                async def answer() -> None:
+                    await held.wait()
+                    assert authored.run_state(hop).run_phase is RunPhase.GATE, (
+                        "the hold never reached the ledger"
+                    )
+                    await submit("arms-at-the-hold")
+
+                (_, held_round, held_cut, _), _ = await asyncio.gather(
+                    execute_round(cycle, 1), answer()
+                )
+                assert held_cut is None
+                return held_round
+
+            # The hold polls on the loop's clock, which jumps past each wait.
+            offline.llm.sent.clear()
+            closed = jumping_clock(at_the_hold())
+            # The critique still reads the round; every other call it made filled the seat.
+            critique_node = NODE_MEMBERS.get("l1_critique")
+            assert isinstance(critique_node, node_contract.LlmNode)
+            assert critique_node.response_model is not None
+            critique = critique_node.response_model.__name__
+            asked = [
+                body.get("response_format", {}).get("json_schema", {}).get("name")
+                for body in offline.llm.sent
+            ]
+            assert all(name == critique for name in asked), (
+                f"an authored round called a model beside its critique: {asked}"
+            )
+            # A resume re-seats the pool its banked round names, never one a later write left.
+            banked = closed.model_copy(update={"optimizer_state": cycle.close_state(1)})
+            set_cycle(cycle, slices=[BlockPool(entries=())])
+            cycle.replay_priors([banked])
+            resumed = PotterView(
+                NodeContext(
+                    dataclasses.replace(at_origin, round_num=2),
+                    NODE_MEMBERS.get("l1_generate"),
+                ),
+                Ladder(),
+            )
+            assert [b.text for b in resumed.block_window().get("persona", ())[:1]] == [
+                "Answer tersely."
+            ], "a resumed run handed its proposer a pool its banked round does not name"
+            l3: Any = NODE_MEMBERS.get("l3_plan")
+            replanning = NodeContext(at_origin, l3)
+            set_cycle(cycle, slices=[L3Memory(plan="attack the default label")])
+            l3.land(replanning, l3.parse(replanning, L3PlanOutput(plan="")))
+            assert cycle.slices.get(L3Memory).plan == "", (
+                "an empty replan kept the plan it replaced: every later prompt read a dropped strategy"
+            )
+    finally:
+        release_cycle(cycle_dir)
+    [arm] = closed.proposed.values()
+    assert arm.individual.prompts["solve"].fields["instruction"] == "Operator wrote this.", (
+        "the operator's arm ran"
+    )
+    assert any("Operator wrote this." in prompt for prompt in measured), "it was measured"
+    assert [made.mode for made in arm.individual.lineage.variations] == ["operator"]
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_gepas_gate_tests_each_arm_against_the_minibatch_scores_of_its_own_parent(
+    built_stores: Stores,
+) -> None:
+    bars = MinibatchBars(
+        bars={
+            "weak_parent_child": MinibatchBar(parent_id="p1", objectives={"0": 0.1, "1": 0.1}),
+            "strong_parent_child": MinibatchBar(parent_id="p2", objectives={"0": 0.9, "1": 0.9}),
+        }
+    )
+    weak_child, strong_child = (ArmKey(cid) for cid in bars.bars)
+    gated = seat(built_stores, optimization={"optimizer": "gepa"})
+    gated.cycle.emit(bars, gated.round_num)
+    gate = MinibatchGate()
+    minibatch = samples(2)
+
+    race = gate.race(
+        NodeContext(gated, gate), RoundSamples(cells=minibatch, order=minibatch, block_size=2)
+    )
+    assert race.priors == {}, "the gate paired a prior, so the bench would catch it up"
+    level = [measurement(i, 1.0, objective=0.5) for i in range(2)]
+    walk = WalkView(level, minibatch, 0, len(level))
+    stops = race.decide(View(dict.fromkeys((weak_child, strong_child), walk), False)).stops
+    assert (
+        list(stops) == [strong_child] and stops[strong_child].check_result["parent_id"] == "p2"
+    ), "one arm's parent bar decided another arm's gate"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_stands(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    member = NODE_MEMBERS.get("l1_generate")
+    assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
+    with _peer_cycle(
+        workspace(),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {"l1_generate": {"config": {"n_variants": 8}}},
+        lambda _p, _s: True,
+    ) as (cycle, _):
+        parent = cycle.parent.prompts["solve"].fields["instruction"]
+
+        def edit(op: str, anchor: str, text: str) -> dict[str, Any]:
+            return {"at": "solve.instruction", "op": op, "anchor": anchor, "text": text}
+
+        edits = [
+            [edit("replace", parent, parent)],
+            [edit("replace", "a span the parent never held", "Check.")],
+            # Two edits on one field: the second anchors on the text the first left.
+            [edit("insert_after", parent, " Zq7."), edit("replace", "Zq7.", "Check twice.")],
+            # A span the text holds twice names no place to edit.
+            [edit("insert_after", parent, " Zq7. Zq7."), edit("replace", "Zq7.", "Check.")],
+            [edit("replace", "", "Rewritten whole.")],
+            [edit("insert_after", parent, " Zq9.")],
+            # Past the length budget, the edits summed.
+            [edit("insert_after", parent, " Zq7."), edit("insert_after", "Zq7.", " Zq8." * 200)],
+            # A hard-wrapped span quoted with its line break reflowed still names its one place.
+            [edit("insert_after", parent, " Zq7\n  Zq8."), edit("replace", "Zq7 Zq8.", "Check.")],
+        ]
+
+        def says(body: dict[str, Any]) -> str:
+            # A line of one panel, cited under no name; two lines joined are held by none.
+            prompt = body["messages"][0]["content"]
+            line = prompt[prompt.index("ESCALATION: ") :].splitlines()[0]
+            cites = [None, None, line, None, None, "SCORED: 1 | true: 2", None, None]
+            return json.dumps(
+                {
+                    "variants": [
+                        {
+                            "evidence_grounding": None if c is None else {"citation": c},
+                            "mechanism": "m",
+                            "targets_rows": [],
+                            "edits": e,
+                        }
+                        for e, c in zip(edits, cites, strict=True)
+                    ]
+                }
+            )
+
+        offline.llm.says = says
+        offline.llm.sent.clear()
+        generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
+        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
+        readout = cycle.output(L1Readout, 1)
+    assert len(offline.llm.sent) == 1, "a reply the invariants refuse per arm bought a repair"
+    fatal = [
+        [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
+        for cp in proposed.proposals
+    ]
+    missed, unheld, long = "edit_anchor_not_one_span", "citation_not_in_panel", "over_ceiling"
+    assert fatal == [["no_op_variant"], [missed], [], [missed], [], [unheld], [long], []], (
+        "a restating, mis-anchored, unheld-citing or overlong variant was not refused as its own arm"
+    )
+    assert "at most 800 characters" in json.dumps(offline.llm.sent[0]), (
+        "the length budget the variant was refused by was never stated on the wire"
+    )
+    written = [cp.individual.prompts["solve"].fields["instruction"] for cp in proposed.proposals]
+    assert written[2] == f"{parent} Check twice.", "two edits on one field did not apply in order"
+    assert written[4] == "Rewritten whole.", "an empty anchor did not rewrite the whole field"
+    assert written[7] == f"{parent} Check.", "an anchor reflowing a line break missed its span"
+    grounding = proposed.proposals[2].individual.lineage.evidence_grounding
+    assert grounding is not None and grounding.field == "escalation_panel", (
+        "a quote of a panel line was not filed under the panel holding it"
+    )
+    assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
+        None,
+        8,
+        {"no_op_variant": 1, missed: 2, unheld: 1, long: 1},
+    ), "a round's per-arm refusals were not booked against what L1 generated"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_optimizer_call_whose_send_raises_leaves_its_record_and_still_raises(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # A call announced and never closed reads as one still waiting, whatever it cost.
+    member = NODE_MEMBERS.get("l1_generate")
+    assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
+    with _peer_cycle(
+        workspace(),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {},
+        lambda _p, _s: True,
+    ) as (cycle, ledger):
+        offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
+        generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
+        with pytest.raises(FailedSendError):
+            asyncio.run(member.propose(generating, node_contract.Proposals([])))
+        record = scan_last([LedgerSpan(ledger.path)], LLMCallRecord)
+    assert record is not None and record.node == "l1_generate", "the failed call left no record"
+    assert (
+        "FailedSendError" in record.payload["error"] and "refused" in record.payload["content"]
+    ), "the record names no failure, or drops the refusal's body"
+    assert record.payload["template_fields"] and record.payload["response_schema"], (
+        "the record cannot rebuild the request that failed"
+    )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # The scorer parses answer_format.
+    member = cast("L1Generate", NODE_MEMBERS.get("l1_generate"))
+    with _peer_cycle(
+        workspace(),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {},
+        lambda _p, _s: True,
+    ) as (cycle, _):
+        fields = cycle.parent.prompts["solve"].fields
+        writes = [("answer_format", "Say anything."), ("instruction", "Check each premise.")]
+        offline.llm.says = lambda _body: json.dumps(
+            {
+                "variants": [
+                    {
+                        "mechanism": "edit",
+                        "edits": [
+                            {
+                                "at": f"solve.{field}",
+                                "op": "replace",
+                                "anchor": fields.get(field, ""),
+                                "text": text,
+                            }
+                        ],
+                    }
+                    for field, text in writes
+                ]
+            }
+        )
+        generating = NodeContext(
+            RoundContext(cycle=cycle, round_num=1),
+            NODE_MEMBERS.get("l1_generate"),
+        )
+        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
+    fatal = [
+        [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
+        for cp in proposed.proposals
+    ]
+    assert fatal == [["forbidden_axis"], []], "an L1 edit of answer_format reached the backend"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_capo_inits_reply_out_of_form_is_one_refused_child(
+    monkeypatch: pytest.MonkeyPatch, offline: Router
+) -> None:
+    # An array of blanks seeds nothing; read as in form, it left the round without one arm or a word.
+    # A reply nested past the parser's stack crashed the init instead of refusing it.
+    member = cast("CapoInit", NODE_MEMBERS.get("capo_init"))
+    for n, reply in enumerate(
+        (json.dumps(["  ", ""]), "[" * 5000 + "]" * 5000, "[" + "1+" * 20000 + "1]")
+    ):
+        with _peer_cycle(
+            workspace(default_identity(f"init-{n}")),
+            _PEER_HOP,
+            monkeypatch,
+            "capo",
+            {"capo_init": {"config": {"size": 2, "k_max": 0}}},
+            lambda _p, _s: True,
+        ) as (cycle, _):
+            offline.llm.says = lambda _body, said=reply: said  # type: ignore[misc]
+            drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
+            proposed = asyncio.run(member.propose(drawing, node_contract.Proposals([])))
+        assert [p.invalid for p in proposed.proposals] == [True], (
+            f"reply {n} out of form drew a child or refused none"
+        )
+
+
+# Round 3's fork offer reads the rounds the disk-faulted closes landed.
+@pytest.mark.usefixtures("optimizing_memory", "offline")
+def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The round the fork hangs from is restated electing that arm, so the line continues from it.
+    with _peer_cycle(
+        workspace(),
+        _PEER_HOP,
+        monkeypatch,
+        "potter",
+        {},
+        lambda _p, _s: True,
+    ) as (cycle, ledger):
+        origin_arm = arm_state(
+            "C0", position=ArmPosition(round=0, idx=0, total=1), individual=cycle.parent
+        )
+        # Walked on no cell this cycle's bank draws, so no panel renders a row the bank lacks.
+        c0, c1, c2 = keys = [arm_key(f"c{i}") for i in range(3)]
+        unwalked = dict.fromkeys(keys, sheet(()))
+        line = [
+            round_result(0, arms=[origin_arm], cells={}),
+            round_result(1, candidates_scored=3, optimizer_state=optimizer_state(), cells=unwalked),
+        ]
+        forking = NodeContext(
+            RoundContext(cycle=cycle, round_num=2),
+            NODE_MEMBERS.get("l2_context"),
+        )
+        set_cycle(cycle, line=line)
+        assert PotterView(forking, Ladder()).reelect_offer == {}, (
+            "an improving line, which builds on its parent, was offered a fork"
+        )
+        # A round file the disk refuses is its ledger's one warning: the close lands, and so
+        # does the next round's file, with no second warning.
+        session = cycle.session
+        round_files = session.store.campaigns.layout(session.hop)
+        with LedgerIndex.of(ledger.path).projecting() as checkout:
+            checkout.add(RoundFileProjection(session.store, session.hop, session.state))
+            with monkeypatch.context() as unwritable:
+                unwritable.setattr(closed_rounds, "write_json", Mock(side_effect=OSError("full")))
+                close_round(ledger, line, cycle=cycle)
+            line.append(
+                round_result(
+                    2,
+                    improved=False,
+                    candidates_scored=1,
+                    optimizer_state=optimizer_state(),
+                    cells={},
+                )
+            )
+            set_cycle(cycle, line=line)
+            close_round(ledger, line, cycle=cycle)
+        warned = [r.kind for r in ledger_records(ledger) if isinstance(r, RoundWarningRecord)]
+        assert warned == ["derived_file_stale"] and round_files.round_file(2).exists(), (
+            "a round file's disk fault unwound its close, went unreported, or stopped the next"
+        )
+        forking = NodeContext(
+            RoundContext(cycle=cycle, round_num=3),
+            NODE_MEMBERS.get("l2_context"),
+        )
+        stalled = PotterView(forking, Ladder())
+        offer = stalled.reelect_offer
+        # c0 sits on both rounds' panels: one entry, its first listing.
+        assert offer == {
+            "C1.1": RoundArm(round=1, arm=c0),
+            "C1.2": RoundArm(round=1, arm=c1),
+            "C1.3": RoundArm(round=1, arm=c2),
+        }, "a stalled layer may stand a fork on another arm than the picks and those they outranked"
+        assert "ELECTIONS" in DispatchHub.render("rebase_capability", stalled), (
+            "an arm two rounds list kept the layer's prompt from composing"
+        )
+        standing = fork_proposal_model(tuple(offer))
+        refork = _rebase_request(
+            forking, "l2_context", standing(reason="r", stand_on="C1.2"), offer
+        )
+        assert isinstance(refork, RebaseRequest) and refork.fork_from_round == 2, (
+            "a fork standing on a round-1 arm cuts at round 2"
+        )
+        hangs_from = refork.hangs_from
+        assert hangs_from is not None and hangs_from.election is not None
+        assert (hangs_from.election.selected, hangs_from.optimizer_state.population) == (
+            c1,
+            [line[1].arms[c1].individual],
+        ), "the restated round elects another arm than the one the layer stood the fork on"
+        assert line[1].election is not None and line[1].election.selected == c0, "guard"
+        assert (
+            hangs_from.election.reelection
+            == Reelection(by=Principal("l2_context/round_3", "l2_context"), reason="r")
+            and hangs_from.election.verdict_reason == line[1].election.verdict_reason
+        ), "a re-election is not told apart from the selector's own verdict"
+        stood_on_pick = _rebase_request(
+            forking, "l2_context", standing(reason="r", stand_on="C1.1"), offer
+        )
+        assert isinstance(stood_on_pick, RebaseRequest) and stood_on_pick.hangs_from is None, (
+            "a fork on the round's own pick restated an election it already holds"
+        )
+        with pytest.raises(ValidationError):
+            standing.model_validate({"reason": "r", "stand_on": "C9.9"})
+
+
+# Each restate banks the fires before it, and the resume seats what they banked.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_closed(
+    tmp_path: Path,
+) -> None:
+    # What a layer fires is on no close.
+    cycle_dir = CycleDir(tmp_path / "fired")
+    fired_ledger = laid_ledger(cycle_dir)
+    # Appended here, as the store appends a restate.
+    carried = select_optimizer(bench_choice("potter")).slices
+    live = SliceMap(carried)
+    closed = round_result(1, optimizer_state=optimizer_state(), cells={})
+    line = [round_result(0, optimizer_state=optimizer_state(), cells={}), closed]
+    closing = seat(workspace()).cycle
+    for n in (1, 2):
+        close_round(fired_ledger, line[:n], cycle=closing)
+
+    def restate() -> None:
+        state = closed.closed_state.holding(
+            live.get(L2Memory), live.get(L3Memory), live.get(Ladder)
+        )
+        standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
+        fired_ledger.append(standing[1].close.restated(state))
+
+    def fired(record: Callable[[Ladder], Ladder]) -> None:
+        live.put(record(live.get(Ladder)))
+
+    floor = NODE_LAYOUTS["l1_generate"].floor
+    moved = coerce_l1_layout({"persona": ["critique"]}, base=floor)
+    assert moved is not None and moved != floor
+    handed = live.get(L2Memory)
+    live.put(
+        handed.steered_onto(
+            "l1_generate", {"layout": moved.model_dump(mode="json"), "n_variants": 5}
+        )
+    )
+    assert handed == L2Memory() and live.get(L2Memory) != handed, (
+        "a fire answers the NEXT memory: the one it was handed is what the closed round banked"
+    )
+    fired(lambda ladder: l2_fired(ladder, LayerReading(1, 0.5, None, None)))
+    restate()
+    live.put(L3Memory(plan="attack the default label"))
+    fired(lambda ladder: l3_fired(ladder, None))
+    restate()
+
+    def resumed(last: int) -> tuple[L2Memory, L3Memory, Ladder]:
+        standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
+        state = SliceMap(carried)
+        state.seat(standing[last].close.closed_state)
+        return state.get(L2Memory), state.get(L3Memory), state.get(Ladder)
+
+    kept = resumed(1)
+    assert kept == (live.get(L2Memory), live.get(L3Memory), live.get(Ladder)), (
+        "paused inside round 2: both fires belong to the boundary the resume keeps"
+    )
+    assert kept[2].l3.fires == 1 and kept[1].plan
+    assert resumed(0) == (L2Memory(), L3Memory(), Ladder()), (
+        "rewound to re-run round 1: the fires are discarded with it"
     )

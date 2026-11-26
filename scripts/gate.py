@@ -1375,9 +1375,20 @@ _ENGINE = ("!webapp/",)
 _GATE = ("scripts/gate.py", "scripts/last_green.py", "scripts/processes.py")
 _GENERATED_TYPES = "webapp/lib/api/types.generated.ts"
 _ESTIMATE_WORDS = "webapp/lib/__tests__/estimate-words.generated.json"
+_SERVED_CONTRACT = "promptpotter/presentation/api/served_contract.py"
 _GENERATED_MARKS = "webapp/components/ui/vendor-marks.generated.ts"
 _WEBAPP_READS = ("webapp/", "tests/fixtures/", *_GATE)
 _ENGINE_RUNTIME = (*ENGINE_RUNTIME, *_GATE)
+# What a layer below presentation can import (`_LAYERING` bars each from `presentation/`): the
+# runtime less that layer and the two modules that open it.
+_BELOW_PRESENTATION = (
+    *(
+        f"promptpotter/{entry.name}{'/' * entry.is_dir()}"
+        for entry in sorted((REPO / "promptpotter").iterdir())
+        if entry.name not in ("presentation", "main.py", "__main__.py", "__pycache__")
+    ),
+    *(prefix for prefix in _ENGINE_RUNTIME if not prefix.startswith("promptpotter/")),
+)
 _RUFF_READS = (*_RUFF_TARGETS, "pyproject.toml", *_GATE)
 
 
@@ -1720,7 +1731,8 @@ CHECKS: tuple[Check, ...] = (
         tier="commit",
         reads=("webapp/app/", "webapp/components/", *_GATE),
     ),
-    # A regenerator reads what it imports and its own output, so none reads another's: no cycle.
+    # A regenerator reads what it imports and its own output. `ts-types` also writes the engine's
+    # served contract, so every engine reader runs after it, and it runs after `optimizer-schemas`.
     Check(
         "ts-types",
         "py",
@@ -1728,7 +1740,7 @@ CHECKS: tuple[Check, ...] = (
         mb=190,  # 153
         tier="commit",
         reads=(*_ENGINE_RUNTIME, "scripts/build_ts_types.py", _GENERATED_TYPES, _ESTIMATE_WORDS),
-        writes=(_GENERATED_TYPES, _ESTIMATE_WORDS),
+        writes=(_GENERATED_TYPES, _ESTIMATE_WORDS, _SERVED_CONTRACT),
     ),
     # "web", unlike its siblings: it reads `simple-icons` out of `webapp/node_modules`.
     Check(
@@ -1752,8 +1764,9 @@ CHECKS: tuple[Check, ...] = (
         _probe("scripts/build_optimizer_schemas.py", _rewrote),
         mb=80,  # 65
         tier="commit",
+        # Its imports stay below presentation, so `ts-types`' served contract is no input of its.
         reads=(
-            *_ENGINE_RUNTIME,
+            *_BELOW_PRESENTATION,
             "scripts/build_optimizer_schemas.py",
             f"{_EXAMPLE_PLUGIN_DIR}/",
         ),
@@ -1783,7 +1796,7 @@ CHECKS: tuple[Check, ...] = (
         "pytest",
         "py",
         _pytest,
-        mb=408,  # 38 MB above a warm 370 MB measured on main 5d150ac13: a 40 MB growth is red
+        mb=393,  # 38 MB above a warm 355 MB: tw-0's suite peaks 15 MB under 7dce00a96's (331 vs 346)
         # Every script, as the suite imports them bare off pytest's `pythonpath`.
         reads=(*ENGINE_RUNTIME, "tests/", "scripts/"),
     ),
@@ -1795,7 +1808,7 @@ CHECKS: tuple[Check, ...] = (
         OFFLINE_RUN,
         "py",
         _offline_leg(_OFFLINE_HOME),
-        mb=1270,  # 1017
+        mb=1240,  # 986: 1017 at a child peak of 196 MB, 190 at tw-0 under the same slots
         tier="landing",
         slots=min(OFFLINE_RUN_CHILDREN_MAX, _CORES),
         reads=(*OFFLINE_RUN_READS, *_GATE),
@@ -1909,6 +1922,9 @@ def _execute(check: Check, sel: Selection, store: LastGreen | None) -> Result:
     if result.kept:
         return result
     if peak is not None and peak > check.mb:
+        # Red past its own run: no product it left (`offline_run.py`'s greens) vouches for a rerun.
+        for path in check.builds:
+            shutil.rmtree(REPO / path.format(key=result.key), ignore_errors=True)
         over = f"peaked at {peak} MB, over its {check.mb} MB cap.\n{result.out}"
         return dataclasses.replace(result, rc=result.rc or 1, out=over, peak_mb=peak)
     return dataclasses.replace(result, peak_mb=peak)

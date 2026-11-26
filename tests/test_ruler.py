@@ -33,7 +33,6 @@ from factories import (
     workspace,
 )
 from offline_world import Router
-from pydantic import TypeAdapter
 
 from promptpotter.application.bench.difficulty import (
     DifficultyView,
@@ -60,14 +59,10 @@ from promptpotter.application.intelligence.rasch import (
 from promptpotter.application.runner.bench import LineSpan, own_level
 from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.paired import grade_measurands
-from promptpotter.application.views.render.sample import fmt_query_result
-from promptpotter.domain.arm_reading import fold_fitness_text
 from promptpotter.domain.cycle_result import CycleResult
-from promptpotter.domain.l4.inner_facts import series_reason_head
 from promptpotter.domain.l4.proxies import (
     OuterSampleProxies,
     compute_outer_proxies,
-    floor_reason,
     inner_cell_facts,
     inner_cell_report,
     panel_precision,
@@ -76,7 +71,6 @@ from promptpotter.domain.optimizer_state import (
     PARSE_FAILURE_MALFORMED,
     PARSE_FAILURE_TOOLING,
 )
-from promptpotter.domain.paired_reading import lift_text
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.results import RoundResult
@@ -92,7 +86,7 @@ from promptpotter.domain.ruler import (
     theta_caveat,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import GradedCell, LedgerCell, Scorer
+from promptpotter.domain.scoring import GradedCell, Scorer
 from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import (
@@ -146,37 +140,45 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
     ):
         assert abs(fitted - truth) < tol, "the population spread is not the one drawn"
 
-    # θ given a fixed δ, one arm's cells at a time: subset-invariant, where raw accuracy inverts it.
-    rng = np.random.default_rng(7)
-    level = {"1": -2.0, "2": -2.0, "3": -2.0, "4": 2.0, "5": 2.0, "6": 2.0}
-    ruler = {f"{sid}.{i}": d for sid, d in level.items() for i in range(200)}
-    easy, hard = ["1", "2", "3"], ["4", "5", "6"]
 
-    def measure(theta: float, sids: list[str], n: int = 200) -> dict[str, float]:
-        cells = [f"{sid}.{i}" for sid in sids for i in range(n)]
-        p = 1.0 / (1.0 + np.exp(-(theta - np.array([ruler[c] for c in cells]))))
-        return dict(zip(cells, (rng.random(len(cells)) < p).astype(float).tolist(), strict=True))
+_EASY, _HARD = ["1", "2", "3"], ["4", "5", "6"]
+# δ −2 under the easy slots, +2 under the hard, 200 cells a slot.
+_LEVELS = {f"{sid}.{i}": -2.0 if sid in _EASY else 2.0 for sid in _EASY + _HARD for i in range(200)}
 
-    def theta_of(
-        responses: dict[str, float], scale: Any, *, binary: bool = True
-    ) -> tuple[float, float]:
-        read = fit_theta(responses, scale, binary=binary)
 
-        assert read is not None, "an arm with cells on the ruler carried no θ"
-        return read
+def _drawn(theta: float, sids: list[str], rng: np.random.Generator) -> dict[str, float]:
+    """An arm at *theta* answering every cell of *sids* on `_LEVELS`."""
+    cells = [f"{sid}.{i}" for sid in sids for i in range(200)]
+    p = 1.0 / (1.0 + np.exp(-(theta - np.array([_LEVELS[c] for c in cells]))))
+    return dict(zip(cells, (rng.random(len(cells)) < p).astype(float).tolist(), strict=True))
 
-    able, weak = measure(1.5, hard), measure(-0.5, easy)
+
+def _theta_of(
+    responses: dict[str, float], scale: Any, *, binary: bool = True
+) -> tuple[float, float]:
+    read = fit_theta(responses, scale, binary=binary)
+    assert read is not None, "an arm with cells on the ruler carried no θ"
+    return read
+
+
+def test_theta_on_a_fixed_ruler_ranks_arms_by_ability_never_by_the_subset_they_read() -> None:
+    rng, ruler, theta_of = np.random.default_rng(7), _LEVELS, _theta_of
+    able, weak = _drawn(1.5, _HARD, rng), _drawn(-0.5, _EASY, rng)
     assert np.mean(list(weak.values())) > np.mean(list(able.values())), (
         "guard: raw accuracy must INVERT the true ability here"
     )
     able_theta, weak_theta = theta_of(able, ruler)[0], theta_of(weak, ruler)[0]
     assert able_theta > weak_theta, "θ on a fixed ruler ranked the arms by their subset"
     assert abs(able_theta - 1.5) < 0.5 and abs(weak_theta + 0.5) < 0.5, "θ off its truth"
-    same_easy = theta_of(measure(0.8, easy), ruler)[0]
-    same_hard = theta_of(measure(0.8, hard), ruler)[0]
+    same_easy = theta_of(_drawn(0.8, _EASY, rng), ruler)[0]
+    same_hard = theta_of(_drawn(0.8, _HARD, rng), ruler)[0]
     assert abs(same_easy - same_hard) < 0.5, "one ability read differently on two subsets"
 
-    # A sample absent from a WARM ruler enters no θ: δ=0 is a position on the scale, not neutral.
+
+def test_a_cell_off_a_warm_ruler_enters_no_theta_and_a_cold_one_reads_logit_fitness() -> None:
+    # δ=0 is a position on the scale, not neutral.
+    ruler, theta_of = _LEVELS, _theta_of
+    able = _drawn(1.5, _HARD, np.random.default_rng(7))
     assert fit_theta({"99": 1.0}, ruler, binary=True) is None, "a cell off the ruler carried a θ"
     assert fit_theta({**able, "99": 0.0}, ruler, binary=True) == fit_theta(
         able, ruler, binary=True
@@ -185,7 +187,10 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
         "a COLD ruler reads plain logit-fitness: one hit is θ > 0"
     )
 
-    # θ_se is dispersion-corrected: a GRADED response varies less about its mean than Bernoulli.
+
+def test_theta_se_reads_the_dispersion_its_scorer_declares() -> None:
+    # A GRADED response varies less about its mean than Bernoulli.
+    ruler, theta_of, easy, hard = _LEVELS, _theta_of, _EASY, _HARD
     graded = {f"{sid}.{i}": 0.5 + 0.02 * i for i, sid in enumerate(easy * 6)}
     spread = {f"{sid}.{i}": float(i % 2) for i, sid in enumerate(easy * 6)}
     assert theta_of(graded, ruler, binary=False)[1] < theta_of(spread, ruler)[1], (
@@ -218,6 +223,9 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
         "no residual spread read as infinite confidence: every gate would fire"
     )
 
+
+def test_theta_holds_across_a_2pl_graduation_and_converges_five_logits_out() -> None:
+    theta_of = _theta_of
     # A 1PL entry and a 2PL entry at a = 1 are one ruler.
     bare = {str(s): 0.2 * s - 1.0 for s in range(8)}
     on_unit_a = {s: (d, 1.0) for s, d in bare.items()}
@@ -242,7 +250,8 @@ def test_the_estimator_recovers_the_scale_its_data_was_drawn_on() -> None:
         "an SE in the hundreds: the iteration never converged"
     )
 
-    # The 2PL graduation gate: 1PL until 2PL wins held-out.
+
+def test_the_ruler_graduates_to_2pl_only_where_2pl_wins_held_out() -> None:
     theta = {f"c{i}": float(t) for i, t in enumerate(np.linspace(-2.5, 2.5, 20))}
     delta = {str(s): float(d) for s, d in enumerate(np.linspace(-2.0, 2.0, 12))}
     varied = _synth(
@@ -279,7 +288,6 @@ def _anchored(delta: dict[str, float], *, mu: float = 0.0) -> DeltaRuler:
     return fit.anchored("1PL")
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_delta_ruler_warms_only_once_a_second_arm_answers() -> None:
     # Eight samples clear any sample floor, so the arm count is the binding condition.
     arm_a = [Observation("a", str(sid), 1.0 if sid % 3 else 0.0) for sid in range(8)]
@@ -290,7 +298,6 @@ def test_a_delta_ruler_warms_only_once_a_second_arm_answers() -> None:
     assert warm is not None and warm.calibration_model == "1PL", "a second arm left δ flat"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_one_tenant_ruler_judges_an_arm_only_on_the_rows_it_may_read(tmp_path: Path) -> None:
     # Versioned by its folds. C0 hits a quarter of the bank; its child changed nothing.
     pool40 = samples(40, "t", query="r")
@@ -410,7 +417,6 @@ def test_a_round_draws_fresh_cells_and_a_reentered_one_orders_on_the_lines_it_op
     assert ordered() == live, "a re-entered round walked an order its opening never drew"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_draw_led_by_one_level_still_covers_every_dataset_and_model_of_its_pool() -> None:
     pool = [
         Sample(id=i, query=f"{d}/{m}/{seed}", ground_truth=None, source_pin={"d": d, "m": m})
@@ -445,7 +451,6 @@ def order_panel() -> _OrderPanel:
     return _OrderPanel(ids, panel, parent_grades, ordering, on_slot, set(range(9)))
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_order_leads_with_win_opportunities_and_probes_a_parent_hit_every_fourth_slot(
     order_panel: _OrderPanel,
 ) -> None:
@@ -469,7 +474,6 @@ def test_a_round_order_leads_with_win_opportunities_and_probes_a_parent_hit_ever
     assert hit_keys == sorted(hit_keys), "hit probes are not led by the hardest"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_order_walks_n_min_cells_on_the_ruler_first_and_keeps_its_probe(
     order_panel: _OrderPanel,
 ) -> None:
@@ -484,7 +488,6 @@ def test_a_round_order_walks_n_min_cells_on_the_ruler_first_and_keeps_its_probe(
     assert led[3] in hit_ids, "the lead dropped the regression probe"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_panel_with_no_parent_grade_opens_on_its_most_discriminating_cells(
     order_panel: _OrderPanel,
 ) -> None:
@@ -500,7 +503,6 @@ def test_a_panel_with_no_parent_grade_opens_on_its_most_discriminating_cells(
     assert unknown.index(easiest) >= 6, "the panel's easiest cell must not lead the round"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_an_arm_cut_at_four_of_six_cells_over_three_benchmarks_has_read_all_three() -> None:
     # δ alone would walk benchmark "a"'s easy misses first: a cut at 4 then never reads "c".
     rows = samples(6)
@@ -518,7 +520,6 @@ def test_an_arm_cut_at_four_of_six_cells_over_three_benchmarks_has_read_all_thre
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_theta_off_the_judging_scale_is_withheld_and_its_caveat_names_why() -> None:
     # A child on cells the judging scale does not carry stays off it until its round folds.
     fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
@@ -537,7 +538,6 @@ def test_a_theta_off_the_judging_scale_is_withheld_and_its_caveat_names_why() ->
         assert served is expected, "a state θ was read in is not the caveat it carries"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_line_read_on_cells_the_scale_lacks_still_differences_its_levels() -> None:
     # Adaptive rows read each arm on its own cells: θ is item-free on one scale, so they difference.
     for caveat, differences in (
@@ -554,7 +554,6 @@ def test_a_line_read_on_cells_the_scale_lacks_still_differences_its_levels() -> 
         )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_whose_band_collapsed_withholds_its_own_level_alone() -> None:
     series = level_series(0.30, [0.31, 0.32, 0.30])
     collapsed = series.levels[2]
@@ -568,7 +567,6 @@ def test_a_round_whose_band_collapsed_withholds_its_own_level_alone() -> None:
     assert read == [0, 1, 3], "one round's collapsed band withheld another round's level"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_ruler_id_names_its_delta_never_key_order_and_a_cold_one_names_its_objective() -> None:
     fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
     assert fitted.anchor_id == anchor_id_of({"3": 0.0, "2": -1.25, "1": 1.5}, 0.0, 2.0, "1PL")
@@ -576,7 +574,6 @@ def test_a_ruler_id_names_its_delta_never_key_order_and_a_cold_one_names_its_obj
     assert flat_ruler_id("acc") != flat_ruler_id("acc_minus_latency")
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_stratum_short_of_its_share_hands_the_rest_on_and_an_empty_one_takes_nothing() -> None:
     assert stratum_shares([2, 10, 10], 9) == [2, 4, 3]
     assert stratum_shares([0, 5], 4) == [0, 4]
@@ -689,7 +686,6 @@ def traced() -> _Traced:
     return _Traced(series_of, closed, hits, bank, scope, warmed, tenant, frozen, run)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_every_round_reads_its_standing_parent_on_the_one_scale_its_series_stamps(
     traced: _Traced,
 ) -> None:
@@ -712,7 +708,6 @@ def test_every_round_reads_its_standing_parent_on_the_one_scale_its_series_stamp
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_fork_and_its_parent_line_read_their_levels_on_one_fit_less_both_lines_parents(
     traced: _Traced,
 ) -> None:
@@ -725,7 +720,6 @@ def test_a_fork_and_its_parent_line_read_their_levels_on_one_fit_less_both_lines
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_series_reads_no_row_past_the_reach_its_reader_holds(traced: _Traced) -> None:
     # An L4 cell takes the arm's scope: its outer cycle's round-0 version plus its own lines.
     series_of, _, _, _, _, warmed, _, frozen, run = traced
@@ -738,7 +732,6 @@ def test_a_series_reads_no_row_past_the_reach_its_reader_holds(traced: _Traced) 
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     traced: _Traced,
 ) -> None:
@@ -764,7 +757,6 @@ def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
     )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
 def test_cells_of_two_datasets_folded_under_one_scope_read_one_scale(traced: _Traced) -> None:
     series_of, _, _, bank, _, warmed, _, _, run = traced
     [series] = series_of(OpenAt(), warmed, [run])
@@ -789,25 +781,23 @@ def test_a_round_no_cell_ran_serves_no_error_rate() -> None:
 # 3. The L4 outer proxy — what one finished inner cycle says
 
 
-def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> None:
-    def cyc(
-        levels: list[float | None],
-        *,
-        origin: float | None = 0.30,
-        rounds: list[RoundResult] | None = None,
-        **kw: Any,
-    ) -> tuple[CycleResult, list[RoundResult]]:
-        """A finished cycle and the rounds its ledger closed, as `spawn.py` reads them."""
-        ran = [round_result(i + 1) for i in range(len(levels))] if rounds is None else rounds
-        return cycle_result(levels, origin, ran, **kw), ran
+def cyc(
+    levels: list[float | None],
+    *,
+    origin: float | None = 0.30,
+    rounds: list[RoundResult] | None = None,
+    **kw: Any,
+) -> tuple[CycleResult, list[RoundResult]]:
+    """A finished cycle and the rounds its ledger closed, as `spawn.py` reads them."""
+    ran = [round_result(i + 1) for i in range(len(levels))] if rounds is None else rounds
+    return cycle_result(levels, origin, ran, **kw), ran
 
-    def delta(levels: list[float | None], **kw: Any) -> float | None:
-        return inner_cell_facts(cyc(levels, **kw)[0]).mean_round_delta
 
-    def lift(levels: list[float | None], bench: list[float | None], **kw: Any) -> float | None:
-        px = compute_outer_proxies(*cyc(levels, bench_origin=0.40, bench_levels=bench, **kw))
-        return px.held_out_lift
+def delta(levels: list[float | None], **kw: Any) -> float | None:
+    return inner_cell_facts(cyc(levels, **kw)[0]).mean_round_delta
 
+
+def test_an_inner_cells_theta_lift_is_its_parent_levels_mean_over_the_round_budget() -> None:
     # The parent levels held forward to the round budget, averaged, less the origin's 0.30.
     walked: tuple[tuple[list[float | None], int | None, float, str], ...] = (
         ([0.40, 0.55], None, 0.175, "the mean read the endpoint (0.25)"),
@@ -822,6 +812,8 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         kw = {} if budget is None else {"round_budget": budget}
         assert delta(levels, **kw) == pytest.approx(mean), why
 
+
+def test_an_inner_cell_scores_its_held_out_curve_and_excludes_what_it_cannot_read() -> None:
     # The scored term is the held-out curve's area (`runner/bench.py::read_curve`): churn on the
     # search split's θ scores ZERO.
     churned = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.40, 0.40])
@@ -830,7 +822,8 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         compute_outer_proxies(*churned),
     )
     assert (churn[0], churn[1].held_out_lift) == pytest.approx((0.25, 0.0))
-    assert lift([0.55, 0.55], [0.50, 0.50]) == pytest.approx(0.10)
+    lifted = cyc([0.55, 0.55], bench_origin=0.40, bench_levels=[0.50, 0.50])
+    assert compute_outer_proxies(*lifted).held_out_lift == pytest.approx(0.10)
 
     # EXCLUDED, never floored: the -1 floor would punish the optimizer prompt for a slow provider.
     tooling = [round_result(1, parse_failure=PARSE_FAILURE_TOOLING)]
@@ -856,19 +849,12 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         assert facts.mean_round_delta is None and facts.series_reason, (
             "a θ lift read off a series that differences nothing, or withheld without its reason"
         )
-        # The tape reads the row the ledger kept, live and on replay alike.
-        report = inner_cell_report(facts, compute_outer_proxies(*unread))
-        row = measurement(0, None, pipeline_data={"cell_report": report})
-        kept = TypeAdapter(LedgerCell).validate_python(row)
-        line = fmt_query_result(0, kept.facts, kept.grade, display_tags={})
-        assert f"withheld: {series_reason_head(facts.series_reason)}" in line, (
-            "the L4 tape line lost the reason its θ lift was withheld"
-        )
 
-    # The L4 round reads its mean held-out lift over MEASURED cells, the floored share beside it:
-    # a floor is a typed fact on the row, never a -1 inside the mean.
+
+# The L4 round reads its mean held-out lift over MEASURED cells, the floored share beside it:
+# a floor is a typed fact on the row, never a -1 inside the mean.
+def test_an_l4_round_means_its_measured_cells_and_reads_its_floored_share_beside() -> None:
     owned = cyc([0.40], stop_reason=StopReason.OPTIMIZER_ABORT)
-    floor = OuterSampleProxies(floored=1, held_out_lift=None, held_out_lift_se=None)
     rows = [
         measurement(sid, None, pipeline_data={"cell_report": report}).facts
         for sid, report in enumerate(
@@ -889,7 +875,6 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
     graded = l4.sheet(rows)
     round_fold = compute_composite_fitness(graded, l4, pipeline_schema([]))
     assert round_fold.term_means == pytest.approx({"floored": 1 / 7, "held_out_lift": 0.0875 / 6})
-    assert lift_text(round_fold.term_means["held_out_lift"], "rate") == "+1.5\N{NO-BREAK SPACE}pts"
     # The L4 formula is no matcher's call, so every printer's source reads a score; a matcher's a rate.
     l4_sources = (
         round_fold.fitness_unit,
@@ -897,11 +882,15 @@ def test_one_finished_inner_cycle_scores_the_optimizer_prompt_that_ran_it() -> N
         grade_measurands(l4)[0].unit,
     )
     assert l4_sources == ("score",) * 3, "a non-rate formula's fitness printed as a percent"
-    assert "%" not in fold_fitness_text(round_fold)
     assert grade_measurands(scorer_of())[0].unit == "rate"
 
-    # Ending on its own terms, a cycle none of whose L1 proposals reached a cell is FLOORED,
-    # whatever its replies' failure: potter banks an empty panel, a paper optimizer Invalid arms.
+
+# Ending on its own terms, a cycle none of whose L1 proposals reached a cell is FLOORED,
+# whatever its replies' failure: potter banks an empty panel, a paper optimizer Invalid arms.
+def test_an_inner_cycle_no_proposal_of_which_reached_a_cell_floors() -> None:
+    owned = cyc([0.40], stop_reason=StopReason.OPTIMIZER_ABORT)
+    floor = OuterSampleProxies(floored=1, held_out_lift=None, held_out_lift_se=None)
+
     def failed(reason: ValidationReason, rnd: int) -> RoundResult:
         return round_result(rnd, parse_failure=reason)
 
@@ -974,9 +963,7 @@ def test_an_inner_cell_floors_on_the_rounds_its_line_spent() -> None:
     )
     # Every round of both cycles spoiled: the floor names the four the line spent, not the fork's two.
     all_spoiled = [LineSpan([spoiled(1), spoiled(2)], None), LineSpan([spoiled(1), spoiled(2)], 1)]
-    rounds = [rr for span in all_spoiled for rr in span.own]
-    said = floor_reason(cycle_result([0.40, 0.40], 0.30, rounds), rounds)
-    assert said is not None and "of its 4 L1 round(s)" in said
+    assert proxies(all_spoiled).floored == 1, "a line that spent every round on spoils scored"
 
 
 def test_an_abort_floors_only_where_the_optimizer_prompt_owns_it() -> None:

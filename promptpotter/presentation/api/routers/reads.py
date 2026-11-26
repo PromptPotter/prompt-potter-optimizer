@@ -54,7 +54,7 @@ from promptpotter.application.read_params import (
 from promptpotter.application.read_workers import off_loop
 from promptpotter.domain.command_kinds import ReadKind
 from promptpotter.presentation.api.deps import CallerDep, read_input
-from promptpotter.presentation.api.middleware.headers import served_contract
+from promptpotter.presentation.api.served_contract import SERVED_CONTRACT
 from promptpotter.shared.named_rows import returned
 
 reads_router = APIRouter(tags=["Reads"])
@@ -157,7 +157,7 @@ def _export(asked: _Asked, read: CycleExportParams) -> Response:
 
 def _events(asked: _Asked, read: CycleEventsParams | FeedParams) -> Response:
     # LF is the contract (the default is CRLF); X-Accel-Buffering is the header sse-starlette omits.
-    frames = stamped_frames(read.answer(asked.caller), served_contract(asked.request.app))
+    frames = stamped_frames(read.answer(asked.caller), SERVED_CONTRACT)
     return EventSourceResponse(frames, sep="\n", headers={"X-Accel-Buffering": "no"})
 
 

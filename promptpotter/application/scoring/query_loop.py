@@ -142,10 +142,6 @@ class QueryLoopResult:
     stop_signal: StopSignal | None = None
 
 
-def _emit_cached_step_tokens(facts: MeasuredCell) -> None:
-    emit_replayed_step_tokens(facts.pipeline.step_tokens, facts.pipeline.step_timings)
-
-
 class WalkRecorder(Protocol):
     def scores(self, results: Sequence[GradedCell]) -> ScoreSummary: ...
 
@@ -494,7 +490,8 @@ class Walk:
         if not acq.fresh:
             # Only if it STAYED a replay: the stale-data protocol may have re-measured for real.
             if acq.result.facts.cached and first:
-                _emit_cached_step_tokens(acq.result.facts)
+                pipeline = acq.result.facts.pipeline
+                emit_replayed_step_tokens(pipeline.step_tokens, pipeline.step_timings)
         elif acq.deprecated_display is not None:
             ctx.sample_scored(acq.deprecated_display, acq.sample, idx, n, running=None)
 
@@ -556,10 +553,11 @@ class Walk:
         return end - start
 
     def sendable(self, cells: int, decided: int, trigger: Trigger) -> list[int]:
-        """The rows it may send now at a press of *cells*, past its own calls out: unsent, and
-        index ``i`` only while no rule can cut before ``i`` rows, so a cut wastes one at most.
-        ``fill`` sends from it and ``flight`` serves it: one bound for both."""
-        room = max(cells - len(self.running), 0)
+        """The rows it may send now at a press of *cells*, past its cells ahead of its head (out, or
+        back and not yet taken: a cut discards both): unsent, and index ``i`` only while no rule
+        can cut before ``i`` rows, so a cut wastes the press at most. ``fill`` sends from it and
+        ``flight`` serves it: one bound for both."""
+        room = max(cells - len(self.running) - len(self.finished), 0)
         if not (sending := self.unsent(cells, decided, trigger)[:room]):
             return []
         horizon = self.horizon(sending[-1] - 2)
