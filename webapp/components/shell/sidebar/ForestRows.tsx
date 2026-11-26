@@ -164,7 +164,9 @@ function CampaignRow({
   const opens = showCandidates || hasTag(campaign, "self_optimization");
   const open = opens && nodes.isOpen(campaign.address);
   const archived = campaign.facts.lifecycle === "archived";
-  const selected = useIsViewed(campaign.facts.root);
+  // The row is its line: it opens the cycle a supersede handed it to, never the root it left.
+  const line = campaign.facts.live_cycle;
+  const selected = useIsViewed(line);
   return (
     <>
       <RowHoverCard card={campaign}>
@@ -173,7 +175,7 @@ function CampaignRow({
           <button
             type="button"
             className="sidebar-tree-item"
-            onClick={() => navigate({ path: pathOfAddress(campaign.facts.root) }, { resume: true })}
+            onClick={() => navigate({ path: pathOfAddress(line) }, { resume: true })}
             aria-current={selected ? "true" : undefined}
             disabled={archived}
           >

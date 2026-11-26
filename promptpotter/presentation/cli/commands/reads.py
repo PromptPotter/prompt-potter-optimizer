@@ -292,9 +292,8 @@ def machine_status_human(
 
 
 async def cmd_close_admission(args: argparse.Namespace) -> CommandResult:
-    held = JobRegistry.attach(local_stores(tenant=args.tenant).jobs_dir).close_for_landing(
-        args.target
-    )
+    registry = JobRegistry.attach(local_stores(tenant=args.tenant).jobs_dir)
+    held = await asyncio.to_thread(registry.close_for_landing, args.target)
     return CommandResult(
         data={"target": args.target, "held": [job.job_id for job in held]},
         # The first word is the verdict `deploy-linux/update.sh` reads.

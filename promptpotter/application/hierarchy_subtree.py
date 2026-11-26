@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import InitVar, dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cached_property, lru_cache
@@ -62,6 +62,7 @@ from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure.store.lineage_queries import (
     MAX_CYCLE_DEPTH,
     CycleArm,
+    CycleRoundsRead,
     iter_family_cycles,
     read_cycle,
 )
@@ -84,13 +85,26 @@ class _Retired:
 type _Status = Literal["live", "rewound"] | _Retired
 
 
+class LineOwners[T](NamedTuple):
+    """Which read owns each round of a line: whose candidates it names, whose election stands."""
+
+    candidates: dict[int, T]
+    elections: dict[int, T]
+
+
 def line_owners[T](
-    own: Iterable[int], cut: int, below: Mapping[int, T] | None, me: T
-) -> dict[int, T]:
-    """Which read owns each round of a line: *me* every round it ran, *below* (its parent's line as
-    of the fork's cut) every other round under *cut*."""
-    lifted = {} if below is None else {r: o for r, o in below.items() if r < cut}
-    return lifted | dict.fromkeys(own, me)
+    stated: Iterable[int], entered: int | None, cut: int, below: LineOwners[T] | None, me: T
+) -> LineOwners[T]:
+    """*me* every round it states, *below* (its parent's line as of the fork's cut) every other
+    round under *cut*. A round it states under *entered*, the first its ledger entered, it
+    re-elected and never ran: the election is *me*'s, the candidates *below*'s."""
+    stated = list(stated)
+    ran = stated if below is None else [r for r in stated if entered is None or r >= entered]
+    lifted = LineOwners[T]({}, {}) if below is None else below
+    return LineOwners(
+        {r: o for r, o in lifted.candidates.items() if r < cut} | dict.fromkeys(ran, me),
+        {r: o for r, o in lifted.elections.items() if r < cut} | dict.fromkeys(stated, me),
+    )
 
 
 def supersede_line[T](cycle: T, supersedes: Sequence[tuple[T, T]]) -> list[T]:
@@ -178,28 +192,40 @@ class _Read:
     """One cycle's record as one read saw it, and the line it stood on then."""
 
     cycle: _ListedCycle
-    elections: dict[int, Election | None]
-    arms: dict[tuple[int, ArmKey], CycleArm]
-    rereads: dict[tuple[int, ArmKey], RoundArm]
+    got: InitVar[CycleRoundsRead]
     below: _Read | None
-    owner: dict[int, _Read] = field(init=False)
+    elections: dict[int, Election | None] = field(init=False)
+    # The arms it proposed; a round it re-elected holds re-reads of its line's candidates instead.
+    arms: dict[tuple[int, ArmKey], CycleArm] = field(init=False)
+    rereads: dict[tuple[int, ArmKey], RoundArm] = field(init=False)
+    owner: LineOwners[_Read] = field(init=False)
 
-    def __post_init__(self) -> None:
+    def __post_init__(self, got: CycleRoundsRead) -> None:
         below = None if self.below is None else self.below.owner
-        self.owner = line_owners(self.elections, self.cycle.index.cut_round or 0, below, self)
+        self.elections = got.rounds
+        self.owner = line_owners(
+            got.rounds, got.entered, self.cycle.index.cut_round or 0, below, self
+        )
+        ran = self.owner.candidates
+        self.arms = {(a.round, a.key): a for a in got.arms if ran.get(a.round) is self}
+        self.rereads = got.rereads | {
+            (a.round, a.key): RoundArm(round=a.round, arm=a.key)
+            for a in got.arms
+            if ran.get(a.round) is not self
+        }
 
     def address(self, arm: RoundArm) -> str | None:
         """The candidate a record names by round and arm on this line: an id alone names none."""
-        o = self.owner.get(arm.round)
+        o = self.owner.candidates.get(arm.round)
         return None if o is None else o.cycle.at_round(arm.round, arm.arm)
 
     def crown(self, round_: int) -> str | None:
-        election = self.owner[round_].elections[round_]
+        election = self.owner.elections[round_].elections[round_]
         selected = None if election is None else election.selected
         return None if selected is None else self.address(RoundArm(round=round_, arm=selected))
 
     def holds(self, c: _Candidate) -> bool:
-        o = self.owner.get(c.round)
+        o = self.owner.candidates.get(c.round)
         return o is not None and o.cycle is c.read_in.cycle and (c.round, c.arm.key) in o.arms
 
 
@@ -382,10 +408,13 @@ def _status(c: _Candidate, superseding: list[_ListedCycle]) -> _Status:
 def _main_line(c: _Candidate) -> list[MainLineStep]:
     """As it ran, on the line it was read on, up to the first crown after it."""
     line = c.read_in
-    first = min(line.owner.keys() | {c.round})
-    base = line.owner[first].cycle if first in line.owner else line.cycle
+    owned = line.owner.candidates
+    first = min(owned.keys() | {c.round})
+    base = owned[first].cycle if first in owned else line.cycle
     hung = None if base.index.cut_round else base.hangs_from
-    crowns = {r: line.crown(r) for r, o in line.owner.items() if o.elections[r] is not None}
+    crowns = {
+        r: line.crown(r) for r, o in line.owner.elections.items() if o.elections[r] is not None
+    }
     through = () if hung is None else line_through(_main_line(hung), hung.address)
     return main_line(c.round, c.address, crowns, through)
 
@@ -508,9 +537,7 @@ class _Build:
             got = read_cycle(stores, cycle.hop, cycle.index, moment=moment)
             cut, parent = cycle.index.forked_at_offset, cycle.parent
             below = None if parent is None or cut is None else self._read(stores, parent, cut)
-            read = cycle.at[offset] = _Read(
-                cycle, got.rounds, {(a.round, a.key): a for a in got.arms}, got.rereads, below
-            )
+            read = cycle.at[offset] = _Read(cycle, got, below)
         return read
 
     def _inner(
@@ -554,8 +581,10 @@ class _Build:
         stands = crowned[-1].address if crowned else None
         latest = next((c.address for c in reversed(cycle.candidates) if c.read_in is head), None)
         rounds: list[HierarchyRound] = []
-        # A round re-run in place short of where a fork's cut stood still lists what ran there.
-        for round_ in sorted(head.elections.keys() | {c.round for c in cycle.candidates}):
+        # A round re-run in place short of where a fork's cut stood still lists what ran there; one
+        # it only re-elected lists on its parent.
+        ran = {r for r, o in head.owner.candidates.items() if o is head}
+        for round_ in sorted(ran | {c.round for c in cycle.candidates}):
             election = head.elections.get(round_)
             elects_on = None if election is None else election.elects_on
             members = [
@@ -584,7 +613,7 @@ class _Build:
                 "children": [*rounds, *cycle.unplaced],
                 "facts": SubtreeCycleEntryFacts(
                     **_fields(cycle.entry.facts),
-                    origin=head.crown(0) if 0 in head.owner else None,
+                    origin=head.crown(0) if 0 in head.owner.candidates else None,
                     from_candidate=None
                     if cycle.index.fork is None or hung is None
                     else hung.address,

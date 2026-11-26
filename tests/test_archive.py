@@ -66,6 +66,7 @@ from promptpotter.application.commands.launching import parse_cycle_start
 from promptpotter.application.cycle_reads import feed_versions, open_family_ray
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import (
+    LineOwners,
     Reach,
     Walked,
     earlier_measured,
@@ -129,6 +130,7 @@ from promptpotter.domain.command_kinds import (
     Door,
     ForkCyclePayload,
     ForkStart,
+    StartRunPayload,
 )
 from promptpotter.domain.crowning_bar import CrowningBar
 from promptpotter.domain.cycle_paths import (
@@ -2075,6 +2077,30 @@ def test_a_running_parents_pause_landing_after_its_supersede_keeps_it_superseded
     )
 
 
+# A start on the cycle a supersede retired would run its line twice, paid: no read offers one,
+# and the launch door refuses it, naming the fork the line runs on.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_superseded_cycle_offers_no_start_and_its_launch_door_refuses_one(
+    world: World, displaced: Shared
+) -> None:
+    stores, parent, fork = world.adopt(displaced).stores, displaced.made.parent, displaced.made.fork
+    listed = _listed(stores, fork.campaign_id)
+    [retired] = [c for c in listed.children if c.address == Subject.of((parent,)).address]
+    admission = retired.state.admission
+    assert admission.offers is None and admission.refusal is not None, (
+        "the retired cycle's run control offers a start beside the fork its line runs on"
+    )
+    assert fork.cycle_id in admission.refusal.message, "the refusal names no fork"
+    start = StartRunPayload(campaign_id=parent.campaign_id, cycle_id=parent.cycle_id)
+
+    async def launch() -> object:
+        dispatcher = CommandDispatcher(stores, inline=Inline())
+        return (await dispatcher.dispatch(CommandCall(start, door=Door.TERMINAL))).result
+
+    with pytest.raises(ConflictError, match=fork.cycle_id):
+        asyncio.run(launch())
+
+
 def _addr(hop: CycleHop, rnd: int, individual: str) -> str:
     return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(individual)).address
 
@@ -2169,26 +2195,37 @@ def test_an_inner_run_hangs_on_the_arm_its_spawn_record_names_or_says_why_none_h
         assert host is not None or why in said, f"{record} hangs unplaced as {said!r}"
 
 
-def test_a_line_owns_each_round_off_the_read_that_ran_it() -> None:
+def test_a_line_owns_each_round_off_the_read_that_ran_it_and_its_election_off_the_one_that_stated_it() -> (
+    None
+):
     t, k, g = "trunk", "kid", "grand"
-    trunk = dict.fromkeys(range(4), t)
-    kid = {0: t, 1: t, 2: k, 3: k}
-    rows: list[tuple[list[int], int, dict[int, str] | None, str, dict[int, str]]] = [
-        ([0, 1, 2, 3], 0, None, t, trunk),
+
+    def both(owned: dict[int, str]) -> LineOwners[str]:
+        return LineOwners(owned, owned)
+
+    trunk = both(dict.fromkeys(range(4), t))
+    kid = both({0: t, 1: t, 2: k, 3: k})
+    # A rebase cut at 2 restates round 1 electing the arm its layer named: it ran none of it.
+    rebased = LineOwners({0: t, 1: t, 2: k, 3: k}, {0: t, 1: k, 2: k, 3: k})
+    rows: list[tuple[list[int], int, int, LineOwners[str] | None, str, LineOwners[str]]] = [
+        ([0, 1, 2, 3], 0, 0, None, t, trunk),
         # A rewind fork cut at 2 lifts what its parent ran below the cut.
-        ([2, 3], 2, trunk, k, kid),
+        ([2, 3], 2, 2, trunk, k, kid),
         # A fork of a fork lifts through: round 2 stays the kid's, 0 and 1 the trunk's.
-        ([3, 4], 3, kid, g, {0: t, 1: t, 2: k, 3: g, 4: g}),
+        ([3, 4], 3, 3, kid, g, both({0: t, 1: t, 2: k, 3: g, 4: g})),
         # A steer lifts no round: it runs its own line from its origin.
-        ([0, 1], 0, trunk, k, {0: k, 1: k}),
+        ([0, 1], 0, 0, trunk, k, both({0: k, 1: k})),
         # A round re-run in place below the cut is the fork's own.
-        ([1, 2], 2, trunk, k, {0: t, 1: k, 2: k}),
+        ([1, 2], 1, 2, trunk, k, both({0: t, 1: k, 2: k})),
         # A fork that has run nothing yet stands on its parent's prefix.
-        ([], 2, trunk, k, {0: t, 1: t}),
+        ([], 2, 2, trunk, k, both({0: t, 1: t})),
+        # A re-elected round names its parent's candidates, and its election lifts through a fork.
+        ([1, 2, 3], 2, 2, trunk, k, rebased),
+        ([3], 3, 3, rebased, g, LineOwners({0: t, 1: t, 2: k, 3: g}, {0: t, 1: k, 2: k, 3: g})),
     ]
-    for own, cut, below, me, owned in rows:
-        assert line_owners(own, cut, below, me) == owned, (
-            f"{me} running {own} cut at {cut} owns rounds off the wrong read"
+    for stated, entered, cut, below, me, owned in rows:
+        assert line_owners(stated, entered, cut, below, me) == owned, (
+            f"{me} stating {stated} from {entered} cut at {cut} owns rounds off the wrong read"
         )
 
 

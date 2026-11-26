@@ -118,8 +118,8 @@ export function CandidatesToolbar({ model: m }: { model: CandidatesModel }) {
       <ToolbarSpacer />
       <ToolbarFold
         label="More candidate options"
-        hint="Lens, scoring mask, cache overlay, and the θ explainer"
-        lit={m.lensActive || m.maskOpen || m.showCache}
+        hint="Lens, scoring mask, replayed answers, every candidate, and the θ explainer"
+        lit={m.lensActive || m.maskOpen || m.showCache || !every}
         actions={viewedPath && <RunExports viewedPath={viewedPath} />}
         menu={
           <>

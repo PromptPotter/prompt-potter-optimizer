@@ -15499,7 +15499,7 @@
             "description": "Why the control offers none, with the acts past it; null where it offers one."
           },
           "stop_acts": {
-            "description": "The acts past the run's stop its reader files: no `start-run` where its campaign refuses every launch (archived, its definition moved).",
+            "description": "The acts past the run's stop its reader files: no `start-run` where its campaign refuses every launch (archived, its definition moved) or its line runs on in a fork.",
             "items": {
               "$ref": "#/components/schemas/NextAct"
             },

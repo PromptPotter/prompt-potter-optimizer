@@ -116,7 +116,8 @@ class RunAdmission(FrozenModel):
     )
     stop_acts: tuple[NextAct, ...] = Field(
         description="The acts past the run's stop its reader files: no `start-run` where its "
-        "campaign refuses every launch (archived, its definition moved)."
+        "campaign refuses every launch (archived, its definition moved) or its line runs on in a "
+        "fork."
     )
 
     @classmethod
@@ -136,14 +137,13 @@ class RunAdmission(FrozenModel):
         if info.action is None:
             refusal = info.refusal
         elif declined:
-            # The phase names a verb its producer does not admit yet; a pause and an inner run say
-            # their own refusal.
-            refusal = (
-                worded_refusal("run_declined", declined) if pausing or run.inner else info.refusal
-            )
-        # A resume files what a start does: the launch a campaign may refuse.
+            # The phase names a verb its producer does not admit yet; a pause, an inner run and a
+            # line moved on say their own refusal.
+            own = pausing or run.inner or run.runs_on is not None
+            refusal = worded_refusal("run_declined", declined) if own else info.refusal
+        # A resume files what a start does: the launch a campaign or a moved line may refuse.
         launches = info.action is not None and RUN_VERB_KIND[info.action] is RUN_VERB_KIND["start"]
-        refuses_launch = campaign_refusal is not None and launches
+        refuses_launch = launches and (campaign_refusal is not None or run.runs_on is not None)
         if refuses_launch and refusal is None:
             refusal = campaign_refusal
         if refusal is None:

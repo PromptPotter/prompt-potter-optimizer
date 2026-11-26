@@ -624,7 +624,8 @@ export interface RunAdmission {
    * as served. */
   payload: Record<string, Record<string, string | number | boolean>>;
   /** The acts past the run's stop its reader files: no `start-run` where its
-   * campaign refuses every launch (archived, its definition moved). */
+   * campaign refuses every launch (archived, its definition moved) or its
+   * line runs on in a fork. */
   stop_acts: NextAct[];
 }
 
@@ -5756,7 +5757,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "022895b4ee9a49c0";
+export const SERVED_CONTRACT = "caa72defa7059b65";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

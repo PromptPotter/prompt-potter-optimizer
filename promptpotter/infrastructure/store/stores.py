@@ -110,7 +110,7 @@ class Stores:
 
     def run_state(self, hop: CycleHop) -> RunState:
         state = derive_run_state(self.campaigns.cycle_dir(hop), self.inbox(hop), self.jobs_dir)
-        return state._replace(inner=self.inner)
+        return state._replace(inner=self.inner, runs_on=self.campaigns.successor(hop))
 
     def void_inbox(self, hop: CycleHop, *, sparing: str | None = None) -> None:
         """A run boundary: what the cycle's loop was asked and never took stands no more, less

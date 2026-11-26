@@ -735,7 +735,7 @@ def test_machine_occupancy_reaches_a_stranger_as_a_count_alone(
 
 @pytest.mark.usefixtures("offline")
 def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_its_target(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     registry, ada_hop, held = _held_slot(tmp_path)
     waiting = registry.request_slot(
@@ -745,12 +745,18 @@ def test_a_landing_closes_admission_once_no_live_job_runs_other_code_to_all_but_
         holder=CampaignLaunch("ds1"),
     )
     elsewhere = "f" * 40
-    assert [job.job_id for job in registry.close_for_landing(elsewhere)] == [held.job_id], (
-        "a live run on other code did not hold the landing open"
-    )
+
+    def verdict() -> str:
+        """The verb `deploy-linux/update.sh` runs first, as it reads it: its first word."""
+        monkeypatch.setattr(sys, "argv", ["promptpotter", "close-admission", elsewhere])
+        with contextlib.suppress(SystemExit):
+            cli_main.main()
+        return capsys.readouterr().out.split()[0]
+
+    assert verdict() == "held", "a live run on other code did not hold the landing open"
     assert registry.landing() is None, "a refused landing closed admission anyway"
     registry.release(held.job_id, StopReason.TARGET_HIT)
-    assert registry.close_for_landing(elsewhere) == [] and registry.landing() == elsewhere
+    assert verdict() == "closed" and registry.landing() == elsewhere
     assert not registry.claim_next(waiting.job_id), "a landing let old code start a queued launch"
     with pytest.raises(ServiceUnavailableError):
         registry.create(

@@ -264,7 +264,9 @@ BASELINE = {
     # tw-j (+11): `node_context.py::closed_round` takes the three fields it reads, not the `Cycle`,
     # and `own_rows` is the parent's fold as a pure function, so its facts are a table.
     # job-endings (+4): the migration also lands v0.8.20's `converged` on `optimizer_exhausted`.
-    "package_lines": 113601,
+    # ui-roots (+39): a round a rebase re-elected names its parent's candidates (`LineOwners`), and
+    # a cycle a supersede retired refuses a start, naming its fork (`RunState.runs_on`).
+    "package_lines": 113640,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

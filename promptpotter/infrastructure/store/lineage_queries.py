@@ -137,6 +137,9 @@ class CycleRoundsRead(NamedTuple):
     rounds: dict[int, Election | None]
     # Each `parent`-role arm by (round, key): the candidate its first record names it re-reading.
     rereads: dict[tuple[int, ArmKey], RoundArm]
+    # The first round its own ledger entered, a fork's from its mint: one it states below that, it
+    # re-elected (a rebase restates the round it hangs from), never ran.
+    entered: int | None
 
 
 def _cycle_spans(
@@ -232,4 +235,6 @@ def read_cycle(
             )
         )
     numbers = sorted({rnd for rnd, _ in standing.arms} | set(standing.rounds))
-    return CycleRoundsRead(arms, {rnd: election_of(rnd) for rnd in numbers}, rereads)
+    return CycleRoundsRead(
+        arms, {rnd: election_of(rnd) for rnd in numbers}, rereads, standing.entered
+    )

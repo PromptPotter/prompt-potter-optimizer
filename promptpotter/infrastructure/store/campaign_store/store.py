@@ -565,7 +565,7 @@ class CampaignStore:
     def line(self, hop: CycleHop, *, moment: Moment | None = None) -> list[CycleHop]:
         """The supersede chain from *hop*; *moment* walks it as it stood then."""
         out = [hop]
-        while successor := self._successor(hop, moment):
+        while successor := self.successor(hop, moment=moment):
             hop = CycleHop(campaign_id=hop.campaign_id, cycle_id=successor)
             out.append(hop)
         return out
@@ -582,7 +582,7 @@ class CampaignStore:
             parent := index.parent_cycle_id
         ) is not None:
             up = CycleHop(campaign_id=hop.campaign_id, cycle_id=parent)
-            if self._successor(up, None) != out[0].cycle_id:
+            if self.successor(up) != out[0].cycle_id:
                 break
             out.insert(0, up)
         return out
@@ -590,7 +590,8 @@ class CampaignStore:
     def live_cycle(self, hop: CycleHop, *, moment: Moment | None = None) -> CycleHop:
         return self.line(hop, moment=moment)[-1]
 
-    def _successor(self, hop: CycleHop, moment: Moment | None) -> str | None:
+    def successor(self, hop: CycleHop, *, moment: Moment | None = None) -> str | None:
+        """The fork a supersede moved *hop*'s line to; ``None`` where its line is its own."""
         ledger = self.ledger(hop)
         until = None if moment is None else moment.span(ledger).until
         return scan_cycle_facts(ledger, until).superseded_by

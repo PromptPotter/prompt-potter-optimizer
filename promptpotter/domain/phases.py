@@ -274,6 +274,8 @@ class RunState(NamedTuple):
     inner: bool = False
     drafts: int = 0
     held_at: str = ""
+    # The fork a supersede moved this cycle's line to: a launch here would run the line twice.
+    runs_on: str | None = None
 
     @property
     def resumable(self) -> bool:
@@ -285,6 +287,8 @@ class RunState(NamedTuple):
         """Why `start-run` / `resume` is refused; empty where one is admitted."""
         if self.inner:
             return INNER_LAUNCH_REFUSAL
+        if self.runs_on is not None:
+            return f"Its line runs on in fork {self.runs_on}: open that cycle to run or pause it."
         if self.resumable:
             return ""
         return "A run of this cycle is in flight. Pause it or let it end, then ask again."
