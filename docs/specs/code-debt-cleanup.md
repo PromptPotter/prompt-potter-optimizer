@@ -1057,6 +1057,14 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `store/data_root.py::row_schema`'s pydantic `json_schema()` over 90 kinds. A memo keyed by the
   model class is keyed by identity. **Rides with:** wave 6. **Re-test:** a second
   `derived_landing_key()` in one process takes under 0.2 s.
+- **`durable=` is a caller's flag restating `Kind.durable`** (tw-v2): `store/io.py::write_bytes`,
+  `write_json` and `appending` fsync on a flag each writer passes (`jobs/registry.py`,
+  `maintenance/landing.py`, `identity/grants.py`, `identity/tokens.py`, `store/user_store.py`,
+  `store/wallet_store.py`), beside `data_root.py::Kind.durable`, the row that decides it. Priced by
+  tw-v2: 5087 fsyncs a suite, 2.5 s, every one on a truth no fold rebuilds (`charges.jsonl` 3087 and
+  1.75 s, the live job files and `.live-jobs`, user, consent, tokens, grants). Door: io's doors read
+  durability off the file's kind. **Rides with:** wave 6. **Re-test:**
+  `git grep -cE "durable=(True|not )" -- promptpotter/*.py` is 0.
 
 ## Held — no wave-4 chain yet
 
