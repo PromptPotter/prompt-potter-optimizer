@@ -2,7 +2,7 @@
 
 Base `77e13a563edb13a05804735879ad01bc7335f311` (BASE-V2, `origin/arc/tw-v`'s tip; `a1720cae0` is its ancestor); `git log -1 --format=%cd origin/main`: Wed Nov 25 15:18:06 2026 +0100. Arc: `arc/tw-v2` at `26751c1`.
 
-**Verdict: NOT accepted. The gap is not closed.** In the final interleaved census the suite ran 65.3 / 67.0 s at `7dce00a96`, 67.5 / 72.2 s at BASE-V2 and 70.8 / 79.3 s at the tip. The tip's second run is slow in every file. Across three sessions the tip can't be told apart from BASE-V2. The gap is `test_archive.py`: 3.4–3.5 s at `7dce00a96` against 16.4–19.4 s at BASE-V2 and the tip. No link here touches it. Stopped as the brief says.
+**Verdict: NOT accepted. The gap is not closed.** Final interleaved census: 65.3 / 67.0 s at `7dce00a96`, 67.5 / 72.2 s at BASE-V2, 70.8 / 79.3 s at the tip (its second run slow in every file; over three sessions the tip can't be told from BASE-V2). The gap is `test_archive.py` (3.4–3.5 s → 16.4–19.4 s), which no link touches. Stopped.
 
 ## Per link
 
@@ -13,22 +13,22 @@ Base `77e13a563edb13a05804735879ad01bc7335f311` (BASE-V2, `origin/arc/tw-v`'s ti
 | 3 boot graph | `26751c1` | +13/−0; 0 | skipped: no misplaced module (ranking in the appendix) |
 | 4 census | none | — | below |
 
-LEAN: `git diff --shortstat 77e13a563 HEAD -- promptpotter` = 5 files, +114/−63 (net +51). The growth is the fix itself: the memo, its two record types (`Imported`, `ModuleCode`), the import walk moved beside the normalizer and the compressed holder. A hunt for dead code in the owned files found none.
+LEAN: `git diff --shortstat 77e13a563 HEAD -- promptpotter` = 5 files, +114/−63 (net +51). The growth is the fix itself: the memo, `Imported` / `ModuleCode` and the compressed holder; the dead-code hunt found none.
 
 ## Proof
-- Full `python scripts/gate.py` at the tip: 31 checks green, 12 reused from an identical green tree (pytest among them; the census ran it six more times, 0 failed).
+- Full gate at the tip: 31 green (12 reused from an identical green tree; the census ran the suite six more times, 0 failed).
 - Equals-main against BASE-V2: 53 legs, all UNMOVED. `--digests` are identical at base and tip (6 keys), and `behaviour_keys.json` is unchanged in all three trees.
 - `offline_run.py` wall and child max RSS: 79.5 s / 191 MB, 75.3 s / 183 MB, 77.2 s / 185 MB.
-- Coverage (PY_START): base 8133 functions, tip 8139. Only two base bodies are gone: `hashing.py::normalized_tree` (deleted; its body is now `_parsed`) and `import_walk.py::_is_type_checking` (moved to `hashing.py`).
+- Coverage (PY_START): 8133 → 8139; gone: `normalized_tree` (deleted, now `_parsed`), `import_walk.py::_is_type_checking` (moved to `hashing.py`).
 - No wipes, nothing installed, no fact cut, no test touched.
 
 ## Decided in-run
-- The memo is keyed by the text's sha256, never the text. The first shape held 10.5 MB of source and code and raised the suite's end RSS by ~10 MB. The normalized code is held zlib-compressed (4.2 → 0.9 MB).
-- Callers that only walk imports (`layering`, `surface-ledger`, offline_run) parse without the memo. Through it, `surface-ledger` went 14.6 → 32.1 s.
-- Link 2's premise was wrong at this base: no `dashboard.json` write is ever fsynced. Each of the suite's 5087 fsyncs lands on a truth file.
+- The memo is keyed by the text's sha256 and holds its code zlib-compressed: keyed by the text, it held 10.5 MB and raised the end RSS ~10 MB.
+- Walk-only callers parse unmemoized (through the memo, `surface-ledger` went 14.6 → 32.1 s).
+- Link 2's premise was wrong at this base: `dashboard.json` is never fsynced; all 5087 fsyncs land on truth files.
 
-## Cuts (holders outside Owns): 2
-`store/data_root.py::row_schema` (link 1's re-test) and the six `durable=` callers (link 2's "never a flag a caller passes"). Both rows are filed in the ledger.
+## Cuts outside Owns: 2, both filed
+`data_root.py::row_schema` (link 1's re-test); the six `durable=` callers (link 2).
 
 ---
 
