@@ -1028,11 +1028,22 @@ def test_a_spawned_run_arms_the_book_its_launch_held_on_its_own_tenants_key(
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
-@on_jumping_clock
-async def test_a_walks_spend_ceiling_binds_before_a_call(built_stores: Stores) -> None:
-    dataset = _dataset()
-    ceiling = await _walk(built_stores, dataset, cap_usd=5.0)
-    assert (ceiling["stop_reason"], ceiling["billed"]) == ("spend_budget", 5.0), (
+def test_a_ceiling_refuses_the_send_its_calls_out_would_carry_past_it() -> None:
+    # A walk plans no more than the ceiling fits; a send past a wrong plan is refused at its hold.
+    dollar = SendBound(input_tokens=0, output_tokens=0, usd=1.0)
+    book = spend_book(5.0)
+
+    def cell() -> Any:
+        label = CallLabel("cell", "backend")
+        return admitted(label, dollar, model=None, provider=None, paid_by="host")
+
+    with scoped(book=book), contextlib.ExitStack() as out:
+        held = [out.enter_context(cell()) for _ in range(5)]
+        with pytest.raises(SendRefusedError) as refused:
+            out.enter_context(cell())
+        for bill in held:
+            bill.settle(Billed(TokenAccount(), 1.0))
+    assert (refused.value.category, book.spent.sent_usd) == (ErrorCategory.SPEND_CEILING, 5.0), (
         "a spend ceiling binds BEFORE a call: every cell out is counted at its bound"
     )
 
