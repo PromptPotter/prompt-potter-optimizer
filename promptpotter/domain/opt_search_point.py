@@ -143,14 +143,6 @@ class NodePrompt(FrozenModel):
         return bool(self.fields or self.shots)
 
 
-def _resolved_config(pipeline_params: PipelineParams, schema: PipelineSchema) -> PipelineParams:
-    """Idempotent."""
-    pp = strip_rendered_prompt(pipeline_params)
-    if schema.active_steps:
-        pp = pp.with_steps(list(schema.active_steps))
-    return pin_default_routes(fold_output_contract(pp, schema), schema)
-
-
 class OptSearchPoint(FrozenModel):
     """The individual: a value per locus of the roster — prompt fields and shots per prompt node, node config — plus its lineage."""
 
@@ -182,7 +174,11 @@ class OptSearchPoint(FrozenModel):
         return {node: prompt.model_dump(mode="json") for node, prompt in self.prompts.items()}
 
     def configured(self, pipeline_params: PipelineParams, schema: PipelineSchema) -> Self:
-        resolved = _resolved_config(pipeline_params, schema)
+        """The one resolution of a point's params: every reader reads them as resolved here."""
+        pp = strip_rendered_prompt(pipeline_params)
+        if schema.active_steps:
+            pp = pp.with_steps(list(schema.active_steps))
+        resolved = pin_default_routes(fold_output_contract(pp, schema), schema)
         return type(self)(prompts=self.prompts, pipeline_params=resolved, lineage=self.lineage)
 
     def prompt(self, node: str) -> NodePrompt:
@@ -268,7 +264,7 @@ class OptSearchPoint(FrozenModel):
         framing: TaskDecomposition,
         demo: Sequence[Sample],
     ) -> JobSearchPoint:
-        pp = _resolved_config(self.pipeline_params, schema)
+        pp = self.pipeline_params
         scored = self.scored_prompts(schema, framing, demo=demo)
         nodes = pp.laid_nodes
         field_wise = {
