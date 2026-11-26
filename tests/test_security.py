@@ -613,15 +613,12 @@ def test_a_refused_poll_stops_at_once_and_its_refusal_is_told_once_until_a_poll_
     bot_token = "123456:telegram-bot-token-xyz"
     monkeypatch.setattr(settings_mod.settings, "ADMIN_BOT_TELEGRAM_TOKEN", SecretStr(bot_token))
 
-    class SeenEnoughError(Exception):
-        pass
-
     told: list[str] = []
 
     def tell(text: str, **_: bool) -> bool:
         told.append(text)
         if text.startswith("✓"):
-            raise SeenEnoughError  # the channel is held again
+            raise EOFError  # seen enough: the channel is held again
         return True
 
     slept: list[float] = []
@@ -629,12 +626,12 @@ def test_a_refused_poll_stops_at_once_and_its_refusal_is_told_once_until_a_poll_
     def sleep(seconds: float) -> None:
         slept.append(seconds)
         if len(slept) == 3:
-            raise SeenEnoughError
+            raise EOFError
 
     def polled(status: int, body: dict[str, Any]) -> list[float]:
         offline.token_endpoints[f"api.telegram.org/bot{bot_token}/getUpdates"] = (status, body)
         slept.clear()
-        with pytest.raises(SeenEnoughError):
+        with pytest.raises(EOFError):
             admin_bot.run_bot(bot_token, "1", None)
         return list(slept)
 

@@ -102,31 +102,19 @@ class _ArchiveRecorder:
         )
 
     def take(self, cell: GradedCell) -> GradedCell:
-        return self._file([cell])[0]
-
-    def bank(self, cells: Sequence[GradedCell]) -> None:
-        self._file(cells)
-
-    def _file(self, cells: Sequence[GradedCell]) -> list[GradedCell]:
-        """Files a cell once, at whichever of its claim, take or bank meets it first."""
-        if not (unfiled := [cell for cell in cells if cell.facts.answer is None]):
-            return list(cells)
-        answers = self.session.store.archive.file_answers(
+        """Files a cell once, at whichever of its claim or take meets it first."""
+        if cell.facts.answer is not None:
+            return cell
+        (answer,) = self.session.store.archive.file_answers(
             self.entry,
-            ((cell.facts, self.provenance(cell.facts)) for cell in unfiled),
+            [(cell.facts, self.provenance(cell.facts))],
             role=self.kind,
             created_at=utcnow_iso(),
             output_keys={
                 n.name: tuple(n.output_keys) for n in self.session.pipeline_schema.running_nodes
             },
         )
-        refs = iter(answers)
-        return [
-            cell
-            if cell.facts.answer is not None
-            else cell.filed(replace(cell.facts, answer=next(refs)))
-            for cell in cells
-        ]
+        return cell.filed(replace(cell.facts, answer=answer))
 
 
 async def score_search_point(

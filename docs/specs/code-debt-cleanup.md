@@ -1005,6 +1005,52 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **A knob layer's tiers have no world example** (tw-x row 10): the knob-layer fact reads only
   "campaign"-level layers; dataset vs free_tier needs a `campaign(knobs=)` layer per tier. **Rides
   with:** wave 6. **Re-test:** a knob fact names a layer of each tier.
+- **A resumed walk buys a charged errored cell again** (tw-j2): `infrastructure/store/measurement_archive.py::ReplayFeed.advance`
+  skips `cell.errored`, so a pass that a charged error stopped is sent again on resume and paid twice.
+  The crossed legs compare deduplicated `passes_graded` and read the repeat as spend. Fork: an errored
+  cell replays as the error it was, or the retry is the point and the bill states it. The root is
+  shared with `repairable_holes`'s row: `ErrorCategory` does not say which errors are fillable.
+  **Rides with:** wave 6. **Re-test:** `offline_run.py --charged` crossed-resumed
+  `harness.backend_cells` equals crossed's, or the retry is a decision in `docs/decisions.md`.
+- **No leg's L2 carries a steer** (tw-j2): `optimizers/potter/records.py::L2Memory.steered_onto`, which
+  `potter/members.py:442` calls when an L2 result names a steer, runs in no leg. At the base only a test
+  that seated the steer itself called it, and that test was deleted. Door: the world's L2 reply names a
+  `steer`. **Rides with:** wave 6. **Re-test:** offline `--coverage` reaches `records.py:79`.
+- **23 parked facts wait for a world door** (tw-j2; each is kept as a test until its door exists):
+  - test_identity I2: a dataset with two prompt nodes.
+  - I3, I4: a parent on fewer rows than its frontier.
+  - I6: an L4 origin past 16k chars.
+  - mixed ×2: an L4 leg mixing potter and capo.
+  - test_scoring S3, S6, S13: a leg that binds a budget (backend cells cost $0).
+  - S8, S14, S15: a pause during a bench pass.
+  - S9–S12: a leg setting `origin_replicates`.
+  - S16–S18: a gate leg running `every_adoption`.
+  - S19: an `arm_gate=author` leg.
+  - S20: a GEPA round proposing more than one arm.
+  - S25: a world LLM naming `stand_on`.
+  - test_spend's skip journey: a `run_one` act that sends `SkipSearchpoint` mid-walk, with a resumed twin.
+  - test_spend's inner-stop: an L4 leg whose inner run rebases and whose provider refuses credit.
+  - The catch-up fact deleted at `af224d3bd` line 1222: a pause while a prior's catch-up is out past
+    the sure rows.
+  - The priced-replay facts at lines 1324 and 1349: a Compare leg paused mid-walk and resumed
+    (`search_incurred`). Mutating `claim_price` leaves every leg green.
+
+  **Rides with:** wave 6. **Re-test:** each fact moves to a leg on its door, or is deleted by a named
+  mutation.
+- **Hand-seats with no world door** (tw-j2 link 5): the world has no mint-only door, and
+  `world.opened(rows)` takes no connector. test_security seats `minted_campaign` ×6,
+  `stored_campaign` ×3 and `loop_session` ×1; test_scoring `loop_session` ×2 and `minted_campaign` ×2;
+  test_spend `loop_session` ×2 (one is tw-x row 3's). **Rides with:** wave 6. **Re-test:**
+  `git grep -cE "\b(minted_campaign|stored_campaign|loop_session)\(" -- tests/test_*.py` is 0.
+- **test_security's stdio-host test is 78 lines** (tw-c, tw-j2), against the 60-line budget: it is one
+  function, so that one spawned host answers every act. Door: a host spawned once for the module.
+  **Rides with:** wave 6. **Re-test:** the test is at most 60 lines and spawns no host of its own.
+- **`write_json` writes with `indent=2`** (tw-q): `infrastructure/store/io.py::write_json` indents
+  every file it writes, the dashboard's on every write included, and an indent forces json's
+  pure-Python encoder. Fork: a run folder is a headless UI that people read (compact JSON is
+  machine-only), against the encoder's cost on every write. Price both before choosing. **Rides
+  with:** wave 6. **Re-test:** a cProfile of one world run ranks `json.encoder` below tw-q's
+  frame list, or the format is a decision with its reason.
 
 ## Held — no wave-4 chain yet
 
