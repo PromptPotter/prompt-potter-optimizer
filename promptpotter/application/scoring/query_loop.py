@@ -150,8 +150,6 @@ class WalkRecorder(Protocol):
         """The cell at its address: filed here unless its claim filed it first."""
         ...
 
-    def bank(self, cells: Sequence[GradedCell]) -> None: ...
-
     def provenance(self, facts: MeasuredCell) -> str: ...
 
 
@@ -577,7 +575,6 @@ class Walk:
         self.collect()
         head = len(self.results)
         sure = min(m for m in (self.budget, self.horizon(self.budget - 1), sure) if m is not None)
-        rows: list[GradedCell] = []
         paid: list[Sample] = []
         samples: list[Sample] = []
         for sample in self.order[head:sure]:
@@ -589,13 +586,10 @@ class Walk:
             if acq.result.facts.errored:
                 break
             if acq.fresh:
-                rows.append(acq.result)
                 paid.append(acq.sample)
             samples.append(acq.sample)
-        if rows:
-            self.ctx.recorder.bank(rows)
-            for sample in paid:
-                self.ctx.claim_price(sample)
+        for sample in paid:
+            self.ctx.claim_price(sample)
         return samples
 
     def end(
