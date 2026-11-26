@@ -116,6 +116,17 @@ export function candidatesAtPath(index: LineageIndex, path: CyclePath | null): H
   return cycle ? candidatesOf(cycle) : [];
 }
 
+// What a viewed entry's bars draw: a cycle's line, the rounds it holds from below its fork's cut
+// first (`facts.inherited`, on the cycle that ran each), then its own; a candidate's inner cycles.
+export function barNodes(index: LineageIndex, node: LineageNode): LineageNode[] {
+  if (node.entry_kind !== "cycle") return childNodes(node);
+  const below = node.facts.inherited.flatMap((address) => {
+    const c = candidateAt(index, address);
+    return c ? [c] : [];
+  });
+  return [...below, ...childNodes(node)];
+}
+
 // A cycle's candidates, round by round in slot order; not the inner campaigns it holds unplaced.
 export function candidatesOf(cycle: SubtreeCycle): HierarchyCandidate[] {
   return cycle.children.flatMap((c) => (c.entry_kind === "round" ? c.children : []));

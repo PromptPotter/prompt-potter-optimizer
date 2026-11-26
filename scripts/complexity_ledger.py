@@ -273,7 +273,9 @@ BASELINE = {
     # round's pairs (`paired.py::read_pair`), and the `next_parent` and `not_separated_stall` switches
     # the paper ablates join; net of the bench's crowning bar, `BarRead`, `cells_read`, `theta_point`
     # and the high-water L2/L3 read beside the stall stream (`HighWater`).
-    "package_lines": 113819,
+    # rebase-line (+13): a fork's line served whole: the candidates its bars lead with below its
+    # cut (`SubtreeCycleEntryFacts.inherited`), and its Spend figure billing its chain.
+    "package_lines": 113832,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

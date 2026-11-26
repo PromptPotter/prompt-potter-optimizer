@@ -79,8 +79,10 @@ export function useCandidatesModel(dash: ServedDashboard) {
 
   const onSelect = useCallback(
     (v: CandidateBar | null) => {
-      // A cycle bar is no arm: there is nothing to inspect.
-      pickCandidate(v?.reading ? { round: barRound(v), arm: v.reading.arm.key } : null);
+      // A cycle bar is no arm: there is nothing to inspect. An arm is picked on the cycle that ran
+      // it: a fork's bars lead with its parent's rounds below the cut.
+      if (!v?.reading) pickCandidate(null);
+      else pickCandidate({ round: barRound(v), arm: v.reading.arm.key }, pathOfAddress(v.key));
     },
     [pickCandidate],
   );

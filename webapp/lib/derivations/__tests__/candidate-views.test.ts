@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { barLevel, barsAreCycles, candidateBars } from "../candidate-views";
+import { EMPTY_LINEAGE, indexLineage } from "../lineage-candidates";
 import type {
   ArmReading,
   CycleEntryFacts,
@@ -25,6 +26,7 @@ const standsAt = (rate: number) =>
   runStanding(1, "C1.1", { vs_origin: pairedReading(rate - 0.5, [-1, 1], { rateA: 0.5 }) });
 
 const EMPTY = {
+  index: EMPTY_LINEAGE,
   inflightByKey: new Map<string, ArmReading>(),
   sampleSet: null,
   marks: [],
@@ -199,6 +201,24 @@ it("drops the tail a supersede cut retired — one round of three, never six", (
   expect(bars.map((b) => b.key)).toEqual(live.map((c) => c.address));
   // `idx` numbers the bars actually drawn — it is the join to the dendrogram beneath them.
   expect(bars.map((b) => b.idx)).toEqual([0, 1]);
+});
+
+it("leads a fork's bars with its line below the cut, the parent's candidates by address", () => {
+  const below = [arm("c0", "C0"), arm("p1", "C1.1")];
+  const forkAt = encodeCyclePath([{ campaignId: "camp__aaaaaa", cycleId: "cycle_root_fork_1" }]);
+  const own = hierarchyCandidate(forkAt, {
+    id: "f2",
+    reading: armReading({ election: { held: true }, arm: { round: 2, label: "C2.1", key: "f2" } }),
+  });
+  const fork = subtreeCycle(
+    { address: forkAt, label: "fork", children: roundsOf(forkAt, [own]) },
+    { inherited: [...below.map((c) => c.address), `${C}/r1/gone`] },
+  );
+  const index = indexLineage(subtreeCampaign({ address: "camp__aaaaaa", children: [cycle(below), fork] }));
+  const bars = candidateBars({ ...EMPTY, index, viewedNode: fork });
+  // An address the tree does not list draws nothing, never a placeholder bar.
+  expect(bars.map((b) => b.key)).toEqual([...below, own].map((c) => c.address));
+  expect(bars.map((b) => b.idx)).toEqual([0, 1, 2]);
 });
 
 it("reads a held round as its leading arm alone, and a round not yet held whole", () => {

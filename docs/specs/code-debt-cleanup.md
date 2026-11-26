@@ -1133,6 +1133,15 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   (`round.py::measure_overlap`): a pick cut short, a line gap or a trigger buys after the election,
   and the closed reading is the later one. Door: the election reads the round's last race, or the
   closed record names which it read. **Rides with:** θ off the round's statement.
+- **The candidate box reads one line from three sources**: the rounds and their chart off
+  `dashboard.json`'s `rounds`, the bars off the subtree's per-cycle children
+  (`webapp/lib/derivations/candidate-views.ts::candidateBars`), and an in-flight arm's half joined
+  onto its bar by arm key (`webapp/lib/derivations/candidate-views.ts::CandidateBarsInput`). They
+  diverged on the box: a rebase fork's dashboard held its parent's rounds and its bars lost them,
+  bridged by `SubtreeCycleEntryFacts.inherited`. Door: the line served once, round by round, each arm
+  by address with its reading, election and descent, live rows in the closed shape; the bars, the
+  chart and the paired tree are masks over it (every or leading arm, sample set, lens), and
+  `inherited` and the in-flight join go. **After:** the v0.8.21 tag, first.
 
 ## Held — no wave-4 chain yet
 

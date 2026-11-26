@@ -249,7 +249,10 @@ class CycleEntryFacts(FrozenModel):
         description="The column the cycle's newest election elected on; null before its first. "
         "`ability`: its rounds are won on θ, not on fitness."
     )
-    spend: MeteredSpend = Field(description="This cycle's own ledger's bill, at the moment.")
+    spend: MeteredSpend = Field(
+        description="Its line's bill at the moment: its fork prefix's, then its own ledger's "
+        "(`CampaignStore.chain`), what its dashboard's spend folds."
+    )
     bench: BenchScore | None = Field(
         description="The campaign's bench, on the cycle holding the line, read whole at the "
         "head; null on every other cycle (the line's reads `held_elsewhere` there) and under a "
@@ -299,6 +302,11 @@ class SubtreeCycleEntryFacts(CycleEntryFacts):
     from_candidate: str | None = Field(
         description="The address of the candidate a fork hangs from: the arm its mint record "
         "names, on the cycle of its parent's line that ran it. Null on a root."
+    )
+    inherited: list[str] = Field(
+        description="The addresses of the candidates of each round its line holds from below "
+        "its fork's cut, round then slot order, on the cycle that ran each: what its bars lead "
+        "with. Empty on a root."
     )
 
 

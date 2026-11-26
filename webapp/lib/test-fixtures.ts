@@ -460,6 +460,7 @@ export function subtreeCycle(
       lens_shift: null,
       origin: null,
       from_candidate: null,
+      inherited: [],
       ...facts,
     },
     climb: null,

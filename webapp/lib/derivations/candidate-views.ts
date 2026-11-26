@@ -11,7 +11,7 @@ import { fmtUnit } from "@/lib/format";
 import { tagValue } from "./hierarchy";
 import { metricLevel } from "./headline-stats";
 import { readPaired } from "./paired-reading";
-import { childNodes, splitRetired } from "./lineage-candidates";
+import { barNodes, childNodes, splitRetired, type LineageIndex } from "./lineage-candidates";
 
 // A run's served standing rate against its origin; `null` renders BLANK, never 0.
 function cycleLevel(node: HierarchyCycle): number | null {
@@ -39,6 +39,7 @@ export function barsAreCycles(viewedNode: LineageNode | undefined): boolean {
 }
 
 interface CandidateBarsInput {
+  index: LineageIndex;
   viewedNode: LineageNode | undefined;
   inflightByKey: ReadonlyMap<string, ArmReading>;
   sampleSet: number[] | null;
@@ -49,6 +50,7 @@ interface CandidateBarsInput {
 }
 
 export function candidateBars({
+  index,
   viewedNode,
   inflightByKey,
   sampleSet,
@@ -58,7 +60,7 @@ export function candidateBars({
   const markOf = (kind: VerificationMark["kind"], key: string) =>
     marks.find((m) => m.kind === kind && m.arm.key === key) ?? null;
   // Live side of each supersede cut only — retired tails double a round.
-  const nodes: readonly LineageNode[] = viewedNode ? childNodes(viewedNode) : [];
+  const nodes: readonly LineageNode[] = viewedNode ? barNodes(index, viewedNode) : [];
   const shown = splitRetired(nodes).live.filter(
     (node) =>
       every ||

@@ -747,7 +747,8 @@ export interface CycleEntryFacts {
   /** The column the cycle's newest election elected on; null before its first.
    * `ability`: its rounds are won on θ, not on fitness. */
   elects_on: 'fitness' | 'composite' | 'ability' | null;
-  /** This cycle's own ledger's bill, at the moment. */
+  /** Its line's bill at the moment: its fork prefix's, then its own ledger's
+   * (`CampaignStore.chain`), what its dashboard's spend folds. */
   spend: MeteredSpend;
   /** The campaign's bench, on the cycle holding the line, read whole at the head;
    * null on every other cycle (the line's reads `held_elsewhere` there) and
@@ -1339,7 +1340,8 @@ export interface SubtreeCycleEntryFacts {
   /** The column the cycle's newest election elected on; null before its first.
    * `ability`: its rounds are won on θ, not on fitness. */
   elects_on: 'fitness' | 'composite' | 'ability' | null;
-  /** This cycle's own ledger's bill, at the moment. */
+  /** Its line's bill at the moment: its fork prefix's, then its own ledger's
+   * (`CampaignStore.chain`), what its dashboard's spend folds. */
   spend: MeteredSpend;
   /** The campaign's bench, on the cycle holding the line, read whole at the head;
    * null on every other cycle (the line's reads `held_elsewhere` there) and
@@ -1365,6 +1367,10 @@ export interface SubtreeCycleEntryFacts {
   /** The address of the candidate a fork hangs from: the arm its mint record names,
    * on the cycle of its parent's line that ran it. Null on a root. */
   from_candidate: string | null;
+  /** The addresses of the candidates of each round its line holds from below its
+   * fork's cut, round then slot order, on the cycle that ran each: what its
+   * bars lead with. Empty on a root. */
+  inherited: string[];
 }
 
 /** What the request's lens did to one cycle's candidate ordering. */
@@ -5758,7 +5764,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "5770c04d09268695";
+export const SERVED_CONTRACT = "d0cd12733ded8080";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';

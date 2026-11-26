@@ -73,7 +73,7 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_ledger_spend
 from promptpotter.infrastructure.store.dataset_access import definition_version
-from promptpotter.infrastructure.store.read_model import LedgerSpan, Moment, file_sig
+from promptpotter.infrastructure.store.read_model import Moment, file_sig
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.shared.errors import BadRequestError
 
@@ -302,11 +302,8 @@ def cycle_entry(
         if limits is None
         else limits.budget.rounds
     )
-    ledger = stores.campaigns.ledger(hop)
     spent = MeteredSpend.of(
-        scan_ledger_spend(
-            [LedgerSpan(ledger, None if moment is None else moment.span(ledger).until)]
-        ).spend,
+        scan_ledger_spend(stores.campaigns.chain(hop, moment=moment)).spend,
         ceiling_meter(campaign.declaration.purpose),
     )
     mint: CycleMint = index.minted_as

@@ -117,7 +117,7 @@ from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.paired import RoundPairs, grade_measurands
 from promptpotter.application.scoring.race_protocol import View, WalkView
 from promptpotter.application.scoring.row_policy import FieldRead, RowGround, RowKnobs, send_rows
-from promptpotter.application.served_dashboard import served_dashboard
+from promptpotter.application.served_dashboard import ServedDashboard, served_dashboard
 from promptpotter.application.views.render.phase import acts_line
 from promptpotter.config.paths import MEASUREMENTS_DIR, user_data_root
 from promptpotter.domain.activity import ActivityFeed
@@ -1921,6 +1921,36 @@ def test_a_forks_own_ledger_displaces_its_parents_prefix_once(
     assert {r: k for r, k in on_fork.crowns.items() if r < 2} == {
         r: k for r, k in on_parent.crowns.items() if r < 2
     }, "the fork re-crowned its parent's prefix"
+
+
+# A fork's line is its parent's below the cut: its bars lead with those candidates, and its Spend
+# figure bills the chain its dashboard folds (its own appends alone read $0 as a rebase starts).
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_forks_served_line_leads_with_its_parents_rounds_and_bills_their_chain(
+    displaced: Shared,
+) -> None:
+    _, parent, fork, _ = displaced.made
+    with displaced.reading() as stores:
+        tree = hierarchy_subtree(stores, Subject(fork.campaign_id).address, None, None, moment=None)
+        dash = served_dashboard(stores, fork)
+    cycles = {e.address: e for e in entries_under(tree) if isinstance(e, SubtreeCycle)}
+    below = [
+        c.address
+        for rnd in cycles[Subject.of((parent,)).address].children
+        if isinstance(rnd, HierarchyRound) and rnd.facts.round < 2
+        for c in rnd.children
+    ]
+    on_fork = cycles[Subject.of((fork,)).address].facts
+    assert below and on_fork.inherited == below, (
+        "the fork's bars do not lead with its parent's candidates below the cut"
+    )
+    assert isinstance(dash, ServedDashboard), "guard"
+    # Tokens, exactly: the offline world bills no USD.
+    prefix = sum(dash.spend_metered_by_round[str(r)].billed_tokens for r in (0, 1))
+    assert prefix > 0, "guard: the prefix billed nothing, so no bill below tells the chain apart"
+    assert on_fork.spend.billed_tokens == dash.spend_metered.billed_tokens, (
+        "the fork's Spend figure is not the bill its dashboard folds beside it"
+    )
 
 
 # Pure over the standing line: a cut hangs from the newest crown below it, round 0 its origin's.

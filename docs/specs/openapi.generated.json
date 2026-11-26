@@ -5309,7 +5309,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/MeteredSpend",
-            "description": "This cycle's own ledger's bill, at the moment."
+            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`CampaignStore.chain`), what its dashboard's spend folds."
           },
           "standing": {
             "anyOf": [
@@ -18340,6 +18340,14 @@
             "description": "The address of the candidate a fork hangs from: the arm its mint record names, on the cycle of its parent's line that ran it. Null on a root.",
             "title": "From Candidate"
           },
+          "inherited": {
+            "description": "The addresses of the candidates of each round its line holds from below its fork's cut, round then slot order, on the cycle that ran each: what its bars lead with. Empty on a root.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Inherited",
+            "type": "array"
+          },
           "lens_criterion": {
             "anyOf": [
               {
@@ -18397,7 +18405,7 @@
           },
           "spend": {
             "$ref": "#/components/schemas/MeteredSpend",
-            "description": "This cycle's own ledger's bill, at the moment."
+            "description": "Its line's bill at the moment: its fork prefix's, then its own ledger's (`CampaignStore.chain`), what its dashboard's spend folds."
           },
           "standing": {
             "anyOf": [
@@ -18448,7 +18456,8 @@
           "lens_criterion",
           "lens_shift",
           "origin",
-          "from_candidate"
+          "from_candidate",
+          "inherited"
         ],
         "title": "SubtreeCycleEntryFacts",
         "type": "object"

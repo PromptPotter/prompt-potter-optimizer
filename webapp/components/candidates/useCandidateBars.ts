@@ -51,13 +51,14 @@ export function useCandidateBars(index: LineageIndex) {
   const views = useMemo<CandidateBar[]>(
     () =>
       candidateBars({
+        index,
         viewedNode,
         inflightByKey,
         sampleSet,
         marks: marks ?? [],
         every,
       }),
-    [viewedNode, inflightByKey, sampleSet, marks, every],
+    [index, viewedNode, inflightByKey, sampleSet, marks, every],
   );
 
   const priorDominated = useMemo(
