@@ -1,8 +1,8 @@
 # tw-c: every hand-seat left after the second pass, onto the world (cloud, Sonnet)
 
 `briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is
-`origin/land/test-world` at `<BASE-C>`. That is `3625a6687` plus tw-r2, tw-s, tw-r3, tw-x, tw-j and tw-p,
-integrated. tw-p brought the suite's wall and end RSS under the rework's start, and you keep them there:
+`origin/land/test-world` at `<BASE-C>`. That is `3625a6687` plus tw-r2, tw-s, tw-r3, tw-x, tw-j, tw-p,
+tw-w and tw-q, integrated; tw-w hosted and priced the offline world (`out/tw-w-report`). tw-p and tw-q brought the suite's wall and end RSS under the rework's start, and you keep them there:
 every world run you add reuses a run tw-p shares, and your before → after states both.
 Replace the ancestor check with `git merge-base --is-ancestor 9cd30b5a7 <BASE-C>`. Equals-main runs against
 `<BASE-C>`'s offline home. Push to `arc/tw-c`, one commit per link, with the full gate green at the tip.
@@ -36,6 +36,14 @@ facts are judged already.
 ## Production
 You may edit `scripts/gate.py` for item 2 and nothing else in production. A row you find goes in your
 report.
+
+## NOT yours
+Chain tw-j2 runs beside you (`briefs/tw-j2.md`). It owns `scripts/offline_run.py`,
+`scripts/offline_world.py`, `application/scoring/**`, every `# Journeys awaiting a leg` block with the
+helpers only it calls, and five test_spend tests: `test_a_walks_spend_ceiling_binds_before_a_call`,
+`test_a_skip_holds_and_its_replay…`, `test_an_inner_runs_stop_reaches_its_outer_cell…`,
+`test_a_resumed_arm_rereads_its_cells_unbilled…` and `_walk`. A count or a >60-line test inside those is
+tw-j2's and out of your census.
 
 ## Proof
 - Before → after, per file you touched and for the suite: lines, test count, lines per test, pytest
