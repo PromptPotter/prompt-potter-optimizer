@@ -34,6 +34,7 @@ from typing import Any, Literal, NamedTuple, cast, override
 
 import httpx
 import pytest
+from build_ts_types import derived_landing_key
 from factories import (
     PROMPT_INFO,
     archive_row,
@@ -129,6 +130,7 @@ from promptpotter.application.jobs.reaper import (
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.library import LibraryAuthored, library
 from promptpotter.application.maintenance import landing as landing_module
+from promptpotter.application.maintenance.built_key import LANDING_KEY
 from promptpotter.application.maintenance.landing import (
     apply_landing,
     holding_landing,
@@ -2954,7 +2956,6 @@ def test_an_edit_to_code_a_load_runs_lands_the_root_again() -> None:
     # Every ledger line and banked state part parses through `KindTable.parse`, a module no schema
     # names: an edit there changes what loads, so a root landed before it is walked again.
     helper = Path(kinds_module.__file__)
-    landed = landing_module.landing_key()
     read = Path.read_text
     with pytest.MonkeyPatch.context() as edited:
         edited.setattr(
@@ -2962,7 +2963,7 @@ def test_an_edit_to_code_a_load_runs_lands_the_root_again() -> None:
             "read_text",
             lambda path, *a, **kw: read(path, *a, **kw) + ("\nEDITED = 1\n" * (path == helper)),
         )
-        assert landing_module.landing_key.__wrapped__() != landed, (
+        assert derived_landing_key() != LANDING_KEY, (
             "an edit to `KindTable.parse`, which every ledger load runs, left the landing key"
         )
 

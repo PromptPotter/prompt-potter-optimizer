@@ -13,7 +13,7 @@ class KindTable[M: BaseModel]:
     """The ONE kind -> model table: a model registers as its class is built, and every read by kind
     goes through ``parse``. A table whose package walks its modules at import completes there;
     one without completes at its declared step. ``every`` is each table built: a load dispatches
-    by name through these alone, so the landing key walks them all (`landing.py::loading_modules`)."""
+    by name through these alone, so the landing key walks them all (`build_ts_types.py::loading_modules`)."""
 
     every: ClassVar[list[KindTable[Any]]] = []
 
@@ -41,7 +41,7 @@ class KindTable[M: BaseModel]:
         return dict(sorted(self._held.items()))
 
     def schemas(self) -> dict[str, object]:
-        """Every kind's shape, so a reshape of any moves what hashes them (`landing.py::landing_key`)."""
+        """Every kind's shape, so a reshape of any moves what hashes them (`build_ts_types.py::derived_landing_key`)."""
         return {kind: model.model_json_schema() for kind, model in self.registered().items()}
 
     def parse(self, kind: str, raw: object) -> M:

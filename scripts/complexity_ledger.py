@@ -218,7 +218,7 @@ BASELINE = {
     # addr-3 (+59) less addr-4 (−20) = +39: a run declaration is a fold patch over `defaults.yaml`
     # that refuses a list it cannot lay (`layer_fold.py::patch_between`), and an arm is one
     # `RunSpec` planned on its seat and numbered once at the mint (`ArmSeat`). bkeys-3 (+21): the
-    # landing key hashes the code a load runs (`landing.py::loading_modules`'s schema walk).
+    # landing key hashes the code a load runs (`build_ts_types.py::loading_modules`'s schema walk).
     # addr-4's fix pass (+85): a cycle files the cell identity it drew under and a moved one
     # refuses (`moved_leaves` over the drawn record, +45); a null clears on every layer and
     # `unbounded` is the one no-bound word on each budget axis (+19); the archive and the ruler
