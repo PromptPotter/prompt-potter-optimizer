@@ -326,6 +326,9 @@ class FakeBackend:
         # while `down`, each is refused as a 500.
         self.sent: list[tuple[str, str, int | None]] = []
         self.down = False
+        # One in this many of the origin's rows answered as the pipeline's ERROR candidate, a
+        # charged error, on every ask of that row (0: none).
+        self.origin_errors = 0
         # Awaited before each cell is answered, inside the run's own task: an operator acting mid-walk.
         self.before_answer: Callable[[], Awaitable[None]] | None = None
 
@@ -405,7 +408,10 @@ class FakeBackend:
         k = self.SKILL.get(tag, 1 + draw("skill", tag) % 9)
         k += self.hardness * (draw("hard", query) % 3 - 1)
         gt = self.truth[query]
-        if draw("cell", prompt, query) % 10 < k:
+        if tag is None and self.origin_errors and draw("errs", query) % self.origin_errors == 0:
+            # The pipeline's own failure on the row, which the walk charges as a miss.
+            label: str | None = "ERROR"
+        elif draw("cell", prompt, query) % 10 < k:
             label = gt
         else:
             wrong = [lab for lab in LABELS if lab != gt]

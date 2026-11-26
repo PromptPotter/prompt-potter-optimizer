@@ -31,11 +31,8 @@ from factories import (
     arm_key,
     arm_state,
     arm_walk,
-    close_round,
-    cycle_ledger,
     degradation_health,
     delta_ruler,
-    election,
     filed,
     filed_under,
     ledger_records,
@@ -44,13 +41,9 @@ from factories import (
     mint_fork,
     optimizer_state,
     pobb_knobs,
-    prompted,
     round_result,
     samples,
     score_summary,
-    scorer_of,
-    seat,
-    set_cycle,
     sheet,
     workspace,
 )
@@ -58,9 +51,7 @@ from offline_run import DATASET
 from offline_world import Router
 from world import Ran, Shared, World, shared_run
 
-from promptpotter.application.bench.cycle import ReadArm, RoundContext
-from promptpotter.application.bench.difficulty import DifficultyView, ruler_rows
-from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.difficulty import ruler_rows
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     ForkCut,
@@ -89,9 +80,6 @@ from promptpotter.application.hierarchy_subtree import (
 )
 from promptpotter.application.initialization.scoring_scope import run_memory
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
-from promptpotter.application.intelligence.rasch import (
-    candidate_abilities,
-)
 from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.registry import JobRegistry
@@ -111,10 +99,9 @@ from promptpotter.application.optimizers.capo.members import (
     PopulationKept,
 )
 from promptpotter.application.optimizers.gepa.members import MinibatchTested
-from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRound, RoundSamples
-from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
+from promptpotter.application.optimizers.potter.election import RoundWinner
 from promptpotter.application.optimizers.potter.pobb import PoBBCheck
-from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
+from promptpotter.application.optimizers.potter.race import EliminationCut
 from promptpotter.application.pipeline_resolve import (
     cycle_config,
     permitted_narrowing,
@@ -125,7 +112,7 @@ from promptpotter.application.runner.termination import (
 )
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
-from promptpotter.application.scoring.race_protocol import Decision, View, WalkView
+from promptpotter.application.scoring.race_protocol import View, WalkView
 from promptpotter.application.scoring.row_policy import FieldRead, RowGround, RowKnobs, send_rows
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.application.views.render.phase import acts_line
@@ -185,11 +172,11 @@ from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import walked_position
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
-from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer
+from promptpotter.domain.scoring import CellSheet, MeasuredCell, Scorer
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.base import Projection
-from promptpotter.infrastructure.run_scope import rescope, scoped
+from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
 from promptpotter.infrastructure.store import io as store_io
 from promptpotter.infrastructure.store.archive_queries import (
@@ -1159,25 +1146,6 @@ def test_a_write_under_a_level_that_stands_but_is_no_directory_raises_an_os_erro
     for level in ("file", "dangling"):
         with pytest.raises(OSError):
             write_json(tmp_path / level / "a" / "b.json", {})
-
-
-def _on_parent() -> dict[str, Any]:
-    """A round whose arm and election end on the individual named `parent`."""
-    parent = prompted(instruction="parent")
-    return {
-        "arms": {ArmKey(parent.id): arm_state("parent", individual=parent)},
-        "election": election(ended_on=parent.id),
-    }
-
-
-def _adopted() -> RoundResult:
-    """Round 0, electing the origin."""
-    origin_position = ArmPosition(round=0, idx=0, total=1)
-    return _round(
-        round=0,
-        arms={ArmKey("origin"): arm_state("origin", position=origin_position)},
-        election=election("origin"),
-    )
 
 
 def _keyed_ruler(rows: Sequence[Sample]) -> DeltaRuler:
@@ -2376,179 +2344,3 @@ def test_a_halts_own_words_are_the_stop_its_run_serves_and_its_chat_says(
         StopReason.OPTIMIZER_ABORT,
         aborted.detail,
     ), "an abort's stop lost the words its layer gave"
-
-
-# Journeys awaiting a leg
-
-
-def _decided(
-    race: PoBBRace,
-    taken: Mapping[ArmKey, Sequence[GradedCell]],
-    untaken: Sequence[Sample],
-    left: int,
-    *,
-    opening: bool = False,
-) -> Decision[ArmKey]:
-    """One decision on walks with none out, each with *untaken* ahead and *left* rows to take."""
-    walks = {key: WalkView(cells, untaken, 0, len(cells) + left) for key, cells in taken.items()}
-    return race.decide(View(walks, opening))
-
-
-def _on_ten(ten: list[Sample], grades: list[float]) -> CellSheet:
-    return sheet(measurement(i, g, sample_key=ten[i].key) for i, g in enumerate(grades))
-
-
-def _informative_race(
-    stores: Stores, monkeypatch: pytest.MonkeyPatch, refit: str, shape: str = "per_candidate"
-) -> tuple[Callable[[], PoBBRace], list[Sample], DeltaRuler, RoundContext]:
-    """A race choosing `informative` rows on a warm ruler (δ = slot − 4) whose parent hit all ten."""
-    ten = samples(10, "g")
-    slots = delta_ruler({i: float(i - 4) for i in range(10)})
-    ruler = slots.model_copy(
-        update={
-            "delta": {s.key: slots.delta[str(s.id)] for s in ten},
-            "delta_se": {s.key: slots.delta_se[str(s.id)] for s in ten},
-        }
-    )
-    monkeypatch.setattr(DifficultyView, "ruler", property(lambda _view: ruler))
-    racing = seat(
-        stores,
-        round_num=3,
-        optimization={
-            "elimination_n_min": 4,
-            "nodes": {
-                "pobb": {
-                    "config": {
-                        "row_choice": "informative",
-                        "refit": refit,
-                        "shape": shape,
-                        "dispatch": "batch",
-                    }
-                },
-                "theta_election": {"config": {"vote": "overlap"}},
-            },
-        },
-    )
-    parent = prompted(instruction="parent")
-    on_parent = _on_parent()
-    set_cycle(
-        racing.cycle,
-        line=[_round(round=0, cells={ArmKey(parent.id): _on_ten(ten, [1.0] * 10)}, **on_parent)],
-    )
-    rescope(ledger=cycle_ledger(racing.cycle))
-    return (
-        lambda: PoBBRace(
-            NodeContext(racing, NODE_MEMBERS.get("pobb")),
-            RoundSamples(cells=ten[:6], order=ten[:6], block_size=1, pool=ten[6:]),
-        ),
-        ten,
-        ruler,
-        racing,
-    )
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_resumed_informative_race_rechooses_its_rows_and_files_nothing(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    for shape in ("per_candidate", "per_round"):
-        race_of, ten, _, racing = _informative_race(
-            built_stores, monkeypatch, "per_decision", shape
-        )
-        taken = {
-            ArmKey("c1"): _on_ten(ten, [0.0, 1.0, 0.0, 0.0]).cells,
-            ArmKey("c2"): _on_ten(ten, [1.0, 1.0, 1.0, 0.0]).cells,
-        }
-        live = race_of()
-        _decided(live, taken, ten[4:], 2, opening=True)
-        chose = _decided(live, taken, ten[4:], 2)
-        filed = len(racing.cycle.pending_decisions)
-        # A resume rebuilds the race and closes its blocks again on the rows the walk replays.
-        resumed = race_of()
-        _decided(resumed, taken, ten[4:], 2, opening=True)
-        assert _decided(resumed, taken, ten[4:], 2) == chose, (
-            f"{shape}: the resume chose other pairs"
-        )
-        assert len(racing.cycle.pending_decisions) == filed, f"{shape}: a choice filed a record"
-
-
-# One journey: the live election's decision is the one the closed round is replayed against.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_parents_charged_error_replays_at_the_grade_the_live_election_read(
-    built_stores: Stores,
-) -> None:
-    stores = built_stores
-    on_parent = _on_parent()
-    scorer = scorer_of()
-
-    def answered_by(model: str, answers: dict[int, str | None]) -> Any:
-        rows = [
-            archive_row(f"q{sid}", predicted=said)
-            if said is not None
-            else archive_row(f"q{sid}", error="boom", error_category="PIPELINE")
-            for sid, said in answers.items()
-        ]
-        walked = filed(
-            stores.archive, rows, filed_under([("llm_only", {"model": model})], "replayds")
-        )
-        return scorer.sheet(
-            a.cell for _, ref, _ in walked if (a := stores.archive.answer(ref)) is not None
-        )
-
-    # Two cells won outright; the third, which clears the bar, only the parent's charged error gives.
-    answered = {sid: "g" if sid < 5 else "x" for sid in range(9)}
-    parent, child = prompted(instruction="parent"), prompted(instruction="child")
-    bar = answered_by("P", {**answered, 9: None})
-    arm = answered_by("C", {**answered, 5: "g", 6: "g", 9: "g"})
-    assert bar.cells[9].scored and bar.cells[9].grade.fitness == 0.0, "guard"
-    electing = seat(stores)
-    set_cycle(electing.cycle, line=[_round(round=0, **on_parent)], population=[parent])
-    walked_child = ArmKey(child.id)
-    child_arm = arm_state("child", position=ArmPosition(round=1, idx=0, total=1), individual=child)
-    read_parent = ReadArm(ArmKey(parent.id), arm_state("parent", individual=parent), bar)
-    selection = elect_on_theta(
-        NodeContext(electing, NODE_MEMBERS.get("theta_election")),
-        MeasuredRound(
-            arms={walked_child: child_arm},
-            rows={walked_child: arm},
-            parent=read_parent,
-            filed={
-                walked_child: ReadArm(walked_child, child_arm, arm),
-                read_parent.key: read_parent,
-            },
-            folds={},
-            fit={},
-            abilities=candidate_abilities(
-                {walked_child: arm}, bar, electing.cycle.difficulty.ruler
-            ),
-            electable=[walked_child],
-            coverage_floor=1,
-            cut=None,
-            origin_panel_slots=[],
-            on_panel={},
-            raced={walked_child: arm, read_parent.key: bar},
-            paired_on=None,
-        ),
-    )
-    assert selection.selected == walked_child, "guard: the live election charges the error"
-    charged = CycleHop(campaign_id=_CAMPAIGN, cycle_id="cycle_charged_parent")
-    stores.campaigns.mint_cycle(charged)
-    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(charged)))
-    close_round(
-        ledger,
-        [
-            _adopted(),
-            _round(
-                round=1,
-                arms={walked_child: child_arm, read_parent.key: read_parent.state},
-                election=election(walked_child),
-                cells={walked_child: arm, read_parent.key: bar},
-            ),
-        ],
-        cycle=seat(stores, bank=samples(10, "g")).cycle,
-    )
-    [closed_on_disk] = closed_rounds(stores, charged, scorer, moment=None)
-    [decided] = electing.cycle.pending_decisions
-    assert replay_all_mismatches(closed_on_disk, [decided]) == [], (
-        "the replay read the parent's charged error as a cell nobody scored"
-    )
