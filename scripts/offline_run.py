@@ -203,7 +203,7 @@ PRESSED = "pressed"
 # depth on another box and a trace would read the box.
 PRESS = LookaheadPress(cells=4, abreast="all", auto=True)
 # Potter's warm run reading its rolling race's calls as they return, pressed, paused inside a walk
-# and resumed: the record hangs on timing, so the resume replays the order the run filed.
+# and resumed: the record hangs on arrival order, so the resume replays the order the run filed.
 ARRIVED = "arrived"
 # Potter's warm run pressed and paused inside a walk, then resumed: what the press bought ahead and
 # no turn took stays out of the campaign's own memory across the pause.
@@ -2368,8 +2368,7 @@ def arrived_leg(workspace: Path, leg: Future[int], pause_after: int) -> bool:
     """Potter's rolling race read in arrival order, paused inside a walk and resumed: before the
     pause some walk took a row ahead of one it sent earlier, and the resumed round reads first
     every row the run filed, in that order (`query_loop.py::_ScoringPhase.filed_reads`). Its
-    record is never held to the unpaused run's: the pause, pressed inside a call's answer, is
-    timing too."""
+    record is never held to the unpaused run's: the pause cuts the walk where it was pressed."""
     if rc := leg.result():
         print(f"potter: arrival order: FAILED (exit {rc}) -- {workspace / 'run.log'}")
         return False

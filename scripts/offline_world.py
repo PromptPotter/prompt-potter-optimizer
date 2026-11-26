@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import contextvars
 import enum
 import hashlib
 import inspect
@@ -16,6 +17,7 @@ import signal
 import socket
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any, ClassVar
 from urllib.parse import urlsplit
 
@@ -343,7 +345,7 @@ class FakeBackend:
                     for _ in range(lag):
                         await asyncio.sleep(0)
                     if hook is not None:
-                        await hook()
+                        _acted(hook)
                     return _json(200, answer, request)
 
                 return answered()
@@ -394,6 +396,17 @@ class FakeBackend:
                 "terminal_node": "llm_only",
             },
         }
+
+
+def _acted(act: Callable[[], Awaitable[None]]) -> None:
+    """*act* run whole while the run's loop waits on it: a command's thread hops last as long as
+    the machine makes them, so on the loop no cell lands and no timer wakes a phase while it acts."""
+
+    async def whole() -> None:
+        await act()
+
+    with ThreadPoolExecutor(1) as one:
+        one.submit(contextvars.copy_context().run, asyncio.run, whole()).result()
 
 
 async def _never() -> httpx.Response:
