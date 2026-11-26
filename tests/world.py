@@ -345,9 +345,6 @@ def offline_network(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
         monkeypatch.setattr(settings, key, SecretStr(NOT_A_KEY))
     monkeypatch.setattr(settings, "RATE_LIMITS", {})
     world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
-    # Upstream lists one row of the bundled floor as it stands, so a home a fact opens holds that
-    # row (`pricing.py::load_rates`), never its own copy of every row the floor already prices.
-    world.rates = dict([next(iter(world.rates.items()))])
     restore = install_network(world)
     send_pacing.cache_clear()
     try:

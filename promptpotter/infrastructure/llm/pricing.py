@@ -194,17 +194,31 @@ def _models_to_rates(models: Mapping[str, RateBody]) -> RateTable:
 def load_rates() -> RateTable:
     """Kept by where it reads and what the files hold: a rates file any process rewrites re-prices
     every reader's next send. The shipped floor refuses, the bug it is, and the fetch lies OVER
-    it: a row upstream never listed keeps the price the bundle gave it. A home listing nothing
-    prices off the floor's one table, so a process opening many homes holds that table once."""
+    it: a row upstream never listed keeps the price the bundle gave it. A home is held as the rows
+    it prices apart from the floor, so a home listing nothing new prices off the floor's one table,
+    and a process opening many homes holds that table once."""
     home = cache_path()
-    listed = derived(("rates", home), sig=file_sig(home), compute=lambda: _cached().models)
+    listed = derived(
+        ("rates", home),
+        sig=(file_sig(home), file_sig(BUNDLED_PATH)),
+        compute=lambda: _apart_from(_floor(), _cached().models),
+    )
     return derived(
         ("rates", BUNDLED_PATH, home if listed else None),
         sig=(file_sig(BUNDLED_PATH), file_sig(home) if listed else None),
-        compute=lambda: _models_to_rates(
-            RatesFile.model_validate_json(BUNDLED_PATH.read_bytes()).models | listed
-        ),
+        compute=lambda: _models_to_rates(_floor() | listed),
     )
+
+
+def _floor() -> dict[str, RateBody]:
+    return RatesFile.model_validate_json(BUNDLED_PATH.read_bytes()).models
+
+
+def _apart_from(
+    floor: Mapping[str, RateBody], models: Mapping[str, RateBody]
+) -> dict[str, RateBody]:
+    """The rows of *models* the floor does not price as they stand."""
+    return {name: body for name, body in models.items() if floor.get(name) != body}
 
 
 def lookup_rate(model: str | None, provider: str | None) -> Rate | None:
