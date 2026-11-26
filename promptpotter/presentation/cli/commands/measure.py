@@ -61,7 +61,7 @@ async def cmd_ab(args: argparse.Namespace) -> CommandResult:
             ]
             for d in report.divergences:
                 alt = (
-                    f" → would elect {d.alternative_candidate_id}"
+                    f" → would stand on {d.alternative_candidate_id}"
                     if d.alternative_candidate_id
                     else ""
                 )

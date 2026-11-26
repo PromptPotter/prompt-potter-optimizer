@@ -41,7 +41,7 @@ from promptpotter.application.scoring.search_point_scorer import filed_entry, sc
 from promptpotter.domain.arms import ArmRole, Proposal, Proposed
 from promptpotter.domain.campaign_config import LivesConfig
 from promptpotter.domain.connector import MeasuredUnit
-from promptpotter.domain.crowning_bar import BarRead, CrowningBar
+from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.l4.proxies import inner_facts_of, outer_proxies_of
 from promptpotter.domain.opt_search_point import (
@@ -56,6 +56,7 @@ from promptpotter.domain.opt_search_point import (
 )
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phase_acts import FitnessFact, StepClosed, StepOpened, fold_fitness
 from promptpotter.domain.phases import CampaignPhase
@@ -302,16 +303,12 @@ class Lineage(CycleRead):
         held = next(rr for rr in cycle.rounds if rr.round == at.round)
         assert held.election is not None, "a re-election restates a round that elected"
         election = held.election.model_copy(
+            # The deciding pair read the selector's leader, which a re-election displaces.
             update={
-                "selected": at.arm,
                 "leading": at.arm,
-                "ended_on": at.arm,
+                "ending": RoundEnding.CROWNED,
+                "deciding_pair": None,
                 "reelection": reelection,
-                # A layer's promotion, which no bar judged: the round promotes as the layer named.
-                "bar": BarRead(
-                    statistic=cycle.config.optimization.crowning_bar,
-                    clears=True,
-                ),
             }
         )
         stated = ended_on(
@@ -424,8 +421,9 @@ class Bounds(CycleRead):
     def admission(self) -> float | None:
         return self._cycle.optimizer.admission
 
-    def crowning_bar(self, admission: float) -> CrowningBar:
-        return self._cycle.crowning_bar(admission)
+    def lift_prior(self) -> LiftPrior | None:
+        """The tenant's banked lift prior on this dataset (`Cycle.lift_prior`)."""
+        return self._cycle.lift_prior()
 
     @property
     def budget_rounds(self) -> int | None:

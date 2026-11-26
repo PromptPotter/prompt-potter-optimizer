@@ -284,9 +284,8 @@ never w0, the trim, stream, startb, stopb, land, admit-2, money, rk-opt, rk-run,
 **Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether the
 visits analytics move to the site repo · whether resume
 re-executes members against the content caches instead of checking validity (≈−1.2k lines; blocked
-today by evictable caches, operator inputs fed back and §0.5's fork-on-divergence) · whether L2/L3's θ
-high-water becomes a paired read (kept on purpose by `verdict-resolution.md`; the ladder is the
-ablation arm) · the sub-cent money rule (forks) · which env
+today by evictable caches, operator inputs fed back and §0.5's fork-on-divergence) · the sub-cent
+money rule (forks) · which env
 file the box keeps (box) · a bench's total · whether an upload's bytes are kept before the parse · a
 prompt field's order · the host assistant's open questions (§ Host assistant) · whether
 `enable_2pl_graduation`, `degradation_fatal_fastpath`, `lift_reference` and `fitness_ceiling` /
@@ -308,6 +307,8 @@ confidence sequences as the default stopping rule, PoBB selectable
 ([`../research/external-constraints.md`](../research/external-constraints.md) § Ranked, item 2); then,
 priced first, the comparability run, the budget dimension and the ablation rows. 5. **The hosted beta**:
 A1, then anon. 6. **Lane C** by dependency. 7. **Embedding** (§ Embedding (M15)), R1 first.
+8. **The early-winner stop**, last, with one crown ending the round: potter cheaper per verdict once
+its bound is derived (§ The right winner — redundant mechanisms).
 
 #### deep — a managed deep-agents node
 
@@ -386,7 +387,7 @@ Every optimizer, peers included, is a manifest the bench runs, the held-out benc
 - **SIFT's members:** the self-proposer; the parent selector `P(i) ∝ exp(−α·r_BT − β·r_acc − η·log(1+v))`;
   a pairwise judge with regularized Bradley-Terry; the `fixed_gate` eliminator.
 - **One PUCT acquisition `Q + c·P·√ΣN/(1+N)`** in place of the greedy pick
-  (`application/scoring/selection.py::elect_round_winner`) and UCB1 rebase: P a predicted lift banked
+  (`application/scoring/selection.py::crowned`) and UCB1 rebase: P a predicted lift banked
   first as an inert field beside realized θ lift, Q measured θ, the rebase forfeit its cost term; no learned value model until a surrogate's held-out error is below
   the lifts chased. Open: θ for unmeasured children; forest vs round normalization; whether a cut arm is
   a legal parent.
@@ -453,9 +454,7 @@ round.
    lifts it). None of the 10 promotions held up. A τ at 0 made the `empirical_bayes` posterior a
    point mass, so that bar read sign(μ0) alone: it held hotpotqa's 5, and under each round's own
    prior would have passed every legalbench arm with more wins than losses in a promoting round.
-   μ0's own error now rides the posterior. A
-   head-to-head arm cannot set `crowning_bar` (`draft_edit.py::OptimizationOverrides`), so that bar
-   is scored offline.
+   μ0's own error now rides the posterior.
 3. **Three arms instead of five** would give +9% lift per dollar and −27% lift per round. This is a
    derivation only, and it matters only where τ > 0.
 4. **An inner run that elects in two rounds is read, not excluded**: a seat benches
@@ -570,12 +569,25 @@ PoBB's per-cell bar stops wrongly about 3.8 times as often as it states, false l
 with `lock_in` shipped off, the default's error is false cuts (33.5%)
 ([`../../paper/notes/stopping-rule-false-stops.md`](../../paper/notes/stopping-rule-false-stops.md)). Owed,
 each moving what the loop decides ([`../developer/offline-run.md`](../developer/offline-run.md)):
-- **Lock in only past an anytime-valid bound**, a mixture likelihood ratio on θ at α/K per arm, reading
-  the verdict direction as the election does and the parent pair on cells the parent's grades did not
-  choose.
+- **The early-winner stop returns on an anytime-valid bound.** Today a race stops an arm only from
+  below (ε cuts a loser) and a clear leader buys its whole draw: `pobb.lock_in` went in 61ef07161
+  (operator, 2026-11-12) because no derivation backed its bar. Lock in only past an anytime-valid bound,
+  a mixture likelihood ratio on θ at α/K per arm, reading the verdict direction as the election does and
+  the parent pair on cells the parent's grades did not choose. A settled leader then stops buying, its
+  rows go to the arms still close, and a round reaches the same verdict for less.
+- **One crown ends the round**, a switch on that bound (operator 2026-11-26): content with one winner a
+  round, the race stops at the first arm the bar crowns, and its siblings buy nothing more. Today
+  nothing is crowned mid-race: the election reads once every arm has walked its draw or been cut. The
+  bar must hold under a read after every answer, so it rides `theta_election.crown: e_process`,
+  already anytime-valid, or the bound above, never the posterior a fixed panel is read on.
 - **The standing pick's evidence pools across rounds.** A near-miss does not carry forward: a round's
-  race buys its evidence up to the round's cap, and a leader short of the bar there is dropped
-  (operator 2026-11-19; the keep in `potter/election.py` goes in W1).
+  race buys its evidence up to the round's cap, and a leader short of the bar there is never crowned;
+  the line moves on to it uncrowned only where its parent did not beat it (`next_parent: not_lost`),
+  its evidence left behind (operator 2026-11-19; the keep in `potter/election.py` goes in W1).
+- **The origin panel trains and measures at once.** Under `vote: overlap` the crown is read on the
+  same fixed cells the advance and the life bank read, so a line selected on them overstates its
+  separation; only the held-out bench reads it honestly. Owed: the advance read on cells the crown
+  never chose (a split panel, or the bench's rows), priced in every axis before it is proposed.
 
 **Closes when** an offline replay elects no pick its later reads as parent contradict, and the pilot's
 equal-arms simulation shows false locks at the stated level. **Open:**
@@ -720,7 +732,7 @@ skill routing before the library grows.
   candidates answer them, update θ, cut, elect. Every part it needs exists: the ruler (θ, δ) and each
   row's expected information (`rasch.py::expected_information`), the round order (`build_round_order`),
   the fresh draw (`AdaptiveQueue.draw`), PoBB's blocks and cuts, the paired bar
-  (`selection.py::elect_round_winner`) and the origin panel with its trigger (`PanelTrigger`). What is
+  (`selection.py::crowned`) and the origin panel with its trigger (`PanelTrigger`). What is
   owed is a few switches and computations on that one loop, never a second loop beside it:
   - **in flight:** the most calls running at once, so the most a late decision wastes (today the
     operator's `LookaheadPress`: one by default, about two per survivor at full speed);

@@ -25,7 +25,8 @@ export function RoundFacts({ reading }: { reading: RoundReading | null }) {
 }
 
 export function RoundVerdict({ reading }: { reading: RoundReading | null }) {
-  if (!reading || reading.improved !== false || !reading.verdictReason) return null;
+  if (!reading || reading.ending === null || reading.ending === "crowned" || !reading.verdictReason)
+    return null;
   return (
     <span className="subject-diff-verdict" title={reading.verdictReason}>
       round {reading.round}: {reading.verdictReason}

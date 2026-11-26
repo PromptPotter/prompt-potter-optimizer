@@ -241,7 +241,7 @@ def _pair_line(pair: PairedReading, unit: MeasuredUnit) -> str:
     level_unit = lift.measurand.unit
     estimate = lift.estimate
     # The flips ride the one measurand declared binary, whichever column the headline is.
-    flips = next((m.flips for m in (lift, *pair.beside) if m.flips is not None), None)
+    flips = next((m.flips for m in (lift, *pair.beside) if m.measurand.binary), None)
     return " · ".join(
         [
             f"vs {against} {level_text(lift.rate_a, level_unit)} → "

@@ -96,16 +96,19 @@ on the `LevelSeries` scale, its later rows as parent included; a flat ruler with
 - **Arms are truncated at different depths.** PoBB cuts a weak arm early and `build_round_order`
   front-loads the parent's misses, so a cut arm was graded on a harder prefix.
 
-So **a winner with lower fitness than a rival or the previous round is normally correct** —
-`elect_round_winner` ranks `P(θ_cand > θ_parent)`, the reading PoBB cuts on. When an operator calls
-the election wrong off the fitness column, say which column it used.
+So **a winner with lower fitness than a rival or the previous round is normally correct** — the
+election ranks on what potter's crown reads (`crowning_bar.py::CrowningBar.rank`): under its
+default `paired_point` the paired verdict lift over the parent on the vote's cells, under the θ readings
+`P(θ_cand > θ_parent)`, the reading PoBB cuts on. When an operator calls the election wrong off the
+fitness column, say which column it used.
 
 **No harness rule ranks rounds by their own readings.** The run has one ceiling stop: the declared
 pick's own level on the origin panel, read at its one-sided anytime-valid lower bound
-(`shared/statistics.py::anytime_level_lower` at `BAR_ADMISSION`), so a level looked at every round
+(`shared/statistics.py::anytime_level_lower` at `termination.py::_CEILING_ALPHA`), so a level looked at every round
 spends no α it was not given; never a point estimate of a truncated draw, C0's rate taken as known, or
 each round's composite high-water. `halt_at_fitness` is its target; 9 of 9 bounds at 0.56, 20 of 20
-at 0.77. Only potter's L2/L3 stall comparator keeps the high-water, as its own signal.
+at 0.77. Potter's L2 and L3 patience count the round's stall as L1's does
+(`escalation.py::_read_layer`), no high-water.
 
 **States where θ is NOT ability, and the pushback above is wrong** — enumerated by
 `domain/ruler.py::ThetaCaveat`, served so the screen and the optimizer's `confounds` panel read one
@@ -202,12 +205,16 @@ contamination-resistant held-out set** (one year's AIME → the next; not a subs
 split).
 
 **Separability is read against C0, not the parent.** A round closes `advanced` only where its pick
-leads C0 on the origin panel as the crowning bar's switch reads it (`domain/crowning_bar.py::CrowningBar.separates`: under
-`posterior`, an interval clear of 0) and tops every earlier pick there; it is the clock a result quotes (`rounds_to_separable`). L1 patience
-resets on `advanced`, `advanced_unpaired` and `not_separated` alike (`domain/origin_panel.py::RoundAdvance.stall`);
-adoption is `improved`, the bar's own verdict on the pick (`Election.bar`). A pick whose reading
-was not taken closes `unread` (neither reset nor stall); a panel with no pair lets the promotion stand
-alone (`advanced_unpaired`).
+leads C0 on the origin panel, the pick-over-C0 lift's interval clearing zero (`lift.side == "above"`,
+for every optimizer), and tops every earlier pick there; a crown inside the noise closes
+`not_separated`. It is the clock a result quotes (`rounds_to_separable`). A round that crowns no arm
+and moves the line on to its leader closes `moved_uncrowned`. The close stamps
+`OverlapReading.stall` (`domain/origin_panel.py::RoundAdvance.stall`), which L1 patience,
+`rounds_without_advance` and the life bank read: `held` and `moved_uncrowned` stall; `not_separated`
+follows `OptimizationConfig.not_separated_stall` (`counts` the default, `resets`, `skips`), for every
+optimizer. Adoption is `improved`, the round crowned an arm (`RoundResult.improved`). A pick whose
+reading was not taken closes `unread` (neither reset nor stall); a panel with no pair lets the
+promotion stand alone (`advanced_unpaired`).
 
 ---
 
@@ -294,7 +301,7 @@ early paired comparison ties, `p_best` pins at 0.5 and the gates go blind; the d
 discordance-potential samples. **At a low base rate the static order hits the same region with the
 symptom INVERTED:** the candidate misses the MISS stratum too, near-ties narrow both SEs, and `p_best`
 reads DECISIVE (`sealqa/longseal-12`: four arms cut at `elimination_n_min`, identical to six
-decimals). Count the discordant cells (`selection.py::discordant`) to tell the two apart.
+decimals). Count the discordant cells (a pairing's `FlipCounts`, `paired_reading.py`) to tell the two apart.
 
 **`pobb.row_choice: informative` (potter's default) reverses this decision, and is refused unless
 `theta_election.vote: overlap`** (`couplings.py::POBB`, `informative_rows_without_overlap`). At

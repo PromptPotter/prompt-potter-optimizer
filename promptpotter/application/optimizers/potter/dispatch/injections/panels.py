@@ -259,8 +259,8 @@ def _evolution(b: PotterView) -> list[Item]:
         lines.append(
             f"  standing pick vs C0: lift {headline.estimate.band}, {_SIDE_VERDICT[headline.side]}"
         )
-    if (parent_line := _vs_parent(overlap.vs_parent)) is not None:
-        lines.append(parent_line)
+    if (previous_line := _vs_previous_pick(overlap.vs_previous_pick)) is not None:
+        lines.append(previous_line)
     if triggered := triggered_rates(overlap):
         lines.append(
             "  read, never adopted: "
@@ -269,21 +269,24 @@ def _evolution(b: PotterView) -> list[Item]:
     return [Item("\n".join(lines))]
 
 
-def _vs_parent(reading: PairedReading | None) -> str | None:
+def _vs_previous_pick(reading: PairedReading | None) -> str | None:
     lift = None if reading is None else reading.on_whole_set
     if reading is None or lift is None or reading.a is None or reading.b is None:
         return None
-    pick, parent = reading.b.address.arm, reading.a.address.arm
-    if pick is None or parent is None:
+    pick, previous = reading.b.address.arm, reading.a.address.arm
+    if pick is None or previous is None:
         return None
     flips = lift.flips
     moved = (
         f"lift {lift.estimate.band}"
-        if flips is None
+        if not lift.measurand.binary
         else f"of {flips.gained + flips.lost + flips.unchanged} rows, wins {flips.gained} the "
-        f"parent missed and misses {flips.lost} it won"
+        f"previous pick missed and misses {flips.lost} it won"
     )
-    return f"  {pick.label} vs its parent {parent.label}: {moved}, {_SIDE_VERDICT[lift.side]}"
+    return (
+        f"  {pick.label} vs the pick it displaced, {previous.label}: {moved}, "
+        f"{_SIDE_VERDICT[lift.side]}"
+    )
 
 
 def _critique_is_all_prompt_field(b: PotterView) -> bool:
@@ -959,15 +962,18 @@ def _r_measurand(b: PotterView) -> list[Item]:
         # The cell formula IS the grade, so a fitness block would restate the θ line's input.
         return [
             Item(
-                f"ELECTION — a round is won on θ lift over the parent by an arm winning more "
-                f"shared cells than it loses{theta}. Round fitness {fitness:.3f}."
+                f"ELECTION — a round is won {b.crowning_rule}{theta}. Round fitness {fitness:.3f}."
             )
         ]
     body = render_composite_fitness_block(fitness, b.evaluators, b.composite_formula)
+    on = (
+        "θ fit on each cell's composite under the formula below, not on fitness"
+        if b.crown_reads_theta
+        else "a verdict being the cell's correctness alone: the formula below reaches θ, never "
+        "the crown"
+    )
     lines = [
-        f"ELECTION — a round is won on θ lift over the parent by an arm winning more shared cells "
-        f"than it loses, θ fit on each cell's composite under the formula below, not on "
-        f"fitness{theta}.",
+        f"ELECTION — a round is won {b.crowning_rule}, {on}{theta}.",
         "REPORTED FITNESS — the headline number and the degradation scale:",
         *(f"  {ln}" for ln in body),
     ]
@@ -975,8 +981,9 @@ def _r_measurand(b: PotterView) -> list[Item]:
 
 
 def detectable_rows(b: PotterView) -> int | None:
-    """How many more of the round's rows than the parent an edit must win to clear the election's
-    bar at 80% power; ``None`` with no parent θ, no informative row or no bar."""
+    """How many more of the round's rows than the parent an edit must win to separate from it at
+    the selector's admission and 80% power; ``None`` with no parent θ, no informative row or no
+    admission."""
     a = b.parent_ability
     keys = b.latest_sample_keys
     admission = b.admission
@@ -997,7 +1004,7 @@ def _r_detectable_move(b: PotterView) -> list[Item]:
     return [
         Item(
             f"DETECTABLE MOVE — an edit must win ≈{rows} more of this round's {n} "
-            f"{unit_plural(b.measured_unit)} than the parent to clear the election's bar "
+            f"{unit_plural(b.measured_unit)} than the parent to separate from it "
             f"(P > {b.admission:.0%}, 80% power); "
             "smaller is noise, so prefer one large-effect edit to several small ones."
         )

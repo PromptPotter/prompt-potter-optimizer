@@ -1,26 +1,14 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import NamedTuple
+from collections.abc import Mapping, Sequence
 
 from promptpotter.application.intelligence.earned_blocks import CampaignSurvey
-from promptpotter.application.intelligence.rasch import (
-    RoundAbilities,
-    graded_response,
-    theta_cells,
-    theta_lift_over_parent,
-)
-from promptpotter.domain.arm_reading import DisplayMetric
+from promptpotter.application.intelligence.rasch import RoundAbilities, theta_lift_over_parent
 from promptpotter.domain.crowning_bar import BarSubject, CrowningBar, LiftPrior, lift_prior
-from promptpotter.domain.paired_reading import ArmKey, Estimate, MeasurandUnit
+from promptpotter.domain.paired_reading import ArmKey, CellSetName, Estimate, MeasurandUnit
 from promptpotter.domain.results import RoundResult
-from promptpotter.domain.ruler import DeltaRuler, clears, p_better
-from promptpotter.domain.scoring import ROW_GRADES, CellGrade, CellSheet, GradedCell
-from promptpotter.shared.statistics import (
-    bounded_mean_interval,
-    discordant_counts,
-    sign_posterior,
-)
+from promptpotter.domain.scoring import ROW_GRADES, CellGrade, CellSheet
+from promptpotter.shared.statistics import bounded_mean_interval
 
 
 def level_band(sheet: CellSheet, grade: CellGrade, unit: MeasurandUnit) -> Estimate | None:
@@ -34,49 +22,38 @@ def level_band(sheet: CellSheet, grade: CellGrade, unit: MeasurandUnit) -> Estim
     )
 
 
-class PairedGrade(NamedTuple):
-    """What a pairing reads off one cell: θ is fit on ``response``, a sign test counts ``verdict``."""
-
-    response: float
-    verdict: float
-
-
-def paired_grades(cells: Iterable[GradedCell]) -> dict[str, PairedGrade]:
-    """The cost term reaches a pairing through θ alone; a sign test counts disagreeing VERDICTS."""
-    verdict = ROW_GRADES["fitness"]
-    return {
-        cell.key: PairedGrade(graded_response(cell), verdict.read(cell))
-        for cell in cells
-        if cell.scored
-    }
-
-
-def discordance(candidate: Sequence[PairedGrade], prior: Sequence[PairedGrade]) -> tuple[int, int]:
-    return discordant_counts([g.verdict for g in candidate], [g.verdict for g in prior])
-
-
-def cells_read(
-    elects_on: DisplayMetric,
-    cells: Iterable[GradedCell],
-    parent: Collection[str],
-    ruler: DeltaRuler | None,
-) -> int:
-    """The coverage floor's count: on ability the scored cells θ is read on, else every scored one."""
-    scored = dict.fromkeys(cell.key for cell in cells if cell.scored)
-    return len(theta_cells(scored, parent, ruler) if elects_on == "ability" else scored)
-
-
-def crowning_cells(rounds: Sequence[RoundResult], parent: str) -> frozenset[str]:
-    """The cells *parent*'s admission was won on — its discordant wins over the bar, on the rows that
-    election read: a race drawn onto them replays the luck that crowned it. A tie reads as any draw."""
+def crowning_cells(
+    rounds: Sequence[RoundResult], parent: str, key_of: Mapping[int, str]
+) -> frozenset[str]:
+    """The cells *parent*'s crown was won on: those its fitness rose on over the arm the round's
+    deciding pair read it against, on the cells that pair read (the measurand the crown is decided
+    on), a race drawn onto them replaying the luck that crowned it. A leader the line moved on to
+    uncrowned won on no cells, so its rows read as any draw. *key_of* names the origin panel's
+    slots."""
+    fitness = ROW_GRADES["fitness"]
     crowned: set[str] = set()
     for rr in rounds:
         election = rr.election
-        if election is None or election.selected != parent or (reference := rr.reference) is None:
+        if election is None or election.selected != parent or election.deciding_pair is None:
             continue
-        own, against = (paired_grades(rr.raced(key)) for key in (ArmKey(parent), reference.arm))
-
-        crowned.update(c for c, g in own.items() if c in against and g.verdict > against[c].verdict)
+        pair = election.deciding_pair
+        assert pair.a is not None and pair.cell_set is not None, "a crown is decided on a read pair"
+        own = rr.raced(ArmKey(parent)).by_key()
+        against = rr.raced(ArmKey(pair.a.address.individual_id)).by_key()
+        on = (
+            {key_of[slot] for slot in rr.overlap.positions}
+            if pair.cell_set.name is CellSetName.ORIGIN_PANEL
+            else own.keys() & against.keys()
+        )
+        crowned.update(
+            key
+            for key in on
+            if key in own
+            and key in against
+            and own[key].scored
+            and against[key].scored
+            and fitness.read(own[key]) > fitness.read(against[key])
+        )
     return frozenset(crowned)
 
 
@@ -94,38 +71,20 @@ def readable_lifts(
     return reads
 
 
-def closest_to_bar(
-    reads: Mapping[ArmKey, Estimate], *, beside: ArmKey | None = None
+def ranked_first(
+    bar: CrowningBar, subjects: Mapping[ArmKey, BarSubject], cells: Mapping[ArmKey, int]
 ) -> ArmKey | None:
-    """On the θ lift ADMISSION takes; the first walked holds a tie."""
-    return max((key for key in reads if key != beside), key=lambda k: reads[k].value, default=None)
+    """The subject *bar* ranks first (`CrowningBar.rank`), more cells read holding a tie, then the
+    first walked: the crown among the arms that clear, the lead among all."""
+    return max(subjects, key=lambda k: (bar.rank(subjects[k]), cells[k]), default=None)
 
 
-def elect_round_winner(
-    keys: Sequence[ArmKey],
-    rows: Mapping[ArmKey, CellSheet],
-    parent_results: CellSheet,
-    coverage_floor: int,
-    abilities: RoundAbilities,
-    *,
-    bar: CrowningBar,
-    paired_on: Collection[str] | None,
+def crowned(
+    bar: CrowningBar, subjects: Mapping[ArmKey, BarSubject], cells: Mapping[ArmKey, int]
 ) -> ArmKey | None:
-    """ADMISSION is the crowning *bar* over every readable arm at once; under ``posterior`` that is
-    raw θ above the parent's by more than a fit resolves AND ``P(θ_cand > θ_parent)``, bounded by
-    the discordant cells, past the admission. The RANK is the unbounded posterior."""
-    reads = readable_lifts(keys, coverage_floor, abilities)
-    verdicts = bar.read(bar_subjects(reads, rows, parent_results, bar.admission, paired_on))
-    best_rank: tuple[float, int] = (0.0, 0)
-    winner: ArmKey | None = None
-    for key, lift in reads.items():
-        if not verdicts[key].clears:
-            continue
-        rank = (p_better(lift), abilities.cells[key])
-        if rank > best_rank:
-            best_rank = rank
-            winner = key
-    return winner
+    """The arm *bar* ranks first among those it clears, read over every readable arm at once."""
+    clears = bar.clears(subjects)
+    return ranked_first(bar, {k: s for k, s in subjects.items() if clears[k]}, cells)
 
 
 def banked_lift_prior(survey: CampaignSurvey, dataset: str) -> LiftPrior | None:
@@ -141,31 +100,3 @@ def banked_lift_prior(survey: CampaignSurvey, dataset: str) -> LiftPrior | None:
         for key in held.close.proposed
         if (fit := election.fit.get(key)) is not None and fit.lift is not None
     )
-
-
-def discordant(
-    rows: CellSheet, bar: CellSheet, paired_on: Collection[str] | None
-) -> tuple[int, int]:
-    """The verdicts *rows* won and lost against *bar* on the cells both scored, of *paired_on*
-    alone where it names any."""
-    own, against = paired_grades(rows), paired_grades(bar)
-    shared = [k for k in own if k in against and (paired_on is None or k in paired_on)]
-    return discordance([own[k] for k in shared], [against[k] for k in shared])
-
-
-def bar_subjects(
-    lifts: Mapping[ArmKey, Estimate],
-    rows: Mapping[ArmKey, CellSheet],
-    parent_results: CellSheet,
-    admission: float,
-    paired_on: Collection[str] | None,
-) -> dict[ArmKey, BarSubject]:
-    """Each arm's paired evidence over the parent. A θ lift the paired cells contradict is the
-    prior's or the δ weighting's, never the arm's, so no reading clears it. The round's draw leaves
-    out every cell that crowned the parent (`crowning_cells`); the fixed origin panel keeps them."""
-    subjects: dict[ArmKey, BarSubject] = {}
-    for key, lift in lifts.items():
-        wins, losses = discordant(rows[key], parent_results, paired_on)
-        posterior = wins > losses and clears(lift, admission, support=sign_posterior(wins, losses))
-        subjects[key] = BarSubject(wins, losses, lift, posterior)
-    return subjects

@@ -415,8 +415,8 @@ class LevelSeries(FrozenModel):
         "the run's parent line (the origin and every pick)."
     )
     levels: dict[int, AbilityReading | None] = Field(
-        description="By round, round 0 the origin: the individual the round ended on — on a round "
-        "that elected nothing, the parent standing into it — read on all of its rows in the "
+        description="By round, round 0 the origin: the individual the round ended on "
+        "(`Election.ended_on`), the next round's parent, read on all of its rows in the "
         "cycle, under its own round's caveat: one that withholds (`ThetaCaveat.withholds`) keeps "
         "that level alone from differencing. Null where it holds no scored cell on the scale."
     )
@@ -429,6 +429,12 @@ class LevelSeries(FrozenModel):
         """The level two rounds may difference."""
         read = self.levels[rnd]
         return None if read is None or withheld(read.caveat) else read
+
+    def hold(self, rnd: int) -> Estimate | None:
+        """Round *rnd*'s arm over the parent it was read against (the round before's), each on
+        every row it met in the cycle: the lift that held beside the one it was crowned on."""
+        now, then = self.level(rnd), self.level(rnd - 1)
+        return None if now is None or then is None else now.lift_over(then)
 
     def plateau(self) -> float | None:
         recent = [self.level(r) for r in self.rounds[-PLATEAU_ROUNDS:]]

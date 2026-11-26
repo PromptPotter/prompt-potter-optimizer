@@ -15,9 +15,9 @@ from promptpotter.domain.campaign import (
     StoppingRule,
 )
 from promptpotter.domain.cells import HardSampleOrder
-from promptpotter.domain.crowning_bar import CrowningStatistic
 from promptpotter.domain.judges import JudgeSpec
 from promptpotter.domain.layer_fold import Folded, Lay, Layer, ScopedBy, fold_layers, rules_of
+from promptpotter.domain.origin_panel import NotSeparatedStall
 from promptpotter.domain.paired_reading import LiftReference
 from promptpotter.domain.pipeline_overlay import steers_disallowed_model
 from promptpotter.domain.pipeline_params import NodeCall, laid_calls, lay_nodes
@@ -166,10 +166,11 @@ class OptimizationConfig(OptimizerChoice):
         None,
         description=(
             "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per "
-            "round that promotes an arm, -1 per round that does not, banked up to ``cap``, and "
-            "the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election "
-            "banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a "
-            "lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
+            "round whose stall `resets` (`OverlapReading.stall`), -1 per round it `counts`, banked "
+            "up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which "
+            "reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still "
+            "caps from above, so a lives run wanting the full bank sets "
+            "``budget: {rounds: unbounded}``."
         ),
     )
     halt_at_fitness: Annotated[float | None, Knob(Estimand.STOPPING)] = Field(
@@ -182,14 +183,14 @@ class OptimizationConfig(OptimizerChoice):
             "record's rule."
         ),
     )
-    crowning_bar: Annotated[CrowningStatistic, Knob(Estimand.SELECTION, Estimand.STOPPING)] = Field(
+    not_separated_stall: Annotated[NotSeparatedStall, Knob(Estimand.STOPPING)] = Field(
         description=(
-            "The ONE bar a crown, an advance of the line and a promotion read "
-            "(`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's θ "
-            "posterior capped by the discordant cells. ``sign_test``: an exact paired sign "
-            "test on the discordant cells, Holm-corrected across the round's arms. "
-            "``e_process``: an anytime-valid e-process on the paired discordance. "
-            "``empirical_bayes``: the arm's θ lift shrunk to the tenant's banked lift prior."
+            "What a crown the origin panel does not separate from the origin (its lift's "
+            "interval spans zero, `RoundAdvance.NOT_SEPARATED`) does to the stall clock L1 "
+            "patience, `rounds_without_advance` and the life bank read, for every optimizer: "
+            "``counts`` as a stall (under ``lives``, a life spent), ``resets`` it as an advance "
+            "does (a life banked), or ``skips`` it. A crown is each selector's own; the bench "
+            "re-judges none."
         ),
     )
     degradation_threshold: Annotated[float, Knob(Estimand.STOPPING)] = Field(ge=0.0, le=1.0)

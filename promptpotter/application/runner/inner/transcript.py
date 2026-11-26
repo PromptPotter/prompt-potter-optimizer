@@ -81,7 +81,7 @@ def _arm_line(close: RoundStatement, key: ArmKey) -> str:
     measured = f"fitness {fold_fitness_text(close.folds.get(key))}"
     if whole is not None:
         flips = whole.flips
-        moved = "" if flips is None else f" (gained {flips.gained}, lost {flips.lost})"
+        moved = f" (gained {flips.gained}, lost {flips.lost})" if whole.measurand.binary else ""
         band = f" {whole.estimate.band}" if whole.estimate.band else ""
         measured += f" lift {whole.estimate.point}{band} {whole.side}{moved}"
     return f"  {arm.label} {outcome} {measured} — {mechanism}"

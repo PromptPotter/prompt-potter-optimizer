@@ -115,12 +115,16 @@ nodes:
       shape: per_round
       dispatch: rolling
       read_order: launch
-  # The next parent: a θ lift over the parent its paired cells agree with (`elect_round_winner`).
+  # The next parent: the arm `crown` ranks first of those it crowns (`selection.py::crowned`), else
+  # the round's leader where its parent did not beat it. The paper's earlier bar is `crown:
+  # posterior`, `next_parent: crowned` and the bench's `not_separated_stall: resets`.
   theta_election:
     type: selector
     config:
       admission: 0.85
       vote: overlap
+      crown: paired_point
+      next_parent: not_lost
   l1_critique:
     type: llm
     optimizer: *node_menus

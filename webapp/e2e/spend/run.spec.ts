@@ -193,7 +193,7 @@ test.describe("a campaign, end to end", () => {
 
     for (const r of rounds) assertRoundMeasured(DATASET, r);
 
-    // `improved` is null until the election stamps it, so it is the "a decision was reached" signal.
+    // `ending` is null until the election stamps it, so it is the "a decision was reached" signal.
     const search = rounds.filter((r) => r.round > 0);
     expect(
       search.length,
@@ -205,11 +205,11 @@ test.describe("a campaign, end to end", () => {
         `round ${r.round} generated ${r.candidates.length} candidate(s) — with nothing to choose between, selection and election are untested`,
       ).toBeGreaterThan(1);
       expect(
-        r.improved,
+        r.ending,
         `round ${r.round} closed with no verdict — candidates were scored but no election was held`,
       ).not.toBeNull();
       console.log(
-        `[e2e] round ${r.round}: ${r.candidates.length} candidates, improved=${r.improved}`,
+        `[e2e] round ${r.round}: ${r.candidates.length} candidates, ending=${r.ending}`,
       );
     }
 

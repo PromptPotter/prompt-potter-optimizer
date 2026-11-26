@@ -294,10 +294,7 @@ class RoundStatement(RoundOutcome):
             leading=None
             if election is None or election.leading is None
             else name(election.leading),
-            selected=None
-            if election is None or election.selected is None
-            else name(election.selected),
-            improved=None if self.round == 0 else self.improved,
+            ending=None if self.round == 0 or election is None else election.ending,
             verdict_reason=None if self.round == 0 or election is None else election.verdict_reason,
             candidates=[
                 DashboardCandidate(reading=reading)

@@ -300,8 +300,8 @@ _STAND_ON_TEXT = (
 
 _ELECTIONS_HEADER = (
     "ELECTIONS — each round's pick and how it won (locked in on part of its panel, or on the full "
-    "panel), its reads as the parent in the rounds after, and the arms it beat; fitness on cells "
-    "read."
+    "panel), else the leader the line moved on to uncrowned, its reads as the parent in the "
+    "rounds after, and the arms it beat; fitness on cells read."
 )
 
 
@@ -324,16 +324,22 @@ def _how_won(rr: RoundOutcome, key: ArmKey) -> str:
 def _election_line(row: ElectionRow, later: Sequence[RoundOutcome]) -> str:
     rr = row.round
     label = {key: arm_name(key, arm, rr.round).label for key, arm in rr.arms.items()}
-    if row.picked is None:
+    if row.picked is not None:
+        parts = [f"r{rr.round}: elected {label[row.picked]}, {_how_won(rr, row.picked)}"]
+    elif row.moved_to is not None:
+        parts = [
+            f"r{rr.round}: none elected; moved on to {label[row.moved_to]} uncrowned, "
+            f"{_how_won(rr, row.moved_to)}"
+        ]
+    else:
         ref = rr.reference
         held = f" (the parent read {_read(rr, ref.arm)})" if ref and ref.arm in rr.arms else ""
         parts = [f"r{rr.round}: none elected{held}"]
-    else:
-        parts = [f"r{rr.round}: elected {label[row.picked]}, {_how_won(rr, row.picked)}"]
+    if (stood := row.stood_on) is not None:
         reads = [
-            f"r{s.round} {_read(s, row.picked)}"
+            f"r{s.round} {_read(s, stood)}"
             for s in later
-            if s.round > rr.round and s.reference is not None and s.reference.arm == row.picked
+            if s.round > rr.round and s.reference is not None and s.reference.arm == stood
         ]
         if reads:
             parts.append("as parent: " + ", ".join(reads))

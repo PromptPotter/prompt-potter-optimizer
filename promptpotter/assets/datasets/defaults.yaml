@@ -30,6 +30,7 @@ campaign:
     panel_gate: strict
     lift_reference: best_so_far
     origin_gate: strict
-    crowning_bar: posterior
+    # A point crown inside the noise is no advance (`not_separated`): it counts toward L2 and lives.
+    not_separated_stall: counts
     enable_2pl_graduation: true
     budget: {usd: 0.025, rounds: 5}

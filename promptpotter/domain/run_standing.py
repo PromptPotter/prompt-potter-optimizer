@@ -35,7 +35,7 @@ def closed_after_origin(rounds: Sequence[int]) -> int:
 def rounds_without_advance(rounds: Sequence[RoundOutcome]) -> int:
     depth = 0
     for rr in reversed(rounds):
-        match rr.overlap.advance.stall:
+        match rr.overlap.stall:
             case StallEffect.STARTS | StallEffect.RESETS:
                 break
             case StallEffect.COUNTS:
@@ -52,7 +52,7 @@ def stalls_left(rounds: Sequence[RoundOutcome], lives: tuple[int, int]) -> int:
     for rr in rounds:
         if rr.round == 0 or rr.election is None or rr.election.electable == 0:
             continue
-        match rr.overlap.advance.stall:
+        match rr.overlap.stall:
             case StallEffect.RESETS:
                 bank = min(cap, bank + 1)
             case StallEffect.COUNTS:
@@ -161,12 +161,14 @@ def round_clocks(rounds: Sequence[RoundResult], *, fitness_ceiling: float | None
 
 
 def line_reference(rounds: Sequence[RoundOutcome], *, origin: ArmKey) -> RoundArm:
-    """The candidate a line of *rounds* stands on going into the next round: its *origin* until an election crowns another."""
+    """The candidate a line of *rounds* stands on going into the next round: its *origin* until a
+    round ends on an arm of its own (`Election.ended_on`), crowned or its uncrowned leader, never
+    the parent it re-read."""
     return next(
         (
-            RoundArm(round=rr.round, arm=picked)
+            RoundArm(round=rr.round, arm=rr.election.ended_on)
             for rr in reversed(rounds)
-            if rr.election is not None and (picked := rr.election.selected) is not None
+            if rr.election is not None and rr.election.ending.moves_line
         ),
         RoundArm(round=0, arm=origin),
     )
@@ -201,22 +203,26 @@ class ClimbRate(NamedTuple):
 
 
 class Climb(NamedTuple):
-    """What the selection gained over C0, priced by what the line paid, and over its parent; each
-    lift's name (`lift_versus`) says the sheet its own reading was read on."""
+    """What the selection gained over C0, priced by what the line paid, and over the pick it
+    displaced; each lift's name (`lift_versus`) says the sheet its own reading was read on."""
 
     candidate: str
     lift: str
     over_origin: str
-    vs_parent: str | None
-    over_parent: str | None
+    vs_previous_pick: str | None
+    over_previous_pick: str | None
     measurand: str
     rates: list[ClimbRate]
 
     @property
     def line(self) -> str:
         """The lead line: who, both lifts as named, every rate (an absent one as `—` with its reason)."""
-        parent = "" if self.vs_parent is None else f", {self.vs_parent} {self.over_parent}"
-        return f"{self.candidate}: {self.lift} {self.over_origin}{parent} · " + " · ".join(
+        previous = (
+            ""
+            if self.vs_previous_pick is None
+            else f", {self.vs_previous_pick} {self.over_previous_pick}"
+        )
+        return f"{self.candidate}: {self.lift} {self.over_origin}{previous} · " + " · ".join(
             f"— {rate.per} ({rate.sub})" if rate.value is None else f"{rate.value} {rate.per}"
             for rate in self.rates
         )
@@ -235,15 +241,19 @@ def _climb(standing: RunStanding) -> Climb | None:
     gained = fmt.scale * lift
     usd, worked = standing.search_usd, standing.worked_s
     cost = LiftCost.of(pair, usd)
-    parent = standing.vs_parent
-    over = None if parent is None else parent.headline
+    previous = standing.vs_previous_pick
+    over = None if previous is None else previous.headline
     return Climb(
         candidate=standing.selection_name,
         lift=lift_text(lift, unit),
         over_origin=lift_versus("origin", pair.cell_set),
-        vs_parent=None if over is None else lift_text(over.estimate.value, over.measurand.unit),
-        over_parent=(
-            None if parent is None or over is None else lift_versus("parent", parent.cell_set)
+        vs_previous_pick=None
+        if over is None
+        else lift_text(over.estimate.value, over.measurand.unit),
+        over_previous_pick=(
+            None
+            if previous is None or over is None
+            else lift_versus("previous pick", previous.cell_set)
         ),
         measurand=headline.measurand.key,
         rates=[
@@ -288,9 +298,6 @@ class RunStanding(FrozenModel):
         description="The optimizer's declared pick (`declared_selection`), as the arm it was "
         "first measured as: the origin until a round selects. Null before round 0 closes."
     )
-    parent: ArmName | None = Field(
-        description="The pick `selection` was promoted over. Null while it is the origin."
-    )
     changes: str = Field(
         description="What `selection` changed, in its proposer's words (its lineage's "
         "`changes_description`). Empty while it is the origin, which changed nothing."
@@ -300,11 +307,13 @@ class RunStanding(FrozenModel):
         "reading of that pair. The state says why where there is none: `same_individual` while "
         "the selection is the origin."
     )
-    vs_parent: PairedReading | None = Field(
-        description="`selection` (`b`) over `parent` (`a`) on the origin panel, from the round "
-        "reading `vs_origin` comes from (`OverlapReading.vs_parent`); `vs_origin` itself where "
-        "the parent is C0. Null while the selection is the origin, or where that reading pairs "
-        "no such two."
+    vs_previous_pick: PairedReading | None = Field(
+        description="`selection` (`b`) over the declared pick it displaced (`a`), which its "
+        "lineage parent is only where the line never moved uncrowned between them, on the "
+        "origin panel, from the "
+        "round reading `vs_origin` comes from (`OverlapReading.vs_previous_pick`); `vs_origin` "
+        "itself where the previous pick is C0. Null while the selection is the origin, or where "
+        "that reading pairs no such two."
     )
     rounds_closed: int = Field(
         description="Rounds closed AFTER the origin — the unit a rounds cap counts."
@@ -390,16 +399,16 @@ class RunStanding(FrozenModel):
             ),
             (declared.overlap.lead, declared.overlap),
         )
-        # Both legs read one sheet: where the parent is C0, the parent leg IS the origin leg.
-        over_parent = (before[-1], chosen) if before else None
-        vs_parent = next(
+        # Both legs read one sheet: where the previous pick is C0, its leg IS the origin leg.
+        displaced = (before[-1], chosen) if before else None
+        vs_previous_pick = next(
             (
                 pair
-                for pair in (vs_origin, overlap.vs_parent)
+                for pair in (vs_origin, overlap.vs_previous_pick)
                 if pair is not None
                 and pair.a is not None
                 and pair.b is not None
-                and (pair.a.address.individual_id, pair.b.address.individual_id) == over_parent
+                and (pair.a.address.individual_id, pair.b.address.individual_id) == displaced
             ),
             None,
         )
@@ -410,12 +419,11 @@ class RunStanding(FrozenModel):
             if lives is None
             else LivesReading(left=stalls_left(rounds, lives), cap=lives[1]),
             selection=arms[chosen],
-            parent=arms[before[-1]] if before else None,
             changes=""
             if vs_origin.state is ReadingState.SAME_INDIVIDUAL
             else declared.arms[chosen].changes_description,
             vs_origin=vs_origin,
-            vs_parent=vs_parent,
+            vs_previous_pick=vs_previous_pick,
             rounds_closed=closed_after_origin([rr.round for rr in rounds]),
             improved=sum(1 for rr in after_origin if rr.improved),
             advanced=sum(1 for rr in after_origin if rr.overlap.advance is RoundAdvance.ADVANCED),

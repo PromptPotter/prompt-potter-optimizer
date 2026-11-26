@@ -26,11 +26,7 @@ from promptpotter.domain.command_kinds import PAYLOAD_MODEL_FOR_KIND, CyclePaylo
 from promptpotter.domain.connector import MeasuredUnit, unit_count
 from promptpotter.domain.cycle_result import CycleResult
 from promptpotter.domain.dashboard_rows import ServedRound
-from promptpotter.domain.origin_panel import (
-    ROUND_ADVANCE_INFO,
-    RoundAdvance,
-    StallEffect,
-)
+from promptpotter.domain.origin_panel import ROUND_ADVANCE_INFO, OverlapReading, StallEffect
 from promptpotter.domain.paired_reading import Estimate, level_text
 from promptpotter.domain.phases import (
     STOP_REASON_INFO,
@@ -221,9 +217,9 @@ def render_round_stats(
     return "\n".join(lines)
 
 
-def render_advance_status(advance: RoundAdvance, stall: int) -> str:
-    info = ROUND_ADVANCE_INFO[advance]
-    if advance.stall is StallEffect.RESETS:
+def render_advance_status(overlap: OverlapReading, stall: int) -> str:
+    info = ROUND_ADVANCE_INFO[overlap.advance]
+    if overlap.stall is StallEffect.RESETS:
         return _node_line(f"{GREEN}✓ {info.label}, auto-continuing...{RESET}")
     rounds = "round" if stall == 1 else "rounds"
     return _node_line(f"{YELLOW}⚠ {info.label} — {stall} {rounds} without an advance{RESET}")

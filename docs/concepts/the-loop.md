@@ -35,6 +35,10 @@ schema has a field for it. **Rules route, never diagnose or stop**: pure predica
 first match wins, once per round. Which preemptors fire L2 before patience runs out:
 [`dispatch-hub.md`](dispatch-hub.md) § Trigger — when L2 fires.
 
+L1 patience, the life bank and L2/L3 patience read one stall stream, each round's `OverlapReading.stall`
+(`escalation.py::bank_round`, `escalation.py::_read_layer`): a layer's patience resets on a later `RESETS`
+round and stalls on any other ask, so a held round never resets a layer while it counts against L1.
+
 A *healthy* round is L1-critique's job; a *systemic fault* (evidence starvation) routes to L2, which self-heals
 or — on a fault no prompt move can fix — emits `terminate_proposal`, the one stop a layer authors: the run halts
 on `optimizer_abort`, its stop carrying the layer's reason to every door (the served `stop`, the chat, the

@@ -14,6 +14,7 @@ from promptpotter.application.optimizers import ManifestDir, nodes
 from promptpotter.application.optimizers.nodes import RewriteKnobs
 from promptpotter.application.optimizers.paper_templates import child, shown
 from promptpotter.domain.campaign_config import Estimand, Knob
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.records.run_records import CheckpointInputs
@@ -94,8 +95,10 @@ class Keep(nodes.Selector):
     name: ClassVar[str] = "example_keep"
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     sees = frozenset({Lineage, Replay})
-    elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
+
+    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
+        return "composite"
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         folds = measured.folds
@@ -110,8 +113,9 @@ class Keep(nodes.Selector):
         selected = ranked[0] if ranked and (bar is None or fitness[ranked[0]] > bar) else None
         ctx.read(Replay).decide(ExampleKept(ranked=ranked), selected or "")
         return nodes.Selection(
-            selected=selected,
             leading=ranked[0] if ranked else None,
+            ending=RoundEnding.HELD if selected is None else RoundEnding.CROWNED,
+            electable=len(measured.electable),
             verdict_reason=f"kept {selected[:8] if selected else 'the parent'}",
             ranked=list(ctx.read(Lineage).population),
         )

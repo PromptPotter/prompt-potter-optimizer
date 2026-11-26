@@ -43,6 +43,7 @@ def _stale_generation(
         recorded_outcome=list(recorded),
         current_outcome=list(current),
         inputs_ref={"generated_from_round": prior[-1].round},
+        stands_on=None,
     )
 
 

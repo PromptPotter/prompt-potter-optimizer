@@ -10,7 +10,7 @@ from pydantic import Field
 from promptpotter.application.optimizers.nodes import LengthKnobs
 from promptpotter.application.scoring.row_policy import RowKnobs
 from promptpotter.domain.campaign_config import Estimand, Knob
-from promptpotter.domain.crowning_bar import Vote
+from promptpotter.domain.crowning_bar import CrowningStatistic, NextParent, Vote
 from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.pool import Access
 from promptpotter.domain.scoring import MAX_PASS_ROWS
@@ -182,7 +182,9 @@ class PoBBKnobs(RowKnobs):
         lt=0.5,
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Smaller → fewer stops. A stop ends "
-        "measurement only; what is promoted is ``theta_election.admission``'s.",
+        "measurement; under ``theta_election.vote: overlap`` it ends the arm's election too, "
+        "since the panel that vote pairs on is read only for an arm walked to its draw's end. "
+        "What is crowned is ``theta_election.crown``'s.",
     )
     epsilon_floor: Annotated[float, Knob(Estimand.STOPPING)] = Field(
         gt=0.0,
@@ -210,10 +212,13 @@ class ElectionKnobs(StrictModel):
         ge=sign_posterior(1, 0),
         lt=1.0,
         description=(
-            "The confidence an arm must exceed to be promoted over its parent: its posterior "
-            "P(θ_arm > θ_parent), capped by what its discordant cells support. Never below "
-            "what one discordant cell supports (0.75), so one cell never promotes. Higher → "
-            "fewer promotions."
+            "The confidence a separation over the parent is read at: the posterior "
+            "P(θ_arm > θ_parent), capped by what its discordant cells support, an arm must "
+            "exceed to be crowned under ``crown: posterior``; the confidence of ``sign_test``, "
+            "``e_process`` and ``empirical_bayes``; under every crown, escalation's layer reading "
+            "and L1's detectable move. The point crown reads none. Never below what one "
+            "discordant cell supports (0.75), so no reading of it separates on one cell. Higher "
+            "→ fewer separations."
         ),
     )
     vote: Annotated[Vote, Knob(Estimand.GATE)] = Field(
@@ -222,6 +227,28 @@ class ElectionKnobs(StrictModel):
             "the promotion alike. ``draw``: every cell the round raced. ``overlap``: the origin "
             "panel's cells alone, and only an arm the panel trigger seats there is electable. "
             "The θ lift and the statistic are the same under both."
+        ),
+    )
+    crown: Annotated[CrowningStatistic, Knob(Estimand.SELECTION)] = Field(
+        description=(
+            "What an arm is crowned on over its parent, on the vote's cells "
+            "(`crowning_bar.py::CrowningBar`); every reading needs more cells won than lost. "
+            "``paired_point``: its mean paired verdict lift, the green bar's point, above zero; "
+            "its interval is information, which the advance reads. ``posterior``: the θ "
+            "posterior past ``admission``. "
+            "``sign_test``: an exact sign test on the discordant cells, Holm-corrected across "
+            "the round's arms. ``e_process``: an anytime-valid e-process on the paired "
+            "discordance. ``empirical_bayes``: its θ lift shrunk to the tenant's banked lift "
+            "prior, past ``admission``."
+        ),
+    )
+    next_parent: Annotated[NextParent, Knob(Estimand.SELECTION)] = Field(
+        description=(
+            "What a round that crowns no arm ends on, so what the next round mutates from; the "
+            "declared pick is always the last crown. ``not_lost``: its leader where the parent "
+            "did not beat it on what the crown ranks (a neutral move), so on one fixed panel the "
+            "line never falls below a crown. ``leading``: its leader whatever it read (comma "
+            "selection). ``crowned``: the parent it held (plus selection)."
         ),
     )
 

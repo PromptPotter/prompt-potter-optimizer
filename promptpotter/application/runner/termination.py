@@ -11,7 +11,6 @@ from promptpotter.domain.campaign_config import (
     GateMode,
     OptimizationConfig,
 )
-from promptpotter.domain.crowning_bar import BAR_ADMISSION
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
     STOP_REASON_INFO,
@@ -111,17 +110,21 @@ def panel_gate_tripped(
     return StopLoop(reason, detail="; ".join(said[:3]) + more)
 
 
+#: The ceiling stop's one-sided anytime-valid miss rate on the pick's origin-panel level.
+_CEILING_ALPHA = 0.025
+
+
 def standing_tripped(standing: RunStanding, optimization: OptimizationConfig) -> StopReason | None:
     """The ONE reading of whether *standing*'s round is the last: the close's stop, the adapter's
     skip and the controller's act all read it. The ceiling stop reads the pick's own level on the
-    origin panel at its one-sided anytime-valid lower bound (``BAR_ADMISSION``), valid at whichever
-    round it is looked at; no pair, no stop."""
+    origin panel at its one-sided anytime-valid lower bound (``_CEILING_ALPHA``), valid at
+    whichever round it is looked at; no pair, no stop."""
     if standing.lives is not None and standing.lives.spent:
         return StopReason.LIVES_EXHAUSTED
     target, read = optimization.halt_at_fitness, standing.vs_origin
     if target is None or read.headline is None or read.b is None:
         return None
-    floor = anytime_level_lower(read.headline.rate_b * read.b.n, read.b.n, 1.0 - BAR_ADMISSION)
+    floor = anytime_level_lower(read.headline.rate_b * read.b.n, read.b.n, _CEILING_ALPHA)
     if floor is not None and floor >= target:
         return StopReason.TARGET_HIT
     return None

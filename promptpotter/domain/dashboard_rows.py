@@ -12,7 +12,12 @@ from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.l4.proxies import PanelPrecision
 from promptpotter.domain.layer_fold import Unbounded
 from promptpotter.domain.opt_search_point import EvidenceGrounding, NodePrompt
-from promptpotter.domain.origin_panel import OverlapReading, line_by_individual, overlap_line
+from promptpotter.domain.origin_panel import (
+    OverlapReading,
+    RoundEnding,
+    line_by_individual,
+    overlap_line,
+)
 from promptpotter.domain.paired_reading import ArmKey, ArmName, Estimate, ReadingState
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import floor_said, health_reading
@@ -378,15 +383,14 @@ class RoundSummary(FrozenModel):
     round: int
     leading: ArmName | None = Field(
         description="The ONE arm this round is read off, as its selector named it and never "
-        "re-ranked: the selection where the round selected, on a held round the challenger "
+        "re-ranked: the crown, the leader the line moved to, on a held round the challenger "
         "`verdict_reason` names as its best, at round 0 the origin. `panel_precision` is "
         "measured on it. Null where the selector could read no arm."
     )
-    selected: ArmName | None = Field(
-        description="The arm the election crowned; null on a round that held."
+    ending: RoundEnding | None = Field(
+        description="How the round ended on `leading` (`Election.ending`); null at round 0, "
+        "which holds no election."
     )
-    # Moves the stall counter and the life bank. Unset at round 0, which holds no election.
-    improved: bool | None = None
     verdict_reason: str | None = None
     # The round's own arms: a reference it re-read is no row of it.
     candidates: list[DashboardCandidate] = Field(default_factory=list)
@@ -499,11 +503,8 @@ def served_rounds(
             selection_movement=movement,
             series_reading=None if series is None else series.levels[closed.round],
             hold_up=None
-            if series is None
-            or not closed.improved
-            or (now := series.level(closed.round)) is None
-            or (then := series.level(closed.round - 1)) is None
-            else now.lift_over(then),
+            if series is None or closed.ending is None or not closed.ending.moves_line
+            else series.hold(closed.round),
         )
         for closed, movement in zip(ordered, movements, strict=True)
     ]

@@ -114,6 +114,7 @@ from promptpotter.application.runner.termination import (
 )
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
+from promptpotter.application.scoring.paired import RoundPairs, grade_measurands
 from promptpotter.application.scoring.race_protocol import View, WalkView
 from promptpotter.application.scoring.row_policy import FieldRead, RowGround, RowKnobs, send_rows
 from promptpotter.application.served_dashboard import served_dashboard
@@ -149,7 +150,7 @@ from promptpotter.domain.hierarchy import (
 )
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.narration import Narration
-from promptpotter.domain.origin_panel import OverlapReading
+from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.records.partition import PartitionRecord
@@ -838,7 +839,7 @@ def _round(**kw: Any) -> RoundResult:
             "reference": None,
             "folds": {},
             "election": None,
-            "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, 0, False),
+            "overlap": OverlapReading.unpaired(ReadingState.NOT_HELD, 0, RoundEnding.HELD),
             "health": degradation_health(),
             "optimizer_state": optimizer_state(),
         }
@@ -1374,10 +1375,17 @@ def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() ->
                 arms=[unwalked],
                 coverage_floor=1,
                 bar=CrowningBar(statistic="posterior", admission=0.5),
+                next_parent="not_lost",
                 parent=bar_arm,
-                paired_on=None,
+                cells=None,
+                pairs=RoundPairs(
+                    path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
+                    instrument_id="bank",
+                    dataset_hash="ds",
+                    measurands=tuple(grade_measurands(scorer_of())),
+                ),
             ),
-            unwalked,
+            [RoundEnding.CROWNED, unwalked],
         ),
         (PopulationKept(objective=objective, survivors=[unwalked]), [unwalked]),
     ):
@@ -1385,7 +1393,7 @@ def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() ->
             _round(round=3, cells={}),
             [decision(inputs, recorded, node=None)],
         )
-        assert gone.current_outcome in (False, None, []), (
+        assert gone.current_outcome in (False, None, [], [RoundEnding.HELD, None]), (
             f"{inputs.kind}: an absent arm's decision replayed"
         )
     # Two survivors walked on disjoint cells share no reading: neither is ranked above the other.

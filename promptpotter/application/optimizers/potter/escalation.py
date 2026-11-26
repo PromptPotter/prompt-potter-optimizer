@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import enum
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, Literal, NamedTuple, Protocol, Self
 
 from pydantic import BaseModel
 
 from promptpotter.application.bench.node_context import (
-    Bounds,
     Calls,
     Lineage,
     NodeContext,
     Progress,
     Replay,
-    Ruler,
 )
 from promptpotter.application.mask.backprop import ForkDecline
 from promptpotter.application.optimizers.nodes import OptimizerPhase
@@ -40,9 +38,8 @@ from promptpotter.application.optimizers.potter.records import (
     LayerCounters,
     Recombination,
 )
-from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.layer_fold import UNBOUNDED, Unbounded
-from promptpotter.domain.origin_panel import RoundAdvance, StallEffect
+from promptpotter.domain.origin_panel import StallEffect
 from promptpotter.domain.paired_reading import RoundArm
 from promptpotter.domain.phase_acts import StepClosed, StepOpened, TextFact
 from promptpotter.domain.phases import StopReason
@@ -56,8 +53,7 @@ from promptpotter.domain.records.run_records import (
     RoundWarningRecord,
     StopLoop,
 )
-from promptpotter.domain.results import Reelection
-from promptpotter.domain.ruler import AbilityReading, LevelSeries, clears
+from promptpotter.domain.results import Reelection, RoundResult
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm.json_parse import OptimizerPromptParseError
@@ -160,35 +156,16 @@ class PotterPhase(enum.StrEnum):
 
 
 @dataclass(frozen=True)
-class HighWater:
-    """Banks a θ peak's ROUND, never its θ: the ruler clock a θ was read at moves."""
-
-    composite_fitness: float | None
-    series: LevelSeries
-    theta_round: int | None
-
-    def level(self, rnd: int | None) -> AbilityReading | None:
-        return None if rnd is None else self.series.level(rnd)
-
-    def theta(self, rnd: int | None) -> float | None:
-        level = self.level(rnd)
-        return None if level is None else level.theta
-
-
-@dataclass(frozen=True)
 class LayerReading:
     stall_count: int
-    best_composite_fitness_at_entry: float | None
-    theta_peak_round_at_entry: int | None
-    # ``None`` where the layer held no entry reading to compare.
-    comparator: str | None
+    # ``None`` only on a heal's record, which reads a layer that was never seeded.
+    entered_round: int | None
 
     def onto(self, held: LayerCounters, *, fired: bool = False) -> LayerCounters:
         return LayerCounters(
             fires=held.fires + fired,
             stall_count=self.stall_count,
-            best_composite_fitness_at_entry=self.best_composite_fitness_at_entry,
-            theta_peak_round_at_entry=self.theta_peak_round_at_entry,
+            entered_round=self.entered_round,
         )
 
 
@@ -205,8 +182,8 @@ class LadderAsk:
         return NEXT_ACTION_STOP.get(self.next_action)
 
 
-def bank_round(ladder: Ladder, advance: RoundAdvance) -> Ladder:
-    match advance.stall:
+def bank_round(ladder: Ladder, stall: StallEffect) -> Ladder:
+    match stall:
         case StallEffect.RESETS:
             return ladder.model_copy(update={"l1_stall_count": 0})
         case StallEffect.COUNTS:
@@ -215,49 +192,28 @@ def bank_round(ladder: Ladder, advance: RoundAdvance) -> Ladder:
             return ladder
 
 
-def _improved(
-    current_comp: float,
-    entry_comp: float,
-    current: AbilityReading | None,
-    entry: AbilityReading | None,
-    admission: float | None,
-) -> tuple[bool, str]:
-    """The scale is NOT fixed per cycle: a layer entered before the ruler warmed compares composites."""
-    if current is not None and entry is not None and (lift := current.lift_over(entry)) is not None:
-        return clears(lift, admission, support=None), "theta"
-    scale = "theta_appeared" if current is not None and entry is None else "composite"
-    return current_comp > entry_comp, scale
-
-
-def _read_layer(layer: LayerCounters, best: HighWater, admission: float | None) -> LayerReading:
-    """Each scale's ratchet is seeded by its first reading: a ruler may warm late."""
-    stall_count = layer.stall_count
-    entry_comp = layer.best_composite_fitness_at_entry
-    entry = best.level(layer.theta_peak_round_at_entry)
-    comp = best.composite_fitness if entry_comp is None else entry_comp
-    peak = best.theta_round if entry is None else layer.theta_peak_round_at_entry
-    if entry_comp is None or best.composite_fitness is None:
-        return LayerReading(stall_count, comp, peak, None)
-    improved, comparator = _improved(
-        best.composite_fitness, entry_comp, best.level(best.theta_round), entry, admission
-    )
-    if improved:
-        return LayerReading(0, best.composite_fitness, best.theta_round, comparator)
-    return LayerReading(stall_count + 1, entry_comp, peak, comparator)
+def _read_layer(layer: LayerCounters, rounds: Sequence[RoundResult]) -> LayerReading:
+    """The stall stream L1 patience and the lives read: a layer's first read only seeds it, a RESETS round past its entry resets it, any other ask stalls it."""
+    now = max(rr.round for rr in rounds)
+    entered = layer.entered_round
+    if entered is None:
+        return LayerReading(layer.stall_count, now)
+    if any(rr.round > entered and rr.overlap.stall is StallEffect.RESETS for rr in rounds):
+        return LayerReading(0, now)
+    return LayerReading(layer.stall_count + 1, entered)
 
 
 def ask_l2_escalation(
     ladder: Ladder,
     *,
-    best: HighWater,
+    rounds: Sequence[RoundResult],
     escalation_ladder: EscalationLadder,
     l2_patience: int,
     l3_patience: int | Unbounded,
-    admission: float | None,
 ) -> LadderAsk:
     """A fire that never parsed leaves the counters where the ledger has them."""
-    l2 = _read_layer(ladder.l2, best, admission)
-    l3 = _read_layer(ladder.l3, best, admission)
+    l2 = _read_layer(ladder.l2, rounds)
+    l3 = _read_layer(ladder.l3, rounds)
     climb = decide_climb(
         LadderInputs(
             escalation_ladder=escalation_ladder,
@@ -280,14 +236,14 @@ def as_read_by(ladder: Ladder, ask: LadderAsk) -> Ladder:
 def bank_and_route(
     ladder: Ladder,
     *,
-    advance: RoundAdvance,
+    stall: StallEffect,
     l1_patience: int,
     escalation_ladder: EscalationLadder,
     l1_mandatory_breach: bool = False,
     l1_zero_candidates: bool = False,
     evidence_starved: bool = False,
 ) -> tuple[Ladder, EscalationEvent]:
-    banked = bank_round(ladder, advance)
+    banked = bank_round(ladder, stall)
     inputs = EscalationInputs(
         l1_stall_count=banked.l1_stall_count,
         l1_patience=l1_patience,
@@ -335,33 +291,11 @@ class TransitionResult:
     for_round: int | None = None
 
 
-def _high_water(ctx: NodeContext) -> HighWater:
-    rounds = ctx.read(Lineage).rounds
-    # `max` keeps the first of equals, so a later round takes the peak only by beating it.
-    best = max(
-        (rr.fold for rr in rounds),
-        key=lambda fold: order_floor(None if fold is None else fold.composite_fitness),
-    )
-    series = ctx.read(Ruler).level_series
-    peak: int | None = None
-    top: float | None = None
-    for rnd in series.rounds:
-        reading = series.level(rnd)
-        if reading is not None and (top is None or reading.theta > top):
-            peak, top = rnd, reading.theta
-    return HighWater(
-        composite_fitness=None if best is None else best.composite_fitness,
-        series=series,
-        theta_round=peak,
-    )
-
-
 @dataclass(frozen=True)
 class Fire:
     cause: str
     # ``None`` is a heal (`escalation.py::l3_fired`).
     ask: LadderAsk | None
-    best: HighWater
 
 
 class EscalationLayer(Protocol):
@@ -515,32 +449,18 @@ class EscalationReading(FrozenModel):
     patience: int | Unbounded
     fires: int
     stall_count: int
-    best_composite_fitness_at_entry: float | None
-    best_composite_fitness_this_round: float | None
-    best_theta_at_entry: float | None
-    best_theta_this_round: float | None
-    comparator: str | None
+    entered_round: int | None
     rule: str
 
     @classmethod
     def read(
-        cls,
-        reading: LayerReading,
-        best: HighWater,
-        *,
-        patience: int | Unbounded,
-        fires: int,
-        rule: str,
+        cls, reading: LayerReading, *, patience: int | Unbounded, fires: int, rule: str
     ) -> Self:
         return cls(
             patience=patience,
             fires=fires,
             stall_count=reading.stall_count,
-            best_composite_fitness_at_entry=reading.best_composite_fitness_at_entry,
-            best_composite_fitness_this_round=best.composite_fitness,
-            best_theta_at_entry=best.theta(reading.theta_peak_round_at_entry),
-            best_theta_this_round=best.theta(best.theta_round),
-            comparator=reading.comparator,
+            entered_round=reading.entered_round,
             rule=rule,
         )
 
@@ -560,15 +480,13 @@ async def escalate_l2(
     ctx: NodeContext, *, cause: str, l2: LayerCall, l3: LayerCall
 ) -> StopReason | None:
     opt = ctx.knobs(EscalationKnobs)
-    best = _high_water(ctx)
 
     ask = ask_l2_escalation(
         ctx.slice(Ladder),
-        best=best,
+        rounds=ctx.read(Lineage).rounds,
         escalation_ladder=opt.escalation_ladder,
         l2_patience=opt.l2_patience,
         l3_patience=opt.l3_patience,
-        admission=ctx.read(Bounds).admission,
     )
 
     # Recorded fired or not.
@@ -576,14 +494,14 @@ async def escalate_l2(
     replay.decide(
         L2EscalationTrigger(
             reading=EscalationReading.read(
-                ask.l2, best, patience=opt.l2_patience, fires=ctx.slice(Ladder).l2.fires, rule=cause
+                ask.l2, patience=opt.l2_patience, fires=ctx.slice(Ladder).l2.fires, rule=cause
             )
         ),
         ask.next_action == NextAction.FIRE_L2,
     )
 
     if ask.next_action == NextAction.FIRE_L2:
-        result = await _fire_layer(ctx, l2, Fire(cause, ask, best))
+        result = await _fire_layer(ctx, l2, Fire(cause, ask))
         heal = decide_heal(
             LadderInputs(
                 escalation_ladder=opt.escalation_ladder,
@@ -598,17 +516,11 @@ async def escalate_l2(
             assert result is not None
             # A heal reads no gate, so its record banks the counters the ladder holds.
             held_l3 = ctx.slice(Ladder).l3
-            held = LayerReading(
-                held_l3.stall_count,
-                held_l3.best_composite_fitness_at_entry,
-                held_l3.theta_peak_round_at_entry,
-                None,
-            )
+            held = LayerReading(held_l3.stall_count, held_l3.entered_round)
             replay.decide(
                 L3EscalationTrigger(
                     reading=EscalationReading.read(
                         held,
-                        best,
                         patience=opt.l3_patience,
                         fires=held_l3.fires,
                         rule=L1_LAYOUT_REFUSED,
@@ -618,7 +530,7 @@ async def escalate_l2(
                 ),
                 True,
             )
-            await _fire_layer(ctx, l3, Fire(L1_LAYOUT_REFUSED, None, best))
+            await _fire_layer(ctx, l3, Fire(L1_LAYOUT_REFUSED, None))
         return None
     if ask.next_action is NextAction.CONTINUE:
         return None
@@ -627,7 +539,6 @@ async def escalate_l2(
         L3EscalationTrigger(
             reading=EscalationReading.read(
                 ask.l3,
-                best,
                 patience=opt.l3_patience,
                 fires=ctx.slice(Ladder).l3.fires,
                 rule=L2_PATIENCE_SPENT,
@@ -639,7 +550,7 @@ async def escalate_l2(
     )
 
     if ask.next_action == NextAction.FIRE_L3:
-        await _fire_layer(ctx, l3, Fire(L2_PATIENCE_SPENT, ask, best))
+        await _fire_layer(ctx, l3, Fire(L2_PATIENCE_SPENT, ask))
         return None
 
     return ask.stop_reason

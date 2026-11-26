@@ -41,6 +41,7 @@ from promptpotter.domain.arms import Cut, Elimination, Measured
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import RoundOutput, StatePart, StateSlice
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind
 from promptpotter.domain.records.run_records import CheckpointInputs
@@ -410,8 +411,10 @@ class Pareto(nodes.Selector):
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoSet, ParetoScores})
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({ParetoScores})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
-    elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
+
+    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
+        return "composite"
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -476,8 +479,9 @@ class Pareto(nodes.Selector):
         if not candidates:
             ctx.put(ParetoScores())
             return nodes.Selection(
-                selected=None,
                 leading=None,
+                ending=RoundEnding.HELD,
+                electable=len(measured.electable),
                 verdict_reason="no candidate carries a verdict on every Pareto-set cell; none "
                 "is admitted",
                 ranked=kept,
@@ -499,8 +503,9 @@ class Pareto(nodes.Selector):
         ctx.put(ParetoScores(scores=candidates, parent_id=parent_id))
         leading = selected_id or max(admitted, key=aggregates.__getitem__, default="")
         return nodes.Selection(
-            selected=ArmKey(selected_id) if selected_id else None,
             leading=ArmKey(leading) if leading else None,
+            ending=RoundEnding.CROWNED if selected_id else RoundEnding.HELD,
+            electable=len(measured.electable),
             verdict_reason=verdict,
             ranked=kept,
         )

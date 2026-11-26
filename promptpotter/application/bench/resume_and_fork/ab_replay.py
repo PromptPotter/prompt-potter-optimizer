@@ -109,6 +109,7 @@ def _identity(rd: RoundResult, current: Mapping[str, str]) -> list[ReplayMismatc
             recorded_outcome={n: recorded[n] for n in moved},
             current_outcome={n: current.get(n) for n in moved},
             inputs_ref={"nodes": moved},
+            stands_on=None,
         )
     ]
 
@@ -142,11 +143,7 @@ def replay_verdict(
             return VerdictOutcome(diverged=False)
         sink.extend(found)
         alternative = next(
-            (
-                m.current_outcome
-                for m in found
-                if isinstance(m.current_outcome, str) and m.current_outcome in rd.proposed
-            ),
+            (m.stands_on for m in found if m.stands_on is not None and m.stands_on in rd.proposed),
             None,
         )
         return VerdictOutcome(diverged=True, alternative_candidate_id=alternative)

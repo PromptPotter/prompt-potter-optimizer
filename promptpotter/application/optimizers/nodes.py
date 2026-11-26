@@ -6,7 +6,7 @@ import importlib
 import pkgutil
 import sys
 import typing
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Collection, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
@@ -25,6 +25,7 @@ from typing import (
 
 from pydantic import BaseModel, Field
 
+from promptpotter.application.scoring.paired import RoundPairs
 from promptpotter.application.scoring.race_protocol import BATCH, Decider, Trigger
 from promptpotter.config.paths import PACKAGE_ROOT
 from promptpotter.config.prompt_blocks import PackShelf
@@ -32,12 +33,12 @@ from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import ArmPosition, Concluded, Elimination, Proposal, Proposed
 from promptpotter.domain.campaign_config import ArmGateMode, CampaignConfig, Estimand, Knob
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.crowning_bar import Vote
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
-from promptpotter.domain.paired_reading import ArmKey
+from promptpotter.domain.origin_panel import RoundEnding
+from promptpotter.domain.paired_reading import ArmKey, PairedReading
 from promptpotter.domain.phase_acts import RowsRan, StepFact
 from promptpotter.domain.pipeline_schema import (
     INITIAL_POPULATION,
@@ -50,6 +51,7 @@ from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.round_audit import RoundAudit
+from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell
 from promptpotter.domain.strict_model import FrozenModel, StrictModel
@@ -443,13 +445,13 @@ class MeasuredRound:
     electable: list[ArmKey]
     coverage_floor: int
     cut: StopLoop | None
-    # The origin panel by sample slot; `on_panel` holds each member's rows there beside its draw.
-    origin_panel_slots: list[int]
+    # The origin panel's sample key by slot; `on_panel` holds each member's rows there beside its draw.
+    origin_panel: dict[int, str]
     on_panel: dict[str, CellSheet]
     # Each arm and the parent as the race read them (`RoundResult.raced`): what θ is fit on.
     raced: dict[ArmKey, CellSheet]
-    # The cells of `raced` the crowning bar pairs on (`Selector.vote`); `None` pairs on every one.
-    paired_on: frozenset[str] | None
+    # What a selector reads a pair of `raced` under in decision scope.
+    pairs: RoundPairs
 
     @property
     def labels(self) -> dict[ArmKey, str]:
@@ -458,14 +460,22 @@ class MeasuredRound:
 
 @dataclass(frozen=True)
 class Selection:
-    """``selected`` is ``None`` when the round holds its parent; ``leading`` is the selector's own, never re-ranked downstream."""
+    """``leading`` is the selector's own, never re-ranked downstream; ``ending`` says how the round
+    ends on it (`Election.ending`)."""
 
-    selected: ArmKey | None
     leading: ArmKey | None
+    ending: RoundEnding
+    # The arms that entered the election, which a selector narrowing `MeasuredRound.electable` counts.
+    electable: int
     verdict_reason: str
     # What the selector keeps, best first: the next population, cut by a survival node where the
     # walk names one (`Survivor`), else whole.
     ranked: Sequence[OptSearchPoint]
+    deciding_pair: PairedReading | None = None
+
+    @property
+    def selected(self) -> ArmKey | None:
+        return self.leading if self.ending is RoundEnding.CROWNED else None
 
 
 class Sampler(NodeMember, Protocol):
@@ -573,16 +583,15 @@ class Eliminator(NodeMember, Protocol):
 
     @property
     def stop_disqualifies(self) -> bool:
-        """False where a stop only ends the buying of an arm the selector still reads; True takes it out of ``MeasuredRound.electable``."""
+        """False where a stop only ends the buying of an arm, which its selector may still read; True takes it out of ``MeasuredRound.electable``."""
         ...
 
     def race(self, ctx: NodeContext, panel: RoundSamples) -> Race: ...
 
 
 class Selector(NodeMember, Protocol):
-    @property
-    def elects_on(self) -> DisplayMetric:
-        """The scoreboard column ``select`` elects on — the nearest the bench serves where its objective is its own."""
+    def elects_on(self, selected: SelectedOptimizer) -> DisplayMetric:
+        """The scoreboard column ``select`` elects on under *selected*'s knobs — the nearest the bench serves where its objective is its own."""
         ...
 
     @property
@@ -604,9 +613,17 @@ class Selector(NodeMember, Protocol):
         """The ``P(θ_arm > θ_parent)`` ``select`` promotes at, which a race's leader lock-in stops at; ``None`` locks none in."""
         return None
 
-    def vote(self, _selected: SelectedOptimizer) -> Vote:
-        """Which rows the crowning bar pairs an arm with its parent on, for ``select`` and the promotion alike."""
-        return "draw"
+    def covered(
+        self,
+        _selected: SelectedOptimizer,
+        cells: CellSheet,
+        _parent: Collection[str],
+        _ruler: DeltaRuler | None,
+    ) -> int:
+        """The cells of an arm the round's coverage floor counts, so whether ``select`` can read it
+        at all (a cut round none clears is unwound): every scored one, *parent* holding the cells
+        the parent answered."""
+        return len({cell.key for cell in cells if cell.scored})
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection: ...
 

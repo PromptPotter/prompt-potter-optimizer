@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from typing import Any, Literal
+from typing import Any, Literal, Self
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, model_validator
 
 from promptpotter.domain.arm_reading import (
     ArmElection,
@@ -19,10 +19,9 @@ from promptpotter.domain.arm_reading import (
 )
 from promptpotter.domain.arms import ArmState, Concluded, arm_name, is_leader_eligible
 from promptpotter.domain.cell_fold import ScoreSummary
-from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.optimizer_state import OptimizerState
-from promptpotter.domain.origin_panel import OverlapReading, line_by_individual
-from promptpotter.domain.paired_reading import ArmKey, RoundArm
+from promptpotter.domain.origin_panel import OverlapReading, RoundEnding, line_by_individual
+from promptpotter.domain.paired_reading import ArmKey, PairedReading, RoundArm
 from promptpotter.domain.pass_kinds import SCOPE_ROLES, IndividualWalk, individual_cells
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 from promptpotter.domain.round_health import DegradationHealth
@@ -97,35 +96,60 @@ class Reelection(FrozenModel):
 
 
 class Election(FrozenModel):
-    """What a round's selector decided over its arms, by key; ``selected`` null = the round HELD."""
+    """What a round's selector decided over its arms, by key: its `leading` arm and how the round
+    ended on it."""
 
-    # THE pick: round 0 selects the origin it adopted.
-    selected: ArmKey | None
     leading: ArmKey | None = Field(
         description="The ONE arm this round is read off, as its selector named it and never "
-        "re-ranked: the selection where there is one, on a held round the challenger that came "
-        "closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. "
-        "`null` where the selector could read no arm. NOT whose numbers the headline carries: "
-        "that is `ended_on`."
+        "re-ranked: the crown, the leader the line moved to, on a held round the challenger that "
+        "came closest on the selector's own objective, at round 0 the origin. Rank 1 of "
+        "`RoundView.candidates`. `null` where the selector could read no arm."
     )
-    ended_on: ArmKey = Field(
-        description="WHOSE numbers the round's headline carries: the selection where the round "
-        "selected; on a held round the retained parent, re-read on this round's cells as its "
-        "reference arm — never the leading challenger."
+    ending: RoundEnding = Field(
+        description="`crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`: "
+        "the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on "
+        "`parent`, re-read on this round's cells."
+    )
+    parent: ArmKey | None = Field(
+        description="The arm every arm was read against, which a held round ends on; null at "
+        "round 0, which reads none."
     )
     # Arms that entered the election. Zero says the proposer made no testable variant, not a stall.
     electable: int
     fit: dict[ArmKey, ArmFit] = Field(default_factory=dict)
     # `Selector.elects_on`: the column of `RoundView.candidates` the round was WON on.
     elects_on: DisplayMetric
+    deciding_pair: PairedReading | None = Field(
+        default=None,
+        description="`leading` (`b`) over `parent` (`a`) on the cells its selector paired them "
+        "on: the reading the round was decided on. Null where the selector banks none.",
+    )
     # The selector's own reason; ``None`` on the origin round, which chose between nobody.
     verdict_reason: str | None = None
     # ``None`` where the selector's pick stands; ``verdict_reason`` stays the selector's.
     reelection: Reelection | None = None
     # The δ scale the election read, whether or not a θ was fit on it.
     ruler: RulerStamp
-    # The crowning bar's read of the pick, what a promotion quotes; ``None`` where none was picked.
-    bar: BarRead | None
+
+    @model_validator(mode="after")
+    def _ends_on_an_arm(self) -> Self:
+        if self.ending.moves_line and self.leading is None:
+            raise ValueError(f"a round {self.ending.value} on its leader, and it names none")
+        if not self.ending.moves_line and self.parent is None:
+            raise ValueError("a held round ends on its parent, and it names none")
+        return self
+
+    @property
+    def selected(self) -> ArmKey | None:
+        """THE pick: round 0 selects the origin it adopted."""
+        return self.leading if self.ending is RoundEnding.CROWNED else None
+
+    @property
+    def ended_on(self) -> ArmKey:
+        """WHOSE numbers the round's headline carries, and the reference the next round is read against."""
+        ended_on = self.leading if self.ending.moves_line else self.parent
+        assert ended_on is not None
+        return ended_on
 
 
 class RoundOutcome(FrozenModel):
@@ -175,13 +199,12 @@ class RoundOutcome(FrozenModel):
 
     @property
     def improved(self) -> bool:
-        """A promotion: a pick the crowning bar clears; round 0 adopts its origin and promotes nothing."""
-        election = self.election
+        """A promotion: the round's selector crowned an arm; round 0 adopts its origin and
+        promotes nothing."""
         return (
             self.round > 0
-            and election is not None
-            and election.bar is not None
-            and election.bar.clears
+            and self.election is not None
+            and self.election.ending is RoundEnding.CROWNED
         )
 
     @property

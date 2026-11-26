@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from types import MappingProxyType
 from typing import Any, ClassVar, Literal
 
@@ -22,7 +22,7 @@ from promptpotter.application.intelligence.adaptive_queue_mechanism import (
     parent_grades,
     stratum_shares,
 )
-from promptpotter.application.intelligence.rasch import build_round_order
+from promptpotter.application.intelligence.rasch import build_round_order, theta_cells
 from promptpotter.application.optimizer_manifest import SelectedOptimizer
 from promptpotter.application.optimizers import nodes
 from promptpotter.application.optimizers.nodes import (
@@ -110,13 +110,12 @@ from promptpotter.application.optimizers.potter.records import (
 from promptpotter.application.optimizers.potter.validators import l3_plan_breaches
 from promptpotter.application.scoring.selection import crowning_cells
 from promptpotter.domain.arm_reading import DisplayMetric
-from promptpotter.domain.crowning_bar import Vote
+from promptpotter.domain.crowning_bar import THETA_CROWNS
 from promptpotter.domain.dashboard_rows import OptimizerLimit
 from promptpotter.domain.opt_search_point import VariationMode
 from promptpotter.domain.optimizer_state import Critique, StatePart
 from promptpotter.domain.phase_acts import (
     CountFact,
-    FitnessFact,
     SettingsFact,
     StepClosed,
     StepOpened,
@@ -128,8 +127,10 @@ from promptpotter.domain.records.run_records import StopLoop
 from promptpotter.domain.results import OptimizerFact, RoundResult
 from promptpotter.domain.results_health import evidence_starved_node
 from promptpotter.domain.round_audit import RoundAudit
+from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_standing import rounds_without_advance
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import StrictModel
 from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.domain.wounds import ValidationReason
@@ -164,7 +165,7 @@ class AdaptiveQueue(nodes.Sampler):
         knobs = ctx.knobs(AdaptiveQueueKnobs)
         lineage = ctx.read(Lineage)
         # A race read on cells that crowned its parent re-reads the parent's luck as its ability.
-        crowned = crowning_cells(lineage.rounds, lineage.parent.id)
+        crowned = crowning_cells(lineage.rounds, lineage.parent.id, {s.id: s.key for s in pool})
         pool = [s for s in pool if s.key not in crowned]
         n_min = ctx.read(Bounds).elimination_n_min
         # No outcome and no ability choose a cell: the election reads these rows as the pool's.
@@ -221,7 +222,7 @@ class L1Generate(LayoutNode, nodes.Proposer):
 
     @property
     def consults(self) -> frozenset[type]:
-        return frozenset({AdaptiveQueue, Escalation})
+        return frozenset({AdaptiveQueue, Escalation, ThetaElection})
 
     def resolved_levers(self, declared: Mapping[str, Any]) -> dict[str, Any]:
         """The rename with each wire name stripped, here alone; an empty one renames nothing."""
@@ -304,7 +305,8 @@ class PoBB(nodes.Eliminator):
         {Lineage, Parent, Ruler, Bounds, Progress, Replay}
     )
     abort_lenses: ClassVar[Mapping[str, frozenset[str]]] = ABORT_LENS_SUPPRESS
-    # A PoBB stop ends the buying of an arm; θ still reads what it measured.
+    # A PoBB stop ends the buying of an arm: a `draw` vote reads it on its draw, `overlap` never
+    # seats it (`election.py::seated`).
     stop_disqualifies: ClassVar[bool] = False
     couplings: ClassVar[tuple[nodes.MemberCoupling, ...]] = POBB
 
@@ -325,14 +327,28 @@ class ThetaElection(nodes.Selector):
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     knobs: ClassVar[type[StrictModel]] = ElectionKnobs
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Bounds, Lineage, Ruler, Replay})
-    elects_on: ClassVar[DisplayMetric] = "ability"
     elects_partial: ClassVar[bool] = True
+
+    def elects_on(self, selected: SelectedOptimizer) -> DisplayMetric:
+        """The θ crowns elect on ability, the verdict crowns on the fitness column."""
+        crown = selected.knobs_of(self.name, ElectionKnobs).crown
+        return "ability" if crown in THETA_CROWNS else "fitness"
 
     def admission(self, selected: SelectedOptimizer) -> float:
         return selected.knobs_of(self.name, ElectionKnobs).admission
 
-    def vote(self, selected: SelectedOptimizer) -> Vote:
-        return selected.knobs_of(self.name, ElectionKnobs).vote
+    def covered(
+        self,
+        selected: SelectedOptimizer,
+        cells: CellSheet,
+        parent: Collection[str],
+        ruler: DeltaRuler | None,
+    ) -> int:
+        """A θ crown counts the cells θ is read on, a verdict crown those the parent answered too:
+        all its pairing can read (`RoundWinner.covered`)."""
+        reads_theta = selected.knobs_of(self.name, ElectionKnobs).crown in THETA_CROWNS
+        scored = {cell.key: cell for cell in cells if cell.scored}
+        return len(theta_cells(scored, parent, ruler if reads_theta else None))
 
     def select(self, ctx: NodeContext, measured: MeasuredRound) -> Selection:
         return elect_on_theta(ctx, measured)
@@ -350,7 +366,7 @@ class L1Critique(LayoutNode, nodes.Adapter):
 
     @property
     def consults(self) -> frozenset[type]:
-        return frozenset({AdaptiveQueue, Escalation, L1Generate})
+        return frozenset({AdaptiveQueue, Escalation, L1Generate, ThetaElection})
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -378,7 +394,7 @@ class L2Context(LayoutNode):
 
     @property
     def consults(self) -> frozenset[type]:
-        return frozenset({AdaptiveQueue, Escalation, L1Generate})
+        return frozenset({AdaptiveQueue, Escalation, L1Generate, ThetaElection})
 
     def reply_model(self, view: PotterView) -> type[BaseModel]:
         return build_l2_response_model(
@@ -457,7 +473,6 @@ class L2Context(LayoutNode):
 
     def enter_act(self, ctx: NodeContext, fire: Fire) -> StepOpened:
         steered = ctx.slice(L2Memory).steered("l1_generate")
-        peak = fire.best.composite_fitness
         stalled = rounds_without_advance(ctx.read(Lineage).rounds)
         return StepOpened(
             node=self.name,
@@ -467,7 +482,6 @@ class L2Context(LayoutNode):
                 "rule": TextFact(value=fire.cause),
                 "L1 stalled rounds": CountFact(value=stalled),
                 "parent fitness": ctx.read(Parent).fitness,
-                "peak fitness": None if peak is None else FitnessFact(value=peak),
                 "l1_overrides": SettingsFact(value=steered) if steered else None,
             },
         )
@@ -500,7 +514,7 @@ class L3Plan(LayoutNode):
 
     @property
     def consults(self) -> frozenset[type]:
-        return frozenset({AdaptiveQueue, Escalation, L1Generate})
+        return frozenset({AdaptiveQueue, Escalation, L1Generate, ThetaElection})
 
     def reply_model(self, view: PotterView) -> type[BaseModel]:
         return build_l3_response_model(
@@ -602,7 +616,7 @@ class Escalation(nodes.Controller):
         evidence_starved = evidence_starved_node(round_result.health.node_failure_rates) is not None
         ladder, event = bank_and_route(
             ctx.slice(Ladder),
-            advance=round_result.overlap.advance,
+            stall=round_result.overlap.stall,
             l1_patience=knobs.l1_patience,
             escalation_ladder=knobs.escalation_ladder,
             l1_mandatory_breach=l1_mandatory_breach,

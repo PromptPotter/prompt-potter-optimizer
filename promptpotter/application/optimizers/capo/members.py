@@ -45,6 +45,7 @@ from promptpotter.domain.arms import Cut, Elimination, Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart, StateSlice
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import NodeKind, PipelineSchema
 from promptpotter.domain.pool import DemoPool, Pool
@@ -667,8 +668,10 @@ class PopulationSelector(nodes.Selector):
     kind: ClassVar[NodeKind] = NodeKind.SELECTOR
     reads: ClassVar[frozenset[type[StatePart]]] = frozenset({CapoObjective})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
-    elects_on: ClassVar[DisplayMetric] = "fitness"
     elects_partial: ClassVar[bool] = True
+
+    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
+        return "fitness"
 
     def parent_cells(
         self,
@@ -697,10 +700,12 @@ class PopulationSelector(nodes.Selector):
             if best is not None
             else f"no arm survived the race; the population of {len(carried)} stands"
         )
+        crowned = best is not None and best != lineage.parent.id
         return nodes.Selection(
-            selected=best if best is not None and best != lineage.parent.id else None,
             # The race's best survivor, which the incumbent may be: it races as an arm.
             leading=best,
+            ending=RoundEnding.CROWNED if crowned else RoundEnding.HELD,
+            electable=len(measured.electable),
             verdict_reason=verdict,
             ranked=[measured.arms[key].individual for key in ranked] if ranked else carried,
         )

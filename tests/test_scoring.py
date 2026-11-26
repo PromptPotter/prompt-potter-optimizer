@@ -13,7 +13,7 @@ import json
 import random
 import signal
 from collections import Counter
-from collections.abc import Awaitable, Callable, Iterator, Sequence
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from contextlib import (
     AbstractContextManager,
     contextmanager,
@@ -49,7 +49,6 @@ from factories import (
     inner_sandbox,
     jumping_clock,
     ledger_records,
-    level_series,
     loop_session,
     measurement,
     measurements,
@@ -93,6 +92,7 @@ from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
 )
+from promptpotter.application.config_map import check_couplings
 from promptpotter.application.datasets.authored import defaults_config
 from promptpotter.application.evidence.head_to_head import (
     GuardDifference,
@@ -126,7 +126,7 @@ from promptpotter.application.jobs.launcher.admission import (
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.mask.backprop import ForkDecline, select_branch_round
 from promptpotter.application.mask.record import SpineCycle
-from promptpotter.application.optimizer_manifest import bench_choice, select_optimizer
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
 from promptpotter.application.optimizers.capo.members import (
     seed_instructions,
@@ -143,10 +143,13 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L3PlanOutput,
     fork_proposal_model,
 )
-from promptpotter.application.optimizers.potter.election import RoundWinner
+from promptpotter.application.optimizers.potter.election import (
+    RoundDecision,
+    RoundWinner,
+    seated,
+)
 from promptpotter.application.optimizers.potter.escalation import (
     EscalationInputs,
-    HighWater,
     LadderAsk,
     NextAction,
     _rebase_request,
@@ -157,11 +160,7 @@ from promptpotter.application.optimizers.potter.escalation import (
     l2_fired,
     l3_fired,
 )
-from promptpotter.application.optimizers.potter.knobs import (
-    ElectionKnobs,
-    EscalationLadder,
-    PoBBKnobs,
-)
+from promptpotter.application.optimizers.potter.knobs import EscalationLadder, PoBBKnobs
 from promptpotter.application.optimizers.potter.l1 import applied_edits
 from promptpotter.application.optimizers.potter.pobb import PoBBCheck, field_p_best
 from promptpotter.application.optimizers.potter.records import (
@@ -196,7 +195,6 @@ from promptpotter.application.runner.loop import open_origin_round
 from promptpotter.application.runner.round import (
     ReferencePairs,
     announce_opening,
-    bar_pairing,
     execute_round,
     hold_for_operator,
     run_init,
@@ -225,6 +223,7 @@ from promptpotter.application.scoring.judges.registry import two_valued_terms
 from promptpotter.application.scoring.metrics import compute_composite_fitness, fold_cells
 from promptpotter.application.scoring.paired import (
     MemberRows,
+    RoundPairs,
     absent_pair,
     as_family,
     grade_measurands,
@@ -237,11 +236,9 @@ from promptpotter.application.scoring.race_protocol import Trigger, View, WalkVi
 from promptpotter.application.scoring.sample_measurement import measure_sample
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.application.scoring.selection import (
-    cells_read,
-    closest_to_bar,
     crowning_cells,
-    elect_round_winner,
     level_band,
+    ranked_first,
     readable_lifts,
 )
 from promptpotter.config.paths import optimizers_root
@@ -296,15 +293,18 @@ from promptpotter.domain.command_kinds import (
     SubmittedArm,
     VerifyCandidatePayload,
 )
-from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
+from promptpotter.domain.crowning_bar import CrowningBar, NextParent
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_panel import (
+    NotSeparatedStall,
     OverlapReading,
     PanelTrigger,
     RoundAdvance,
+    RoundEnding,
+    StallEffect,
     TriggeredReading,
     line_by_individual,
     origin_panel,
@@ -361,6 +361,8 @@ from promptpotter.domain.ruler import RulerScope, RulerStamp, p_better
 from promptpotter.domain.run_standing import (
     LineOutlay,
     RunStanding,
+    declared_selection,
+    line_reference,
     rounds_without_advance,
     stalls_left,
 )
@@ -1443,17 +1445,70 @@ def _elect(
 ) -> tuple[ArmKey | None, RoundAbilities]:
     """The election on the fit the round measures of the same rows."""
     abilities = candidate_abilities(rows, parent, ruler)
-    winner = elect_round_winner(
-        keys, rows, parent, coverage_floor, abilities, bar=bar, paired_on=None
+    vote = _winner(keys, ArmKey("p"), bar=bar, coverage_floor=coverage_floor)
+    return _crown(vote, rows, parent, abilities), abilities
+
+
+_PAIRS = RoundPairs(
+    path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
+    instrument_id="bank",
+    dataset_hash="ds",
+    measurands=(
+        Measurand(
+            kind=MeasurandKind.GRADE, key="fitness", scorer_id="test", binary=True, unit="rate"
+        ),
+    ),
+)
+
+
+def _winner(
+    arms: list[ArmKey],
+    parent: ArmKey,
+    *,
+    bar: CrowningBar,
+    next_parent: NextParent = "crowned",
+    coverage_floor: int = 6,
+    cells: list[str] | None = None,
+    scorer_id: str = "test",
+) -> RoundWinner:
+    fitness = _PAIRS.measurands[0].model_copy(update={"scorer_id": scorer_id})
+    return RoundWinner(
+        arms=arms,
+        coverage_floor=coverage_floor,
+        bar=bar,
+        next_parent=next_parent,
+        parent=parent,
+        cells=cells,
+        pairs=_PAIRS.model_copy(update={"measurands": (fitness,)}),
     )
-    return winner, abilities
+
+
+def _decide(
+    vote: RoundWinner,
+    rows: Mapping[ArmKey, CellSheet],
+    parent: CellSheet,
+    abilities: RoundAbilities,
+) -> RoundDecision:
+    pairings = vote.pairings({**rows, vote.parent: parent}, {})
+    return vote.decide(vote.subjects(pairings, abilities), abilities)
+
+
+def _crown(
+    vote: RoundWinner,
+    rows: Mapping[ArmKey, CellSheet],
+    parent: CellSheet,
+    abilities: RoundAbilities,
+) -> ArmKey | None:
+    decided = _decide(vote, rows, parent, abilities)
+    return decided.leading if decided.ending is RoundEnding.CROWNED else None
 
 
 def test_a_round_winner_elects_by_ability_not_subset_accuracy() -> None:
     ruler = _easy_low_hard_high()
     bar = CrowningBar(statistic="posterior", admission=election_knobs().admission)
     with pytest.raises(ValidationError):
-        ElectionKnobs(admission=0.70, vote="draw")  # one discordant cell supports 0.75
+        # One discordant cell supports 0.75.
+        election_knobs().model_validate(election_knobs().model_dump() | {"admission": 0.70})
     weak_on_easy = [measurement(i, float(i < 16)) for i in range(20)]
     able_on_hard = [measurement(i, float(i < 34)) for i in range(20, 40)]
     by_id = {
@@ -1526,9 +1581,12 @@ def test_a_thin_arm_never_wins_on_a_margin_inside_its_own_noise() -> None:
     ), "one cell won and one lost is a tie, whatever the δ weighting or the fit's last digit"
     longer, terse_parent = _charged_by_length()
     level = delta_ruler(dict.fromkeys(range(34), 0.0))
-    assert _elect([ArmKey("l")], {ArmKey("l"): longer}, terse_parent, 6, level, bar=bar)[0] == (
-        "l"
-    ), "a cost term's tie-break was counted as a verdict lost"
+    l_key = ArmKey("l")
+    lengthy = _winner([l_key], ArmKey("p"), bar=bar, scorer_id=terse_parent.scorer_id)
+    abilities = candidate_abilities({l_key: longer}, terse_parent, level)
+    assert _crown(lengthy, {l_key: longer}, terse_parent, abilities) == "l", (
+        "a cost term's tie-break was counted as a verdict lost"
+    )
 
 
 def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
@@ -1536,13 +1594,46 @@ def test_a_crowned_picks_lucky_cells_stay_out_of_every_race_it_judges() -> None:
     crowned_on = sheet(measurements([1.0] * 4 + [0.0], range(30, 35)))
     bar_rows = sheet(measurements([0.0, 0.0, 1.0, 1.0, 0.0], range(30, 35)))
     c0 = arm_key("c0")
-    won = round_result(1, voted={"electable": 1}, cells={c0: crowned_on, PARENT: bar_rows})
-    assert crowning_cells([won, round_result(2, improved=False)], c0) == {
+
+    def member(key: ArmKey, rows: CellSheet) -> MemberRows:
+        return _PAIRS.member(key, rows, name=None, role=None, cut=False)
+
+    pair = _PAIRS.read(
+        member(PARENT, bar_rows),
+        member(c0, crowned_on),
+        cell_set=CellSetName.MEASURED_BY_BOTH,
+        cells=None,
+        measurands=_PAIRS.measurands,
+    )
+    voted = {"electable": 1, "deciding_pair": pair}
+    won = round_result(1, voted=voted, cells={c0: crowned_on, PARENT: bar_rows})
+    assert crowning_cells([won, round_result(2, improved=False)], c0, {}) == {
         crowned_on.cells[0].key,
         crowned_on.cells[1].key,
     }, "a crowned pick's discordant wins stay out of every race it judges, a lone arm's included"
-    assert not crowning_cells([won], arm_key("c1")), (
+    assert not crowning_cells([won], arm_key("c1"), {}), (
         "an ancestor's are its child's own measurements"
+    )
+    unbanked = round_result(1, voted={"electable": 1}, cells={c0: crowned_on, PARENT: bar_rows})
+    assert not crowning_cells([unbanked], c0, {}), "a crown read no pairing it never banked"
+    # Under `overlap` the pair read the panel alone: a win off it is no crowning cell.
+    on_panel = _PAIRS.read(
+        member(PARENT, bar_rows),
+        member(c0, crowned_on),
+        cell_set=CellSetName.ORIGIN_PANEL,
+        cells=["31", "32", "33"],
+        measurands=_PAIRS.measurands,
+    )
+    panel_won = won.model_copy(
+        update={
+            "election": won.election
+            and won.election.model_copy(update={"deciding_pair": on_panel}),
+            "overlap": won.overlap.model_copy(update={"positions": (31, 32, 33)}),
+        }
+    )
+    key_of = {slot: str(slot) for slot in range(30, 35)}
+    assert crowning_cells([panel_won], c0, key_of) == {"31"}, (
+        "an overlap crown's draw-only wins left the next draw"
     )
 
 
@@ -1557,15 +1648,90 @@ def test_an_overlap_vote_elects_on_the_origin_panel_an_arm_its_draw_held_back() 
         theta={c53: 0.504}, theta_se={c53: 0.458}, bar={c53: (0.0, 0.0)}, cells={c53: 25}
     )
     crowning = CrowningBar(statistic="posterior", admission=election_knobs().admission)
-    for paired_on, elected, why in (
+    for cells, elected, why in (
         (None, None, "the draw elected an arm that lost more of its cells than it won"),
         (panel, c53, "the overlap vote held back an arm that won its panel rows 7-3"),
     ):
-        vote = RoundWinner(
-            arms=[c53], coverage_floor=6, bar=crowning, parent=parent, paired_on=paired_on
-        )
+        vote = _winner([c53], parent, bar=crowning, cells=cells)
         # The banked inputs are what a replay re-elects on: the live vote is this same call.
-        assert vote.elect({c53: rows}, bar, abilities) == elected, why
+        assert _crown(vote, {c53: rows}, bar, abilities) == elected, why
+
+
+def test_a_point_reading_crowns_the_green_bar_its_interval_spans() -> None:
+    # Campaign justlogic.d234__0dcfd7, round 1, C1.3: panel 18 vs 16 of 34 (3 gained, 1 lost),
+    # its draw tied, θ level (lift -0.001). Arm b gains 2, loses 1, on a θ lift of +0.5.
+    a, b, parent = ArmKey("C1.3"), ArmKey("b"), ArmKey("parent")
+    draw = [float(i % 2) for i in range(34)]
+    held = [1.0] * 16 + [0.0] * 18
+    rows = {
+        parent: sheet(measurements(held + draw)),
+        a: sheet(measurements([*held[:15], 0.0, 1.0, 1.0, 1.0, *held[19:], *draw])),
+        b: sheet(measurements([*held[:15], 0.0, 1.0, 1.0, *held[18:], *draw])),
+    }
+    panel = sorted(str(i) for i in range(34))
+    abilities = RoundAbilities(
+        theta={a: 0.092, b: 0.593},
+        theta_se={a: 0.18, b: 0.18},
+        bar={a: (0.093, 0.18), b: (0.093, 0.18)},
+        cells={a: 68, b: 68},
+    )
+    admission = election_knobs().admission
+    flipped = {**rows, a: rows[parent], parent: rows[a]}
+    for bar, both, alone in (
+        (CrowningBar(statistic="paired_point", admission=admission), a, a),
+        (CrowningBar(statistic="posterior", admission=admission), None, None),
+    ):
+        for arms, on, crowned in (([a, b], rows, both), ([a], rows, alone), ([a], flipped, None)):
+            vote = _winner(arms, parent, bar=bar, cells=panel)
+            assert _crown(vote, on, on[parent], abilities) == crowned, (
+                f"{bar.statistic} over {arms}: a net panel loss, a level θ or the rank moved"
+            )
+
+
+def test_a_round_crowning_none_moves_on_only_to_a_leader_its_parent_did_not_beat() -> None:
+    # On the fixed panel paired lifts add: a step onto a leader that did not lose never falls below
+    # the crown the line holds, and a pick is only ever a crown.
+    parent, tied, lost, won = ArmKey("parent"), ArmKey("tied"), ArmKey("lost"), ArmKey("won")
+    base = [1.0] * 10 + [0.0] * 10
+    rows = {
+        parent: sheet(measurements(base)),
+        tied: sheet(measurements([0.0, 1.0, *base[2:10], 1.0, *base[11:]])),
+        lost: sheet(measurements([0.0, 0.0, *base[2:10], 1.0, *base[11:]])),
+        won: sheet(measurements([*base[:10], 1.0, *base[11:]])),
+    }
+    flat = delta_ruler(dict.fromkeys(range(20), 0.0))
+    bar = CrowningBar(statistic="paired_point", admission=election_knobs().admission)
+    crowned, moved, held = RoundEnding.CROWNED, RoundEnding.MOVED, RoundEnding.HELD
+    table: tuple[tuple[list[ArmKey], NextParent, RoundEnding, ArmKey | None], ...] = (
+        ([won, tied], "not_lost", crowned, won),
+        ([tied], "not_lost", moved, tied),
+        ([lost], "not_lost", held, None),
+        ([lost], "leading", moved, lost),
+        ([tied], "crowned", held, None),
+    )
+    for arms, next_parent, ending, stands_on in table:
+        on = {k: rows[k] for k in arms}
+        abilities = candidate_abilities(on, rows[parent], flat)
+        vote = _winner(arms, parent, bar=bar, next_parent=next_parent)
+        decided = _decide(vote, on, rows[parent], abilities)
+        assert decided.ending is ending, f"{next_parent} over {arms}"
+        assert vote.stands_on([decided.ending, decided.leading]) == stands_on, (
+            "a replay's counterfactual is not the arm the round ends on"
+        )
+
+
+def test_a_round_that_crowns_none_hands_on_its_leader_and_keeps_its_crown() -> None:
+    c0, c1, origin = arm_key("c0"), arm_key("c1"), ArmKey("origin")
+    crowned = round_result(1)
+    held = round_result(2, improved=False)
+    stepped = round_result(2, improved=False, voted={"moved_to": c1})
+    assert line_reference([crowned, held], origin=origin) == RoundArm(round=1, arm=c0), (
+        "a round that ended on the parent it re-read moved the line"
+    )
+    assert line_reference([crowned, stepped], origin=origin) == RoundArm(round=2, arm=c1), (
+        "the leader a round ended on is not what the next round stands on"
+    )
+    assert declared_selection([crowned, stepped]) is crowned, "an uncrowned leader became the pick"
 
 
 def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
@@ -1582,23 +1748,10 @@ def test_an_overlap_vote_elects_only_an_arm_the_panel_trigger_seats() -> None:
         ArmKey("stopped"): sheet(measurements([1.0] * 8)),
         ArmKey("thin"): sheet(measurements([1.0] * 3)),
     }
-    keys, panel = list(arms), frozenset({"0", "1"})
-    assert bar_pairing("draw", keys, arms, rows, panel, 6) == (keys, None), "the draw moved"
-    assert bar_pairing("overlap", keys, arms, rows, panel, 6) == ([ArmKey("walked")], panel), (
+    keys = list(arms)
+    assert seated("draw", keys, arms, rows, 6) == keys, "the draw moved"
+    assert seated("overlap", keys, arms, rows, 6) == [ArmKey("walked")], (
         "an arm the origin panel holds no reading of stayed electable on it"
-    )
-    voting = select_optimizer(
-        OptimizerChoice(
-            call_target=BENCH_TARGET,
-            optimizer="potter",
-            nodes={
-                "pobb": ManifestNodeOverlay(config={"row_choice": "random"}),
-                "theta_election": ManifestNodeOverlay(config={"vote": "draw"}),
-            },
-        )
-    )
-    assert (voting.vote, select_optimizer(bench_choice("potter")).vote) == ("draw", "overlap"), (
-        "the election's `vote` never reached the round's pairing"
     )
 
 
@@ -1622,6 +1775,20 @@ def test_informative_rows_without_an_overlap_vote_are_refused_at_every_selection
         )
 
 
+def test_an_epsilon_a_tied_field_reaches_is_named_before_it_cuts_the_leader() -> None:
+    """PoBB's shares sum to 1: a parent and k arms tie at 1/(k+1), and an ε there cuts a tied leader."""
+    for epsilon, n_variants, collides in ((0.3, 3, True), (0.25, 3, True), (0.3, 2, False)):
+        nodes = {
+            "pobb": {"config": {"epsilon": epsilon, "epsilon_floor": epsilon}},
+            "l1_generate": {"config": {"n_variants": n_variants}},
+        }
+        config = defaulted_config({"optimization": {"optimizer": "potter", "nodes": nodes}})
+        named = check_couplings(config, select_optimizer(config.optimization))
+        assert any(c.severity == "collision" for c in named) is collides, (
+            f"ε {epsilon} over {n_variants} arms and their parent: the tie the check reads moved"
+        )
+
+
 def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads() -> None:
     bar, deep_key = (
         CrowningBar(statistic="posterior", admission=election_knobs().admission),
@@ -1642,7 +1809,10 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
     assert held_abilities.theta[thin] > held_abilities.bar[thin][0], "the floor, not θ, bars thin"
     assert set(reads) == {"near", "deep"}, "an arm under the floor is not readable"
     assert reads[deep_key].value < reads[near_key].value <= 0.0
-    assert closest_to_bar(reads) == "near", "the lead is named on the θ lift"
+    vote = _winner(list(arms), ArmKey("p"), bar=bar)
+    subjects = vote.subjects(vote.pairings({**arms, vote.parent: twenty}, {}), held_abilities)
+    cells = {key: vote.covered(key, s, held_abilities) for key, s in subjects.items()}
+    assert ranked_first(bar, subjects, cells) == "near", "the lead is named on the bar's rank"
     off = ArmKey("off")
     cold = candidate_abilities({off: sheet(measurements([1.0] * 8, range(26, 34)))}, twenty, None)
     assert cold.cells[off] == 2 and not readable_lifts([off], 6, cold), (
@@ -1650,7 +1820,8 @@ def test_a_held_round_leads_on_the_readable_arm_nearest_the_bar_admission_reads(
     )
     warm = candidate_abilities({off: sheet(measurements([1.0] * 8, range(24, 32)))}, half, flat)
     assert warm.cells[off] == 4, "warm, the floor counts only the cells the ruler carries"
-    assert closest_to_bar(reads, beside=near_key) == "deep"
+    del subjects[near_key]
+    assert ranked_first(bar, subjects, cells) == "deep"
 
 
 def test_only_an_invalid_measurement_bars_an_arm_from_leading() -> None:
@@ -2619,9 +2790,6 @@ def test_a_cell_a_declared_bound_cut_is_settled_and_never_re_measured() -> None:
 # 6. Escalation and stop — live, and folded back on resume
 
 
-_TODAYS_BAR = CrowningBar(statistic="posterior", admission=BAR_ADMISSION)
-
-
 def _line_read(
     round_num: int,
     improved: bool,
@@ -2629,7 +2797,9 @@ def _line_read(
     c0: Sequence[float | None],
     ids: dict[str, str] | None = None,
     triggered: Sequence[tuple[str, Sequence[float | None]]] = (),
+    not_separated: NotSeparatedStall = "counts",
 ) -> OverlapReading:
+    """A crown moves the line onto itself; a round crowning none here holds its parent."""
     bank = samples(len(c0), "t")
     hop = CycleHop(campaign_id="camp", cycle_id="cyc")
 
@@ -2667,7 +2837,7 @@ def _line_read(
     readings = [read(label, grades, origin) for label, grades in picks]
     return OverlapReading.of(
         round_num,
-        improved,
+        RoundEnding.CROWNED if improved else RoundEnding.HELD,
         positions=range(len(c0)),
         lead=readings[-1],
         earlier=readings[:-1],
@@ -2675,8 +2845,8 @@ def _line_read(
             TriggeredReading(trigger=PanelTrigger.N_MIN, reading=read(label, grades, origin))
             for label, grades in triggered
         ],
-        vs_parent=read(*picks[-1], picks[-2]) if len(picks) >= 2 else None,
-        bar=_TODAYS_BAR,
+        vs_previous_pick=read(*picks[-1], picks[-2]) if len(picks) >= 2 else None,
+        not_separated=not_separated,
     )
 
 
@@ -2686,36 +2856,50 @@ _CLEAN_PANEL: Sequence[float | None] = [1.0] * 9
 _TIED_PANEL: Sequence[float | None] = [1.0, 0.0] + [0.0] * 6 + [1.0]
 
 
-def _high_water(comp: float | None, thetas: list[float], se: float) -> HighWater:
-    """Round i read thetas[i] on one series; the peak is the FIRST round at the max."""
-    origin = thetas[0] if thetas else None
-    rest = thetas[1:]
-    return HighWater(
-        composite_fitness=comp,
-        series=level_series(origin, rest, origin_se=se, ses=[se] * len(rest)),
-        theta_round=max(range(len(thetas)), key=thetas.__getitem__) if thetas else None,
+def _stamped(rnd: int, stall: StallEffect) -> RoundResult:
+    """A round closed with *stall*, the one stream L1 patience, the lives and L2/L3 patience read."""
+    closed = round_result(rnd)
+    return closed.model_copy(update={"overlap": closed.overlap.model_copy(update={"stall": stall})})
+
+
+def test_a_layer_resets_on_a_later_reset_round_and_stalls_on_any_other() -> None:
+    effects = [StallEffect.STARTS, StallEffect.COUNTS, StallEffect.COUNTS, StallEffect.RESETS]
+    effects += [StallEffect.SKIPS, StallEffect.COUNTS]
+    line = [_stamped(i, s) for i, s in enumerate(effects)]
+
+    def read(upto: int, held: LayerCounters) -> tuple[int, int | None]:
+        asked = ask_l2_escalation(
+            Ladder(l2=held),
+            rounds=line[: upto + 1],
+            escalation_ladder=EscalationLadder.FULL,
+            l2_patience=9,
+            l3_patience="unbounded",
+        )
+        return asked.l2.stall_count, asked.l2.entered_round
+
+    assert read(1, LayerCounters(stall_count=4)) == (4, 1), "seeding changed the count"
+    assert read(2, LayerCounters(stall_count=4, entered_round=1)) == (5, 1), "a COUNTS round held"
+    assert read(3, LayerCounters(stall_count=4, entered_round=1)) == (0, 3), "RESETS did not reset"
+    assert read(3, LayerCounters(stall_count=4, entered_round=3)) == (5, 3), (
+        "a RESETS round at the entry itself reset a layer it seeded"
+    )
+    assert read(5, LayerCounters(stall_count=0, entered_round=3)) == (1, 3), (
+        "SKIPS and COUNTS after the entry stall it"
     )
 
 
-def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
-    # θ advances once for real (+0.467), then by noise.
-    stall_rounds = [
-        (0.4853, -0.1296, 0.216),
-        (0.6248, 0.3376, 0.202),
-        (0.6248, 0.3498, 0.198),
-        (0.6248, 0.3498, 0.198),
-    ]
-
-    def climb() -> list[str]:
+def test_a_round_that_counts_for_l1_never_resets_l2_or_l3() -> None:
+    def climb(effect: StallEffect) -> list[str]:
         ladder, actions = Ladder(), []
-        for upto, (comp, _, se) in enumerate(stall_rounds):
+        line = [_stamped(0, StallEffect.STARTS)]
+        for rnd in range(1, 6):
+            line.append(_stamped(rnd, effect))
             asked = ask_l2_escalation(
                 ladder,
-                best=_high_water(comp, [t for _, t, _ in stall_rounds[: upto + 1]], se),
+                rounds=line,
                 escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
-                admission=0.85,
             )
             actions.append(str(asked.next_action))
             if asked.next_action != NextAction.FIRE_L2:
@@ -2723,39 +2907,8 @@ def test_a_theta_stall_verdict_must_clear_its_own_error() -> None:
             ladder = l2_fired(ladder, asked.l2)
         return actions
 
-    assert climb() == ["fire_l2", "fire_l2", "fire_l2", "fire_l3"], (
-        "a θ step inside the election's bar is a stall"
-    )
-
-
-def test_the_bar_applies_on_the_theta_scale_only() -> None:
-    # A composite-scale verdict has no error term.
-    series = level_series(0.34, [0.35, 0.60, 0.80], ses=[0.20, 0.20, 0.20])
-
-    def l2_read(
-        comp: float, entry_comp: float, rnd: int | None, entry_rnd: int | None
-    ) -> tuple[int, str | None]:
-        entered = LayerCounters(
-            best_composite_fitness_at_entry=entry_comp, theta_peak_round_at_entry=entry_rnd
-        )
-        asked = ask_l2_escalation(
-            Ladder(l2=entered),
-            best=HighWater(composite_fitness=comp, series=series, theta_round=rnd),
-            escalation_ladder=EscalationLadder.FULL,
-            l2_patience=9,
-            l3_patience="unbounded",
-            admission=0.85,
-        )
-        return asked.l2.stall_count, asked.l2.comparator
-
-    assert l2_read(0.0, 0.0, 1, 0) == (1, "theta"), "a θ step inside its SE cleared the stall"
-    assert l2_read(0.0, 0.0, 2, 0) == (1, "theta"), (
-        "a step past the lead's own SE but inside the lift's cleared the stall"
-    )
-    assert l2_read(0.0, 0.0, 3, 0) == (0, "theta"), "a θ step past the election's bar stalled"
-    assert l2_read(0.7, 0.6, None, None) == (0, "composite"), (
-        "with no θ on either side the composite lift is the verdict"
-    )
+    assert climb(StallEffect.COUNTS) == ["fire_l2", "fire_l2", "fire_l3"], "COUNTS reset a layer"
+    assert climb(StallEffect.RESETS) == ["fire_l2"] * 5, "a RESETS line reached L3"
 
 
 def test_the_l1_only_arm_reaches_no_layer_above_it_over_the_whole_predicate_space() -> None:
@@ -2786,20 +2939,19 @@ def test_the_l1_only_arm_reaches_no_layer_above_it_over_the_whole_predicate_spac
 # Each stretch climbs the ladder the one before it left.
 def test_a_heal_fire_spends_no_l3_patience() -> None:
     healed = Ladder()
-    seen: list[float] = []
+    line = [_stamped(0, StallEffect.STARTS)]
 
-    def stretch(theta: float, *, heal_first: bool) -> LadderAsk:
+    def stretch(first: StallEffect, *, heal_first: bool) -> LadderAsk:
         nonlocal healed
         asks: list[LadderAsk] = []
         while not asks or asks[-1].next_action is NextAction.FIRE_L2:
-            seen.append(theta)
+            line.append(_stamped(len(line), first if not asks else StallEffect.COUNTS))
             asked = ask_l2_escalation(
                 healed,
-                best=_high_water(0.5, seen, 0.2),
+                rounds=line,
                 escalation_ladder=EscalationLadder.FULL,
                 l2_patience=2,
                 l3_patience=1,
-                admission=0.85,
             )
             asks.append(asked)
             if asked.next_action is NextAction.FIRE_L2:
@@ -2808,23 +2960,24 @@ def test_a_heal_fire_spends_no_l3_patience() -> None:
                     healed = l3_fired(healed, None)
         return asks[-1]
 
-    gate = stretch(0.3, heal_first=True)
+    gate = stretch(StallEffect.COUNTS, heal_first=True)
     assert gate.next_action is NextAction.FIRE_L3, (
         "the heal wiped L2; the gate reached is L3's FIRST"
     )
     healed = l3_fired(healed, gate.l3)
-    gate = stretch(0.6, heal_first=True)
+    gate = stretch(StallEffect.RESETS, heal_first=True)
     assert gate.next_action is NextAction.FIRE_L3, "a later heal must not re-base the comparison"
     healed = l3_fired(healed, gate.l3)
-    assert stretch(0.6, heal_first=False).next_action is NextAction.STOP_L3_PATIENCE, (
-        "the patience a heal did not spend still binds a flat run"
-    )
+    assert (
+        stretch(StallEffect.COUNTS, heal_first=False).next_action is NextAction.STOP_L3_PATIENCE
+    ), "the patience a heal did not spend still binds a flat run"
 
 
 # Each fire lands on the ladder the fire before it left.
 def test_a_landed_fire_moves_the_ladder_and_an_unlanded_one_moves_nothing() -> None:
     landed = Ladder()
-    trace: list[tuple[int, int, float | None, int, int, float | None, int]] = []
+    trace: list[tuple[int, int, int | None, int, int, int | None, int]] = []
+    line = [_stamped(0, StallEffect.STARTS)] + [_stamped(i, StallEffect.COUNTS) for i in (1, 2, 3)]
 
     def snapshot() -> None:
         held = landed
@@ -2832,31 +2985,28 @@ def test_a_landed_fire_moves_the_ladder_and_an_unlanded_one_moves_nothing() -> N
             (
                 held.l2.fires,
                 held.l2.stall_count,
-                held.l2.best_composite_fitness_at_entry,
+                held.l2.entered_round,
                 held.l3.fires,
                 held.l3.stall_count,
-                held.l3.best_composite_fitness_at_entry,
+                held.l3.entered_round,
                 held.l1_stall_count,
             )
         )
 
-    def ask_at(fitness: float) -> LadderAsk:
+    def ask_at(upto: int) -> LadderAsk:
         return ask_l2_escalation(
             landed,
-            best=_high_water(fitness, [], 0.2),
+            rounds=line[: upto + 1],
             escalation_ladder=EscalationLadder.FULL,
             l2_patience=3,
             l3_patience=2,
-            admission=0.85,
         )
 
-    landed = l2_fired(landed, ask_at(0.60).l2)
+    landed = l2_fired(landed, ask_at(1).l2)
     snapshot()
-    landed = l2_fired(
-        landed, ask_at(0.60).l2
-    )  # an unimproved ask reads a stall the landing commits
+    landed = l2_fired(landed, ask_at(2).l2)  # a COUNTS round reads a stall the landing commits
     snapshot()
-    unlanded = ask_at(0.60)
+    unlanded = ask_at(3)
     assert unlanded.l2.stall_count == 2, "the ask read the stall"
     assert as_read_by(landed, unlanded).l2.stall_count == 2, (
         "the prompt that fire composed still reported the verdict that asked for it"
@@ -2864,34 +3014,34 @@ def test_a_landed_fire_moves_the_ladder_and_an_unlanded_one_moves_nothing() -> N
     snapshot()
     landed = l3_fired(landed, None)  # a heal: it bumps L3, the patience ratchet stays unset
     snapshot()
-    landed = l3_fired(landed, ask_at(0.75).l3)
+    landed = l3_fired(landed, ask_at(3).l3)
     snapshot()
     assert trace == [
-        (1, 0, 0.60, 0, 0, None, 0),
-        (2, 1, 0.60, 0, 0, None, 0),
-        (2, 1, 0.60, 0, 0, None, 0),
+        (1, 0, 1, 0, 0, None, 0),
+        (2, 1, 1, 0, 0, None, 0),
+        (2, 1, 1, 0, 0, None, 0),
         (0, 0, None, 1, 0, None, 0),
-        (0, 0, None, 2, 0, 0.75, 0),
+        (0, 0, None, 2, 0, 3, 0),
     ], "an unparseable fire adopted something, or L3 firing kept L2's progress"
 
 
 class _StallReads(NamedTuple):
     close: Callable[..., RoundResult]
-    observed: Callable[[list[RoundAdvance]], Ladder]
+    observed: Callable[[list[StallEffect]], Ladder]
 
 
 @pytest.fixture
 def stall_reads() -> _StallReads:
-    """A round closed by whether it improved, and the L1 stall a ladder banks over advances."""
+    """A round closed by whether it improved, and the L1 stall a ladder banks over the stamps."""
 
     def close(rnd: int, *, improved: bool, electable: int = 2) -> RoundResult:
         return round_result(rnd, improved=improved, voted={"electable": electable}, cells={})
 
-    def observed(advances: list[RoundAdvance]) -> Ladder:
+    def observed(stalls: list[StallEffect]) -> Ladder:
         ladder = Ladder()
-        for advance in advances:
+        for stall in stalls:
             ladder, _ = bank_and_route(
-                ladder, advance=advance, l1_patience=99, escalation_ladder=EscalationLadder.FULL
+                ladder, stall=stall, l1_patience=99, escalation_ladder=EscalationLadder.FULL
             )
         return ladder
 
@@ -2902,7 +3052,7 @@ def test_the_l1_stall_and_the_lives_bank_read_the_same_rounds(stall_reads: _Stal
     close, observed = stall_reads
     sequence = [(True, 2), (True, 2), (True, 2), (True, 2), (False, 0), (False, 2), (False, 2)]
     closes = [close(i, improved=up, electable=n) for i, (up, n) in enumerate(sequence, start=1)]
-    assert observed([c.overlap.advance for c in closes]).l1_stall_count == 3, (
+    assert observed([c.overlap.stall for c in closes]).l1_stall_count == 3, (
         "three trailing non-improving rounds, one uncompared — all three advance the stall"
     )
     origin_close = close(0, improved=False, electable=0)
@@ -2927,8 +3077,16 @@ def test_the_l1_stall_and_the_lives_bank_read_the_same_rounds(stall_reads: _Stal
     )
     assert watched.advance is RoundAdvance.NOT_SEPARATED, "a triggered arm is read, never adopted"
     assert line_by_individual(watched)["c2.2"].rate == 1.0, "and served beside the line"
-    assert observed([*(line.advance for line in lines), RoundAdvance.HELD]).l1_stall_count == 1, (
-        "a crown is progress for pacing, separated or not; only the held round stalls"
+    held = close(2, improved=False).overlap.stall
+    switch: tuple[tuple[NotSeparatedStall, int], ...] = (("counts", 3), ("resets", 1), ("skips", 2))
+    for not_separated, stalled in switch:
+        tied = _line_read(3, True, ("C3.1", _TIED_PANEL), c0=_C0_PANEL, not_separated=not_separated)
+        assert observed([lines[0].stall, held, tied.stall, held]).l1_stall_count == stalled, (
+            f"a crown inside the noise did not pace the ladder as `{not_separated}` says"
+        )
+    moved = OverlapReading.unpaired(ReadingState.NOT_HELD, 4, RoundEnding.MOVED)
+    assert (moved.advance, moved.stall) == (RoundAdvance.MOVED_UNCROWNED, StallEffect.COUNTS), (
+        "a step onto an uncrowned leader read as an advance"
     )
 
 
@@ -2941,7 +3099,7 @@ def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
     lead = won.lead
     stopped = OverlapReading.of(
         3,
-        True,
+        RoundEnding.CROWNED,
         positions=won.positions,
         lead=absent_pair(
             state=ReadingState.PASS_STOPPED,
@@ -2954,8 +3112,8 @@ def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
         ),
         earlier=(),
         triggered=(),
-        vs_parent=None,
-        bar=None,
+        vs_previous_pick=None,
+        not_separated="counts",
     )
     assert stopped.advance is RoundAdvance.UNREAD
     rounds = [
@@ -2968,7 +3126,7 @@ def test_a_reading_that_failed_moves_the_stall_clock_neither_way(
         "the unread round neither clears the held round nor adds to it"
     )
     assert rounds_without_advance([*rounds, round_result(4, improved=False)]) == 2
-    assert observed([rr.overlap.advance for rr in rounds[1:]]).l1_stall_count == 1, (
+    assert observed([rr.overlap.stall for rr in rounds[1:]]).l1_stall_count == 1, (
         "the live stall reads what the standing reads"
     )
     unread_close = round_result(3, improved=True, overlap=stopped, voted={"electable": 2})
@@ -3010,9 +3168,10 @@ def test_no_pair_to_read_stands_alone_and_a_pair_owed_refused_or_unlanded_is_no_
     }
     for state, advance in promoted_on.items():
         pair = lead if state is ReadingState.READ else PairedReading.unread(state)
-        assert round_advance(1, True, pair, _TODAYS_BAR) is advance, state
-        assert round_advance(1, False, pair, _TODAYS_BAR) is RoundAdvance.HELD, state
-        assert round_advance(0, True, pair, _TODAYS_BAR) is RoundAdvance.ORIGIN, state
+        assert round_advance(1, RoundEnding.CROWNED, pair) is advance, state
+        assert round_advance(1, RoundEnding.HELD, pair) is RoundAdvance.HELD, state
+        assert round_advance(1, RoundEnding.MOVED, pair) is RoundAdvance.MOVED_UNCROWNED, state
+        assert round_advance(0, RoundEnding.CROWNED, pair) is RoundAdvance.ORIGIN, state
 
 
 _LIVED = defaulted_config({"optimization": {"lives": {"start": 2, "cap": 4}}}).optimization
@@ -3050,8 +3209,12 @@ def test_the_campaign_ends_only_where_the_objective_is_spent_and_the_round_resol
     readings = {
         RoundAdvance.ADVANCED: _line_read(1, True, ("C1.1", _CLEAN_PANEL), c0=_C0_PANEL),
         RoundAdvance.NOT_SEPARATED: _line_read(1, True, ("C1.1", _TIED_PANEL), c0=_C0_PANEL),
-        RoundAdvance.ADVANCED_UNPAIRED: OverlapReading.unpaired(ReadingState.NOT_HELD, 1, True),
-        RoundAdvance.UNREAD: OverlapReading.unpaired(ReadingState.PASS_STOPPED, 1, True),
+        RoundAdvance.ADVANCED_UNPAIRED: OverlapReading.unpaired(
+            ReadingState.NOT_HELD, 1, RoundEnding.CROWNED
+        ),
+        RoundAdvance.UNREAD: OverlapReading.unpaired(
+            ReadingState.PASS_STOPPED, 1, RoundEnding.CROWNED
+        ),
     }
     assert all(reading.advance is advance for advance, reading in readings.items())
 
@@ -3271,10 +3434,12 @@ def _reference_reading(
     )
     reference_rows = rows(reference)
     pairs = ReferencePairs(
-        path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
-        instrument_id="bank",
-        scorer=scorer,
-        dataset_hash=Bank.of(bank).dataset_hash,
+        pairs=RoundPairs(
+            path=(CycleHop(campaign_id="camp", cycle_id="cyc"),),
+            instrument_id="bank",
+            dataset_hash=Bank.of(bank).dataset_hash,
+            measurands=tuple(grade_measurands(scorer)),
+        ),
         declared=[cell.key for cell in reference_rows],
         names={key: ArmName(key=key, round=1, label="C1.1")},
     )
@@ -3380,7 +3545,6 @@ def test_a_pair_is_one_estimate_over_the_cells_both_members_scored() -> None:
 
     assert lift.side == "spans"
     assert lift.p_floor == 0.25, "three cells differ, so no exact test can read below 2/2**3"
-    assert lift.flips is not None
     assert (lift.flips.gained, lift.flips.lost, lift.flips.unchanged) == (2, 1, 2)
 
 
@@ -3408,7 +3572,7 @@ def test_a_measurand_beside_the_headline_is_read_over_the_same_scored_cells() ->
         unit="score",
     )
     (beside,) = _read_pair(a, b, bank, measurands=[reading.headline.measurand, composite]).beside
-    assert beside.flips is None
+    assert not beside.measurand.binary
     assert beside.estimate.value == pytest.approx(0.6 * reading.headline.estimate.value), (
         "a measurand beside the headline is read over the SAME scored cells"
     )
@@ -3453,10 +3617,10 @@ def test_an_arm_of_one_replicate_reads_its_declaration_and_a_pooled_one_the_t() 
         return read
 
     single = lift([a], [b])
-    assert single.flips is not None and (single.flips.gained, single.flips.lost) == (5, 0)
+    assert (single.flips.gained, single.flips.lost) == (5, 0)
     assert single.p_value == pytest.approx(0.0625), "5 gained, 0 lost is exact McNemar's 2/2**5"
     pooled = lift([a], [b, b2])
-    assert pooled.flips is None, "a mean over two replicates is no 0/1 cell: the t reads it"
+    assert not pooled.measurand.binary, "a mean over two replicates is no 0/1 cell: the t reads it"
 
 
 def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
@@ -3479,7 +3643,6 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     assert cells.column(ROW_GRADES["fitness"]) == standing, "a second reading is a second row"
     assert cells.column(ROW_GRADES["objective"]) == worth
     assert responses_of(cells) == worth, "the ruler read another row than the column"
-    assert cells_read("fitness", cells, (), None) == 4
     fold = fold_cells(cells, "rate")
     assert (fold.total, fold.fitness) == (4, 0.75)
     assert fold.composite_fitness == pytest.approx(sum(worth.values()) / 4)
@@ -3489,7 +3652,7 @@ def test_a_cell_measured_twice_is_one_standing_row_to_every_reader() -> None:
     once = member_rows("once", measurements(list(by_slot.values())), four)
     unmoved = _read_pair(once, twice, four)
     lift, coverage = unmoved.headline, unmoved.coverage
-    assert lift is not None and coverage is not None and lift.flips is not None
+    assert lift is not None and coverage is not None
     assert (coverage.scored, coverage.excluded_faulted) == (4, 0)
     assert (lift.rate_a, lift.rate_b, lift.estimate.value) == (0.75, 0.75, 0.0), (
         "paired against an individual that walked each cell once at those grades, nothing moved"
@@ -3900,7 +4063,7 @@ def standing_run() -> _StandingRun:
             arms=[arm_state("parent", individual=on), *proposed],
             improved=bool(selected),
             selected=ids[selected] if selected else None,
-            voted={} if selected else {"ended_on": on.id},
+            voted={} if selected else {"parent": on.id},
             cells={},
             **reading,
         )
@@ -3933,20 +4096,19 @@ def test_a_run_stands_on_its_selection_read_against_the_origin_it_was_promoted_f
     )
     at_c0 = stands(run[:1])
     assert at_c0.selection is not None
-    assert (at_c0.selection.label, at_c0.parent) == ("C0", None)
+    assert at_c0.selection.label == "C0"
     assert at_c0.vs_origin == PairedReading.unread(ReadingState.SAME_INDIVIDUAL)
     held = stands(run[:3])
     assert held.selection is not None
     assert held.selection.label == "C1.1", "a held round keeps the selection before it"
     assert held.vs_origin == first_line.lead
     standing_now = stands(run)
-    assert standing_now.selection is not None and standing_now.parent is not None
+    assert standing_now.selection is not None
     assert standing_now.selection.model_dump() == {
         "key": second_pick.id,
         "round": 3,
         "label": "C3.2",
     }
-    assert standing_now.parent.label == "C1.1"
     assert (standing_now.rounds_closed, standing_now.improved, standing_now.advanced) == (
         3,
         2,
@@ -3967,10 +4129,10 @@ def test_a_run_stands_on_its_selection_read_against_the_origin_it_was_promoted_f
     assert held_on.vs_origin.headline.rate_a == pytest.approx(1 / 9), (
         "a later round that holds re-reads the line, and the standing follows the NEWEST reading"
     )
-    pass_stopped = OverlapReading.unpaired(ReadingState.PASS_STOPPED, 5, True)
+    pass_stopped = OverlapReading.unpaired(ReadingState.PASS_STOPPED, 5, RoundEnding.CROWNED)
     unread = stands([*run, closed(5, third_pick, "C5.1", selected="C5.1", overlap=pass_stopped)])
     assert unread.selection is not None
-    assert (unread.selection.label, unread.parent) == ("C5.1", standing_now.selection)
+    assert unread.selection.label == "C5.1"
     assert (unread.vs_origin.state, unread.vs_origin.headline) == (
         ReadingState.PASS_STOPPED,
         None,
@@ -4007,11 +4169,11 @@ def test_the_climb_prices_c0s_lift_by_what_the_line_paid_and_an_absent_denominat
         "seconds per point"
     )
     # Both legs come off one round reading: over C0 at round 1 they are one number.
-    assert at_c0.vs_parent is None
-    assert held.vs_parent == held.vs_origin and held.climb is not None
-    assert held.climb.vs_parent == held.climb.lift, "one pair read on two sheets at round 1"
-    assert standing_now.vs_parent is not None
-    assert standing_now.vs_parent == run[-1].overlap.vs_parent
+    assert at_c0.vs_previous_pick is None
+    assert held.vs_previous_pick == held.vs_origin and held.climb is not None
+    assert held.climb.vs_previous_pick == held.climb.lift, "one pair read on two sheets at round 1"
+    assert standing_now.vs_previous_pick is not None
+    assert standing_now.vs_previous_pick == run[-1].overlap.vs_previous_pick
 
 
 def _guarded(**moved: Any) -> GuardMember:
@@ -4198,7 +4360,8 @@ def test_an_act_on_an_arm_takes_it_out_of_its_head_to_head(
     ], f"{acted} left another standing than {states}"
 
 
-def test_a_two_valued_scorers_headline_separates_under_the_bar_its_paired_test_separates() -> None:
+def test_a_two_valued_scorers_headline_separates_on_its_paired_flips() -> None:
+    # `round_advance` reads separation off this side: 11 gained, 0 lost advances the line.
     bank = samples(12, "t")
 
     def member(name: str, grades: list[float]) -> MemberRows:
@@ -4209,11 +4372,8 @@ def test_a_two_valued_scorers_headline_separates_under_the_bar_its_paired_test_s
     lift = _read_pair(
         member("c0", [0.0] * 11 + [1.0]), member("c1", [1.0] * 12), bank, measurands=measurands
     ).headline
-    assert lift is not None and lift.flips is not None, "a matcher's 0/1 fitness read as graded"
-    assert lift.side == "above"
-    for statistic in ("sign_test", "e_process"):
-        bar = CrowningBar(statistic=statistic, admission=BAR_ADMISSION)
-        assert bar.separates(lift), f"{statistic} refused 11 gained, 0 lost its paired test took"
+    assert lift is not None and lift.measurand.binary, "a matcher's 0/1 fitness read as graded"
+    assert lift.side == "above", "11 gained, 0 lost read inside the noise"
 
 
 # 8. A bare-answer backend — the n8n eval harness
@@ -5096,9 +5256,7 @@ def _adopting_twice(picked: _Bench, monkeypatch: pytest.MonkeyPatch) -> tuple[st
     )
     assert round_.election is not None
     earlier = round_.model_copy(
-        update={
-            "election": round_.election.model_copy(update={"selected": other, "ended_on": other})
-        }
+        update={"election": round_.election.model_copy(update={"leading": other})}
     )
     spans = line_bench.line_spans
     monkeypatch.setattr(

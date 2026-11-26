@@ -104,7 +104,7 @@ const crowned = (
   return summaryRound({
     round,
     leading: leadingIdx >= 0 ? arm(leadingIdx) : null,
-    selected: winnerIdx >= 0 ? arm(winnerIdx) : null,
+    ending: round === 0 ? null : winnerIdx >= 0 ? "crowned" : "held",
     candidates: Array.from({ length: n }, (_, i) =>
       summaryCandidate({
         reading: armReading({
@@ -161,8 +161,8 @@ describe("resolveObserveSubject — best", () => {
 describe("resolveObserveSubject — every state resolves its row by arm key", () => {
   const rounds = [
     crowned(0, 0, 1),
-    crowned(1, 1, 3, { improved: true }),
-    crowned(2, -1, 3, { improved: false, verdict_reason: "no arm cleared the parent" }, 1),
+    crowned(1, 1, 3),
+    crowned(2, -1, 3, { verdict_reason: "no arm cleared the parent" }, 1),
   ];
   // The cycle entry's standing: `CycleEntryFacts.standing`.
   const stood = standing(1, 1);
@@ -200,8 +200,8 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     expect(s.state).toBe("best");
     expect(s.point).toMatchObject({ round: 1, label: "C1.2", title: "best · C1.2" });
     expect(keyOf(s)).toBe("r1c1");
-    expect(s.reading).toMatchObject({ round: 1, improved: true });
-    expect(s.verdict).toMatchObject({ round: 2, improved: false });
+    expect(s.reading).toMatchObject({ round: 1, ending: "crowned" });
+    expect(s.verdict).toMatchObject({ round: 2, ending: "held" });
     expect(s.round).toBe(1);
     expect(s.live).toBe(false);
   });
@@ -210,7 +210,7 @@ describe("resolveObserveSubject — every state resolves its row by arm key", ()
     const s = resolveObserveSubject(closed, stood, false, asked("latest"));
     expect(s.point).toMatchObject({ round: 2, label: "C2.3", title: "latest · C2.3" });
     expect(keyOf(s)).toBe("r2c2");
-    expect(s.reading).toMatchObject({ round: 2, improved: false });
+    expect(s.reading).toMatchObject({ round: 2, ending: "held" });
     expect(s.verdict).toBeNull();
   });
 

@@ -28,6 +28,7 @@ from promptpotter.domain.candidate_diff import (
     group_diff_keys,
 )
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import READING_STATE_INFO, level_text
 from promptpotter.domain.phase_acts import (
     CellFormula,
@@ -238,6 +239,7 @@ def render_round_verdict(
     detail = [] if theta is None else [fitness_txt]
 
     selected = next((s.vs_reference for s in arms if s.election.selected), None)
+    ending = None if v.election is None else v.election.ending
     if v.improved:
         # An arm that stopped short gets no reference rate: over a prefix it is a lift nobody measured.
         lift = selected.on_whole_set if selected else None
@@ -249,6 +251,13 @@ def render_round_verdict(
         ended_on = "" if (head := v.head) is None else head.label
         out.append(
             f"  {GREEN}{BOLD}✓ SELECTED {ended_on}{RESET}  {headline}"
+            f" ({', '.join(detail)}){comp_tag}"
+        )
+    elif ending is RoundEnding.MOVED:
+        detail += ["the pick held", f"n={0 if fold is None else fold.total}"]
+        ended_on = "" if (head := v.head) is None else head.label
+        out.append(
+            f"  {YELLOW}{BOLD}→ MOVED {ended_on}, uncrowned{RESET}  {headline}"
             f" ({', '.join(detail)}){comp_tag}"
         )
     else:

@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from collections.abc import Collection, Mapping, Sequence
 from enum import StrEnum
-from typing import NamedTuple, assert_never
+from typing import Literal, NamedTuple, assert_never
 
 from pydantic import Field
 
-from promptpotter.domain.crowning_bar import CrowningBar
+from promptpotter.domain.arms import ArmState, Measured, walked_short
+from promptpotter.domain.cell_fold import measured_cells
 from promptpotter.domain.paired_reading import (
     ArmName,
     MeasurandUnit,
@@ -14,7 +15,9 @@ from promptpotter.domain.paired_reading import (
     ReadingState,
     ReadingStateKind,
 )
+from promptpotter.domain.scoring import CellSheet
 from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.measurement_context import MeasurementRole
 from promptpotter.shared.worded import Worded
 
 
@@ -25,8 +28,26 @@ class StallEffect(StrEnum):
     SKIPS = "skips"
 
 
-# Marked: `stall` is the ONE pacing rule L1 patience, `rounds_without_advance` and the life bank
-# read; the words (`ROUND_ADVANCE_INFO`) reach a closure only where a prompt prints one.
+class RoundEnding(StrEnum):
+    """How a round's election ended: on the arm it crowned, on its uncrowned leader the line moved
+    to, or held on its parent. Round 0 crowns the origin it adopts."""
+
+    CROWNED = "crowned"
+    MOVED = "moved"
+    HELD = "held"
+
+    @property
+    def moves_line(self) -> bool:
+        return self is not RoundEnding.HELD
+
+
+#: What a crown the origin panel does not separate from the origin does to the stall
+#: (`OptimizationConfig.not_separated_stall`).
+NotSeparatedStall = Literal["resets", "counts", "skips"]
+
+
+# Marked: `OverlapReading.stall` is the ONE pacing rule L1 patience, `rounds_without_advance` and
+# the life bank read; the words (`ROUND_ADVANCE_INFO`) reach a closure only where a prompt prints one.
 class RoundAdvance(StrEnum):
     """Whether a closed round ADVANCED the best-so-far line."""
 
@@ -34,19 +55,21 @@ class RoundAdvance(StrEnum):
     ADVANCED = "advanced"
     ADVANCED_UNPAIRED = "advanced_unpaired"
     NOT_SEPARATED = "not_separated"
+    MOVED_UNCROWNED = "moved_uncrowned"
     HELD = "held"
     UNREAD = "unread"
 
-    @property
-    def stall(self) -> StallEffect:
+    def stall(self, not_separated: NotSeparatedStall | None) -> StallEffect:
+        """*not_separated* is read by ``NOT_SEPARATED`` alone, which only a read lead closes."""
         match self:
             case RoundAdvance.ORIGIN:
                 return StallEffect.STARTS
-            case (
-                RoundAdvance.ADVANCED | RoundAdvance.ADVANCED_UNPAIRED | RoundAdvance.NOT_SEPARATED
-            ):
+            case RoundAdvance.ADVANCED | RoundAdvance.ADVANCED_UNPAIRED:
                 return StallEffect.RESETS
-            case RoundAdvance.HELD:
+            case RoundAdvance.NOT_SEPARATED:
+                assert not_separated is not None, "a read lead closes on the switch's effect"
+                return StallEffect(not_separated)
+            case RoundAdvance.MOVED_UNCROWNED | RoundAdvance.HELD:
                 return StallEffect.COUNTS
             case RoundAdvance.UNREAD:
                 return StallEffect.SKIPS
@@ -66,8 +89,7 @@ ROUND_ADVANCE_INFO: Worded[RoundAdvance, RoundAdvanceInfo] = Worded(
         ),
         RoundAdvance.ADVANCED: RoundAdvanceInfo(
             "advanced",
-            "The pick's lift over the origin clears zero on the origin panel, and its rate there "
-            "tops every earlier pick's.",
+            "The pick's lift over the origin clears zero on the origin panel.",
         ),
         RoundAdvance.ADVANCED_UNPAIRED: RoundAdvanceInfo(
             "advanced, unpaired",
@@ -78,7 +100,14 @@ ROUND_ADVANCE_INFO: Worded[RoundAdvance, RoundAdvanceInfo] = Worded(
             "An arm was promoted, and on the origin panel it has not separated from the origin and "
             "every earlier pick.",
         ),
-        RoundAdvance.HELD: RoundAdvanceInfo("held", "No arm was promoted."),
+        RoundAdvance.MOVED_UNCROWNED: RoundAdvanceInfo(
+            "moved, uncrowned",
+            "No arm was promoted; the line moved on to the round's leader, which the next round "
+            "mutates from, while the pick stays the last one promoted.",
+        ),
+        RoundAdvance.HELD: RoundAdvanceInfo(
+            "held", "No arm was promoted, and the line stands on its parent."
+        ),
         RoundAdvance.UNREAD: RoundAdvanceInfo(
             "unread",
             "An arm was promoted, and the origin-panel reading owed on it was not taken: the round "
@@ -89,18 +118,12 @@ ROUND_ADVANCE_INFO: Worded[RoundAdvance, RoundAdvanceInfo] = Worded(
 assert ROUND_ADVANCE_INFO.keys() == set(RoundAdvance)
 
 
-def round_advance(
-    round_num: int,
-    improved: bool,
-    lead: PairedReading,
-    bar: CrowningBar | None,
-) -> RoundAdvance:
-    """*improved* is the bar's promotion; only *lead* (pick over C0, origin panel) moves the line,
-    separated as the *bar*'s switch reads it."""
+def round_advance(round_num: int, ending: RoundEnding, lead: PairedReading) -> RoundAdvance:
+    """Only *lead* (pick over C0, origin panel) advances the line, separated where its interval clears."""
     if round_num == 0:
         return RoundAdvance.ORIGIN
-    if not improved:
-        return RoundAdvance.HELD
+    if ending is not RoundEnding.CROWNED:
+        return RoundAdvance.MOVED_UNCROWNED if ending.moves_line else RoundAdvance.HELD
     match lead.state.kind:
         case ReadingStateKind.UNPAIRED:
             return RoundAdvance.ADVANCED_UNPAIRED
@@ -108,9 +131,9 @@ def round_advance(
             return RoundAdvance.UNREAD
         case ReadingStateKind.READ:
             lift = lead.headline
-            assert lift is not None and bar is not None, "a read pair carries its lift and bar"
-            # ONE interval read: the pick over C0 as the bar reads it, never a point compare beside it.
-            separated = bar.separates(lift)
+            assert lift is not None, "a read pair carries its lift"
+            # ONE interval read: the pick over C0, never a point compare beside it.
+            separated = lift.side == "above"
             return RoundAdvance.ADVANCED if separated else RoundAdvance.NOT_SEPARATED
 
 
@@ -119,6 +142,18 @@ class PanelTrigger(StrEnum):
     election's ``vote: overlap``, where it is the verdict: only an arm it seats there is electable."""
 
     N_MIN = "n_min"
+
+
+def panel_trigger(arm: ArmState, rows: CellSheet, n_min: int) -> PanelTrigger | None:
+    """Why the origin panel reads *arm*, a proposal walked to its draw's end, off its draw's *rows*."""
+    if (
+        not isinstance(arm, Measured)
+        or walked_short(arm)
+        or arm.role is MeasurementRole.PARENT
+        or len(measured_cells(rows)) < n_min
+    ):
+        return None
+    return PanelTrigger.N_MIN
 
 
 class TriggeredReading(FrozenModel):
@@ -145,46 +180,54 @@ class OverlapReading(FrozenModel):
         description="Every arm off the line a `PanelTrigger` fired for this cycle, by first walk. "
         "It moves no `advance`."
     )
-    vs_parent: PairedReading | None = Field(
+    vs_previous_pick: PairedReading | None = Field(
         description="The standing pick (`b`) over the pick before it on the line (`a`), on the "
-        "same panel: the cells it gained and lost against its own parent. Null where that parent "
-        "is C0, which `lead` reads, or where the line went unread. It moves no `advance`."
+        "same panel: the cells it gained and lost against the last pick it displaced. Null where "
+        "that pick is C0, which `lead` reads, or where the line went unread. It moves no "
+        "`advance`."
     )
     advance: RoundAdvance
+    stall: StallEffect = Field(
+        description="What `advance` does to the stall clock L1 patience, `rounds_without_advance` "
+        "and the life bank read, stamped at the close under `not_separated_stall`."
+    )
 
     @classmethod
     def of(
         cls,
         round_num: int,
-        improved: bool,
+        ending: RoundEnding,
         *,
         positions: Sequence[int],
         lead: PairedReading,
         earlier: Sequence[PairedReading],
         triggered: Sequence[TriggeredReading],
-        vs_parent: PairedReading | None,
-        bar: CrowningBar | None,
+        vs_previous_pick: PairedReading | None,
+        not_separated: NotSeparatedStall | None,
     ) -> OverlapReading:
+        advance = round_advance(round_num, ending, lead)
         return cls(
             positions=tuple(positions),
             lead=lead,
             earlier=tuple(earlier),
             triggered=tuple(triggered),
-            vs_parent=vs_parent,
-            advance=round_advance(round_num, improved, lead, bar),
+            vs_previous_pick=vs_previous_pick,
+            advance=advance,
+            stall=advance.stall(not_separated),
         )
 
     @classmethod
-    def unpaired(cls, state: ReadingState, round_num: int, improved: bool) -> OverlapReading:
+    def unpaired(cls, state: ReadingState, round_num: int, ending: RoundEnding) -> OverlapReading:
+        """No lead is read, so no round closes ``NOT_SEPARATED`` and no switch is read."""
         return cls.of(
             round_num,
-            improved,
+            ending,
             positions=(),
             lead=PairedReading.unread(state),
             earlier=(),
             triggered=(),
-            vs_parent=None,
-            bar=None,
+            vs_previous_pick=None,
+            not_separated=None,
         )
 
 

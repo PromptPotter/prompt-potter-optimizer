@@ -54,7 +54,7 @@ def ended_on(
         overlap_results=overlap_results,
         election=election,
         health=head_health(round, head, cells[election.ended_on], picked=picked, priors=priors),
-        overlap=OverlapReading.unpaired(overlap, round, picked),
+        overlap=OverlapReading.unpaired(overlap, round, election.ending),
     )
     return rr.model_copy(update={"diagnostics": compute_round_diagnostics(rr, schema)})
 

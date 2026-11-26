@@ -213,7 +213,7 @@ BASELINE = {
     # 8 (+11): `host_surface.py::ListTools`, the MCP listing as its session's identity files it.
     # 9 (+13): `filable`'s docstring names what stands outside the map; `holding` -> `worded_refusal`
     # wraps `RUN_PHASE_INFO`'s detached row (+6); the launch test reads `RUN_VERB_KIND`.
-    # vote (+98): `theta_election.vote`, the bar's paired cells chosen once (`round.py::bar_pairing`)
+    # vote (+98): `theta_election.vote`, the bar's paired cells chosen once (`election.py::seated`)
     # and banked on `RoundWinner`; `origin_panel_cells`, the panel's own size, refused past the origin.
     # addr-3 (+59) less addr-4 (−20) = +39: a run declaration is a fold patch over `defaults.yaml`
     # that refuses a list it cannot lay (`layer_fold.py::patch_between`), and an arm is one
@@ -266,7 +266,14 @@ BASELINE = {
     # job-endings (+4): the migration also lands v0.8.20's `converged` on `optimizer_exhausted`.
     # ui-roots (+39): a round a rebase re-elected names its parent's candidates (`LineOwners`), and
     # a cycle a supersede retired refuses a start, naming its fork (`RunState.runs_on`).
-    "package_lines": 113640,
+    # eps-tie (+17): the coupling naming an ε a tied opening field reaches (`couplings.py::POBB`),
+    # and the ε knob saying a cut also ends an arm's election under `vote: overlap`.
+    # round (+162): each selector owns its round: the crown, how the round ended (`RoundEnding`,
+    # its replay) and the cells its coverage floor counts (`Selector.covered`); potter crowns on the
+    # round's pairs (`paired.py::read_pair`), and the `next_parent` and `not_separated_stall` switches
+    # the paper ablates join; net of the bench's crowning bar, `BarRead`, `cells_read`, `theta_point`
+    # and the high-water L2/L3 read beside the stall stream (`HighWater`).
+    "package_lines": 113819,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
@@ -284,7 +291,9 @@ BASELINE = {
     # ml-2 (+2): `pobb.row_choice` and `pobb.refit`, the measuring loop's row-choice switches.
     # ml-4 (+1): `pobb.shape`, whether a block's rows are shared or each walk's own.
     # ml-5 (+2): `pobb.dispatch` and `pobb.read_order`, when the race decides and in what order.
-    "config_leaf_fields": 105,
+    # crown (+2): `theta_election.crown` and `next_parent` and `not_separated_stall` join, the
+    # paper's ablations of what a round crowns, ends on and counts; the bench's `crowning_bar` goes.
+    "config_leaf_fields": 107,
     # `Settings` fields — what the environment can set.
     # tv-2 (+1): `EXHIBIT_CAMPAIGN`, the setting that names the exhibit.
     "settings_env": 39,
@@ -343,7 +352,9 @@ BASELINE = {
     # narr-3 (+3): `Parent.fitness`, the parent's fitness as the `FitnessFact` L2's box banks.
     # small-3 (+2): `RoundPanel`, the round's draw as a declared read, for `propose`'s parameter.
     # l4-outer (+1): `Target.transcript`, a row's one transcript source, its inner run on L4.
-    "p_reads": 323,
+    # round (+1): `LevelSeries.hold`, the lift a round that moved the line held on every row it
+    # met, one read for the readout and the dashboard.
+    "p_reads": 293,
     # `tests/test_*.py` — `tests/CLAUDE.md` names what each one owns.
     # webd-2 (+1): `test_stream_stamp.py`, its brief's own file, since store-2f lands in the others.
     # rates-1 (+1): `test_world_edges.py`, what a run meets at its edges: the rates it prices by

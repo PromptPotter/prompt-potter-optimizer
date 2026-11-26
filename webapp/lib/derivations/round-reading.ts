@@ -1,9 +1,9 @@
-import type { OptimizerFact, ServedDashboard } from "@/lib/api/types";
+import type { OptimizerFact, ServedDashboard, ServedRound } from "@/lib/api/types";
 
 export interface RoundReading {
   round: number;
-  // Round 0 holds no election, so its `improved` is `null`.
-  improved: boolean | null;
+  // Round 0 holds no election, so its `ending` is `null`.
+  ending: ServedRound["ending"];
   verdictReason: string | null;
   facts: OptimizerFact[];
 }
@@ -15,7 +15,7 @@ export function roundReading(dash: ServedDashboard | null, round: number): Round
   if (!r) return null;
   return {
     round: r.round,
-    improved: r.improved,
+    ending: r.ending,
     verdictReason: r.verdict_reason,
     facts: r.optimizer_facts,
   };

@@ -50,7 +50,7 @@ def _spark(values: list[float]) -> str:
 def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
     if not rd.p_best_trajectory:
         return []
-    # The ELECTED arm first: a round is won on θ lift, and the highest final P(best) is often not it.
+    # The ELECTED arm first: a round is won on its crown, and the highest final P(best) is often not it.
     ordered = sorted(
         rd.p_best_trajectory.items(),
         key=lambda kv: (kv[0] != rd.winner_id, -(kv[1][-1] if kv[1] else 0.0)),
@@ -115,6 +115,8 @@ def _render_round(rd: RoundDigestView, *, formula: str | None) -> list[str]:
             parts.append(
                 f"- θ caveat: `{rd.level.caveat.value}` — {THETA_CAVEAT_INFO[rd.level.caveat].label}"
             )
+    if rd.hold_up is not None:
+        parts.append(f"- held up: the promotion holds {rd.hold_up.text} over the parent it beat")
     if series := overlap_series(rd.overlap):
         parts.append(f"- overlap: {series}")
     if rd.verdict_reason:

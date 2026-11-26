@@ -520,10 +520,12 @@ class TestFamily(FrozenModel):
 
 
 class FlipCounts(FrozenModel):
-    """What moving from member `a` to member `b` did cell by cell, on a binary measurand."""
+    """What moving from member `a` to member `b` did cell by cell, by the sign of each difference."""
 
-    gained: int = Field(description="Cells `a` missed and `b` hit.")
-    lost: int = Field(description="Cells `a` hit and `b` missed.")
+    gained: int = Field(
+        description="Cells `b` read above `a`: on a binary measurand, `a` missed and `b` hit."
+    )
+    lost: int = Field(description="Cells `b` read below `a`.")
     unchanged: int
 
 
@@ -543,7 +545,7 @@ class MeasuredLift(FrozenModel):
         description="The smallest p an exact sign test can reach on the cells that differ "
         "from the null. Above the spec's `alpha`, `side` is `spans` whatever the interval says."
     )
-    flips: FlipCounts | None
+    flips: FlipCounts
     family: TestFamily | None
 
     @model_validator(mode="after")
@@ -552,8 +554,6 @@ class MeasuredLift(FrozenModel):
             raise ValueError("a lift is rate_b - rate_a over the cells both members scored")
         if self.estimate.form != "lift" or self.estimate.unit != self.measurand.unit:
             raise ValueError("a lift's estimate is a lift in its measurand's unit")
-        if (self.flips is not None) != self.measurand.binary:
-            raise ValueError("flips exist exactly where the measurand is declared binary")
         return self
 
 
@@ -659,8 +659,6 @@ class PairedReading(FrozenModel):
                 raise ValueError(
                     "a lift's side is read off its own test, and its p is never below its floor"
                 )
-            if lift.flips is not None and (
-                lift.flips.gained + lift.flips.lost + lift.flips.unchanged != self.coverage.scored
-            ):
+            if lift.flips.gained + lift.flips.lost + lift.flips.unchanged != self.coverage.scored:
                 raise ValueError("flips partition the scored cells")
         return self

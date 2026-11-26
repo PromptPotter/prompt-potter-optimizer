@@ -295,7 +295,6 @@ from promptpotter.domain.layer_fold import (
 )
 from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint, Variation
 from promptpotter.domain.optimizer_template import TEMPLATE_TOKEN_RE
-from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import PauseCause, StopReason
 from promptpotter.domain.pipeline_manifest import resolved_key
 from promptpotter.domain.pipeline_overlay import (
@@ -4678,8 +4677,7 @@ def _gepa_seat(stores: Stores, population: list[OptSearchPoint]) -> RoundContext
             round_result(
                 0,
                 arms=[arm_state("parent", individual=population[0])],
-                improved=False,
-                voted={"ended_on": ArmKey(population[0].id)},
+                selected=population[0].id,
             )
         ],
         population=population,
@@ -4707,7 +4705,7 @@ def test_gepas_reflection_round_robins_a_lineage_across_the_prompt_nodes(
             )
             for ind in (origin, *held)
         ]
-        return [round_result(0, arms=arms, improved=False, voted={"ended_on": ArmKey(origin.id)})]
+        return [round_result(0, arms=arms, selected=origin.id)]
 
     offline.llm.says = lambda _body: f"```\nRewritten in round {len(population)}.\n```"
     set_cycle(reflected_on.cycle, line=measured(reflected_on.cycle.parent))

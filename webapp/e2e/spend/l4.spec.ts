@@ -156,11 +156,11 @@ test.describe("the recursion, end to end", () => {
         `outer round ${r.round} generated ${r.candidates.length} candidate(s) — with nothing to choose between, selection and election are untested`,
       ).toBeGreaterThan(1);
       expect(
-        r.improved,
+        r.ending,
         `outer round ${r.round} closed with no verdict — cells were scored but no election was held`,
       ).not.toBeNull();
       console.log(
-        `[e2e] outer round ${r.round}: ${r.candidates.length} candidates, improved=${r.improved}`,
+        `[e2e] outer round ${r.round}: ${r.candidates.length} candidates, ending=${r.ending}`,
       );
     }
 

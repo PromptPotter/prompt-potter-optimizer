@@ -784,8 +784,6 @@ export interface RunStanding {
    * measured as: the origin until a round selects. Null before round 0
    * closes. */
   selection: ArmName | null;
-  /** The pick `selection` was promoted over. Null while it is the origin. */
-  parent: ArmName | null;
   /** What `selection` changed, in its proposer's words (its lineage's
    * `changes_description`). Empty while it is the origin, which changed
    * nothing. */
@@ -794,11 +792,13 @@ export interface RunStanding {
    * reading of that pair. The state says why where there is none:
    * `same_individual` while the selection is the origin. */
   vs_origin: PairedReading;
-  /** `selection` (`b`) over `parent` (`a`) on the origin panel, from the round
-   * reading `vs_origin` comes from (`OverlapReading.vs_parent`); `vs_origin`
-   * itself where the parent is C0. Null while the selection is the origin, or
-   * where that reading pairs no such two. */
-  vs_parent: PairedReading | null;
+  /** `selection` (`b`) over the declared pick it displaced (`a`), which its lineage
+   * parent is only where the line never moved uncrowned between them, on the
+   * origin panel, from the round reading `vs_origin` comes from
+   * (`OverlapReading.vs_previous_pick`); `vs_origin` itself where the
+   * previous pick is C0. Null while the selection is the origin, or where
+   * that reading pairs no such two. */
+  vs_previous_pick: PairedReading | null;
   /** Rounds closed AFTER the origin — the unit a rounds cap counts. */
   rounds_closed: number;
   /** Of those, how many PROMOTED an arm. A bare point estimate (lift > 0, no
@@ -925,7 +925,7 @@ export interface MeasuredLift {
    * null. Above the spec's `alpha`, `side` is `spans` whatever the interval
    * says. */
   p_floor: number;
-  flips: FlipCounts | null;
+  flips: FlipCounts;
   family: TestFamily | null;
 }
 
@@ -959,12 +959,12 @@ export interface Estimate {
   form: 'level' | 'lift';
 }
 
-/** What moving from member `a` to member `b` did cell by cell, on a binary
- * measurand. */
+/** What moving from member `a` to member `b` did cell by cell, by the sign of
+ * each difference. */
 export interface FlipCounts {
-  /** Cells `a` missed and `b` hit. */
+  /** Cells `b` read above `a`: on a binary measurand, `a` missed and `b` hit. */
   gained: number;
-  /** Cells `a` hit and `b` missed. */
+  /** Cells `b` read below `a`. */
   lost: number;
   unchanged: number;
 }
@@ -1812,14 +1812,14 @@ export interface ServedDashboard {
 export interface ServedRound {
   round: number;
   /** The ONE arm this round is read off, as its selector named it and never re-
-   * ranked: the selection where the round selected, on a held round the
+   * ranked: the crown, the leader the line moved to, on a held round the
    * challenger `verdict_reason` names as its best, at round 0 the origin.
    * `panel_precision` is measured on it. Null where the selector could read
    * no arm. */
   leading: ArmName | null;
-  /** The arm the election crowned; null on a round that held. */
-  selected: ArmName | null;
-  improved: boolean | null;
+  /** How the round ended on `leading` (`Election.ending`); null at round 0, which
+   * holds no election. */
+  ending: 'crowned' | 'moved' | 'held' | null;
   verdict_reason: string | null;
   candidates: DashboardCandidate[];
   selection: number[];
@@ -1884,11 +1884,14 @@ export interface OverlapReading {
    * It moves no `advance`. */
   triggered: TriggeredReading[];
   /** The standing pick (`b`) over the pick before it on the line (`a`), on the same
-   * panel: the cells it gained and lost against its own parent. Null where
-   * that parent is C0, which `lead` reads, or where the line went unread. It
-   * moves no `advance`. */
-  vs_parent: PairedReading | null;
-  advance: 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
+   * panel: the cells it gained and lost against the last pick it displaced.
+   * Null where that pick is C0, which `lead` reads, or where the line went
+   * unread. It moves no `advance`. */
+  vs_previous_pick: PairedReading | null;
+  advance: 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'moved_uncrowned' | 'held' | 'unread';
+  /** What `advance` does to the stall clock L1 patience, `rounds_without_advance`
+   * and the life bank read, stamped at the close under `not_separated_stall`. */
+  stall: 'starts' | 'resets' | 'counts' | 'skips';
 }
 
 /** Fired once, re-read every round the panel reads: a later cut or lost election
@@ -2518,27 +2521,31 @@ export interface RoundView {
   unfiled: boolean;
 }
 
-/** What a round's selector decided over its arms, by key; ``selected`` null = the
- * round HELD. */
+/** What a round's selector decided over its arms, by key: its `leading` arm and
+ * how the round ended on it. */
 export interface Election {
-  selected: string | null;
   /** The ONE arm this round is read off, as its selector named it and never re-
-   * ranked: the selection where there is one, on a held round the challenger
-   * that came closest on the selector's own objective, at round 0 the origin.
-   * Rank 1 of `RoundView.candidates`. `null` where the selector could read no
-   * arm. NOT whose numbers the headline carries: that is `ended_on`. */
+   * ranked: the crown, the leader the line moved to, on a held round the
+   * challenger that came closest on the selector's own objective, at round 0
+   * the origin. Rank 1 of `RoundView.candidates`. `null` where the selector
+   * could read no arm. */
   leading: string | null;
-  /** WHOSE numbers the round's headline carries: the selection where the round
-   * selected; on a held round the retained parent, re-read on this round's
-   * cells as its reference arm — never the leading challenger. */
-  ended_on: string;
+  /** `crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`:
+   * the line moved to `leading` uncrowned (potter's `next_parent`); `held`:
+   * it stands on `parent`, re-read on this round's cells. */
+  ending: 'crowned' | 'moved' | 'held';
+  /** The arm every arm was read against, which a held round ends on; null at round
+   * 0, which reads none. */
+  parent: string | null;
   electable: number;
   fit: Record<string, ArmFit>;
   elects_on: 'fitness' | 'composite' | 'ability';
+  /** `leading` (`b`) over `parent` (`a`) on the cells its selector paired them on:
+   * the reading the round was decided on. Null where the selector banks none. */
+  deciding_pair: PairedReading | null;
   verdict_reason: string | null;
   reelection: Reelection | null;
   ruler: RulerStamp;
-  bar: BarRead | null;
 }
 
 /** What the election read of one arm: θ lives here and nowhere else. */
@@ -2562,12 +2569,6 @@ export interface Reelection {
 export interface Principal {
   id: string;
   display: string;
-}
-
-/** The bar's verdict on one subject. */
-export interface BarRead {
-  statistic: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes';
-  clears: boolean;
 }
 
 /** One arm as every round read serves it, in flight (`current_round.candidates`)
@@ -3670,25 +3671,25 @@ export interface OptimizationConfig {
    * the dashboard is the tell). */
   budget: Budget;
   /** Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1
-   * life per round that promotes an arm, -1 per round that does not, banked
-   * up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm
-   * of which reached the election banks nothing. ``None`` → ``budget.rounds``
-   * governs. It still caps from above, so a lives run wanting the full bank
-   * sets ``budget: {rounds: unbounded}``. */
+   * life per round whose stall `resets` (`OverlapReading.stall`), -1 per
+   * round it `counts`, banked up to ``cap``, and the run stops
+   * ``lives_exhausted`` at 0. A round no arm of which reached the election
+   * banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from
+   * above, so a lives run wanting the full bank sets ``budget: {rounds:
+   * unbounded}``. */
   lives: LivesConfig | null;
   /** Stop ``target_hit`` once the declared pick's level over the origin, on the
    * origin's panel, reaches this at its paired interval's lower bound.
    * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
    * only on its record's rule. */
   halt_at_fitness: number | null;
-  /** The ONE bar a crown, an advance of the line and a promotion read
-   * (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's
-   * θ posterior capped by the discordant cells. ``sign_test``: an exact
-   * paired sign test on the discordant cells, Holm-corrected across the
-   * round's arms. ``e_process``: an anytime-valid e-process on the paired
-   * discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's
-   * banked lift prior. */
-  crowning_bar: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes';
+  /** What a crown the origin panel does not separate from the origin (its lift's
+   * interval spans zero, `RoundAdvance.NOT_SEPARATED`) does to the stall
+   * clock L1 patience, `rounds_without_advance` and the life bank read, for
+   * every optimizer: ``counts`` as a stall (under ``lives``, a life spent),
+   * ``resets`` it as an advance does (a life banked), or ``skips`` it. A
+   * crown is each selector's own; the bench re-judges none. */
+  not_separated_stall: 'resets' | 'counts' | 'skips';
   degradation_threshold: number;
   /** End a candidate at the first FATAL sample (a backend 4xx, content-filtered,
    * structurally broken) without spending the rest of its budget. Active
@@ -5308,25 +5309,25 @@ export interface OptimizationLayer {
    * the dashboard is the tell). */
   budget: Budget | null;
   /** Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1
-   * life per round that promotes an arm, -1 per round that does not, banked
-   * up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm
-   * of which reached the election banks nothing. ``None`` → ``budget.rounds``
-   * governs. It still caps from above, so a lives run wanting the full bank
-   * sets ``budget: {rounds: unbounded}``. */
+   * life per round whose stall `resets` (`OverlapReading.stall`), -1 per
+   * round it `counts`, banked up to ``cap``, and the run stops
+   * ``lives_exhausted`` at 0. A round no arm of which reached the election
+   * banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from
+   * above, so a lives run wanting the full bank sets ``budget: {rounds:
+   * unbounded}``. */
   lives: _LivesConfigFields | null;
   /** Stop ``target_hit`` once the declared pick's level over the origin, on the
    * origin's panel, reaches this at its paired interval's lower bound.
    * ``None`` → no such stop. Refused on an arm of a head-to-head, which stops
    * only on its record's rule. */
   halt_at_fitness: number | null;
-  /** The ONE bar a crown, an advance of the line and a promotion read
-   * (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's
-   * θ posterior capped by the discordant cells. ``sign_test``: an exact
-   * paired sign test on the discordant cells, Holm-corrected across the
-   * round's arms. ``e_process``: an anytime-valid e-process on the paired
-   * discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's
-   * banked lift prior. */
-  crowning_bar: 'posterior' | 'sign_test' | 'e_process' | 'empirical_bayes' | null;
+  /** What a crown the origin panel does not separate from the origin (its lift's
+   * interval spans zero, `RoundAdvance.NOT_SEPARATED`) does to the stall
+   * clock L1 patience, `rounds_without_advance` and the life bank read, for
+   * every optimizer: ``counts`` as a stall (under ``lives``, a life spent),
+   * ``resets`` it as an advance does (a life banked), or ``skips`` it. A
+   * crown is each selector's own; the bench re-judges none. */
+  not_separated_stall: 'resets' | 'counts' | 'skips' | null;
   degradation_threshold: number | null;
   /** End a candidate at the first FATAL sample (a backend 4xx, content-filtered,
    * structurally broken) without spending the rest of its budget. Active
@@ -5757,7 +5758,7 @@ export const FEED_SUBJECT_HEADER = "X-Feed-Subject";
 export const FEED_VERSIONS_HEADER = "X-Feed-Versions";
 // The API shape this bundle is built against, which every answer names
 // (presentation/api/served_contract.py::SERVED_CONTRACT).
-export const SERVED_CONTRACT = "caa72defa7059b65";
+export const SERVED_CONTRACT = "5770c04d09268695";
 
 // promptpotter.domain.checkin_draft::SetupStep
 export type SetupStep = 'optimizer' | 'data' | 'scoring' | 'pipeline' | 'head_to_head' | 'run';
@@ -5814,7 +5815,7 @@ export type StartBlock = 'verifier_graded' | 'empty' | 'missing_extra' | 'unread
 export type ExportTier = 'chat' | 'report' | 'notebook' | 'deploy' | 'package';
 
 // promptpotter.domain.origin_panel::RoundAdvance
-export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'held' | 'unread';
+export type RoundAdvance = 'origin' | 'advanced' | 'advanced_unpaired' | 'not_separated' | 'moved_uncrowned' | 'held' | 'unread';
 
 // promptpotter.domain.paired_reading::CellSetName
 export type CellSetName = 'origin_panel' | 'reference_cells' | 'bench_split' | 'measured_by_both';
@@ -6336,10 +6337,11 @@ export const EXPORT_TIER_INFO: Record<ExportTier, ExportTierInfo> = {
 // Mirror of domain/origin_panel.py::ROUND_ADVANCE_INFO, in display order.
 export const ROUND_ADVANCE_INFO: Record<RoundAdvance, RoundAdvanceInfo> = {
   "origin": { label: "origin", sentence: "Round 0 measured the origin every later pick is read against." },
-  "advanced": { label: "advanced", sentence: "The pick's lift over the origin clears zero on the origin panel, and its rate there tops every earlier pick's." },
+  "advanced": { label: "advanced", sentence: "The pick's lift over the origin clears zero on the origin panel." },
   "advanced_unpaired": { label: "advanced, unpaired", sentence: "An arm was promoted, and the origin panel held nothing to pair it with the origin on." },
   "not_separated": { label: "not separated", sentence: "An arm was promoted, and on the origin panel it has not separated from the origin and every earlier pick." },
-  "held": { label: "held", sentence: "No arm was promoted." },
+  "moved_uncrowned": { label: "moved, uncrowned", sentence: "No arm was promoted; the line moved on to the round's leader, which the next round mutates from, while the pick stays the last one promoted." },
+  "held": { label: "held", sentence: "No arm was promoted, and the line stands on its parent." },
   "unread": { label: "unread", sentence: "An arm was promoted, and the origin-panel reading owed on it was not taken: the round neither advances the line nor counts as a stall." },
 };
 
@@ -6640,7 +6642,7 @@ export const WORD_ORDER: ReadonlyMap<object, readonly string[]> = new Map<object
   [SAMPLE_MOVEMENT_LABELS, ["new", "readded", "gained", "lost", "kept"]],
   [START_BLOCK_WORDS, ["verifier_graded", "empty", "missing_extra", "unreadable", "backend_unreachable"]],
   [EXPORT_TIER_INFO, ["chat", "report", "notebook", "deploy", "package"]],
-  [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "held", "unread"]],
+  [ROUND_ADVANCE_INFO, ["origin", "advanced", "advanced_unpaired", "not_separated", "moved_uncrowned", "held", "unread"]],
   [CELL_SET_NAME_WORDS, ["origin_panel", "reference_cells", "bench_split", "measured_by_both"]],
   [LIFT_SIDE_TONE, ["above", "below", "spans"]],
   [READING_STATE_INFO, ["read", "not_asked", "pending", "not_held", "no_holdout", "held_elsewhere", "pass_stopped", "past_tolerance", "member_unscoreable", "under_two_cells", "no_selection", "same_individual", "run_failed", "scope_differs", "measurand_differs", "dataset_differs", "cell_set_differs", "instrument_differs"]],

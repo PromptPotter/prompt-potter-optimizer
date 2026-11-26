@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.domain.arms import arm_name, is_leader_eligible
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, RoundArm
 from promptpotter.domain.pipeline_schema import (
     SCHEMA_RENAME_PARAM,
@@ -113,12 +114,19 @@ UNELECTED_SHOWN = 2
 
 
 class ElectionRow(NamedTuple):
-    """One round's election as a layer that may re-elect reads it: the pick, and the best of the
-    proposed arms left unelected, in the round's own rank."""
+    """One round's election as a layer that may re-elect reads it: the pick, else the arm the
+    line moved on to uncrowned, and the best of the proposed arms left unelected, in the round's
+    own rank."""
 
     round: RoundOutcome
     picked: ArmKey | None
+    moved_to: ArmKey | None
     unelected: tuple[ArmKey, ...]
+
+    @property
+    def stood_on(self) -> ArmKey | None:
+        """The round's own arm it ended on, crowned or not: the next rounds' parent."""
+        return self.picked or self.moved_to
 
 
 def election_table_rows(rounds: Sequence[RoundOutcome]) -> list[ElectionRow]:
@@ -127,13 +135,16 @@ def election_table_rows(rounds: Sequence[RoundOutcome]) -> list[ElectionRow]:
         if rr.round == 0 or rr.election is None:
             continue
         picked = rr.election.selected
+        moved_to = rr.election.leading if rr.election.ending is RoundEnding.MOVED else None
         ranked = (row.reading.arm.key for row in rr.ranked())
         unelected = tuple(
             key
             for key in ranked
-            if key != picked and key in rr.proposed and is_leader_eligible(rr.proposed[key])
+            if key not in (picked, moved_to)
+            and key in rr.proposed
+            and is_leader_eligible(rr.proposed[key])
         )
-        rows.append(ElectionRow(rr, picked, unelected[:UNELECTED_SHOWN]))
+        rows.append(ElectionRow(rr, picked, moved_to, unelected[:UNELECTED_SHOWN]))
     return rows[-ELECTION_ROUNDS_SHOWN:]
 
 
@@ -141,7 +152,7 @@ def reelection_roster(rounds: Sequence[RoundOutcome], *, parent: str) -> dict[st
     """By label, every arm the ELECTIONS panel lists, the one the line stands on now left out."""
     roster: dict[ArmKey, tuple[str, RoundArm]] = {}
     for row in election_table_rows(rounds):
-        for key in ((row.picked,) if row.picked is not None else ()) + row.unelected:
+        for key in ((row.stood_on,) if row.stood_on is not None else ()) + row.unelected:
             if key != parent and key not in roster:
                 label = arm_name(key, row.round.arms[key], row.round.round).label
                 roster[key] = (label, RoundArm(round=row.round.round, arm=key))

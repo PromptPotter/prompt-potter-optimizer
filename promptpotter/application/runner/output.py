@@ -587,6 +587,12 @@ def from_disk_log(
                     else None
                 ),
                 level=None if level_series is None else level_series.levels[t.round],
+                hold_up=None
+                if level_series is None
+                or not t.round
+                or election is None
+                or not election.ending.moves_line
+                else level_series.hold(t.round),
                 verdict_reason=None if election is None else election.verdict_reason,
                 overlap=t.overlap,
                 p_best_trajectory=traj,

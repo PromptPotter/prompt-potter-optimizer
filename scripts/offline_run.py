@@ -1198,7 +1198,8 @@ def spread_reads_the_selection(stores: Stores, hops: Iterable[CycleHop]) -> None
         for at in elections:
             past = lines[:at]
             if not any(
-                r.get("record_type") == "election" and r["round"] and r["selected"] for r in past
+                r.get("record_type") == "election" and r["round"] and r["ending"] == "crowned"
+                for r in past
             ):
                 continue
             scope = cells_scope(
@@ -1238,8 +1239,9 @@ def spread_reads_the_selection(stores: Stores, hops: Iterable[CycleHop]) -> None
 
 async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) -> None:
     """The line's warm ruler separates arms, so each door reads the noise walk and the hold off
-    one served round: the readouts of *line* name μ0 and τ, the embedded and MCP reads of *hop*
-    serve both."""
+    one served round: the readouts of *line* name μ0 and τ, *hop*'s `log.md` every hold the
+    last close's series reads (a close's readout reads its own), the embedded and MCP reads of
+    *hop* serve both."""
     embedded = await answer_read(
         CycleDashboardParams(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id), stores
     )
@@ -1252,13 +1254,14 @@ async def noise_walk_doors(stores: Stores, hop: CycleHop, line: list[CycleHop]) 
     hosted = json.loads(json.dumps(mcp.value))["rounds"]
     if served != [{k: r[k] for k in walk} for r in hosted]:
         raise SystemExit("offline run: the MCP and embedded doors read two noise walks")
-    held = [r for r in served if r["hold_up"]]
+    held = [r.hold_up for r in embedded.rounds if r.hold_up is not None]
+    log = stores.campaigns.layout(hop).log_md.read_text("utf-8")
     said = {
         "lift_prior": any(r["lift_prior"] for r in served),
         "hold_up": bool(held),
         "μ0": "noise walk: μ0 " in readout,
         "τ": ", τ " in readout,
-        "held up": "held up: " in readout,
+        "held up": all(f"held up: the promotion holds {h.text} " in log for h in held),
     }
     if missing := [name for name, read in said.items() if not read]:
         raise SystemExit(f"offline run: the separating round's doors read no {missing}")
@@ -1727,7 +1730,8 @@ ARM_KEYS = (
 )  # fmt: skip
 ROUND_KEYS = ("round", "overlap", "overlap_results", "optimizer_state")
 ELECTION_KEYS = (
-    "selected", "leading", "ended_on", "electable", "fit", "elects_on", "verdict_reason",
+    "leading", "ending", "parent", "electable", "fit", "elects_on", "deciding_pair",
+    "verdict_reason",
 )  # fmt: skip
 
 
@@ -1753,7 +1757,7 @@ def _round(d: dict[str, Any], ids: dict[str, str]) -> dict[str, Any]:
 
 LEDGER_KEYS: dict[str, tuple[str, tuple[str, ...]]] = {
     "decision": ("decisions", ("round", "kind", "outcome", "inputs_ref")),
-    "election": ("elections", ("round", "selected", "ended_on", "fit")),
+    "election": ("elections", ("round", "leading", "ending", "parent", "fit")),
     "arm": ("arms", ("round", "arm", "state")),
     "phase": ("phases", ("round", "phase", "step")),
     "round_entered": ("rounds_entered", ("round",)),

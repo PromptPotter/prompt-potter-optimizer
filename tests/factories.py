@@ -101,7 +101,6 @@ from promptpotter.domain.campaign import Campaign, Optimize, Purpose, RunDeclara
 from promptpotter.domain.campaign_config import CampaignConfig, CycleConfig
 from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import PinnedCell, Seat
-from promptpotter.domain.crowning_bar import BarRead
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop
 from promptpotter.domain.cycle_result import CycleResult, WallClock
 from promptpotter.domain.job import CampaignLaunch, EmbeddedRun, LaunchMove
@@ -109,7 +108,7 @@ from promptpotter.domain.l4.cells import InnerCell, InnerCells
 from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, OptimizerState, StateSlice
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
-from promptpotter.domain.origin_panel import OverlapReading
+from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
 from promptpotter.domain.paired_reading import (
     ArmKey,
     ArmName,
@@ -1154,16 +1153,25 @@ PARENT = arm_key("parent")
 
 
 def election(
-    selected: str | None = None, *, ended_on: str | None = None, **overrides: Any
+    selected: str | None = None,
+    *,
+    moved_to: str | None = None,
+    parent: str = PARENT,
+    **overrides: Any,
 ) -> Election:
+    """*selected* crowns, else the line moves to *moved_to* uncrowned, else it holds on *parent*."""
     pick = None if selected is None else ArmKey(selected)
+    moved = None if moved_to is None else ArmKey(moved_to)
     fields: dict[str, Any] = {
-        "selected": pick,
-        "leading": pick,
-        "ended_on": ArmKey(ended_on) if ended_on else pick or PARENT,
+        "leading": pick or moved,
+        "ending": RoundEnding.CROWNED
+        if pick is not None
+        else RoundEnding.MOVED
+        if moved is not None
+        else RoundEnding.HELD,
+        "parent": ArmKey(parent),
         "electable": int(pick is not None),
         "elects_on": "ability",
-        "bar": None if pick is None else BarRead(statistic="posterior", clears=True),
         "ruler": RulerStamp(
             id=flat_ruler_id("acc"),
             version=0,
@@ -1247,7 +1255,7 @@ def round_result(
         "overlap": OverlapReading.unpaired(
             ReadingState.NOT_HELD if rnd else ReadingState.SAME_INDIVIDUAL,
             rnd,
-            rnd > 0 and vote.selected is not None,
+            vote.ending,
         ),
         "cells": {
             ArmKey(arm.individual.id): sheet(

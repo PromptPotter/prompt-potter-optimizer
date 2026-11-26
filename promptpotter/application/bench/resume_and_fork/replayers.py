@@ -19,6 +19,8 @@ class ReplayMismatch(NamedTuple):
     recorded_outcome: Any
     current_outcome: Any
     inputs_ref: dict[str, Any]
+    # `Replayed.stands_on` of `current_outcome`: the one-step counterfactual's arm.
+    stands_on: str | None
 
 
 class ReplayContext(NamedTuple):
@@ -35,6 +37,11 @@ class Replayed(CheckpointInputs, kind=None):
     @abc.abstractmethod
     def replay(self, ctx: ReplayContext) -> Any: ...
 
+    def stands_on(self, outcome: object) -> str | None:  # noqa: ARG002 -- a kind deciding an arm reads it
+        """The arm the round ends on where *outcome* decides it; a kind deciding no such arm
+        names none."""
+        return None
+
 
 def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
     for rec in ctx.decisions:
@@ -48,6 +55,7 @@ def _iter_mismatches(ctx: ReplayContext) -> Iterator[ReplayMismatch]:
                 recorded_outcome=rec.outcome,
                 current_outcome=current,
                 inputs_ref=rec.inputs_ref.model_dump(mode="json"),
+                stands_on=rec.inputs_ref.stands_on(current),
             )
 
 

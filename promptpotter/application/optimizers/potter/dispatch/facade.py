@@ -38,6 +38,7 @@ from promptpotter.application.optimizers.potter.dispatch.layout import (
 )
 from promptpotter.application.optimizers.potter.dispatch.prompts import node_layout
 from promptpotter.application.optimizers.potter.knobs import (
+    ElectionKnobs,
     EscalationKnobs,
     L1GenerateKnobs,
     PanelShareKnobs,
@@ -53,6 +54,7 @@ from promptpotter.application.optimizers.potter.records import (
 )
 from promptpotter.application.optimizers.variation.members import Cross, crossable
 from promptpotter.domain.connector import MeasuredUnit
+from promptpotter.domain.crowning_bar import CROWNING_RULE, THETA_CROWNS
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint
 from promptpotter.domain.optimizer_state import Critique, CritiqueReadout, StatePart
 from promptpotter.domain.optimizer_template import OptimizerPromptTemplate
@@ -423,6 +425,15 @@ class PotterView:
     def admission(self) -> float | None:
         """The selector's own promotion bar (`Bounds.admission`); ``None``: it promotes on no θ bar."""
         return self.ctx.read(Bounds).admission
+
+    @property
+    def crowning_rule(self) -> str:
+        """How the round's election crowns, in words (`crowning_bar.py::CROWNING_RULE`)."""
+        return CROWNING_RULE[self.ctx.knobs(ElectionKnobs).crown]
+
+    @property
+    def crown_reads_theta(self) -> bool:
+        return self.ctx.knobs(ElectionKnobs).crown in THETA_CROWNS
 
     @property
     def budget_rounds(self) -> int | None:

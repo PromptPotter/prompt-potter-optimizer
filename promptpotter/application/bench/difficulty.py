@@ -192,14 +192,9 @@ def regraded_ruler(
 
 
 def parent_line(rounds: Sequence[RoundResult]) -> set[str]:
-    """The origin and every pick since, by archive address: the individuals each round judges against."""
-    return {
-        head.config_key
-        for rr in rounds
-        if rr.election is not None
-        and rr.election.selected is not None
-        and (head := rr.head) is not None
-    }
+    """The origin and every arm a round ended on since, by archive address: the individuals each
+    round judges against, a held round's re-read parent and an uncrowned leader included."""
+    return {head.config_key for rr in rounds if (head := rr.head) is not None}
 
 
 @dataclass

@@ -7,6 +7,7 @@ from promptpotter.domain.cell_fold import ScoreSummary
 from promptpotter.domain.cells import HardSampleOrder, HardSamples
 from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.origin_panel import OverlapReading
+from promptpotter.domain.paired_reading import Estimate
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.ruler import AbilityReading
@@ -40,6 +41,8 @@ class RoundDigestView:
     # ``None`` where the round matched nothing: the cycle origin is a different basis, not a default.
     composite_floor: float | None = None
     level: AbilityReading | None = None
+    # `LevelSeries.hold` of a round that promoted, on the cycle's last series (`ServedRound.hold_up`).
+    hold_up: Estimate | None = None
     verdict_reason: str | None = None
     # Empty for resumed rounds.
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)

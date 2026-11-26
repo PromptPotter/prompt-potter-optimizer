@@ -101,12 +101,11 @@ class L3Memory(StateSlice, kind="l3_memory"):
 
 
 class LayerCounters(FrozenModel):
-    """The peak a stall is read against is seeded at the layer's first patience fire and moved only by an advance clearing it."""
+    """``entered_round`` is the line round the layer's patience was last seeded or reset at, ``None`` until its first read: a later round stamped `StallEffect.RESETS` resets it."""
 
     fires: int = 0
     stall_count: int = 0
-    best_composite_fitness_at_entry: float | None = None
-    theta_peak_round_at_entry: int | None = None
+    entered_round: int | None = None
 
 
 class Ladder(StateSlice, kind="ladder"):

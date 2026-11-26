@@ -11,7 +11,7 @@ import math
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, NamedTuple, assert_never
+from typing import TYPE_CHECKING, NamedTuple
 
 from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import ruler_clock
@@ -53,6 +53,7 @@ from promptpotter.application.scoring.catch_up import CatchUpPool
 from promptpotter.application.scoring.metrics import arm_folds
 from promptpotter.application.scoring.paired import (
     MemberRows,
+    RoundPairs,
     absent_pair,
     fresh_cells,
     grade_measurands,
@@ -68,7 +69,6 @@ from promptpotter.application.scoring.search_point_scorer import (
     reread_cells,
     score_search_points,
 )
-from promptpotter.application.scoring.selection import cells_read, discordant
 from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import (
     ArmState,
@@ -86,8 +86,6 @@ from promptpotter.domain.arms import (
 )
 from promptpotter.domain.cell_fold import measured_cells, unscoreable_cells
 from promptpotter.domain.command_kinds import SubmittedArm
-from promptpotter.domain.crowning_bar import BarRead, BarSubject, Vote
-from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.opt_search_point import Locus, OptSearchPoint, loci_of
 from promptpotter.domain.optimizer_state import RoundOutput
 from promptpotter.domain.origin_panel import (
@@ -95,6 +93,7 @@ from promptpotter.domain.origin_panel import (
     PanelTrigger,
     TriggeredReading,
     origin_panel,
+    panel_trigger,
 )
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
@@ -139,7 +138,7 @@ from promptpotter.domain.run_standing import (
     rounds_without_advance,
 )
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell, Scorer
+from promptpotter.domain.scoring import NO_CELLS, CellSheet, GradedCell
 from promptpotter.domain.search_point import SHOTS_KEY, JobSearchPoint
 from promptpotter.domain.wounds import ValidationFailure, ValidationReason
 from promptpotter.infrastructure.llm.heartbeat import CallBeat, heartbeat
@@ -307,10 +306,10 @@ async def measure_overlap(
 ) -> tuple[OverlapReading, dict[str, CellSheet]]:
     """After the election, on the panel it pooled; a member the election's pass read is never topped up again."""
     passed = dict(round_result.overlap_results)
-    if round_result.head is None:
-        return OverlapReading.unpaired(
-            ReadingState.NO_SELECTION, round_result.round, round_result.improved
-        ), passed
+    election = round_result.election
+    assert election is not None, "the origin panel is read after the round's election"
+    ending = election.ending
+    not_separated = cycle.config.optimization.not_separated_stall
     pairs = _OriginPanelPairs(cycle, scoring_pool)
     # The line INCLUDING this round, which may have made its own result the new best.
     ordered = sorted(best_line(cycle.rounds), key=lambda s: s.arm.round)
@@ -325,13 +324,13 @@ async def measure_overlap(
     def not_read(state: ReadingState) -> OverlapReading:
         return OverlapReading.of(
             round_result.round,
-            round_result.improved,
+            ending,
             positions=panel,
             lead=pairs.absent(state, origin, ordered[-1], held, keep, spent()),
             earlier=(),
             triggered=(),
-            vs_parent=None,
-            bar=None,
+            vs_previous_pick=None,
+            not_separated=not_separated,
         )
 
     def gaps(step: LineStep) -> set[int]:
@@ -381,7 +380,7 @@ async def measure_overlap(
     readings = [pairs.read(c0, pick, topped_up, keep, paid) for pick in picks]
     reading = OverlapReading.of(
         round_result.round,
-        round_result.improved,
+        ending,
         positions=panel,
         lead=readings[-1]
         if readings
@@ -402,24 +401,12 @@ async def measure_overlap(
                 for step, trigger in stopped
             ),
         ],
-        vs_parent=pairs.read(picks[-2], picks[-1], topped_up, keep, paid)
+        vs_previous_pick=pairs.read(picks[-2], picks[-1], topped_up, keep, paid)
         if len(picks) >= 2
         else None,
-        bar=cycle.crowning_bar(None),
+        not_separated=not_separated,
     )
     return reading, bought
-
-
-def panel_trigger(arm: ArmState, rows: CellSheet, n_min: int) -> PanelTrigger | None:
-    """Why the origin panel reads *arm*, a proposal walked to its draw's end, off its draw's *rows*."""
-    if (
-        not isinstance(arm, Measured)
-        or walked_short(arm)
-        or arm.role is MeasurementRole.PARENT
-        or len(measured_cells(rows)) < n_min
-    ):
-        return None
-    return PanelTrigger.N_MIN
 
 
 def panel_triggers(
@@ -434,26 +421,6 @@ def panel_triggers(
                 step = LineStep(arm=arm_name(key, arm, rr.round), opt_sp=arm.individual)
                 fired[arm.individual.id] = (step, trigger)
     return list(fired.values())
-
-
-def bar_pairing(
-    vote: Vote,
-    electable: Sequence[ArmKey],
-    arms: Mapping[ArmKey, ArmState],
-    rows: Mapping[ArmKey, CellSheet],
-    panel: frozenset[str],
-    n_min: int,
-) -> tuple[list[ArmKey], frozenset[str] | None]:
-    """The ONE row choice every reader of the bar's paired subjects takes: under ``overlap`` the
-    origin *panel*'s cells, and only an arm its trigger seats there stays electable."""
-    match vote:
-        case "draw":
-            return list(electable), None
-        case "overlap":
-            seated = [k for k in electable if panel_trigger(arms[k], rows[k], n_min) is not None]
-            return seated, panel
-        case unreachable:
-            assert_never(unreachable)
 
 
 class _OriginPanelPairs:
@@ -604,7 +571,7 @@ async def measure_population(
 
     def readable(key: ArmKey, parent: CellSheet) -> bool:
         answered = {cell.key for cell in parent.scoreable}
-        return cells_read(selector.elects_on, rows[key], answered, ruler) >= coverage_floor
+        return selector.covered(cycle.optimizer, rows[key], answered, ruler) >= coverage_floor
 
     # The REPLICATION cohort, deliberately the looser predicate: the election admits on `is_electable`.
     scored = [key for key, arm in arms.items() if is_leader_eligible(arm)]
@@ -625,7 +592,8 @@ async def measure_population(
         taken = ReadArm(parent.key, parent.state, replace(parent.rows, cells=tuple(backfilled)))
         ctx.walked(taken, ctx.asked(parent.key, ()))
         parent = ctx.walks[parent.key].arm
-    origin_panel_slots = round_origin_panel(cycle, pool)
+    key_of = {s.id: s.key for s in pool}
+    origin_panel = {slot: key_of[slot] for slot in round_origin_panel(cycle, pool)}
     on_panel, topped_cuts = await read_origin_panel(
         cycle,
         [
@@ -640,7 +608,7 @@ async def measure_population(
                 parent.rows,
             ),
         ],
-        origin_panel_slots,
+        list(origin_panel),
         pool,
         buys=cut is None,
         race=race,
@@ -658,9 +626,17 @@ async def measure_population(
     # Never in a `finally`: an unwound round did not score. Round 0's is `emit_origin_round`.
     cycle.session.state.control.spend_sample_lookahead()
     # The shared anchor's single-draw noise is correlated across arms, so it favours none.
+    session = cycle.session
+    pairs = RoundPairs(
+        path=(session.hop,),
+        instrument_id=session.instrument_id,
+        dataset_hash=session.bank.dataset_hash,
+        measurands=tuple(grade_measurands(session.state.scoring.scorer)),
+    )
     pair = ReferencePairs.of_round(
         ctx,
         arms,
+        pairs,
         declared=[cell.key for cell in parent.rows]
         if cycle.config.optimization.lift_reference == "best_so_far"
         else [sample.key for sample in panel.read_on(rows)],
@@ -683,15 +659,6 @@ async def measure_population(
     # Fixed δ decouples the arms; the election reads this fit, never one of its own.
     abilities = candidate_abilities(
         {key: raced[key] for key in electable}, raced[parent.key], ruler
-    )
-    slots = set(origin_panel_slots)
-    electable, paired_on = bar_pairing(
-        cycle.optimizer.vote,
-        electable,
-        arms,
-        rows,
-        frozenset(s.key for s in pool if s.id in slots),
-        cycle.config.optimization.elimination_n_min,
     )
     fit = {
         key: ArmFit(
@@ -722,10 +689,10 @@ async def measure_population(
         electable=electable,
         coverage_floor=coverage_floor,
         cut=cut,
-        origin_panel_slots=origin_panel_slots,
+        origin_panel=origin_panel,
         on_panel=on_panel,
         raced=raced,
-        paired_on=paired_on,
+        pairs=pairs,
     )
 
 
@@ -791,10 +758,7 @@ async def _reference_readings(
 
 @dataclass(frozen=True, kw_only=True)
 class ReferencePairs:
-    path: tuple[CycleHop, ...]
-    instrument_id: str
-    scorer: Scorer
-    dataset_hash: str
+    pairs: RoundPairs
     declared: Sequence[str]
     names: Mapping[ArmKey, ArmName]
 
@@ -803,67 +767,39 @@ class ReferencePairs:
         cls,
         ctx: RoundContext,
         arms: Mapping[ArmKey, Concluded],
+        pairs: RoundPairs,
         *,
         declared: Sequence[str],
     ) -> ReferencePairs:
-        session = ctx.cycle.session
         # A re-read individual is named by this round's slot, never the one it was first walked in.
         names = {
             key: arm_name(key, arm, rr.round)
             for rr in ctx.cycle.rounds
             for key, arm in rr.arms.items()
         } | {key: arm_name(key, arm, ctx.round_num) for key, arm in arms.items()}
-        return cls(
-            path=(session.hop,),
-            instrument_id=session.instrument_id,
-            scorer=session.state.scoring.scorer,
-            dataset_hash=session.bank.dataset_hash,
-            declared=declared,
-            names=names,
-        )
+        return cls(pairs=pairs, declared=declared, names=names)
 
     def read(self, arm: ReadArm, against: ArmKey, reference: ReadArm | None) -> PairedReading:
         """*reference* is ``None`` where the round never read the individual *against* names."""
-        return read_pair(
-            a=self._member(
+        pairs = self.pairs
+        return pairs.read(
+            pairs.member(
                 against,
-                MeasurementRole.PARENT if reference is None else reference.state.role,
                 NO_CELLS if reference is None else reference.rows,
+                name=self.names.get(against),
+                role=MeasurementRole.PARENT if reference is None else reference.state.role,
                 cut=reference is not None and walked_short(reference.state),
             ),
-            b=self._member(arm.key, arm.state.role, arm.rows, cut=walked_short(arm.state)),
+            pairs.member(
+                arm.key,
+                arm.rows,
+                name=self.names.get(arm.key),
+                role=arm.state.role,
+                cut=walked_short(arm.state),
+            ),
             cell_set=CellSetName.REFERENCE_CELLS,
             cells=self.declared,
-            masked=False,
-            dataset_hash=self.dataset_hash,
-            measurands=grade_measurands(self.scorer),
-            spec=ROUND_LIFT_SPEC,
-            scope=RoleScope.DECISION,
-            instrument_id=self.instrument_id,
-        )
-
-    def _member(
-        self,
-        key: ArmKey,
-        role: MeasurementRole,
-        rows: CellSheet,
-        *,
-        cut: bool,
-    ) -> MemberRows:
-        return MemberRows(
-            address=MemberAddress(
-                path=self.path,
-                individual_id=key,
-                arm=self.names.get(key),
-                pass_role=role,
-            ),
-            sheet=rows,
-            bought=fresh_cells(rows),
-            cut=cut,
-            scope=RoleScope.DECISION,
-            instrument_id=self.instrument_id,
-            dataset_hash=self.dataset_hash,
-            cell_set_id=None,
+            measurands=pairs.measurands,
         )
 
 
@@ -1057,23 +993,6 @@ async def settle_owed_outputs(ctx: RoundContext) -> None:
             ) from last
 
 
-def _crowning_read(cycle: Cycle, measured: MeasuredRound, winner: ArmKey | None) -> BarRead | None:
-    """The ONE bar's read of the pick, every electable arm its round's multiplicity. Today's reading
-    is the selector's own admission, so under it the pick clears as its selector picked it."""
-    if winner is None:
-        return None
-    parent = measured.raced[measured.parent.key]
-    subjects = {
-        key: BarSubject(
-            *discordant(measured.raced[key], parent, measured.paired_on),
-            None if (fit := measured.fit.get(key)) is None else fit.lift,
-            key == winner,
-        )
-        for key in {*measured.electable, winner}
-    }
-    return cycle.crowning_bar(cycle.optimizer.admission).read(subjects)[winner]
-
-
 def _round_result(
     ctx: RoundContext,
     measured: MeasuredRound,
@@ -1081,27 +1000,21 @@ def _round_result(
     *,
     elects_on: DisplayMetric,
 ) -> RoundResult:
-    winner, leading = selection.selected, selection.leading
-    if winner is not None and leading != winner:
-        raise ValueError(
-            f"round {ctx.round_num}: the selector kept {winner[:12]} and named "
-            f"{(leading or 'no arm')[:12]} as the one the round is read off"
-        )
     cycle = ctx.cycle
     reference = line_reference(cycle.rounds, origin=ArmKey(cycle.origin_round.origin.individual.id))
     assert reference.arm == measured.parent.key, "a round re-reads the candidate its line stands on"
     return ended_on(
         Election(
-            selected=winner,
-            leading=leading,
-            # A held round headlines the parent RE-SCORED on this panel, never a union of its cells.
-            ended_on=winner or measured.parent.key,
-            electable=len(measured.electable),
+            leading=selection.leading,
+            ending=selection.ending,
+            # A round ending on its parent headlines it RE-SCORED on this panel, never a union.
+            parent=measured.parent.key,
+            electable=selection.electable,
             fit=measured.fit,
             elects_on=elects_on,
+            deciding_pair=selection.deciding_pair,
             verdict_reason=selection.verdict_reason,
             ruler=cycle.difficulty.stamp,
-            bar=_crowning_read(cycle, measured, winner),
         ),
         priors=cycle.rounds,
         schema=cycle.session.pipeline_schema,
@@ -1322,9 +1235,7 @@ def _survivors(ctx: RoundContext, selection: Selection) -> list[OptSearchPoint]:
 def _crowned(ctx: RoundContext, measured: MeasuredRound, selection: Selection) -> RoundResult:
     """The bench's close of the election: the round's result, gated on a whole panel, then absorbed."""
     cycle = ctx.cycle
-    result = _round_result(
-        ctx, measured, selection, elects_on=cycle.optimizer.plan.selector.elects_on
-    )
+    result = _round_result(ctx, measured, selection, elects_on=cycle.optimizer.elects_on)
     append_record(PhaseRecord(phase=CampaignPhase.SELECT, step="exit", round=ctx.round_num))
     _panel_gate(ctx, result, measured.cut)
     # AFTER the panel gate: a round halted on a holed panel is unwound and re-run, never crowned.
@@ -1344,7 +1255,7 @@ async def _adapt_beside_overlap(
     is_final_round: bool,
 ) -> RoundResult:
     cycle = ctx.cycle
-    reading, bought = await measure_overlap(cycle, round_result, pool, measured.origin_panel_slots)
+    reading, bought = await measure_overlap(cycle, round_result, pool, list(measured.origin_panel))
     seated = cycle.seat(
         round_result.model_copy(update={"overlap": reading, "overlap_results": bought})
     )

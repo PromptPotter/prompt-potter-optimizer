@@ -1665,32 +1665,6 @@
         "title": "BankSnippetPayload",
         "type": "object"
       },
-      "BarRead": {
-        "additionalProperties": false,
-        "description": "The bar's verdict on one subject.",
-        "properties": {
-          "clears": {
-            "title": "Clears",
-            "type": "boolean"
-          },
-          "statistic": {
-            "enum": [
-              "posterior",
-              "sign_test",
-              "e_process",
-              "empirical_bayes"
-            ],
-            "title": "Statistic",
-            "type": "string"
-          }
-        },
-        "required": [
-          "statistic",
-          "clears"
-        ],
-        "title": "BarRead",
-        "type": "object"
-      },
       "BenchCurve": {
         "additionalProperties": false,
         "description": "A line's held-out curve: per round of its budget, the standing selection's headline on the\nbench rows, and its area, paired row by row with the origin's.",
@@ -6703,17 +6677,18 @@
       },
       "Election": {
         "additionalProperties": false,
-        "description": "What a round's selector decided over its arms, by key; ``selected`` null = the round HELD.",
+        "description": "What a round's selector decided over its arms, by key: its `leading` arm and how the round\nended on it.",
         "properties": {
-          "bar": {
+          "deciding_pair": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BarRead"
+                "$ref": "#/components/schemas/PairedReading"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "`leading` (`b`) over `parent` (`a`) on the cells its selector paired them on: the reading the round was decided on. Null where the selector banks none."
           },
           "electable": {
             "title": "Electable",
@@ -6722,10 +6697,9 @@
           "elects_on": {
             "$ref": "#/components/schemas/DisplayMetric"
           },
-          "ended_on": {
-            "description": "WHOSE numbers the round's headline carries: the selection where the round selected; on a held round the retained parent, re-read on this round's cells as its reference arm — never the leading challenger.",
-            "title": "Ended On",
-            "type": "string"
+          "ending": {
+            "$ref": "#/components/schemas/RoundEnding",
+            "description": "`crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
           },
           "fit": {
             "additionalProperties": {
@@ -6743,8 +6717,20 @@
                 "type": "null"
               }
             ],
-            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the crown, the leader the line moved to, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm.",
             "title": "Leading"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The arm every arm was read against, which a held round ends on; null at round 0, which reads none.",
+            "title": "Parent"
           },
           "reelection": {
             "anyOf": [
@@ -6759,17 +6745,6 @@
           "ruler": {
             "$ref": "#/components/schemas/RulerStamp"
           },
-          "selected": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Selected"
-          },
           "verdict_reason": {
             "anyOf": [
               {
@@ -6783,13 +6758,12 @@
           }
         },
         "required": [
-          "selected",
           "leading",
-          "ended_on",
+          "ending",
+          "parent",
           "electable",
           "elects_on",
-          "ruler",
-          "bar"
+          "ruler"
         ],
         "title": "Election",
         "type": "object"
@@ -7786,15 +7760,15 @@
       },
       "FlipCounts": {
         "additionalProperties": false,
-        "description": "What moving from member `a` to member `b` did cell by cell, on a binary measurand.",
+        "description": "What moving from member `a` to member `b` did cell by cell, by the sign of each difference.",
         "properties": {
           "gained": {
-            "description": "Cells `a` missed and `b` hit.",
+            "description": "Cells `b` read above `a`: on a binary measurand, `a` missed and `b` hit.",
             "title": "Gained",
             "type": "integer"
           },
           "lost": {
-            "description": "Cells `a` hit and `b` missed.",
+            "description": "Cells `b` read below `a`.",
             "title": "Lost",
             "type": "integer"
           },
@@ -10936,14 +10910,7 @@
             ]
           },
           "flips": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/FlipCounts"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/FlipCounts"
           },
           "measurand": {
             "$ref": "#/components/schemas/Measurand"
@@ -12387,17 +12354,6 @@
             "$ref": "#/components/schemas/CallTarget",
             "description": "The provider and model every llm node of the optimizer calls, laid under each node's own ``config``: a node its manifest or ``nodes`` routes elsewhere keeps it."
           },
-          "crowning_bar": {
-            "description": "The ONE bar a crown, an advance of the line and a promotion read (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's θ posterior capped by the discordant cells. ``sign_test``: an exact paired sign test on the discordant cells, Holm-corrected across the round's arms. ``e_process``: an anytime-valid e-process on the paired discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's banked lift prior.",
-            "enum": [
-              "posterior",
-              "sign_test",
-              "e_process",
-              "empirical_bayes"
-            ],
-            "title": "Crowning Bar",
-            "type": "string"
-          },
           "degradation_fatal_fastpath": {
             "description": "End a candidate at the first FATAL sample (a backend 4xx, content-filtered, structurally broken) without spending the rest of its budget. Active while the degradation check runs (`degradation_threshold` > 0); the rate-based check stays governed by that threshold. The bench's, run on every optimizer's arms.",
             "title": "Degradation Fatal Fastpath",
@@ -12462,7 +12418,7 @@
                 "type": "null"
               }
             ],
-            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
+            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round whose stall `resets` (`OverlapReading.stall`), -1 per round it `counts`, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
           },
           "nodes": {
             "additionalProperties": {
@@ -12471,6 +12427,16 @@
             "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs and a paper's configuration ride here; each node validates its own knobs when the optimizer is selected.",
             "title": "Nodes",
             "type": "object"
+          },
+          "not_separated_stall": {
+            "description": "What a crown the origin panel does not separate from the origin (its lift's interval spans zero, `RoundAdvance.NOT_SEPARATED`) does to the stall clock L1 patience, `rounds_without_advance` and the life bank read, for every optimizer: ``counts`` as a stall (under ``lives``, a life spent), ``resets`` it as an advance does (a life banked), or ``skips`` it. A crown is each selector's own; the bench re-judges none.",
+            "enum": [
+              "resets",
+              "counts",
+              "skips"
+            ],
+            "title": "Not Separated Stall",
+            "type": "string"
           },
           "optimizer": {
             "description": "The optimizer manifest this campaign runs — a directory under ``promptpotter/assets/optimizers/``. Every entry point selects it here; nothing selects it install-wide.",
@@ -12502,7 +12468,7 @@
           "call_target",
           "arm_gate",
           "budget",
-          "crowning_bar",
+          "not_separated_stall",
           "degradation_threshold",
           "degradation_fatal_fastpath",
           "elimination_n_min",
@@ -12556,24 +12522,6 @@
               }
             ],
             "description": "The provider and model every llm node of the optimizer calls, laid under each node's own ``config``: a node its manifest or ``nodes`` routes elsewhere keeps it."
-          },
-          "crowning_bar": {
-            "anyOf": [
-              {
-                "enum": [
-                  "posterior",
-                  "sign_test",
-                  "e_process",
-                  "empirical_bayes"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The ONE bar a crown, an advance of the line and a promotion read (`domain/crowning_bar.py::CrowningBar`). ``posterior`` (default): today's θ posterior capped by the discordant cells. ``sign_test``: an exact paired sign test on the discordant cells, Holm-corrected across the round's arms. ``e_process``: an anytime-valid e-process on the paired discordance. ``empirical_bayes``: the arm's θ lift shrunk to the tenant's banked lift prior.",
-            "title": "Crowning Bar"
           },
           "degradation_fatal_fastpath": {
             "anyOf": [
@@ -12674,7 +12622,7 @@
                 "type": "null"
               }
             ],
-            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round that promotes an arm, -1 per round that does not, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
+            "description": "Opt-in improvement-banked round budget ('hearts'), under any optimizer: +1 life per round whose stall `resets` (`OverlapReading.stall`), -1 per round it `counts`, banked up to ``cap``, and the run stops ``lives_exhausted`` at 0. A round no arm of which reached the election banks nothing. ``None`` → ``budget.rounds`` governs. It still caps from above, so a lives run wanting the full bank sets ``budget: {rounds: unbounded}``."
           },
           "nodes": {
             "anyOf": [
@@ -12690,6 +12638,23 @@
             ],
             "description": "This campaign's overlay on the selected manifest, keyed by node name — ``{node: {config: {...}}}``, the shape a target pipeline's overlay takes. An optimizer's knobs and a paper's configuration ride here; each node validates its own knobs when the optimizer is selected.",
             "title": "Nodes"
+          },
+          "not_separated_stall": {
+            "anyOf": [
+              {
+                "enum": [
+                  "resets",
+                  "counts",
+                  "skips"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What a crown the origin panel does not separate from the origin (its lift's interval spans zero, `RoundAdvance.NOT_SEPARATED`) does to the stall clock L1 patience, `rounds_without_advance` and the life bank read, for every optimizer: ``counts`` as a stall (under ``lives``, a life spent), ``resets`` it as an advance does (a life banked), or ``skips`` it. A crown is each selector's own; the bench re-judges none.",
+            "title": "Not Separated Stall"
           },
           "optimizer": {
             "anyOf": [
@@ -13438,6 +13403,10 @@
             "title": "Positions",
             "type": "array"
           },
+          "stall": {
+            "$ref": "#/components/schemas/StallEffect",
+            "description": "What `advance` does to the stall clock L1 patience, `rounds_without_advance` and the life bank read, stamped at the close under `not_separated_stall`."
+          },
           "triggered": {
             "description": "Every arm off the line a `PanelTrigger` fired for this cycle, by first walk. It moves no `advance`.",
             "items": {
@@ -13446,7 +13415,7 @@
             "title": "Triggered",
             "type": "array"
           },
-          "vs_parent": {
+          "vs_previous_pick": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PairedReading"
@@ -13455,7 +13424,7 @@
                 "type": "null"
               }
             ],
-            "description": "The standing pick (`b`) over the pick before it on the line (`a`), on the same panel: the cells it gained and lost against its own parent. Null where that parent is C0, which `lead` reads, or where the line went unread. It moves no `advance`."
+            "description": "The standing pick (`b`) over the pick before it on the line (`a`), on the same panel: the cells it gained and lost against the last pick it displaced. Null where that pick is C0, which `lead` reads, or where the line went unread. It moves no `advance`."
           }
         },
         "required": [
@@ -13463,8 +13432,9 @@
           "lead",
           "earlier",
           "triggered",
-          "vs_parent",
-          "advance"
+          "vs_previous_pick",
+          "advance",
+          "stall"
         ],
         "title": "OverlapReading",
         "type": "object"
@@ -15082,6 +15052,7 @@
           "advanced",
           "advanced_unpaired",
           "not_separated",
+          "moved_uncrowned",
           "held",
           "unread"
         ],
@@ -15208,6 +15179,16 @@
         ],
         "title": "RoundAxis",
         "type": "object"
+      },
+      "RoundEnding": {
+        "description": "How a round's election ended: on the arm it crowned, on its uncrowned leader the line moved\nto, or held on its parent. Round 0 crowns the origin it adopts.",
+        "enum": [
+          "crowned",
+          "moved",
+          "held"
+        ],
+        "title": "RoundEnding",
+        "type": "string"
       },
       "RoundFacts": {
         "additionalProperties": false,
@@ -15617,17 +15598,6 @@
             ],
             "description": "The life bank after this round. Null where the campaign banks no lives (`optimization.lives`)."
           },
-          "parent": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmName"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The pick `selection` was promoted over. Null while it is the origin."
-          },
           "rounds_closed": {
             "description": "Rounds closed AFTER the origin — the unit a rounds cap counts.",
             "title": "Rounds Closed",
@@ -15664,7 +15634,7 @@
             "$ref": "#/components/schemas/PairedReading",
             "description": "`selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap reading of that pair. The state says why where there is none: `same_individual` while the selection is the origin."
           },
-          "vs_parent": {
+          "vs_previous_pick": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PairedReading"
@@ -15673,7 +15643,7 @@
                 "type": "null"
               }
             ],
-            "description": "`selection` (`b`) over `parent` (`a`) on the origin panel, from the round reading `vs_origin` comes from (`OverlapReading.vs_parent`); `vs_origin` itself where the parent is C0. Null while the selection is the origin, or where that reading pairs no such two."
+            "description": "`selection` (`b`) over the declared pick it displaced (`a`), which its lineage parent is only where the line never moved uncrowned between them, on the origin panel, from the round reading `vs_origin` comes from (`OverlapReading.vs_previous_pick`); `vs_origin` itself where the previous pick is C0. Null while the selection is the origin, or where that reading pairs no such two."
           },
           "worked_s": {
             "anyOf": [
@@ -15692,10 +15662,9 @@
           "rounds_without_advance",
           "lives",
           "selection",
-          "parent",
           "changes",
           "vs_origin",
-          "vs_parent",
+          "vs_previous_pick",
           "rounds_closed",
           "improved",
           "advanced",
@@ -16653,6 +16622,17 @@
             "title": "Candidates",
             "type": "array"
           },
+          "ending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RoundEnding"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the round ended on `leading` (`Election.ending`); null at round 0, which holds no election."
+          },
           "health": {
             "$ref": "#/components/schemas/RoundHealth"
           },
@@ -16667,17 +16647,6 @@
             ],
             "description": "This round's promotion over the parent it beat, each read on every row it met in the cycle on `series_reading`'s one scale, its later rows as parent included: the lift that held beside the one it was crowned on. Null on a round that promoted nothing."
           },
-          "improved": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Improved"
-          },
           "leading": {
             "anyOf": [
               {
@@ -16687,7 +16656,7 @@
                 "type": "null"
               }
             ],
-            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where the round selected, on a held round the challenger `verdict_reason` names as its best, at round 0 the origin. `panel_precision` is measured on it. Null where the selector could read no arm."
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the crown, the leader the line moved to, on a held round the challenger `verdict_reason` names as its best, at round 0 the origin. `panel_precision` is measured on it. Null where the selector could read no arm."
           },
           "lift_prior": {
             "anyOf": [
@@ -16739,17 +16708,6 @@
             "title": "Round",
             "type": "integer"
           },
-          "selected": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmName"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The arm the election crowned; null on a round that held."
-          },
           "selection": {
             "items": {
               "type": "integer"
@@ -16798,7 +16756,7 @@
         "required": [
           "round",
           "leading",
-          "selected",
+          "ending",
           "health",
           "overlap",
           "panel_precision_verdict",
@@ -17137,6 +17095,16 @@
         },
         "title": "SpendRollup",
         "type": "object"
+      },
+      "StallEffect": {
+        "enum": [
+          "starts",
+          "resets",
+          "counts",
+          "skips"
+        ],
+        "title": "StallEffect",
+        "type": "string"
       },
       "StampedEnvelope": {
         "additionalProperties": false,

@@ -577,7 +577,5 @@ class ReadoutProjection(Projection):
         served = next(r for r in served_rounds(closed, {}, series) if r.round == rn)
         for line in render_noise_walk(served):
             self._write(line)
-        self._write(
-            render_advance_status(round_result.overlap.advance, standing.rounds_without_advance)
-        )
+        self._write(render_advance_status(round_result.overlap, standing.rounds_without_advance))
         self._write(_node_bottom())

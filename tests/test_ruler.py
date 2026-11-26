@@ -623,14 +623,14 @@ def traced() -> _Traced:
             for s, h in zip(bank, hits, strict=True)
         )
 
-    def closed(n: int, walked: dict[str, list[float]], pick: str | None, ended_on: str) -> Any:
+    def closed(n: int, walked: dict[str, list[float]], pick: str | None, held_on: str) -> Any:
         # Each election reads its own version; the series must read none of them.
         stamp = RulerStamp(id=f"v{n}", version=n, own=None, scope=_SCOPE, excluded=())
         return round_result(
             n,
             arms=[arm_state(k) for k in walked],
             cells={arm_key(k): graded(h) for k, h in walked.items()},
-            election=election(pick and arm_key(pick), ended_on=arm_key(ended_on), ruler=stamp),
+            election=election(pick and arm_key(pick), parent=arm_key(held_on), ruler=stamp),
         )
 
     hits = {

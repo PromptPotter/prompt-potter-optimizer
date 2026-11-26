@@ -254,7 +254,7 @@ came back all-no-op once; the parse guard caught it and the repair rung fired, a
   credit may promote an arm with zero or negative raw lift.
 - `param_scope_discipline` dropped its `PARAM_UNLOCK_ROUND = 3` calendar floor (contract: no round
   thresholds in the loop); it scores only on mutation history (a prompt field unmutated two rounds).
-- **FIXED — a tie or a trailing arm can no longer win.** `selection.py::elect_round_winner` now
-  admits only on a positive RAW θ lift over the parent; the earned parent-selection-bias credit only
+- **FIXED — a tie or a trailing arm can no longer win.** the election (`potter/election.py::RoundWinner.decide`
+  over `selection.py::crowned`) now admits only on a positive RAW θ lift over the parent; the earned parent-selection-bias credit only
   reorders admitted arms. Test rewritten in `test_numerics.py` (the bar test). Trade-off accepted:
   the credit no longer lifts a slightly-trailing arm over an inflated parent bar.

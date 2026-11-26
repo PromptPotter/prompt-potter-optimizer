@@ -42,6 +42,7 @@ from promptpotter.domain.arms import Proposal
 from promptpotter.domain.campaign_config import Estimand, Knob
 from promptpotter.domain.opt_search_point import OptSearchPoint, VariationMode
 from promptpotter.domain.optimizer_state import StatePart, StateSlice
+from promptpotter.domain.origin_panel import RoundEnding
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.pipeline_schema import INITIAL_POPULATION, NodeKind
 from promptpotter.domain.results import OptimizerFact, RoundResult
@@ -378,8 +379,10 @@ class MapElites(nodes.Selector):
     writes: ClassVar[frozenset[type[StatePart]]] = frozenset({DescriptorCalibration, EliteArchive})
     sees: ClassVar[frozenset[type[CycleRead]]] = frozenset({Lineage, Replay})
     consults: ClassVar[frozenset[type]] = frozenset({ProxyCss})
-    elects_on: ClassVar[DisplayMetric] = "composite"
     elects_partial: ClassVar[bool] = False
+
+    def elects_on(self, _selected: SelectedOptimizer) -> DisplayMetric:
+        return "composite"
 
     def round_facts(
         self, _selected: SelectedOptimizer, round_result: RoundResult
@@ -453,8 +456,9 @@ class MapElites(nodes.Selector):
         ctx.put(DescriptorCalibration(calibration=calibration))
         ctx.put(EliteArchive(elites=archive))
         return nodes.Selection(
-            selected=selected,
             leading=selected or max(placed_scores, key=placed_scores.__getitem__, default=None),
+            ending=RoundEnding.HELD if selected is None else RoundEnding.CROWNED,
+            electable=len(measured.electable),
             verdict_reason=verdict,
             ranked=[held[cid] for cid in dict.fromkeys(e.individual_id for e in archive)],
         )

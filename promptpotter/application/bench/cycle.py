@@ -22,10 +22,10 @@ from promptpotter.domain.arm_reading import ArmFit, DisplayMetric
 from promptpotter.domain.arms import Broken, Concluded, Cut, PointContext
 from promptpotter.domain.campaign import Compare
 from promptpotter.domain.campaign_config import CampaignConfig
-from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
+from promptpotter.domain.crowning_bar import LiftPrior
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.optimizer_state import OptimizerState, RoundOutput, StateSlice
-from promptpotter.domain.origin_panel import OverlapReading
+from promptpotter.domain.origin_panel import OverlapReading, RoundEnding
 from promptpotter.domain.paired_reading import ArmKey, ReadingState
 from promptpotter.domain.phases import StopOutcome, stop_reason_outcome
 from promptpotter.domain.pipeline_params import PipelineParams
@@ -97,18 +97,17 @@ def _origin_round(
         cells={key: results},
         folds=arm_folds({key: arm}, {key: results}, scorer, schema),
         election=Election(
-            selected=key,
             leading=key,
-            ended_on=key,
+            ending=RoundEnding.CROWNED,
+            parent=None,
             electable=0,
             fit=fit,
             elects_on=elects_on,
             ruler=ruler,
-            bar=None,
         ),
         # An abort pads no error rows onto the tail: the cells never sent are the panel's shortfall.
         health=head_health(0, arm, results, picked=True, priors=()),
-        overlap=OverlapReading.unpaired(ReadingState.SAME_INDIVIDUAL, 0, False),
+        overlap=OverlapReading.unpaired(ReadingState.SAME_INDIVIDUAL, 0, RoundEnding.CROWNED),
         optimizer_state=optimizer_state,
     )
     if not results:
@@ -197,18 +196,9 @@ class Cycle:
         cycle.seat_origin(origin, None)
         return cycle
 
-    def crowning_bar(self, admission: float | None) -> CrowningBar:
-        """The ONE bar crown, advance and promotion read, at the selector's *admission* (a
-        selector declaring none is read at ``BAR_ADMISSION``); the tenant's lift prior is read only
-        where the switch reads it."""
-        statistic = self.config.optimization.crowning_bar
-        prior = (
-            banked_lift_prior(self.survey, self.session.measured_dataset)
-            if statistic == "empirical_bayes"
-            else None
-        )
-        held = BAR_ADMISSION if admission is None else admission
-        return CrowningBar(statistic=statistic, admission=held, prior=prior)
+    def lift_prior(self) -> LiftPrior | None:
+        """The tenant's banked lift prior over arm-vs-parent θ lifts on this dataset."""
+        return banked_lift_prior(self.survey, self.session.measured_dataset)
 
     def reopen_difficulty(self) -> None:
         """Round 0's view again, on the scorer its close locked."""
@@ -362,7 +352,8 @@ class Cycle:
 
     @property
     def parent(self) -> OptSearchPoint:
-        """The individual the last election ended on: a HELD round ends on the parent itself."""
+        """The individual the last election ended on (`Election.ended_on`): its crown, an arm its
+        selector moved the line to uncrowned, else the parent itself."""
         head = self.elected[0].head
         assert head is not None, "an election ends on an arm it concluded"
         return head.individual

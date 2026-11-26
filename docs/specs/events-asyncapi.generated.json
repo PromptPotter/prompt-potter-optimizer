@@ -726,32 +726,6 @@
         "title": "BankedStop",
         "type": "object"
       },
-      "BarRead": {
-        "additionalProperties": false,
-        "description": "The bar's verdict on one subject.",
-        "properties": {
-          "clears": {
-            "title": "Clears",
-            "type": "boolean"
-          },
-          "statistic": {
-            "enum": [
-              "posterior",
-              "sign_test",
-              "e_process",
-              "empirical_bayes"
-            ],
-            "title": "Statistic",
-            "type": "string"
-          }
-        },
-        "required": [
-          "statistic",
-          "clears"
-        ],
-        "title": "BarRead",
-        "type": "object"
-      },
       "BenchCurve": {
         "additionalProperties": false,
         "description": "A line's held-out curve: per round of its budget, the standing selection's headline on the\nbench rows, and its area, paired row by row with the origin's.",
@@ -2964,17 +2938,19 @@
       },
       "Election": {
         "additionalProperties": false,
-        "description": "What a round's selector decided over its arms, by key; ``selected`` null = the round HELD.",
+        "description": "What a round's selector decided over its arms, by key: its `leading` arm and how the round\nended on it.",
         "properties": {
-          "bar": {
+          "deciding_pair": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BarRead"
+                "$ref": "#/components/schemas/PairedReading"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "default": null,
+            "description": "`leading` (`b`) over `parent` (`a`) on the cells its selector paired them on: the reading the round was decided on. Null where the selector banks none."
           },
           "electable": {
             "title": "Electable",
@@ -2983,10 +2959,9 @@
           "elects_on": {
             "$ref": "#/components/schemas/DisplayMetric"
           },
-          "ended_on": {
-            "description": "WHOSE numbers the round's headline carries: the selection where the round selected; on a held round the retained parent, re-read on this round's cells as its reference arm — never the leading challenger.",
-            "title": "Ended On",
-            "type": "string"
+          "ending": {
+            "$ref": "#/components/schemas/RoundEnding",
+            "description": "`crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
           },
           "fit": {
             "additionalProperties": {
@@ -3004,8 +2979,20 @@
                 "type": "null"
               }
             ],
-            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the crown, the leader the line moved to, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm.",
             "title": "Leading"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The arm every arm was read against, which a held round ends on; null at round 0, which reads none.",
+            "title": "Parent"
           },
           "reelection": {
             "anyOf": [
@@ -3021,17 +3008,6 @@
           "ruler": {
             "$ref": "#/components/schemas/RulerStamp"
           },
-          "selected": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Selected"
-          },
           "verdict_reason": {
             "anyOf": [
               {
@@ -3046,13 +3022,12 @@
           }
         },
         "required": [
-          "selected",
           "leading",
-          "ended_on",
+          "ending",
+          "parent",
           "electable",
           "elects_on",
-          "ruler",
-          "bar"
+          "ruler"
         ],
         "title": "Election",
         "type": "object"
@@ -3061,15 +3036,17 @@
         "additionalProperties": false,
         "description": "A round's election, the moment it is held: the close carries the same one.",
         "properties": {
-          "bar": {
+          "deciding_pair": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/BarRead"
+                "$ref": "#/components/schemas/PairedReading"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "default": null,
+            "description": "`leading` (`b`) over `parent` (`a`) on the cells its selector paired them on: the reading the round was decided on. Null where the selector banks none."
           },
           "electable": {
             "title": "Electable",
@@ -3078,10 +3055,9 @@
           "elects_on": {
             "$ref": "#/components/schemas/DisplayMetric"
           },
-          "ended_on": {
-            "description": "WHOSE numbers the round's headline carries: the selection where the round selected; on a held round the retained parent, re-read on this round's cells as its reference arm — never the leading challenger.",
-            "title": "Ended On",
-            "type": "string"
+          "ending": {
+            "$ref": "#/components/schemas/RoundEnding",
+            "description": "`crowned`: the round crowned `leading` (round 0 adopts the origin); `moved`: the line moved to `leading` uncrowned (potter's `next_parent`); `held`: it stands on `parent`, re-read on this round's cells."
           },
           "fit": {
             "additionalProperties": {
@@ -3099,8 +3075,20 @@
                 "type": "null"
               }
             ],
-            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the selection where there is one, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm. NOT whose numbers the headline carries: that is `ended_on`.",
+            "description": "The ONE arm this round is read off, as its selector named it and never re-ranked: the crown, the leader the line moved to, on a held round the challenger that came closest on the selector's own objective, at round 0 the origin. Rank 1 of `RoundView.candidates`. `null` where the selector could read no arm.",
             "title": "Leading"
+          },
+          "parent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The arm every arm was read against, which a held round ends on; null at round 0, which reads none.",
+            "title": "Parent"
           },
           "record_type": {
             "const": "election",
@@ -3126,17 +3114,6 @@
           "ruler": {
             "$ref": "#/components/schemas/RulerStamp"
           },
-          "selected": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Selected"
-          },
           "timestamp": {
             "title": "Timestamp",
             "type": "string"
@@ -3155,13 +3132,12 @@
           }
         },
         "required": [
-          "selected",
           "leading",
-          "ended_on",
+          "ending",
+          "parent",
           "electable",
           "elects_on",
           "ruler",
-          "bar",
           "round"
         ],
         "title": "ElectionRecord",
@@ -3560,15 +3536,15 @@
       },
       "FlipCounts": {
         "additionalProperties": false,
-        "description": "What moving from member `a` to member `b` did cell by cell, on a binary measurand.",
+        "description": "What moving from member `a` to member `b` did cell by cell, by the sign of each difference.",
         "properties": {
           "gained": {
-            "description": "Cells `a` missed and `b` hit.",
+            "description": "Cells `b` read above `a`: on a binary measurand, `a` missed and `b` hit.",
             "title": "Gained",
             "type": "integer"
           },
           "lost": {
-            "description": "Cells `a` hit and `b` missed.",
+            "description": "Cells `b` read below `a`.",
             "title": "Lost",
             "type": "integer"
           },
@@ -4381,7 +4357,7 @@
                 }
               ]
             },
-            "description": "By round, round 0 the origin: the individual the round ended on — on a round that elected nothing, the parent standing into it — read on all of its rows in the cycle, under its own round's caveat: one that withholds (`ThetaCaveat.withholds`) keeps that level alone from differencing. Null where it holds no scored cell on the scale.",
+            "description": "By round, round 0 the origin: the individual the round ended on (`Election.ended_on`), the next round's parent, read on all of its rows in the cycle, under its own round's caveat: one that withholds (`ThetaCaveat.withholds`) keeps that level alone from differencing. Null where it holds no scored cell on the scale.",
             "title": "Levels",
             "type": "object"
           },
@@ -4669,14 +4645,7 @@
             ]
           },
           "flips": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/FlipCounts"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/FlipCounts"
           },
           "measurand": {
             "$ref": "#/components/schemas/Measurand"
@@ -5600,6 +5569,10 @@
             "title": "Positions",
             "type": "array"
           },
+          "stall": {
+            "$ref": "#/components/schemas/StallEffect",
+            "description": "What `advance` does to the stall clock L1 patience, `rounds_without_advance` and the life bank read, stamped at the close under `not_separated_stall`."
+          },
           "triggered": {
             "description": "Every arm off the line a `PanelTrigger` fired for this cycle, by first walk. It moves no `advance`.",
             "items": {
@@ -5608,7 +5581,7 @@
             "title": "Triggered",
             "type": "array"
           },
-          "vs_parent": {
+          "vs_previous_pick": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PairedReading"
@@ -5617,7 +5590,7 @@
                 "type": "null"
               }
             ],
-            "description": "The standing pick (`b`) over the pick before it on the line (`a`), on the same panel: the cells it gained and lost against its own parent. Null where that parent is C0, which `lead` reads, or where the line went unread. It moves no `advance`."
+            "description": "The standing pick (`b`) over the pick before it on the line (`a`), on the same panel: the cells it gained and lost against the last pick it displaced. Null where that pick is C0, which `lead` reads, or where the line went unread. It moves no `advance`."
           }
         },
         "required": [
@@ -5625,8 +5598,9 @@
           "lead",
           "earlier",
           "triggered",
-          "vs_parent",
-          "advance"
+          "vs_previous_pick",
+          "advance",
+          "stall"
         ],
         "title": "OverlapReading",
         "type": "object"
@@ -7096,6 +7070,7 @@
           "advanced",
           "advanced_unpaired",
           "not_separated",
+          "moved_uncrowned",
           "held",
           "unread"
         ],
@@ -7390,6 +7365,16 @@
         ],
         "title": "RoundDiagnostics",
         "type": "object"
+      },
+      "RoundEnding": {
+        "description": "How a round's election ended: on the arm it crowned, on its uncrowned leader the line moved\nto, or held on its parent. Round 0 crowns the origin it adopts.",
+        "enum": [
+          "crowned",
+          "moved",
+          "held"
+        ],
+        "title": "RoundEnding",
+        "type": "string"
       },
       "RoundEnteredRecord": {
         "additionalProperties": false,
@@ -7902,17 +7887,6 @@
             ],
             "description": "The life bank after this round. Null where the campaign banks no lives (`optimization.lives`)."
           },
-          "parent": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ArmName"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "The pick `selection` was promoted over. Null while it is the origin."
-          },
           "rounds_closed": {
             "description": "Rounds closed AFTER the origin — the unit a rounds cap counts.",
             "title": "Rounds Closed",
@@ -7949,7 +7923,7 @@
             "$ref": "#/components/schemas/PairedReading",
             "description": "`selection` (`b`) over C0 (`a`) on the origin panel — the newest overlap reading of that pair. The state says why where there is none: `same_individual` while the selection is the origin."
           },
-          "vs_parent": {
+          "vs_previous_pick": {
             "anyOf": [
               {
                 "$ref": "#/components/schemas/PairedReading"
@@ -7958,7 +7932,7 @@
                 "type": "null"
               }
             ],
-            "description": "`selection` (`b`) over `parent` (`a`) on the origin panel, from the round reading `vs_origin` comes from (`OverlapReading.vs_parent`); `vs_origin` itself where the parent is C0. Null while the selection is the origin, or where that reading pairs no such two."
+            "description": "`selection` (`b`) over the declared pick it displaced (`a`), which its lineage parent is only where the line never moved uncrowned between them, on the origin panel, from the round reading `vs_origin` comes from (`OverlapReading.vs_previous_pick`); `vs_origin` itself where the previous pick is C0. Null while the selection is the origin, or where that reading pairs no such two."
           },
           "worked_s": {
             "anyOf": [
@@ -7977,10 +7951,9 @@
           "rounds_without_advance",
           "lives",
           "selection",
-          "parent",
           "changes",
           "vs_origin",
-          "vs_parent",
+          "vs_previous_pick",
           "rounds_closed",
           "improved",
           "advanced",
@@ -8938,6 +8911,16 @@
         ],
         "title": "SpendTombstoneRecord",
         "type": "object"
+      },
+      "StallEffect": {
+        "enum": [
+          "starts",
+          "resets",
+          "counts",
+          "skips"
+        ],
+        "title": "StallEffect",
+        "type": "string"
       },
       "StandingBudgetRecord": {
         "additionalProperties": false,

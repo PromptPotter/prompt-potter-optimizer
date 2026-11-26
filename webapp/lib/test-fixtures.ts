@@ -176,7 +176,7 @@ export function pairedReading(
     side: lo > 0 ? "above" : hi < 0 ? "below" : "spans",
     p_value: 0.5,
     p_floor: 0.5,
-    flips: null,
+    flips: { gained: 0, lost: 0, unchanged: 0 },
     family: null,
   });
   const member = (id: string): NonNullable<PairedReading["a"]> => ({
@@ -221,8 +221,9 @@ export function unreadOverlap(over: Partial<OverlapReading> = {}): OverlapReadin
     },
     earlier: [],
     triggered: [],
-    vs_parent: null,
+    vs_previous_pick: null,
     advance: "held",
+    stall: "counts",
     ...over,
   };
 }
@@ -237,13 +238,12 @@ export function runStanding(
     rounds_without_advance: 0,
     lives: null,
     selection: round === 0 ? origin : { round, label, key: label },
-    parent: round === 0 ? null : origin,
     changes: "",
     vs_origin: {
       ...unreadOverlap().lead,
       state: round === 0 ? "same_individual" : "not_held",
     },
-    vs_parent: null,
+    vs_previous_pick: null,
     rounds_closed: round,
     improved: 0,
     advanced: 0,
@@ -647,8 +647,7 @@ export function summaryRound(over: Partial<ServedRound> = {}): ServedRound {
   return {
     round: 0,
     leading: null,
-    selected: null,
-    improved: null,
+    ending: null,
     verdict_reason: null,
     candidates: [],
     selection: [],

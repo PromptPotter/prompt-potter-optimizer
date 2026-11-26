@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from promptpotter.application.optimizers.nodes import MemberCoupling
-from promptpotter.application.optimizers.potter.knobs import EscalationKnobs
+from promptpotter.application.optimizers.potter.knobs import ElectionKnobs, EscalationKnobs
 from promptpotter.domain.campaign_config import Estimand
 
 ADAPTIVE_QUEUE = (
@@ -72,6 +72,22 @@ POBB = (
         predicate=lambda _c, k, _d, _s: k.epsilon_floor > k.epsilon,
     ),
     MemberCoupling(
+        name="epsilon_at_a_tied_share",
+        knobs=("epsilon",),
+        bench_knobs=(),
+        estimand=Estimand.STOPPING,
+        relation=(
+            "p_best is each member's share of one P(best) over the parent and every arm standing; "
+            "the shares sum to 1, so a round the parent and k arms open is tied at 1/(k+1)."
+        ),
+        consequence=(
+            "epsilon sits at or above the share a tied opening field holds, so an arm level with "
+            "the field, its leader included, is cut once its bar ramps to epsilon."
+        ),
+        severity="collision",
+        predicate=lambda _c, k, _d, s: k.epsilon * (s.arms_per_round + 1) >= 1,
+    ),
+    MemberCoupling(
         name="informative_rows_without_overlap",
         knobs=("row_choice",),
         bench_knobs=(),
@@ -86,7 +102,13 @@ POBB = (
             "the bar would read the race's choice as the arm's ability. Refused before the mint."
         ),
         severity="refused",
-        predicate=lambda _c, k, _d, s: k.row_choice == "informative" and s.vote != "overlap",
+        predicate=lambda _c, k, _d, s: (
+            k.row_choice == "informative"
+            and not (
+                isinstance(election := s.knobs(s.plan.selector.name), ElectionKnobs)
+                and election.vote == "overlap"
+            )
+        ),
     ),
     MemberCoupling(
         name="refit_without_informative_rows",

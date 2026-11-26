@@ -1093,6 +1093,47 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   started. **Rides with:** wave 6. **Re-test:** a first landing on an empty root writes the index, and
   the fixture mints.
 
+### wave-6 · what the v0.8.21 box test showed (2026-11-26)
+
+- **Health fails a backend no offered dataset names**: `update.sh`'s health printed `✗ backend:n8n
+  unverified (N8N_HARNESS_ENDPOINTS is unset)` on a box whose `DATASET_OFFER` names no n8n dataset.
+  Door: health checks the connectors the unit's offer reaches, the set `offer_faults()` reads.
+  **Rides with:** box. **Re-test:** the box's health lists no n8n line while its offer names none.
+- **A wiped campaign answers two failure kinds**: after the landing, a still-open tab asked
+  `/campaigns/<wiped>/pipeline` (400) beside its `/hierarchy` and `/dashboard` (404). I7's GONE
+  stops on a 404 alone, so that read keeps asking. Door: an absent campaign is a 404 at every read.
+  **Rides with:** wave 6. **Re-test:** each campaign read of a deleted campaign answers 404.
+- **"Rebased to fork" names no fork**: the readout's stop line names neither the round the fork was
+  cut at nor the layer's reason, so the run that continues reads as unexplained. Door: the stop's
+  words carry the cut round and the `RebaseRequest.reason`. **Rides with:** wave 6.
+- **A host-allowance halt below the face, unexplained**: a visitor's first run ended `host_allowance`
+  at $0.041 spent of a $0.30 face (hold bound $0.06). Unchecked whether the run's own ceiling was
+  worded as the host's allowance. **Rides with:** money. **Re-test:** a run halted on its own
+  ceiling names that ceiling, never the allowance.
+- **Dead producers' locks accumulate**: the box's `jobs/producers/` holds 15 `.lock` files, one per
+  past producer pid, with nothing listed live. Door: the sweep that releases a dead producer's job
+  removes its lock. **Rides with:** box.
+- **`promptpotter-self`'s ε 0.30 is priced on the retired pairwise statistic**: its comment weighs a
+  false cut against a false survival on the pairwise p_best (and a 0.15 default), but since
+  5cf502c7b ε reads a field share that a 3-variant round ties at 0.25, so 0.30 cuts a tied leader
+  (`epsilon_at_a_tied_share` names it). Door: a value measured on the field-wise p_best stream of an
+  outer campaign. **Rides with:** L4. **Re-test:** the outer round's check-in names no collision.
+
+### wave-6 · what the round-decision restructure left (2026-11-26)
+
+- **Round 0 is CROWNED on its `Election` and holds no election as served**: `Election.ending` says
+  `crowned` where the origin is adopted, `RoundResult.improved` and the readout's hold exclude it by
+  `round > 0`, and `run_records.py` serves `ending: null` and no `verdict_reason`. Door: round 0's
+  ending is its own state (`adopted`), so no reader tests the round number. **Rides with:** θ off the
+  round's statement (roadmap § Sequence).
+- **`RoundOutcome.reference` and `Election.parent` name one arm twice** (`results.py`,
+  `layer_state.py` reads the first): the parent the round re-read is the election's input. Door: one
+  field, the round's `RoundArm`. **Rides with:** θ off the round's statement.
+- **The race a round closes on can differ from the one its election read**
+  (`round.py::measure_overlap`): a pick cut short, a line gap or a trigger buys after the election,
+  and the closed reading is the later one. Door: the election reads the round's last race, or the
+  closed record names which it read. **Rides with:** θ off the round's statement.
+
 ## Held — no wave-4 chain yet
 
 - **The estimator has no golden corpus**: its key (`nodes.py::BehaviourKeys.cell_estimator`) reads the

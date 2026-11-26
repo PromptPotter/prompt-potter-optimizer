@@ -12,8 +12,11 @@ from promptpotter.application.scoring.formula.compiler import (
     cell_channels_of,
     compile_expression,
 )
+from promptpotter.domain.cycle_paths import CycleHop
 from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
+    ArmKey,
+    ArmName,
     CellSet,
     CellSetBasis,
     CellSetName,
@@ -43,7 +46,8 @@ from promptpotter.domain.scoring import (
     constant_answer,
     enumerable_truth_labels,
 )
-from promptpotter.shared.measurement_context import RoleScope
+from promptpotter.domain.strict_model import FrozenModel
+from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.statistics import (
     declared_two_valued,
     discordant_counts,
@@ -75,6 +79,58 @@ class MemberRows:
 
 def fresh_cells(sheet: CellSheet) -> int:
     return sum(1 for cell in sheet if not cell.facts.cached)
+
+
+class RoundPairs(FrozenModel):
+    """What every pair a round reads in decision scope shares: its cycle, instrument and bank, and
+    the measurands, fitness first."""
+
+    path: tuple[CycleHop, ...]
+    instrument_id: str
+    dataset_hash: str
+    measurands: tuple[Measurand, ...]
+
+    def member(
+        self,
+        key: ArmKey,
+        rows: CellSheet,
+        *,
+        name: ArmName | None,
+        role: MeasurementRole | None,
+        cut: bool,
+    ) -> MemberRows:
+        return MemberRows(
+            address=MemberAddress(path=self.path, individual_id=key, arm=name, pass_role=role),
+            sheet=rows,
+            bought=fresh_cells(rows),
+            cut=cut,
+            scope=RoleScope.DECISION,
+            instrument_id=self.instrument_id,
+            dataset_hash=self.dataset_hash,
+            cell_set_id=None,
+        )
+
+    def read(
+        self,
+        a: MemberRows,
+        b: MemberRows,
+        *,
+        cell_set: CellSetName,
+        cells: Collection[str] | None,
+        measurands: Sequence[Measurand],
+    ) -> PairedReading:
+        return read_pair(
+            a=a,
+            b=b,
+            cell_set=cell_set,
+            cells=cells,
+            masked=False,
+            dataset_hash=self.dataset_hash,
+            measurands=measurands,
+            spec=ROUND_LIFT_SPEC,
+            scope=RoleScope.DECISION,
+            instrument_id=self.instrument_id,
+        )
 
 
 def grade_measurands(scorer: Scorer) -> list[Measurand]:
@@ -404,15 +460,12 @@ def _lift(
     measurand: Measurand, a_values: list[float], b_values: list[float], spec: EstimatorSpec
 ) -> MeasuredLift:
     n = len(a_values)
-    flips: FlipCounts | None = None
     mean, lo, hi, p, se = paired_mean_t(b_values, a_values, alpha=spec.alpha)
     assert lo is not None and hi is not None and p is not None
     floor = p_floor(b_values, a_values)
+    signed = (declared_two_valued(v) if measurand.binary else v for v in (b_values, a_values))
+    gained, lost = discordant_counts(*signed)
     if measurand.binary:
-        gained, lost = discordant_counts(
-            declared_two_valued(b_values), declared_two_valued(a_values)
-        )
-        flips = FlipCounts(gained=gained, lost=lost, unchanged=n - gained - lost)
         # Exact McNemar on the cells that flipped, never the t: 7 gained, 1 lost is 0.070, not 0.030.
         p = min(1.0, 2.0 * sign_test_p(max(gained, lost), min(gained, lost)))
     return MeasuredLift(
@@ -425,6 +478,6 @@ def _lift(
         side=interval_side(mean, max(p, floor), spec.alpha),
         p_value=max(p, floor),
         p_floor=floor,
-        flips=flips,
+        flips=FlipCounts(gained=gained, lost=lost, unchanged=n - gained - lost),
         family=None,
     )

@@ -30,13 +30,13 @@ PoBB is a **block race** (`potter/race.py::PoBBRace`): every arm walks the panel
 
 1. The cells read are those θ is read on (`rasch.py::theta_cells`, never rows walked — [`verdict-resolution.md`](verdict-resolution.md) § The round order) that every standing arm scored, or, under `pobb.shape: per_round`, that any did: the union, since each arm answers rows of its own. An arm is cut only once it answered `elimination_n_min` of them itself, and its ε(n) ramps on that own depth; under `per_candidate` every racer's depth is the shared count, as before. A rival with no row on a cell is **excluded there, never zero-filled**: the fit reads each member on the cells it answered.
 2. One hierarchical Rasch fit of the whole field on those cells, θ and δ together (`rasch.py::fit_rasch`), and a Monte Carlo over its θ draws, seeded by the read (`pobb.py::field_p_best`): `p_best` is each arm's posterior probability of being the field's best. The shares sum to 1, so the multiplicity of a wide field is inside the statement and slot order enters nowhere. A pairwise "credibly worse than some rival" cut was slot-dependent (serial, 0.25 → 0.63 by slot) or, raced against every sibling, cut a planted better arm 11.8% of the time against serial's 7.1%; the joint fit cuts it 4.7% at ε 0.05, flat by slot.
-3. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`). **An arm that ran its panel joins the priors** (`runner/round.py::_conclude_arm`), so it stays in the field of its top-up; an eliminated one never does.
+3. Stop when `p_best < ε(n)` — eliminated (graded by depth: `epsilon_floor`; switch `epsilon_stop`). A round the parent and k arms open is tied at 1/(k+1), so an ε at or above it cuts a tied leader, and the config check names it (`couplings.py::POBB`, `epsilon_at_a_tied_share`). **An arm that ran its panel joins the priors** (`runner/round.py::_conclude_arm`), so it stays in the field of its top-up; an eliminated one never does.
 
 The **origin panel's top-up is one more stretch of the same race** (`runner/round.py::read_origin_panel`): a cut there lands as the arm's `Cut`, which `runner/round.py::panel_triggers` reads, so the monitor never buys it back.
 
 **The race and the election read one row set** (`results.py::RoundResult.raced`: the draw, then the origin-panel cells it lacks) **on one ruler**, the scale the round opened on; the round's cells join δ after its election.
 
-**The election's bar** admits an arm on
+**The `posterior` bar** admits an arm on
 
 a raw θ lift above `domain/ruler.py::FIT_SLACK`, more shared cells won than lost on VERDICTS, AND its
 `P(θ_arm > θ_parent)` bounded by what the DISCORDANT pairs support (`shared/statistics.py::sign_posterior`; directional, so contradicting pairs collapse the claim to 0.5; **discordance counts VERDICTS, `Grade.fitness`, never the objective**) above potter's `theta_election` `admission` — never PoBB's ε, which
@@ -44,26 +44,47 @@ says when to stop BUYING an arm, not when to promote one. An `admission` below `
 = 0.75 is refused, so one discordant cell never promotes. Admission is bounded; the election RANKS on
 the unbounded posterior (bounding it moved a banked crown across a 0.0007 gap). **A pick's crowning
 cells are its discordant wins over its bar**: there its rows are the luck the selection kept, so they
-stay out of every race it judges; a cell it tied on stays in the pool. **Evidence is bought in one
-place, the round's race, up to the round's cap**: a leader short of the bar there is dropped, a false
-negative the bar accepts, and a round that crowns nothing hands on its parent alone.
+stay out of every race it judges; a cell it tied on stays in the pool. They are read off the pairing
+the round banked (`results.py::Election.deciding_pair`, `selection.py::crowning_cells`), on a crowned
+round alone. **Evidence is bought in one
+place, the round's race, up to the round's cap**: a leader short of the bar there is not crowned, a
+false negative the bar accepts. A round ends one of three ways (`origin_panel.py::RoundEnding`, filed
+as `results.py::Election.ending`; `run_standing.py::line_reference` reads it): crowned, moved onto its
+uncrowned leader, or held on its parent, the declared pick staying the last crown. Potter's
+`theta_election` `next_parent` picks between the last two:
+`not_lost` (the default) steps onto the round's leader unless the parent beat it, a neutral move on
+the fixed origin panel (`vote: overlap`, paired lifts add), so the line never falls below a held
+crown; `leading` always steps onto the leader (comma selection); `crowned` keeps the parent (plus
+selection). `RoundWinner` replays `[ending, leading]` (`potter/election.py::RoundWinner.decide`).
 
-**The bar is ONE predicate whose statistic is a switch** (`OptimizationConfig.crowning_bar`,
-`domain/crowning_bar.py::CrowningBar`), read over every readable arm of the round at once; crown,
-advance (`CrowningBar.separates`) and `RoundResult.improved` read it, and each reading names what a
-result quotes (`Election.bar`): `posterior` (the default) is the bar above; `sign_test`, the exact
+**Each selector owns its crown; the bench re-judges none.** capo, gepa and levi crown by their own
+official rules. Potter's crown statistic is `theta_election` `crown`
+(`domain/crowning_bar.py::CrowningBar`, potter's alone), read over every readable arm of the round at
+once, the round's crown and lead the arm it ranks first (`CrowningBar.rank`, signed: zero is level
+with the parent; `CrowningBar.lost` is `rank < 0`). Each arm's evidence is the bench's one pairing
+(`scoring/paired.py::read_pair`) of the arm over its parent on the fitness verdict alone, on the
+vote's cells (`potter/election.py::RoundWinner.pairings`): its lift is the green bar's point and its
+`FlipCounts` the cells won and lost; an arm read on fewer than two shared cells is no subject.
+`paired_point` (the default) crowns that lift above zero, ranked on it: its interval is
+information, which the advance reads, so a point crown whose interval spans
+zero closes `NOT_SEPARATED` and the line moves all the same. `posterior` is the bar above. The θ
+crowns (`posterior`, `empirical_bayes`) elect on ability and floor coverage on θ cells, the others on
+the fitness column and the pairing's scored cells (`ThetaElection.elects_on`). Ablation switches of potter's crown only:
+`sign_test`, the exact
 paired sign test on the discordant verdicts, Holm-corrected across the round's arms; `e_process`, a
 uniform-mixture e-value on the same discordance at `arms / α`, valid wherever the race stops;
 `empirical_bayes`, the θ lift shrunk toward the tenant's banked arm-vs-parent lifts on the dataset
 (`selection.py::banked_lift_prior`: τ² = observed variance less mean noise variance, floored at 0),
 its posterior carrying μ0's own error, so a τ at 0 never reads as certainty on μ0's sign
-(`crowning_bar.py::LiftPrior.shrunk`). No reading crowns an arm its paired verdicts contradict.
+(`crowning_bar.py::LiftPrior.shrunk`). No reading crowns an arm its paired verdicts contradict. The
+paper's earlier behaviour is `crown: posterior`, `next_parent: crowned`,
+`optimization.not_separated_stall: resets`.
 
-**Which rows the bar pairs on is potter's `theta_election` `vote`**, chosen once before the election
-(`runner/round.py::bar_pairing`), so the crown, `Election.bar` and the replay read one cell set
-(`MeasuredRound.paired_on`). `draw` pairs an arm with its parent on every cell raced.
+**Which rows the bar pairs on is potter's `theta_election` `vote`**, which the bench never reads:
+the election banks the cells on its replay inputs (`RoundWinner.cells`), so the crown and the replay
+read one cell set. `draw` pairs an arm with its parent on every cell raced.
 `overlap` (the default) pairs them on the origin panel's cells alone, the rows both hold, and only an arm the
-panel trigger seats there (`runner/round.py::panel_trigger`) is electable: the panel, a monitor
+panel trigger seats there (`potter/election.py::seated`, `origin_panel.py::panel_trigger`) is electable: the panel, a monitor
 under `draw`, is the verdict, and a PoBB stop, which it never seats, leaves the election. Its cells are bought before the election
 (`runner/round.py::read_origin_panel`), the crowning cells included, since the panel stays fixed
 at C0; θ, its lift, the statistic and `admission` are the same under both. The panel holds
@@ -165,7 +186,7 @@ CAPO's survival selection (arXiv 2504.16005 §4, App. B) takes PoBB's row 5 for 
 
 - **`blocks` (sampler)** — `block_size` (b), `max_blocks` (z_max): the first `max_blocks` whole blocks of the search split in bank order, the same every round, never shuffled (App. C.4); `RoundSamples.block_size` hands the boundaries over; a pool short of one block refuses.
 - **`paired_t` (eliminator)** — `alpha`, `length_penalty` (γ), and μ = the `population` selector's `size` (one knob). At each block's close every live arm meets every other in a one-sided paired t (`shared/statistics.py::paired_mean_t`) on CAPO's objective over the same k blocks; arms that μ others significantly beat are cut together off pre-cut readings — App. B's `n_sig_better ≥ μ` (§4's prose says "more than") — with no multiple-test correction, as CAPO races. At μ or fewer the race is settled (`locked_in`), and only then or at `max_blocks`: a survivor set above μ walks the next block (App. B, `while |P| > μ and i < z_max`). A first block that cuts the set to μ settles the race there, as CAPO's does — with c offspring and μ parents a common case, since γ makes an offspring longer than a parent it ties on fitness significantly worse on every shared cell — so `max_blocks` binds only where cuts come slower. `Elimination.context.gate` reads `outscored` / `settled`, with its `block` and `raced_against`; the stream's `p_best` is the smallest `p_better`.
-- **Departures.** A race starting at ≤μ arms still walks one block so the selector can rank (App. B races none). `paired_mean_t` floors the SE at `1/(4n)`. A budget-cut round is a holed panel under `optimization.panel_gate`: `strict` unwinds it (a raised-ceiling `resume` re-runs it); `off` elects on the blocks paid for (`Selector.elects_partial`) among arms at the coverage floor (`selection.py::cells_read`), the parent read on cells the archive holds, as the run's last round; no arm at the floor, or a parent with none of its cells, unwinds.
+- **Departures.** A race starting at ≤μ arms still walks one block so the selector can rank (App. B races none). `paired_mean_t` floors the SE at `1/(4n)`. A budget-cut round is a holed panel under `optimization.panel_gate`: `strict` unwinds it (a raised-ceiling `resume` re-runs it); `off` elects on the blocks paid for (`Selector.elects_partial`) among arms at the coverage floor (`nodes.py::Selector.covered`, the selector's own count), the parent read on cells the archive holds, as the run's last round; no arm at the floor, or a parent with none of its cells, unwinds.
 - **Each cut is a ledger decision**, `paired_t_cut`, REPLAYED (arm, rows, rivals, γ, normaliser), so a changed scorer re-reads the same test.
 
 **CAPO selects on its own objective; the bench scores it on the campaign's.** Per cell `fitness − γ · target_prompt_chars / length_norm` (§4), unclamped; γ = `capo_init`'s `length_penalty` (0.05, App. C.4). `capo_init` fixes γ and `length_norm` (the longest initial prompt) into the `capo_objective` slice that `paired_t` and `population` both read. The campaign's `scoring.per_cell` composite never takes CAPO's term — it is the ONE evaluator every optimizer's arms, election and bench headline are scored under.
