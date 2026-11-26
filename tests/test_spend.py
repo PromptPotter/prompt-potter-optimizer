@@ -12,7 +12,6 @@ import contextlib
 import dataclasses
 import inspect
 import json
-import os
 import random
 import ssl
 import subprocess
@@ -73,7 +72,7 @@ from offline_world import (
     install_network,
 )
 from pydantic import BaseModel, Field, SecretStr, ValidationError
-from world import World
+from world import Shared, World, shared_run
 
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores, set_coupon
@@ -166,7 +165,7 @@ from promptpotter.application.served_dashboard import (
 )
 from promptpotter.config.paths import default_projects_root, jobs_dir
 from promptpotter.config.settings import settings
-from promptpotter.connectors.protocol import InProcessWorkload, cell_envelope_of
+from promptpotter.connectors.protocol import InProcessWorkload
 from promptpotter.connectors.termnorm import TermNormSession
 from promptpotter.domain.arms import ArmPosition, CutKind
 from promptpotter.domain.bench import PassRefusal
@@ -516,9 +515,24 @@ def _minted(stores: Stores, net: Router, layer: dict[str, Any] | None = None) ->
     return mint.mint(plan, campaign_id=mint.fresh_campaign_id(session), adopting=None).session
 
 
-def _line(world: World, forks: int) -> list[CycleHop]:
-    """A campaign the world ran, then *forks* cut off its origin by the operator's fork door."""
-    root = asyncio.run(world.campaign(rows=24)).hop
+@pytest.fixture(scope="module")
+def ran_24(tmp_path_factory: pytest.TempPathFactory) -> Shared:
+    """One campaign on 24 rows, run once for every fact of this file that reads a run's line
+    (~2.5 s once, ~20 ms a fact)."""
+
+    async def act(world: World) -> CycleHop:
+        return (await world.campaign(rows=24)).hop
+
+    return shared_run(tmp_path_factory, act)
+
+
+def _line(world: World, forks: int, ran: Shared | None = None) -> list[CycleHop]:
+    """A campaign the world ran (*ran*'s copy, else its own: another account mints its own), then
+    *forks* cut off its origin by the operator's fork door."""
+    if ran is None:
+        root = asyncio.run(world.campaign(rows=24)).hop
+    else:
+        root, world = ran.made, world.adopt(ran)
     asked = ForkCyclePayload(campaign_id=root.campaign_id, cycle_id=root.cycle_id)
     cut = (cut_operator_fork(world.stores, asked, CycleStart()) for _ in range(forks))
     return [root, *(root.model_copy(update={"cycle_id": c.take(world.stores)}) for c in cut)]
@@ -1959,10 +1973,10 @@ def shared_ceiling(built_stores: Stores) -> _SharedCeiling:
 
 # Each fork is admitted what the forks launched before it left of the one ceiling.
 def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
-    built_stores: Stores, world: World, shared_ceiling: _SharedCeiling
+    built_stores: Stores, world: World, ran_24: Shared, shared_ceiling: _SharedCeiling
 ) -> None:
     shared, launch, share, bill = shared_ceiling
-    root, fork_a, fork_b, fork_c = _line(world, 3)
+    root, fork_a, fork_b, fork_c = _line(world, 3, ran_24)
     bill(root, 0.25)
     _, held_a = launch(fork_a, 0.5)
     assert share(held_a) == pytest.approx(0.25), (
@@ -2029,12 +2043,12 @@ def test_forks_launched_side_by_side_hold_one_ceiling_between_them(
 
 # The money-axis refusals read the pair's cycles while they live.
 def test_a_raised_ceiling_is_reshared_over_every_live_cycle_never_handed_whole_to_one(
-    built_stores: Stores, world: World, shared_ceiling: _SharedCeiling
+    built_stores: Stores, world: World, ran_24: Shared, shared_ceiling: _SharedCeiling
 ) -> None:
     shared, launch, share, _ = shared_ceiling
     # A runs at $1, B is admitted at $3 beside it ($2), and the raise to $3 leaves A its $1.
     eighth = SendBound(input_tokens=0, output_tokens=0, usd=0.125)
-    *pair, pair_c, unminted = _line(world, 3)
+    *pair, pair_c, unminted = _line(world, 3, ran_24)
     job_a, held_a = launch(pair[0], 1.0)
     book_a = _armed(built_stores, pair[0], held_a)
     job_b6, held_b6 = launch(pair[1], 3.0)
@@ -2063,12 +2077,13 @@ def test_a_launch_landing_mid_reshare_waits_it_out(
     monkeypatch: pytest.MonkeyPatch,
     built_stores: Stores,
     world: World,
+    ran_24: Shared,
     shared_ceiling: _SharedCeiling,
 ) -> None:
     shared, launch, _, _ = shared_ceiling
     # A holds $1 of $1 while a raise to $3 re-shares; B, launching at $3 meanwhile, is admitted
     # on the shares as moved, never on a torn split.
-    race = _line(world, 1)
+    race = _line(world, 1, ran_24)
     camp = race[0].campaign_id
     launch(race[0], 1.0)
     resharing, b_at_gate, go = threading.Event(), threading.Event(), threading.Event()
@@ -2127,10 +2142,10 @@ def test_a_launch_landing_mid_reshare_waits_it_out(
 
 
 def test_a_ceiling_its_campaign_has_spent_admits_nothing(
-    world: World, shared_ceiling: _SharedCeiling
+    world: World, ran_24: Shared, shared_ceiling: _SharedCeiling
 ) -> None:
     _, launch, _, bill = shared_ceiling
-    race = _line(world, 1)
+    race = _line(world, 1, ran_24)
     bill(race[0], 3.0)
     with pytest.raises(QuotaExceededError):
         launch(race[1], 3.0)
@@ -2376,28 +2391,17 @@ def test_a_planned_head_to_head_is_priced_at_its_archived_cells_and_optimizer_ro
 
 
 @pytest.mark.usefixtures("run_bound")
-def test_a_remote_cell_open_at_the_runs_wall_clock_is_cut_on_it(
-    tmp_path: Path, offline: Router
-) -> None:
-    offline.backend.faults = {"/matches": [Hang()]}
-    jobs = tmp_path / "jobs"
-    remote = backend_client(jobs, cell_envelope_s=cell_envelope_of(600.0))
+def test_a_remote_cell_open_at_the_runs_wall_clock_is_cut_on_it(world: World) -> None:
     clock = spend_book(None, usd_reserve=None, wall_clock_s=30.0)
-    cut_session = loop_session(
-        workspace(),
-        pipeline_schema([]),
-        [],
-        scorer=_HIT,
-        client=remote,
-    )
 
     async def cut_cell() -> tuple[MeasuredCell, float]:
         loop = asyncio.get_running_loop()
-        began = loop.time()
-        async with contextlib.aclosing(remote):
+        async with world.opened() as session:
+            world.net.backend.faults = {"/matches": [Hang()]}
+            began = loop.time()
             with scoped(book=clock):
                 row = await measure_sample(
-                    Sample(id=0, query="q", ground_truth="a"), cut_session, PipelineParams()
+                    session.bank.samples[0], session, session.pipeline_params
                 )
         return row, loop.time() - began
 
@@ -2415,18 +2419,14 @@ def test_a_remote_cell_open_at_the_runs_wall_clock_is_cut_on_it(
 
 
 @pytest.mark.usefixtures("run_bound")
-def test_a_cell_row_carries_the_category_its_sends_close_decided(
-    tmp_path: Path, offline: Router
-) -> None:
-    offline.backend.faults = {"/matches": [httpx.Response(503, json={"detail": "down"})] * 12}
-    remote = backend_client(tmp_path / "jobs")
-    session = loop_session(workspace(), pipeline_schema([]), [], scorer=_HIT, client=remote)
-
+def test_a_cell_row_carries_the_category_its_sends_close_decided(world: World) -> None:
     async def downed_cell() -> MeasuredCell:
-        async with contextlib.aclosing(remote):
+        async with world.opened() as session:
+            down = httpx.Response(503, json={"detail": "down"})
+            world.net.backend.faults = {"/matches": [down] * 12}
             with scoped(book=spend_book(None, usd_reserve=None)):
                 return await measure_sample(
-                    Sample(id=0, query="q", ground_truth="a"), session, PipelineParams()
+                    session.bank.samples[0], session, session.pipeline_params
                 )
 
     row = jumping_clock(downed_cell())
@@ -3403,35 +3403,10 @@ def dspy_billed(out: Path) -> dict[str, Any]:
     return paid
 
 
-_DSPY_CHILD = """
-import json, sys
-from pathlib import Path
-from test_spend import dspy_billed
-print(json.dumps(dspy_billed(Path(sys.argv[1]))))
-"""
-
-
-@pytest.fixture(scope="module")
-def dspy_paid(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    out, tests = tmp_path_factory.mktemp("dspy"), Path(__file__).resolve().parent
-    child = subprocess.run(
-        [sys.executable, "-c", _DSPY_CHILD, str(out)],
-        cwd=tests,
-        env={
-            **os.environ,
-            # The repo root first: the child imports the promptpotter this suite runs, never the install's.
-            "PYTHONPATH": os.pathsep.join(
-                (str(tests.parent), str(tests), str(tests.parent / "scripts"))
-            ),
-            "PROMPTPOTTER_HOME": str(out / "home"),
-            "PROMPTPOTTER_ENV_FILE": str(out / ".env"),
-        },
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert child.returncode == 0, f"the dspy cells did not run: {child.stderr[-2000:]}"
-    paid: dict[str, Any] = json.loads(child.stdout.splitlines()[-1])
+@pytest.fixture
+def dspy_paid(dspy_child: dict[str, Any]) -> dict[str, Any]:
+    """`dspy_billed`, as `conftest.py::dspy_child` ran it."""
+    paid: dict[str, Any] = dspy_child["spend"]
     return paid
 
 
@@ -5133,11 +5108,11 @@ class _SpentCampaign(NamedTuple):
 
 
 @pytest.fixture
-def spent_campaign(built_stores: Stores, world: World) -> _SpentCampaign:
+def spent_campaign(built_stores: Stores, world: World, ran_24: Shared) -> _SpentCampaign:
     """A campaign the world ran and two forks off it, each then spent on the box's key, and
     readers of that spend."""
     stores = built_stores
-    root, stub, retried = _line(world, 2)
+    root, stub, retried = _line(world, 2, ran_24)
     _spent(stores, root, 0.07)
     stub_ledger, retried_ledger = _spent(stores, stub, 0.11), _spent(stores, retried, 0.05)
 
@@ -5169,15 +5144,17 @@ def spent_campaign(built_stores: Stores, world: World) -> _SpentCampaign:
 
 
 @pytest.mark.usefixtures("account_bound")
-async def test_the_account_and_the_campaigns_ceiling_read_what_its_run_billed(world: World) -> None:
-    ran = await world.campaign(rows=24)
+def test_the_account_and_the_campaigns_ceiling_read_what_its_run_billed(
+    world: World, ran_24: Shared
+) -> None:
+    hop, world = ran_24.made, world.adopt(ran_24)
     billed = [
         r.money
-        for r in world.records(ran.hop)
+        for r in world.records(hop)
         if isinstance(r, TokenUsageRecord) and isinstance(r.money, Bill) and not r.mirrored
     ]
     assert billed, "vacuous: the run billed no send"
-    ceiling = world.stores.campaigns.metered_spend(ran.hop.campaign_id, "bill")
+    ceiling = world.stores.campaigns.metered_spend(hop.campaign_id, "bill")
     assert ceiling.token_amount == sum(bill.tokens for bill in billed), (
         "the campaign's ceiling read other tokens than its ledger billed"
     )
