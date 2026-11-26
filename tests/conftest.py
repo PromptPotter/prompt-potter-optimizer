@@ -87,6 +87,12 @@ print(json.dumps({"spend": dspy_billed(out / "spend"), "connectors": dspy_cells(
 """
 
 
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """The facts reading the dspy child run first, so it runs while this process is still small:
+    the gate meters the two together (`scripts/processes.py::close_job`)."""
+    items.sort(key=lambda item: "dspy_child" not in getattr(item, "fixturenames", ()))
+
+
 @pytest.fixture(scope="session")
 def dspy_child(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
     """What every dspy cell paid, run once for the suite in a child, where dspy is imported."""
