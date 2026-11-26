@@ -2534,34 +2534,42 @@ def controlled_reading(home: Path, arm_names: Sequence[str]) -> str:
     return "\n".join([*said, *(line for line in lines if line.startswith(("arm ", "head-to-")))])
 
 
-_PROVEN_HOME = """
-import sys
+_PROVEN_HOMES = """
+import json, sys
 sys.path.insert(0, sys.argv[1])
 from pathlib import Path
 from promptpotter.application.maintenance.landing import plan_landing
-landing = plan_landing(Path(sys.argv[2]), reset=False)
-unknown = list(landing.unknown)
-refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches, *landing.runs)]
-refused += [f"{u.path}: {u.why}" for u in landing.torn]
-refused += [one.said for one in landing.rows]
-if unknown or refused or landing.staged:
-    sys.exit(
-        f"offline run: the run wrote what no data-root row names {unknown}, what its row's "
-        f"reader refuses {refused}, or a shape a migration rewrites "
-        f"{[one.said for one in landing.staged]}"
-    )
+for at, root in enumerate(sys.argv[2:]):
+    landing = plan_landing(Path(root), reset=False)
+    unknown = list(landing.unknown)
+    refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches, *landing.runs)]
+    refused += [f"{u.path}: {u.why}" for u in landing.torn]
+    refused += [one.said for one in landing.rows]
+    if unknown or refused or landing.staged:
+        print(json.dumps([at, (
+            f"the run wrote what no data-root row names {unknown}, what its row's reader refuses "
+            f"{refused}, or a shape a migration rewrites {[one.said for one in landing.staged]}"
+        )]))
 """
 
 
-def proven_home() -> None:
-    """A landing's plan over what the run wrote: every file named by a row, loading as it shapes, and
-    nothing for a migration to stage or the landing to drop. It plans in a process of its own, as a
-    landing does, so a state kind only an optimizer's import registers is refused here."""
-    root = str(Path(__file__).resolve().parents[1])
-    proof = [sys.executable, "-c", _PROVEN_HOME, root, str(default_projects_root())]
+def proven_homes(failed: dict[str, int], planned: Mapping[Path, str]) -> None:
+    """Once every leg ran green, a landing's plan over what each wrote (*planned*: a projects root
+    and the optimizer its leg ran): every file named by a row, loading as it shapes, and nothing for
+    a migration to stage or the landing to drop. One process of its own plans them all, as a landing
+    does, so a state kind only an optimizer's import registers is refused here, its import paid once."""
+    if any(failed.values()):
+        return
+    roots = list(planned)
+    repo = str(Path(__file__).resolve().parents[1])
+    proof = [sys.executable, "-c", _PROVEN_HOMES, repo, *map(long_path, roots)]
     proved = subprocess.run(proof, capture_output=True, text=True, check=False)
     if proved.returncode:
-        raise SystemExit(proved.stderr.strip())
+        raise SystemExit(f"offline run: the landing's own process failed: {proved.stderr.strip()}")
+    for line in proved.stdout.splitlines():
+        at, said = json.loads(line)
+        failed[planned[roots[at]]] += 1
+        print(f"{planned[roots[at]]}: a landing refuses {roots[at]}: {said}")
 
 
 def read_children(
@@ -2636,7 +2644,6 @@ def run_child_leg(args: argparse.Namespace) -> None:
             arrival=args.arrival,
         )
         print(asyncio.run(one)[0])
-    proven_home()
 
 
 def main() -> int:
@@ -2776,10 +2783,14 @@ def main() -> int:
                 stderr=subprocess.STDOUT,
             ).returncode
 
+    # Each leg's projects root, by the optimizer it runs, for one landing plan once all have run.
+    planned: dict[Path, str] = {}
+
     def spawn(name: str, workspace: Path, *extra: str, into: Path | None = None) -> Future[int]:
         """*into* is the leg whose data root it runs in: its own, unless named."""
         workspace.mkdir()
         root = data_root(into or workspace)
+        planned.setdefault(root / PROJECTS_DIR, name)
         return pool.submit(run_child, name, workspace, "run.log", args.rounds, *extra, root=root)
 
     def terminal(workspace: Path, verb: str, interrupts: int) -> int:
@@ -2875,6 +2886,7 @@ def main() -> int:
     for name, wound in wounding.items():
         failed[name] += not wounded_leg(name, home / name, wound)
     said_leg(failed, "potter", home / "potter" / L4, nesting, "an L4 campaign over inner runs")
+    proven_homes(failed, planned)
     if args.against is not None:
         print("\n".join(moved_against(home, args.against, names)))
     if args.controlled and not any(failed.values()):
