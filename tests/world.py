@@ -40,7 +40,7 @@ from offline_world import (
 from pydantic import SecretStr
 
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
-from promptpotter.application.datasets.authored import ConfigLayers, dataset_campaign_block
+from promptpotter.application.datasets.authored import ConfigLayers
 from promptpotter.application.embedded_run import run_campaign, run_head_to_head
 from promptpotter.application.initialization.scoring_scope import arm_diagnostic_scoring
 from promptpotter.application.initialization.wiring import init_services
@@ -68,7 +68,6 @@ from promptpotter.domain.spend import Budget
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.registry import send_pacing
 from promptpotter.infrastructure.run_scope import scoped
-from promptpotter.infrastructure.store.dataset_access import resolve_dataset
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -107,6 +106,14 @@ class Shared:
     home: Path
     made: Any
     script: Script
+
+    @contextmanager
+    def reading(self) -> Iterator[None]:
+        """Its home as the data root, for a fixture reading what it left in place, never a copy:
+        a sandbox is a workspace of the data root its outer cycle ran under."""
+        with pytest.MonkeyPatch.context() as home:
+            home.setenv("PROMPTPOTTER_HOME", str(self.home))
+            yield
 
 
 @dataclass
@@ -301,26 +308,6 @@ class World:
             laid, config = laid_session(session, ConfigLayers.stating(stated(config)))
             with arm_diagnostic_scoring(laid, config):
                 yield laid
-
-    async def l4_campaign(self, *, rows: int = 40) -> Ran:
-        """An L4 campaign through the real entry (~8 s): potter's outer cycle over inner runs of the
-        offline dataset, each minted in the outer cycle's sandbox (`inner_sandbox_store`)."""
-        l4 = "promptpotter-self/e2e"
-        raw = dict(dataset_campaign_block(resolve_dataset(self.stores, l4)))
-        opt = raw["optimization"]
-        # Its spend cap lifted and its draws seeded, as the offline run's L4 leg lays it.
-        opt.update(budget={**opt["budget"], "usd": 1000.0}, determinism={"seed": 0})
-        config = CampaignConfig.model_validate(raw)
-        self._lay(Script(config, rows, 0))
-        session, result = await run_campaign(
-            l4,
-            stated(config),
-            stores=self.stores,
-            readout_sink=lambda _line: None,
-            budget=Budget(),
-            mode=RunMode(),
-        )
-        return self._ran(session, result)
 
 
 def shared_run[T](

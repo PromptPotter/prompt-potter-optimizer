@@ -89,7 +89,6 @@ from promptpotter.application.bench.difficulty import (
     session_ruler_scope,
 )
 from promptpotter.application.bench.node_context import NodeContext, own_rows
-from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.caller import Caller
 from promptpotter.application.commands import measuring
 from promptpotter.application.commands.dispatcher import (
@@ -283,6 +282,7 @@ from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.cell_fold import (
     ScoreSummary,
     is_prior_dominated,
+    repairable_holes,
     unscoreable_cells,
 )
 from promptpotter.domain.cell_terms import CELL_TERMS, CellTerm
@@ -2505,17 +2505,17 @@ def test_a_hole_is_neither_a_stop_nor_a_deprecated_row() -> None:
 
 
 def test_a_cell_a_declared_bound_cut_is_settled_and_never_re_measured() -> None:
-    def bounded(category: ErrorCategory) -> RoundResult:
+    def holes(category: ErrorCategory) -> int:
         rows = [
             measurement(0, 1.0),
             measurement(1, None, error="no verdict", error_category=category),
         ]
-        return round_result(1, candidates_scored=1, cells={arm_key("c0"): sheet(rows)})
+        return repairable_holes(sheet(rows))
 
-    assert repair_cut([bounded(ErrorCategory.HALTED)]).rounds == [], (
+    assert holes(ErrorCategory.HALTED) == 0, (
         "a cell a declared bound CUT is settled: the same bound cuts the next attempt"
     )
-    assert repair_cut([bounded(ErrorCategory.UNSCOREABLE)]).rounds == [1], (
+    assert holes(ErrorCategory.UNSCOREABLE) == 1, (
         "a cell that ran to its own end can answer differently on a re-measure"
     )
 

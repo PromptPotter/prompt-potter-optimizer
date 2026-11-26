@@ -174,11 +174,11 @@ row it closes.
 
 ### batch/26 · addr
 
-- **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::_earlier`,
+- **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::earlier_measured`,
   O(n² log n) per read; reported beside it, the subtree read builds the whole top family per request,
   and `_descent` compares O(n²) pairs with `SequenceMatcher` behind an lru of 4096 that thrashes from
-  ~90 candidates (`hierarchy_subtree.py:154-231`). Action: "closer to" and descent are folded once per
-  candidate on the ledger: a record kind. **Rides with:** a lineage-fold chain of its own. **Re-test:** `git grep -n "def _earlier" -- promptpotter/application/hierarchy_subtree.py` is empty.
+  ~90 candidates (`hierarchy_subtree.py:242-318`). Action: "closer to" and descent are folded once per
+  candidate on the ledger: a record kind. **Rides with:** a lineage-fold chain of its own. **Re-test:** `git grep -n "def earlier_measured" -- promptpotter/application/hierarchy_subtree.py` is empty.
 - **The feed's version spans a whole store**: `GET /feed`'s tick (`application/cycle_reads.py::feed_frames`) runs
   `application/hierarchy.py::entries_version` over every store, per connected tab, and a campaign
   subtree's version (`hierarchy_subtree.py`) covers its whole store, so any run's append re-asks every
@@ -804,7 +804,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **A writer stamps one version per subject (root D)**: 11 `version` functions in 10 files
   (`campaign_store/store.py:243`, `draft_store.py:59`, `measurement_archive.py:493`, `ruler_store.py:42`,
   `tenant_dataset_store.py:136`, `dataset_access.py:397`, `machine_status.py:249`, `hierarchy.py:554,585`,
-  `hierarchy_subtree.py:676`, `measurement_log.py:259`) and `file_sig(` 34/15, each re-deriving a
+  `hierarchy_subtree.py:750`, `measurement_log.py:259`) and `file_sig(` 34/15, each re-deriving a
   subject's change from the files it reads. **Closes:** **The feed's version spans a whole store**,
   **The account feed never re-asks an exhibit's reads when the host's store moves**; adjacent:
   **The live reads re-serve history per poll**, **The lineage subtree sorts every candidate per candidate**,

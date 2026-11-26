@@ -21,7 +21,6 @@ import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 from typing import IO, Any, NamedTuple
-from unittest import mock
 
 import httpx
 import pytest
@@ -43,7 +42,6 @@ from factories import (
     measurement,
     measurements,
     mint_fork,
-    minted_campaign,
     optimizer_state,
     pobb_knobs,
     prompted,
@@ -54,8 +52,6 @@ from factories import (
     seat,
     set_cycle,
     sheet,
-    spend_book,
-    stored_campaign,
     workspace,
 )
 from offline_run import DATASET
@@ -71,16 +67,25 @@ from promptpotter.application.bench.resume_and_fork.fork_siblings import (
     cut_operator_fork,
     fork_edge,
 )
-from promptpotter.application.bench.resume_and_fork.repair import apply_correction
 from promptpotter.application.bench.resume_and_fork.replayers import replay_all_mismatches
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import parse_cycle_start
 from promptpotter.application.cycle_reads import feed_versions, open_family_ray
 from promptpotter.application.hierarchy import list_hierarchy
 from promptpotter.application.hierarchy_subtree import (
+    Reach,
+    Walked,
+    earlier_measured,
     hierarchy_subtree,
+    inner_host,
+    line_owners,
+    line_through,
+    main_line,
+    retired_by,
     subtree_cycle,
     subtree_version,
+    supersede_line,
+    unplaced_reason,
 )
 from promptpotter.application.initialization.scoring_scope import run_memory
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
@@ -114,24 +119,19 @@ from promptpotter.application.pipeline_resolve import (
     cycle_config,
     permitted_narrowing,
 )
-from promptpotter.application.runner.inner.tasks import inner_spawn_of
-from promptpotter.application.runner.round import run_init
 from promptpotter.application.runner.termination import (
     run_stop_detail,
     run_stop_reason,
 )
-from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.race_protocol import Decision, View, WalkView
 from promptpotter.application.scoring.row_policy import FieldRead, RowGround, RowKnobs, send_rows
-from promptpotter.application.scoring.search_point_scorer import filed_entry
 from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.application.views.render.phase import acts_line
 from promptpotter.config.paths import MEASUREMENTS_DIR, user_data_root
 from promptpotter.domain.activity import ActivityFeed
 from promptpotter.domain.arms import ArmPosition, Measured
-from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import (
     CycleConfig,
@@ -149,18 +149,16 @@ from promptpotter.domain.cycle_paths import (
     Subject,
 )
 from promptpotter.domain.hierarchy import (
-    CandidateStanding,
     HierarchyCampaign,
     HierarchyCandidate,
     HierarchyEntry,
     HierarchyRound,
-    SubtreeCampaign,
+    MainLineStep,
     SubtreeCycle,
     entries_under,
 )
 from promptpotter.domain.job import CampaignLaunch
 from promptpotter.domain.narration import Narration
-from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
@@ -172,15 +170,14 @@ from promptpotter.domain.records.run_records import (
     CycleShareRecord,
     CycleStart,
     CycleSupersededRecord,
-    ForkDirection,
     ForkSpec,
     ForkTrigger,
     OriginGatePass,
     RoundEnteredRecord,
-    RoundProposedRecord,
     RoundWarningRecord,
     RunPhaseRecord,
     SampleScoredRecord,
+    SpawnedBy,
     StopLoop,
 )
 from promptpotter.domain.results import RoundResult
@@ -189,7 +186,6 @@ from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.run_standing import walked_position
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
 from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer
-from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.projections.base import Projection
@@ -233,7 +229,7 @@ from promptpotter.infrastructure.store.session_pointer import (
     cleanup_stub_fork_if_empty,
     read_active_pointer,
 )
-from promptpotter.infrastructure.store.stores import Stores, build_stores, inner_sandbox_store
+from promptpotter.infrastructure.store.stores import Stores, build_stores
 from promptpotter.presentation.cli import main as cli_main
 from promptpotter.shared.errors import (
     BadRequestError,
@@ -2044,10 +2040,6 @@ def test_a_running_parents_pause_landing_after_its_supersede_keeps_it_superseded
     )
 
 
-def _ident(name: str) -> str:
-    return prompted(instruction=name).id
-
-
 def _addr(hop: CycleHop, rnd: int, individual: str) -> str:
     return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(individual)).address
 
@@ -2060,21 +2052,17 @@ class _Family(NamedTuple):
     stores: Stores
     hops: dict[str, CycleHop]
     tree: HierarchyEntry
-    inner: HierarchyEntry
-    home: Path
 
 
 # A trunk; a rewind fork of it cut at 2 (kid) and one of the kid cut at 3 (grand); a steer off a
-# round-1 arm the trunk never crowned; then the kid re-run in place from 2, below the grand's cut;
-# and an L4 campaign whose inner runs its sandbox holds. ~17 s once; every fact on it only reads.
+# round-1 arm the trunk never crowned. Every fact on it only reads.
 @pytest.fixture(scope="module")
-def family_tree(tmp_path_factory: pytest.TempPathFactory, line: Shared) -> _Family:
-    """`line` as the trunk, two rewind forks, a steer off an uncrowned arm, the kid re-run from 2
-    and an L4 campaign, run once for the module (~11 s, the L4 ~8 s of it): facts read it."""
+def family_tree(tmp_path_factory: pytest.TempPathFactory, displaced: Shared) -> _Family:
+    """`displaced`'s parent as the trunk and its fork as the kid, a rewind fork of the kid and a
+    steer off an uncrowned arm, run once for the module (~2.5 s on `displaced`'s): facts read it."""
 
     async def act(world: World) -> dict[str, CycleHop]:
-        trunk, _ = line.made
-        kid = (await world.fork(trunk, 2, keep_rounds=True)).hop
+        trunk, kid = displaced.made.parent, displaced.made.fork
         grand = (await world.fork(kid, 3, keep_rounds=True)).hop
         # A candidate's record pins the host the world's LLM names, which the world's OpenRouter
         # host list lacks: listed, so a steer laying that record prices its dollar ceiling.
@@ -2086,19 +2074,15 @@ def family_tree(tmp_path_factory: pytest.TempPathFactory, line: Shared) -> _Fami
         stood = world.stores.campaigns.standing_rounds(trunk, moment=None)
         uncrowned = next(k for k in stood.rounds[1].close.arms if k != stood.crowns[1])
         steered = (await world.fork(trunk, 1, candidate_id=uncrowned)).hop
-        await world.resume(kid, from_round=2)
-        l4 = (await world.l4_campaign()).hop
-        return {"trunk": trunk, "kid": kid, "grand": grand, "steered": steered, "l4": l4}
+        return {"trunk": trunk, "kid": kid, "grand": grand, "steered": steered}
 
-    shared = shared_run(tmp_path_factory, act, on=line)
-    with pytest.MonkeyPatch.context() as home, scoped(memory=OpenAt()):
-        home.setenv("PROMPTPOTTER_HOME", str(shared.home))
+    shared = shared_run(tmp_path_factory, act, on=displaced)
+    with shared.reading(), scoped(memory=OpenAt()):
         stores, hops = workspace(), shared.made
-        tree, inner = (
-            hierarchy_subtree(stores, Subject(h.campaign_id).address, None, None, moment=None)
-            for h in (hops["trunk"], hops["l4"])
+        tree = hierarchy_subtree(
+            stores, Subject(hops["trunk"].campaign_id).address, None, None, moment=None
         )
-        return _Family(stores, hops, tree, inner, shared.home)
+        return _Family(stores, hops, tree)
 
 
 def _owned(
@@ -2118,23 +2102,6 @@ def _owned(
     return {k: v for k, v in _owned(stores, parent, at_cut).items() if k < cut} | own
 
 
-def _started(stores: Stores, hop: CycleHop) -> tuple[str | None, str]:
-    """The candidate *hop*'s mint record hangs it from, as its parent stood at the cut, and its
-    origin."""
-    index = stores.campaigns.load(hop, moment=None)
-    assert index is not None
-    owner, crown = _owned(stores, hop)[0]
-    origin = _addr(owner, 0, str(crown))
-    if index.fork is None or index.parent_cycle_id is None or index.forked_at_offset is None:
-        return None, origin
-    parent = hop.model_copy(update={"cycle_id": index.parent_cycle_id})
-    at_cut = Moment(stores.campaigns.ledger(parent), index.forked_at_offset - 1)
-    named = index.fork.from_candidate
-    assert named is not None
-    owner = _owned(stores, parent, at_cut)[named.round][0]
-    return _addr(owner, named.round, named.arm), origin
-
-
 def test_a_reread_stamps_the_latest_walk_of_its_individual() -> None:
     def walk(rnd: int, role: MeasurementRole = MeasurementRole.PANEL) -> RoundResult:
         at = ArmPosition(round=rnd, idx=0, total=1)
@@ -2149,101 +2116,127 @@ def test_a_reread_stamps_the_latest_walk_of_its_individual() -> None:
     assert walked_position([walk(1, re_read)], arm_key("a")) is None, "a re-read walked nothing"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_inner_run_hangs_on_the_candidate_its_spawn_record_names(
-    family_tree: _Family, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    # A sandbox is a workspace of the data root its outer cycle ran under.
-    monkeypatch.setenv("PROMPTPOTTER_HOME", str(family_tree.home))
-    outer = family_tree.hops["l4"]
-    sandbox = inner_sandbox_store(family_tree.stores, outer)
-    assert sandbox is not None
-    named = {}
-    for listed in sandbox.campaigns.list_campaigns(None, lifecycle="all"):
-        index = sandbox.campaigns.load(listed.root_hop, moment=None)
-        by = None if index is None else index.spawned_by
-        assert by is not None
-        # A bench pass measures no candidate of a round: it hangs under its cycle.
-        held = by.arm is not None and by.role is not MeasurementRole.BENCH
-        named[listed.root_hop.campaign_id] = (
-            _addr(outer, by.round, by.individual_id)
-            if held and by.individual_id is not None
-            else _cycle_of(outer)
+def test_an_inner_run_hangs_on_the_arm_its_spawn_record_names_or_says_why_none_holds_it() -> None:
+    a = ArmKey("a")
+    # The asker's arms by round: round 2's is the re-read of round 1's candidate.
+    ran = {(1, a): "a@1", (2, a): "a@1"}
+
+    def spawned(role: MeasurementRole | None, rnd: int = 1) -> SpawnedBy:
+        return SpawnedBy(round=rnd, individual_id="a", role=role, cycle_id="c", task="t")
+
+    asked = Mapping[tuple[int, ArmKey], str] | None
+    rows: list[tuple[SpawnedBy | None, asked, str | None, str]] = [
+        (spawned(MeasurementRole.PANEL), ran, "a@1", ""),
+        (spawned(MeasurementRole.PARENT, 2), ran, "a@1", ""),
+        (spawned(MeasurementRole.PANEL, 3), ran, None, "the panel arm its record names is not on"),
+        (spawned(MeasurementRole.PANEL), None, None, "is not among this campaign's cycles"),
+        (None, ran, None, "it carries no spawn record"),
+        (spawned(None), ran, None, "spawned by an origin pass"),
+        (spawned(MeasurementRole.OVERLAP), ran, None, "(overlap) is not one of a round's arms"),
+        (spawned(MeasurementRole.BACKFILL), ran, None, "(backfill) is not one of a round's arms"),
+    ]
+    for record, asker, host, why in rows:
+        assert inner_host(record, asker) == host, f"{record} hangs on another candidate"
+        said = unplaced_reason(record, asker_listed=asker is not None)
+        assert host is not None or why in said, f"{record} hangs unplaced as {said!r}"
+
+
+def test_a_line_owns_each_round_off_the_read_that_ran_it() -> None:
+    t, k, g = "trunk", "kid", "grand"
+    trunk = dict.fromkeys(range(4), t)
+    kid = {0: t, 1: t, 2: k, 3: k}
+    rows: list[tuple[list[int], int, dict[int, str] | None, str, dict[int, str]]] = [
+        ([0, 1, 2, 3], 0, None, t, trunk),
+        # A rewind fork cut at 2 lifts what its parent ran below the cut.
+        ([2, 3], 2, trunk, k, kid),
+        # A fork of a fork lifts through: round 2 stays the kid's, 0 and 1 the trunk's.
+        ([3, 4], 3, kid, g, {0: t, 1: t, 2: k, 3: g, 4: g}),
+        # A steer lifts no round: it runs its own line from its origin.
+        ([0, 1], 0, trunk, k, {0: k, 1: k}),
+        # A round re-run in place below the cut is the fork's own.
+        ([1, 2], 2, trunk, k, {0: t, 1: k, 2: k}),
+        # A fork that has run nothing yet stands on its parent's prefix.
+        ([], 2, trunk, k, {0: t, 1: t}),
+    ]
+    for own, cut, below, me, owned in rows:
+        assert line_owners(own, cut, below, me) == owned, (
+            f"{me} running {own} cut at {cut} owns rounds off the wrong read"
         )
-    hung = {
-        cid: e.parent
-        for e in entries_under(family_tree.inner)
-        if isinstance(e, SubtreeCampaign)
-        for cid in named
-        if e.address.endswith(f"~{cid}")
-    }
-    assert len(named) > 2 and hung == named, (
-        "an inner run hung on a candidate other than the one its spawn record names"
-    )
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_every_candidates_line_reads_each_round_off_the_cycle_owning_it(
-    family_tree: _Family,
-) -> None:
-    stores = family_tree.stores
-    lines: dict[str, list[tuple[int, list[str]]]] = {}
+def test_a_candidates_line_runs_its_hang_then_each_crown_up_to_the_first_after_it() -> None:
+    def steps(*pairs: tuple[int, list[str]]) -> list[MainLineStep]:
+        return [MainLineStep(round=r, candidates=c) for r, c in pairs]
 
-    def line(address: str) -> list[tuple[int, list[str]]]:
-        if address not in lines:
-            at = Subject.parse_address(address)
-            hop, rnd = at.path[-1], at.round
-            assert rnd is not None
-            hung, _ = _started(stores, hop)
-            index = stores.campaigns.load(hop, moment=None)
-            # A cycle lifting no round continues the line of the candidate it hangs from, through it.
-            steps = [] if hung is None or (index and index.cut_round) else through(hung)
-            for k, (owner, crown) in sorted(_owned(stores, hop).items()):
-                if k > rnd and crown is not None:
-                    break
-                steps.append(
-                    (
-                        k,
-                        [address]
-                        if k == rnd
-                        else []
-                        if crown is None
-                        else [_addr(owner, k, crown)],
-                    )
-                )
-            lines[address] = steps
-        return lines[address]
-
-    def through(address: str) -> list[tuple[int, list[str]]]:
-        steps = line(address)
-        return steps[: next(i for i, (_, c) in enumerate(steps) if address in c) + 1]
-
-    read = {
-        e.address: [(s.round, s.candidates) for s in e.facts.main_line]
-        for e in entries_under(family_tree.tree)
-        if isinstance(e, HierarchyCandidate)
-        # A candidate its cycle re-ran away reads the line it ran on, which the head no longer is.
-        and e.facts.standing not in (CandidateStanding.REWOUND, CandidateStanding.REWOUND_STOOD_ON)
-    }
-    on = {Subject.parse_address(a).path[-1].cycle_id for a in read}
-    assert on == {family_tree.hops[n].cycle_id for n in ("trunk", "kid", "grand", "steered")}
-    assert read == {a: line(a) for a in read}, (
-        "a candidate's line reads a round off a cycle that does not own it"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_every_cycle_hangs_from_and_starts_at_the_candidates_its_mint_record_names(
-    family_tree: _Family,
-) -> None:
-    stores = family_tree.stores
-    cycles = {e.address: e for e in entries_under(family_tree.tree) if isinstance(e, SubtreeCycle)}
-    for name in ("trunk", "kid", "grand", "steered"):
-        hop = family_tree.hops[name]
-        cycle = cycles[_cycle_of(hop)]
-        assert (cycle.facts.from_candidate, cycle.facts.origin) == _started(stores, hop), (
-            f"the {name} hangs from, or starts at, a candidate its mint record does not name"
+    hung = steps((0, ["o"]), (1, ["a"]))
+    rows: list[tuple[int, dict[int, str | None], list[MainLineStep], list[MainLineStep]]] = [
+        (0, {0: "o", 1: "a"}, [], steps((0, ["x"]))),
+        (2, {0: "o", 1: "a", 2: "b", 3: "c"}, [], steps((0, ["o"]), (1, ["a"]), (2, ["x"]))),
+        # An election that crowned none is a step with none; one past it does not end the line.
+        (1, {0: "o", 1: "a", 2: None, 3: "c"}, [], steps((0, ["o"]), (1, ["x"]), (2, []))),
+        # A round no election closed is no step.
+        (3, {0: "o", 2: "b"}, [], steps((0, ["o"]), (2, ["b"]), (3, ["x"]))),
+        # A cycle hung from a candidate continues that candidate's line.
+        (3, {2: "k"}, hung, [*hung, *steps((2, ["k"]), (3, ["x"]))]),
+    ]
+    for rnd, crowns, through, expected in rows:
+        assert main_line(rnd, "x", crowns, through) == expected, (
+            f"round {rnd}'s candidate under {crowns} reads the wrong line"
         )
+    line = steps((0, ["o"]), (1, ["a"]), (2, ["x"]))
+    assert line_through(line, "a") == line[:2], "a hung line runs past its candidate"
+
+
+def test_a_supersede_retires_exactly_what_is_off_its_line_within_its_reach() -> None:
+    trunk, kid, kid2, grand = object(), object(), object(), object()
+    # Each supersede fork as (its parent, itself), in listing order; a steer is none of them.
+    lines = [
+        ([(trunk, kid), (kid, grand)], trunk, [kid, grand]),
+        ([(trunk, kid), (trunk, kid2)], trunk, [kid2, kid]),
+        ([(trunk, kid), (trunk, kid2), (kid, grand)], trunk, [kid2, kid, grand]),
+        ([(trunk, kid), (kid, grand)], kid, [grand]),
+        ([], trunk, []),
+    ]
+    for supersedes, of, line in lines:
+        assert supersede_line(of, supersedes) == line, "a supersede line misses or misorders a link"
+    rows: list[tuple[int, list[Reach[str]], str | None]] = [
+        (2, [], None),
+        (2, [Reach("k", 2, 3, False)], "k"),
+        (1, [Reach("k", 2, 3, True)], None),
+        # A fork that died before the round retires nothing there.
+        (3, [Reach("k", 2, 2, False)], None),
+        (3, [Reach("g", 3, 4, False), Reach("k", 2, 4, False)], "k"),
+        # Tied rival cuts: the first on the line, the nearest link and then the newest.
+        (2, [Reach("k2", 2, 3, False), Reach("k", 2, 3, False)], "k2"),
+        # A supersede of a supersede: the grand holds what the kid lifted, the kid retires it.
+        (3, [Reach("k", 2, 4, False), Reach("g", 3, 4, True)], "k"),
+    ]
+    for rnd, reaches, by in rows:
+        assert retired_by(rnd, reaches) == by, (
+            f"round {rnd} under {reaches} retired by the wrong fork"
+        )
+
+
+def test_a_child_descends_from_its_parents_newest_measurement_never_a_copy_that_measured_none() -> (
+    None
+):
+    def walked(
+        of: str, rnd: int, *, invalid: bool = False, on: bool = True, own: bool = True
+    ) -> Walked[str]:
+        return Walked(of, of.split("@")[0], rnd, invalid, on, own)
+
+    rows: list[tuple[list[Walked[str]], dict[str, str]]] = [
+        # Round 1 re-proposed the origin verbatim, refused before a cell.
+        ([walked("o@0", 0), walked("o@1", 1, invalid=True)], {"o": "o@0"}),
+        ([walked("o@0", 0), walked("o@1", 1)], {"o": "o@1"}),
+        # The reader's own round and later measure nothing earlier.
+        ([walked("o@2", 2), walked("o@3", 3)], {}),
+        # On the reader's line over a later round off it; its own cycle over another at a tie.
+        ([walked("o@0", 0), walked("o@1", 1, on=False)], {"o": "o@0"}),
+        ([walked("o@1", 1), walked("o@1'", 1, own=False)], {"o": "o@1"}),
+    ]
+    for measured, newest in rows:
+        assert earlier_measured(2, measured) == newest, f"{measured} descends from the wrong walk"
 
 
 class _Fork(NamedTuple):
@@ -2262,32 +2255,6 @@ def _forks(family: _Family) -> dict[str, _Fork]:
         if name != "l4" and index.parent_cycle_id is not None:
             out[hop.cycle_id] = _Fork(hop, index.parent_cycle_id, index.cut_round or None)
     return out
-
-
-# A retirement is "off the fork's line, within its reach", and nothing else: a rewind fork cut at
-# c retires every arm of its parent at round c and past, named by the lowest cut; a steer, none.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_cut_retires_exactly_the_arms_off_its_line_within_its_reach(
-    family_tree: _Family,
-) -> None:
-    cuts: dict[str, list[tuple[int, str]]] = {}
-    for fork in _forks(family_tree).values():
-        if fork.cut is not None:
-            cuts.setdefault(fork.parent, []).append((fork.cut, _cycle_of(fork.hop)))
-    read, rule = {}, {}
-    for e in entries_under(family_tree.tree):
-        if isinstance(e, HierarchyCandidate):
-            at = Subject.parse_address(e.address)
-            tag = e.tag("superseded")
-            retired = e.facts.standing is CandidateStanding.RETIRED
-            read[e.address] = (None if tag is None else tag.value, retired)
-            rnd = at.round
-            assert rnd is not None
-            reach = sorted(c for c in cuts.get(at.path[-1].cycle_id, []) if c[0] <= rnd)
-            rule[e.address] = (reach[0][1], True) if reach else (None, False)
-    spared = sum(tag is None for tag, _ in rule.values())
-    assert len(cuts) == 2 and 0 < spared < len(rule), "the family cut nothing, or everything"
-    assert read == rule, "a cut retires an arm on its line or past its reach, or spares one off it"
 
 
 # A lifted round keeps the crown its parent elected, and a parting dims every fork whose start
@@ -2332,169 +2299,6 @@ def test_the_mask_reads_the_lines_the_subtree_reads(family_tree: _Family) -> Non
         assert sorted(parted.divergent) == sorted(dimmed), (
             f"a parting at {parting} dims a fork started at or before it, or spares one past it"
         )
-
-
-class _Repair(NamedTuple):
-    repaired: Callable[..., tuple[CycleHop, CycleHop]]
-    fork_direction: Callable[[CycleHop], ForkDirection]
-    critique_of: Callable[[CycleHop], str]
-
-
-@pytest.fixture
-def repair(built_stores: Stores) -> _Repair:
-    """A repair re-measures a holed round onto a branch, graded by whether any later round read the
-    hole: the one validity check, and a round banked off the hole, decide EQUIVALENT against
-    SUPERSEDE."""
-    stores = built_stores
-    repair_bank = samples(4, "g")
-    repair_origin, holed = prompted(instruction="origin"), ArmKey(prompted(instruction="c1").id)
-
-    async def _answered(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
-        return MeasuredCell(
-            sample_key=sample.key, query=sample.query, ground_truth="g", predicted="g"
-        )
-
-    def repaired(cycle_id: str, *, consumed: bool) -> tuple[CycleHop, CycleHop]:
-        hop = CycleHop(campaign_id=f"{cycle_id}__20260101-000000", cycle_id=cycle_id)
-        stored_campaign(stores, minted_campaign(hop))
-        stores.campaigns.mint_cycle(hop)
-        drawn = partition_bank(repair_bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0)
-        stores.campaigns.append(
-            hop,
-            PartitionRecord.of(drawn, dataset_hash="bank", cell_identity={}, instrument_id="bank"),
-        )
-        rows = [
-            measurement(i, 1.0, sample_key=s.key, predicted="g") for i, s in enumerate(repair_bank)
-        ]
-        running = seat(
-            stores,
-            hop=hop,
-            bank=repair_bank,
-            round_num=2,
-            origin=(repair_origin, lambda _s: sheet(rows)),
-        )
-        cycle, ledger = running.cycle, cycle_ledger(running.cycle)
-        rescope(spawn=inner_spawn_of(cycle.session), ledger=ledger)
-        run_init(RoundContext(cycle, 0))
-        # Round 1's arm ran to its end on cell 3 and came back with no measurement.
-        hole = measurement(
-            3, None, sample_key=repair_bank[3].key, error="boom", error_category="transient"
-        )
-        critiqued = Critique(readout={"priority_fix": "framing: as recorded"})
-        child = prompted(instruction="c1")
-        sp = cycle.session.points(cycle.framing).job(child)
-        c1 = arm_state(
-            "c1",
-            position=ArmPosition(round=1, idx=0, total=1),
-            individual=child,
-            resolved_params=sp.config_params.dump(),
-            filed=filed_entry(sp, cycle.session),
-        )
-        line = [
-            cycle.origin_round.model_copy(update={"optimizer_state": cycle.close_state(0)}),
-            _round(
-                round=1,
-                arms={holed: c1},
-                cells={holed: sheet([*rows[:3], hole])},
-                election=election(holed),
-                optimizer_state=cycle.close_state(1).holding(critiqued),
-            ),
-        ]
-        for n in range(len(line)):
-            close_round(ledger, line[: n + 1], cycle=cycle)
-        if consumed:
-            ledger.append(
-                RoundProposedRecord(
-                    round=2,
-                    consumed="",
-                    proposals=[],
-                    submitted=False,
-                    walked=cycle.round_state(2),
-                    reads=[],
-                    opened_on=cycle.difficulty.stamp.reach,
-                )
-            )
-        set_cycle(cycle, line=line)
-        with (
-            scoped(ledger=ledger),
-            mock.patch.object(query_loop, "measure_sample", _answered),
-            scoped(book=spend_book()),
-        ):
-            branch = asyncio.run(apply_correction(cycle, line, repair_bank))
-        assert branch is not None, "a holed round was carried as it ran"
-        return hop, branch.child
-
-    def fork_direction(hop: CycleHop) -> ForkDirection:
-        index = stores.campaigns.load(hop, moment=None)
-        assert index is not None and index.fork is not None
-        return index.fork.resolved_direction
-
-    def critique_of(hop: CycleHop) -> str:
-        stood = stores.campaigns.standing_rounds(hop, moment=None).rounds[1]
-        readout = stood.close.optimizer_state.feedback()
-        assert readout is not None, "guard: round 1 banked a critique"
-        return readout["priority_fix"]
-
-    return _Repair(repaired, fork_direction, critique_of)
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_correction_no_later_round_read_branches_equivalent(repair: _Repair) -> None:
-    repaired, fork_direction, critique_of = repair
-    ran, unread_branch = repaired("cycle_unread", consumed=False)
-    assert fork_direction(unread_branch) is ForkDirection.EQUIVALENT, (
-        "a correction no recorded decision reads forked the line off its parent"
-    )
-    assert critique_of(ran) == "framing: as recorded", "the repair rewrote the round its parent ran"
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_correction_a_later_round_read_supersedes_its_parent(repair: _Repair) -> None:
-    repaired, fork_direction, _ = repair
-    _, read_branch = repaired("cycle_read", consumed=True)
-    assert fork_direction(read_branch) is ForkDirection.SUPERSEDE, (
-        "round 2's banked candidates were generated off the hole and carried across as equivalent"
-    )
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_child_hangs_from_the_arm_that_measured_its_parent_never_a_verbatim_copy() -> None:
-    stores = workspace()
-    hop = CycleHop(campaign_id="copied__20260101-000000", cycle_id="cycle_copied")
-    stored_campaign(stores, minted_campaign(hop))
-    stores.campaigns.mint_cycle(hop)
-    origin, bred = prompted(instruction="o"), prompted(instruction="k")
-    bred = bred.model_copy(
-        update={"lineage": bred.lineage.model_copy(update={"parent_ids": [origin.id]})}
-    )
-    o, b, k = _ident("o"), _ident("b"), bred.id
-    copy = ArmKey("copy")
-    # Round 1 re-proposes the origin verbatim, refused before a cell, and elects no one.
-    rounds = [
-        {ArmKey(o): arm_state("o", position=ArmPosition(round=0, idx=0, total=1))},
-        {
-            copy: arm_state(
-                "o",
-                position=ArmPosition(round=1, idx=0, total=2),
-                invalid_reason=ValidationReason.NO_OP_VARIANT,
-            ),
-            ArmKey(b): arm_state("b", position=ArmPosition(round=1, idx=1, total=2)),
-        },
-        {ArmKey(k): arm_state("k", position=ArmPosition(round=2, idx=0, total=1), individual=bred)},
-    ]
-    crowns = [(o, o), (None, b), (k, k)]
-    log = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
-    line: list[RoundResult] = []
-    for n, (arms, (crown, ended)) in enumerate(zip(rounds, crowns, strict=True)):
-        line.append(_round(round=n, arms=arms, election=election(crown, ended_on=ended)))
-        close_round(log, line, cycle=seat(stores).cycle)
-    tree = hierarchy_subtree(stores, Subject(hop.campaign_id).address, None, None, moment=None)
-    cands = [e for e in entries_under(tree) if isinstance(e, HierarchyCandidate)]
-    child = next(e for e in cands if e.facts.individual == bred.id)
-    first = next(e for e in cands if e.facts.individual == o and e.facts.reading.arm.round == 0)
-    assert child.facts.descends_from == first.address, (
-        "a child hangs from a copy of its parent that measured nothing"
-    )
 
 
 # 4. An origin the gate halted, resumed past it
