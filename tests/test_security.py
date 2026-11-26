@@ -495,13 +495,27 @@ async def test_a_blocking_lock_refuses_on_the_event_loop_and_takes_nothing(tmp_p
     taken.release()
 
 
-_SERVE_THE_API = """
+# A child's network, answered by the `offline` fixture's world: its first argument is `scripts/`.
+_OFFLINE_CHILD = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
+from pydantic import SecretStr
+from promptpotter.config.settings import settings
+for key in PROVIDER_KEYS:
+    setattr(settings, key, SecretStr(NOT_A_KEY))
+router = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
+install_network(router)
+"""
+
+_SERVE_THE_API = f"""{_OFFLINE_CHILD}
 from fastapi.testclient import TestClient
 from promptpotter.infrastructure.producer_lock import minted_producer
 from promptpotter.main import app
 with TestClient(app) as client:
     assert client.get("/api/v1/health").status_code == 200
     assert minted_producer(app.state.job_registry.jobs_dir) is not None
+assert not router.unrouted, router.unrouted
 """
 
 
@@ -509,7 +523,10 @@ def test_the_api_starts_under_the_loop_guard_with_its_held_producer_lock() -> No
     # The real lifespan, on a loop: a lock its preamble waits on there refuses the server's start.
     # Its own process: the lifespan's state outlives the app's shutdown.
     started = subprocess.run(
-        [sys.executable, "-c", _SERVE_THE_API], cwd=_REPO, capture_output=True, text=True
+        [sys.executable, "-c", _SERVE_THE_API, str(_REPO / "scripts")],
+        cwd=_REPO,
+        capture_output=True,
+        text=True,
     )
     assert started.returncode == 0, f"the API refused its own start: {started.stderr[-2000:]}"
 
@@ -2048,9 +2065,9 @@ async def test_a_health_check_tells_no_secret_and_never_tells_an_unaddressed_bac
     )
 
 
-async def _mint(stores: Stores, offline: Router, tmp_path: Path, **asked: Any) -> CycleHop:
-    """A campaign minted into *stores* by the world's real entry, no round run."""
-    return (await World(stores, offline, tmp_path / "world").campaign(rounds=0, **asked)).hop
+async def _mint(stores: Stores, offline: Router, tmp_path: Path) -> CycleHop:
+    """A campaign minted into *stores* by the world's real mint, no round run."""
+    return await World(stores, offline, tmp_path / "world").minted()
 
 
 @pytest.mark.usefixtures("offline")
@@ -2173,7 +2190,6 @@ def test_an_unreadable_file_costs_the_trail_survey_only_what_it_holds(
         user_id=UserId("bob-id"), tenant_id=TenantId("bob-id"), email="bob@x.com", provider="google"
     )
     account.arrive(workspace(bob), device=None)
-    # Minted first: a run lands the data root, which refuses a torn survivor.
     hops = [asyncio.run(_mint(stores, offline, tmp_path / f"world-{n}")) for n in range(2)]
     bob_consent = workspace(bob).base_dir / CONSENT_FILE
     bob_consent.write_bytes(bob_consent.read_bytes() + b"{not a row\n")
@@ -2242,7 +2258,7 @@ class _HeldCycle(NamedTuple):
 
 @pytest.fixture(scope="module")
 def one_round(tmp_path_factory: pytest.TempPathFactory) -> Shared:
-    """One potter round on 40 rows; # ~3.5 s once, ~20 ms a fact."""
+    """One potter round on 40 rows; ~1.7 s once, ~25 ms a fact."""
 
     async def act(world: World) -> CycleHop:
         return (await world.campaign(rounds=1)).hop
@@ -3170,7 +3186,7 @@ def moved(
 ) -> _Moved:
     campaigns, data_root = built_stores.campaigns, built_stores.projects_root.parent
     # Minted first: a run lands the data root, which a stray file refuses.
-    kept_hop = asyncio.run(_mint(built_stores, offline, tmp_path))
+    kept_hop = asyncio.run(World(built_stores, offline, tmp_path / "world").campaign(rounds=0)).hop
     user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
     UserStore(campaigns.workspace).save(user)
     events = CycleEventLog.workspace_path(campaigns.workspace)
@@ -3842,15 +3858,7 @@ async def test_a_host_files_no_kind_its_press_keeps_from_hosts() -> None:
 
 
 # The stdio server as a host spawns it, in the `offline` fixture's world.
-_SERVE_MCP_OFFLINE = """
-import sys
-sys.path.insert(0, sys.argv[1])
-from offline_world import NOT_A_KEY, PROVIDER_KEYS, FakeBackend, FakeLLM, Router, install_network
-from pydantic import SecretStr
-from promptpotter.config.settings import settings
-for key in PROVIDER_KEYS:
-    setattr(settings, key, SecretStr(NOT_A_KEY))
-install_network(Router(FakeLLM(lambda _body: "ok"), FakeBackend([])))
+_SERVE_MCP_OFFLINE = f"""{_OFFLINE_CHILD}
 from promptpotter.presentation.cli.main import main
 sys.argv = ["promptpotter", "--tenant", sys.argv[2], "mcp"]
 main()

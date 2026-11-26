@@ -1037,8 +1037,8 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
   **Rides with:** wave 6. **Re-test:** each fact moves to a leg on its door, or is deleted by a named
   mutation.
-- **Hand-seats with no world door** (tw-j2 link 5): the world has no mint-only door, and
-  `world.opened(rows)` takes no connector. test_security seats `minted_campaign` ×6,
+- **Hand-seats with no world door** (tw-j2 link 5): `world.opened(rows)` takes no connector, and
+  the seats below have not moved onto `world.minted` (tw-v's mint door). test_security seats `minted_campaign` ×6,
   `stored_campaign` ×3 and `loop_session` ×1; test_scoring `loop_session` ×2 and `minted_campaign` ×2;
   test_spend `loop_session` ×2 (one is tw-x row 3's). **Rides with:** wave 6. **Re-test:**
   `git grep -cE "\b(minted_campaign|stored_campaign|loop_session)\(" -- tests/test_*.py` is 0.
