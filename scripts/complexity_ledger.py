@@ -258,7 +258,8 @@ BASELINE = {
     # (`EliminationCut.of`, `RowKnobs.rows_ran`); a home listing no rates shares the floor's table.
     # tw-r2 (+84): what a walk bought and none took is named (`records/untaken.py`, its fold and
     # `Walk.untaken_bought`), so the running campaign leaves out its own press, nothing else.
-    "package_lines": 113709,
+    # tw-r3 (+3): `_ArchiveRecorder._file` files only a cell no address names (one filing rule).
+    "package_lines": 113712,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.
