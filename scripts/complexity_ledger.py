@@ -275,7 +275,8 @@ BASELINE = {
     # and the high-water L2/L3 read beside the stall stream (`HighWater`).
     # rebase-line (+13): a fork's line served whole: the candidates its bars lead with below its
     # cut (`SubtreeCycleEntryFacts.inherited`), and its Spend figure billing its chain.
-    "package_lines": 113832,
+    # v0.8.21 (−134): the three migrations v0.8.20 landed on the box go, with the retired claim row.
+    "package_lines": 113698,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

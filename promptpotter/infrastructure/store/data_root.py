@@ -649,10 +649,6 @@ RETIRED_KINDS: tuple[Kind, ...] = (
         Fate.RUN,
         _RETIRED,
     ),
-    # Its claim moved onto the host's account (`migrations/host_account.py`).
-    Kind(
-        "retired host claim", _INSTALL, f"{IDENTITY_DIR}/default_claimed.json", Fate.RUN, _RETIRED
-    ),
 )
 
 

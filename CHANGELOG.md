@@ -6,15 +6,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.21] — 2026-11-26
+
+> Rounds ask only the questions that can still change the winner, and every refusal says what to do next. Underneath, the tests were rebuilt on one offline world and a layer of indirection came out. Upgrading wipes run data and saved answers and renames two `.env` keys; accounts, API keys and the install's settings survive. 202 commits since `v0.8.20`; the commits carry the detail.
+
+### Added
+
+- **potter asks only the questions that can still change who wins**: it learns how hard each example is, sends each call to the candidate and example that say most about who is ahead, and decides as each answer comes back. (1356c77d6, 24372157f)
+- **A refusal names what to do next**, at every door in its own words: the terminal's command and flag, the webapp's button, the MCP tool. (dcc98fd75, 2d053c7db)
+- **API tokens and MCP over HTTP**: a script or an MCP client (`/mcp/`) acts as its account with a token minted in the webapp. (30af50704, 5273b6adb)
+- **Speed controls**: `--lookahead N|max` and `--abreast N|all` set how many calls run at once, and every cap shows what it holds. (b27f4550e, e8d97499f, 3bb3f52f6)
+- **The host's exhibit**: `EXHIBIT_CAMPAIGN` names a campaign every account with "Try & learn" on follows read-only. (23d82b69d, dcbb0f66e)
+- **Charts read on hover and by keyboard**, and the lineage tree hangs each child from the arm that measured its parent. (8301ff49e, ee7a7a426, 5d150ac13)
+
 ### Changed
 
-- **A definition names its connector `pipeline.connector`** (was `pipeline.backend_type`); an account's own definition naming the old key no longer resolves until its key is renamed. An unregistered name answers a 422 naming the registered set, never a 500.
-- **A connector's address is a map of named endpoints, and a dataset names one as `pipeline.endpoint`**; a map of one answers a dataset naming none, a map of more refuses it naming the names. `TERMNORM_URL=<url>` becomes `TERMNORM_ENDPOINTS={"local": "<url>"}` and `N8N_HARNESS_URL=<url>` becomes `N8N_HARNESS_ENDPOINTS={"<name>": "<url>"}` in every install's `.env` (the box's included); an n8n cell keeps its key, since each hashes its own endpoint's URL. `GET /backends` serves `endpoints` in place of `base_url`, and `/backends/{id}/health` no `base_url`.
-- **`DBLLMBENCH_DB_URL` has no default**: a dbllmbench launch refuses without it (`.env.example` names upstream's compose addresses). A harbor dataset names `nodes.agent.config.skill_delivery` (`agent_skill` was the default); one naming none refuses at run init.
+- **L1 edits a prompt instead of rewriting it**, each edit quoting the failing example it answers. (31c61ec5b, 69ada2b13)
+- **Potter crowns as soon as a gain shows** (the paired point lift over its parent, `theta_election.crown: paired_point`), steps onto a round's leader that did not lose (`next_parent: not_lost`), and counts a crown inside the noise toward the stall (`not_separated_stall: counts`), the one stall L1, L2 and L3 escalate on; each baseline crowns by its own rule, and every level and lift is one `Estimate`. (61ef07161, a32639135, e08141a5d)
+- **Every campaign default lives in `defaults.yaml`**, a run's declaration is a patch over it, and the headline column is θ (`display_metric: ability`). (1f7b1b8c7, da08f4717)
+- **Spend counts every cycle** of a campaign against its cap, and a stale price list is said in `machine-status`. (534793fb9, ee8f1e4d1)
+- **L4 (research tier)**: the outer reads each inner run and grades held-out seats on its own panels. (3d8e0f0c3, edf1f02cf, ccfe28b72)
+- **The embedded door is async** (`await enter()`). (621586119)
+- **Renamed**: `grade-bench` is `held-out` at every door, and `resume --on-divergence halt|accept|fork` replaces `--no-check` and `--fork-on-divergence`. (bb20cdcc2, de4c0cc47)
+- **A connector reaches named endpoints**: in `.env`, `TERMNORM_URL=<url>` becomes `TERMNORM_ENDPOINTS={"local": "<url>"}` and `N8N_HARNESS_URL=<url>` becomes `N8N_HARNESS_ENDPOINTS={"<name>": "<url>"}`; a dataset names its connector `pipeline.connector` (was `pipeline.backend_type`), and `DBLLMBENCH_DB_URL` has no default. (a3312e3e1, 917861717)
+- **An older release refuses a data root this one landed**, so a roll-back restores the backup. (6c944f6fb)
+- **The tests run on one offline world**: each fact drives the real doors against a world that answers offline, at no spend. (06d541184, 99e918aad, c7c867197)
 
 ### Removed
 
-- The `jupyter` extra and its one renderer, `presentation/terminal/completion.py`; the BBEH notebook's runner (`paper/bbeh-comparison/bbeh_potter_runner.py`) runs against `promptpotter==0.8.20`.
+- The knobs `pobb.lock_in`, `origin_gate.critical_only` and `convergence_patience`, and the `jupyter` extra. (61ef07161, 75428b66b)
+
+### Fixed
+
+- **On a phone** every pane fits its column, a touch control owns its 44 px box, and an open overlay sits at its trigger. (c16af40fb, d7dc22eb2, 78b0ca9e0)
+- **A press moves the bill, never the record**: how fast a round sends changes what it costs, never what it decides. (ad166940b)
+- **Robustness**: the server's event loop never waits on a lock, a deleted campaign is never re-made by a late write, and a rate limit worded as quota stays a throttle. (621586119, f2b8b1f8f, ea020d03f)
 
 ## [0.8.20] — 2026-11-13
 

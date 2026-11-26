@@ -276,7 +276,6 @@ from promptpotter.infrastructure.identity.accounts import (
     is_host,
 )
 from promptpotter.infrastructure.identity.grants import (
-    IDENTITY_DIR,
     IdentityPaths,
     block_email,
     check_blocklist,
@@ -341,7 +340,6 @@ from promptpotter.infrastructure.store.stores import (
 from promptpotter.infrastructure.store.user_store import (
     CONSENT_FILE,
     USER_FILE,
-    ConsentLine,
     User,
     UserStore,
     count_accounts,
@@ -3083,38 +3081,6 @@ def test_a_landing_drops_a_charge_book_whose_settle_another_writer_split(
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_a_landing_carries_an_acceptance_off_the_account_file_onto_its_consent_trail(
-    tmp_path: Path,
-) -> None:
-    # The account file as the last release wrote it: one record, the newest acceptance. Its trail
-    # line names whose it was (here a delegate's, over its delegator's), and a trail may lack it.
-    at = "2026-02-01T00:00:00Z"
-    user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
-    delegates = ConsentLine(event="terms_accepted", user_id="d", subject=TERMS_VERSION, at=at)
-    for name, trail, owner in (("bare", None, "u"), ("delegated", delegates, "d")):
-        with pytest.MonkeyPatch.context() as home:
-            home.setenv("PROMPTPOTTER_HOME", str(tmp_path / name))
-            stores = workspace()
-            base = stores.campaigns.workspace
-            record = {"version": TERMS_VERSION, "accepted_at": at}
-            write_json(base / USER_FILE, user.model_dump() | {"terms_accepted": record})
-            if trail is not None:
-                (base / CONSENT_FILE).write_text(trail.model_dump_json() + "\n", encoding="utf-8")
-            landing = plan_landing(stores.projects_root, reset=False)
-            refusal = landing.refusal
-            assert not landing.refused, f"{name}: the last release's account refused: {refusal}"
-            apply_landing(stores.projects_root, landing)
-        users = UserStore(base)
-        assert users.load() == user, f"{name}: the account changed beyond its terms record"
-        assert users.accepted_terms(owner) == TERMS_VERSION, f"{name}: consent was asked again"
-        others = {"u", "d"} - {owner}
-        assert all(users.accepted_terms(o) is None for o in others), (
-            f"{name}: an acceptance was stood on by another principal"
-        )
-        assert len(users.consent_trail()) == 1, f"{name}: an acceptance the trail held was doubled"
-
-
-@pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_job_file_that_does_not_load_is_named_in_machine_status_and_the_rest_listed(
     tmp_path: Path,
 ) -> None:
@@ -3177,24 +3143,17 @@ def test_a_write_a_crash_cut_short_under_an_authored_tree_is_run_data_never_a_su
     assert found_torn is not None and found_torn.kind.fate is Fate.RUN, "a torn write survived"
 
 
-class _Moved(NamedTuple):
-    """A tree of moved survivors beside run data: the account's events, its identity grants, the
-    host's claim marker over a terminal record, and one minted campaign."""
+class _Unread(NamedTuple):
+    """A tree of run data no reader takes beside one minted campaign: the account's events."""
 
     stores: Stores
     kept_hop: Any
-    identity: Any
     events: Path
-    marker: Path
-    host_dir: Path
-    grants_before: bytes
 
 
 @pytest.fixture
-def moved(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch, offline: Router, tmp_path: Path
-) -> _Moved:
-    campaigns, data_root = built_stores.campaigns, built_stores.projects_root.parent
+def unread(built_stores: Stores, offline: Router, tmp_path: Path) -> _Unread:
+    campaigns = built_stores.campaigns
     # Minted first: a run lands the data root, which a stray file refuses.
     kept_hop = asyncio.run(World(built_stores, offline, tmp_path / "world").campaign(rounds=0)).hop
     user = User(user_id="u", tenant_id="u", created_at="2026-01-01T00:00:00Z")
@@ -3203,30 +3162,14 @@ def moved(
     old = {"record_type": "account_event", "user_id": "u", "timestamp": "2026-01-02T00:00:00Z"}
     append_jsonl(events, old | {"event": "signed_in", "subject": "google", "device": "phone"})
     append_jsonl(events, old | {"event": "request_refused", "subject": "x", "device": None})
-    identity = IdentityPaths(data_root / IDENTITY_DIR)
-    # The host's claim marker, over the terminal's record its claim renamed under the host's id,
-    # its terms record on it as the last release wrote it: two migrations reshape that one file.
-    marker = data_root / IDENTITY_DIR / "default_claimed.json"
-    write_json(marker, {"user_id": "h", "claimed_at": "2026-01-01T00:00:00Z", "renamed": True})
-    host_dir = built_stores.projects_root / "h"
-    accepted = {"version": TERMS_VERSION, "accepted_at": "2026-01-01T00:00:00Z"}
-    write_json(
-        host_dir / USER_FILE,
-        user.model_dump(mode="json") | {"user_id": "default", "terms_accepted": accepted},
-    )
-    monkeypatch.setattr(settings_mod.settings, "HOST_ADMIN_EMAIL", "h@x.com")
-    grant = {"delegated_by": "u", "capabilities": [CAMPAIGN_STEP_CAP], "spend_ceiling_usd": None}
-    write_json(identity.grants, {"grants": {"sub": grant | {"note": ""}}})
-    return _Moved(
-        built_stores, kept_hop, identity, events, marker, host_dir, identity.grants.read_bytes()
-    )
+    return _Unread(built_stores, kept_hop, events)
 
 
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_file_no_row_names_refuses_a_landing_asked_to_reset_or_not_and_it_writes_nothing(
-    moved: _Moved,
+    unread: _Unread,
 ) -> None:
-    stores = moved.stores
+    stores = unread.stores
     stray = stores.projects_root.parent / "stray.json"
     write_json(stray, {})
     for reset in (False, True):
@@ -3235,58 +3178,35 @@ def test_a_file_no_row_names_refuses_a_landing_asked_to_reset_or_not_and_it_writ
         with pytest.raises(ConflictError):
             apply_landing(stores.projects_root, refused)
     assert [one.path for one in refused.runs] == [] and refused.reset is not None
-    assert refused.staged and moved.identity.grants.read_bytes() == moved.grants_before, (
-        "a refused landing wrote"
-    )
-    assert moved.events.is_file(), "a refused landing dropped run data"
+    assert unread.events.is_file(), "a refused landing dropped run data"
 
 
 # One landing: planned, a run started since, applied (kept), the run released, applied again.
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_landing_keeps_the_files_of_a_run_started_since_its_plan_and_drops_them_once_it_ends(
-    moved: _Moved,
+    unread: _Unread,
 ) -> None:
-    stores = moved.stores
+    stores = unread.stores
     # What a retired writer left under a campaign is run data no reader takes.
-    retired = Path(stores.campaigns.cycle_dir(moved.kept_hop), "gone.json")
+    retired = Path(stores.campaigns.cycle_dir(unread.kept_hop), "gone.json")
     write_json(retired, {})
     landed = plan_landing(stores.projects_root, reset=False)
     assert not landed.refused, f"a landing refused run data it drops itself: {landed}"
-    assert {one.path for one in landed.runs} == {moved.events, retired, moved.marker}, (
+    assert {one.path for one in landed.runs} == {unread.events, retired}, (
         "run data no reader takes was kept"
     )
-    since_jobs, since = _pass_started(stores, moved.kept_hop)
+    since_jobs, since = _pass_started(stores, unread.kept_hop)
     held_runs = apply_landing(stores.projects_root, landed)
-    assert (
-        moved.events.exists()
-        and retired.exists()
-        and [one.path for one in held_runs.runs] == [moved.marker]
-    ), "a landing dropped the files of a run started since its plan"
+    assert unread.events.exists() and retired.exists() and not held_runs.runs, (
+        "a landing dropped the files of a run started since its plan"
+    )
     unlanded = last_landing(stores.projects_root)
     assert sum(line.startswith("kept ") for line in held_runs.said) == 2, held_runs.said
     assert unlanded is not None and unlanded.key is None, "a landing that kept a run read landed"
     since_jobs.release(since.job_id)
     apply_landing(stores.projects_root, plan_landing(stores.projects_root, reset=False))
-    assert not moved.events.exists(), "a landing kept run data this build cannot read"
-
-
-@pytest.mark.usefixtures("optimizing_memory", "offline")
-def test_a_landing_migrates_the_host_and_a_grant_whole_and_a_second_landing_has_nothing_to_do(
-    moved: _Moved,
-) -> None:
-    root = moved.stores.projects_root
-    apply_landing(root, plan_landing(root, reset=False))
-    host = UserStore(moved.host_dir).load()
-    assert not moved.marker.exists() and host is not None, "a landing kept the claim marker"
-    assert (host.user_id, host.email) == ("h", "h@x.com") and host_user_id(root) == "h", (
-        "a landing lost the host"
-    )
-    assert UserStore(moved.host_dir).accepted_terms("h") == TERMS_VERSION, (
-        "the host is asked consent again"
-    )
-    regranted = read_grant(moved.identity.grants, "sub")
-    assert regranted is not None and regranted.delegated_by == "u", "a landing lost a grant"
-    again = plan_landing(root, reset=False)
+    assert not unread.events.exists(), "a landing kept run data this build cannot read"
+    again = plan_landing(stores.projects_root, reset=False)
     assert not again.staged and not again.refused, (
         "a second landing migrated again, or left the tree unproven"
     )

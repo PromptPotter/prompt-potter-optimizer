@@ -8,19 +8,10 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from promptpotter.application.maintenance.migrations import (
-    grant_ceiling,
-    host_account,
-    job_endings,
-    live_jobs_index,
-    terms_consent,
-)
+from promptpotter.application.maintenance.migrations import job_endings, live_jobs_index
 from promptpotter.infrastructure.store.data_root import Staged
 
 MIGRATIONS: dict[str, Callable[[Path, Mapping[Path, bytes]], list[Staged]]] = {
-    "grant ceiling": grant_ceiling.staged,
-    "host account": host_account.staged,
     "live-jobs index": live_jobs_index.staged,
     "job endings": job_endings.staged,
-    "terms consent": terms_consent.staged,
 }
