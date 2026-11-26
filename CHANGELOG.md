@@ -8,7 +8,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.8.21] — 2026-11-26
 
-> Rounds ask only the questions that can still change the winner, and every refusal says what to do next. Underneath, the tests were rebuilt on one offline world and a layer of indirection came out. Upgrading wipes run data and saved answers and renames two `.env` keys; accounts, API keys and the install's settings survive. 202 commits since `v0.8.20`; the commits carry the detail.
+> Rounds ask only the questions that can still change the winner, and every refusal says what to do next. Underneath, the tests were rebuilt on one offline world and a layer of indirection came out. Upgrading wipes run data and saved answers and renames two `.env` keys; accounts, API keys and the install's settings survive. 203 commits since `v0.8.20`; the commits carry the detail.
 
 ### Added
 

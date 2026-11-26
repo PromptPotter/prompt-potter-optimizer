@@ -137,9 +137,14 @@ def main() -> int:
         assert (WEBAPP_DIR / "index.html").is_file(), (
             f"no index.html under {WEBAPP_DIR} — the API mounts, the dashboard 404s"
         )
-        assert any(getattr(r, "name", None) == "webapp" for r in app.routes), (
-            "index.html is present but nothing mounted it at /"
-        )
+        from fastapi.staticfiles import StaticFiles
+        from starlette.routing import Mount
+
+        # The mount itself, never a name: `main.py`'s mounts carry none.
+        assert any(
+            isinstance(r, Mount) and r.path == "" and isinstance(r.app, StaticFiles)
+            for r in app.routes
+        ), "index.html is present but nothing mounted it at /"
 
     # The uvicorn a deploy runs, never an in-process ASGI client: the lifespan runs too.
     port = _free_port()

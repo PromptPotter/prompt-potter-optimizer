@@ -64,10 +64,16 @@ yet: he reads and edits the CHANGELOG and the body there, on the branch his edit
       rebuild's conflicts touch), and CI on the push runs the rest.
 - [ ] A rewrite of an unpushed commit changes its hash: re-check every hash `CHANGELOG.md` cites.
 
-## 3. Push the release branch as a draft PR to `main`, wait for CI green on it
+## 3. Push the release branch as a draft PR to `main`, wait for CI green on it, and prove the release wheel
 
 `git push origin <commit>:refs/heads/release/vX.Y.Z`: CI runs on PRs to `main` only, and the branch's
 history stays rewritable until the box has passed.
+
+- [ ] `gh workflow run publish.yml --ref release/vX.Y.Z`, then watch it green: the dispatch runs the
+      release's own build and smoke and uploads nothing. CI's wheel is API-only, so the wheel that
+      carries the webapp (its package-data glob, its mount, the bundle's credential scan) is otherwise
+      first built after the tag, where a failure moves the tag (v0.8.21's smoke read a mount name the
+      mounts had lost).
 
 ## 4. Deploy the branch to the box and verify there (`/potter-box`)
 
