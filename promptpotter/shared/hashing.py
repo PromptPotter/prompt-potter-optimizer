@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import ast
-import functools
 import hashlib
 import json
+import zlib
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, NamedTuple
 
 ID_HEX = 16
 # 16 hex collides at archive scale (cells = configurations x samples); 64 strains Windows paths.
@@ -38,8 +38,86 @@ def _is_prose(stmt: ast.stmt) -> bool:
     )
 
 
-def normalized_tree(tree: ast.AST) -> str:
-    """Documenting, reformatting or relocating a name is free; rebinding one moves the digest."""
+def module_source_digest(*modules: ModuleType) -> str:
+    return stable_hash(
+        [normalized_module(Path(str(m.__file__)).read_text("utf-8")) for m in modules]
+    )
+
+
+class Imported(NamedTuple):
+    """One import statement as written: `module` None for `import a.b` (its `names` dotted), else
+    `from <level dots><module> import <names>`; `typed` under ``TYPE_CHECKING``."""
+
+    level: int
+    module: str | None
+    names: tuple[str, ...]
+    typed: bool
+
+
+class ModuleCode(NamedTuple):
+    # Held compressed: a process holds every module it digested (~4 MB of code for the package).
+    packed: bytes
+    imports: tuple[Imported, ...]
+
+    @property
+    def normalized(self) -> str:
+        return zlib.decompress(self.packed).decode()
+
+
+def _is_type_checking(test: ast.expr) -> bool:
+    return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
+        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
+    )
+
+
+def written_imports(tree: ast.Module) -> tuple[Imported, ...]:
+    """Each import statement of *tree*, function bodies included."""
+    found: list[Imported] = []
+    # An import is a statement, so no expression is walked; a function body is.
+    todo: list[tuple[ast.AST, bool]] = [(tree, False)]
+    while todo:
+        sub, typed = todo.pop()
+        if isinstance(sub, ast.Import):
+            found.append(Imported(0, None, tuple(a.name for a in sub.names), typed))
+        elif isinstance(sub, ast.ImportFrom):
+            names = tuple(a.name for a in sub.names)
+            found.append(Imported(sub.level, sub.module or "", names, typed))
+        for field, value in ast.iter_fields(sub):
+            if isinstance(value, list):
+                inner = typed or (
+                    field == "body" and isinstance(sub, ast.If) and _is_type_checking(sub.test)
+                )
+                todo.extend(
+                    (child, inner)
+                    for child in value
+                    if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
+                )
+    return tuple(found)
+
+
+def normalized_module(text: str) -> str:
+    return module_code(text).normalized
+
+
+_CODE: dict[bytes, ModuleCode] = {}
+
+
+def module_code(text: str) -> ModuleCode:
+    """One parse of a module's text, memoized on the text's digest, never the module (an edit on
+    disk is never answered by an older read) nor the text (the process would hold every source it
+    read): every digest of code reads it, the import closure's walk included, so a text is parsed
+    and normalized once a process."""
+    key = hashlib.sha256(text.encode()).digest()
+    if (held := _CODE.get(key)) is None:
+        held = _CODE[key] = _parsed(text)
+    return held
+
+
+def _parsed(text: str) -> ModuleCode:
+    """Its code less its prose: documenting, reformatting or relocating a name is free; rebinding
+    one moves the digest."""
+    tree = ast.parse(text)
+    imports = written_imports(tree)
     bindings: set[tuple[str, str]] = set()
     for node in ast.walk(tree):
         for field in ("body", "orelse", "finalbody"):
@@ -57,19 +135,8 @@ def normalized_tree(tree: ast.AST) -> str:
         body = getattr(node, "body", None)
         if isinstance(body, list) and not body:
             body.append(ast.Pass())
-    return f"{sorted(bindings)}\n{ast.unparse(tree)}"
-
-
-def module_source_digest(*modules: ModuleType) -> str:
-    return stable_hash(
-        [normalized_module(Path(str(m.__file__)).read_text("utf-8")) for m in modules]
-    )
-
-
-@functools.cache
-def normalized_module(text: str) -> str:
-    """Memoized on the text, never the module: an edit on disk is never answered by an older read."""
-    return normalized_tree(ast.parse(text))
+    code = f"{sorted(bindings)}\n{ast.unparse(tree)}"
+    return ModuleCode(zlib.compress(code.encode(), 1), imports)
 
 
 def stable_hash(value: Any, *, length: int = ID_HEX) -> str:

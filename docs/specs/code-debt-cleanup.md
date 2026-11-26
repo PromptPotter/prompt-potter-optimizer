@@ -1051,6 +1051,12 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   machine-only), against the encoder's cost on every write. Price both before choosing. **Rides
   with:** wave 6. **Re-test:** a cProfile of one world run ranks `json.encoder` below tw-q's
   frame list, or the format is a decision with its reason.
+- **`row_schema` rebuilds every row's JSON schema per landing key** (tw-v, tw-v2): with
+  `hashing.py::module_code` memoizing the closure, a second `build_ts_types.py::derived_landing_key()`
+  in one process costs 0.72–0.86 s (2.7–3.0 s at tw-v's tip), 0.6–0.85 s of it
+  `store/data_root.py::row_schema`'s pydantic `json_schema()` over 90 kinds. A memo keyed by the
+  model class is keyed by identity. **Rides with:** wave 6. **Re-test:** a second
+  `derived_landing_key()` in one process takes under 0.2 s.
 
 ## Held — no wave-4 chain yet
 

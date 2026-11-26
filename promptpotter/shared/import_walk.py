@@ -9,7 +9,7 @@ from collections.abc import Iterable
 from functools import cache
 from pathlib import Path
 
-from promptpotter.shared.hashing import normalized_tree
+from promptpotter.shared.hashing import Imported, module_code, written_imports
 
 _PACKAGE = Path(__file__).resolve().parents[1]
 
@@ -32,26 +32,20 @@ def package_modules(tree: Path) -> dict[str, str]:
     return {_module_name(rel): rel for rel in rels}
 
 
-def _is_type_checking(test: ast.expr) -> bool:
-    return (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING") or (
-        isinstance(test, ast.Attribute) and test.attr == "TYPE_CHECKING"
-    )
-
-
 def import_statements(path: Path) -> list[tuple[set[str], bool]]:
     """Each package file one import statement of *path* names, and whether the statement sits
     under ``TYPE_CHECKING``; function bodies included."""
-    return _imports(path, ast.parse(path.read_text(encoding="utf-8")))
+    return _imports(path, written_imports(ast.parse(path.read_text(encoding="utf-8"))))
 
 
-def _imports(path: Path, parsed: ast.Module) -> list[tuple[set[str], bool]]:
+def _imports(path: Path, written: Iterable[Imported]) -> list[tuple[set[str], bool]]:
     root = _tree(path)
     importer = _module_name(path.resolve().relative_to(root).as_posix())
     home = importer if path.name == "__init__.py" else importer.rpartition(".")[0]
     modules = package_modules(root)
     return [
         ({modules[n] for n in names if n in modules}, typed)
-        for names, typed in _named(parsed, home)
+        for names, typed in _named(written, home)
     ]
 
 
@@ -59,39 +53,23 @@ def package_imports(path: Path) -> set[str]:
     """The package modules a file outside the package (a plugin's) imports by name, function
     bodies and `TYPE_CHECKING` included."""
     modules = package_modules(_PACKAGE.parent)
-    parsed = ast.parse(path.read_text(encoding="utf-8"))
-    return {n for names, _ in _named(parsed, home="") for n in names if n in modules}
+    written = written_imports(ast.parse(path.read_text(encoding="utf-8")))
+    return {n for names, _ in _named(written, home="") for n in names if n in modules}
 
 
-def _named(parsed: ast.Module, home: str) -> list[tuple[list[str], bool]]:
+def _named(written: Iterable[Imported], home: str) -> list[tuple[list[str], bool]]:
     """Each import statement's dotted names, a relative one read from *home*, and whether it sits
     under ``TYPE_CHECKING``."""
     found: list[tuple[list[str], bool]] = []
-    # An import is a statement, so no expression is walked; a function body is.
-    todo: list[tuple[ast.AST, bool]] = [(parsed, False)]
-    while todo:
-        sub, typed = todo.pop()
-        names: list[str] = []
-        if isinstance(sub, ast.Import):
-            names = [a.name for a in sub.names]
-        elif isinstance(sub, ast.ImportFrom):
-            base = sub.module or ""
-            if sub.level:
-                up = home.split(".")[: len(home.split(".")) - (sub.level - 1)]
-                base = ".".join([*up, base] if base else up)
-            names = [base, *(f"{base}.{a.name}" for a in sub.names)]
-        if names:
-            found.append((names, typed))
-        for field, value in ast.iter_fields(sub):
-            if isinstance(value, list):
-                inner = typed or (
-                    field == "body" and isinstance(sub, ast.If) and _is_type_checking(sub.test)
-                )
-                todo.extend(
-                    (child, inner)
-                    for child in value
-                    if isinstance(child, ast.stmt | ast.excepthandler | ast.match_case)
-                )
+    for level, module, names, typed in written:
+        if module is None:
+            found.append((list(names), typed))
+            continue
+        base = module
+        if level:
+            up = home.split(".")[: len(home.split(".")) - (level - 1)]
+            base = ".".join([*up, base] if base else up)
+        found.append(([base, *(f"{base}.{n}" for n in names)], typed))
     return found
 
 
@@ -103,7 +81,8 @@ def imported_files(path: Path) -> set[str]:
 
 def import_closure(modules: Iterable[str]) -> dict[str, str]:
     """Every package module *modules* reach through imports, to its code less its prose
-    (`hashing.py::normalized_tree`, off the one parse its walk read), themselves and each one's
+    (`hashing.py::module_code`, the one memo every digest of code reads, its imports off the same
+    parse), themselves and each one's
     enclosing packages included (an import runs their `__init__`): the code a call into one can
     run, a function body's import included, so a module named may not be loaded yet."""
     root = _PACKAGE.parent
@@ -114,10 +93,11 @@ def import_closure(modules: Iterable[str]) -> dict[str, str]:
     while todo:
         if (rel := todo.pop()) in seen:
             continue
-        parsed = ast.parse((root / rel).read_text(encoding="utf-8"))
+        text = (root / rel).read_text(encoding="utf-8")
         name = names[rel]
         parents = (name.rpartition(".")[0],) if "." in name else ()
-        imported = {f for found, _ in _imports(root / rel, parsed) for f in found}
-        seen[rel] = normalized_tree(parsed)
+        code = module_code(text)
+        imported = {f for found, _ in _imports(root / rel, code.imports) for f in found}
+        seen[rel] = code.normalized
         todo.extend({*imported, *(files[p] for p in parents)} - seen.keys())
     return {names[rel]: seen[rel] for rel in sorted(seen)}
