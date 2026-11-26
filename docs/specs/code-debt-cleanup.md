@@ -996,6 +996,18 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **No door yields a recorded capability menu or a dataset with a panel** (tw-x row 7): two
   `write_resolved_run` seats stay in test_identity. **Rides with:** wave 6. **Re-test:**
   `git grep -c "write_resolved_run(" -- tests/` is 0.
+- **The repair's readers have no producer** (tw-p): `application/bench/round_analysis.py::mended_round`,
+  `domain/records/run_records.py::ForkGradedRecord` (with `ledger_scan.py`'s case, `CycleFacts.direction`
+  and the `fork` override it feeds, and `fork_graded` in the generated specs and webapp types) and
+  `shared/measurement_context.py::MeasurementRole.REPAIR` (`domain/pass_kinds.py`'s row). Their one
+  writer was the archive repair's `apply_correction`, deleted as dead by tw-p: a charged hole cuts its arm
+  and an uncharged one ends the run before its round closes. Action: delete them with their readers and
+  regenerate the specs. **Rides with:** wave 6. **Re-test:** `git grep -n "mended_round(\|ForkGradedRecord("
+  -- promptpotter` names only definitions.
+- **`domain/cell_fold.py::repairable_holes` counts a charged error** (tw-p): every errored non-HALTED cell
+  counts, a charged one a re-walk pays again included, since `ErrorCategory` does not say which errors
+  are fillable. With the repair gone, name each reader and what it should count. **Rides with:** wave 6.
+  **Re-test:** `repairable_holes` excludes a charged error, or has no reader.
 - **A knob layer's tiers have no world example** (tw-x row 10): the knob-layer fact reads only
   "campaign"-level layers; dataset vs free_tier needs a `campaign(knobs=)` layer per tier. **Rides
   with:** wave 6. **Re-test:** a knob fact names a layer of each tier.
