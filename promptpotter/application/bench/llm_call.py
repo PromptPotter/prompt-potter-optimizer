@@ -96,6 +96,15 @@ class OptimizerResponseModel(StrictModel):
     model_config = ConfigDict(json_schema_extra=_drop_class_description)
 
     @classmethod
+    def __pydantic_init_subclass__(cls, **kwargs: Any) -> None:
+        # Generation order is field order: a model says what a list of ids holds before the list
+        # opens, or the list runs on to `max_tokens` (two banked minimax replies, healed at a price).
+        super().__pydantic_init_subclass__(**kwargs)
+        named = list(cls.model_fields)
+        if (ids := [n for n in named if n.endswith("_ids")]) and named[-len(ids) :] != ids:
+            raise TypeError(f"{cls.__name__}: its id lists {ids} must close it, after {named}")
+
+    @classmethod
     def model_json_schema(cls, *args: Any, **kwargs: Any) -> dict[str, Any]:
         return wire_closed(super().model_json_schema(*args, **kwargs))
 

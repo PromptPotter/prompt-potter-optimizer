@@ -654,6 +654,25 @@ def _refuse_unknown_main(selected: SelectedOptimizer) -> None:
             )
 
 
+def _refuse_layout_out_of_schema_order(selected: SelectedOptimizer) -> None:
+    """A reply layout a prompt shows opens each object's keys in the order its schema sends them:
+    the model writes the layout it reads, and an id list it opens first runs on to `max_tokens`."""
+    for node, config in selected.node_configs.items():
+        key = resolved_key(config.schema_family, config.schema_version)
+        layout = running_prompt(node, config, selected.manifest).answer_format
+        if key is None or not layout:
+            continue
+        sent = selected.resolved_schemas[key]["json_schema"]["schema"]
+        for name, obj in {"": sent, **sent.get("$defs", {})}.items():
+            shown = [k for k in obj.get("properties", {}) if f'"{k}"' in layout]
+            at = [layout.index(f'"{k}"') for k in shown]
+            if at != sorted(at):
+                raise ValueError(
+                    f"optimizer {selected.name!r}: {node}'s reply layout opens {name or 'its reply'}"
+                    f"'s keys out of the order its schema sends them ({shown})."
+                )
+
+
 def _refuse_unnamed_arms(selected: SelectedOptimizer) -> None:
     # At load, so a setup surface never meets a proposer it cannot name.
     for proposer in selected.plan.proposers:
@@ -898,6 +917,7 @@ def _select(
             code="optimizer_roster_open",
         )
     _refuse_unknown_main(selected)
+    _refuse_layout_out_of_schema_order(selected)
     _refuse_unnamed_arms(selected)
     _refuse_unheld_steers(selected)
     _refuse_unknown_slots(selected)

@@ -555,20 +555,19 @@ class Walk:
             end += 1
         return end - start
 
-    def sendable(
-        self, cells: int, decided: int, trigger: Trigger, room: int = sys.maxsize
-    ) -> list[int]:
-        """The rows it may send now, at most *room*: unsent at a press of *cells*, and index ``i``
-        only while no rule can cut before ``i`` rows, so a cut wastes one at most."""
-        if not (sending := self.unsent(cells, decided, trigger)[: max(room, 0)]):
+    def sendable(self, cells: int, decided: int, trigger: Trigger) -> list[int]:
+        """The rows it may send now at a press of *cells*, past its own calls out: unsent, and
+        index ``i`` only while no rule can cut before ``i`` rows, so a cut wastes one at most.
+        ``fill`` sends from it and ``flight`` serves it: one bound for both."""
+        room = max(cells - len(self.running), 0)
+        if not (sending := self.unsent(cells, decided, trigger)[:room]):
             return []
         horizon = self.horizon(sending[-1] - 2)
         return [i for i in sending if horizon is None or i <= horizon]
 
     def flight(self, cells: int, decided: int, trigger: Trigger) -> Flight:
-        """``allowed`` is what ``fill`` may have out at a press of *cells*: one bound for both."""
         out, settled = len(self.running), len(self.results) + len(self.finished)
-        sendable = self.sendable(cells, decided, trigger, cells - out)
+        sendable = self.sendable(cells, decided, trigger)
         return Flight(out, out + len(sendable), self.budget - settled)
 
     def bank(self, sure: int) -> list[Sample]:
@@ -1078,7 +1077,7 @@ class _ScoringPhase[K: Hashable]:
             self.room(walk, armed, ceiling),
             max(self.affordable(), walk.rereads_ahead(unsent[0])),
         )
-        for idx in walk.sendable(armed.cells, decided, self.trigger, room):
+        for idx in walk.sendable(armed.cells, decided, self.trigger):
             if room <= 0:
                 break
             sample, cell = walk.launch(idx, armed)
