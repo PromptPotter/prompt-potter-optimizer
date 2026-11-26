@@ -380,7 +380,7 @@ class _Warm(NamedTuple):
 
 
 @pytest.fixture
-def warm(offline: Router) -> _Warm:  # ~3 s to open for the first fact, ~0.5 s after
+def warm(offline: Router) -> _Warm:  # ~0.5 s a fact
     graded_pool = samples(40, "TRUE", query="d")
     answered = offline.backend.matches
 

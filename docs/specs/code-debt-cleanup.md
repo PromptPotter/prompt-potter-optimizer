@@ -1037,8 +1037,8 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 
   **Rides with:** wave 6. **Re-test:** each fact moves to a leg on its door, or is deleted by a named
   mutation.
-- **Hand-seats with no world door** (tw-j2 link 5): the world has no mint-only door, and
-  `world.opened(rows)` takes no connector. test_security seats `minted_campaign` ×6,
+- **Hand-seats with no world door** (tw-j2 link 5): `world.opened(rows)` takes no connector, and
+  the seats below have not moved onto `world.minted` (tw-v's mint door). test_security seats `minted_campaign` ×6,
   `stored_campaign` ×3 and `loop_session` ×1; test_scoring `loop_session` ×2 and `minted_campaign` ×2;
   test_spend `loop_session` ×2 (one is tw-x row 3's). **Rides with:** wave 6. **Re-test:**
   `git grep -cE "\b(minted_campaign|stored_campaign|loop_session)\(" -- tests/test_*.py` is 0.
@@ -1051,6 +1051,47 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   machine-only), against the encoder's cost on every write. Price both before choosing. **Rides
   with:** wave 6. **Re-test:** a cProfile of one world run ranks `json.encoder` below tw-q's
   frame list, or the format is a decision with its reason.
+- **The suite runs ~3.6 s over `7dce00a96`, all of it test_archive's world runs** (tw-v, tw-v2): in one
+  session, `7dce00a96` 62.0–67.0 s and tw-v's tip 65.2–67.9 s. `test_archive.py` takes 16.4–19.4 s
+  against 3.4–3.5 s hand-seated. `line`, `displaced`, `family_tree`, `origin_forks` and `gated` have
+  distinct forks, so no shape merges. Operator, 2026-11-26: close it once the indirections are removed,
+  never by adding complexity for seconds. Door: a cheaper run, not fewer runs. **Rides with:** after
+  wave 6. **Re-test:** archive's file wall is under 8 s, and the suite's is below `7dce00a96`'s.
+- **A landing key re-derives per call** (tw-v, tw-v2): `shared/import_walk.py::import_closure`
+  normalizes each module from its own parse (`hashing.py::normalized_tree`), beside
+  `hashing.py::normalized_module`'s memo. That costs 2.16 s for the 329-module closure. On top,
+  `store/data_root.py::row_schema` rebuilds pydantic `json_schema()` over 90 kinds (0.6–0.85 s), and a
+  memo keyed by the model class is keyed by identity. tw-v2's fix (`arc/tw-v2` 604b03eb2) was not
+  taken: +47 production lines, because a text-keyed memo held 10.5 MB, so it went sha-keyed and
+  zlib-compressed, to save ~2 s on one fact. **Rides with:** after wave 6. **Re-test:** a second
+  `scripts/build_ts_types.py::derived_landing_key()` in one process takes under 0.2 s, with
+  production no larger.
+- **`durable=` is a caller's flag restating `Kind.durable`** (tw-v2): `store/io.py::write_bytes`,
+  `write_json` and `appending` fsync on a flag that each writer passes (`jobs/registry.py`,
+  `maintenance/landing.py`, `identity/grants.py`, `identity/tokens.py`, `store/user_store.py`,
+  `store/wallet_store.py`). That sits beside `data_root.py::Kind.durable`, the row that decides it.
+  Priced: 5,087 fsyncs a suite, 2.5 s, each on a truth no fold rebuilds (`charges.jsonl` 3,087, live
+  job files, `.live-jobs`, accounts). `dashboard.json` is never fsynced. Door: io's doors read
+  durability off the file's kind. **Rides with:** wave 6. **Re-test:**
+  `git grep -cE "durable=(True|not )" -- promptpotter/*.py` is 0.
+- **Child-process facts idle the parent ~8 s** (tw-v, tw-v2): `conftest.py::dspy_child` (2.9 s), the
+  API-start child (2.7 s) and the stdio host (2.4 s) run serially. Each peaks at 160–165 MB, so
+  overlapping them breaks pytest's 393 MB cap. `-X importtime` finds no extra loaded by a boot that
+  never calls it: `promptpotter.main` takes 2.6 s (`application/health.py` 0.82 s, `mcp` mounted at
+  `/mcp` 0.64 s), and the CLI 0.45–0.68 s (`domain/command_kinds.py` 0.40–0.58 s). Door: fewer models
+  built at import. **Rides with:** wave 6. **Re-test:** each child's wall is under 1.5 s.
+- **A child process has no offline-world door** (tw-v): `refused_network` stops at the process, so
+  test_security's API-start child fetched upstream's real price list until `d2fce21` gave it a
+  `-c` preamble, `tests/test_security.py::_OFFLINE_CHILD`, that installs the world's `Router`. Door:
+  one child entry in `scripts/offline_world.py` that every spawned child runs under. **Rides with:**
+  wave 6. **Re-test:** `git grep -c "_OFFLINE_CHILD" -- tests` is 0 and each child asserts nothing
+  went unrouted.
+- **A first landing leaves `jobs/.live-jobs` unwritten** (tw-v, `tests/test_security.py` `moved`
+  fixture): on a tree that never ran, a first landing writes no live-jobs index, and a second landing
+  stages it, so the fixture keeps `campaign(rounds=0)` rather than a mint. This is a state the system
+  enters but does not report. Suspected root: the landing's index row is written only once a run has
+  started. **Rides with:** wave 6. **Re-test:** a first landing on an empty root writes the index, and
+  the fixture mints.
 
 ## Held — no wave-4 chain yet
 

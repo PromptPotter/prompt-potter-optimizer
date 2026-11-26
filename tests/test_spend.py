@@ -502,7 +502,7 @@ def _minted(stores: Stores, net: Router, layer: dict[str, Any] | None = None) ->
 @pytest.fixture(scope="module")
 def ran_24(tmp_path_factory: pytest.TempPathFactory) -> Shared:
     """One campaign on 24 rows, run once for every fact of this file that reads a run's line
-    (~2.5 s once, ~20 ms a fact)."""
+    (~0.5 s once, ~25 ms a fact that adopts it, none one that reads it in place)."""
 
     async def act(world: World) -> CycleHop:
         return (await world.campaign(rows=24)).hop
@@ -511,10 +511,10 @@ def ran_24(tmp_path_factory: pytest.TempPathFactory) -> Shared:
 
 
 def _line(world: World, forks: int, ran: Shared | None = None) -> list[CycleHop]:
-    """A campaign the world ran (*ran*'s copy, else its own: another account mints its own), then
-    *forks* cut off its origin by the operator's fork door."""
+    """A campaign the world ran (*ran*'s copy, else its origin alone: another account mints its
+    own), then *forks* cut off its origin by the operator's fork door."""
     if ran is None:
-        root = asyncio.run(world.campaign(rows=24)).hop
+        root = asyncio.run(world.campaign(rounds=0, rows=24)).hop
     else:
         root, world = ran.made, world.adopt(ran)
     asked = ForkCyclePayload(campaign_id=root.campaign_id, cycle_id=root.cycle_id)
@@ -4978,21 +4978,21 @@ def spent_campaign(built_stores: Stores, world: World, ran_24: Shared) -> _Spent
 
 
 @pytest.mark.usefixtures("account_bound")
-def test_the_account_and_the_campaigns_ceiling_read_what_its_run_billed(
-    world: World, ran_24: Shared
-) -> None:
-    hop, world = ran_24.made, world.adopt(ran_24)
-    billed = [
-        r.money
-        for r in world.records(hop)
-        if isinstance(r, TokenUsageRecord) and isinstance(r.money, Bill) and not r.mirrored
-    ]
+def test_the_account_and_the_campaigns_ceiling_read_what_its_run_billed(ran_24: Shared) -> None:
+    hop = ran_24.made
+    with ran_24.reading() as stores:
+        billed = [
+            r.money
+            for r in ledger_records(stores.campaigns.layout(hop).ledger)
+            if isinstance(r, TokenUsageRecord) and isinstance(r.money, Bill) and not r.mirrored
+        ]
+        ceiling = stores.campaigns.metered_spend(hop.campaign_id, "bill")
+        used = account_bill(stores.charges).host.used_usd
     assert billed, "vacuous: the run billed no send"
-    ceiling = world.stores.campaigns.metered_spend(hop.campaign_id, "bill")
     assert ceiling.token_amount == sum(bill.tokens for bill in billed), (
         "the campaign's ceiling read other tokens than its ledger billed"
     )
-    assert account_bill(world.stores.charges).host.used_usd == pytest.approx(ceiling.usd_amount), (
+    assert used == pytest.approx(ceiling.usd_amount), (
         "the account read another sum than the campaign's ceiling"
     )
 
