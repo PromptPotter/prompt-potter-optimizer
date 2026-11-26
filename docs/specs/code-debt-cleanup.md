@@ -961,6 +961,45 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   moves to the side the row puts below it. **Re-test:** `_LAYERING` names `config/` and the gate's
   `layering` check is green.
 
+### wave-6 · what the test rework's world could not seat (tw-x, tw-j at their landing)
+
+- **A pressed L4 outer run does not repeat** (tw-j): two pressed runs of the e2e L4 fixture differ in the
+  outer `L1Critique/Generate_0,_1` requests and the inner decisions, while unpressed runs repeat, so the
+  outer's record hangs on which concurrent inner campaign files first. Root: an outer phase reads its
+  inners in an order the outer owns, not their completion order. **Rides with:** wave 6 (L4).
+  **Re-test:** two pressed runs of `offline_run.py --l4` read the same outer requests.
+- **No L4 fixture buys an outer cell ahead, so an L4 outer ending is unread** (tw-j link 1):
+  `query_loop.py`'s endings skip `land()` when `phase.cancels`, the connector's `cancel_stops_billing`,
+  which only the inner connector sets (`runner/inner/spawn.py::CONNECTOR`). So an inner cell that
+  arrived, was filed under its claim and was cut may stay the outer campaign's own memory, with no
+  `UntakenBoughtRecord`. tw-j's e2e L4 fixture discarded 0 outer cells at press depth 4 and at 6
+  seats: the path is unreached, not refuted. **Rides with:** wave 6 (L4). **Re-test:** an L4 leg
+  pressed past one outer cell discards one, and its ledger names it untaken.
+- **An operator's act is atomic in the offline world** (tw-j link 2): `offline_world.py::_acted` runs
+  a press or a pause whole while the run's loop waits, so its legs repeat, and no leg lands a cell
+  between a command's own steps, where tw-r2 and tw-r3 found their bugs. Root: the world steps the
+  command and picks the cell that lands between two steps, by an event, never the clock. **Rides
+  with:** wave 6. **Re-test:** a leg lands a cell between a pause's two steps, on every run.
+- **A rename on a run line re-keys potter** (tw-j): renaming `application/optimizers/potter/dispatch/injections/wounds.py::_guard_evidence` re-keyed potter
+  and capo-pobb, while `optimizers/potter/CLAUDE.md` says a rename on a run line re-keys nothing. The
+  fingerprint carries a name it should not (`optimizer_manifest.py::behaviour_key`), or the doc is
+  stale. Root: whichever side is wrong. **Rides with:** wave 6. **Re-test:** rename `_guard_evidence`
+  and read `offline_run.py --digests`.
+- **The world has no in-process connector door** (tw-x row 3): test_spend's ungraded-cell fact stays on
+  `factories.py::loop_session`. **Rides with:** wave 6. **Re-test:** `git grep -c "loop_session(" --
+  tests/` is 0.
+- **The never-closed-origin edge of `fork_edge` has no door** (tw-x row 5):
+  `application/fork_siblings.py:131-139` is reached by no fork, since `cut_operator_fork` refuses an
+  unmeasured origin, so test_identity's sibling stop-record stays on `mint_cycle`. Root: the edge is
+  dead (delete it) or a door reaches it. **Rides with:** wave 6. **Re-test:** the coverage run reaches
+  `fork_siblings.py:131`, or the lines are gone.
+- **No door yields a recorded capability menu or a dataset with a panel** (tw-x row 7): two
+  `write_resolved_run` seats stay in test_identity. **Rides with:** wave 6. **Re-test:**
+  `git grep -c "write_resolved_run(" -- tests/` is 0.
+- **A knob layer's tiers have no world example** (tw-x row 10): the knob-layer fact reads only
+  "campaign"-level layers; dataset vs free_tier needs a `campaign(knobs=)` layer per tier. **Rides
+  with:** wave 6. **Re-test:** a knob fact names a layer of each tier.
+
 ## Held — no wave-4 chain yet
 
 - **The estimator has no golden corpus**: its key (`nodes.py::BehaviourKeys.cell_estimator`) reads the
