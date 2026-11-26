@@ -2224,7 +2224,8 @@ def _with_builders(checks: list[Check]) -> list[Check]:
 _PINNED_KINDS = ("py", "parity")
 # A `--web` gate asks no engine check, yet playwright reads the walk world an engine check builds:
 # what it pulls in must hold a pinned kind, or the run re-execs nowhere.
-assert any(c.kind in _PINNED_KINDS for c in _with_builders([_NAMED["playwright"]]))
+if not any(c.kind in _PINNED_KINDS for c in _with_builders([_NAMED["playwright"]])):
+    raise RuntimeError("playwright pulls in no engine check, so a --web gate re-execs nowhere")
 
 
 def _kinds(args: argparse.Namespace) -> set[str]:

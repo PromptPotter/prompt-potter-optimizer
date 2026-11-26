@@ -3943,11 +3943,12 @@ def host_tenant() -> _HostTenant:
     return _HostTenant(tenant, caller, session, answered, keyed, upload)
 
 
+# One spawned host answers every act; the edits run on the draft its upload opened.
 @pytest.mark.usefixtures("offline")
-async def test_a_host_over_stdio_lands_a_command_in_the_terminals_account_and_serves_a_refusal_as_in_process(
+async def test_a_host_over_stdio_acts_in_the_terminals_account_as_the_in_process_door_does(
     host_tenant: _HostTenant,
 ) -> None:
-    tenant, _, session, answered, keyed, _ = host_tenant
+    tenant, _, session, answered, keyed, upload = host_tenant
     async with _stdio_host(tenant) as host:
         # A command lands in the terminal principal's account, which a read then answers alike.
         flipped = not (await answered("user-settings", {}))["demo_mode_enabled"]
@@ -3958,23 +3959,7 @@ async def test_a_host_over_stdio_lands_a_command_in_the_terminals_account_and_se
         assert here == there.get("structuredContent") == {"demo_mode_enabled": flipped}, (
             "a command over stdio landed in another account than the terminal's"
         )
-        # A refusal is the value the in-process door raises.
-        run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": "abc"}}
-        with pytest.raises(PotterError) as raised:
-            await session.answer(CallTool("start-run", keyed(run)))
-        called = await host("start-run", keyed(run))
-        refusal = Refusal.of(raised.value).model_dump(mode="json")
-        assert called.get("isError") and json.loads(called["content"][0]["text"]) == refusal, (
-            "a tool call over stdio served a refusal another way"
-        )
 
-
-@pytest.mark.usefixtures("offline")
-async def test_a_host_over_stdio_opens_the_draft_the_in_process_door_opens_and_a_key_names_its_bytes(
-    host_tenant: _HostTenant,
-) -> None:
-    tenant, _, _, answered, keyed, upload = host_tenant
-    async with _stdio_host(tenant) as host:
         # The bytes arrive base64 and open the draft the in-process door opens from them.
         opened = await host("ingest-upload", keyed(upload))
         assert not opened.get("isError"), opened["content"]
@@ -3987,6 +3972,7 @@ async def test_a_host_over_stdio_opens_the_draft_the_in_process_door_opens_and_a
             assert opened_draft["pipeline"].pop("campaign_id") == opened_draft["draft_id"]
         moved = {key for key in draft if draft[key] != beside[key]}
         assert moved == {"draft_id", "created_at"}, f"the two doors parsed one file apart: {moved}"
+
         # A key names one act, its bytes included: a corrected file re-sent under the key of the
         # first is refused, never answered with the first file's draft.
         reused = keyed(upload)
@@ -4001,17 +3987,6 @@ async def test_a_host_over_stdio_opens_the_draft_the_in_process_door_opens_and_a
         assert moved_key.get("isError") and "idempotency_key_reused" in json.dumps(moved_key), (
             "a reused key on other bytes replayed the first act's answer"
         )
-
-
-# One draft: the upload opens it, a patch edits it, a null resets what the patch laid.
-@pytest.mark.usefixtures("offline")
-async def test_a_host_over_stdio_edits_the_draft_its_upload_opened_and_a_null_takes_an_override_back(
-    host_tenant: _HostTenant,
-) -> None:
-    tenant, _, _, _, keyed, upload = host_tenant
-    async with _stdio_host(tenant) as host:
-        opened = await host("ingest-upload", keyed(upload))
-        draft = opened["structuredContent"]
         # A payload nesting a model is digested in a process that built none of it before.
         patched = {"draft_id": draft["draft_id"], "patch": {"slug": "sums-host"}}
         edited = await host("edit-draft-campaign", keyed(patched))
@@ -4034,6 +4009,15 @@ async def test_a_host_over_stdio_edits_the_draft_its_upload_opened_and_a_null_ta
             laid.append(sent_edit["structuredContent"]["config"])
         assert laid[0] != laid[1] and laid[2] == laid[0], (
             "a reset left the draft's own override in what Start launches"
+        )
+        # A refusal is the value the in-process door raises.
+        run = {"campaign_id": "c1", "cycle_id": "k1", "budget": {"usd": "abc"}}
+        with pytest.raises(PotterError) as raised:
+            await session.answer(CallTool("start-run", keyed(run)))
+        called = await host("start-run", keyed(run))
+        refusal = Refusal.of(raised.value).model_dump(mode="json")
+        assert called.get("isError") and json.loads(called["content"][0]["text"]) == refusal, (
+            "a tool call over stdio served a refusal another way"
         )
 
 
