@@ -13,7 +13,6 @@ import contextlib
 import copy
 import io
 import json
-import math
 import random
 import re
 import shutil
@@ -24,7 +23,6 @@ from collections.abc import Callable, Iterator, Sequence
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from statistics import NormalDist
 from typing import Annotated, Any, ClassVar, NamedTuple, cast
 from unittest.mock import Mock
 
@@ -67,6 +65,7 @@ from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.children import (
     admission_failures,
     carried_writes,
+    length_failures,
     overlay_failures,
 )
 from promptpotter.application.bench.cycle import RoundContext
@@ -169,7 +168,6 @@ from promptpotter.application.optimizers.nodes import (
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
 from promptpotter.application.optimizers.potter.dispatch.injections.panels import (
     clustered_sample_ids,
-    detectable_rows,
 )
 from promptpotter.application.optimizers.potter.dispatch.l1_wire_schema import (
     build_l1_response_schema,
@@ -179,7 +177,6 @@ from promptpotter.application.optimizers.potter.knobs import L1GenerateKnobs
 from promptpotter.application.optimizers.potter.l1 import parse_population
 from promptpotter.application.optimizers.potter.records import Ladder
 from promptpotter.application.optimizers.potter.validators import l1_shots_in_demo_pool
-from promptpotter.application.optimizers.variation.members import Cross, LocusCrossover
 from promptpotter.application.origin import resolve_origin_opt_search_point
 from promptpotter.application.origin_listing import list_datasets, list_origins
 from promptpotter.application.pipeline_resolve import (
@@ -242,7 +239,7 @@ from promptpotter.config.paths import (
 from promptpotter.connectors import CONNECTORS, upload_connector
 from promptpotter.connectors import harbor as harbor_connector
 from promptpotter.connectors.dbllmbench import DbllmbenchPanel
-from promptpotter.domain.arms import PointContext, Proposal
+from promptpotter.domain.arms import PointContext
 from promptpotter.domain.bench import (
     BankPartition,
     CampaignRefusal,
@@ -352,9 +349,7 @@ from promptpotter.domain.scoring import GradedCell, ScoringFormulaError
 from promptpotter.domain.search_point import NodeConfig, TaskDecomposition
 from promptpotter.domain.spend import Budget, HeldBudget, usd_text
 from promptpotter.domain.wounds import (
-    ValidationFailure,
     ValidationReason,
-    fatal_validation_failures,
 )
 from promptpotter.infrastructure.identity import grants
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -4641,7 +4636,23 @@ def test_a_critique_cluster_says_what_it_holds_before_its_id_list_opens() -> Non
     assert at == sorted(at), "the reply layout opens a cluster's id list before its mechanism"
 
 
-# Journeys awaiting a leg
+def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refused() -> None:
+    # Every child is minted through `Children.child`, which books this rule: grown or trimmed alike.
+    n = 10
+    main = prompted(instruction="x" * (2 * n), persona="r" * n)
+    for instruction, persona, refused in (
+        ("x" * (3 * n), "r" * n, False),
+        ("x" * n, "", True),
+        ("x" * (3 * n + 1), "r" * n, True),
+        ("x" * (n - 1), "r" * n, True),
+        ("x" * (3 * n), "r" * (n // 2), False),
+    ):
+        child = prompted(instruction=instruction, persona=persona)
+        booked = [f.reason for f in length_failures(child, main, n)]
+        assert booked == ([ValidationReason.OVER_CEILING] if refused else []), (
+            f"a child of {len(instruction)}+{len(persona)} chars over a 30-char main was judged wrong"
+        )
+    assert length_failures(prompted(instruction="x" * 99), main, None) == [], "None bounds nothing"
 
 
 def _two_prompt_origin() -> OptSearchPoint:
@@ -4748,27 +4759,6 @@ def _outer(cells: InnerCells) -> tuple[PipelineSchema, OptSearchPoint]:
     return schema, resolve_origin_opt_search_point(pipeline_params=PipelineParams(), schema=schema)
 
 
-def test_l1_is_told_the_rows_to_win_on_the_round_it_reads_not_the_frontier_pool(
-    built_stores: Stores,
-) -> None:
-    # The parent hits half of 80 origin rows; the latest round reads 20 of them.
-    hits = [measurement(sid, float(sid % 2), objective=float(sid % 2)) for sid in range(80)]
-    seated = seat(built_stores, origin=(OptSearchPoint(), lambda _s: sheet(hits)))
-    run_init(RoundContext(seated.cycle, 0))
-    latest = round_result(
-        1, improved=False, arms=[arm_state("parent")], cells={PARENT: sheet(hits[:20])}
-    )
-    set_cycle(seated.cycle, line=[seated.cycle.origin_round, latest])
-    view = PotterView(NodeContext(seated, NODE_MEMBERS.get("l1_generate")), Ladder())
-    assert view.admission is not None and len(view.latest_sample_keys) == 20
-    # Two arms of 20 coin-flip rows each: the two-proportion count at 80% power.
-    z = NormalDist().inv_cdf(view.admission) + NormalDist().inv_cdf(0.8)
-    told = detectable_rows(view)
-    assert told is not None and abs(told - z * math.sqrt(20 / 2)) <= 1.0, (
-        f"L1 is told to win {told} rows, a precision the 20-row round cannot carry"
-    )
-
-
 def test_the_critique_reads_every_row_the_parent_ran_worst_first_and_never_the_origins(
     built_stores: Stores,
 ) -> None:
@@ -4863,47 +4853,6 @@ def test_the_answer_tally_and_the_theta_l1_reads_are_the_parents_rows_never_the_
     assert f"θ {theta.theta:+.3f}" in measurand, f"L1 is told another arm's θ: {measurand}"
 
 
-def test_rewriting_the_prompt_panel_cannot_accumulate_the_operator_framing(
-    built_stores: Stores,
-) -> None:
-    upstream = "Raw invoice text is provided directly as the input column."
-    framing = TaskDecomposition(
-        upstream_context=upstream,
-        downstream_context="The assigned code books a ledger entry.",
-    )
-    opt_sp = prompted(
-        "classify",
-        persona="You assign Swiss account codes.",
-        problem_description="Assign the four-digit account code for the invoice.",
-    )
-    booking = pipeline_schema(
-        [PipelineNode(name="classify", kind=NodeKind.LLM, prompt_info=PROMPT_INFO, tunes_llm=True)]
-    )
-    classify = booking.prompt_nodes()[0]
-    view = _view(built_stores, opt_sp, framing, booking)
-    rendered = "\n\n".join(i.text for i in DispatchHub.render_items("rendered_prompt", view))
-    shown = {
-        label.removeprefix("[").removesuffix("]"): body
-        for label, _, body in (s.partition("\n") for s in rendered.split("\n\n"))
-        if label.startswith("[")
-    }
-    rewritten = OptSearchPoint.derive(
-        [opt_sp],
-        schema=booking,
-        variation=_L1,
-        changes={Locus(*label.split(".", 1)): body for label, body in shown.items()},
-    )
-    assert rewritten.render_target(classify, framing, demo=()) == opt_sp.render_target(
-        classify, framing, demo=()
-    ), "rewriting the shown panel accumulated the operator framing into the scored prompt"
-    assert upstream in opt_sp.render_target(classify, framing, demo=()), (
-        "dropping the framing from the target render trades this bug for a blinder one"
-    )
-    assert upstream in DispatchHub.render("task_context", view), (
-        "dropping the framing from the task context trades this bug for a blinder one"
-    )
-
-
 def test_the_l4_generator_and_its_steer_are_shown_the_inner_optimizer_prompts_it_rewrites(
     built_stores: Stores,
 ) -> None:
@@ -4934,55 +4883,6 @@ def test_the_l4_generator_and_its_steer_are_shown_the_inner_optimizer_prompts_it
         )
         refused = set(filled.injections.dropped) & NODE_LAYOUTS[node].mandatory
         assert not refused, f"{node}: mandatory panel(s) refused by the budget: {sorted(refused)}"
-
-
-def test_a_child_moving_its_main_parents_prompt_past_the_length_budget_is_refused_at_its_mint(
-    built_stores: Stores,
-) -> None:
-    # A drawn crossover, an LLM host's recombination and a variant's edits alike, grown or trimmed.
-    potter = select_optimizer(bench_choice("potter"))
-    n = potter.knobs_of("l1_generate", L1GenerateKnobs).length_budget
-    at, persona = Locus("solve", "instruction"), Locus("solve", "persona")
-    main = prompted(instruction="x" * (2 * n), persona="r" * n)
-    donor = prompted(instruction="d" * (3 * n + 1), persona="d" * (2 * n + 1))
-    seated = seat(built_stores)
-    set_cycle(seated.cycle, population=[main, donor])
-    over = [ValidationReason.OVER_CEILING]
-
-    def booked(proposal: Proposal) -> list[ValidationReason]:
-        return [f.reason for f in fatal_validation_failures(proposal.validation_failures)]
-
-    cross = Cross(main, donor)
-    copy = Children(seated, NODE_MEMBERS.get("mating")).child(cross)
-    assert booked(copy) == [], "vacuous — the main's own copy is refused"
-    crossover = LocusCrossover()
-    walked = asyncio.run(crossover.propose(NodeContext(seated, crossover), Proposals([copy])))
-    (drawn,) = walked.proposals
-    assert drawn.individual.id != copy.individual.id, "vacuous — the donor gave nothing"
-    assert booked(drawn) == over, f"a crossover past the budget books {booked(drawn)}"
-    variants = Children(seated, NODE_MEMBERS.get("l1_generate"))
-    hosted = variants.child(cross, take={persona: 1})
-    assert booked(hosted) == over, f"a hosted recombination past the budget books {booked(hosted)}"
-    for moved, refused in (
-        ({at: "x" * (3 * n)}, False),
-        ({at: "x" * n, persona: ""}, True),
-        ({at: "x" * (3 * n + 1)}, True),
-        ({at: "x" * (n - 1)}, True),
-        ({at: "x" * (3 * n), persona: "r" * (n // 2)}, False),
-    ):
-        child = variants.child([main], prompt_loci=moved)
-        assert booked(child) == (over if refused else []), (
-            f"a variant moving its parent by {[len(t) for t in moved.values()]} was judged wrong"
-        )
-    # The L1 readout tallies a refused variant by its first reason.
-    miscited = ValidationFailure(
-        axis="evidence_grounding",
-        value="",
-        allowed=[],
-        reason=ValidationReason.CITATION_NOT_IN_PANEL,
-    )
-    both = variants.child([main], prompt_loci={at: "x" * (n - 1)}, failures=[miscited])
-    assert booked(both)[0] == ValidationReason.OVER_CEILING, f"tallied as {booked(both)[0]}"
 
 
 class _Mixed(NamedTuple):

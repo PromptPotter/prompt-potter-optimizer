@@ -478,7 +478,7 @@ class CapoInitKnobs(RewriteKnobs):
     )
 
 
-def _instructions(raw: str) -> list[str] | None:
+def seed_instructions(raw: str) -> list[str] | None:
     """The reply's array of instructions, stripped; ``None`` out of form, an array holding no
     non-blank string included."""
     start, end = raw.find("["), raw.rfind("]")
@@ -519,7 +519,7 @@ class CapoInit(nodes.Proposer):
     async def propose(self, ctx: NodeContext, _proposals: Proposals) -> Proposals:
         knobs = ctx.knobs(CapoInitKnobs)
         raw = await ctx.read(Calls).ask(init_prompt(ctx))
-        listed = _instructions(raw)
+        listed = seed_instructions(raw)
         instructions = listed or []
         pool = [s.key for s in ctx.drawn(DemoPool)]
         target = ctx.read(Target)

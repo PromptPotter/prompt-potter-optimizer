@@ -209,6 +209,9 @@ ARRIVED = "arrived"
 # Potter's warm run pressed and paused inside a walk, then resumed: what the press bought ahead and
 # no turn took stays out of the campaign's own memory across the pause.
 PRESSED_RESUMED = f"{PRESSED}-{RESUMED}"
+# The crossed pair's origin errs on one row in this many, so the resume replays the parent's bar
+# at the grade its live election charged.
+CHARGED = 8
 ARRIVAL = {"pobb": {"read_order": "arrival"}}
 INTERRUPTED = {1: "interrupted", 2: "interrupted-twice"}
 # Potter's straight campaign with invalid answers scripted by call, each on the rung that heals it:
@@ -858,11 +861,13 @@ async def run_one(
     hardness: int = 0,
     press: bool = False,
     arrival: bool = False,
+    charged: bool = False,
 ) -> tuple[Path, str]:
     """The archive is the workspace's, never *out*'s: campaigns in one process share it.
     *pause_after* pauses at that round's boundary; *pause_in_walk* at the first cell that round
     measures, its walk banked, so the resume replays the walk and runs no proposer; *press* presses
-    `PRESS` as the first cell is answered; *arrival* lays `ARRIVAL`."""
+    `PRESS` as the first cell is answered; *arrival* lays `ARRIVAL`; *charged* answers one in `CHARGED`
+    of the origin's rows as the pipeline's error, a miss its bar is charged."""
     out = workspace if out is None else out
     config = campaign_config(
         optimizer,
@@ -884,6 +889,7 @@ async def run_one(
     )
     if heal:
         harness.llm.heals = HEALS
+    harness.backend.origin_errors = CHARGED if charged else 0
     if wound:
         harness.llm.wounds = {key: sent for key, (sent, _) in WOUNDS[optimizer].items()}
 
@@ -2198,12 +2204,27 @@ def crossed_legs(
         "l1_generate": recombined(straight, "l1_generate"),
         "l2_context": recombined(by_l2, "l2_context"),
     }
-    same = decided(straight, after=pause_after) == decided(paused, after=pause_after)
-    print(
-        f"potter: crossover on, two-parent arms recombined by host {hosted}; paused after round "
-        f"{pause_after} and resumed, decisions {'UNMOVED' if same else 'MOVED'}"
+    twins = [decided(at, after=pause_after) for at in (straight, paused)]
+    # A move of the bill alone is spend, read beside the record: an errored cell never replays.
+    # A stopped pass the resume sends again is bought twice, so each reading counts once.
+    cells = [twin.pop("harness")["backend_cells"] for twin in twins]
+    for twin in twins:
+        passes = twin["ledger"]["passes_graded"]
+        for graded in passes:
+            del graded["reserve_tokens"], graded["reserve_usd"]
+        twin["ledger"]["passes_graded"] = sorted({json.dumps(g, sort_keys=True) for g in passes})
+    same = twins[0] == twins[1]
+    # The origin's charged errors stand in the bar its first election read, which the resume replays.
+    charged = sum(
+        r["record_type"] == "arm" and r["round"] == 0 and '"PIPELINE"' in json.dumps(r)
+        for r in leg_ledger(straight)
     )
-    return all(hosted.values()) and same
+    print(
+        f"potter: crossover on, two-parent arms recombined by host {hosted}; its origin charged "
+        f"{charged} pipeline errors; paused after round {pause_after} and resumed, decisions "
+        f"{'UNMOVED' if same else 'MOVED'} (backend cells {cells[0]} -> {cells[1]})"
+    )
+    return all(hosted.values()) and same and charged > 0
 
 
 def less_heals(workspace: Path) -> dict[str, Any]:
@@ -2647,6 +2668,7 @@ def run_child_leg(args: argparse.Namespace) -> None:
             hardness=args.hardness,
             press=args.press,
             arrival=args.arrival,
+            charged=args.charged,
         )
         print(asyncio.run(one)[0])
 
@@ -2705,6 +2727,7 @@ def main() -> int:
     ap.add_argument("--hardness", type=int, default=0, help=argparse.SUPPRESS)
     ap.add_argument("--press", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument("--arrival", action="store_true", help=argparse.SUPPRESS)
+    ap.add_argument("--charged", action="store_true", help=argparse.SUPPRESS)
     ap.add_argument(
         "--l4",
         action="store_true",
@@ -2827,21 +2850,22 @@ def main() -> int:
     wounding = {name: spawn(name, home / name / WOUNDED, "--wound") for name in wounded}
     # The L4 fixture's outer and inner optimizer are potter's.
     nesting = spawn("potter", home / "potter" / L4, "--l4") if potter_legs else None
-    warmly = f"--hardness={REBASE_HARDNESS}"
+    warmly = (f"--hardness={REBASE_HARDNESS}",)
     # Its pool is read off the closed rounds, so a resume must hand it the pool a straight run had;
     # only potter's race rolls, so only its calls are read as they return, pressed so several are out.
     l1_host, l2_host = (f"--crossover={host}" for host in CROSSED_HOSTS)
-    arrival = (warmly, "--arrival", "--press", f"--pause-in-walk={pause_after + 1}")
+    arrival = (*warmly, "--arrival", "--press", f"--pause-in-walk={pause_after + 1}")
     paired = (
         None
         if not potter_legs
         else (
             (
-                spawn("potter", home / "potter" / CROSSED, l1_host),
+                spawn("potter", home / "potter" / CROSSED, l1_host, "--charged"),
                 spawn(
                     "potter",
                     home / "potter" / f"{CROSSED}-{RESUMED}",
                     l1_host,
+                    "--charged",
                     f"--pause-after={pause_after}",
                 ),
                 spawn("potter", home / "potter" / f"{CROSSED}-l2", l2_host),
@@ -2851,13 +2875,13 @@ def main() -> int:
     )
     warm = {
         name: (
-            spawn(name, home / name / WARM, warmly),
-            spawn(name, home / name / PRESSED, warmly, "--press"),
-            spawn(name, home / name / RESUMED, warmly, f"--pause-in-walk={pause_after + 1}"),
+            spawn(name, home / name / WARM, *warmly),
+            spawn(name, home / name / PRESSED, *warmly, "--press"),
+            spawn(name, home / name / RESUMED, *warmly, f"--pause-in-walk={pause_after + 1}"),
             spawn(
                 name,
                 home / name / PRESSED_RESUMED,
-                warmly,
+                *warmly,
                 "--press",
                 f"--pause-in-walk={pause_after + 1}",
             ),

@@ -259,7 +259,7 @@ _DECLARED_SWALLOWS: dict[str, str] = {
     "application/maintenance/migrations/live_jobs_index.py::staged::FileUnreadableError": (
         "a job file that does not load refuses the landing on its own"
     ),
-    "application/optimizers/capo/members.py::_instructions::ValueError": (
+    "application/optimizers/capo/members.py::seed_instructions::ValueError": (
         "a reply out of form answers None, by contract; the call's record keeps it"
     ),
     "application/origin_listing.py::list_origins::DatasetAccessError": (
