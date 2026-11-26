@@ -261,7 +261,9 @@ BASELINE = {
     # tw-r3 (+3): `_ArchiveRecorder._file` files only a cell no address names (one filing rule).
     # tw-x (+22): the level series folds off the ruler, its scope and reach
     # (`difficulty.py::level_series_of`), so its rules are a table, not a seated session.
-    "package_lines": 113734,
+    # tw-j (+11): `node_context.py::closed_round` takes the three fields it reads, not the `Cycle`,
+    # and `own_rows` is the parent's fold as a pure function, so its facts are a table.
+    "package_lines": 113745,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

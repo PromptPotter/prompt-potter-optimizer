@@ -930,10 +930,11 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `domain/cells.py:131` (the heatmap's hard-sample order, `list[str]`). Root: one name per thing, the
   heatmap's renamed for what it orders. **Re-test:**
   `git grep -nE "sample_order\s*:" -- promptpotter/domain` returns one line.
-- **`tests/test_spend.py` holds the walk's tests**: 6,021 lines, 70 lines naming a walk (tw-0 moved the
-  fake races onto the offline legs; the hand-driven `_walk`/`_round` pause, catch-up and ceiling tests
-  stay). Root: each becomes an offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and
-  `_walk`/`_round` go (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
+- **`tests/test_spend.py` holds the walk's tests**: 5,522 lines, 32 lines naming a walk (tw-j deleted
+  `_round` and the pause and catch-up tests by mutation; the hand-driven `_walk` stays under the spend
+  ceiling, skip and last-skip facts, and the inner stop patches `execute_round`). Root: each becomes an
+  offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and `_walk` goes
+  (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
 - **`scoring/query_loop.py::keep_cut` takes a refusal as a row**: `_ScoringPhase.keep_cut` (`:952`) filters
   the cell the ceiling refused back out of `walk.results` (`:960-964`, by `_budget_refusal`), because the
   refused cell was taken as a row before it stopped the phase. Root: a refusal is never a row. **Re-test:**

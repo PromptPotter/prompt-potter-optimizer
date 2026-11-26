@@ -1444,7 +1444,12 @@ async def close_round(
     closing = cycle.seat(stood.model_copy(update={"optimizer_facts": facts}))
     flush_pending_decisions(cycle)
     close = closed_round(
-        closing, cycle.rounds, cycle, outlay=line_outlay(session, cycle.optimizer.phases)
+        closing,
+        cycle.rounds,
+        cycle.difficulty,
+        lives=cycle.config.optimization.lives,
+        position_of=cycle.session.bank.position_of,
+        outlay=line_outlay(session, cycle.optimizer.phases),
     )
     cycle.standing = close.run_standing
     offset = append_record(close)

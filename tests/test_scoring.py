@@ -88,7 +88,7 @@ from promptpotter.application.bench.difficulty import (
     ruler_clock,
     session_ruler_scope,
 )
-from promptpotter.application.bench.node_context import NodeContext
+from promptpotter.application.bench.node_context import NodeContext, own_rows
 from promptpotter.application.bench.resume_and_fork.repair import repair_cut
 from promptpotter.application.caller import Caller
 from promptpotter.application.commands import measuring
@@ -2137,7 +2137,24 @@ def test_a_rebase_discarded_adoption_stays_in_the_held_out_area() -> None:
     assert curve.area.estimate.value == pytest.approx(0.35)
 
 
-# 4. An authored round — the operator's arm in the seat a proposer fills
+def test_a_parents_own_rows_are_its_latest_cell_per_sample_its_panel_top_ups_included() -> None:
+    parent, other = ArmKey("parent"), ArmKey("other")
+
+    def ran(n: int, parents: dict[int, float], *, panel: dict[int, float] | None = None) -> Any:
+        cells = {parent: sheet(measurement(s, g) for s, g in parents.items())}
+        cells[other] = sheet([measurement(9, 1.0)])
+        top_ups = {parent: sheet(measurement(s, g) for s, g in (panel or {}).items())}
+        return round_result(n, cells=cells, overlap_results=top_ups)
+
+    for line, read in (
+        ([], {}),
+        ([ran(0, {0: 1.0, 1: 0.0})], {"0": 1.0, "1": 0.0}),
+        ([ran(0, {0: 1.0, 1: 0.0}), ran(1, {1: 1.0})], {"0": 1.0, "1": 1.0}),
+        ([ran(0, {0: 1.0}, panel={3: 0.0}), ran(1, {3: 1.0})], {"0": 1.0, "3": 1.0}),
+        ([ran(0, {0: 1.0}), ran(1, {}, panel={0: 0.0})], {"0": 0.0}),
+    ):
+        rows = own_rows(line, parent)
+        assert {c.key: c.grade.fitness for c in rows.cells} == read, (line, rows)
 
 
 # 5. Elimination — who is cut, and when
