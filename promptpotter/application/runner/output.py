@@ -672,7 +672,11 @@ def _render_cycle_log_md(session: Session, config: CampaignConfig) -> None:
             index,
             rounds,
             hop=hop,
-            hard_samples=cycle_hard_samples(session.store, session.at) if rounds else None,
+            hard_samples=(
+                cycle_hard_samples(session.store, hop, session.state.scoring.scorer, config)
+                if rounds
+                else None
+            ),
             p_best=_p_best(layout),
             hard_sample_order=config.hard_sample_order,
             spend_by_round=scan_ledger_spend_by_round(store.chain(hop)),
