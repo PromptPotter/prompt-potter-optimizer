@@ -1,16 +1,19 @@
 # tw-j2: the journeys tw-j left parked, each a leg, a rule or a delete (cloud, Opus)
 
-`briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is `origin/land/test-world`
-at `<BASE-J2>`. That is `af224d3bd` plus tw-x, tw-j, tw-p, tw-w and tw-q, integrated: tw-w hosted and
-priced the offline world (`out/tw-w-report`), so a spend fact has its door, and tw-q made a world run
-cheaper in production (`out/tw-q-report`). Read
+`briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is `origin/land/tw-xjp` at
+`<BASE-J2>` = `86b7b4eb4`. That is `land/test-world`'s `af224d3bd` plus tw-x, tw-j, tw-p, tw-w and tw-c, integrated:
+tw-w hosted and priced the offline world (`out/tw-w-report`), so a spend fact has its door; tw-c moved
+test_security's hand-seats onto the world (`out/tw-c-report`). You are the last chain of the test
+rework. Chain tw-q runs beside you (`briefs/tw-q.md`) to make a world run cheaper in production. Read
 `out/tw-j-report:report.md` first: you finish its brief (`briefs/tw-2b.md` § tw-j), whose menu, order of
 preference and budget rule bind you unchanged. Replace the ancestor check with
 `git merge-base --is-ancestor 9cd30b5a7 <BASE-J2>`. Equals-main runs against `<BASE-J2>`'s offline home.
 Push to `arc/tw-j2`, one commit per link, with the full gate green at the tip.
 
-**`tests/CLAUDE.md` binds whole**, the admission rule and § Budget per test above all. tw-p brought the
-suite's wall and end RSS under the rework's start, and you keep them there.
+**`tests/CLAUDE.md` binds whole**, the admission rule and § Budget per test above all. The suite's wall
+is above the rework's start (`7dce00a96`: 82.3 s; tw-p's tip: 109.0 s, in tw-p's session), and tw-q is
+winning it back in production. You add no cost to it: a journey turned into a leg leaves pytest's wall,
+and your before → after states the suite's wall and end RSS.
 
 ## Why
 tw-j's brief gave it 39 parked journeys and test_spend's walks. It moved test_security's 3 and
@@ -21,7 +24,7 @@ over captured requests", which is preference 1, and `offline_run.py::outside_the
 
 ## Links
 Work the files in this order, pushing `wip/tw-j2` as each lands whole: test_archive, test_spend,
-test_identity, test_scoring, then links 3 and 4. A session that runs short hands back whole files,
+test_identity, test_scoring, then links 3, 4 and 5. A session that runs short hands back whole files,
 never a half-moved one.
 1. **Every `# Journeys awaiting a leg` block empties and is deleted**: test_archive, test_spend,
    test_identity, test_scoring. The helpers only they call go with them (`_peer_cycle`, `_bench_cycle`,
@@ -49,15 +52,24 @@ never a half-moved one.
    pytest green. Its report never names those two. Re-derive each deleted test's production path from
    `git show 6c2dcdcaa`, mutate it, and per path say: guarded elsewhere (name the red line), dead
    (delete it, in `application/scoring/**`), or a row with the door it lacks.
+5. **The hand-seats tw-c left**, outside the journeys blocks. At `<BASE-J2>`, re-derive them with
+   `git grep -nE "(^|[^.])\b(loop_session|seat|close_round|set_cycle|minted_campaign|stored_campaign|mint_cycle|write_resolved_run)\(" -- tests/test_*.py`
+   (a call on a store, `campaigns.mint_cycle(`, is production's door and stays). At `e398d9ebe` plus tw-c
+   they were: test_security `minted_campaign` ×6, `stored_campaign` ×3, `loop_session` ×1; test_scoring
+   `loop_session` ×2, `minted_campaign` ×2; test_spend `loop_session` ×2 (tw-x's row 3: no in-process
+   connector door). Each moves to the world's door for the state it seats, or is a row with the door it
+   lacks, shown missing. Then `tests/factories.py`'s builders left with zero callers are deleted, and
+   your report lists them.
 
 ## Owns
-- `scripts/offline_run.py` and `scripts/offline_world.py`;
-- the four journeys blocks and the five test_spend tests above, with the helpers only they call;
-- in production, `application/scoring/**` for link 3, and a rule link 1 exposes, named in its commit.
+Every line of `tests/` except `tests/conftest.py` and `tests/CLAUDE.md` § The world, plus
+`scripts/offline_run.py` and `scripts/offline_world.py`. In production, `application/scoring/**` for
+links 3 and 4, and a rule link 1 exposes, each named in its commit. A world door you need that tw-x did
+not build is a row, never a door you build.
 
-**NOT yours:** chain tw-c runs beside you and owns every other line of `tests/`, `tests/world.py`,
-`tests/factories.py` and `scripts/gate.py`. A world door you need that tw-x did not build is a row,
-never a door you build.
+**NOT yours:** tw-q owns the rest of production, `tests/conftest.py` and `tests/CLAUDE.md` § The world,
+and may add one check to `scripts/gate.py`. Where you and tw-q both edit a production module, keep to
+your own hunks; I merge them at integration.
 
 ## Proof
 - Census per block: parked → leg / dimension / edge / rule / deleted-by-mutation (each mutation and the
