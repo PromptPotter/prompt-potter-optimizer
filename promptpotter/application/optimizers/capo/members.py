@@ -293,11 +293,9 @@ def _readings(
     out: dict[ArmKey, tuple[float, int]] = {}
     for pid, rival in rivals.items():
         shared = [sid for sid in arm if sid in rival]
-        _, _, _, p, n = paired_mean_t(
-            [rival[s] for s in shared], [arm[s] for s in shared], tail="greater"
-        )
+        p = paired_mean_t([rival[s] for s in shared], [arm[s] for s in shared], tail="greater")[3]
         if p is not None:
-            out[pid] = (p, n)
+            out[pid] = (p, len(shared))
     return out
 
 
@@ -331,10 +329,9 @@ class PairedTRace(nodes.Race):
     def n_priors(self) -> int:
         return len(self._racing) - 1
 
-    def open_turn(self, key: ArmKey) -> None:
-        self._racing.add(key)
-
     def decide(self, view: View[ArmKey]) -> Decision[ArmKey]:
+        if view.opening:
+            self._racing = set(view.walks)
         stops = {} if view.opening else self._cut(view)
         return next_block(view, stops, self._block_size)
 

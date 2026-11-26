@@ -13,7 +13,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.pipeline_params import PipelineParams
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import RoundOutcome, RoundResult
-from promptpotter.domain.ruler import SeriesReading
+from promptpotter.domain.ruler import AbilityReading
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition, strip_rendered_prompt
 from promptpotter.domain.spend import SpendRollup
@@ -112,7 +112,7 @@ class ExportMeasurement(FrozenModel):
         "or the state that says why it was not read. The origin's level is its `rate_a`."
     )
     # ``None`` where no scored cell sits on the series' scale.
-    ability: SeriesReading | None
+    ability: AbilityReading | None
 
 
 class PromptExport(_ProvModel):
@@ -177,7 +177,7 @@ def build_prompt_export(
     finished_at: str,
     formula: str | None,
     own: OwnLevel,
-    level: SeriesReading | None,
+    level: AbilityReading | None,
     schema: PipelineSchema,
     framing: TaskDecomposition,
     demo: Sequence[Sample],

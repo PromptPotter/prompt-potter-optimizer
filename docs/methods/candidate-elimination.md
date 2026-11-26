@@ -92,7 +92,11 @@ v_k and the nearness are 1 and the information alone decides: at one θ on a col
 pair ties, and a tie goes to the walk handed fewer, a round robin. An arm far past the bar either
 way (a sure cut, a sure leader) draws few calls while a contested one remains; one alone draws
 them all. Under `per_round` the parent catches up on every row a candidate takes it never answered,
-so its bill grows with the union of the rows.
+so its bill grows with the union of the rows. After the race it is re-scored on the round's whole
+draw plus each pool row an arm took (`nodes.py::RoundSamples.read_on`), never on the taken rows
+alone: the next round's proposer reads the parent's own cells (its critique's misses, the failing
+samples it is shown), so a round whose arms were all cut, or that walked none, still hands its
+proposer fresh evidence.
 
 `pobb.dispatch` says when the decision runs (`race_protocol.py::Trigger`). `batch` decides once
 every call it sent is back, each decision closing a block. `rolling` (the default) decides on every

@@ -111,8 +111,8 @@ def render_progress_table(rounds: Sequence[RoundOutcome], series: LevelSeries) -
     # Trend reads ABILITY, never fitness: under `per_round_resubset` consecutive fitnesses sit different exams.
     prev: AbilityReading | None = None
     for rr in rounds:
-        read = series.reading(rr.round)
-        th_str = "---" if read is None else f"{read.reading.theta:+.3f}"
+        read = series.levels[rr.round]
+        th_str = "---" if read is None else f"{read.theta:+.3f}"
         level = series.level(rr.round)
         step = None if level is None or prev is None else level.lift_over(prev)
         trend = "-" if step is None else f"{step.value:+.3f}"

@@ -405,7 +405,7 @@ def _lift(
 ) -> MeasuredLift:
     n = len(a_values)
     flips: FlipCounts | None = None
-    mean, lo, hi, p, _ = paired_mean_t(b_values, a_values, alpha=spec.alpha)
+    mean, lo, hi, p, se = paired_mean_t(b_values, a_values, alpha=spec.alpha)
     assert lo is not None and hi is not None and p is not None
     floor = p_floor(b_values, a_values)
     if measurand.binary:
@@ -420,7 +420,7 @@ def _lift(
         rate_a=sum(a_values) / n,
         rate_b=sum(b_values) / n,
         estimate=Estimate(
-            value=mean, ci_lo=lo, ci_hi=hi, n=n, se=None, unit=measurand.unit, form="lift"
+            value=mean, ci_lo=lo, ci_hi=hi, n=n, se=se, unit=measurand.unit, form="lift"
         ),
         side=interval_side(mean, max(p, floor), spec.alpha),
         p_value=max(p, floor),

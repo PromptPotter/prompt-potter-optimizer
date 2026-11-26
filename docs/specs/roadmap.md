@@ -281,8 +281,8 @@ unloadable run data itself; a survivor reshape ships its migration in its landin
 A short window defers from the end (pending tracks, ren, faults, the ts private-reach link, la, lw),
 never w0, the trim, stream, startb, stopb, land, admit-2, money, rk-opt, rk-run, payer or rel.
 
-**Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether `log.md`
-and `review.md` go (md) · whether the visits analytics move to the site repo · whether resume
+**Forks left to the operator** (taste and policy; a chain leaves each as it stands): whether the
+visits analytics move to the site repo · whether resume
 re-executes members against the content caches instead of checking validity (≈−1.2k lines; blocked
 today by evictable caches, operator inputs fed back and §0.5's fork-on-divergence) · whether L2/L3's θ
 high-water becomes a paired read (kept on purpose by `verdict-resolution.md`; the ladder is the

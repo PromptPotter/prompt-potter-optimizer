@@ -41,16 +41,16 @@ def _fired(audit: RoundAudit | None) -> str:
 
 
 def _level(series: LevelSeries, rnd: int) -> str:
-    read = series.reading(rnd)
+    read = series.levels[rnd]
     if read is None:
         return "θ: no scored cell"
     if withheld(read.caveat):
         return f"θ withheld: {series_reason_head(read.caveat)}"
     origin = series.level(0)
-    lift = None if origin is None else read.reading.lift_over(origin)
+    lift = None if origin is None else read.lift_over(origin)
     over = "" if lift is None else f", {lift.point} over the origin"
     note = "" if read.caveat is None else f" ({series_reason_head(read.caveat)})"
-    return f"θ {read.reading.theta:+.2f}{over}{note}"
+    return f"θ {read.theta:+.2f}{over}{note}"
 
 
 def _steer(critique: CritiqueReadout | None) -> list[str]:

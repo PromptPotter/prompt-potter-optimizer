@@ -272,14 +272,13 @@ class DifficultyView:
         )
 
     def level_series(self, lines: Sequence[Sequence[RoundResult]]) -> list[LevelSeries]:
-        """ONE fit less every line's parents, so lines' levels sum; each caveats on its own cells."""
+        """ONE fit less every line's parents, so lines' levels sum; each level caveats on its own cells."""
         judged = frozenset(a for rounds in lines for a in parent_line(rounds))
         scale = self._read(ruler_clock(self.session), judged)
         return [
             LevelSeries(
                 stamp=scale.stamp,
                 levels={rnd: scale.frontier(sheets[i]) for rnd, i in ended.items()},
-                caveat=scale.caveat(cell for sheet in sheets.values() for cell in sheet),
             )
             for ended, sheets in map(_ended_on, lines)
         ]

@@ -1783,7 +1783,7 @@ CHECKS: tuple[Check, ...] = (
         "pytest",
         "py",
         _pytest,
-        mb=375,  # 38 MB above a measured warm 337 MB: a 40 MB growth is red
+        mb=408,  # 38 MB above a warm 370 MB measured on main 5d150ac13: a 40 MB growth is red
         # Every script, as the suite imports them bare off pytest's `pythonpath`.
         reads=(*ENGINE_RUNTIME, "tests/", "scripts/"),
     ),

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal, Self, cast
 
 from pydantic import (
     AfterValidator,
+    BaseModel,
     BeforeValidator,
     Field,
     WithJsonSchema,
@@ -341,6 +342,16 @@ def fork_proposal_model(offer: tuple[str, ...]) -> type[StandingForkProposal]:
     )
 
 
+# The reply carries `fork_proposal` only where `PotterView.rebase_offered` holds: a model volunteers
+# any field its schema carries, and a proposal the bit does not offer would leave no record.
+class Forking(OptimizerResponseModel):
+    fork_proposal: ForkProposal | None = None
+
+
+def proposed_fork(reply: BaseModel) -> ForkProposal | None:
+    return reply.fork_proposal if isinstance(reply, Forking) else None
+
+
 class TerminateProposal(OptimizerResponseModel):
     reason: Annotated[str, BeforeValidator(_truncate_marked(150))] = Field(
         default="",
@@ -383,7 +394,6 @@ class L2ContextOutput(OptimizerResponseModel):
             "it cannot be told from a guess."
         ),
     )
-    fork_proposal: ForkProposal | None = None
 
 
 class L2RecombiningOutput(L2ContextOutput):
@@ -430,11 +440,15 @@ def recombinations_schema(offer: RecombinationOffer) -> dict[str, Any]:
     return {"type": "array", "items": spec, "maxItems": offer.children}
 
 
-def _standing_on(offer: tuple[str, ...]) -> dict[str, Any]:
-    """The ``fork_proposal`` field override that puts ``stand_on`` on the wire; none for no offer."""
-    if not offer:
-        return {}
-    return {"fork_proposal": (fork_proposal_model(offer) | None, None)}
+def _forking(
+    base: type[OptimizerResponseModel], forking: bool, stand_on: tuple[str, ...]
+) -> tuple[tuple[type[OptimizerResponseModel], ...], dict[str, Any]]:
+    """*base* with the fork slot where *forking*, and the override putting ``stand_on`` on the
+    wire where *stand_on* offers a re-election."""
+    if not forking:
+        return (base,), {}
+    named = {"fork_proposal": (fork_proposal_model(stand_on) | None, None)} if stand_on else {}
+    return (base, Forking), named
 
 
 @functools.lru_cache(maxsize=4)
@@ -442,16 +456,18 @@ def build_l2_response_model(
     withheld: frozenset[str],
     recombination: RecombinationOffer | None = None,
     terminating: bool = False,
+    forking: bool = False,
     stand_on: tuple[str, ...] = (),
 ) -> type[L2ContextOutput]:
-    """``None`` *recombination* offers no slot; an empty *stand_on* offers no re-election."""
+    """``None`` *recombination* offers no slot; no *forking*, no fork slot; an empty *stand_on*
+    offers no re-election."""
     base: type[L2ContextOutput] = {
         (False, False): L2ContextOutput,
         (True, False): L2RecombiningOutput,
         (False, True): L2TerminatingOutput,
         (True, True): L2RecombiningTerminatingOutput,
     }[recombination is not None, terminating]
-    fields: dict[str, Any] = _standing_on(stand_on)
+    bases, fields = _forking(base, forking, stand_on)
     if withheld:
         schema = layout_json_schema(
             NODE_LAYOUTS["l1_generate"], description=LAYOUT_SCHEMA_INSTRUCTION, withheld=withheld
@@ -465,9 +481,9 @@ def build_l2_response_model(
             Annotated[list[L1Recombination], WithJsonSchema(recombinations_schema(recombination))],
             Field(default_factory=list),
         )
-    if not fields:
+    if not fields and bases == (base,):
         return base
-    return create_model("L2ContextOutput", __base__=base, **fields)
+    return cast(type[L2ContextOutput], create_model("L2ContextOutput", __base__=bases, **fields))
 
 
 class L3PlanOutput(OptimizerResponseModel):
@@ -481,7 +497,6 @@ class L3PlanOutput(OptimizerResponseModel):
     )
     note: Annotated[str, BeforeValidator(_truncate_marked(150))] = ""
     rationale: Annotated[str, BeforeValidator(_truncate_marked(125))] = ""
-    fork_proposal: ForkProposal | None = None
 
 
 class L3TerminatingOutput(L3PlanOutput):
@@ -490,11 +505,13 @@ class L3TerminatingOutput(L3PlanOutput):
 
 @functools.lru_cache(maxsize=4)
 def build_l3_response_model(
-    *, terminating: bool, stand_on: tuple[str, ...] = ()
+    *, terminating: bool, forking: bool, stand_on: tuple[str, ...] = ()
 ) -> type[L3PlanOutput]:
     base = L3TerminatingOutput if terminating else L3PlanOutput
-    fields = _standing_on(stand_on)
-    return create_model("L3PlanOutput", __base__=base, **fields) if fields else base
+    bases, fields = _forking(base, forking, stand_on)
+    if not fields and bases == (base,):
+        return base
+    return cast(type[L3PlanOutput], create_model("L3PlanOutput", __base__=bases, **fields))
 
 
 # At import, not in a test: a model on plain `StrictModel` typechecks and passes the drift gate.

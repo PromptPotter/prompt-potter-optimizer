@@ -535,7 +535,7 @@ async def measure_noise_floor(
                     ci_lo=band[1],
                     ci_hi=band[2],
                     n=k,
-                    se=None,
+                    se=band[4],
                     unit="score",
                     form="level",
                 ),

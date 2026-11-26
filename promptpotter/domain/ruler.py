@@ -407,18 +407,6 @@ PLATEAU_THETA_BAND = 0.05
 PLATEAU_ROUNDS = 3
 
 
-class SeriesReading(FrozenModel):
-    """A round's level as its series read it, under the one caveat that qualifies it."""
-
-    reading: AbilityReading = Field(
-        description="The round's level: the individual it ended on, read on the series' one scale"
-    )
-    caveat: ThetaCaveat | None = Field(
-        description="The level's own caveat, else its series'. One that withholds "
-        "(`ThetaCaveat.withholds`) keeps the level from differencing; a footnote does not."
-    )
-
-
 class LevelSeries(FrozenModel):
     """Every round's ended-on individual read on ONE δ scale, so any two of its levels difference."""
 
@@ -429,30 +417,18 @@ class LevelSeries(FrozenModel):
     levels: dict[int, AbilityReading | None] = Field(
         description="By round, round 0 the origin: the individual the round ended on — on a round "
         "that elected nothing, the parent standing into it — read on all of its rows in the "
-        "cycle. Null where it holds no scored cell on the scale."
-    )
-    caveat: ThetaCaveat | None = Field(
-        description="`theta_caveat` over every cell this line read. One that withholds, no two of "
-        "its levels difference, whatever `stamp` says; another line on the stamp keeps its own."
+        "cycle, under its own round's caveat: one that withholds (`ThetaCaveat.withholds`) keeps "
+        "that level alone from differencing. Null where it holds no scored cell on the scale."
     )
 
     @property
     def rounds(self) -> list[int]:
         return sorted(self.levels)
 
-    def reading(self, rnd: int) -> SeriesReading | None:
-        """A surface showing θ under its caveat asks here, by name; ``None``: no scored cell."""
-        held = self.levels[rnd]
-        if held is None:
-            return None
-        return SeriesReading(
-            reading=held, caveat=held.caveat if held.caveat is not None else self.caveat
-        )
-
     def level(self, rnd: int) -> AbilityReading | None:
         """The level two rounds may difference."""
-        read = self.reading(rnd)
-        return None if read is None or withheld(read.caveat) else read.reading
+        read = self.levels[rnd]
+        return None if read is None or withheld(read.caveat) else read
 
     def plateau(self) -> float | None:
         recent = [self.level(r) for r in self.rounds[-PLATEAU_ROUNDS:]]

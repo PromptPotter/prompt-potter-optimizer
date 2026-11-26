@@ -555,6 +555,20 @@ def test_a_line_read_on_cells_the_scale_lacks_still_differences_its_levels() -> 
 
 
 @pytest.mark.usefixtures("optimizing_memory")
+def test_a_round_whose_band_collapsed_withholds_its_own_level_alone() -> None:
+    series = level_series(0.30, [0.31, 0.32, 0.30])
+    collapsed = series.levels[2]
+    assert collapsed is not None
+    levels = {
+        **series.levels,
+        2: collapsed.model_copy(update={"caveat": ThetaCaveat.COLLAPSED_BAND}),
+    }
+    line = series.model_copy(update={"levels": levels})
+    read = [rnd for rnd in line.rounds if line.level(rnd) is not None]
+    assert read == [0, 1, 3], "one round's collapsed band withheld another round's level"
+
+
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_ruler_id_names_its_delta_never_key_order_and_a_cold_one_names_its_objective() -> None:
     fitted = _anchored({"1": 1.5, "2": -1.25, "3": 0.0})
     assert fitted.anchor_id == anchor_id_of({"3": 0.0, "2": -1.25, "1": 1.5}, 0.0, 2.0, "1PL")
@@ -693,7 +707,7 @@ def test_every_round_reads_its_standing_parent_on_the_one_scale_its_series_stamp
         "a held round, or one that elected nothing, read another individual than the parent "
         "standing into it"
     )
-    assert series.caveat is None and series.plateau() == pytest.approx(levels[3].theta), (
+    assert series.plateau() == pytest.approx(levels[3].theta), (
         "three rounds of one standing parent on one scale is the plateau"
     )
 
@@ -734,7 +748,8 @@ def test_a_series_on_no_delta_scale_withholds_its_theta_lift_with_its_caveat(
         scope, [("f0", s.key, (s.id + 1) / 16) for s in bank], campaign="else", own=None
     )
     [cold] = series_of(OpenAt(), lone, [run])
-    assert cold.stamp.cold and cold.caveat is ThetaCaveat.COLD_RULER and cold.plateau() is None, (
+    caveats = {lv.caveat for lv in cold.levels.values() if lv is not None}
+    assert cold.stamp.cold and caveats == {ThetaCaveat.COLD_RULER} and cold.plateau() is None, (
         "a series on no δ scale read as one that differences"
     )
     ran = [round_result(1), round_result(2)]
@@ -755,7 +770,8 @@ def test_cells_of_two_datasets_folded_under_one_scope_read_one_scale(traced: _Tr
     [series] = series_of(OpenAt(), warmed, [run])
     split = [s.model_copy(update={"measured_dataset": "other"}) if s.id % 2 else s for s in bank]
     [mixed] = series_of(OpenAt(), warmed, [run], split)
-    assert mixed.caveat is None and mixed.plateau() == pytest.approx(series.plateau()), (
+    caveats = {lv.caveat for lv in mixed.levels.values() if lv is not None}
+    assert caveats == {None} and mixed.plateau() == pytest.approx(series.plateau()), (
         "a δ scale the fold wrote once read as several"
     )
 

@@ -52,7 +52,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.records.held_out import BenchScoredRecord, PassGradedRecord
 from promptpotter.domain.records.run_records import RoundStatement
 from promptpotter.domain.results import RoundOutcome
-from promptpotter.domain.ruler import THETA_CAVEAT_INFO, SeriesReading, ThetaCaveat
+from promptpotter.domain.ruler import THETA_CAVEAT_INFO, AbilityReading, ThetaCaveat
 from promptpotter.domain.spend import RATE_PRICED_LABEL, StopSpend, usd_text
 from promptpotter.domain.verification import NoiseBand, VerifyReading
 from promptpotter.domain.wounds import COLLAPSE_WORDS, collapse_counts, collapse_reason
@@ -199,7 +199,7 @@ _ROWS_RAN_WORDS: dict[RowsRan, str] = {
 def render_round_verdict(
     v: RoundStatement,
     basis: Sequence[str],
-    level: SeriesReading | None,
+    level: AbilityReading | None,
     *,
     cell_formula: CellFormula | None,
     display_metric: DisplayMetric,
@@ -230,8 +230,8 @@ def render_round_verdict(
     fitness_txt = fold_fitness_text(fold)
     # A cold θ is logit-fitness, so the headline stays fitness.
     theta = (
-        level.reading.theta
-        if display_metric == "ability" and level is not None and not level.reading.ruler.cold
+        level.theta
+        if display_metric == "ability" and level is not None and not level.ruler.cold
         else None
     )
     headline = fitness_txt if theta is None else f"θ {theta:+.3f}"

@@ -1711,7 +1711,7 @@ def _ledger(ledger: list[dict[str, Any]], canon: Canon) -> dict[str, Any]:
                 canon(
                     {
                         "round": r["round"],
-                        "level_series": {"caveat": series["caveat"], "levels": levels},
+                        "level_series": {"levels": levels},
                     }
                 )
             )

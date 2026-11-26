@@ -5148,8 +5148,9 @@ def test_the_paired_t_matches_ttest_rel_and_brackets_the_evidence_it_tests() -> 
     cand = _PAIRED_CAND
     prior = [0.10, 0.85, 0.15, 0.80, 0.20, 0.70, 0.05, 0.90]
     reference = 0.8750918683549795  # scipy 1.17.1 `ttest_rel(cand, prior).pvalue`
-    mean_d, lo, hi, p_two, n = paired_mean_t(cand, prior)
-    assert n == len(cand)
+    mean_d, lo, hi, p_two, se = paired_mean_t(cand, prior)
+    n, diffs = len(cand), [c - p for c, p in zip(cand, prior, strict=True)]
+    assert se is not None and abs(se - stdev(diffs) / n**0.5) < 1e-12, "it brackets on its SE"
     assert abs(mean_d - sum(c - p for c, p in zip(cand, prior, strict=True)) / n) < 1e-12
     assert p_two is not None and abs(p_two - reference) < 1e-12, (
         "spread wide enough that the 1/(4n) floor does not bind, so the two must agree exactly"
@@ -5166,7 +5167,7 @@ def test_the_paired_t_matches_ttest_rel_and_brackets_the_evidence_it_tests() -> 
         "the SE is clipped at 1/(4n): a near-constant difference scipy calls significant "
         "(p = 0.006) is not"
     )
-    assert paired_mean_t([0.5], [0.1])[1:4] == (None, None, None), "one cell brackets nothing"
+    assert paired_mean_t([0.5], [0.1])[1:] == (None,) * 4, "one cell brackets nothing"
 
 
 @pytest.mark.usefixtures("optimizing_memory")

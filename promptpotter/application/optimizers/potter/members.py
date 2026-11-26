@@ -65,6 +65,7 @@ from promptpotter.application.optimizers.potter.dispatch.schemas import (
     L3TerminatingOutput,
     build_l2_response_model,
     build_l3_response_model,
+    proposed_fork,
 )
 from promptpotter.application.optimizers.potter.election import elect_on_theta
 from promptpotter.application.optimizers.potter.escalation import (
@@ -384,6 +385,7 @@ class L2Context(LayoutNode):
             view.silent_l1_panels,
             view.recombination_offer(self.name),
             terminating=view.terminate_offer is not None,
+            forking=view.rebase_offered,
             stand_on=tuple(view.reelect_offer),
         )
 
@@ -423,7 +425,7 @@ class L2Context(LayoutNode):
             l1_layout=accepted_layout,
             l1_layout_refused=layout_refused,
             l2_guard_breaches=layout_outcomes,
-            fork_proposal=raw.fork_proposal,
+            fork_proposal=proposed_fork(raw),
             terminate_proposal=(
                 raw.terminate_proposal if isinstance(raw, L2TerminatingOutput) else None
             ),
@@ -502,7 +504,9 @@ class L3Plan(LayoutNode):
 
     def reply_model(self, view: PotterView) -> type[BaseModel]:
         return build_l3_response_model(
-            terminating=view.terminate_offer is not None, stand_on=tuple(view.reelect_offer)
+            terminating=view.terminate_offer is not None,
+            forking=view.rebase_offered,
+            stand_on=tuple(view.reelect_offer),
         )
 
     def parse(self, ctx: NodeContext, raw: L3PlanOutput) -> TransitionResult:
@@ -512,7 +516,7 @@ class L3Plan(LayoutNode):
             plan=raw.plan,
             l3_note=raw.note,
             l3_guard_breaches=failures,
-            fork_proposal=raw.fork_proposal,
+            fork_proposal=proposed_fork(raw),
             terminate_proposal=(
                 raw.terminate_proposal if isinstance(raw, L3TerminatingOutput) else None
             ),

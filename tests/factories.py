@@ -1405,7 +1405,8 @@ def level_series(
 ) -> LevelSeries:
     """Round 0 the origin, then one round per level; ``None`` is a round with no level on the scale.
 
-    ``cold`` and ``caveat`` are set apart: `theta_caveat` ranks other states above a cold scale."""
+    ``cold`` and ``caveat`` (every level's) are set apart: `theta_caveat` ranks other states above
+    a cold scale."""
     stamp = RulerStamp(
         id=flat_ruler_id("acc") if cold else "warm",
         version=1,
@@ -1425,7 +1426,7 @@ def level_series(
             ruler_span=None,
             round_span=None,
             calibration_model=None if cold else "1PL",
-            caveat=None,
+            caveat=caveat,
             unlinked=0,
             pinned_share=None,
         )
@@ -1438,7 +1439,6 @@ def level_series(
             rnd: read(theta, se)
             for rnd, (theta, se) in enumerate(zip(levels, per_round, strict=True), start=1)
         },
-        caveat=caveat,
     )
 
 

@@ -526,7 +526,7 @@ class ReadoutProjection(Projection):
                 render_round_verdict(
                     round_result,
                     round_verdict_basis(round_result),
-                    series.reading(rn),
+                    series.levels[rn],
                     cell_formula=self._formula,
                     display_metric=self._display_metric,
                 )

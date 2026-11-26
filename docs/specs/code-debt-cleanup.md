@@ -843,9 +843,11 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   (786 lines) writes `log.md`, `review.md` and `export.json` (`:640`); `readout.log`,
   `rounds/round_NNNN.json`, the `evidence` verb and the dashboard serve the same facts. Dropping the two
   markdown files takes the runner to 9 modules and removes B's hardest reader. **Closes:**
-  **A round's markdown names its lift column from the first arm**. **Held:** the operator's fork; the tuning
-  row **The default host pin is a trial with no verdict** reads `review.md`, so its reader moves to a
-  served read first. **Run data:** none. **Size:** medium. **Re-test:** `git grep -c "review.md" -- promptpotter` is 0.
+  **A round's markdown names its lift column from the first arm**. **Decided** (operator, 2026-11-25): the
+  two go, and the run folder stays the headless UI (a device with no browser, a PLC or a Raspberry Pi,
+  reads it), so every fact they show stays plain text in `readout.log`, a round file or a CLI read
+  verb, never a served-only read. The tuning row **The default host pin is a trial with no verdict**
+  reads `review.md`, so its reader moves first. **Run data:** none. **Size:** medium. **Re-test:** `git grep -c "review.md" -- promptpotter` is 0.
 - **A nested run's send is filed once, on the run that sent it**: `domain/records/run_records.py:572`
   `mirrored: bool = False`, `infrastructure/llm/spend_book.py:751` writes `mirrored=self._book.nested`,
   `infrastructure/store/read_model.py:1132-1136` branches on it, and `store/CLAUDE.md` warns that money
@@ -917,44 +919,13 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   no `aria-busy` while it is in flight, so the walk counts fetches itself (`webapp/e2e/harness.ts::drawn`).
   Root: `useRead`'s `loading` state marks its pane busy, one rule in `webapp/lib/hooks/useRead.ts`.
   **Re-test:** `drawn` keeps only its `aria-busy` check and `landscape-844 › every view` stays red 3/3 at base.
-- **`catalogue_for` keys L4 on a term no connector declares**: `application/evidence/metric_catalogue.py:228`
-  branches on `"lift" in available` ("Lift over origin", θ, "the number the outer loop scores"). That was
-  L4's θ term, which l4-key-c removed, so the branch is dead and its words false: the outer loop scores
-  `held_out_lift`. Root: delete the branch; L4 evidence then reads `fitness`, a linear re-anchor of
-  `held_out_lift`. **Rides with:** l4-key-c. **Re-test:** `git grep -c seed_lift -- promptpotter` (today 8, target 0).
-- **A series caveat unions every round's cells** (ml-fork): `bench/difficulty.py::level_series` stamps
-  `LevelSeries.caveat` from `theta_caveat` over every cell the line read, so a withholding state in one
-  round's cells (say `collapsed_band`) withholds every level of the line, and `SeriesReading` falls back
-  to it wherever a level's own caveat is null. Root: a level carries its own round's caveat; the series
-  states none of its own. **Rides with:** ml-8. **Re-test:** a line with one `collapsed_band` round reads
-  every other round's level.
-- **A fork proposed with `rebase_capability` off is dropped unsaid** (ml-fork): the reply schemas carry
-  `fork_proposal` whatever the bit says (`dispatch/schemas.py:386`), and `escalation.py::_run_transition`
-  asks no `_rebase_request` when it is off, so the proposal leaves no record. Root: the bit decides the
-  schema the L2 is asked, so an off bit asks for no proposal. **Rides with:** ml-8. **Re-test:** with the bit
-  off, the L2 reply schema holds no `fork_proposal`.
-- **`Race.open_turn` is a hook one race needs** (ml-7): potter's and gepa's are no-ops; capo's counts the
-  field racing for `n_priors` (`capo/members.py`), a fact the race's first `View` already holds, and it
-  writes the race's `_racing`, which `decide` then overwrites: two writers of one count. Root: `n_priors`
-  is derived off the first `View`; `open_turn` goes from `nodes.py` and the three races. **Rides with:**
-  ml-8. **Re-test:** `git grep -c open_turn -- promptpotter` is 0.
 - **A max-press resume replays on timing** (ml-7): at press max the offline run's `capo/resumed` and
   `gepa/resumed` legs differ run to run on the base itself (capo-only rerun 3×: 3 of 3 moved), so
   equals-main at max cannot pin them; at max a 1-SIGINT `new` can also finish before the signal lands
   (`offline_run.py`'s capo signal leg exits 0, not 130). Root: a resume replays the reads the run filed,
-  whatever the press. **Rides with:** ml-8. **Re-test:** three runs at press max leave `capo/resumed`
-  and `gepa/resumed` UNMOVED against each other.
-- **Under `rolling`, the parent is handed calls no live rival's decision reads**: in
-  the race's settle rule (`_settles`; potter's race module at ml-6, `application/scoring/` after ml-7)
-  the parent "stands no bar", so it never settles, and `_hand_out` gives it
-  its whole budget while its rivals are cut. Its later rows have no other answerer. The judging scale
-  leaves the parent line out, so those rows carry no δ, and `expected_information` reads 0 on them. In
-  the offline fork leg at ml-6 (`fc9a2e7b5`), 24–40 of a line's 68–96 cells sat off the scale.
-  Unmeasured: how many of those calls were billed and how many were replays. Root, if they are billed:
-  a call is sent only where a decision reads it, so the parent's lead is bounded by the live rivals'
-  rows plus the press horizon. Measure it after ml-7 moves the row policy into
-  `application/scoring/`. **Re-test:** on a paid `rolling` run, the parent's billed cells on rows that
-  no rival answered, then → 0.
+  whatever the press. Unreproduced at ml-8 (4-core cloud: 0 of 3 moved at press 16, 0 of 3 at 64), so
+  no replayed record is named yet; reproduce it first. **Re-test:** three runs at press max leave
+  `capo/resumed` and `gepa/resumed` UNMOVED against each other.
 - **`sample_order` names two things**: `domain/arms.py:175` (an arm's walk order, `list[int]`) and
   `domain/cells.py:131` (the heatmap's hard-sample order, `list[str]`). Root: one name per thing, the
   heatmap's renamed for what it orders. **Re-test:**
@@ -978,15 +949,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   tenant ruler's response rows: over 1 MB, and its only source is account data on the box, which the
   operator may wipe. **Held:** a corpus source the repo can commit under 1 MB. **Re-test:** the
   estimator's entry in the behaviour-key file names its key's inputs.
-- **The held-out lift's SE is never served**: `OuterSampleProxies.held_out_lift_se` reads
-  `BenchCurve.area`'s estimate, which `scoring/paired.py::_lift` builds with `se=None` although
-  `shared/statistics.py::paired_diff_posterior` took it, so `domain/l4/proxies.py::panel_precision`
-  reads no L4 panel and the outer reply (`runner/inner/spawn.py`) carries no band. The same
-  wrongness stands at every t-based `Estimate`: `scoring/paired.py:423`, `scoring/selection.py:33`,
-  `scoring/passes.py:144,538,547`, `evidence/metric_catalogue.py:94` and `domain/arm_reading.py:331`
-  each set `se=None`. Root: `shared/statistics.py::paired_mean_t` returns `n` where it could return the SE.
-  Action: a paired t's `Estimate` carries its SE. **Held:** `scoring/` is ml-6/ml-7's. **Re-test:**
-  `git grep -c "se=None" -- promptpotter/application/scoring/paired.py` (today 1, target 0), and the other sites above.
 - **"Which benchmark a row measures" is spelled twice**: Shape: `potter/members.py::_strata` reads
   `measured_dataset or ""` where every other reader takes `Sample.measured_dataset` raw (None = the
   filed one), and `BenchScope` partitions by benchmark under the word `RulerScope` owns. Action:

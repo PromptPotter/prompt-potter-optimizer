@@ -17,7 +17,7 @@ from promptpotter.domain.paired_reading import ArmKey, ArmName, Estimate, Readin
 from promptpotter.domain.results import OptimizerFact
 from promptpotter.domain.results_health import floor_said, health_reading
 from promptpotter.domain.round_health import DegradationHealth, HealthGrade, HealthReading
-from promptpotter.domain.ruler import LevelSeries, SeriesReading
+from promptpotter.domain.ruler import AbilityReading, LevelSeries
 from promptpotter.domain.said import Said
 from promptpotter.domain.scoring import Grade, MeasuredCell, SampleStatus, is_hit
 from promptpotter.domain.spend import (
@@ -412,9 +412,9 @@ class ServedRound(RoundSummary):
         description="How each sample of `selection` moved against the round before it that "
         "measured any, position for position with `selection` (`sample_movements`)."
     )
-    series_reading: SeriesReading | None = Field(
-        description="This round's level on the cycle's `LevelSeries`, read under the caveat that "
-        "withholds it from differencing; null where no scored cell sits on the scale."
+    series_reading: AbilityReading | None = Field(
+        description="This round's level on the cycle's `LevelSeries`, under its own round's "
+        "caveat; null where no scored cell sits on the scale."
     )
     hold_up: Estimate | None = Field(
         description="This round's promotion over the parent it beat, each read on every row it met "
@@ -497,7 +497,7 @@ def served_rounds(
             if closed.panel_precision is None
             else precision_verdict(closed.panel_precision),
             selection_movement=movement,
-            series_reading=None if series is None else series.reading(closed.round),
+            series_reading=None if series is None else series.levels[closed.round],
             hold_up=None
             if series is None
             or not closed.improved

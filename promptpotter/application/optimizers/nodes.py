@@ -542,8 +542,6 @@ class Race(Decider[ArmKey], Protocol):
         """The race walked on over the origin panel's top-up; ``None`` where it ends with the draw."""
         return None
 
-    def open_turn(self, key: ArmKey) -> None: ...
-
     def judge(
         self, signal: StopSignal | None, key: ArmKey, labels: Mapping[ArmKey, str]
     ) -> Elimination | None: ...

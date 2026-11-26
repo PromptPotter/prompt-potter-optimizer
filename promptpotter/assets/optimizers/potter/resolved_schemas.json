@@ -316,49 +316,13 @@
       "axis_targeted",
       "l1_layout",
       "l1_overrides",
-      "rationale",
-      "fork_proposal"
+      "rationale"
     ],
     "json_schema": {
       "name": "l2_context",
       "strict": true,
       "schema": {
         "$defs": {
-          "ForkProposal": {
-            "additionalProperties": false,
-            "properties": {
-              "reason": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "1-2 sentences: why this line is exhausted, and what the fork changes.",
-                "title": "Reason"
-              },
-              "unlock_schema_field_rename": {
-                "anyOf": [
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Let the fork's L1 rename a field on the inner l1_generate's output schema (it can only describe fields today). Set ONLY when the panels show the search stalling on what a field is FOR rather than on what it says — a field whose name misdescribes its content. Default false.",
-                "title": "Unlock Schema Field Rename"
-              }
-            },
-            "title": "ForkProposal",
-            "type": "object",
-            "required": [
-              "reason",
-              "unlock_schema_field_rename"
-            ]
-          },
           "L1Overrides": {
             "additionalProperties": false,
             "properties": {
@@ -485,16 +449,6 @@
             ],
             "description": "Why this fire, in 1-2 sentences: the failure cluster you are attacking and the named data point behind it — a sample id, a count, a yield number. Required on every fire, including one that pulls no lever; a lever with no diagnosis behind it cannot be told from a guess.",
             "title": "Rationale"
-          },
-          "fork_proposal": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForkProposal"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "title": "L2ContextOutput",
@@ -503,8 +457,7 @@
           "axis_targeted",
           "l1_layout",
           "l1_overrides",
-          "rationale",
-          "fork_proposal"
+          "rationale"
         ]
       }
     }
@@ -513,50 +466,12 @@
     "fields": [
       "plan",
       "note",
-      "rationale",
-      "fork_proposal"
+      "rationale"
     ],
     "json_schema": {
       "name": "l3_plan",
       "strict": true,
       "schema": {
-        "$defs": {
-          "ForkProposal": {
-            "additionalProperties": false,
-            "properties": {
-              "reason": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "1-2 sentences: why this line is exhausted, and what the fork changes.",
-                "title": "Reason"
-              },
-              "unlock_schema_field_rename": {
-                "anyOf": [
-                  {
-                    "type": "boolean"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "description": "Let the fork's L1 rename a field on the inner l1_generate's output schema (it can only describe fields today). Set ONLY when the panels show the search stalling on what a field is FOR rather than on what it says — a field whose name misdescribes its content. Default false.",
-                "title": "Unlock Schema Field Rename"
-              }
-            },
-            "title": "ForkProposal",
-            "type": "object",
-            "required": [
-              "reason",
-              "unlock_schema_field_rename"
-            ]
-          }
-        },
         "additionalProperties": false,
         "properties": {
           "plan": {
@@ -585,23 +500,12 @@
               }
             ],
             "title": "Rationale"
-          },
-          "fork_proposal": {
-            "anyOf": [
-              {
-                "$ref": "#/$defs/ForkProposal"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "required": [
           "plan",
           "note",
-          "rationale",
-          "fork_proposal"
+          "rationale"
         ],
         "title": "L3PlanOutput",
         "type": "object"
