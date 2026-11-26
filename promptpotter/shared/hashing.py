@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import ast
-import functools
 import hashlib
 import json
+import zlib
 from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
@@ -55,8 +55,13 @@ class Imported(NamedTuple):
 
 
 class ModuleCode(NamedTuple):
-    normalized: str
+    # Held compressed: a process holds every module it digested (~4 MB of code for the package).
+    packed: bytes
     imports: tuple[Imported, ...]
+
+    @property
+    def normalized(self) -> str:
+        return zlib.decompress(self.packed).decode()
 
 
 def _is_type_checking(test: ast.expr) -> bool:
@@ -94,12 +99,23 @@ def normalized_module(text: str) -> str:
     return module_code(text).normalized
 
 
-@functools.cache
+_CODE: dict[bytes, ModuleCode] = {}
+
+
 def module_code(text: str) -> ModuleCode:
-    """One parse of a module's text, memoized on the text, never the module (an edit on disk is
-    never answered by an older read): every digest of code reads it, the import closure's walk
-    included, so a text is parsed and normalized once a process. Its code less its prose:
-    documenting, reformatting or relocating a name is free; rebinding one moves the digest."""
+    """One parse of a module's text, memoized on the text's digest, never the module (an edit on
+    disk is never answered by an older read) nor the text (the process would hold every source it
+    read): every digest of code reads it, the import closure's walk included, so a text is parsed
+    and normalized once a process."""
+    key = hashlib.sha256(text.encode()).digest()
+    if (held := _CODE.get(key)) is None:
+        held = _CODE[key] = _parsed(text)
+    return held
+
+
+def _parsed(text: str) -> ModuleCode:
+    """Its code less its prose: documenting, reformatting or relocating a name is free; rebinding
+    one moves the digest."""
     tree = ast.parse(text)
     imports = written_imports(tree)
     bindings: set[tuple[str, str]] = set()
@@ -119,7 +135,8 @@ def module_code(text: str) -> ModuleCode:
         body = getattr(node, "body", None)
         if isinstance(body, list) and not body:
             body.append(ast.Pass())
-    return ModuleCode(f"{sorted(bindings)}\n{ast.unparse(tree)}", imports)
+    code = f"{sorted(bindings)}\n{ast.unparse(tree)}"
+    return ModuleCode(zlib.compress(code.encode(), 1), imports)
 
 
 def stable_hash(value: Any, *, length: int = ID_HEX) -> str:
