@@ -42,6 +42,6 @@ L4's law is `domain/l4/`; this package runs it, and the `promptpotter` connector
 
 ## Backend overlay
 
-- This layer merges the overlay, never authors one ([`datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route).
+- This layer merges the overlay, never authors one ([`promptpotter/assets/datasets/CLAUDE.md`](../assets/datasets/CLAUDE.md) § Sole route).
 - **The backend's pipeline is read live through `pipeline_resolve.py::served_pipeline` and stored on no draft** <!-- probe: git grep -cE "fetch_pipeline\(" -- promptpotter/*.py == 2 -->; an unreachable backend raises `BackendUnreachableError` (a 503), never a stand-in schema.
 - **Pipeline params are ONE fold, `pipeline_resolve.py::ParamLayers`**, in `ParamLayer`'s order; each subject picks its layers by the data it lays. A point's params hold only what it sends, so its id is that; a cell's identity (`identity_layer`, `Session.cell_identity`) is laid only into its archive key, `PipelineParams.keyed_by`. Every layered document folds through `layer_fold.py::fold_layers`, by its schema's rule per key. <!-- probe: git grep -cE "def (merge_config_layers|apply_node_overlay|lay_node_config|apply_config_overrides)\b" -- promptpotter/*.py == 0 -->

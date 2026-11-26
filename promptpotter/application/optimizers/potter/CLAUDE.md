@@ -36,7 +36,7 @@
 
 ## The optimizer never searches the GATEWAY or the ROUTE
 
-**`PARAM_FORBIDDEN_KEYS` (`domain/pipeline_params.py`) is an invariant**: the operator sets a node's route in the dataset overlay ([`datasets/CLAUDE.md`](../../../assets/datasets/CLAUDE.md) § Sole route), the optimizer's in `OptimizationConfig.determinism`, applied last. `model` is an axis opened per node by `optimizer.param_keys` within `param_allowed_values["model"]` ([decisions](../../../../docs/decisions.md) § 0005).
+**`PARAM_FORBIDDEN_KEYS` (`domain/pipeline_params.py`) is an invariant**: the operator sets a node's route in the dataset overlay ([`promptpotter/assets/datasets/CLAUDE.md`](../../../assets/datasets/CLAUDE.md) § Sole route), the optimizer's in `OptimizationConfig.determinism`, applied last. `model` is an axis opened per node by `optimizer.param_keys` within `param_allowed_values["model"]` ([decisions](../../../../docs/decisions.md) § 0005).
 
 ## Editing a renderer's PROSE is a measurement change
 
