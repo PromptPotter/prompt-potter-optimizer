@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import contextvars
 import dataclasses
 import json
 import os
@@ -21,38 +20,34 @@ import sys
 import threading
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
-from types import SimpleNamespace
 from typing import IO, Any, NamedTuple
 from unittest import mock
 
+import httpx
 import pytest
 from factories import (
     LLM_ONLY,
-    PROMPT_INFO,
     Configs,
     archive_row,
+    arm_key,
     arm_state,
     arm_walk,
     close_round,
     cycle_ledger,
-    defaulted_config,
     degradation_health,
     delta_ruler,
     election,
     filed,
     filed_under,
-    inner_sandbox,
     ledger_records,
-    loop_session,
     measurement,
     measurements,
     mint_fork,
     minted_campaign,
-    minted_dataset,
     optimizer_state,
-    pipeline_schema,
     pobb_knobs,
     prompted,
+    round_result,
     samples,
     score_summary,
     scorer_of,
@@ -63,19 +58,21 @@ from factories import (
     stored_campaign,
     workspace,
 )
-from world import Ran, World
+from offline_run import DATASET
+from offline_world import OPENROUTER_ENDPOINTS
+from world import Ran, Shared, World, shared_run
 
-from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
+from promptpotter.application.bench.cycle import ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import DifficultyView, ruler_rows
 from promptpotter.application.bench.node_context import NodeContext
 from promptpotter.application.bench.resume_and_fork.decisions import decision
 from promptpotter.application.bench.resume_and_fork.fork_siblings import (
+    ForkCut,
     cut_operator_fork,
     fork_edge,
 )
 from promptpotter.application.bench.resume_and_fork.repair import apply_correction
 from promptpotter.application.bench.resume_and_fork.replayers import replay_all_mismatches
-from promptpotter.application.bench.resume_and_fork.resume import resume_with_divergence_check
 from promptpotter.application.commands.dispatcher import CommandCall, CommandDispatcher
 from promptpotter.application.commands.launching import parse_cycle_start
 from promptpotter.application.cycle_reads import feed_versions, open_family_ray
@@ -86,13 +83,12 @@ from promptpotter.application.hierarchy_subtree import (
     subtree_version,
 )
 from promptpotter.application.initialization.scoring_scope import run_memory
-from promptpotter.application.initialization.session import LaunchClock
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.intelligence.rasch import (
     candidate_abilities,
 )
 from promptpotter.application.jobs.launcher.admission import request_jobs
-from promptpotter.application.jobs.launcher.launch import Admitted, Inline
+from promptpotter.application.jobs.launcher.launch import Inline, Launched
 from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import (
     archive_datasets,
@@ -103,6 +99,7 @@ from promptpotter.application.maintenance.archive_maintenance import (
 )
 from promptpotter.application.mask.divergence import VerdictOutcome, find_divergences
 from promptpotter.application.mask.load import load_mask_record
+from promptpotter.application.mask.record import MaskRound
 from promptpotter.application.optimizers.capo.members import (
     CapoObjective,
     PairedTCut,
@@ -113,23 +110,17 @@ from promptpotter.application.optimizers.nodes import NODE_MEMBERS, MeasuredRoun
 from promptpotter.application.optimizers.potter.election import RoundWinner, elect_on_theta
 from promptpotter.application.optimizers.potter.pobb import PoBBCheck
 from promptpotter.application.optimizers.potter.race import EliminationCut, PoBBRace
-from promptpotter.application.origin import (
-    resolve_origin_opt_search_point,
-    try_inherit_fork_origin,
-)
 from promptpotter.application.pipeline_resolve import (
     cycle_config,
     permitted_narrowing,
-    steer_verdict,
 )
-from promptpotter.application.run_observers import build_run_observers, declare_run_wiring
-from promptpotter.application.runner.entry import close_cycle
 from promptpotter.application.runner.inner.tasks import inner_spawn_of
-from promptpotter.application.runner.loop import LoopEnd, open_origin_round, run_round_loop
-from promptpotter.application.runner.mint import start_launch
 from promptpotter.application.runner.round import run_init
-from promptpotter.application.runner.termination import RUN_STOPS, end_run_on
-from promptpotter.application.scoring import query_loop, search_point_scorer
+from promptpotter.application.runner.termination import (
+    run_stop_detail,
+    run_stop_reason,
+)
+from promptpotter.application.scoring import query_loop
 from promptpotter.application.scoring.closed_rounds import closed_round, closed_rounds
 from promptpotter.application.scoring.measurement_log import open_cell
 from promptpotter.application.scoring.race_protocol import Decision, View, WalkView
@@ -139,11 +130,11 @@ from promptpotter.application.served_dashboard import served_dashboard
 from promptpotter.application.views.render.phase import acts_line
 from promptpotter.config.paths import MEASUREMENTS_DIR, user_data_root
 from promptpotter.domain.activity import ActivityFeed
-from promptpotter.domain.arms import ArmPosition, PointContext
+from promptpotter.domain.arms import ArmPosition, Measured
 from promptpotter.domain.bench import DatasetSplit, partition_bank
 from promptpotter.domain.campaign import CampaignCycle
 from promptpotter.domain.campaign_config import (
-    start_layer,
+    CycleConfig,
 )
 from promptpotter.domain.command_kinds import (
     DeleteCampaignPayload,
@@ -158,6 +149,7 @@ from promptpotter.domain.cycle_paths import (
     Subject,
 )
 from promptpotter.domain.hierarchy import (
+    CandidateStanding,
     HierarchyCampaign,
     HierarchyCandidate,
     HierarchyEntry,
@@ -172,8 +164,6 @@ from promptpotter.domain.optimizer_state import Critique
 from promptpotter.domain.origin_panel import OverlapReading
 from promptpotter.domain.paired_reading import ArmKey, ReadingState, RoundArm
 from promptpotter.domain.phases import PauseCause, StopReason
-from promptpotter.domain.pipeline_params import PipelineParams
-from promptpotter.domain.pipeline_schema import PipelineNode
 from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmRecord,
@@ -186,28 +176,22 @@ from promptpotter.domain.records.run_records import (
     ForkSpec,
     ForkTrigger,
     OriginGatePass,
-    OriginSource,
     RoundEnteredRecord,
     RoundProposedRecord,
     RoundWarningRecord,
-    Running,
     RunPhaseRecord,
-    SpawnedBy,
-    SpawnedRecord,
+    SampleScoredRecord,
     StopLoop,
 )
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.ruler import DeltaRuler
 from promptpotter.domain.run_mode import RunMode
-from promptpotter.domain.run_standing import line_reference, walked_position
+from promptpotter.domain.run_standing import walked_position
 from promptpotter.domain.sample import ArchiveEntry, Bank, FiledAnswer, Sample
-from promptpotter.domain.scoring import GRADE_KEYS, CellSheet, GradedCell, MeasuredCell
-from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import Budget
+from promptpotter.domain.scoring import CellSheet, GradedCell, MeasuredCell, Scorer
 from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure import producer_lock
 from promptpotter.infrastructure.ledger import CycleEventLog
-from promptpotter.infrastructure.llm.spend_book import SendBound
 from promptpotter.infrastructure.projections.base import Projection
 from promptpotter.infrastructure.run_scope import rescope, scoped
 from promptpotter.infrastructure.store import archive_queries, measurement_archive
@@ -216,14 +200,14 @@ from promptpotter.infrastructure.store.archive_queries import (
     ArmOf,
     CampaignWalks,
     OpenAt,
-    SampleFoldRow,
     bench_reads,
     list_populations,
     load_population,
     sample_fold_rows,
-    write_sample_fold,
 )
-from promptpotter.infrastructure.store.campaign_store.ledger_scan import scan_cycle_facts
+from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
+    scan_ledger_answers,
+)
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import (
     Appended,
@@ -244,7 +228,7 @@ from promptpotter.infrastructure.store.measurement_archive import (
     config_key,
     standing,
 )
-from promptpotter.infrastructure.store.read_model import LedgerIndex
+from promptpotter.infrastructure.store.read_model import LedgerIndex, Moment
 from promptpotter.infrastructure.store.session_pointer import (
     cleanup_stub_fork_if_empty,
     read_active_pointer,
@@ -259,8 +243,6 @@ from promptpotter.shared.errors import (
     NotFoundError,
     PayloadInvalidError,
     PotterError,
-    ResumeDivergenceError,
-    SendRefusedError,
 )
 from promptpotter.shared.identity import SYSTEM_PRINCIPAL, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole
@@ -271,57 +253,7 @@ _CAMPAIGN = "testds__20260101-000000"
 # 1. Replay eligibility
 
 
-def _walk_panel(
-    tenant: str,
-    panel: list[Sample],
-    per_sample: str,
-    per_cell: str | None,
-    *,
-    bank: list[Sample] | None = None,
-    ledger: Path | None = None,
-) -> Any:
-    """*ledger* given, the walk is an arm's and records what it took there; *bank* given, the
-    panel is a part of that bank."""
-    schema = pipeline_schema(
-        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)],
-    )
-    session = loop_session(
-        workspace(default_identity(tenant)),
-        schema,
-        panel if bank is None else bank,
-        scorer=scorer_of(per_sample, per_cell),
-    )
-    sp = PointContext(schema=schema, framing=TaskDecomposition(), demo=[]).job(
-        prompted(instruction="Answer.")
-    )
-
-    async def _measure(sample: Sample, _session: Any, _pipeline_params: Any) -> MeasuredCell:
-        predicted = "b" if sample.id % 2 else "a"
-        return MeasuredCell(
-            sample_key=sample.key,
-            query=sample.query,
-            ground_truth="a",
-            predicted=predicted,
-        )
-
-    measured = None if ledger is None else "arm"
-    with (
-        scoped(
-            ledger=CycleEventLog(
-                user_data_root().parent / f"walk-{tenant}.jsonl" if ledger is None else ledger
-            )
-        ),
-        mock.patch.object(query_loop, "measure_sample", _measure),
-    ):
-        walked = asyncio.run(
-            search_point_scorer.score_search_point(
-                sp, panel, session, kind=MeasurementRole.PANEL, measured=measured
-            )
-        )
-    return session, walked
-
-
-def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_path: Path) -> None:
+def test_a_full_chain_answer_never_replays_across_a_later_nodes_change(tmp_path: Path) -> None:
     archive = MeasurementArchive(tmp_path / "cells")
     # Filed LAST on purpose: wrongly served, it is the cell's most recent and no answer hides it.
     chain: Configs = [(n, {}) for n in ("l1_generate", "l1_critique", "l2_context", "l3_plan")]
@@ -343,6 +275,9 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
         "mid-chain short-circuit inside the trusted prefix stopped reusing"
     )
 
+
+def test_a_grade_c_answer_never_replays(tmp_path: Path) -> None:
+    archive = MeasurementArchive(tmp_path / "cells")
     for name, grade, terminal, dataset_hash in (
         ("clean", "A", "llm_only", "aime"),
         ("connector", "C", "token_matching", "aime"),
@@ -357,7 +292,13 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
         "q_aime_14",
         "q_justlogic_14",
     }, "a grade-C answer was replayed"
-    # A later diagnostic rescore (B) or remeasure never displaces the answer a run measured first.
+
+
+def test_a_later_rescore_or_remeasure_never_displaces_the_answer_measured_first(
+    tmp_path: Path,
+) -> None:
+    # A diagnostic rescore files grade B, a remeasure grade A: neither is the answer a run paid for.
+    archive = MeasurementArchive(tmp_path / "cells")
     feed = ReplayFeed(archive, LLM_ONLY)
     for at, said, grade in ((1, "measured", "A"), (2, "rescored", "B"), (3, "again", "A")):
         row = archive_row("q_rescored", predicted=said, pipeline_data={"terminal_node": "llm_only"})
@@ -366,7 +307,15 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
         assert moved == (["measured"] if at == 1 else []), (
             f"the replay served {moved} once {said!r} was filed: a later row displaced the first"
         )
-    # A cell replays on its sample's content in whichever bank holds it, at that bank's slot.
+
+
+def test_a_cell_replays_on_its_samples_content_at_the_slot_of_whichever_bank_holds_it(
+    tmp_path: Path,
+) -> None:
+    archive = MeasurementArchive(tmp_path / "cells")
+    row = archive_row("q_aime_14", predicted="p", pipeline_data={"terminal_node": "llm_only"})
+    filed(archive, [row])
+    reusable = ReplayFeed(archive, LLM_ONLY).advance()
     wider = [
         Sample(id=0, query="q_aime_14", ground_truth="g"),
         Sample(id=14, query="q_new", ground_truth="g"),
@@ -377,8 +326,9 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     assert set(on_wider) == {0}, "a cell replayed onto a sample whose content it never measured"
     assert on_wider[0].query == "q_aime_14"
 
-    # Two walks never buy one cell: the holder files the answer before its claim retires, and the
-    # waiter that takes the claim next replays it; a second release frees nobody's claim.
+
+def test_two_walks_never_buy_one_cell_and_a_second_release_frees_no_claim(tmp_path: Path) -> None:
+    # The holder files the answer before its claim retires; the waiter taking the claim replays it.
     claims = MeasurementArchive(tmp_path / "cells")
     holder, waiter = (ReplayFeed(claims, LLM_ONLY) for _ in range(2))
     row = archive_row("q_held")
@@ -395,29 +345,52 @@ def test_a_filed_cell_replays_by_its_content_and_reads_as_a_fresh_run_would(tmp_
     taken.retire()
     beside.retire()
 
-    # Rows banked under one formula read under another exactly as a fresh run would.
-    wider_panel = samples(10)
-    panel = wider_panel[:6]
-    banked_under = ("label_match(predicted, ground_truth)", None)
-    read_under = ("0.5 * label_match(predicted, ground_truth)", "0.5 * fitness + 0.25")
-    shared, banked_walk = _walk_panel("shared", panel, *banked_under, bank=wider_panel)
-    assert all(GRADE_KEYS & r.keys() for r in banked_walk.sheet.wire()), "guard: the walk graded"
-    banked = archive_queries.walked_answers(shared.store, banked_walk.cells)
-    assert len(banked) == len(panel), "a walked answer was not banked"
-    signatures = shared.store.archive.cell_signatures()
-    _, fresh = _walk_panel("fresh", panel, *read_under)
-    worth = {c.key: c.grade.objective for c in fresh.sheet}
-    assert len(set(worth.values())) == 2, "guard: hits and misses are worth different amounts"
 
-    _, replayed = _walk_panel("shared", panel, *read_under, bank=wider_panel)
-    assert all(c.facts.cached for c in replayed.sheet), "guard: the second read bought nothing"
-    every = frozenset(c.key for c in replayed.sheet)
-    ruler_cells = {key: y for _, key, y in ruler_rows(shared.store, [("x", replayed.sheet)], every)}
-    assert ruler_cells == pytest.approx(worth), "the ruler read the banked formula's grades"
-    assert [c[:2] for c in replayed.cells] == [c[:2] for c in banked_walk.cells]
-    assert shared.store.archive.cell_signatures() == signatures, "a replay filed a second answer"
-    assert {c.key: c.grade.objective for c in replayed.sheet} == worth
-    assert replayed.scores.composite_fitness == pytest.approx(fresh.scores.composite_fitness)
+def _unrouted(arm: object) -> dict[str, Any]:
+    """The overlay a steered fork off *arm* runs under: its route cleared, since the campaign's
+    dollar cap prices no host the world lists for the route its record pinned (row: offline_world)."""
+    assert isinstance(arm, Measured), arm
+    return {node: {"route_order": None} for node in arm.resolved_params["steps"]}
+
+
+# The `score:F` lens moves the formula alone: the fork's origin replays what its parent paid.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_cell_banked_under_one_formula_reads_under_another_as_a_fresh_walk_would(
+    world: World, line: Shared
+) -> None:
+    adopted, (hop, banked_by) = world.adopt(line), line.made
+    branch = closed_round(adopted.stores, hop, 1, banked_by, moment=None)
+    assert branch is not None and branch.election is not None
+    key = branch.election.ended_on
+    paid = {cell.facts.answer for cell in branch.rows(key)}
+    lens = ConfigOverrides(scoring={"per_cell": "0.5 * fitness + 0.25"})
+    start = ForkStart(pipeline_overlay=_unrouted(branch.arms[key]), config_overrides=lens)
+    fork = asyncio.run(adopted.fork(hop, 1, candidate_id=str(key), start=start))
+    read_by = fork.session.state.scoring.scorer
+    walked = [
+        rec.result
+        for rec in adopted.records(fork.hop)
+        if isinstance(rec, SampleScoredRecord) and rec.round == 0
+    ]
+    assert walked and all(c.facts.cached and c.facts.answer in paid for c in walked), (
+        "guard: the fork's origin bought an answer its parent had paid for"
+    )
+    worth = {c.key: read_by.grade(c.facts).grade.objective for c in walked}
+    banked = {c.key: banked_by.grade(c.facts).grade.objective for c in walked}
+    assert all(worth[k] != banked[k] for k in worth), "guard: the lens moved no cell's worth"
+    assert {c.key: c.grade.objective for c in walked} == pytest.approx(worth), (
+        "a replayed cell carried the grade of the formula it was banked under"
+    )
+    origin, scored = fork.result.origin, [w for w in worth.values() if w is not None]
+    assert origin is not None and origin.composite is not None and len(scored) == len(worth)
+    assert origin.composite.value == pytest.approx(sum(scored) / len(scored)), (
+        "the fork's origin scored on another worth than its cells"
+    )
+    every = frozenset(worth)
+    ruled = ruler_rows(adopted.stores, [("x", read_by.graded(walked))], every)
+    assert {k: y for _, k, y in ruled} == pytest.approx(worth), (
+        "the ruler read the banked formula's grades"
+    )
 
 
 # 2. The archive on disk
@@ -669,125 +642,81 @@ def test_compaction_round_trips_every_field_it_moved(
     assert archive.population(whole) == before, "a restore did not return every moved field"
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+def _remembered_at(stores: Stores, scope: ArmOf, bank: Bank) -> set[str]:
+    """Every answer a population read under the arm's *scope* holds."""
+    with scoped(memory=scope):
+        return {
+            answer.answer
+            for entry in list_populations(stores, bank)
+            for answer in load_population(stores, entry, bank)
+        }
+
+
+# Its foreign answers are the `--controlled` leg's (`offline_run.py::run_controlled`): no arm's
+# memory reads one. Here, the fence is its campaign's walks as memory is read, never as it opened.
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_controlled_arm_remembers_only_the_answers_its_campaign_walked(
-    built_stores: Stores,
+    world: World, line: Shared
 ) -> None:
-    archive = built_stores.archive
-    ds = Bank.of(Sample(id=0, query=f"k{i}", ground_truth="g") for i in range(2))
-
-    def individual(name: str) -> ArchiveEntry:
-        return filed_under([("", {"individual": name})], ds.dataset_hash, prompt_fields_id=name)
-
-    def bank(name: str, said: list[str], at: int) -> list[str]:
-        cells = [
-            MeasuredCell(sample_key=ds.samples[i].key, predicted=p) for i, p in enumerate(said)
-        ]
-        return [
-            ref
-            for _, ref, _ in filed(
-                archive, cells, individual(name), created_at=f"2026-09-28T00:00:{at:02d}Z"
-            )
-        ]
-
-    campaigns = built_stores.campaigns
-    arm_root = CycleHop(campaign_id="arm", cycle_id="cycle_root")
-    campaigns.mint_cycle(arm_root)
-
-    def walk(hop: CycleHop, answers: list[str]) -> None:
-        arm_walk(
-            CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop))),
-            ((i, (ds.samples[i].key, answer, False)) for i, answer in enumerate(answers)),
-            role=MeasurementRole.PANEL,
-        )
-
-    def listed() -> set[str]:
-        return {e.prompt_fields_id for e in list_populations(built_stores, ds)}
-
-    def remembered(name: str) -> list[str]:
-        return [a.cell.predicted for a in load_population(built_stores, individual(name), ds)]
-
-    def fold_row(key: str) -> SampleFoldRow:
-        return SampleFoldRow(config_key=key, sp=key, fk="formula", sig=[], graded=[])
-
-    bank("foreign", ["yes", "no"], 1)
-    bank("shared", ["no", "no"], 2)
-    write_sample_fold(built_stores, dataset_hash=ds.dataset_hash, rows=[fold_row("x")])
-
-    def inside_arm() -> tuple[set[str], list[str], list[SampleFoldRow]]:
-        walk(arm_root, bank("origin", ["yes", "no"], 3))
-        rescope(memory=ArmOf(CampaignWalks(campaigns, "arm"), ruler_version=0))
-        assert listed() == {"origin"}, "the arm saw a population its campaign never walked"
-        # A cycle the campaign mints after the fence (a rebase, a fork) is its own too, and a
-        # replayed answer joins the arm's memory once its walk lands there.
-        later = CycleHop(campaign_id="arm", cycle_id="cycle_rebased")
-        campaigns.mint_cycle(later)
-        walk(later, bank("shared", ["yes", "yes"], 0))
-        write_sample_fold(built_stores, dataset_hash=ds.dataset_hash, rows=[fold_row("y")])
-        return (
-            listed(),
-            remembered("shared"),
-            sample_fold_rows(built_stores, dataset_hash=ds.dataset_hash),
-        )
-
-    arm_listed, arm_shared, arm_fold = contextvars.copy_context().run(inside_arm)
-    assert arm_listed == {"origin", "shared"}
-    assert arm_shared == ["yes", "yes"], (
-        "another campaign's answer of a shared cell steered the arm"
+    adopted, (hop, scorer) = world.adopt(line), line.made
+    stores = adopted.stores
+    bank = stores.tenant_datasets.labelled(DATASET)
+    assert bank is not None
+    walks = CampaignWalks(stores.campaigns, hop.campaign_id)
+    arm = ArmOf(walks, ruler_version=0)
+    before = _remembered_at(stores, arm, bank)
+    branch = closed_round(stores, hop, 1, scorer, moment=None)
+    assert branch is not None and branch.election is not None
+    key = branch.election.ended_on
+    # An edited origin re-measures, so the fork walks answers no cycle before it walked.
+    [(node, prompt)] = list(branch.arms[key].individual.prompts.items())[:1]
+    field, text = next(iter(prompt.fields.items()))
+    edited = {node: prompt.model_copy(update={"fields": {**prompt.fields, field: f"{text} Anew."}})}
+    start = ForkStart(pipeline_overlay=_unrouted(branch.arms[key]), origin_prompts=edited)
+    asyncio.run(adopted.fork(hop, 1, candidate_id=str(key), start=start))
+    after = _remembered_at(stores, arm, bank)
+    assert before < after, "a cycle the campaign forked after the arm's scope opened is not its own"
+    assert after <= scan_ledger_answers(walks.spans()), (
+        "the arm remembers an answer it never walked"
     )
-    assert arm_fold == [], "the arm read a fold its fence never admitted"
-    assert listed() == {"foreign", "shared", "origin"}, "the fence leaked out of the arm"
-    assert remembered("shared") == ["no", "no"]
-    assert sample_fold_rows(built_stores, dataset_hash=ds.dataset_hash) == [fold_row("x")]
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_an_arms_round_close_folds_its_replay_and_reloads_no_population_it_left(
-    built_stores: Stores, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    archive, campaigns = built_stores.archive, built_stores.campaigns
-    ds = Bank.of(Sample(id=0, query=f"k{i}", ground_truth="g") for i in range(2))
-    hop = CycleHop(campaign_id="arm", cycle_id="cycle_root")
-    campaigns.mint_cycle(hop)
-
-    def bank(name: str, said: list[str], at: int) -> list[str]:
-        entry = filed_under([("", {"individual": name})], ds.dataset_hash, prompt_fields_id=name)
-        cells = [
-            MeasuredCell(sample_key=s.key, predicted=p, ground_truth="g")
-            for s, p in zip(ds.samples, said, strict=True)
-        ]
-        stamp = f"2026-09-28T00:00:{at:02d}Z"
-        return [ref for _, ref, _ in filed(archive, cells, entry, created_at=stamp)]
-
-    def walk(answers: list[str]) -> None:
-        arm_walk(
-            CycleEventLog.open(CycleDir(campaigns.cycle_dir(hop))),
-            ((i, (ds.samples[i].key, answer, False)) for i, answer in enumerate(answers)),
-            role=MeasurementRole.PANEL,
+    with scoped(memory=arm):
+        assert sample_fold_rows(stores, dataset_hash=bank.dataset_hash) == [], (
+            "an arm read the shared fold every campaign writes"
         )
 
-    walk(bank("left", ["g", "g"], 1))
-    replayed = bank("replayed", ["g", "x"], 2)
+
+# A fork re-walks round 1 as its parent did: what it files moves a population, its replays none.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_arms_index_refresh_reloads_only_the_populations_its_walks_moved(
+    world: World, line: Shared, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    adopted, (hop, scorer) = world.adopt(line), line.made
+    stores = adopted.stores
+    bank = stores.tenant_datasets.labelled(DATASET)
+    assert bank is not None
+    arm = ArmOf(CampaignWalks(stores.campaigns, hop.campaign_id), ruler_version=0)
+    signatures = stores.archive.cell_signatures()
+    with scoped(memory=arm):
+        admitted = frozenset(bank.position_of.values())
+        index = SampleIndex.ensure_for(stores, scorer=scorer, bank=bank, sample_ids=admitted)
+        assert index is not None
+        held = index.records()
+    asyncio.run(adopted.fork(hop, 1))
+    moved = {k for k, v in stores.archive.cell_signatures().items() if signatures.get(k) != v}
     loaded: list[str] = []
     load = archive_queries.load_population
 
     def spy(stores: Stores, entry: ArchiveEntry, bank: Bank) -> list[FiledAnswer]:
-        loaded.append(entry.prompt_fields_id)
+        loaded.append(entry.config_key)
         return load(stores, entry, bank)
 
-    def inside_arm() -> list[float]:
-        rescope(memory=ArmOf(CampaignWalks(campaigns, "arm"), ruler_version=0))
-        scorer, admitted = scorer_of(), frozenset(ds.position_of.values())
-        index = SampleIndex.ensure_for(built_stores, scorer=scorer, bank=ds, sample_ids=admitted)
-        assert index is not None
-        # The arm replays another campaign's answers: its walk lands, no cell file moves.
-        walk(replayed)
-        monkeypatch.setattr(archive_queries, "load_population", spy)
-        index.refresh(built_stores, scorer=scorer)
-        return [record.hit_rate for record in index.records()]
-
-    assert contextvars.copy_context().run(inside_arm) == [1.0, 0.5], "the arm's replay never folded"
-    assert loaded == ["replayed"], "a round close reloaded a population its arm left untouched"
+    monkeypatch.setattr(archive_queries, "load_population", spy)
+    with scoped(memory=arm):
+        index.refresh(stores, scorer=scorer)
+        assert index.records() != held, "the index never folded the cells the fork filed"
+    assert moved and sorted(loaded) == sorted(moved), (
+        "a refresh reloaded a population no walk moved, or missed one that moved"
+    )
 
 
 # The re-cut moves the name the relabel placed on the bank.
@@ -873,6 +802,18 @@ async def test_a_deleted_campaigns_cells_stay_the_memory_of_the_next_campaign_on
 
 
 # 3. Replayed decisions, and forks
+
+
+@pytest.fixture(scope="module")
+def line(tmp_path_factory: pytest.TempPathFactory) -> Shared:
+    """Potter's three rounds on 40 rows, run once for the module (~3.5 s, ~7 s cold): each fact
+    takes `world.adopt(line)`, its own copy, at ~20 ms."""
+
+    async def act(world: World) -> tuple[CycleHop, Scorer]:
+        ran = await world.campaign(rounds=3)
+        return ran.hop, ran.session.state.scoring.scorer
+
+    return shared_run(tmp_path_factory, act)
 
 
 def _round(**kw: Any) -> RoundResult:
@@ -1184,30 +1125,6 @@ def test_a_write_under_a_level_that_stands_but_is_no_directory_raises_an_os_erro
             write_json(tmp_path / level / "a" / "b.json", {})
 
 
-def _emit_round(
-    closing: Cycle,
-    ledger: CycleEventLog,
-    closed: list[RoundResult],
-    name: str,
-    *,
-    crowned: bool = True,
-    resolved_params: dict[str, Any] | None = None,
-) -> str:
-    n = len(closed)
-    pick = prompted(instruction=name)
-    key = ArmKey(pick.id)
-    arm = arm_state(
-        name,
-        position=ArmPosition(round=n, idx=0, total=1),
-        individual=pick,
-        resolved_params=resolved_params or {},
-    )
-    rr = _round(round=n, arms={key: arm}, election=election(key if crowned else None, ended_on=key))
-    closed.append(rr)
-    close_round(ledger, closed, cycle=closing)
-    return pick.id
-
-
 def _on_parent() -> dict[str, Any]:
     """A round whose arm and election end on the individual named `parent`."""
     parent = prompted(instruction="parent")
@@ -1473,166 +1390,110 @@ def test_every_replayer_reads_an_absent_arm_as_no_cut_no_gain_and_no_winner() ->
     )
 
 
-class _ThreeRounds(NamedTuple):
-    hop: CycleHop
-    ledger: CycleEventLog
-    closed: list[RoundResult]
-    ids: list[str]
-    closing: Cycle
-    on_cycle: Callable[[], list[HierarchyCandidate]]
-    served: Callable[[], list[tuple[str, bool, bool]]]
-    selected: Callable[[], list[str]]
-
-
-@pytest.fixture
-def three_rounds(built_stores: Stores) -> _ThreeRounds:
-    """A campaign's line closed through c0..c2, and its readers of what stands."""
-    stores = built_stores
-    closing = seat(stores).cycle
-    hop = CycleHop(campaign_id="rewound__20260101-000000", cycle_id="cycle_rewound")
-    stored_campaign(stores, minted_campaign(hop))
-    stores.campaigns.mint_cycle(hop)
-    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
-    closed: list[RoundResult] = []
-    ids = [_emit_round(closing, ledger, closed, name) for name in ("c0", "c1", "c2")]
-
-    def on_cycle() -> list[HierarchyCandidate]:
-        cycle = subtree_cycle(stores, (hop,))
-        return [c for r in cycle.children for c in r.children if isinstance(c, HierarchyCandidate)]
-
-    def served() -> list[tuple[str, bool, bool]]:
-        return [
-            (c.facts.individual, c.facts.reading.election.held, c.facts.reading.election.selected)
-            for c in on_cycle()
-        ]
-
-    def selected() -> list[str]:
-        index = stores.campaigns.load(hop, moment=None)
-        assert index is not None
-        readers = (
-            stores.campaigns.standing_rounds(hop, moment=None).standing,
-            subtree_cycle(stores, (hop,)).facts.standing,
-            index.standing,
-        )
-        return [reader.selection.label for reader in readers]  # type: ignore[union-attr]
-
-    return _ThreeRounds(hop, ledger, closed, ids, closing, on_cycle, served, selected)
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_rewind_retracts_every_election_close_and_crown_past_it_for_every_reader(
-    built_stores: Stores, three_rounds: _ThreeRounds
-) -> None:
-    stores = built_stores
-    hop, _, _, ids, _, _, served, selected = three_rounds
-    assert served() == [(i, True, True) for i in ids] and selected() == ["C2.1"] * 3, "guard"
-    stores.campaigns.rewind_to_round(hop, 1)
-    assert selected() == ["C1.1"] * 3, (
-        "the ledger, the subtree and the index disagree on the selection"
+def _selected(stores: Stores, hop: CycleHop) -> set[str]:
+    """The selection every reader of what stands serves: the ledger, the subtree, the index."""
+    index = stores.campaigns.load(hop, moment=None)
+    assert index is not None
+    readers = (
+        stores.campaigns.standing_rounds(hop, moment=None).standing,
+        subtree_cycle(stores, (hop,)).facts.standing,
+        index.standing,
     )
+    return {reader.selection.label for reader in readers}  # type: ignore[union-attr]
+
+
+def _candidates(stores: Stores, hop: CycleHop) -> list[tuple[int, HierarchyCandidate]]:
+    """Each candidate the subtree serves, by the round it hangs from."""
+    cycle = subtree_cycle(stores, (hop,))
+    return [
+        (r.facts.round, c)  # type: ignore[union-attr]
+        for r in cycle.children
+        for c in r.children
+        if isinstance(c, HierarchyCandidate)
+    ]
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_rewind_retracts_every_election_close_and_crown_past_it_for_every_reader(
+    world: World, line: Shared
+) -> None:
+    stores, (hop, _) = world.adopt(line).stores, line.made
+    crowned = stores.campaigns.standing_rounds(hop, moment=None).crowns
+    assert len(crowned) > 1 and len(_selected(stores, hop)) == 1, "guard: a crown past the origin"
     stores.campaigns.rewind_to_round(hop, 0)
     stood = stores.campaigns.standing_rounds(hop, moment=None)
-    assert list(stood.rounds) == list(stood.elections) == [0] and stood.crowns == {0: ids[0]}, (
+    assert list(stood.rounds) == list(stood.elections) == [0] and stood.crowns == {0: crowned[0]}, (
         "an election, close or crown stood past the rewind"
     )
-    assert served() == [(ids[0], True, True)]
+    assert len(_selected(stores, hop)) == 1, (
+        "the ledger, the subtree and the index disagree on the selection"
+    )
+    assert {rnd for rnd, _ in _candidates(stores, hop)} == {0}, (
+        "a candidate of a retracted round is still served"
+    )
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_resume_from_3_that_halts_on_a_divergence_below_it_displaces_no_round_past_it(
-    built_stores: Stores,
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_resume_rewinding_that_halts_on_a_divergence_below_it_displaces_no_round_past_it(
+    world: World, line: Shared
 ) -> None:
-    stores = built_stores
-    closing = seat(stores).cycle
-    halted = CycleHop(campaign_id="halted__20260101-000000", cycle_id="cycle_halted")
-    stored_campaign(stores, minted_campaign(halted))
-    stores.campaigns.mint_cycle(halted)
-    halted_ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(halted)))
-    run: list[RoundResult] = []
-    for name in ("h0", "h1", "h2"):
-        _emit_round(closing, halted_ledger, run, name)
-    edited = optimizer_state().model_copy(update={"prompt_hashes": {"l1_generate": "edited"}})
-    for n in (3, 4):
-        walked_h = prompted(instruction=f"h{n}")
-        run.append(
-            _round(
-                round=n,
-                arms={ArmKey(walked_h.id): arm_state(f"h{n}", individual=walked_h)},
-                election=election(walked_h.id),
-                optimizer_state=edited if n == 3 else optimizer_state(),
-            )
-        )
-        close_round(halted_ledger, run, cycle=closing)
-    resuming = seat(stores, hop=halted)
-    resuming.cycle.session.state.resumed_from_round = stores.campaigns.rewind_enters(halted, 3)
-    with (
-        scoped(ledger=cycle_ledger(resuming.cycle), spawn=inner_spawn_of(resuming.cycle.session)),
-        scoped(book=spend_book()),
-        pytest.raises(ResumeDivergenceError),
-    ):
-        asyncio.run(resume_with_divergence_check(resuming.cycle, [], RunMode(from_round=3)))
-    assert stores.campaigns.standing_rounds(halted, moment=None).last_closed == 4, (
+    adopted, (hop, _) = world.adopt(line), line.made
+    closed = adopted.stores.campaigns.standing_rounds(hop, moment=None).last_closed
+    assert closed is not None
+    adopted.edit_proposer()
+    halted = asyncio.run(adopted.resume(hop, from_round=closed - 1))
+    assert halted.result.stop_reason is StopReason.DIVERGED, "guard: the edit diverged"
+    assert adopted.stores.campaigns.standing_rounds(hop, moment=None).last_closed == closed, (
         "a resume its divergence halted had already rewound the line"
     )
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_round_the_archive_lost_or_a_rewind_past_the_ledger_offers_a_resume_the_terminal_takes(
-    built_stores: Stores, three_rounds: _ThreeRounds
+    world: World, line: Shared
 ) -> None:
     # Each act is printed in the flag its payload declares: `--from-round` parsed nowhere.
-    stores, scorer = built_stores, scorer_of()
-    hop, ledger, closed, *_ = three_rounds
-    pick = prompted(instruction="c3")
-    walked = filed(stores.archive, [archive_row(f"q{i}", predicted="g") for i in range(3)])
-    rows = scorer.sheet(a.cell for _, ref, _ in walked if (a := stores.archive.answer(ref)))
-    position = ArmPosition(round=3, idx=0, total=1)
-    closed.append(
-        _round(
-            round=3,
-            arms={ArmKey(pick.id): arm_state("c3", position=position, individual=pick)},
-            election=election(ArmKey(pick.id)),
-            cells={ArmKey(pick.id): rows},
-        )
-    )
-    close_round(ledger, closed, cycle=seat(stores, bank=samples(3, "g")).cycle)
+    stores, (hop, scorer) = world.adopt(line).stores, line.made
+    last = stores.campaigns.standing_rounds(hop, moment=None).last_closed
+    assert last is not None
     shutil.rmtree(stores.archive.base_dir / MEASUREMENTS_DIR)
     with pytest.raises(NotFoundError) as lost:
-        closed_round(stores, hop, 3, scorer, moment=None)
+        closed_round(stores, hop, last, scorer, moment=None)
     with pytest.raises(BadRequestError) as past:
-        stores.campaigns.rewind_to_round(hop, 9)
+        stores.campaigns.rewind_to_round(hop, last + 9)
     taken = [
         cli_main._PARSER.parse_args(spelled.split())
         for refused in (lost.value, past.value)
         for spelled in re.findall(r"`([^`]+)`", "".join(acts_line(refused.next_acts)))
     ]
-    assert [(t.command, t.resume_from_round) for t in taken] == [("resume", 2), ("resume", None)], (
-        "a lost round's act resumed past it, or an act was spelled in a flag the terminal lacks"
-    )
+    assert [(t.command, t.resume_from_round) for t in taken] == [
+        ("resume", last - 1),
+        ("resume", None),
+    ], "a lost round's act resumed past it, or an act was spelled in a flag the terminal lacks"
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_reentered_rounds_arm_folds_only_its_new_walk(
-    built_stores: Stores, three_rounds: _ThreeRounds
-) -> None:
-    stores = built_stores
-    hop, ledger, closed, ids, *_ = three_rounds
-    stores.campaigns.rewind_to_round(hop, 1)
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_reentered_rounds_arm_folds_only_its_new_walk(world: World, line: Shared) -> None:
+    adopted, (hop, scorer) = world.adopt(line), line.made
+    stores = adopted.stores
+    entered = closed_round(stores, hop, 1, scorer, moment=None)
+    assert entered is not None
+    key, state = next(iter(entered.arms.items()))
     stores.campaigns.rewind_to_round(hop, 0)
     # Every live fold reads the rewind off its record.
     folds = Narration()
-    walk = ArmRecord(round=1, arm=ArmKey(ids[1]), state=closed[1].arms[ArmKey(ids[1])])
+    walk = ArmRecord(round=1, arm=key, state=state)
     [cell] = arm_walk(
         CycleEventLog(stores.projects_root / "rewalk.jsonl"),
         [(0, ("k0", "a", False))],
         rnd=1,
-        individual=ids[1],
+        individual=state.individual.id,
         role=MeasurementRole.PANEL,
         running=score_summary(),
     )
     [rewind] = [
         rec
-        for rec in ledger_records(ledger)
+        for rec in adopted.records(hop)
         if isinstance(rec, RoundEnteredRecord) and rec.rewound and rec.round == 1
     ]
     folds.announce(walk)
@@ -1647,69 +1508,58 @@ def test_a_reentered_rounds_arm_folds_only_its_new_walk(
     )
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_uncrowned_rerun_of_a_rewound_round_never_takes_the_stand(
-    built_stores: Stores, three_rounds: _ThreeRounds
+    world: World, line: Shared
 ) -> None:
-    stores = built_stores
-    hop, ledger, closed, ids, closing, on_cycle, served, _ = three_rounds
-    stores.campaigns.rewind_to_round(hop, 1)
-    stores.campaigns.rewind_to_round(hop, 0)
-    again = _emit_round(closing, ledger, closed[:1], "c1_again", crowned=False)
-    assert served() == [(ids[0], True, True), (again, True, False)]
-    origin, held = on_cycle()
-    assert (origin.facts.stands, held.facts.stands) == (True, False), (
-        "an uncrowned re-run took the stand"
-    )
+    adopted, (hop, _) = world.adopt(line), line.made
+    crowned = adopted.stores.campaigns.standing_rounds(hop, moment=None).crowns
+    rerun = max(crowned) + 1
+    asyncio.run(adopted.resume(hop, from_round=rerun))
+    stood = adopted.stores.campaigns.standing_rounds(hop, moment=None)
+    assert stood.crowns == crowned and rerun in stood.rounds, "guard: the rerun crowned nothing"
+    standing = {c.facts.individual for _, c in _candidates(adopted.stores, hop) if c.facts.stands}
+    assert standing == {crowned[max(crowned)]}, "an uncrowned re-run took the stand"
 
 
 # An inode number outlives its file, so only the bytes tell the old file's tail from a new file.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_ledger_reminted_onto_its_freed_inode_grown_past_the_old_one_is_read_as_itself(
-    built_stores: Stores, three_rounds: _ThreeRounds
+    world: World, line: Shared
 ) -> None:
-    stores = built_stores
-    hop, ledger, _, _, closing, *_ = three_rounds
-    # A reader indexed the old file before it was replaced.
-    stores.campaigns.standing_rounds(hop, moment=None)
-    _, regrown = _minted(stores, "cycle_regrown")
-    regrown_rounds: list[RoundResult] = []
-    grown = [_emit_round(closing, regrown, regrown_rounds, f"d{n}") for n in range(6)]
-    assert regrown.path.stat().st_size > ledger.path.stat().st_size, "guard"
-    ledger.path.write_bytes(regrown.path.read_bytes())
-    assert stores.campaigns.standing_rounds(hop, moment=None).crowns == dict(enumerate(grown)), (
-        "a re-minted ledger was read as the tail of the file it replaced"
+    stores, (hop, _) = world.adopt(line).stores, line.made
+    asked = ForkCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, round=1)
+    cut = hop.model_copy(
+        update={"cycle_id": cut_operator_fork(stores, asked, CycleStart()).take(stores)}
     )
+    # A reader indexed the cut's ledger before it was replaced.
+    stores.campaigns.standing_rounds(cut, moment=None)
+    old, grown = stores.campaigns.layout(cut).ledger, stores.campaigns.layout(hop).ledger
+    assert grown.stat().st_size > old.stat().st_size, "guard"
+    old.write_bytes(grown.read_bytes())
+    assert (
+        stores.campaigns.standing_rounds(cut, moment=None).crowns
+        == stores.campaigns.standing_rounds(hop, moment=None).crowns
+    ), "a re-minted ledger was read as the tail of the file it replaced"
 
 
 # Disposable, so a re-run remedies it.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_an_export_this_build_cannot_read_is_refused_as_an_export(
-    built_stores: Stores, three_rounds: _ThreeRounds
+    world: World, line: Shared
 ) -> None:
-    stores, hop = built_stores, three_rounds.hop
-    export_file = stores.campaigns.layout(hop).export
-    export_file.write_text("{not an export", encoding="utf-8")
+    stores, (hop, _) = world.adopt(line).stores, line.made
+    stores.campaigns.layout(hop).export.write_text("{not an export", encoding="utf-8")
     with pytest.raises(FileUnreadableError) as unread_export:
         stores.campaigns.read_export(hop)
     assert unread_export.value.kind is FileKind.EXPORT, "an export was refused as another file"
-    export_file.unlink()
 
 
-# Never half-read; the remedy it names deletes the campaign, paused as it is.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+# Never half-read; the remedy it names deletes the campaign, as it stands.
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_unreadable_close_refuses_its_cycle_to_every_reader_and_the_remedy_keeps_paid_rows(
-    built_stores: Stores,
+    world: World, line: Shared
 ) -> None:
-    stores = built_stores
-    closing, scorer = seat(stores).cycle, scorer_of()
-    # `rewrite_lines` writes a fresh file: a ledger index takes a same-inode growth for an append.
-    stranded = CycleHop(campaign_id="stranded__20260101-000000", cycle_id="cycle_stranded")
-    stored_campaign(stores, minted_campaign(stranded))
-    stores.campaigns.mint_cycle(stranded)
-    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(stranded)))
-    _emit_round(closing, ledger, [], "c0")
-    ledger.append(RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT))
+    stores, (stranded, scorer) = world.adopt(line).stores, line.made
     retired: list[int] = []
 
     def _retire(lines: list[str]) -> tuple[list[str], None]:
@@ -1718,12 +1568,9 @@ def test_an_unreadable_close_refuses_its_cycle_to_every_reader_and_the_remedy_ke
         records[retired[0]]["a_field_no_build_declares"] = True
         return [json.dumps(rec) + "\n" for rec in records], None
 
-    rewrite_lines(ledger.path, _retire)
-    paid = filed(
-        stores.archive,
-        [archive_row("q_stranded", predicted="p")],
-        filed_under(dataset_hash="strandedds"),
-    )
+    # `rewrite_lines` writes a fresh file: a ledger index takes a same-inode growth for an append.
+    rewrite_lines(stores.campaigns.layout(stranded).ledger, _retire)
+    paid = [entry.config_key for entry in stores.archive.list_all()]
     readers: dict[str, Callable[[], object]] = {
         "resume": lambda: stores.campaigns.standing_rounds(stranded, moment=None),
         "export": lambda: closed_rounds(stores, stranded, scorer, moment=None),
@@ -1750,165 +1597,98 @@ def test_an_unreadable_close_refuses_its_cycle_to_every_reader_and_the_remedy_ke
     assert not stores.campaigns.campaign_root_dir(stranded.campaign_id).exists(), (
         "the remedy left the refused campaign standing"
     )
-    assert all(stores.archive.answer(ref) is not None for _, ref, _ in paid), (
+    assert paid and [entry.config_key for entry in stores.archive.list_all()] == paid, (
         "the remedy took a paid measurement with the campaign"
     )
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_unmodified_fork_origin_inherits_the_branch_points_reading_and_an_edited_one_rescores(
-    built_stores: Stores,
+    world: World, line: Shared
 ) -> None:
-    stores = built_stores
-    closing = seat(stores).cycle
-    store = stores.campaigns
-    prompt = {"instruction": "do the thing", "persona": "you are precise"}
-    solving = pipeline_schema(
-        [PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]
-    )
-    inheriting, ledger = _minted(stores, "cycle_inherit_parent")
-    close_round(
-        ledger,
-        [
-            _adopted(),
-            _round(
-                round=1,
-                arms={
-                    ArmKey("c1"): arm_state(
-                        "c1",
-                        position=ArmPosition(round=1, idx=0, total=1),
-                        individual=prompted(**prompt),
-                        total=10,
-                    ),
-                    ArmKey("parent"): arm_state("parent", total=10),
-                },
-                folds={ArmKey("c1"): score_summary(total=10)},
-                election=election(ended_on="parent"),
-            ),
-        ],
-        cycle=closing,
-    )
-    fork = "cycle_inherit_parent_fork_abc123"
-    spec = ForkSpec(
-        trigger=ForkTrigger.OPERATOR_STEERED,
-        reason="",
-        issued_by=SYSTEM_PRINCIPAL,
-        from_candidate=RoundArm(round=1, arm=ArmKey("c1")),
-    )
-    _mint_sibling(store, inheriting, fork, spec, cut_round=0)
-    session = loop_session(
-        stores,
-        solving,
-        [],
-        hop=CycleHop(campaign_id=_CAMPAIGN, cycle_id=fork),
-        # The branch-point round banked no row here, so no cell is ever graded.
-        scorer=scorer_of(),
-    )
+    # Two forks run, ~3 s: the inheritance is read off what each fork's round 0 measured.
+    adopted, (hop, scorer) = world.adopt(line), line.made
+    stores = adopted.stores
+    branch = closed_round(stores, hop, 1, scorer, moment=None)
+    assert branch is not None and branch.election is not None
+    key = branch.election.ended_on
+    paid = {cell.facts.answer for cell in branch.rows(key)}
+    unrouted = _unrouted(branch.arms[key])
 
-    def inherit(fields: dict[str, str]) -> Any:
-        # Resolved as `seat_campaign_origin` does: the fork start wins.
-        start = CycleStart(
-            origin_prompts=prompted(**fields).prompts,
-            origin_source=OriginSource.FORK_START,
-        )
-        resolved = resolve_origin_opt_search_point(
-            start=start, pipeline_params=PipelineParams(), schema=solving
-        )
-        return try_inherit_fork_origin(
-            session,
-            start,
-            resolved_origin=resolved,
-            sp=JobSearchPoint(),
-            framing=TaskDecomposition(),
-        )
+    def origin_answers(start: ForkStart) -> set[str | None]:
+        fork = asyncio.run(adopted.fork(hop, 1, candidate_id=str(key), start=start)).hop
+        origin = closed_round(stores, fork, 0, scorer, moment=None)
+        assert origin is not None and origin.election is not None
+        return {cell.facts.answer for cell in origin.rows(origin.election.ended_on)}
 
-    inherited = inherit(dict(prompt))
-    assert inherited is not None, "an unmodified fork origin rescored what its parent paid for"
-    assert inherited.origin.individual.lineage.source == "origin"
-    assert inherit({**prompt, "instruction": "do it differently"}) is None, (
-        "an edited fork origin inherited a measurement it never earned"
+    assert paid and origin_answers(ForkStart(pipeline_overlay=unrouted)) == paid, (
+        "an unmodified fork origin rescored what its parent paid for"
+    )
+    [(node, prompt)] = list(branch.arms[key].individual.prompts.items())[:1]
+    field, text = next(iter(prompt.fields.items()))
+    edited = {node: prompt.model_copy(update={"fields": {**prompt.fields, field: f"{text} Anew."}})}
+    assert origin_answers(ForkStart(pipeline_overlay=unrouted, origin_prompts=edited)).isdisjoint(
+        paid
+    ), "an edited fork origin inherited a measurement it never earned"
+
+
+def _operator_fork(stores: Stores, hop: CycleHop, steer: ForkStart, **asked: Any) -> CycleHop:
+    """An operator's fork of *hop* at round 2 cut and taken, its *steer* parsed as the fork door
+    parses it."""
+    campaign = stores.campaigns.campaign(hop.campaign_id)
+    parsed = parse_cycle_start(steer, stores, CampaignCycle(campaign, hop.cycle_id))
+    payload = ForkCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, round=2, **asked)
+    return hop.model_copy(
+        update={"cycle_id": cut_operator_fork(stores, payload, parsed).take(stores)}
     )
 
 
-class _Scenario(NamedTuple):
-    hop: CycleHop
-    log: CycleEventLog
-    rounds: list[RoundResult]
-    pick: ArmKey
-    drawn: PartitionRecord
-    unheld: tuple[RunPhaseRecord, CycleShareRecord]
-    closing: Cycle
+def _laid(stores: Stores, hop: CycleHop) -> CycleConfig:
+    return cycle_config(
+        stores, CampaignCycle(stores.campaigns.campaign(hop.campaign_id), hop.cycle_id)
+    )
 
 
-@pytest.fixture
-def scenario_line(built_stores: Stores) -> _Scenario:
-    """A paused line closed through s0, s1 on a drawn holdout, with a share the parent holds; its
-    campaign permits model `m` on node `a`."""
-    stores = built_stores
-    closing = seat(stores).cycle
-    store = stores.campaigns
-    scenario, scenario_log = _minted(stores, "cycle_applyscenario")
-    permits_m = defaulted_config(
-        {
-            "optimization": {"degradation_threshold": 0.4},
-            "optimizer_narrowing": {"a": {"param_allowed_values": {"model": ["m"]}}},
-        }
+def _measured_in(world: World, hop: CycleHop, rnd: int) -> tuple[ArmKey, Measured]:
+    """The first arm round *rnd* measured, with the params its record ran."""
+    return next(
+        (r.arm, r.state)
+        for r in world.records(hop)
+        if isinstance(r, ArmRecord) and r.round == rnd and isinstance(r.state, Measured)
     )
-    scenario_campaign = minted_campaign(scenario, config=permits_m)
-    stored_campaign(stores, scenario_campaign)
-    minted_dataset(stores, scenario_campaign)
-    scenario_rounds: list[RoundResult] = []
-    scenario_pick = ArmKey(
-        [_emit_round(closing, scenario_log, scenario_rounds, f"s{n}") for n in range(2)][-1]
-    )
-    bank = samples(4, "g")
-    drawn = PartitionRecord.of(
-        partition_bank(bank, DatasetSplit(bench=0, demo=0, tolerance=0), seed=0),
-        dataset_hash="bank",
-        cell_identity={},
-        instrument_id="bank",
-    )
-    store.append(scenario, drawn)
-    unheld = (
-        RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT),
-        CycleShareRecord(allotment=Budget(usd=1.0)),
-    )
-    for record in unheld:
-        store.append(scenario, record)
-    return _Scenario(scenario, scenario_log, scenario_rounds, scenario_pick, drawn, unheld, closing)
 
 
 # No supersede, no inbox void, no moved pointer, no stub; nor does a cut past the last close.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_rewind_its_launch_refuses_has_written_nothing_on_its_parent(
-    built_stores: Stores, scenario_line: _Scenario
+    world: World, line: Shared
 ) -> None:
-    stores, store, scenario = built_stores, built_stores.campaigns, scenario_line.hop
+    ran = world.adopt(line)
+    stores, store, (hop, _) = ran.stores, ran.stores.campaigns, line.made
 
-    # No backend answers this dataset, so the launch refuses.
     def parent_standing() -> tuple[object, ...]:
-        index = store.load(scenario, moment=None)
+        index = store.load(hop, moment=None)
         assert index is not None
-        cycles = sorted(d.name for d in store.campaign_cycle_dirs(scenario.campaign_id))
+        cycles = sorted(d.name for d in store.campaign_cycle_dirs(hop.campaign_id))
         return cycles, read_active_pointer(store.workspace), index.final
 
     standing = parent_standing()
+    # The backend unreachable, so the launch at round 2 refuses as it opens.
+    ran.net.backend.faults["/pipeline"] = [httpx.ConnectError("down")] * 8
     for refused_round in (2, 99):
+        asked = ForkCyclePayload(
+            campaign_id=hop.campaign_id,
+            cycle_id=hop.cycle_id,
+            round=refused_round,
+            keep_rounds=True,
+        )
         with pytest.raises(PotterError):
             asyncio.run(
                 CommandDispatcher(stores, inline=Inline()).dispatch(
-                    CommandCall(
-                        ForkCyclePayload(
-                            campaign_id=scenario.campaign_id,
-                            cycle_id=scenario.cycle_id,
-                            round=refused_round,
-                            keep_rounds=True,
-                        ),
-                        door=Door.HOST,
-                    )
+                    CommandCall(asked, door=Door.HOST)
                 )
             )
-        assert store.last(scenario, CycleSupersededRecord) is None, (
+        assert store.last(hop, CycleSupersededRecord) is None, (
             f"a refused rewind at round {refused_round} superseded its parent"
         )
         assert parent_standing() == standing, (
@@ -1916,337 +1696,217 @@ def test_a_rewind_its_launch_refuses_has_written_nothing_on_its_parent(
         )
 
 
-def _operator_fork(stores: Stores, hop: CycleHop, parsed: CycleStart, **asked: Any) -> str:
-    """An operator's fork of *hop* cut and taken, its seed *parsed*."""
-    payload = ForkCyclePayload(campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, **asked)
-    return cut_operator_fork(stores, payload, parsed).take(stores)
-
-
 # The steered forks cut from the applied scenario's fork, and from each other.
 @pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_an_applied_scenario_forks_at_its_round_keeps_the_holdout_and_carries_its_criterion(
-    built_stores: Stores, scenario_line: _Scenario
+    world: World, line: Shared
 ) -> None:
-    stores, store = built_stores, built_stores.campaigns
-    scenario, _, _, scenario_pick, drawn, unheld, _ = scenario_line
+    stores, (hop, _) = world.adopt(line).stores, line.made
+    store = stores.campaigns
     criterion = "0.9 * accuracy + 0.1 * (1 - mean_latency_s)"
-    fork_id = _operator_fork(
-        stores,
-        scenario,
-        CycleStart(config_overrides=ConfigOverrides(scoring=criterion)),
-        round=2,
-        keep_rounds=True,
-    )
-    applied = scenario.model_copy(update={"cycle_id": fork_id})
+    scenario = ForkStart(config_overrides=ConfigOverrides(scoring=criterion))
+    applied = _operator_fork(stores, hop, scenario, keep_rounds=True)
     index = store.load(applied, moment=None)
     assert index is not None and index.fork is not None
     assert index.fork.issued_by.id == str(stores.identity.user_id), "the fork names no issuer"
-    assert store.last(applied, PartitionRecord) == drawn, (
+    assert store.last(applied, PartitionRecord) == store.last(hop, PartitionRecord), (
         "a redrawn holdout reads the fork's bench lift on rows its parent never held out"
     )
-    for record in unheld:
-        assert store.last(applied, type(record)) is None, (
-            f"a fork read its parent's {type(record).__name__}: its phase or its share is the parent's"
+    for kind in (RunPhaseRecord, CycleShareRecord):
+        assert store.last(hop, kind) is not None and store.last(applied, kind) is None, (
+            f"a fork read its parent's {kind.__name__}: its phase or its share is the parent's"
         )
-    # OPERATOR_REWIND is the rebase branch, the one that lifts rounds 0..N-1.
+    # OPERATOR_REWIND is the rebase branch, the one that lifts rounds 0..N-1; it stands on the
+    # pick the parent's line stood on into the cut.
+    crowns = store.standing_rounds(hop, moment=None).crowns
+    stood = crowns[max(r for r in crowns if r < 2)]
     assert (index.fork.trigger, index.cut_round, index.fork.from_candidate) == (
         ForkTrigger.OPERATOR_REWIND,
         2,
-        RoundArm(round=1, arm=scenario_pick),
+        RoundArm(round=1, arm=ArmKey(stood)),
     ), "a rewind's record names another arm than the pick its parent's line stood on"
-    start = store.read_laid_spans(applied)[-1].start
-    assert start is not None, "a rewind's start rode no record of its own"
-    base = defaulted_config({"optimization": {"degradation_threshold": 0.05}})
-    assert base.overlaid(start_layer(start.config_overrides)).scoring == criterion
-    assert base.scoring != criterion, "applying a scenario wrote through to its base config"
+    scored = (_laid(stores, applied).config.scoring, _laid(stores, hop).config.scoring)
+    assert scored[0] == criterion != scored[1], (
+        "the scenario's criterion missed its fork, or wrote through to its parent"
+    )
     # A steer outside what the campaign permits is the babysit act, and a fork of that fork lays
-    # its start over its parent's: a steer back inside the menu still runs babysat, and its mint
+    # its start over its parent's: steering nothing more, it still runs babysat, and its mint
     # stamps the intervention every answer it files is graded by.
-    campaign = stores.campaigns.campaign(scenario.campaign_id)
-
-    def steered_fork(hop: CycleHop, model: str) -> CycleHop:
-        start = parse_cycle_start(
-            ForkStart(pipeline_overlay={"a": {"model": model}}),
-            stores,
-            CampaignCycle(campaign, hop.cycle_id),
-        )
-        cycle_id = _operator_fork(stores, hop, start, round=2, keep_rounds=True)
-        return hop.model_copy(update={"cycle_id": cycle_id})
-
-    permitted = permitted_narrowing(stores, campaign)
-    babysat = steered_fork(applied, "x")
-    assert cycle_config(stores, CampaignCycle(campaign, babysat.cycle_id)).steers_outside(
-        permitted
-    ), "an unpermitted steer forked clean"
-    back = steered_fork(babysat, "m")
-    onward = cycle_config(stores, CampaignCycle(campaign, back.cycle_id))
+    permitted = permitted_narrowing(stores, store.campaign(hop.campaign_id))
+    steer = ForkStart(pipeline_overlay={"llm_only": {"model": "x"}})
+    babysat = _operator_fork(stores, applied, steer, keep_rounds=True)
+    assert _laid(stores, babysat).steers_outside(permitted), "an unpermitted steer forked clean"
+    back = _operator_fork(stores, babysat, ForkStart(), keep_rounds=True)
+    onward = _laid(stores, back)
     assert (onward.start_overlay, onward.steers_outside(permitted), onward.config.scoring) == (
-        {"a": {"model": "m"}},
+        {"llm_only": {"model": "x"}},
         True,
         criterion,
-    ), "a fork steering back inside the menu dropped what its line laid, or ran clean"
-    for hop in (babysat, back):
-        index = store.load(hop, moment=None)
-        assert index is not None and index.human_intervened, (
-            f"{hop.cycle_id} runs babysat and its mint stamped no intervention"
+    ), "a fork of a babysat fork dropped what its line laid, or ran clean"
+    for fork, babysit in ((applied, False), (babysat, True), (back, True)):
+        index = store.load(fork, moment=None)
+        assert index is not None and index.human_intervened is babysit, (
+            f"{fork.cycle_id} runs {'babysat' if babysit else 'clean'}, its mint stamped otherwise"
         )
-    clean = store.load(applied, moment=None)
-    assert clean is not None and not clean.human_intervened, "a clean fork was stamped babysat"
 
 
-# With no edit it steers nothing and stamps no intervention.
+# With no edit it steers nothing and stamps no intervention; a field cleared in the panel drops
+# the candidate's value, and the layer below shows.
 @pytest.mark.usefixtures("offline", "optimizing_memory")
 def test_a_panel_fork_off_a_candidate_runs_its_record_and_sends_only_the_operators_edit(
-    built_stores: Stores, scenario_line: _Scenario
+    world: World, line: Shared
 ) -> None:
-    stores, store = built_stores, built_stores.campaigns
-    scenario, scenario_log, scenario_rounds, *_, closing = scenario_line
-    campaign = stores.campaigns.campaign(scenario.campaign_id)
-    permitted = permitted_narrowing(stores, campaign)
-    # Provider and route included.
-    candidate_record = {"a": {"model": "m", "provider": "p", "route_order": ["r"]}}
-    candidate_key = _emit_round(
-        closing, scenario_log, scenario_rounds, "s2", resolved_params=candidate_record
-    )
-    no_edit = ForkStart()
-    assert steer_verdict(stores, permitted, no_edit.pipeline_overlay) == "clean"
-    panel_fork = scenario.model_copy(
-        update={
-            "cycle_id": _operator_fork(
-                stores,
-                scenario,
-                parse_cycle_start(no_edit, stores, CampaignCycle(campaign, scenario.cycle_id)),
-                round=2,
-                candidate_id=candidate_key,
-            )
-        }
-    )
-    panel_laid = cycle_config(stores, CampaignCycle(campaign, panel_fork.cycle_id))
-    panel_index = store.load(panel_fork, moment=None)
-    assert (panel_laid.start_overlay, panel_laid.steers_outside(permitted)) == (
-        candidate_record,
-        False,
-    ), (
-        "a panel fork candidate_record other params than its candidate's record, or steered by running them"
-    )
-    assert panel_index is not None and not panel_index.human_intervened, (
-        "a panel fork with no edit was stamped babysat"
-    )
+    ran = world.adopt(line)
+    stores, (hop, _) = ran.stores, line.made
+    permitted = permitted_narrowing(stores, stores.campaigns.campaign(hop.campaign_id))
+    candidate, measured = _measured_in(ran, hop, 2)
+    ran_on = {n: c for n, c in measured.resolved_params.items() if n != "steps"}
+    cleared = ForkStart(pipeline_overlay={"llm_only": {"route_order": None}})
+    for start, laid in (
+        (ForkStart(), ran_on),
+        (
+            cleared,
+            {"llm_only": {k: v for k, v in ran_on["llm_only"].items() if k != "route_order"}},
+        ),
+    ):
+        fork = _operator_fork(stores, hop, start, candidate_id=str(candidate), start=start)
+        panel = _laid(stores, fork)
+        index = stores.campaigns.load(fork, moment=None)
+        assert (panel.start_overlay, panel.steers_outside(permitted)) == (laid, False), (
+            "a panel fork laid other params than its candidate's record and its edit, or steered"
+        )
+        assert index is not None and not index.human_intervened, (
+            "a panel fork steering inside the menu was stamped babysat"
+        )
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_field_cleared_in_the_panel_drops_the_candidates_value_and_the_layer_below_shows(
-    built_stores: Stores, scenario_line: _Scenario
-) -> None:
-    stores = built_stores
-    scenario, scenario_log, scenario_rounds, *_, closing = scenario_line
-    campaign = stores.campaigns.campaign(scenario.campaign_id)
-    candidate_record = {"a": {"model": "m", "provider": "p", "route_order": ["r"]}}
-    candidate_key = _emit_round(
-        closing, scenario_log, scenario_rounds, "s2", resolved_params=candidate_record
-    )
-    cleared = ForkStart(pipeline_overlay={"a": {"route_order": None}})
-    reset_fork = scenario.model_copy(
-        update={
-            "cycle_id": _operator_fork(
-                stores,
-                scenario,
-                parse_cycle_start(cleared, stores, CampaignCycle(campaign, scenario.cycle_id)),
-                round=2,
-                candidate_id=candidate_key,
-                start=cleared,
-            )
-        }
-    )
-    assert cycle_config(stores, CampaignCycle(campaign, reset_fork.cycle_id)).start_overlay == {
-        "a": {"model": "m", "provider": "p"}
-    }, "a cleared field forked with the candidate's value"
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_rewind_fork_asked_to_rewind_its_parent_too_refuses_before_any_cut(
-    built_stores: Stores, scenario_line: _Scenario
-) -> None:
-    stores, scenario = built_stores, scenario_line.hop
-    before = [hop.cycle_id for hop, _ in stores.campaigns.campaign_cycles(scenario.campaign_id)]
-    # `resume --rewind 2 --from 1`, as the terminal lays it.
+def test_a_rewind_fork_asked_to_rewind_its_parent_too_refuses() -> None:
+    # `resume --rewind 2 --from 1`, as the terminal lays it: no run of its would rewind its parent.
     with pytest.raises(PayloadInvalidError):
         PayloadInvalidError.validating(
             ForkCyclePayload,
             {
-                "campaign_id": scenario.campaign_id,
-                "cycle_id": scenario.cycle_id,
+                "campaign_id": "c",
+                "cycle_id": "cycle_c",
                 "round": 2,
                 "keep_rounds": True,
                 "mode": RunMode(from_round=1),
             },
         )
-    after = [hop.cycle_id for hop, _ in stores.campaigns.campaign_cycles(scenario.campaign_id)]
-    assert after == before, "a fork whose run would rewind its parent in place was cut"
 
 
 # It goes ahead on its own authority over the parent (bl1.B5).
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_fork_by_another_issuer_withdraws_the_launch_queued_on_its_parent(
-    built_stores: Stores,
-    scenario_line: _Scenario,
-    monkeypatch: pytest.MonkeyPatch,
+    world: World, line: Shared
 ) -> None:
-    stores, store, scenario = built_stores, built_stores.campaigns, scenario_line.hop
+    stores, (hop, _) = world.adopt(line).stores, line.made
     room = [0]
     queue = JobRegistry(stores.jobs_dir, capacity=lambda _live: room[0])
     (parents_launch,) = request_jobs(
-        stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=scenario
+        stores=stores, job_registry=queue, holder=CampaignLaunch("ds1"), hop=hop
     )
     assert parents_launch.queued, "guard: the parent's launch holds a place in line"
     room[0] = 1
     other = dataclasses.replace(
         stores, identity=dataclasses.replace(stores.identity, claims={"principal": "sub-1"})
     )
-
-    async def past_its_refusals(admitted: Admitted) -> Any:
-        # The journey asks what the held fork does to its parent, not what holds it.
-        return SimpleNamespace(start=admitted.start, session=admitted.request.at)
-
-    monkeypatch.setattr(Admitted, "held", past_its_refusals)
-    asyncio.run(
-        CommandDispatcher(other, job_registry=queue, inline=Inline()).dispatch(
-            CommandCall(
-                ForkCyclePayload(
-                    campaign_id=scenario.campaign_id,
-                    cycle_id=scenario.cycle_id,
-                    round=2,
-                    keep_rounds=True,
-                ),
-                door=Door.HOST,
-            )
-        )
+    asked = ForkCyclePayload(
+        campaign_id=hop.campaign_id, cycle_id=hop.cycle_id, round=2, keep_rounds=True
     )
+
+    async def forked() -> None:
+        dispatched = await CommandDispatcher(other, job_registry=queue, inline=Inline()).dispatch(
+            CommandCall(asked, door=Door.HOST)
+        )
+        launched = dispatched.result
+        assert isinstance(launched, Launched) and launched.held is not None
+        # The journey asks what the held fork does to its parent, not what its run does next.
+        async with (await launched.held).closing:
+            pass
+
+    asyncio.run(forked())
     withdrawn = queue.get(parents_launch.job_id)
     assert withdrawn is not None and withdrawn.lapse == "withdrawn", (
         "a fork left its parent's queued launch to run beside it"
     )
-    assert store.holder(scenario) is None, "a withdrawn launch still claims the parent"
-    assert store.last(scenario, CycleSupersededRecord) is not None, "the fork never took"
+    assert stores.campaigns.holder(hop) is None, "a withdrawn launch still claims the parent"
+    assert stores.campaigns.last(hop, CycleSupersededRecord) is not None, "the fork never took"
 
 
 class _Displaced(NamedTuple):
+    cut: ForkCut
     parent: CycleHop
     fork: CycleHop
-    prefix: list[str]
-    closed: list[RoundResult]
-    closing: Cycle
+    before: list[tuple[int, ArmKey]]
 
 
-@pytest.fixture
-def displaced_line(built_stores: Stores) -> _Displaced:
-    """A line closed through p0..p2 and a fork minted off it at round 3, holding no round of its
-    own yet."""
-    stores, store = built_stores, built_stores.campaigns
-    closing = seat(stores).cycle
-    displaced = CycleHop(campaign_id="displaced__20260101-000000", cycle_id="cycle_displaced")
-    stored_campaign(stores, minted_campaign(displaced))
-    stores.campaigns.mint_cycle(displaced)
-    ledger = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(displaced)))
-    closed: list[RoundResult] = []
-    prefix = [_emit_round(closing, ledger, closed, f"p{n}") for n in range(3)]
-    fork_hop = _mint_sibling(
-        store,
-        displaced,
-        "cycle_displaced_fork_r1",
-        ForkSpec(
-            trigger=ForkTrigger.OPERATOR_REWIND,
-            reason="",
-            issued_by=SYSTEM_PRINCIPAL,
-            from_candidate=RoundArm(round=2, arm=ArmKey(prefix[2])),
-        ),
-        cut_round=3,
-    )
-    return _Displaced(displaced, fork_hop, prefix, closed, closing)
+@pytest.fixture(scope="module")
+def displaced(tmp_path_factory: pytest.TempPathFactory, line: Shared) -> Shared:
+    """`line` (`parent`) forked at round 2 through the `fork_cycle` door (`fork`), and a campaign
+    paused after round 1 with a fork cut off it and not yet taken (`cut`); run once for the
+    module (~3 s on `line`'s): each fact adopts its own copy."""
+
+    async def act(world: World) -> _Displaced:
+        parent, _ = line.made
+        before = sorted(world.stores.campaigns.standing_rounds(parent, moment=None).arms)
+        fork = (await world.fork(parent, 2, keep_rounds=True)).hop
+        paused = (await world.campaign(rounds=2, step_rounds=0)).hop
+        asked = ForkCyclePayload(
+            campaign_id=paused.campaign_id, cycle_id=paused.cycle_id, round=1, keep_rounds=True
+        )
+        cut = cut_operator_fork(world.stores, asked, CycleStart())
+        return _Displaced(cut, parent, fork, before)
+
+    return shared_run(tmp_path_factory, act, on=line)
 
 
-def _fork_own_rounds(stores: Stores, line: _Displaced) -> list[str]:
-    """The fork's own rounds over its parent's round 0: f1 crowned, f2 not."""
-    own = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(line.fork)))
-    forked = line.closed[:1]
-    return [
-        _emit_round(line.closing, own, forked, "f1"),
-        _emit_round(line.closing, own, forked, "f2", crowned=False),
-    ]
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_forks_own_ledger_displaces_its_parents_prefix_once(
-    built_stores: Stores, displaced_line: _Displaced
+    world: World, displaced: Shared
 ) -> None:
-    store = built_stores.campaigns
-    displaced, fork_hop, prefix, *_ = displaced_line
+    ran = world.adopt(displaced)
+    store, (_, parent, fork, before) = ran.stores.campaigns, displaced.made
+    on_parent = store.standing_rounds(parent, moment=None)
+    on_fork = store.standing_rounds(fork, moment=None)
+    own = {(r.round, r.arm) for r in ran.records(fork) if isinstance(r, ArmRecord)}
+    assert sorted(on_parent.arms) == before, "the fork's rounds displaced its parent's own"
+    assert {a for a in on_fork.arms if a[0] < 2} == {a for a in before if a[0] < 2}, (
+        "the fork does not continue its parent's rounds below its cut"
+    )
+    assert {a for a in on_fork.arms if a[0] >= 2} == own and own, (
+        "a parent round stood beside the fork's own, or the fork's own stood twice"
+    )
+    assert {r: k for r, k in on_fork.crowns.items() if r < 2} == {
+        r: k for r, k in on_parent.crowns.items() if r < 2
+    }, "the fork re-crowned its parent's prefix"
 
-    def candidates(hop: CycleHop) -> list[str]:
-        return [key for _, key in store.standing_rounds(hop, moment=None).arms]
 
-    assert candidates(fork_hop) == prefix, "the fork does not continue its parent's rounds"
-    mine = _fork_own_rounds(built_stores, displaced_line)
-    stood = store.standing_rounds(fork_hop, moment=None)
-    assert candidates(fork_hop) == [prefix[0], *mine], "a parent round stood beside the fork's own"
-    assert [next(iter(r.close.arms)) for r in stood.rounds.values()] == [prefix[0], *mine]
-    assert stood.crowns == {0: prefix[0], 1: mine[0]}
-    assert candidates(displaced) == prefix, "the fork's rounds displaced its parent's own"
-
-
-# A line whose origin walk never closed names its origin by the arm it announced.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+# Pure over the standing line: a cut hangs from the newest crown below it, round 0 its origin's.
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_line_stands_on_its_origin_until_an_election_crowns_another(
-    built_stores: Stores,
+    world: World, displaced: Shared
 ) -> None:
-    stores, store = built_stores, built_stores.campaigns
-    closing = seat(stores).cycle
-    walked_only, origin_log = _minted(stores, "cycle_origin_only")
-    walked_origin = ArmKey(prompted(instruction="w_origin").id)
-    origin_position = ArmPosition(round=0, idx=0, total=1)
-    origin_log.append(
-        ArmRecord(round=0, arm=walked_origin, state=arm_state("w_origin", position=origin_position))
-    )
-    on_origin = RoundArm(round=0, arm=walked_origin)
-    for cut_round in (0, 1):
-        assert fork_edge(store.standing_rounds(walked_only, moment=None), cut_round, None) == (
-            on_origin
-        ), "a fork of a line no election crowned hangs from no candidate, or from another"
-    crown = ArmKey(prompted(instruction="w_crown").id)
-    close_round(
-        origin_log,
-        [
-            # `close_round` closes the line's last round alone: round 0 stays the announced arm.
-            _round(
-                round=0,
-                arms={walked_origin: arm_state("w_origin", position=origin_position)},
-                election=election(walked_origin),
-            ),
-            _round(
-                round=1,
-                arms={crown: arm_state("w_crown", position=ArmPosition(round=1, idx=0, total=1))},
-                election=election(crown),
-            ),
-        ],
-        cycle=closing,
-    )
-    standing_now = store.standing_rounds(walked_only, moment=None)
-    assert (fork_edge(standing_now, 0, None), fork_edge(standing_now, 2, None)) == (
-        on_origin,
-        RoundArm(round=1, arm=crown),
-    ), "a cut stands on a candidate other than the line's newest crown below it"
+    ran = world.adopt(displaced)
+    standing = ran.stores.campaigns.standing_rounds(displaced.made.parent, moment=None)
+    crowns = standing.crowns
+    assert len(crowns) > 1, "guard: the line crowned past its origin"
+    for cut_round in range(max(standing.rounds) + 2):
+        below = max(r for r in crowns if r < max(cut_round, 1))
+        assert fork_edge(standing, cut_round, None) == RoundArm(round=below, arm=crowns[below]), (
+            f"a cut at {cut_round} stands on another candidate than the newest crown below it"
+        )
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_steps_silence_is_the_familys_wherever_a_window_cuts_the_ray(
-    built_stores: Stores, displaced_line: _Displaced
+    world: World, displaced: Shared
 ) -> None:
-    stores, fork_hop = built_stores, displaced_line.fork
-    _fork_own_rounds(stores, displaced_line)
+    ran = world.adopt(displaced)
 
     def gaps(limit: int) -> dict[str, float]:
-        ray = open_family_ray(stores, (fork_hop,), limit=limit, before=None).window()
-        return {step.address: step.facts.gap_before_s for step in ray.steps}
+        ray = open_family_ray(ran.stores, (displaced.made.fork,), limit=limit, before=None)
+        return {step.address: step.facts.gap_before_s for step in ray.window().steps}
 
     whole = gaps(10_000)
     assert len(whole) > 2, "guard"
@@ -2257,47 +1917,60 @@ def test_a_steps_silence_is_the_familys_wherever_a_window_cuts_the_ray(
         )
 
 
-# A holder declares its own stop; the hierarchy then reads the line the supersede moved.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+# A holder declares its own stop.
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_supersede_ends_its_parent_only_where_no_producer_holds_it(
-    built_stores: Stores, displaced_line: _Displaced, tmp_path: Path
+    world: World, displaced: Shared
 ) -> None:
-    stores, store = built_stores, built_stores.campaigns
-    displaced, fork_hop, *_ = displaced_line
-    _fork_own_rounds(stores, displaced_line)
+    ran = world.adopt(displaced)
+    stores, cut = ran.stores, displaced.made.cut
 
-    def ended(hop: CycleHop) -> StopReason | None:
-        index = store.load(hop, moment=None)
+    def ended() -> StopReason | None:
+        index = stores.campaigns.load(cut.parent, moment=None)
         assert index is not None
         return index.stop_reason
 
+    assert ended() is None, "guard: the cut's parent stands paused"
     # Held as a server-launched run holds it, from a lock of its own process.
-    lock = CycleLayout(store.cycle_dir(displaced)).producer_lock
+    lock = CycleLayout(stores.campaigns.cycle_dir(cut.parent)).producer_lock
     producer = take_lock(lock, wait_s=0)
     assert producer is not None
     with probe_lock(lock) as seen:
         assert seen, "a reader's probe missed the producer holding the cycle"
-    stores.mark_superseded(displaced, fork_hop.cycle_id)
+    cut.take(stores)
     producer.release()
-    assert ended(displaced) is None, "a supersede ended its parent under the producer running it"
+    assert ended() is None, "a supersede ended its parent under the producer running it"
     lock.touch()
     with probe_lock(lock):
         assert not producer_lock.held(lock), (
             "a reader's probe in flight read as a producer, so a supersede would skip its stop"
         )
-    stores.mark_superseded(displaced, fork_hop.cycle_id)
-    assert ended(displaced) is StopReason.REBASED, "a superseded parent no producer holds runs on"
+    cut.take(stores)
+    assert ended() is StopReason.REBASED, "a superseded parent no producer holds runs on"
+
+
+def _listed(stores: Stores, campaign_id: str) -> HierarchyCampaign:
     [listed] = list_hierarchy(
         stores,
         inside=(),
         dataset=None,
         lifecycle="all",
-        campaign_id=displaced.campaign_id,
+        campaign_id=campaign_id,
         attached_only=False,
         depth=1,
     ).entries
     assert isinstance(listed, HierarchyCampaign), "guard"
-    assert listed.facts.live_cycle == Subject.of((fork_hop,)).address, (
+    return listed
+
+
+# The hierarchy reads the line the supersede moved, and the bench chip its line's archive rows.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_superseded_campaigns_line_bench_and_stand_are_its_forks(
+    world: World, displaced: Shared
+) -> None:
+    stores, fork = world.adopt(displaced).stores, displaced.made.fork
+    listed = _listed(stores, fork.campaign_id)
+    assert listed.facts.live_cycle == Subject.of((fork,)).address, (
         "the campaign's line stayed on the cycle a supersede retired"
     )
     [line_cycle] = [c for c in listed.children if c.address == listed.facts.live_cycle]
@@ -2308,8 +1981,35 @@ def test_a_supersede_ends_its_parent_only_where_no_producer_holds_it(
     assert [r for r in listed.figures if r.key == "bench"] == [
         r for r in line_cycle.figures if r.key == "bench"
     ], "the campaign's bench is not its line's"
-    # The bench chip grades archive rows, so a regrade at rest must answer the next ask with a body.
-    validator = subtree_version(stores, listed.address)
+    picked = line_cycle.facts.standing.selection
+    assert picked is not None, "guard"
+    # The fork's pick may be a round of the prefix it reads: it stands on the cycle owning that round.
+    subtree = hierarchy_subtree(stores, listed.address, None, None, moment=None)
+    line_stood = [
+        e
+        for cycle in entries_under(subtree)
+        if isinstance(cycle, SubtreeCycle)
+        for rnd in cycle.children
+        if isinstance(rnd, HierarchyRound)
+        for e in rnd.children
+        if e.facts.stands
+    ]
+    assert [(e.facts.reading.arm.round, e.facts.reading.arm.key) for e in line_stood] == [
+        (picked.round, picked.key)
+    ], "the subtree stands a candidate other than the one the line's index selected"
+    assert line_cycle.facts.standing.changes == line_stood[0].facts.reading.changes_description, (
+        "the cycle's standing names another pick's change than the candidate it stands"
+    )
+
+
+# The bench chip grades archive rows, so a regrade at rest must answer the next ask with a body.
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_archive_write_moves_the_subtrees_validator_and_the_feeds_store_version(
+    world: World, displaced: Shared, tmp_path: Path
+) -> None:
+    stores = world.adopt(displaced).stores
+    address = _listed(stores, displaced.made.fork.campaign_id).address
+    validator = subtree_version(stores, address)
     feed_jobs = JobRegistry(tmp_path / "feed_jobs", capacity=lambda _live: 1)
     fed = feed_versions(stores, feed_jobs)["store:"]
     filed(
@@ -2317,48 +2017,29 @@ def test_a_supersede_ends_its_parent_only_where_no_producer_holds_it(
         [archive_row("q_regraded", predicted="p")],
         filed_under(dataset_hash="regradeds"),
     )
-    assert subtree_version(stores, listed.address) != validator, (
+    assert subtree_version(stores, address) != validator, (
         "an archive write left the subtree's validator standing: its BENCH chip goes stale behind a 304"
     )
     moved = feed_versions(stores, feed_jobs)["store:"]
     assert moved.process == fed.process and moved.n > fed.n, (
-        "the feed's store version did not move forward on an archive write: a browser keeps the "
-        "BENCH chip it holds, or lands an older read over a newer one"
+        "the feed's store version did not move forward on an archive write"
     )
     assert feed_versions(stores, feed_jobs)["store:"] == moved, "an unmoved store moved its version"
-    picked = line_cycle.facts.standing.selection
-    assert picked is not None, "guard"
-    [line_drawn] = [
-        e
-        for e in entries_under(hierarchy_subtree(stores, listed.address, None, None, moment=None))
-        if isinstance(e, SubtreeCycle) and e.address == listed.facts.live_cycle
-    ]
-    line_stood = [
-        e
-        for rnd in line_drawn.children
-        if isinstance(rnd, HierarchyRound)
-        for e in rnd.children
-        if e.facts.stands
-    ]
-    assert [(e.facts.reading.arm.round, e.facts.reading.arm.key) for e in line_stood] == [
-        (picked.round, picked.key)
-    ], "the subtree stands a candidate on the line other than the one its index selected"
-    assert line_cycle.facts.standing.changes == line_stood[0].facts.reading.changes_description, (
-        "the cycle's standing names another pick's change than the candidate it stands"
-    )
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_running_parents_pause_landing_after_its_supersede_keeps_it_superseded(
-    built_stores: Stores, displaced_line: _Displaced
+    world: World, displaced: Shared
 ) -> None:
     # The fork files its parent's pause for the loop, then supersedes it: the pause lands last.
-    store = built_stores.campaigns
-    displaced, fork_hop, *_ = displaced_line
-    store.append(displaced, CycleSupersededRecord(successor_cycle_id=fork_hop.cycle_id))
-    store.append(displaced, RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT))
-    index = store.load(displaced, moment=None)
-    assert index is not None and index.superseded_by == fork_hop.cycle_id, (
+    ran = world.adopt(displaced)
+    stores, cut = ran.stores, displaced.made.cut
+    cut.take(stores)
+    stores.campaigns.append(
+        cut.parent, RunPhaseRecord.stop(StopReason.PAUSED, cause=PauseCause.INTERRUPT)
+    )
+    index = stores.campaigns.load(cut.parent, moment=None)
+    assert index is not None and index.superseded_by == cut.child.cycle_id, (
         "the parent's own pause erased its supersede: the line still reads as the parent's"
     )
 
@@ -2367,500 +2048,290 @@ def _ident(name: str) -> str:
     return prompted(instruction=name).id
 
 
+def _addr(hop: CycleHop, rnd: int, individual: str) -> str:
+    return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(individual)).address
+
+
 def _cycle_of(hop: CycleHop) -> str:
     return Subject.of((hop,)).address
-
-
-def _at(hop: CycleHop, rnd: int, name: str) -> str:
-    return Subject.of((hop,))._replace(round=rnd, candidate_id=ArmKey(_ident(name))).address
-
-
-def _trunk_picks(hops: dict[str, CycleHop]) -> tuple[str, str, str, str]:
-    """The trunk's origin o, its round-1 arms a and b, and the grand's x."""
-    family, grand = hops["family"], hops["grand"]
-    return (
-        _at(family, 0, "o"),
-        _at(family, 1, "a"),
-        _at(family, 1, "b"),
-        _at(grand, 3, "x"),
-    )
-
-
-# ONE line resolver over a fork-of-a-fork-of-a-fork: every (cycle, round) reads off the cycle
-# owning it, as the mint records say. The trunk crowns o, a, z; the kid cuts it at 2 and holds;
-# the grand cuts the kid at 3 and crowns x; the great cuts the grand at 4; a steer takes the kid
-# back to C0, another the grand to b, an arm of the trunk's round 1 never crowned; rewinds re-run
-# the grand's round 1 and its round 3.
-# One row per round closed, in ledger order: a cycle's first row mints it off `parent`, cut at
-# `cut` (a steer names the candidate it starts from); every row closes one round on it.
-_FAMILY_ROWS: list[
-    tuple[str, str, int, tuple[int, str] | None, list[str], str | None, str | None]
-] = [
-    # cycle, parent, cut, steered from, arms, crown, reference
-    ("family", "", 0, None, ["o"], "o", None),
-    ("family", "", 0, None, ["a", "b"], "a", "o"),
-    ("kid", "family", 2, None, ["y"], None, "a"),
-    ("family", "", 0, None, ["a", "z"], "z", None),
-    ("grand", "kid", 3, None, ["x"], "x", "a"),
-    ("great", "grand", 4, None, ["v"], "v", "x"),
-    ("steered", "kid", 0, (0, "o"), ["s"], "s", None),
-    ("rewound", "grand", 1, None, ["w"], "w", "o"),
-    ("redone", "grand", 3, None, ["q"], "q", "a"),
-    ("branched", "grand", 0, (1, "b"), ["p"], "p", None),
-    ("rerun", "grand", 0, (3, "a"), ["r"], "r", None),
-    ("relift", "grand", 0, (1, "o"), ["l"], "l", None),
-    ("mended", "grand", 3, None, ["m"], "m", "a"),
-    # A supersede fork of a supersede fork, cut below where every cycle above it was cut.
-    ("carried", "rewound", 2, None, ["d"], "d", "w"),
-    # A cycle already minted, cut again: `--from` in place, re-running round 1 after the fork.
-    ("rewound", "", 1, None, ["k"], "k", "o"),
-    # Two supersede forks of one cycle, the second cut above where the first branched, then the
-    # cycle re-run in place under both: the first still retires what the second stands on.
-    ("rival", "kid", 0, (0, "o"), ["c"], "c", None),
-    ("rival", "", 0, None, ["e", "f"], "e", "c"),
-    ("first", "rival", 1, None, ["i"], "i", "c"),
-    ("first", "", 0, None, ["n"], "n", "i"),
-    ("rival", "", 0, None, ["g"], "g", "e"),
-    ("second", "rival", 3, None, ["h"], "h", "g"),
-    ("rival", "", 2, None, ["j"], "j", "e"),
-    # An arm re-run away that only an offshoot's read holds, and no line stands on.
-    ("steered", "", 0, None, ["t"], "t", "s"),
-    ("glance", "steered", 0, (0, "s"), ["u"], "u", None),
-    ("steered", "", 1, None, ["t2"], "t2", "s"),
-    # Re-run in place BELOW an arm a cut still holds: that arm reads the line it ran on.
-    ("steered", "", 0, None, ["t3"], "t3", "t2"),
-    ("peek", "steered", 0, (2, "t3"), ["u2"], "u2", None),
-    ("steered", "", 1, None, ["t4"], "t4", "s"),
-]
 
 
 class _Family(NamedTuple):
     stores: Stores
     hops: dict[str, CycleHop]
-    line_of: dict[str, list[RoundResult]]
-    asks: dict[str, tuple[CycleHop, int, str, MeasurementRole]]
-    seed_key: ArmKey
     tree: HierarchyEntry
+    inner: HierarchyEntry
+    home: Path
 
 
+# A trunk; a rewind fork of it cut at 2 (kid) and one of the kid cut at 3 (grand); a steer off a
+# round-1 arm the trunk never crowned; then the kid re-run in place from 2, below the grand's cut;
+# and an L4 campaign whose inner runs its sandbox holds. ~17 s once; every fact on it only reads.
 @pytest.fixture(scope="module")
-def family_tree(tmp_path_factory: pytest.TempPathFactory) -> _Family:
-    """Built once, at a home of its own: every fact on it only reads."""
-    with scoped(memory=OpenAt()), pytest.MonkeyPatch.context() as home:
-        home.setenv("PROMPTPOTTER_HOME", str(tmp_path_factory.mktemp("family")))
-        return _family(workspace())
+def family_tree(tmp_path_factory: pytest.TempPathFactory, line: Shared) -> _Family:
+    """`line` as the trunk, two rewind forks, a steer off an uncrowned arm, the kid re-run from 2
+    and an L4 campaign, run once for the module (~11 s, the L4 ~8 s of it): facts read it."""
 
-
-def _family(stores: Stores) -> _Family:
-    """Every row of `_FAMILY_ROWS` closed, inner runs spawned by each ask, and the subtree read."""
-    store = stores.campaigns
-    closing = seat(stores).cycle
-    family = CycleHop(campaign_id="family__20260101-000000", cycle_id="cycle_family")
-    stored_campaign(
-        stores,
-        minted_campaign(
-            family,
-            config=defaulted_config({"optimization": {"degradation_threshold": 0.4}}),
-        ),
-    )
-    stores.campaigns.mint_cycle(family)
-    restated_at_mint = {"mended": [1]}
-    hops, line_of = {"family": family}, {"family": list[RoundResult]()}
-    for (
-        row_cycle,
-        row_parent,
-        row_cut,
-        row_named,
-        row_picks,
-        row_crown,
-        row_reference,
-    ) in _FAMILY_ROWS:
-        if row_cycle in hops and row_cut:
-            store.rewind_to_round(hops[row_cycle], row_cut - 1)
-            del line_of[row_cycle][row_cut:]
-        if row_cycle not in hops:
-            spec = ForkSpec(
-                trigger=ForkTrigger.OPERATOR_STEERED if row_named else ForkTrigger.OPERATOR_REWIND,
-                reason="",
-                issued_by=SYSTEM_PRINCIPAL,
-                # The one resolution `cut_fork` writes: the named arm, else the line's pick.
-                from_candidate=fork_edge(
-                    store.standing_rounds(hops[row_parent], moment=None),
-                    row_cut,
-                    None
-                    if row_named is None
-                    else RoundArm(round=row_named[0], arm=ArmKey(_ident(row_named[1]))),
-                ),
-            )
-            hops[row_cycle] = _mint_sibling(
-                store, hops[row_parent], f"cycle_family_{row_cycle}", spec, cut_round=row_cut
-            )
-            line_of[row_cycle] = line_of[row_parent][:row_cut]
-            # A repair restates a lifted round WHOLE at its mint, so the round is the fork's own.
-            for r in restated_at_mint.get(row_cycle, ()):
-                lifted = store.standing_rounds(hops[row_cycle], moment=None).rounds[r].close
-                store.append(hops[row_cycle], lifted.restated(lifted.optimizer_state))
-        line, n = line_of[row_cycle], len(line_of[row_cycle])
-        arms = {
-            ArmKey(_ident(p)): arm_state(
-                p, position=ArmPosition(round=n, idx=i, total=len(row_picks))
-            )
-            for i, p in enumerate(row_picks)
-        }
-        if row_reference is not None:
-            arms[ArmKey(_ident(row_reference))] = arm_state(
-                row_reference,
-                position=walked_position(line, ArmKey(_ident(row_reference))),
-                role=MeasurementRole.PARENT,
-            )
-            root = next(iter(line[0].arms))
-            assert line_reference(line, origin=root).arm == _ident(row_reference), (
-                f"guard: a row re-reads off {row_cycle}'s line"
-            )
-        row_ended = row_crown or row_reference or row_picks[0]
-        line.append(
-            _round(
-                round=n,
-                arms=arms,
-                reference=None if row_reference is None else line_reference(line, origin=root),
-                election=election(
-                    None if row_crown is None else _ident(row_crown),
-                    ended_on=_ident(row_ended),
-                ),
-            )
+    async def act(world: World) -> dict[str, CycleHop]:
+        trunk, _ = line.made
+        kid = (await world.fork(trunk, 2, keep_rounds=True)).hop
+        grand = (await world.fork(kid, 3, keep_rounds=True)).hop
+        # A candidate's record pins the host the world's LLM names, which the world's OpenRouter
+        # host list lacks: listed, so a steer laying that record prices its dollar ceiling.
+        hosts = json.loads(json.dumps(OPENROUTER_ENDPOINTS))
+        hosts["data"]["endpoints"][0]["tag"] = "Groq"
+        world.net.hosts.update(
+            dict.fromkeys(("openai/gpt-oss-20b", "openai/gpt-oss-20b:nitro"), hosts)
         )
-        close_round(
-            CycleEventLog.open(CycleDir(store.cycle_dir(hops[row_cycle]))), line, cycle=closing
+        stood = world.stores.campaigns.standing_rounds(trunk, moment=None)
+        uncrowned = next(k for k in stood.rounds[1].close.arms if k != stood.crowns[1])
+        steered = (await world.fork(trunk, 1, candidate_id=uncrowned)).hop
+        await world.resume(kid, from_round=2)
+        l4 = (await world.l4_campaign()).hop
+        return {"trunk": trunk, "kid": kid, "grand": grand, "steered": steered, "l4": l4}
+
+    shared = shared_run(tmp_path_factory, act, on=line)
+    with pytest.MonkeyPatch.context() as home, scoped(memory=OpenAt()):
+        home.setenv("PROMPTPOTTER_HOME", str(shared.home))
+        stores, hops = workspace(), shared.made
+        tree, inner = (
+            hierarchy_subtree(stores, Subject(h.campaign_id).address, None, None, moment=None)
+            for h in (hops["trunk"], hops["l4"])
         )
-    grand, rewound, peek = hops["grand"], hops["rewound"], hops["peek"]
-    # A round still measuring: its re-read is announced, and nothing has elected or closed.
-    live = len(line_of["peek"])
-    CycleEventLog.open(CycleDir(store.cycle_dir(peek))).append(
-        ArmRecord(
-            round=live,
-            arm=ArmKey(_ident("u2")),
-            state=arm_state(
-                "u2", position=ArmPosition(round=0, idx=0, total=1), role=MeasurementRole.PARENT
-            ),
+        return _Family(stores, hops, tree, inner, shared.home)
+
+
+def _owned(
+    stores: Stores, hop: CycleHop, moment: Moment | None = None
+) -> dict[int, tuple[CycleHop, ArmKey | None]]:
+    """By round, the cycle owning it and what that cycle crowned there, as *hop* stood at *moment*:
+    off each cycle's own ledger and mint record, never the subtree."""
+    stood = stores.campaigns.standing_rounds(hop, moment=moment)
+    index = stores.campaigns.load(hop, moment=None)
+    assert index is not None
+    cut = index.cut_round or 0
+    own = {k: (hop, stood.crowns.get(k)) for k in stood.rounds if k >= cut}
+    if not cut or index.parent_cycle_id is None or index.forked_at_offset is None:
+        return own
+    parent = hop.model_copy(update={"cycle_id": index.parent_cycle_id})
+    at_cut = Moment(stores.campaigns.ledger(parent), index.forked_at_offset - 1)
+    return {k: v for k, v in _owned(stores, parent, at_cut).items() if k < cut} | own
+
+
+def _started(stores: Stores, hop: CycleHop) -> tuple[str | None, str]:
+    """The candidate *hop*'s mint record hangs it from, as its parent stood at the cut, and its
+    origin."""
+    index = stores.campaigns.load(hop, moment=None)
+    assert index is not None
+    owner, crown = _owned(stores, hop)[0]
+    origin = _addr(owner, 0, str(crown))
+    if index.fork is None or index.parent_cycle_id is None or index.forked_at_offset is None:
+        return None, origin
+    parent = hop.model_copy(update={"cycle_id": index.parent_cycle_id})
+    at_cut = Moment(stores.campaigns.ledger(parent), index.forked_at_offset - 1)
+    named = index.fork.from_candidate
+    assert named is not None
+    owner = _owned(stores, parent, at_cut)[named.round][0]
+    return _addr(owner, named.round, named.arm), origin
+
+
+def test_a_reread_stamps_the_latest_walk_of_its_individual() -> None:
+    def walk(rnd: int, role: MeasurementRole = MeasurementRole.PANEL) -> RoundResult:
+        at = ArmPosition(round=rnd, idx=0, total=1)
+        return round_result(rnd, arms=[arm_state("a", position=at, role=role)])
+
+    re_read = MeasurementRole.PARENT
+    for line, stamped in (([walk(1), walk(2)], 2), ([walk(1), walk(2, re_read)], 1)):
+        walked = walked_position(line, arm_key("a"))
+        assert walked is not None and walked.round == stamped, (
+            f"a re-read stamps a walk other than its latest: {walked} for round {stamped}"
         )
-    )
-    inner_sandbox(stores, family.campaign_id, family.cycle_id)
-    sandbox = inner_sandbox_store(stores, family)
-    assert sandbox is not None, "guard"
-    asks = {
-        "reread": (grand, 3, "a", MeasurementRole.PARENT),
-        "again": (family, 2, "a", MeasurementRole.PANEL),
-        "own": (grand, 3, "x", MeasurementRole.PANEL),
-        # A pass beside the draw, of the very individual round 3 re-read: no arm asked it.
-        "overlap": (grand, 3, "a", MeasurementRole.OVERLAP),
-        # Asked by an arm its cycle has since re-run away: it is still the candidate that ran it.
-        "unrun": (rewound, 1, "w", MeasurementRole.PANEL),
-        # Asked by a re-read whose round has not elected yet.
-        "live": (peek, live, "u2", MeasurementRole.PARENT),
-    }
-    for name, (asker, rnd, pick, role) in asks.items():
-        spawned = CycleHop(campaign_id=f"{name}__20260101-000000", cycle_id=f"cycle_{name}")
-        stored_campaign(sandbox, minted_campaign(spawned))
-        sandbox.campaigns.mint_cycle(spawned)
-        sandbox.campaigns.append(
-            spawned,
-            SpawnedRecord(
-                spawned_by=SpawnedBy(
-                    round=rnd,
-                    individual_id=_ident(pick),
-                    role=role,
-                    cycle_id=asker.cycle_id,
-                    task=f"t/{name}",
-                )
-            ),
-        )
-    # The run x asked closes its origin: its line continues the line of the candidate that asked.
-    seeded = CycleHop(campaign_id="own__20260101-000000", cycle_id="cycle_own")
-    seed_key = ArmKey(_ident("w0"))
-    close_round(
-        CycleEventLog.open(CycleDir(sandbox.campaigns.cycle_dir(seeded))),
-        [
-            _round(
-                round=0,
-                arms={seed_key: arm_state("w0", position=ArmPosition(round=0, idx=0, total=1))},
-                election=election(seed_key, ended_on=seed_key),
-            )
-        ],
-        cycle=closing,
-    )
-    tree = hierarchy_subtree(stores, Subject(family.campaign_id).address, None, None, moment=None)
-    return _Family(stores, hops, line_of, asks, seed_key, tree)
+    assert walked_position([walk(1, re_read)], arm_key("a")) is None, "a re-read walked nothing"
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
-def test_a_reread_stamps_the_latest_walk_of_its_individual(family_tree: _Family) -> None:
-    restamp = walked_position(family_tree.line_of["family"], ArmKey(_ident("a")))
-    assert restamp is not None and restamp.round == 2, (
-        "a re-read stamps a walk other than its latest"
-    )
-
-
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_an_inner_run_hangs_on_the_candidate_its_spawn_record_names(
-    family_tree: _Family,
+    family_tree: _Family, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    family, grand, rewound, peek = (
-        family_tree.hops[n] for n in ("family", "grand", "rewound", "peek")
-    )
-    asks, tree = family_tree.asks, family_tree.tree
+    # A sandbox is a workspace of the data root its outer cycle ran under.
+    monkeypatch.setenv("PROMPTPOTTER_HOME", str(family_tree.home))
+    outer = family_tree.hops["l4"]
+    sandbox = inner_sandbox_store(family_tree.stores, outer)
+    assert sandbox is not None
+    named = {}
+    for listed in sandbox.campaigns.list_campaigns(None, lifecycle="all"):
+        index = sandbox.campaigns.load(listed.root_hop, moment=None)
+        by = None if index is None else index.spawned_by
+        assert by is not None
+        # A bench pass measures no candidate of a round: it hangs under its cycle.
+        held = by.arm is not None and by.role is not MeasurementRole.BENCH
+        named[listed.root_hop.campaign_id] = (
+            _addr(outer, by.round, by.individual_id)
+            if held and by.individual_id is not None
+            else _cycle_of(outer)
+        )
     hung = {
-        name: e.parent
-        for e in entries_under(tree)
+        cid: e.parent
+        for e in entries_under(family_tree.inner)
         if isinstance(e, SubtreeCampaign)
-        for name in asks
-        if f"{name}__" in e.address
+        for cid in named
+        if e.address.endswith(f"~{cid}")
     }
-    _, first_pick, _, x = _trunk_picks(family_tree.hops)
-    assert hung == {
-        "reread": first_pick,
-        "again": _at(family, 2, "a"),
-        "own": x,
-        "overlap": _cycle_of(grand),
-        "unrun": _at(rewound, 1, "w"),
-        "live": _at(peek, 0, "u2"),
-    }, "an inner run hung on a candidate other than the one its spawn record names"
+    assert len(named) > 2 and hung == named, (
+        "an inner run hung on a candidate other than the one its spawn record names"
+    )
 
 
-# The bugs reviews found are rows here: the grand's cut round drawn twice, the steer's
-# inherited anchor lost, the rewind's round 1 re-read off the wrong cycle's picks.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_every_candidates_line_reads_each_round_off_the_cycle_owning_it(
     family_tree: _Family,
 ) -> None:
-    (
-        family,
-        kid,
-        _grand,
-        great,
-        steered,
-        rewound,
-        redone,
-        branched,
-        rerun,
-        relift,
-        mended,
-        carried,
-        rival,
-        first,
-        second,
-        glance,
-        peek,
-    ) = family_tree.hops.values()
-    tree, seed_key = family_tree.tree, family_tree.seed_key
-    o, first_pick, b, x = _trunk_picks(family_tree.hops)
-    head = [(0, [o]), (1, [first_pick])]
-    crownless: tuple[int, list[str]] = (2, [])
-    # A cycle lifting no round continues the line of the candidate it hangs from, through it.
-    steer = [(0, [o]), (0, [_at(steered, 0, "s")])]
-    rivals = [(0, [o]), (0, [_at(rival, 0, "c")])]
-    [own_start] = [
-        e.address
-        for e in entries_under(tree)
-        if isinstance(e, HierarchyCandidate) and e.facts.individual == seed_key
-    ]
-    lines = {
-        o: [(0, [o])],
-        first_pick: head,
-        b: [(0, [o]), (1, [b])],
-        **{
-            c: [*head, (2, [c])]
-            for c in (_at(family, 2, "a"), _at(family, 2, "z"), _at(kid, 2, "y"))
-        },
-        x: [*head, crownless, (3, [x])],
-        _at(great, 4, "v"): [*head, crownless, (3, [x]), (4, [_at(great, 4, "v")])],
-        own_start: [*head, crownless, (3, [x]), (0, [own_start])],
-        _at(steered, 0, "s"): steer,
-        _at(rewound, 1, "w"): [(0, [o]), (1, [_at(rewound, 1, "w")])],
-        _at(rewound, 1, "k"): [(0, [o]), (1, [_at(rewound, 1, "k")])],
-        # Its parent re-ran round 1 in place after the cut; the fork's line still stands on w.
-        _at(carried, 2, "d"): [(0, [o]), (1, [_at(rewound, 1, "w")]), (2, [_at(carried, 2, "d")])],
-        _at(redone, 3, "q"): [*head, crownless, (3, [_at(redone, 3, "q")])],
-        _at(branched, 0, "p"): [(0, [o]), (1, [b]), (0, [_at(branched, 0, "p")])],
-        _at(rerun, 0, "r"): [*head, (0, [_at(rerun, 0, "r")])],
-        _at(relift, 0, "l"): [(0, [o]), (0, [_at(relift, 0, "l")])],
-        # The restated round 1 is the repair's own, whole: its arms are copies on its own line.
-        **{c: [(0, [o]), (1, [c]), crownless] for c in (_at(mended, 1, "a"), _at(mended, 1, "b"))},
-        _at(mended, 3, "m"): [
-            (0, [o]),
-            (1, [_at(mended, 1, "a")]),
-            crownless,
-            (3, [_at(mended, 3, "m")]),
-        ],
-        _at(rival, 0, "c"): rivals,
-        **{n: [*rivals, (1, [n])] for n in (_at(rival, 1, "e"), _at(rival, 1, "f"))},
-        # A cut lifting the rival's origin continues the line that origin hangs from.
-        _at(first, 1, "i"): [*rivals, (1, [_at(first, 1, "i")])],
-        _at(first, 2, "n"): [*rivals, (1, [_at(first, 1, "i")]), (2, [_at(first, 2, "n")])],
-        # Each read on the line it ran on: g on the rival's round 1 as the second's cut found it.
-        **{
-            n: [*rivals, (1, [_at(rival, 1, "e")]), (2, [n])]
-            for n in (_at(rival, 2, "g"), _at(rival, 2, "j"))
-        },
-        _at(second, 3, "h"): [
-            *rivals,
-            (1, [_at(rival, 1, "e")]),
-            (2, [_at(rival, 2, "g")]),
-            (3, [_at(second, 3, "h")]),
-        ],
-        **{
-            n: [*steer, (1, [n])]
-            for n in (_at(steered, 1, "t"), _at(steered, 1, "t2"), _at(steered, 1, "t4"))
-        },
-        _at(steered, 2, "t3"): [*steer, (1, [_at(steered, 1, "t2")]), (2, [_at(steered, 2, "t3")])],
-        _at(glance, 0, "u"): [*steer, (0, [_at(glance, 0, "u")])],
-        _at(peek, 0, "u2"): [
-            *steer,
-            (1, [_at(steered, 1, "t2")]),
-            (2, [_at(steered, 2, "t3")]),
-            (0, [_at(peek, 0, "u2")]),
-        ],
-    }
-    assert {
+    stores = family_tree.stores
+    lines: dict[str, list[tuple[int, list[str]]]] = {}
+
+    def line(address: str) -> list[tuple[int, list[str]]]:
+        if address not in lines:
+            at = Subject.parse_address(address)
+            hop, rnd = at.path[-1], at.round
+            assert rnd is not None
+            hung, _ = _started(stores, hop)
+            index = stores.campaigns.load(hop, moment=None)
+            # A cycle lifting no round continues the line of the candidate it hangs from, through it.
+            steps = [] if hung is None or (index and index.cut_round) else through(hung)
+            for k, (owner, crown) in sorted(_owned(stores, hop).items()):
+                if k > rnd and crown is not None:
+                    break
+                steps.append(
+                    (
+                        k,
+                        [address]
+                        if k == rnd
+                        else []
+                        if crown is None
+                        else [_addr(owner, k, crown)],
+                    )
+                )
+            lines[address] = steps
+        return lines[address]
+
+    def through(address: str) -> list[tuple[int, list[str]]]:
+        steps = line(address)
+        return steps[: next(i for i, (_, c) in enumerate(steps) if address in c) + 1]
+
+    read = {
         e.address: [(s.round, s.candidates) for s in e.facts.main_line]
-        for e in entries_under(tree)
+        for e in entries_under(family_tree.tree)
         if isinstance(e, HierarchyCandidate)
-    } == lines, "a candidate's line reads a round off a cycle that does not own it"
+        # A candidate its cycle re-ran away reads the line it ran on, which the head no longer is.
+        and e.facts.standing not in (CandidateStanding.REWOUND, CandidateStanding.REWOUND_STOOD_ON)
+    }
+    on = {Subject.parse_address(a).path[-1].cycle_id for a in read}
+    assert on == {family_tree.hops[n].cycle_id for n in ("trunk", "kid", "grand", "steered")}
+    assert read == {a: line(a) for a in read}, (
+        "a candidate's line reads a round off a cycle that does not own it"
+    )
 
 
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+@pytest.mark.usefixtures("optimizing_memory")
 def test_every_cycle_hangs_from_and_starts_at_the_candidates_its_mint_record_names(
     family_tree: _Family,
 ) -> None:
-    (
-        family,
-        kid,
-        grand,
-        great,
-        steered,
-        rewound,
-        redone,
-        branched,
-        rerun,
-        relift,
-        mended,
-        carried,
-        rival,
-        first,
-        second,
-        glance,
-        peek,
-    ) = family_tree.hops.values()
-    tree = family_tree.tree
-    o, first_pick, b, x = _trunk_picks(family_tree.hops)
-    cycles = {e.address: e for e in entries_under(tree) if isinstance(e, SubtreeCycle)}
-    hangs = {
-        family: (None, o),
-        kid: (first_pick, o),
-        grand: (first_pick, o),
-        great: (x, o),
-        steered: (o, _at(steered, 0, "s")),
-        rewound: (o, o),
-        redone: (first_pick, o),
-        branched: (b, _at(branched, 0, "p")),
-        # A steer naming a round's re-read hangs from the candidate that round re-read, lifted or not.
-        rerun: (first_pick, _at(rerun, 0, "r")),
-        relift: (o, _at(relift, 0, "l")),
-        # It hangs from the parent line's arm.
-        mended: (first_pick, o),
-        carried: (_at(rewound, 1, "w"), o),
-        rival: (o, _at(rival, 0, "c")),
-        first: (_at(rival, 0, "c"), _at(rival, 0, "c")),
-        # Cut on g, which its parent has since re-run away: the cut still names g.
-        second: (_at(rival, 2, "g"), _at(rival, 0, "c")),
-        glance: (_at(steered, 0, "s"), _at(glance, 0, "u")),
-        peek: (_at(steered, 2, "t3"), _at(peek, 0, "u2")),
-    }
-    for hop, hangs_from in hangs.items():
+    stores = family_tree.stores
+    cycles = {e.address: e for e in entries_under(family_tree.tree) if isinstance(e, SubtreeCycle)}
+    for name in ("trunk", "kid", "grand", "steered"):
+        hop = family_tree.hops[name]
         cycle = cycles[_cycle_of(hop)]
-        assert (cycle.facts.from_candidate, cycle.facts.origin) == hangs_from, (
-            f"{hop.cycle_id} hangs from, or starts at, a candidate its mint record does not name"
+        assert (cycle.facts.from_candidate, cycle.facts.origin) == _started(stores, hop), (
+            f"the {name} hangs from, or starts at, a candidate its mint record does not name"
         )
 
 
-# A retirement is "off the fork's line, within its reach", and nothing else.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+class _Fork(NamedTuple):
+    hop: CycleHop
+    parent: str
+    cut: int | None
+
+
+def _forks(family: _Family) -> dict[str, _Fork]:
+    """Each fork of the trunk's family by cycle, off its mint record: its parent and its cut (None
+    for a steer, which lifts no round)."""
+    out = {}
+    for name, hop in family.hops.items():
+        index = family.stores.campaigns.load(hop, moment=None)
+        assert index is not None
+        if name != "l4" and index.parent_cycle_id is not None:
+            out[hop.cycle_id] = _Fork(hop, index.parent_cycle_id, index.cut_round or None)
+    return out
+
+
+# A retirement is "off the fork's line, within its reach", and nothing else: a rewind fork cut at
+# c retires every arm of its parent at round c and past, named by the lowest cut; a steer, none.
+@pytest.mark.usefixtures("optimizing_memory")
 def test_a_cut_retires_exactly_the_arms_off_its_line_within_its_reach(
     family_tree: _Family,
 ) -> None:
-    family, kid, steered, rewound, mended, carried, rival, first = (
-        family_tree.hops[n]
-        for n in ("family", "kid", "steered", "rewound", "mended", "carried", "rival", "first")
-    )
-    tree = family_tree.tree
-    *_, x = _trunk_picks(family_tree.hops)
-    by_addr = {e.address: e for e in entries_under(tree) if isinstance(e, HierarchyCandidate)}
-    assert {
-        address: tag.value
-        for address, e in by_addr.items()
-        if (tag := e.tag("superseded")) is not None
-    } == {
-        # Off the line of ANY supersede fork the line passed through that reached it, named by the
-        # lowest cut, the nearest link of a tie: the rewind takes the trunk's round 1 off its line,
-        # `kid` its round 2 though `carried`, cut from `kid` at the same round, reached it too.
-        **dict.fromkeys((_at(family, 1, n) for n in "ab"), _cycle_of(rewound)),
-        **dict.fromkeys((_at(family, 2, n) for n in "az"), _cycle_of(kid)),
-        _at(kid, 2, "y"): _cycle_of(carried),
-        x: _cycle_of(mended),
-        _at(rewound, 1, "k"): _cycle_of(carried),
-        # The second's line stands on g, and the first still retires it.
-        **dict.fromkeys(
-            (_at(rival, r, n) for r, n in ((1, "e"), (1, "f"), (2, "g"), (2, "j"))),
-            _cycle_of(first),
-        ),
-        # Re-run away by their own cycle, whether or not a line stands on them.
-        _at(rewound, 1, "w"): _cycle_of(rewound),
-        **dict.fromkeys(
-            (_at(steered, r, n) for r, n in ((1, "t"), (1, "t2"), (2, "t3"))), _cycle_of(steered)
-        ),
-    }, "a cut retires an arm on its line, one past the reach of its branch, or names another cut"
+    cuts: dict[str, list[tuple[int, str]]] = {}
+    for fork in _forks(family_tree).values():
+        if fork.cut is not None:
+            cuts.setdefault(fork.parent, []).append((fork.cut, _cycle_of(fork.hop)))
+    read, rule = {}, {}
+    for e in entries_under(family_tree.tree):
+        if isinstance(e, HierarchyCandidate):
+            at = Subject.parse_address(e.address)
+            tag = e.tag("superseded")
+            retired = e.facts.standing is CandidateStanding.RETIRED
+            read[e.address] = (None if tag is None else tag.value, retired)
+            rnd = at.round
+            assert rnd is not None
+            reach = sorted(c for c in cuts.get(at.path[-1].cycle_id, []) if c[0] <= rnd)
+            rule[e.address] = (reach[0][1], True) if reach else (None, False)
+    spared = sum(tag is None for tag, _ in rule.values())
+    assert len(cuts) == 2 and 0 < spared < len(rule), "the family cut nothing, or everything"
+    assert read == rule, "a cut retires an arm on its line or past its reach, or spares one off it"
 
 
 # A lifted round keeps the crown its parent elected, and a parting dims every fork whose start
-# was proposed past it, a steer from a later arm included.
-@pytest.mark.usefixtures("offline", "optimizing_memory")
+# was proposed past it (a rewind's at its cut, a steer's where its arm was), the fork's forks with it.
+@pytest.mark.usefixtures("optimizing_memory")
 def test_the_mask_reads_the_lines_the_subtree_reads(family_tree: _Family) -> None:
-    stores = family_tree.stores
-    family, grand, great, rewound, redone, branched, rerun, mended, carried = (
-        family_tree.hops[n]
-        for n in (
-            "family",
-            "grand",
-            "great",
-            "rewound",
-            "redone",
-            "branched",
-            "rerun",
-            "mended",
-            "carried",
-        )
-    )
-    mask = load_mask_record(stores, family.campaign_id, lens=None)
+    stores, trunk, grand = family_tree.stores, family_tree.hops["trunk"], family_tree.hops["grand"]
+    mask = load_mask_record(stores, trunk.campaign_id, lens=None)
     crowned = {
         c.cycle_id: {
             r.round: next((m.key for m in r.candidates if m.is_selected), None) for r in c.rounds
         }
         for c in mask.cycles
     }
-    assert crowned[great.cycle_id] == {
-        0: _ident("o"),
-        1: _ident("a"),
-        2: None,
-        3: _ident("x"),
-        4: _ident("v"),
-    }, "the mask crowns a lifted round other than where its parent elected it"
-    parted = find_divergences(
-        mask,
-        lambda rnd: VerdictOutcome(diverged=(rnd.cycle_id, rnd.round) == (grand.cycle_id, 0)),
+    assert crowned[grand.cycle_id] == {k: c for k, (_, c) in _owned(stores, grand).items()}, (
+        "the mask crowns a lifted round other than where its parent elected it"
     )
-    # `relift` named round 1's re-read of o, which its mint records as o: proposed AT the parting.
-    assert {cid for cid, _ in parted.divergent} == {
-        h.cycle_id for h in (grand, great, rewound, redone, branched, rerun, mended, carried)
-    }, "a parting dims a fork rooted before it, or keeps one proposed past it"
+    forks, cycles = _forks(family_tree), {e.address: e for e in entries_under(family_tree.tree)}
+
+    def started(fork: _Fork) -> int:
+        """The trunk round the line of *fork* left it in, off the subtree's hang of each fork."""
+        if fork.parent != trunk.cycle_id:
+            return started(forks[fork.parent])
+        hung = cycles[_cycle_of(fork.hop)]
+        assert isinstance(hung, SubtreeCycle) and hung.facts.from_candidate is not None
+        steered_at = Subject.parse_address(hung.facts.from_candidate).round
+        assert steered_at is not None
+        return fork.cut or steered_at
+
+    for parting in (0, 1, 2):
+
+        def parts(rnd: MaskRound, at: int = parting) -> VerdictOutcome:
+            return VerdictOutcome(diverged=(rnd.cycle_id, rnd.round) == (trunk.cycle_id, at))
+
+        parted = find_divergences(mask, parts)
+        dimmed = {(trunk.cycle_id, k) for k in _owned(stores, trunk) if k > parting} | {
+            (cid, k)
+            for cid, f in forks.items()
+            if started(f) > parting
+            for k in _owned(stores, f.hop)
+        }
+        assert sorted(parted.divergent) == sorted(dimmed), (
+            f"a parting at {parting} dims a fork started at or before it, or spares one past it"
+        )
 
 
 class _Repair(NamedTuple):
@@ -3029,127 +2500,56 @@ def test_a_child_hangs_from_the_arm_that_measured_its_parent_never_a_verbatim_co
 # 4. An origin the gate halted, resumed past it
 
 
-@pytest.mark.usefixtures("optimizing_memory")
+@pytest.fixture(scope="module")
+def gated(tmp_path_factory: pytest.TempPathFactory) -> Shared:
+    """Potter's origin under `origin_gate: strict`, every cell refused, halted at the gate; run once
+    for the module (~3.5 s cold, ~1.5 s warm): each fact takes `world.adopt(gated)`."""
+
+    async def act(world: World) -> CycleHop:
+        return (await world.campaign(origin_gate="strict", down=True)).hop
+
+    return shared_run(tmp_path_factory, act)
+
+
+def _passes(world: World, hop: CycleHop) -> list[str]:
+    decided = world.stores.campaigns.standing_rounds(hop, moment=None).decisions.get(0, [])
+    return [d.inputs_ref.by for d in decided if isinstance(d.inputs_ref, OriginGatePass)]
+
+
+# Each launch reads the pass the one before it banked.
 def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launch_reads_the_pass(
-    built_stores: Stores,
+    world: World, gated: Shared
 ) -> None:
-    stores = built_stores
-    # The origin's cells, each one the backend refused.
-    bank = samples(8)
-    dead = sheet(measurement(i, None, error="boom", error_category="SERVER") for i in range(8))
-    origin = prompted(instruction="origin")
-    hop = CycleHop(campaign_id="cycle_gated__20260101-000000", cycle_id="cycle_gated")
-    stored_campaign(stores, minted_campaign(hop))
-    stores.campaigns.mint_cycle(hop)
-
-    def launch(*, replayed: bool, crashes: bool = False) -> StopReason:
-        """A launch as `build_run_observers` opens it, its loop capped before round 1; one that
-        *crashes* writes no ending. The real resume path walks in the offline run's `gated/` leg."""
-        ctx = seat(
-            stores,
-            hop=hop,
-            bank=bank,
-            origin=(origin, lambda _session: dead),
-            optimization={"budget": {"rounds": 0}},
-        )
-        cycle, session, ledger = ctx.cycle, ctx.cycle.session, cycle_ledger(ctx.cycle)
-        session.state.clock = LaunchClock.now()
-        rescope(spawn=inner_spawn_of(session))
-        ledger.append(RunPhaseRecord(state=Running()))
-        if replayed:
-            # The origin a resume replays stands on its close (`closed_rounds.py::closed_rounds`).
-            closed = stores.campaigns.standing_rounds(hop, moment=None).rounds[0]
-            set_cycle(
-                cycle,
-                line=[cycle.origin_round.model_copy(update={"at_offset": closed.at_offset})],
-            )
-
-        # Read before the launch writes, as `mint.py::open_launch` reads it.
-        resumed = scan_cycle_facts(stores.campaigns.ledger(hop)).resumed_ending
-
-        async def walk() -> LoopEnd:
-            gated = await open_origin_round(cycle, bank, resumed_ending=resumed)
-            return gated or await run_round_loop(cycle, cycle.config, session)
-
-        with scoped(account=stores):
-            book = spend_book()
-        with scoped(ledger=ledger), scoped(book=book):
-            end = asyncio.run(walk())
-        if not crashes:
-            ledger.append(RunPhaseRecord.stop(end.stop_reason))
-        return end.stop_reason
-
-    def passes() -> list[str]:
-        decided = stores.campaigns.standing_rounds(hop, moment=None).decisions.get(0, [])
-        return [d.inputs_ref.by for d in decided if isinstance(d.inputs_ref, OriginGatePass)]
-
-    # An origin that scored no cell has nothing to gate: it halts.
-    assert launch(replayed=False) is StopReason.ORIGIN_GATE, "an unscored origin held or ran on"
-    assert passes() == [], "a halt banked a pass"
-    # The resume's own RUNNING retires that ending, yet the pass is read off what it retired; the
-    # launch dies before it writes an ending, so the next one takes up the gate's halt again.
-    assert launch(replayed=True, crashes=True) is StopReason.ROUNDS_BUDGET, (
-        "a resume halted at the gate again"
-    )
-    assert passes() == ["resume"], "the override lived only in the process that took it"
-    assert launch(replayed=True) is StopReason.ROUNDS_BUDGET, "a banked pass was not read"
-    assert passes() == ["resume"], "a resume after a crash banked the override twice"
-    # A later launch, after an ending the gate never made, stands on the pass already banked.
-    assert launch(replayed=True) is StopReason.ROUNDS_BUDGET, "a banked pass was not read"
-    assert passes() == ["resume"], "one override was banked twice"
+    run, hop = world.adopt(gated), gated.made
+    assert _passes(run, hop) == [], "a halt banked a pass"
+    # Still refused: the resume is the operator's override, paused before round 1 closes, so the
+    # next launch asks the gate again, after an ending the gate never made.
+    run.net.backend.down = True
+    for step, ending in ((0, StopReason.PAUSED), (None, StopReason.ROUNDS_BUDGET)):
+        launch = run.resume(hop, step_rounds=step)
+        ended = asyncio.run(launch).result.stop_reason
+        assert ended is ending, f"a launch stepping {step} ended {ended}, not {ending}"
+        assert _passes(run, hop) == ["resume"], "the override was lost, or banked twice"
 
 
-@pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_halts_own_words_are_the_stop_its_run_serves_and_its_chat_says(
-    built_stores: Stores,
+    world: World, gated: Shared
 ) -> None:
-    # A refused send's sentence and an L2 terminate's reason, raised where a run ends, reach the
-    # served stop and the chat through the close every launch takes (`entry.py::close_cycle`).
-    stores = built_stores
-    with pytest.raises(SendRefusedError) as unpriced:
-        spend_book(None, usd_reserve=0.05).refuse_unpriced(
-            SendBound(input_tokens=1, output_tokens=1, usd=None, unpriced=("acme/unpriced-1",)),
-            "diagnostic",
-            "the probe",
-            "host",
-        )
+    # The gate's words, raised where the run ends, reach the served stop and the chat through the
+    # close every launch takes (`entry.py::close_cycle`).
+    run, hop = world.adopt(gated), gated.made
+    served = run.stores.run_state(hop).stop
+    assert served is not None and served.stop_reason is StopReason.ORIGIN_GATE and served.detail, (
+        "the halt served no words of its own"
+    )
+    notices = LedgerIndex.of(run.ledger(hop).path).view(ActivityFeed).notices
+    assert any(said.detail == served.detail for said in notices), "the chat lost the halt's words"
+    # A layer's terminate stops in its own words.
     aborted = StopLoop(StopReason.OPTIMIZER_ABORT, detail="l2: the backend's index is gone")
-    for n, (raised, words) in enumerate(
-        ((unpriced.value, "acme/unpriced-1"), (aborted, "l2: the backend's index is gone"))
-    ):
-        hop = CycleHop(campaign_id=f"halted{n}__20260101-000000", cycle_id=f"halted{n}")
-        stored_campaign(stores, minted_campaign(hop))
-        stores.campaigns.mint_cycle(hop)
-        cycle = seat(stores, hop=hop).cycle
-        session, config, selected = cycle.session, cycle.config, cycle.optimizer
-        declare_run_wiring(session, config, selected=selected)
-        observers = build_run_observers(session=session, campaign_config=config)
-        start_launch(session)
-        try:
-            with scoped(ledger=cycle_ledger(cycle), account=stores):
-                try:
-                    raise raised
-                except RUN_STOPS as stop:
-                    stop_reason, error, detail = end_run_on(stop)
-                close_cycle(
-                    None,
-                    session,
-                    observers,
-                    stop_reason=stop_reason,
-                    cycle_error=error,
-                    open_round=None,
-                    config=config,
-                    pause_cause=PauseCause.INTERRUPT,
-                    rebasing=False,
-                    selected=selected,
-                    detail=detail,
-                )
-        finally:
-            observers.release()
-        served = stores.run_state(hop).stop
-        assert served is not None and words in served.said, f"stop {n}'s reading lost its words"
-        notices = LedgerIndex.of(cycle_ledger(cycle).path).view(ActivityFeed).notices
-        assert any(words in (said.detail or "") for said in notices), f"the chat lost stop {n}"
+    assert (run_stop_reason(aborted), run_stop_detail(aborted)) == (
+        StopReason.OPTIMIZER_ABORT,
+        aborted.detail,
+    ), "an abort's stop lost the words its layer gave"
 
 
 # Journeys awaiting a leg

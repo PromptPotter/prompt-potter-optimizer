@@ -24,8 +24,14 @@
 ## The world (`tests/world.py`)
 
 - `world` (fixture): `World(stores, net, scratch)` — the fact's stores at its own data root (`own_home`), the network answered by `scripts/offline_world.py` (`offline`).
-- `await world.campaign(optimizer="potter", rounds=1, rows=40, step_rounds=None, knobs=None, hardness=0) -> Ran`: a fresh campaign minted and run through `embedded_run.py::run_campaign`, on the offline run's script (`ByCallIdentity`, `FakeBackend`, `synthetic_rows`); `step_rounds` pauses at that boundary.
-- `await world.resume(hop) -> Ran`: the same entry, resuming.
+- `await world.campaign(optimizer="potter", rounds=1, rows=40, step_rounds=None, knobs=None, hardness=0, origin_gate=None, down=False) -> Ran`: a fresh campaign minted and run through `embedded_run.py::run_campaign`, on the offline run's script (`ByCallIdentity`, `FakeBackend`, `synthetic_rows`); `step_rounds` pauses at that boundary, `down` has the backend refuse every cell.
+- `await world.resume(hop, from_round=None, on_divergence=HALT, step_rounds=None) -> Ran`: the same entry, resuming; `from_round` rewinds as `--from` does.
+- `await world.l4_campaign(rows=40) -> Ran` (~8 s): potter's outer cycle over inner runs, each minted in its sandbox (`inner_sandbox_store`).
+- `await world.fork(hop, round, **ForkCyclePayload) -> Ran`: a fork through the `fork_cycle` command door, run inline.
+- `await world.head_to_head(arms, h2h_id, rounds=1, rows=40) -> list[Ran]`: a head-to-head's arms minted in one act (`embedded_run.py::run_head_to_head`).
+- `async with world.opened(rows=40) as session`: the real opening (`init_services` → `laid_session` → `arm_diagnostic_scoring`), for a fact measuring one cell outside a run.
+- `world.edit_proposer()`: the proposer's template edited in this home's manifest shadow, so a resume diverges.
+- **A run several facts read is run once**: a module-scoped fixture returns `world.py::shared_run(tmp_path_factory, act)` (a `Shared`), and each fact takes `world.adopt(shared)`, its own copy of that home (~20 ms) whose script the network answers, so a fact may rewind, fork or resume it. **Its fixture's line states the run's cost per module** (`# ~3.5 s once, ~20 ms a fact`).
 - `Ran.session`, `Ran.result`, `Ran.hop`; `world.ledger(hop)`, `world.records(hop)`; `world.net` is the `Router` (`net.backend.faults`, `net.llm.sent`, `net.rates`).
 - Its teardown is the fixtures': `offline` restores the network and asserts nothing went unrouted, `own_home`'s tree goes with `tmp_path`.
 
