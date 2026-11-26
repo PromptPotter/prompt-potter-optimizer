@@ -1,9 +1,11 @@
 # tw-c: every hand-seat left after the second pass, onto the world (cloud, Sonnet)
 
-`briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is
-`origin/land/test-world` at `<BASE-C>`. That is `3625a6687` plus tw-r2, tw-s, tw-r3, tw-x, tw-j, tw-p,
-tw-w and tw-q, integrated; tw-w hosted and priced the offline world (`out/tw-w-report`). tw-p and tw-q brought the suite's wall and end RSS under the rework's start, and you keep them there:
-every world run you add reuses a run tw-p shares, and your before → after states both.
+`briefs/common.md` binds you (read BASE FIRST), with ONE override: the base is `origin/land/tw-xjp` at
+`<BASE-C>` = `e398d9ebe`. That is `land/test-world`'s `af224d3bd` plus tw-x, tw-j, tw-p and tw-w,
+integrated; tw-w hosted and priced the offline world (`out/tw-w-report`). The suite's wall is still
+above the rework's start (tw-p § Three-point: 82.3 s at `7dce00a96`, 109.0 s at its tip), and chain
+tw-q runs beside you to bring it down in production. You add no cost it must win back: every world run
+you add reuses a run tw-p shares, and your before → after states the suite's wall and end RSS.
 Replace the ancestor check with `git merge-base --is-ancestor 9cd30b5a7 <BASE-C>`. Equals-main runs against
 `<BASE-C>`'s offline home. Push to `arc/tw-c`, one commit per link, with the full gate green at the tip.
 
@@ -38,7 +40,11 @@ You may edit `scripts/gate.py` for item 2 and nothing else in production. A row 
 report.
 
 ## NOT yours
-Chain tw-j2 runs beside you (`briefs/tw-j2.md`). It owns `scripts/offline_run.py`,
+Chain tw-q runs beside you (`briefs/tw-q.md`). It owns production (`promptpotter/**`),
+`tests/conftest.py` and `tests/CLAUDE.md` § The world, and may add one check to `scripts/gate.py`'s
+list for the landing key. In gate.py you edit only item 2's hunks.
+
+Chain tw-j2 starts after tw-q lands and runs beside you (`briefs/tw-j2.md`). It owns `scripts/offline_run.py`,
 `scripts/offline_world.py`, `application/scoring/**`, every `# Journeys awaiting a leg` block with the
 helpers only it calls, and five test_spend tests: `test_a_walks_spend_ceiling_binds_before_a_call`,
 `test_a_skip_holds_and_its_replay…`, `test_an_inner_runs_stop_reaches_its_outer_cell…`,
