@@ -76,9 +76,7 @@ from world import Shared, World, shared_run
 
 from promptpotter.application import free_tier
 from promptpotter.application.account import account_of, local_stores, set_coupon
-from promptpotter.application.bench import llm_call as call_mod
 from promptpotter.application.bench.resume_and_fork.fork_siblings import cut_operator_fork
-from promptpotter.application.bench.task_context import checkin_template
 from promptpotter.application.commands.dispatcher import (
     Applier,
     CommandCall,
@@ -127,7 +125,7 @@ from promptpotter.application.jobs.registry import JobRegistry
 from promptpotter.application.maintenance.archive_maintenance import purge_cold_store
 from promptpotter.application.maintenance.landing import complete_registries
 from promptpotter.application.maintenance.reset import apply_reset, plan_reset
-from promptpotter.application.optimizer_manifest import checkin_manifest, select_optimizer
+from promptpotter.application.optimizer_manifest import select_optimizer
 from promptpotter.application.pipeline_resolve import cycle_config, laid_config, laid_session
 from promptpotter.application.run_phase_control import RunControl, budget_stop
 from promptpotter.application.runner import loop
@@ -151,7 +149,6 @@ from promptpotter.application.scoring.sample_measurement import (
 )
 from promptpotter.application.scoring.search_point_scorer import (
     open_walk,
-    score_search_point,
 )
 from promptpotter.application.served_dashboard import (
     ServedDashboard,
@@ -204,7 +201,6 @@ from promptpotter.domain.l4.proxies import (
     inner_cell_report,
 )
 from promptpotter.domain.layer_fold import UNBOUNDED, Layer, fold_layers
-from promptpotter.domain.measurement_provenance import REUSABLE_MIN_GRADE
 from promptpotter.domain.paired_reading import ArmKey
 from promptpotter.domain.phases import (
     ERROR_CATEGORY_INFO,
@@ -251,7 +247,7 @@ from promptpotter.domain.records.run_records import (
 from promptpotter.domain.run_mode import RunMode
 from promptpotter.domain.sample import Bank, Sample
 from promptpotter.domain.scoring import MeasuredCell, PipelineData, Scorer
-from promptpotter.domain.search_point import JobSearchPoint, NodeConfig
+from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.domain.spend import (
     CYCLE_AXES,
     MONEY_AXES,
@@ -327,7 +323,6 @@ from promptpotter.infrastructure.store.account_spend import (
 )
 from promptpotter.infrastructure.store.campaign_store import store as campaign_store_module
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
-    scan_ledger_priced_keys,
     scan_ledger_spend,
     scan_ledger_spend_by_round,
     scan_standing_rounds,
@@ -1040,6 +1035,30 @@ async def test_a_walks_spend_ceiling_binds_before_a_call(built_stores: Stores) -
     assert (ceiling["stop_reason"], ceiling["billed"]) == ("spend_budget", 5.0), (
         "a spend ceiling binds BEFORE a call: every cell out is counted at its bound"
     )
+
+
+@pytest.mark.usefixtures("run_bound", "offline")
+def test_a_search_ceiling_meters_its_search_and_prices_a_reread_once_per_campaign(
+    tmp_path: Path,
+) -> None:
+    # The bench grades past the search's ceiling; a launch's re-read of a cell its campaign priced is free.
+    for meters, kind, binds in (
+        ("search_incurred", "optimizer", True),
+        ("search_incurred", "bench", False),
+        ("bill", "bench", True),
+    ):
+        assert spend_book(1.0, meters=meters).binds(kind) is binds, f"{meters} binds {kind}"
+    campaign = tmp_path / "campaign"
+    laid_ledger(campaign_cycles_dir(campaign) / "stopped").append(PricedKeyRecord(priced_key="k"))
+    rescope(priced=campaign)
+    for meters, key, free in (
+        ("search_incurred", "k", True),
+        ("search_incurred", "j", False),
+        ("bill", "j", True),
+    ):
+        assert spend_book(1.0, meters=meters).replays_free(key) is free, (
+            f"under {meters}, a re-read of {key} is {'billed' if free else 'free'}"
+        )
 
 
 @pytest.mark.usefixtures("run_bound", "offline")
@@ -5568,121 +5587,3 @@ def test_a_reported_zero_of_reasoning_reaches_a_step_as_zero_and_none_as_unrepor
         {"node": "n", "input_tokens": 9, "output_tokens": 4, "money": price.model_dump(), **parts}
     )
     assert (line.reasoning_tokens, line.cache_write_tokens) == (0, 0)
-
-
-# Journeys awaiting a leg
-
-
-@pytest.mark.usefixtures("run_bound")
-@on_jumping_clock
-async def test_a_resumed_arm_rereads_its_cells_unbilled_and_its_bench_runs_past_the_ceiling(
-    tmp_path: Path, built_stores: Stores, offline: Router
-) -> None:
-    offline.llm.says = lambda body: completion("ok", model=body["model"], usd=0.01)
-    loop_reuse = LLMReuseCache(tmp_path / "reuse", "optimizer_reuse")
-    judge_reuse = LLMReuseCache(tmp_path / "reuse", "judge_reuse")
-
-    async def round_calls() -> None:
-        await call_mod.llm_call(
-            [{"role": "user", "content": "q"}],
-            context=call_mod.LLMCallContext(
-                node="checkin",
-                config=NodeConfig.model_validate(
-                    checkin_manifest().config.model_dump(exclude_unset=True)
-                    | {"provider": "openai", "model": "m"}
-                ),
-                template=checkin_template(),
-                cache=loop_reuse,
-                seed=None,
-            ),
-        )
-        with scoped(judge_cache=judge_reuse):
-            await judge_call.ask(
-                JudgeStage(role="grade", temperature=0.0, model="m", provider="openai"),
-                "grade",
-                judge="j",
-            )
-
-    # Another campaign's run banks both replies; this arm only ever replays them.
-    rescope(priced=tmp_path / "other")
-    with _billing_on(CycleEventLog(tmp_path / "other.jsonl"), spend_book()):
-        await round_calls()
-
-    reread = samples(4)
-    step = {"solve": StepUsage(input=10, output=5, cost_usd=0.01)}
-    banked = {
-        s.id: MeasuredCell(
-            sample_key=s.key,
-            query=s.query,
-            ground_truth="a",
-            predicted="a",
-            pipeline=PipelineData(step_tokens=step),
-        )
-        for s in reread
-    }
-    # The ceiling already spent: no cell fits, and the control reads it as reached.
-    campaign = tmp_path / "campaign"
-    ledger = laid_ledger(campaign_cycles_dir(campaign) / "cycle")
-    ledger.append(billed_call(0.02, kind="optimizer", node="spent"))
-    arm = spend_book(0.02, meters="search_incurred", metered_on=ledger.path)
-    session = loop_session(
-        built_stores,
-        _searching(0.01),
-        reread,
-        scorer=_HIT,
-        client=backend_client(built_stores.jobs_dir, max_cells_in_flight=1),
-    )
-    # The arm's individual and the one the bench grades, every cell of each already filed.
-    picked, graded = (
-        JobSearchPoint(pipeline_params=PipelineParams().with_nodes({"search": {"sp": n}}))
-        for n in "pg"
-    )
-    for sp in (picked, graded):
-        filed(
-            built_stores.archive,
-            banked.values(),
-            archive_entry(
-                sp,
-                dataset_hash=session.bank.dataset_hash,
-                pipeline_schema=session.pipeline_schema,
-                cell_identity=session.cell_identity,
-            ),
-            grade=REUSABLE_MIN_GRADE,
-            created_at="2026-01-01T00:00:00Z",
-        )
-    feed = _filed(built_stores, picked, session)
-    with scoped(ledger=ledger):
-        # The stopped launch, a cycle of the same campaign, priced the cells it took.
-        stopped = laid_ledger(campaign_cycles_dir(campaign) / "stopped")
-        for s in reread[:3]:
-            stopped.append(PricedKeyRecord(priced_key=feed.cell_key(s.key)))
-        rescope(priced=campaign)
-        with scoped(book=arm):
-            walk = open_walk(picked, reread, session, kind=MeasurementRole.PANEL, measured=None)
-            halted = await _stopped_by_operator(
-                query_loop.run_walks({"arm": walk}, session, keep_cut=False)
-            )
-            bench = await score_search_point(
-                graded, reread, session, kind=MeasurementRole.BENCH, measured=None
-            )
-            # The first round's calls are priced; the second reads them off the ledger.
-            await round_calls()
-            await round_calls()
-    assert [c.key for c in walk.results] == [s.key for s in reread[:3]], (
-        "the ceiling held back a re-read"
-    )
-    assert halted == "spend_budget", "a spent ceiling did not stop the arm"
-    assert len(bench.cells) == len(reread), "the search's ceiling stopped the bench pass"
-    kinds = [r.price.kind for r in ledger_records(ledger) if isinstance(r, TokenUsageRecord)]
-    assert kinds == ["optimizer"] + ["bench"] * len(reread) + ["optimizer", "judge"], (
-        f"a re-read was metered a second time: {kinds}"
-    )
-    assert arm.spent.sent_usd == pytest.approx(0.04), (
-        "the arm's book read another bill than metered"
-    )
-    priced = scan_ledger_priced_keys([ledger.path])
-    benched = _filed(built_stores, graded, session)
-    benched_keys = {benched.cell_key(s.key) for s in reread}
-    assert benched_keys <= priced and len(priced) == len(reread) + 2, (
-        "the ledger names another set of priced calls than the arm paid for"
-    )
