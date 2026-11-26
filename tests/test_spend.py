@@ -1053,20 +1053,22 @@ def test_a_search_ceiling_meters_its_search_and_prices_a_reread_once_per_campaig
     tmp_path: Path,
 ) -> None:
     # The bench grades past the search's ceiling; a launch's re-read of a cell its campaign priced is free.
-    for meters, kind, binds in (
+    metered: tuple[tuple[CeilingMeter, TokenUsageKind, bool], ...] = (
         ("search_incurred", "optimizer", True),
         ("search_incurred", "bench", False),
         ("bill", "bench", True),
-    ):
+    )
+    for meters, kind, binds in metered:
         assert spend_book(1.0, meters=meters).binds(kind) is binds, f"{meters} binds {kind}"
     campaign = tmp_path / "campaign"
     laid_ledger(campaign_cycles_dir(campaign) / "stopped").append(PricedKeyRecord(priced_key="k"))
     rescope(priced=campaign)
-    for meters, key, free in (
+    reread: tuple[tuple[CeilingMeter, str, bool], ...] = (
         ("search_incurred", "k", True),
         ("search_incurred", "j", False),
         ("bill", "j", True),
-    ):
+    )
+    for meters, key, free in reread:
         assert spend_book(1.0, meters=meters).replays_free(key) is free, (
             f"under {meters}, a re-read of {key} is {'billed' if free else 'free'}"
         )

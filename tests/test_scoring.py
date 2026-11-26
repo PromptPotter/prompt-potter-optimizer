@@ -3108,7 +3108,11 @@ def test_an_l1_edit_lands_on_its_one_anchor_in_order_and_never_writes_answer_for
             f"{parent_text} Check.",
         ),
     ):
-        edits = [L1Edit(at="solve.instruction", op=op, anchor=a, text=t) for op, a, t in steps]
+        at = "solve.instruction"
+        edits = [
+            L1Edit.model_validate({"at": at, "op": op, "anchor": a, "text": t})
+            for op, a, t in steps
+        ]
         texts, failures = applied_edits(edits, parent, pooled=None)
         got = failures[0].reason if failures else texts[Locus("solve", "instruction")]
         assert got == written, f"{steps} wrote {got!r}, not {written!r}"
@@ -5452,5 +5456,3 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
         )
         with pytest.raises(ValidationError):
             standing.model_validate({"reason": "r", "stand_on": "C9.9"})
-
-
