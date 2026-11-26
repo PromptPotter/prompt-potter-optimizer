@@ -38,7 +38,6 @@ from factories import (
     bench_line,
     bench_pass,
     bench_passes,
-    billed_call,
     close_round,
     cycle_ledger,
     defaulted_config,
@@ -56,7 +55,6 @@ from factories import (
     measurement,
     measurements,
     member_rows,
-    mint_fork,
     minted_campaign,
     minted_dataset,
     optimizer_state,
@@ -78,6 +76,7 @@ from factories import (
 )
 from offline_world import FakeHarness, Router, shown_text
 from pydantic import SecretStr, ValidationError
+from world import Shared, World, shared_run
 
 from promptpotter import connectors
 from promptpotter.application.bench import node_context
@@ -98,7 +97,13 @@ from promptpotter.application.commands.dispatcher import (
     CommandCall,
     CommandDispatcher,
 )
-from promptpotter.application.evidence.head_to_head import GuardDifference, GuardState
+from promptpotter.application.datasets.authored import defaults_config
+from promptpotter.application.evidence.head_to_head import (
+    GuardDifference,
+    GuardMember,
+    GuardState,
+    pair_guard,
+)
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.host_surface import (
     IDEMPOTENCY_KEY,
@@ -183,8 +188,6 @@ from promptpotter.application.runner import bench as line_bench
 from promptpotter.application.runner.bench import (
     LineSpan,
     bench_selection,
-    launch_clock_record,
-    line_launches,
     line_round_budget,
     pair_on_bench,
     read_bench,
@@ -249,7 +252,7 @@ from promptpotter.config.paths import optimizers_root
 from promptpotter.config.settings import settings
 from promptpotter.connectors import n8n
 from promptpotter.connectors.protocol import PROBE_WORKLOAD, Connector
-from promptpotter.domain.arm_reading import ArmFit, DisplayMetric, order_floor
+from promptpotter.domain.arm_reading import order_floor
 from promptpotter.domain.arms import (
     ArmPosition,
     BankedSearchPointError,
@@ -272,13 +275,11 @@ from promptpotter.domain.bench import (
     partition_bank,
 )
 from promptpotter.domain.campaign import (
-    Arm,
-    Compare,
-    HeadToHeadRecord,
+    BenchSet,
     Optimize,
-    Purpose,
+    StoppingRule,
 )
-from promptpotter.domain.campaign_config import CampaignConfig, OptimizerChoice
+from promptpotter.domain.campaign_config import OptimizerChoice
 from promptpotter.domain.cell_fold import (
     ScoreSummary,
     is_prior_dominated,
@@ -315,6 +316,8 @@ from promptpotter.domain.paired_reading import (
     ROUND_LIFT_SPEC,
     ArmKey,
     ArmName,
+    CellSet,
+    CellSetBasis,
     CellSetName,
     CoverageState,
     EstimatorSpec,
@@ -344,13 +347,9 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.pool import BlockPool
 from promptpotter.domain.records.held_out import PassGradedRecord
-from promptpotter.domain.records.partition import PartitionRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
     ArmRecord,
-    CampaignCeilingRecord,
-    ForkSpec,
-    ForkTrigger,
     LLMCallRecord,
     RebaseRequest,
     RoundEnteredRecord,
@@ -361,7 +360,7 @@ from promptpotter.domain.records.run_records import (
 )
 from promptpotter.domain.results import InRunCells, Reelection, RoundResult
 from promptpotter.domain.results_health import is_deprecated
-from promptpotter.domain.ruler import RulerScope, RulerStamp, ThetaCaveat, p_better
+from promptpotter.domain.ruler import RulerScope, RulerStamp, p_better
 from promptpotter.domain.run_standing import (
     LineOutlay,
     RunStanding,
@@ -387,7 +386,7 @@ from promptpotter.domain.scoring import (
     turn_scalars,
 )
 from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-from promptpotter.domain.spend import Budget, TokenUsageKind
+from promptpotter.domain.spend import Budget
 from promptpotter.domain.verification import (
     BenchPass,
     BenchPasses,
@@ -403,7 +402,6 @@ from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     require_spend_book,
 )
-from promptpotter.infrastructure.llm.telemetry import append_record
 from promptpotter.infrastructure.producer_lock import cycle_held, release_cycle
 from promptpotter.infrastructure.projections.live_dashboard import (
     LiveDashboardProjection,
@@ -416,7 +414,6 @@ from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
 from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, scan_last
-from promptpotter.infrastructure.store.session_pointer import cleanup_stub_fork_if_empty
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
@@ -428,7 +425,7 @@ from promptpotter.shared.errors import (
     PotterError,
     SendRefusedError,
 )
-from promptpotter.shared.identity import SYSTEM_PRINCIPAL, Principal, default_identity
+from promptpotter.shared.identity import Principal, default_identity
 from promptpotter.shared.measurement_context import MeasurementRole, RoleScope
 from promptpotter.shared.plugin_registry import Registry
 from promptpotter.shared.statistics import paired_mean_t
@@ -3124,203 +3121,6 @@ def _reference_reading(
     return pairs.read(ReadArm(key, scored, rows(arm)), against, reference_arm)
 
 
-_H2H_BANK = samples(12)
-
-
-def _h2h_config(
-    optimizer: str, seed: int, scoring: str, proposer_model: str | None
-) -> CampaignConfig:
-    # The shipped optimizers default to different models, so every arm pins one on each llm node.
-    manifest = yaml.safe_load((optimizers_root() / optimizer / "pipeline.yaml").read_text("utf-8"))
-    model = proposer_model or "qwen/qwen3.7-flash"
-    return defaulted_config(
-        {
-            "optimization": {
-                "optimizer": optimizer,
-                "degradation_threshold": 0.0,
-                "nodes": {
-                    name: {"config": {"model": model}}
-                    for name, node in manifest["nodes"].items()
-                    if node.get("type") == "llm"
-                },
-            },
-            "dataset_split": {"bench": 6},
-            "run_seed": seed,
-            "scoring": scoring,
-        }
-    )
-
-
-def _evidence_campaign(
-    stores: Stores,
-    cid: str,
-    n: int,
-    *,
-    selected: float,
-    seed: int = 0,
-    origin: float = 0.4,
-    scoring: str = _H2H_FORMULA,
-    at: int | None = None,
-    incurred: float = 0.2,
-    loop: float = 0.05,
-    wall: int = 100,
-    rebased: bool = False,
-    purpose: Purpose = Optimize(),  # noqa: B008 — frozen
-    proposer_model: str | None = None,
-    graded: bool = True,
-    steered: bool = False,
-    tilt: float = 0.0,
-    elects_on: DisplayMetric = "ability",
-    fit: ArmFit | None = None,
-) -> Subject:
-    if stores.campaigns.load_campaign(cid) is not None:
-        return Subject(cid)
-    split = DatasetSplit(bench=6, demo=0, tolerance=0)
-    partition = partition_bank(_H2H_BANK, split, seed=seed)
-    root = CycleHop(campaign_id=cid, cycle_id=f"cycle_{cid}")
-    stores.campaigns.create_campaign(
-        minted_campaign(
-            root,
-            config=_h2h_config(cid.split("_")[0], seed, scoring, proposer_model),
-            purpose=purpose,
-            dataset_name="ds",
-            created_at=f"2026-09-26T00:00:{n:02d}Z",
-        )
-    )
-    hop = CycleHop(campaign_id=cid, cycle_id=f"{root.cycle_id}_fork_r1") if rebased else root
-    panel = [
-        measurement(
-            s.id,
-            None,
-            query=s.query,
-            sample_key=s.key,
-            pipeline_data={"env_reward": 0.5},
-        )
-        for s in partition.search[:4]
-    ]
-    walked = filed(
-        stores.archive,
-        [cell.facts for cell in panel],
-        filed_under([("", {"individual": f"panel_{cid}"})], prompt_fields_id="origin"),
-    )
-    # A rebase fork replays its own origin and redraws the one partition.
-    ledgers: dict[CycleHop, CycleEventLog] = {}
-    held = Bank.of(_H2H_BANK)
-    stores.tenant_datasets.put_bank(held)
-    for cycle in {root, hop}:
-        stores.campaigns.mint_cycle(cycle)
-        stores.campaigns.append(
-            cycle,
-            PartitionRecord.of(
-                partition,
-                dataset_hash=held.dataset_hash,
-                cell_identity={},
-                instrument_id=held.dataset_hash,
-            ),
-        )
-        ledgers[cycle] = CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(cycle)))
-        arm_walk(
-            ledgers[cycle],
-            ((s.id, cell) for cell, s in zip(walked, partition.search, strict=False)),
-        )
-    if rebased:
-        stores.mark_superseded(root, hop.cycle_id)
-    if graded:
-        key = arm_key(f"{cid}:selected")
-        pick = arm_state(f"{cid}:selected", position=ArmPosition(round=1, idx=0, total=1))
-        answered = sheet(
-            cell.filed(dataclasses.replace(cell.facts, answer=answer))
-            for cell, (_, answer, _) in zip(panel, walked, strict=True)
-        )
-        closed = round_result(
-            1,
-            arms=[pick],
-            cells={key: answered},
-            voted={"elects_on": elects_on, "fit": {} if fit is None else {key: fit}},
-        )
-        close_round(
-            ledgers[hop],
-            [round_result(0, cells={}), closed],
-            cycle=seat(stores, bank=_H2H_BANK).cycle,
-        )
-    if steered:
-        stores.campaigns.act(hop, ArmAct.SKIP)
-    passes: dict[str, BenchPass] = {}
-    for role, level in (("origin", origin), ("selected", selected))[: 1 + graded]:
-        # The origin is ONE individual every campaign sends; each pick is its own.
-        individual = role if role == "origin" else arm_key(f"{cid}:{role}")
-        rows = [
-            measurement(
-                s.id,
-                None,
-                query=s.query,
-                sample_key=s.key,
-                pipeline_data={
-                    "env_reward": level
-                    + 0.1 * (s.id % 2)
-                    + (role == "selected") * tilt * (s.id % 3)
-                },
-            )
-            for s in partition.bench
-        ]
-        passes[role] = bench_pass(
-            stores,
-            individual,
-            rows,
-            [s.key for s in partition.bench],
-            filed_as=f"bench_{individual}_{seed}_{level}",
-            sp_hash=role,
-            scorer_id=scoring,
-            reads_before=int(role == "selected") * n,
-        )
-    hour = n if at is None else at
-    started = f"2026-09-26T{hour:02d}:00:00Z"
-    # The optimizer billed on the root; a rebase fork replayed its cells and graded the pick.
-    calls: list[tuple[TokenUsageKind, float, bool]] = [
-        ("optimizer", loop, False),
-        ("backend", incurred - loop - 0.05, True),
-        ("bench", 0.05, True),
-    ]
-    for kind, usd, replay in calls:
-        ledgers[root if kind == "optimizer" else hop].append(
-            billed_call(
-                usd,
-                kind=kind,
-                node=kind,
-                input_tokens=10,
-                output_tokens=5,
-                replay=replay,
-                timestamp=started,
-            )
-        )
-    for role, taken in passes.items():
-        ledgers[hop].append(
-            PassGradedRecord(
-                verification=taken,
-                subject=role,  # type: ignore[arg-type]
-                tolerance=0,
-                reserve_usd=0.05 if role == "origin" else None,
-                reserve_tokens=0 if role == "origin" else None,
-                reading=None,
-                state=ReadingState.READ,
-                refusal=None,
-            )
-        )
-    with scoped(ledger=ledgers[hop]):
-        append_record(
-            launch_clock_record(
-                stores,
-                stores.campaigns.line(root),
-                LaunchClock(started_at=started, monotonic=0.0),
-                f"2026-09-26T{hour:02d}:{wall // 60:02d}:{wall % 60:02d}Z",
-                frozenset(),
-            )
-        )
-    campaign = stores.campaigns.load_campaign(cid)
-    assert campaign is not None and len(line_launches(stores, campaign)) == 1
-    return Subject(cid)
-
-
 _PAIRED_CAND = [0.90, 0.10, 0.85, 0.20, 0.75, 0.30, 0.95, 0.05]
 
 
@@ -4005,339 +3805,188 @@ def test_the_climb_prices_c0s_lift_by_what_the_line_paid_and_an_absent_denominat
     assert standing_now.vs_parent == run[-1].overlap.vs_parent
 
 
-class _Declared(NamedTuple):
-    stores: Stores
-    declared: Any
-
-
-@pytest.fixture
-def declared_head_to_heads() -> _Declared:
-    """Five declared head-to-heads, one over defaults its arms no longer run under."""
-    h2h_stores = workspace()
-    declared = minted_campaign(
-        CycleHop(campaign_id="arm", cycle_id="cycle_arm"),
-        config=_h2h_config("potter", 0, _H2H_FORMULA, None),
-        purpose=Compare(arm=Arm(head_to_head_id="any", arm_key="any", replicate=1)),
-    ).declaration
-    for h2h_id in ("real4", "real5", "real6", "real7", "real8"):
-        alike = declared.spec.shared_part()
-        if h2h_id == "real8":
-            # Declared over defaults its arms no longer run under.
-            alike = alike.model_copy(update={"bench_defaults_pin": "moved"})
-        h2h_stores.campaigns.declare_head_to_head(
-            HeadToHeadRecord(
-                head_to_head_id=h2h_id,
-                created_at="",
-                origin="origin",
-                cell_identity={},
-                shared=alike,
-                ruler_version=0,
-            )
-        )
-    return _Declared(h2h_stores, declared)
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_head_to_head_pairs_two_optimizers_only_on_one_bench_under_one_grader(
-    declared_head_to_heads: _Declared,
-) -> None:
-    h2h_stores = declared_head_to_heads.stores
-    potter_a, capo_b = Subject("potter_a"), Subject("capo_b")
-    potter_cycle = Subject("potter_a", "cycle_potter_a_fork_r1")
-    _evidence_campaign(h2h_stores, "potter_a", 1, selected=0.5, rebased=True)
-    _evidence_campaign(h2h_stores, "capo_b", 2, selected=0.7, incurred=0.3, loop=0.15, wall=50)
-    shared = subject_evidence(h2h_stores, [potter_a, capo_b]).head_to_head
-    assert shared is not None and shared.rows[0].bench_set is not None
-    h2h_cases: tuple[
-        tuple[tuple[Subject, ...], dict[str, Any] | None, bool | None, list[str], int, int],
-        ...,
-    ] = (
-        ((potter_a, capo_b), None, True, [], 1, 1),
-        ((potter_cycle, capo_b), None, True, [], 1, 1),
-        ((potter_cycle, potter_a, capo_b), None, True, [], 1, 1),
-        (
-            (potter_a, capo_b),
-            {"cid": "gepa_c", "n": 3, "seed": 1},
-            False,
-            ["bench_rows"],
-            1,
-            1,
+def _guarded(**moved: Any) -> GuardMember:
+    """One campaign's guard member, its standing defaults, *moved* laid over them."""
+    bench = BenchSet(
+        instrument_id="i",
+        dataset_hash="d",
+        split=None,
+        bench_rows=CellSet.of(
+            CellSetName.BENCH_SPLIT, CellSetBasis.DECLARED, ["k0", "k1"], dataset_hash="d"
         ),
-        # A replicate read apart from its arm's origin puts the whole arm outside the family.
-        (
-            (potter_a, capo_b),
-            {"cid": "capo_d", "n": 4, "origin": 0.6},
-            False,
-            ["origin_reading"],
-            0,
-            2,
-        ),
-        # capo_b and capo_f run one treatment: one arm, its two replicates.
-        ((potter_a, capo_b), {"cid": "capo_f", "n": 6, "at": 1}, True, [], 1, 2),
-        (
-            (potter_a, capo_b),
-            {"cid": "potter_g", "n": 7, "proposer_model": "other/model"},
-            False,
-            ["optimizer_models"],
-            1,
-            1,
-        ),
-        (
-            (potter_a, capo_b),
-            {"cid": "capo_s", "n": 9, "steered": True},
-            False,
-            ["human_intervened"],
-            0,
-            2,
-        ),
+        scorer_id="s",
+        models={},
+        origin="o",
     )
-    for subjects, third, verdict, differs_on, family, replicates in h2h_cases:
-        case = f"{subjects} beside {third}"
-        roster = [*subjects]
-        if third is not None:
-            roster.append(_evidence_campaign(h2h_stores, **{"selected": 0.7, **third}))
-        evidence = subject_evidence(h2h_stores, roster)
-        h2h = evidence.head_to_head
-        assert evidence.scorer_id == auto_scorer_id(_H2H_FORMULA, None, judge_instrument=None)
-        assert h2h is not None and (h2h.verdict, h2h.guard.differs_on) == (verdict, differs_on), (
-            case
-        )
-        tested = [c for c in h2h.contrasts if c.lift is not None and c.lift.family is not None]
-        assert len(tested) == family, f"{case}: the tests one correction was taken across"
-        contrast = next(
-            c for c in h2h.contrasts if {c.a.optimizer, c.b.optimizer} == {"potter", "capo"}
-        )
-        potter_arm, capo_arm = sorted(
-            (contrast.a, contrast.b), key=lambda arm: arm.optimizer != "potter"
-        )
-        lift = contrast.lift
-        assert lift is not None and len(contrast.differences) == 6, case
-        assert lift.estimate.value == pytest.approx(0.2 if contrast.a is potter_arm else -0.2)
-        assert lift.side != "spans", case
-        assert potter_arm.replicates == ["potter_a"], case
-        assert len(capo_arm.replicates) == replicates, f"{case}: one treatment is one arm"
-        assert (lift.family is None) is (contrast.guard.state is GuardState.DIFFERS), (
-            f"{case}: a contrast that differs is read, labelled, and outside the correction"
-        )
-        differs = "differs" if differs_on else "uncontrolled"
-        assert [r.guard.state.value for r in h2h.rows] == ["uncontrolled"] * 2 + [differs] * bool(
-            third
-        ), case
-        rows = {r.campaign_id: r for r in h2h.rows}
-        potter_row, capo_row = rows["potter_a"], rows["capo_b"]
-        for ratio, times in (
-            ("incurred_usd_ratio", 1.5),
-            ("optimizer_incurred_usd_ratio", 3.0),
-            ("worked_ratio", 0.5),
-        ):
-            assert getattr(capo_row, ratio) == pytest.approx(times * getattr(potter_row, ratio)), (
-                f"{case}: priced on INCURRED spend, so capo's bill prices arrival"
-            )
-        assert capo_row.bench.cost.lift_per_usd == pytest.approx(0.3 / 0.25), case
+    member = GuardMember(
+        purpose=Optimize(),
+        bench_set=bench,
+        budget=defaults_config().optimization.budget,
+        stopping=StoppingRule(lives=None),
+        determinism=None,
+        bench_defaults_pin="pin",
+        optimizer_models=("m",),
+        human_intervened=False,
+        left_comparison=(),
+    )
+    return member._replace(**moved)
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_the_arms_of_one_declared_head_to_head_are_controlled_only_on_their_record(
-    declared_head_to_heads: _Declared,
-) -> None:
-    h2h_stores = declared_head_to_heads.stores
-    optimizer_hour = {
-        "potter": ("potter", 10),
-        "capo": ("capo", 11),
-        "gepa": ("gepa", 12),
-        "levi": ("levi", 13),
-        "waiting": ("capo", 14),
-        "capped": ("capo", 15),
-        "rewound": ("capo", 16),
-        "forked": ("capo", 17),
-    }
-    for h2h_id, arms, verdict, guards in (
-        ("real4", ("potter", "capo"), True, ["controlled"] * 2),
-        # An arm a launch rewound in place stays admitted, and leaves the comparison as that event.
-        ("real4", ("potter", "rewound"), True, ["controlled", "uncontrolled"]),
-        # A fork spends its campaign's ceiling: the arm leaves though the act landed on the fork.
-        ("real4", ("potter", "forked"), True, ["controlled", "uncontrolled"]),
-        ("real4", ("potter", "capo", "gepa", "levi"), True, ["controlled"] * 3 + ["uncontrolled"]),
+def test_a_pair_differs_on_exactly_what_its_members_ran_apart_on() -> None:
+    other_rows = CellSet.of(
+        CellSetName.BENCH_SPLIT, CellSetBasis.DECLARED, ["k0", "k2"], dataset_hash="d"
+    )
+    base = _guarded()
+    assert base.bench_set is not None
+    for moved, read_apart, differs_on in (
+        ({}, False, []),
         (
-            "real6",
-            ("potter", "capped", "gepa", "levi"),
+            {"bench_set": base.bench_set.model_copy(update={"bench_rows": other_rows})},
             False,
-            ["controlled", "controlled", "uncontrolled", "differs"],
+            [GuardDifference.BENCH_ROWS],
         ),
-        ("real7", ("potter", "capo", "waiting"), None, ["controlled"] * 3),
-        ("real8", ("potter", "capo"), False, ["differs"] * 2),
+        ({"budget": Budget(usd=1.0)}, False, [GuardDifference.BUDGET]),
+        ({"bench_defaults_pin": "moved"}, False, [GuardDifference.DEFAULTS]),
+        ({"optimizer_models": ("other/model",)}, False, [GuardDifference.OPTIMIZER_MODELS]),
+        ({"human_intervened": True}, False, [GuardDifference.HUMAN_INTERVENED]),
+        ({}, True, [GuardDifference.ORIGIN_READING]),
     ):
-        case = f"{h2h_id} over {arms}"
-        arm_subjects = []
-        for key in arms:
-            optimizer, hour = optimizer_hour[key]
-            record = "real5" if key == "levi" else h2h_id
-            arm_subjects.append(
-                _evidence_campaign(
-                    h2h_stores,
-                    f"{optimizer}_{key}_{record}",
-                    hour,
-                    selected=0.6,
-                    purpose=Compare(arm=Arm(head_to_head_id=record, arm_key=key, replicate=1)),
-                    graded=key != "waiting",
-                )
+        guard = pair_guard([base, _guarded(**moved)], None, origin_read_apart=read_apart)
+        assert guard.differs_on == differs_on, f"{moved}, origin read apart {read_apart}"
+        assert guard.state is (GuardState.DIFFERS if differs_on else GuardState.UNCONTROLLED)
+
+
+def test_an_arm_differences_each_rows_replicate_means_and_clusters_on_the_row() -> None:
+    bank = samples(6, "t", query="w")
+    measurand = grade_measurands(scorer_of(_H2H_FORMULA))[0]
+
+    def seeded(level: float, tilt: float) -> list[float]:
+        return [level + 0.1 * (i % 2) + tilt * (i % 3) for i in range(len(bank))]
+
+    def arm(*levels: tuple[float, float]) -> list[MemberRows]:
+        return [
+            member_rows(
+                f"r{n}", [measurement(i, v, objective=v) for i, v in enumerate(seeded(*lv))], bank
             )
-        if "capped" in arms:
-            capped = h2h_stores.campaigns.load_campaign(f"capo_capped_{h2h_id}")
-            assert capped is not None
-            h2h_stores.campaigns.append(
-                capped.root_hop,
-                CampaignCeilingRecord(budget=Budget(usd=1.0), asked=Budget(usd=1.0)),
-            )
-        if "rewound" in arms:
-            rewound = h2h_stores.campaigns.load_campaign(f"capo_rewound_{h2h_id}")
-            assert rewound is not None
-            h2h_stores.campaigns.act(
-                h2h_stores.campaigns.live_cycle(rewound.root_hop), ArmAct.REWIND
-            )
-        if "forked" in arms:
-            forked = h2h_stores.campaigns.load_campaign(f"capo_forked_{h2h_id}")
-            assert forked is not None
-            line = h2h_stores.campaigns.live_cycle(forked.root_hop)
-            parent = h2h_stores.campaigns.cycle_dir(line)
-            fork = CycleHop(campaign_id=line.campaign_id, cycle_id=f"{line.cycle_id}_fork_r1")
-            mint_fork(
-                h2h_stores.campaigns,
-                fork,
-                parent,
-                ForkSpec(
-                    trigger=ForkTrigger.OPERATOR_REWIND,
-                    reason="",
-                    issued_by=SYSTEM_PRINCIPAL,
-                    from_candidate=RoundArm(round=0, arm=ArmKey("origin")),
-                ),
-                cut=CycleEventLog.open(CycleDir(parent)).next_offset,
-                cut_round=1,
-            )
-            h2h_stores.campaigns.act(line, ArmAct.FORK)
-            # The exit is the arm's, not the fork's: deleting the fork leaves it standing.
-            deleted, why = cleanup_stub_fork_if_empty(campaign_store=h2h_stores.campaigns, hop=fork)
-            assert deleted, why
-        h2h = subject_evidence(h2h_stores, arm_subjects).head_to_head
-        assert h2h is not None and h2h.guard.head_to_head_id == h2h_id, case
-        assert [r.guard.state.value for r in h2h.rows] == guards, (
-            f"{case}: {[r.guard.differs_on for r in h2h.rows]}"
-        )
-        assert h2h.verdict is verdict, case
-        tested_by_state = Counter(c.guard.state for c in h2h.contrasts if c.lift is not None)
-        for contrast in h2h.contrasts:
-            if contrast.lift is not None and contrast.lift.family is not None:
-                assert contrast.lift.family.n_tests == tested_by_state[contrast.guard.state], (
-                    f"{case}: a controlled and an uncontrolled contrast were corrected as one family"
-                )
-        assert (GuardDifference.DEFAULTS in h2h.guard.differs_on) is (h2h_id == "real8"), (
-            f"{case}: arms run under defaults their record was not declared over, unsaid"
-        )
-        if verdict is None:
-            assert h2h.verdict_absent is ReadingState.PENDING, f"{case}: a waiting arm is pending"
+            for n, lv in enumerate(levels)
+        ]
+
+    older, newer = ((0.1, 0.0), (0.2, 0.0)), ((0.1, 0.4), (0.0, 0.4))
+    read = read_arms(
+        arm(*older),
+        arm(*newer),
+        cells=[s.key for s in bank],
+        measurand=measurand,
+        spec=ROUND_LIFT_SPEC,
+    )
+    means = [
+        [fmean(col) for col in zip(*(seeded(*lv) for lv in side), strict=True)]
+        for side in (older, newer)
+    ]
+    known = {s.key: b - a for s, a, b in zip(bank, *means, strict=True)}
+    assert read.differences == pytest.approx(known), "each row: b's replicate mean less a's"
+    assert read.lift is not None and read.lift.estimate.value == pytest.approx(
+        fmean(known.values())
+    )
+    pairs = [
+        y - x
+        for i in range(len(bank))
+        for x in (seeded(*lv)[i] for lv in older)
+        for y in (seeded(*lv)[i] for lv in newer)
+    ]
+    assert (read.se_clustered, read.se_naive) == pytest.approx(
+        (stdev(known.values()) / sqrt(len(known)), stdev(pairs) / sqrt(len(pairs)))
+    ), "the row is the cluster: its replicate pairings are never independent rows"
+
+
+@pytest.fixture(scope="module")
+def head_to_head(tmp_path_factory: pytest.TempPathFactory) -> Shared:
+    """potter, capo and gepa as the arms of head-to-head `h2h`, and a capo campaign outside it:
+    9.2 s, read by three facts (~3 s each)."""
+
+    async def ran(w: World) -> tuple[list[str], str]:
+        arms = await w.head_to_head({k: k for k in ("potter", "capo", "gepa")}, "h2h", rows=60)
+        lone = await w.campaign("capo", rows=60)
+        return [a.session.campaign_id for a in arms], lone.session.campaign_id
+
+    return shared_run(tmp_path_factory, ran)
 
 
 @pytest.mark.usefixtures("optimizing_memory")
-def test_a_matrix_reads_each_arm_as_a_treatment_over_its_replicates_clustered_by_bench_row(
-    declared_head_to_heads: _Declared,
+def test_a_head_to_heads_arms_are_controlled_and_corrected_as_one_family(
+    world: World, head_to_head: Shared
 ) -> None:
-    # Each bench row's arm means are differenced; Holm gates, and BH reads false discovery across
-    # the arm × arm family.
-    h2h_stores, declared = declared_head_to_heads
-    h2h_stores.campaigns.declare_head_to_head(
-        HeadToHeadRecord(
-            head_to_head_id="seeds",
-            created_at="",
-            origin="origin",
-            cell_identity={},
-            shared=declared.spec.shared_part(),
-            ruler_version=0,
-        )
-    )
-    pinned = ArmFit(theta=0.31, theta_se=0.2, theta_caveat=ThetaCaveat.PRIOR_DOMINATED)
-    replicated: dict[str, tuple[float, float, DisplayMetric, ArmFit | None]] = {
-        "potter_s1": (0.1, 0.0, "ability", ArmFit(theta=0.42, theta_se=0.1)),
-        "potter_s2": (0.2, 0.0, "ability", pinned),
-        "capo_s1": (0.1, 0.4, "fitness", None),
-        "capo_s2": (0.0, 0.4, "fitness", None),
-        "gepa_s1": (0.2, 0.2, "composite", None),
-    }
-    replicate_arms = [
-        _evidence_campaign(
-            h2h_stores,
-            cid,
-            17 + i,
-            selected=selected,
-            tilt=tilt,
-            elects_on=elects_on,
-            fit=fit,
-            purpose=Compare(arm=Arm(head_to_head_id="seeds", arm_key=cid, replicate=1)),
-        )
-        for i, (cid, (selected, tilt, elects_on, fit)) in enumerate(replicated.items())
-    ]
-    matrix = subject_evidence(h2h_stores, replicate_arms).head_to_head
-    assert matrix is not None and matrix.verdict is True
-    held_out = partition_bank(_H2H_BANK, DatasetSplit(bench=6, demo=0, tolerance=0), seed=0).bench
-
-    def seeded(cid: str, row: Sample) -> float:
-        selected, tilt, _, _ = replicated[cid]
-        return selected + 0.1 * (row.id % 2) + tilt * (row.id % 3)
-
-    by_arm = {
-        "potter": ["potter_s1", "potter_s2"],
-        "capo": ["capo_s1", "capo_s2"],
-        "gepa": ["gepa_s1"],
-    }
-    assert [(c.a.optimizer, c.b.optimizer) for c in matrix.contrasts] == [
+    stores = world.adopt(head_to_head).stores
+    arms, _ = head_to_head.made
+    table = subject_evidence(stores, [Subject(c) for c in arms]).head_to_head
+    assert table is not None and table.verdict is True
+    assert [r.guard.state for r in table.rows] == [GuardState.CONTROLLED] * 3
+    assert [(c.a.optimizer, c.b.optimizer) for c in table.contrasts] == [
         ("potter", "capo"),
         ("potter", "gepa"),
         ("capo", "gepa"),
     ], "each treatment is one arm, the older arm `a`"
-    for contrast in matrix.contrasts:
-        older, newer = by_arm[contrast.a.optimizer], by_arm[contrast.b.optimizer]
-        assert (contrast.a.replicates, contrast.b.replicates) == (older, newer)
-        known = {
-            row.key: fmean(seeded(cid, row) for cid in newer)
-            - fmean(seeded(cid, row) for cid in older)
-            for row in held_out
-        }
-        assert contrast.differences == pytest.approx(known), "each row: b's mean less a's"
+    for contrast in table.contrasts:
         lift = contrast.lift
         assert lift is not None and lift.family is not None
-        assert lift.estimate.value == pytest.approx(fmean(known.values()))
-        pairs = [seeded(y, row) - seeded(x, row) for row in held_out for x in older for y in newer]
-        clustered = stdev(known.values()) / sqrt(len(known))
-        naive = stdev(pairs) / sqrt(len(pairs))
-        assert (contrast.se_clustered, contrast.se_naive) == pytest.approx((clustered, naive)), (
-            "the row is the cluster: its replicate pairings are never independent rows"
-        )
-        assert contrast.design_effect == pytest.approx((clustered / naive) ** 2)
-        assert (lift.family.id, lift.family.n_tests) == ("seeds", 3)
+        assert (lift.family.id, lift.family.n_tests) == ("h2h", 3)
+        assert lift.estimate.value == pytest.approx(fmean(contrast.differences.values()))
         assert contrast.q_value is not None and contrast.q_value <= lift.family.p_adjusted, (
             "BH never gates harder than Holm"
         )
     ranked = sorted(
-        (c for c in matrix.contrasts if c.lift is not None and c.lift.family is not None),
-        key=lambda c: c.lift.p_value if c.lift is not None else 1.0,
+        (c.lift for c in table.contrasts if c.lift is not None), key=lambda x: x.p_value
     )
-    p = [c.lift.p_value for c in ranked if c.lift is not None]
-    lowest = ranked[0].lift
-    assert lowest is not None and lowest.family is not None
-    assert lowest.family.p_adjusted == pytest.approx(min(1.0, 3 * p[0]))
-    assert ranked[-1].q_value == pytest.approx(p[-1])
-    elections = {r.campaign_id: r.election for r in matrix.rows}
-    assert {cid: e and (e.elects_on, e.reads_on) for cid, e in elections.items()} == {
-        "potter_s1": ("ability", "ability"),
-        "potter_s2": ("ability", "fitness"),
-        "capo_s1": ("fitness", "fitness"),
-        "capo_s2": ("fitness", "fitness"),
-        "gepa_s1": ("composite", "composite"),
-    }, "an ability pick is quoted on θ unless a caveat is served on its θ"
-    quoted = elections["potter_s1"]
-    assert quoted is not None and quoted.ability is not None and quoted.ability.theta is not None
-    assert quoted.ability.theta.value == 0.42
+    assert ranked[0].family is not None
+    assert ranked[0].family.p_adjusted == pytest.approx(min(1.0, 3 * ranked[0].p_value))
+    potter = Subject(arms[0], stores.campaigns.campaign_cycle_dirs(arms[0])[0].name)
+    for roster in ([potter, *map(Subject, arms[1:])], [potter, *map(Subject, arms)]):
+        again = subject_evidence(stores, roster).head_to_head
+        assert again is not None and again.contrasts == table.contrasts, (
+            "a cycle read as a subject of its own beside its campaign"
+        )
 
-    assert any(note.startswith("potter_s1, gepa_s1 elected") for note in matrix.notes)
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_a_campaign_outside_the_head_to_head_joins_its_treatments_arm_uncorrected_with_it(
+    world: World, head_to_head: Shared
+) -> None:
+    stores = world.adopt(head_to_head).stores
+    arms, lone = head_to_head.made
+    table = subject_evidence(stores, [Subject(c) for c in (*arms, lone)]).head_to_head
+    assert table is not None and table.verdict is True
+    states = {r.campaign_id: r.guard.state for r in table.rows}
+    assert states[lone] is GuardState.UNCONTROLLED and states[arms[1]] is GuardState.CONTROLLED
+    [capo] = [c for c in table.contrasts if {c.a.optimizer, c.b.optimizer} == {"potter", "capo"}]
+    assert capo.b.replicates == [arms[1], lone], "one treatment is one arm, over its replicates"
+    tested = Counter(c.guard.state for c in table.contrasts if c.lift is not None)
+    for contrast in table.contrasts:
+        assert contrast.lift is not None and contrast.lift.family is not None
+        assert contrast.lift.family.n_tests == tested[contrast.guard.state], (
+            "a controlled and an uncontrolled contrast were corrected as one family"
+        )
+
+
+@pytest.mark.usefixtures("optimizing_memory")
+def test_an_act_on_an_arm_takes_it_out_of_its_head_to_head(
+    world: World, head_to_head: Shared
+) -> None:
+    # A rewind or a fork leaves the comparison; a skipped step is a human's hand on the run.
+    stores = world.adopt(head_to_head).stores
+    arms, _ = head_to_head.made
+    acted = dict(zip(arms, (ArmAct.REWIND, ArmAct.FORK, ArmAct.SKIP), strict=True))
+    for cid, act in acted.items():
+        campaign = stores.campaigns.load_campaign(cid)
+        assert campaign is not None
+        stores.campaigns.act(stores.campaigns.live_cycle(campaign.root_hop), act)
+    table = subject_evidence(stores, [Subject(c) for c in arms]).head_to_head
+    assert table is not None
+    states = {r.campaign_id: r.guard.state for r in table.rows}
+    assert [states[c] for c in arms] == [
+        GuardState.UNCONTROLLED,
+        GuardState.UNCONTROLLED,
+        GuardState.DIFFERS,
+    ], f"{acted} left another standing than {states}"
 
 
 def test_a_two_valued_scorers_headline_separates_under_the_bar_its_paired_test_separates() -> None:
