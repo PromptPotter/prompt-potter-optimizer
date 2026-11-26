@@ -37,7 +37,7 @@
 }
 
 /* --bp-sm: the value takes its own line under the axis. */
-@media (max-width: 640px) {
+@container column (max-width: 640px) {
   .value {
     flex-basis: 100%;
   }

@@ -214,7 +214,7 @@
   min-width: 0;
 }
 
-@media (max-width: 640px) {
+@container column (max-width: 640px) {
   .cell-trace {
     grid-template-columns: minmax(0, 1fr);
   }

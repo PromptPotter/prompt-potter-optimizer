@@ -7,6 +7,11 @@
 canvas{max-width:100%}
 /* The ONE field look: a surface sizes a field, never re-skins it. */
 input:not([type=checkbox],[type=radio],[type=file],[type=range]),select,textarea{font:inherit;padding:1px var(--space-4);border:1px solid var(--color-border);border-radius:var(--border-radius-md);background:Field;color:FieldText}
+/* A field framed with its own controls (the composer's Tools, a snippet's tag): the frame wears the skin, the field inside none. */
+.chat-field{background:Field;border:1px solid var(--color-border);border-radius:var(--border-radius-md)}
+.chat-field:focus-within{border-color:var(--color-accent)}
+:is(.chat-field,.prompt-snippet) :is(input,textarea){border:0;background:transparent}
+.chat-field :is(input,textarea):focus-visible{outline:none}
 fieldset{padding:var(--space-4) var(--space-8);border:1px solid var(--color-border);border-radius:var(--border-radius-md)}
 }
 

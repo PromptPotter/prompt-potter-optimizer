@@ -255,3 +255,10 @@
   /* The list screen hides `.view-tabs` without unmounting it, so the dock is reserved off it by name. */
   .shell:not(.mobile-list):has(> .main > .view-tabs){--nav-dock-h:var(--nav-row-h)}
 }
+/* A landscape phone has no height for a standing masthead: the panes take all of it under the bars,
+   and the masthead scrolls away above them. */
+@media (max-width:880px) and (orientation:landscape){
+  .shell > .main{overflow-y:auto}
+  .views{min-height:calc(100% - var(--nav-dock-h) - var(--remote-dock-h))}
+  .view-tabs{position:sticky;bottom:0}
+}

@@ -387,10 +387,6 @@ and derived the knob couplings from each member's draws and the escalation ladde
   every served response field to a webapp reader, or to its model naming why not (as `Verb.unspelled` /
   `terminal_only` do for the CLI), on a baseline that only falls. **Rides with:** webd. **Re-test:**
   the check's baseline is 0.
-- **Form fields are skinned outside `base.css`** (`scoring.css:17`, `chat.css:23`, `onboarding.css:44`),
-  against `webapp/app/CLAUDE.md`'s one-skin rule. Action: fields skin in `base.css` alone.
-  **Rides with:** webd. **Re-test:** no `border:` on an `input` / `select` / `textarea` selector
-  outside `foundation/base.css`.
 - **An inner campaign serves a Delete no door presses** (webd-3's report): `domain/hierarchy.py::SubtreeCampaign`
   subclasses `HierarchyCampaign`, so an inner campaign in the deep read inherits its
   `delete: DeleteAct` (`delete-campaign`), which nothing may file for it. Root: the subtree entry is
@@ -740,31 +736,11 @@ and derived the knob couplings from each member's draws and the escalation ladde
 
 ### wave-5 · webapp (what webapp-1 left)
 
-- **A pane's phone layout keys on the screen, not its column**: `measurements.css`, `scoring.css`,
-  `dashboard-pipeline.css`, `remote.css` and `ui/IntervalRow.module.css` switch at
-  `@media (max-width:640px)` though they draw inside a `.view` 413px wide on a 1440 screen. Root:
-  the `column` container `ui/Toolbar.module.css`'s fold reads. **Re-test:**
-  `git grep -c "@media (max-width: *640px)" -- webapp/components webapp/app/styles/domains` reaches
-  the screen-only rules alone.
-- **A short landscape screen leaves its pane a 30px strip**: at 844×390 on touch the masthead
-  (~200px), nav (56px) and remote bar (~60px) stay fixed; nothing is under the bar any more, but a
-  pane shows less than one row. Root: the masthead scrolls away with the pane on a short viewport.
-  **Re-test:** at landscape-844 touch the samples pane shows ≥ 3 rows.
 - **An open panel lags its trigger by a frame**: `ui/overlay.ts::useAnchored` re-places a popover
   from `requestAnimationFrame`, and follows a trigger scrolled out of its pane over the masthead;
   `e2e/harness.ts::everyTapLands` re-reads a cover two frames on for it. Root: CSS anchor
   positioning, no JS follow. **Held:** iOS before 26 lacks it. **Re-test:**
   `git grep -c requestAnimationFrame -- webapp/components/ui/overlay.ts webapp/e2e/harness.ts` is 0.
-- **The walk serves a stale bundle as the page under test**: against an old `webapp/out` the app
-  says "This page is out of date" (`promptpotter/main.py`'s `webapp` Said), which shrinks the panes,
-  and a bare `npx playwright test` does not refuse it (the gate rebuilds first). Root: the walk
-  server refuses a bundle older than its sources. **Re-test:** a walk run on a stale build fails at
-  start, naming the build.
-- **The walk's server reaches the network for model capabilities** (store-5a's report): a cloud
-  full gate went red on `playwright` once and green on its rerun with no web change, its WebServer
-  logging "model capability refresh failed … 403 Forbidden". Root: the walk world serves a pinned
-  capability answer and makes no outbound call. **Re-test:** the walk server makes no outbound
-  request (a refusing proxy changes no walk result).
 - **A Candidates card draws an empty chart over a served lineage**: campaign
   `bbh-multistep-arithmetic-8b__244ba5` (history 2, rounds 2) renders `.cand-card`'s canvas blank
   with no console error, while its hierarchy and dashboard reads serve rows. A state the card enters

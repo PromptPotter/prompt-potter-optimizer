@@ -6,7 +6,7 @@ to [`../CLAUDE.md`](../CLAUDE.md) § Testing posture; this page is the runbook.
 ```bash
 cd webapp
 npm run e2e                 # build the app, then walk it (walk + cold)
-npm run e2e:fast            # skip the build — iterating on specs
+npm run e2e:fast            # skip the build — iterating on specs; a build of another webapp/ refuses to serve
 npm run e2e:watch           # the same, in a browser you can watch
 npm run e2e:ui              # step, time-travel, pick locators
 npx playwright test --project=walk -g "theme"    # one slice
@@ -25,8 +25,10 @@ account agreed to the live terms, with the `offline` backend. Unset, `playwright
 `gate.py --walk-world` for this tree's world, which builds it when absent.
 
 **The backend is a posture too, argued like auth** (`serve.mjs --backend=offline|live`). A run
-without `spend` serves the throwaway world `offline`: `serve_app.py` answers `TERMNORM_ENDPOINTS` with
-`scripts/offline_world.py::FakeBackend`, so a check-in reads one schema on every machine. A desk
+without `spend` serves the throwaway world `offline`: `serve_app.py` answers every send of the server
+with `scripts/offline_world.py::Router` (`TERMNORM_ENDPOINTS` its `FakeBackend`, the model catalogue
+pinned empty) and resolves no name, so a check-in reads one world on every machine and a refusing
+proxy changes no walk. A desk
 TermNorm at :8000 once turned a CI-red spec green at the push hook.
 
 ## Three worlds, because the app has two populations
@@ -94,7 +96,7 @@ without being identical — each run leaves inner-cycle residue the next re-meas
 what took the third pass to 80.4%. It is there to catch a tape that has stopped answering at all; a
 bar tuned to whatever last passed asserts nothing.
 
-## Three rules for anything added here
+## Four rules for anything added here
 
 Each binds one helper in `harness.ts` and is argued where it binds:
 
@@ -104,3 +106,5 @@ Each binds one helper in `harness.ts` and is argued where it binds:
 - **The console guard is the point** (`BENIGN`, `EXPECTED_4XX`) — it is `auto`, so no spec can
   forget it, and it stays empty of anything the app itself emits.
 - **A hash-only `goto` does not remount** (`open`) — navigate with it, never `page.goto`.
+- **A layout check reads what is drawn** (`drawn`, the `reads` fixture) — it waits until no read
+  the document sent is open, so a row its read has not yet answered can never pass unchecked.

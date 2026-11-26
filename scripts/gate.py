@@ -1409,6 +1409,9 @@ class Check:
     builds: tuple[str, ...] = ()
     # Returns `None` where ownership cannot be told, and then the whole check runs.
     narrow: Callable[[Sequence[str]], tuple[str, ...] | None] | None = None
+    # The HEAD trees its product stamps (`webapp/vite.config.ts`'s build stamp), which a commit
+    # moves while every source byte stands: they key it beside its sources.
+    stamps_head: tuple[str, ...] = ()
 
     def inputs(self) -> tuple[str, ...] | None:
         if self.kind == "release":  # the answer lives on the network
@@ -1422,7 +1425,8 @@ class Check:
         if prefixes is None or self.kind == "parity":
             return None
         made = [key for b in _builders(self, CHECKS) if (key := b.key(store)) is not None]
-        return digest(store.key(prefixes).encode(), *(key.encode() for key in made)).hex()
+        heads = [git("rev-parse", f"HEAD:{tree}")[1].encode() for tree in self.stamps_head]
+        return digest(store.key(prefixes).encode(), *heads, *(key.encode() for key in made)).hex()
 
     def kept(self, store: LastGreen, key: str | None) -> bool:
         standing = all((REPO / path.format(key=key)).exists() for path in self.builds)
@@ -1844,6 +1848,7 @@ CHECKS: tuple[Check, ...] = (
         slots=2,
         # Inside `out/`, so vite's `emptyOutDir` takes it with the product it vouched for.
         builds=("webapp/out/.built-{key}",),
+        stamps_head=("webapp",),
     ),
     # Its incremental `tsconfig.tsbuildinfo` is written only where its content moved.
     Check("tsc", "web", _tsc, mb=735, tier="commit"),  # 586
