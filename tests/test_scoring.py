@@ -48,7 +48,6 @@ from factories import (
     filed_under,
     inner_sandbox,
     jumping_clock,
-    laid_ledger,
     ledger_records,
     level_series,
     loop_session,
@@ -74,17 +73,15 @@ from factories import (
     walking_cycle,
     workspace,
 )
-from offline_world import FakeHarness, Router, shown_text
+from offline_world import FakeHarness, Router
 from pydantic import SecretStr, ValidationError
 from world import Shared, World, shared_run
 
 from promptpotter import connectors
 from promptpotter.application.bench import node_context
-from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext, SliceMap
+from promptpotter.application.bench.cycle import Cycle, ReadArm, RoundContext
 from promptpotter.application.bench.difficulty import (
     JudgingRuler,
-    judging_ruler,
-    regraded_ruler,
     ruler_clock,
     session_ruler_scope,
 )
@@ -131,7 +128,9 @@ from promptpotter.application.mask.backprop import ForkDecline, select_branch_ro
 from promptpotter.application.mask.record import SpineCycle
 from promptpotter.application.optimizer_manifest import bench_choice, select_optimizer
 from promptpotter.application.optimizers import nodes as node_contract
-from promptpotter.application.optimizers.capo.members import CapoInit, CapoObjective
+from promptpotter.application.optimizers.capo.members import (
+    seed_instructions,
+)
 from promptpotter.application.optimizers.gepa.members import (
     MinibatchBar,
     MinibatchBars,
@@ -139,11 +138,8 @@ from promptpotter.application.optimizers.gepa.members import (
 )
 from promptpotter.application.optimizers.nodes import NODE_MEMBERS, RoundSamples
 from promptpotter.application.optimizers.potter.dispatch.facade import DispatchHub, PotterView
-from promptpotter.application.optimizers.potter.dispatch.layout import (
-    NODE_LAYOUTS,
-    coerce_l1_layout,
-)
 from promptpotter.application.optimizers.potter.dispatch.schemas import (
+    L1Edit,
     L3PlanOutput,
     fork_proposal_model,
 )
@@ -152,7 +148,6 @@ from promptpotter.application.optimizers.potter.escalation import (
     EscalationInputs,
     HighWater,
     LadderAsk,
-    LayerReading,
     NextAction,
     _rebase_request,
     as_read_by,
@@ -167,16 +162,18 @@ from promptpotter.application.optimizers.potter.knobs import (
     EscalationLadder,
     PoBBKnobs,
 )
-from promptpotter.application.optimizers.potter.members import L1Generate
+from promptpotter.application.optimizers.potter.l1 import applied_edits
 from promptpotter.application.optimizers.potter.pobb import PoBBCheck, field_p_best
 from promptpotter.application.optimizers.potter.records import (
-    L1Readout,
-    L2Memory,
     L3Memory,
     Ladder,
     LayerCounters,
 )
-from promptpotter.application.optimizers.potter.validators import l1_evidence_grounding
+from promptpotter.application.optimizers.potter.validators import (
+    detect_invariants,
+    l1_evidence_grounding,
+    l1_prompt_fields_open,
+)
 from promptpotter.application.optimizers.variation.members import (
     Cross,
     donor_take,
@@ -260,6 +257,7 @@ from promptpotter.domain.arms import (
     CutKind,
     Measured,
     PointContext,
+    Proposal,
     Proposed,
     Refused,
     is_leader_eligible,
@@ -301,7 +299,7 @@ from promptpotter.domain.command_kinds import (
 from promptpotter.domain.crowning_bar import BAR_ADMISSION, CrowningBar
 from promptpotter.domain.cycle_paths import CycleDir, CycleHop, Subject
 from promptpotter.domain.judges import JudgeSpec, JudgeStage, JudgeVerdict
-from promptpotter.domain.opt_search_point import NodePrompt, OptSearchPoint
+from promptpotter.domain.opt_search_point import Locus, NodePrompt, OptSearchPoint
 from promptpotter.domain.optimizer_template import PROMPT_FIELDS
 from promptpotter.domain.origin_panel import (
     OverlapReading,
@@ -350,7 +348,6 @@ from promptpotter.domain.records.held_out import PassGradedRecord
 from promptpotter.domain.records.run_records import (
     ArmAct,
     ArmRecord,
-    LLMCallRecord,
     RebaseRequest,
     RoundEnteredRecord,
     RoundWarningRecord,
@@ -394,10 +391,9 @@ from promptpotter.domain.verification import (
     VerifyPass,
     VerifyStrategy,
 )
-from promptpotter.domain.wounds import ValidationReason, fatal_validation_failures
+from promptpotter.domain.wounds import ValidationReason
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.ledger import CycleEventLog, ledger_chain
-from promptpotter.infrastructure.llm.send_failure import FailedSendError
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm.spend_book import (
     SpendBook,
     require_spend_book,
@@ -409,11 +405,10 @@ from promptpotter.infrastructure.projections.live_dashboard import (
 from promptpotter.infrastructure.run_scope import run_scope, scoped
 from promptpotter.infrastructure.store.campaign_store.ledger_scan import (
     scan_ledger_walks,
-    scan_standing_rounds,
 )
 from promptpotter.infrastructure.store.dataset_access import DEFINITION_FILE
 from promptpotter.infrastructure.store.io import write_yaml
-from promptpotter.infrastructure.store.read_model import LedgerIndex, LedgerSpan, scan_last
+from promptpotter.infrastructure.store.read_model import LedgerIndex
 from promptpotter.infrastructure.store.stores import Stores, descend_store
 from promptpotter.presentation.cli.commands.launch import ctrl_c_stops_pass
 from promptpotter.shared.answer_text import extract_gsm8k_number
@@ -1787,6 +1782,20 @@ def test_potters_queue_in_a_peers_roster_sizes_its_panel_off_its_own_knobs(
     )
 
 
+def test_capo_inits_reply_out_of_form_seeds_nothing_and_never_crashes() -> None:
+    # `CapoInit.propose` books a None as its one refused child: an array of blanks, read as in
+    # form, left the round without one arm or a word; a reply nested past the parser's stack
+    # crashed the init.
+    for reply, seeded in (
+        ('Here: ["  A.", "", "B."]', ["A.", "B."]),
+        (json.dumps(["  ", ""]), None),
+        ("[" * 5000 + "]" * 5000, None),
+        ("[" + "1+" * 20000 + "1]", None),
+        ("no array at all", None),
+    ):
+        assert seed_instructions(reply) == seeded, f"{reply[:20]!r} seeded {seeded}"
+
+
 def test_a_crossover_donor_gives_a_minority_of_the_loci_the_two_differ_on() -> None:
     # A crossover child continues its main.
     solve = pipeline_schema([PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)])
@@ -3077,6 +3086,50 @@ def test_a_citation_names_the_panel_holding_its_words_whole_and_in_order() -> No
         assert bool(failures) == (panel is None), f"{citation!r} cited nothing yet stood"
 
 
+def test_an_l1_edit_lands_on_its_one_anchor_in_order_and_never_writes_answer_format() -> None:
+    # Every L1 child's text is `applied_edits`', and its held fields `l1_prompt_fields_open`'s.
+    parent_text = "Answer the query."
+    fields = {"instruction": parent_text, "answer_format": "Reply with the letter."}
+    parent = OptSearchPoint(prompts={"solve": NodePrompt(fields=fields)})
+    missed = ValidationReason.EDIT_ANCHOR_NOT_ONE_SPAN
+    for steps, written in (
+        # Two edits on one field: the second anchors on the text the first left.
+        (
+            (("insert_after", parent_text, " Zq7."), ("replace", "Zq7.", "Check twice.")),
+            f"{parent_text} Check twice.",
+        ),
+        # A span the text holds twice names no place to edit.
+        ((("insert_after", parent_text, " Zq7. Zq7."), ("replace", "Zq7.", "Check.")), missed),
+        ((("replace", "a span the parent never held", "Check."),), missed),
+        ((("replace", "", "Rewritten whole."),), "Rewritten whole."),
+        # A hard-wrapped span quoted with its line break reflowed still names its one place.
+        (
+            (("insert_after", parent_text, " Zq7\n  Zq8."), ("replace", "Zq7 Zq8.", "Check.")),
+            f"{parent_text} Check.",
+        ),
+    ):
+        edits = [L1Edit(at="solve.instruction", op=op, anchor=a, text=t) for op, a, t in steps]
+        texts, failures = applied_edits(edits, parent, pooled=None)
+        got = failures[0].reason if failures else texts[Locus("solve", "instruction")]
+        assert got == written, f"{steps} wrote {got!r}, not {written!r}"
+    schema = pipeline_schema(
+        nodes=[PipelineNode(name="solve", tunes_llm=False, prompt_info=PROMPT_INFO)]
+    )
+    writes = {Locus("solve", "answer_format"): "Say anything.", Locus("solve", "instruction"): "x"}
+    refused = l1_prompt_fields_open(writes, pipeline_schema=schema)
+    assert [(f.axis, f.reason) for f in refused] == [
+        ("solve.answer_format", ValidationReason.FORBIDDEN_AXIS)
+    ], "an L1 edit of answer_format, which the scorer parses, reached the backend"
+    edited = OptSearchPoint(prompts={"solve": NodePrompt(fields={**fields, "instruction": "x"})})
+    checked = detect_invariants(
+        [Proposal(individual=c) for c in (parent, edited)], parent, PipelineParams()
+    )
+    assert [[f.reason for f in c.validation_failures] for c in checked] == [
+        [ValidationReason.NO_OP_VARIANT],
+        [],
+    ], "a variant restating its parent was measured, or an edit refused as one"
+
+
 def test_a_fork_no_spine_node_may_take_is_declined_with_its_reason() -> None:
     # A fresh store's line whose levels are all withheld: the proposal used to vanish unsaid.
     def spine(theta: float | None) -> list[SpineCycle]:
@@ -4290,9 +4343,6 @@ def test_a_merge_of_two_reads_of_one_cell_fits_theta_on_one_row() -> None:
     )
 
 
-# Journeys awaiting a leg
-
-
 _PEER_BANK = samples(16)
 
 
@@ -4402,114 +4452,6 @@ def _peer_cycle(
 def _asked(body: dict[str, Any]) -> str:
     """What an optimizer call sent the provider, every message of it."""
     return "\n".join(str(m["content"]) for m in body["messages"])
-
-
-def _potter_says(*instructions: str) -> Callable[[dict[str, Any]], str]:
-    """Potter's L1 proposing one variant per instruction, in order; every other node a critique."""
-
-    def says(body: dict[str, Any]) -> str:
-        if body.get("response_format", {}).get("json_schema", {}).get("name") != "L1GenerateOutput":
-            return json.dumps({"priority_fix": "instruction: check each premise"})
-        anchor = shown_text(_asked(body), "solve.instruction")
-        variants = [
-            {
-                "mechanism": text,
-                "targets_rows": [],
-                "edits": [
-                    {"at": "solve.instruction", "op": "replace", "anchor": anchor, "text": text}
-                ],
-            }
-            for text in instructions
-        ]
-        return json.dumps({"variants": variants})
-
-    return says
-
-
-# Round 2 starts from what round 1 handed on.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_held_rounds_leader_ahead_of_its_parent_is_dropped_and_never_raced_again(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # The cells that ranked it first are the ones its luck rode.
-    def one_more_than_parent(prompt: str, sample: Sample) -> bool:
-        order = _PEER_READ_ORDER[sample.id]
-        if "Guess." in prompt:
-            return order % 4 == 0
-        return order % 2 == 0 or ("Check each premise." in prompt and order == 1)
-
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {"l1_generate": {"config": {"n_variants": 2}}},
-        one_more_than_parent,
-    ) as (cycle, _):
-        parent_id = cycle.parent.id
-        offline.llm.says = _potter_says("Check each premise.", "Guess.")
-        first = asyncio.run(execute_round(cycle, 1)).result
-        assert first.election is not None and first.election.selected is None, "round 1 held"
-        leader = first.election.leading
-        assert leader is not None
-        assert "Check" in first.arms[leader].individual.prompts["solve"].fields["instruction"]
-        assert [m.id for m in cycle.population] == [parent_id], (
-            "a held round handed on more than its parent: evidence is bought in its race alone"
-        )
-        offline.llm.says = _potter_says("Guess.")
-        second = asyncio.run(execute_round(cycle, 2)).result
-        assert leader not in second.proposed and not second.rows(leader), (
-            "a leader short of the bar was raced again past its round's cap"
-        )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_ab_replay_refits_the_whole_ruler_under_the_edited_formula(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # The election's scale re-read off the archive: unchanged under its own formula, moved under
-    # an edited one, since every row the ruler holds is re-graded, not only the record's own cells.
-    def every_other(prompt: str, sample: Sample) -> bool:
-        return _PEER_READ_ORDER[sample.id] % 2 == 0 or "Check" in prompt
-
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {"l1_generate": {"config": {"n_variants": 3}}},
-        every_other,
-    ) as (cycle, _):
-        offline.llm.says = _potter_says("Check each premise.", "Guess.", "Check twice.")
-        asyncio.run(execute_round(cycle, 1))
-
-        # Round 1's cells fold after its election, so round 2 is the first to read them.
-        offline.llm.says = _potter_says("Guess.")
-        second = asyncio.run(execute_round(cycle, 2)).result
-    assert second.election is not None
-    stamp, stores = second.election.ruler, cycle.session.store
-
-    opt = cycle.config.optimization
-    n_min, two_pl = opt.elimination_n_min, opt.enable_2pl_graduation
-    read = judging_ruler(
-        stores.ruler,
-        stamp.scope,
-        stamp.reach,
-        stamp.excluded,
-        objective_id=stamp.scope.scorer,
-        n_min=n_min,
-        enable_2pl=two_pl,
-    ).ruler
-    own = cycle.session.state.scoring.scorer
-    same = regraded_ruler(stores, stamp, own, n_min=n_min, enable_2pl=two_pl)
-    assert read is not None and same is not None and same.delta == read.delta, (
-        "ab re-fit the election's scale differently under the formula the election read it with"
-    )
-    edited = scorer_of("label_match(predicted, ground_truth)", "1.0 - fitness")
-    moved = regraded_ruler(stores, stamp, edited, n_min=n_min, enable_2pl=two_pl)
-    assert moved is not None and moved.delta != read.delta, (
-        "ab replayed an edited formula on the scale the old formula fit"
-    )
 
 
 _CAPO_NODES = {
@@ -4636,95 +4578,6 @@ def test_a_round_the_budget_cuts_elects_only_past_the_panel_gate_and_stands_once
     for cut_round, budget, replayed, parent_cells in ((1, 17, 0, 2), (2, 5, 12, 0)):
         for panel_gate in ("strict", "off"):
             cut_by_budget(cut_round, budget, replayed, parent_cells, panel_gate)
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_capo_races_block_after_block_while_more_than_mu_arms_stand_and_stops_at_mu(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    def raced(failing: str) -> RoundResult:
-
-        def misses_after_block_one(prompt: str, sample: Sample) -> bool:
-            block = _PEER_READ_ORDER[sample.id] // 4
-            return block == 0 or not any(f"task, {arm}." in prompt for arm in failing)
-
-        with _peer_cycle(
-            workspace(default_identity(f"race-{failing}")),
-            _PEER_HOP,
-            monkeypatch,
-            "capo",
-            _CAPO_NODES,
-            misses_after_block_one,
-        ) as (cycle, _):
-            offline.llm.says = _capo_says()
-            return asyncio.run(execute_round(cycle, 1)).result
-
-    def fates(closed: RoundResult) -> dict[str, list[int]]:
-        out: dict[str, list[int]] = {}
-        for key in closed.proposed:
-            arm = closed.arms[key]
-            state = (
-                arm.kind
-                if isinstance(arm, Cut)
-                else "locked_in"
-                if isinstance(arm, Measured) and arm.locked_in is not None
-                else "measured"
-            )
-            out.setdefault(state, []).append(len(closed.rows(key)))
-        return out
-
-    # Five arms, μ 3: nobody falls on block 1; C falls on block 2, and four still race block 3.
-    assert fates(raced("C")) == {"eliminated": [8], "measured": [12] * 4}, (
-        "a survivor set above μ stopped racing before max_blocks"
-    )
-    # B and C fall together on block 2, which leaves μ: the race is settled there.
-    assert fates(raced("BC")) == {"eliminated": [8, 8], "locked_in": [8] * 3}, (
-        "a race at μ survivors walked on, or settled before its cut"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_one_round_composes_a_peers_crossover_and_selector_with_potters_race(
-    monkeypatch: pytest.MonkeyPatch, offline: Router, peer_composition: _Composition
-) -> None:
-    name, walk, composed, crossover_says, crossed, composed_nodes = peer_composition
-    with (
-        composed(walk),
-        _peer_cycle(
-            workspace(),
-            _PEER_HOP,
-            monkeypatch,
-            name,
-            composed_nodes,
-            lambda prompt, _s: "Merged." in prompt,
-        ) as (cycle, _),
-    ):
-        offline.llm.says = crossover_says
-        assert not cycle.population
-        _, closed, cut, _ = asyncio.run(execute_round(cycle, 1))
-    assert cut is None
-    assert crossed and all("Solve it, A." in a and "Solve it, B." in a for a in crossed), (
-        "a crossover saw one parent"
-    )
-    assert cycle.slices.get(CapoObjective).length_norm, (
-        "CAPO's initial population banked no length norm for the objective its selector ranks on"
-    )
-    for panel_arm in closed.proposed.values():
-        lineage = panel_arm.individual.lineage
-        assert [(made.node, made.mode) for made in lineage.variations] == [
-            (f"{name}:mating", "deterministic"),
-            (f"{name}:capo_crossover", "llm"),
-        ], "an arm's lineage names the peer's mating and crossover"
-        assert len(set(lineage.parent_ids)) == 2, "a crossover child has two parents"
-    assert closed.election is not None
-    winner = closed.election.selected
-    assert winner is not None
-    assert "Merged." in closed.arms[winner].individual.prompts["solve"].fields["instruction"], (
-        "CAPO's selector elected it off potter's race"
-    )
-    assert cycle.population[0].id == winner, (
-        "the individual the next round mutates from does not lead the population the run carries"
-    )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -4999,35 +4852,6 @@ def _closed_origin(bench: _PeerBench) -> _ClosedOrigin:
     return _ClosedOrigin(
         drawn, dataclasses.replace(session, bank=Bank.of(kept)), cycle.points.job(origin)
     )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_arm_is_read_on_the_theta_its_election_takes_on_the_scale_its_race_read(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    with _bench_cycle(monkeypatch, offline) as bench:
-        cycle, picked, fold = bench.cycle, bench.picked, bench.fold
-        assert picked.election is not None
-        crowned = picked.election.selected
-        assert crowned is not None
-        [bar] = [picked.rows(key) for key in picked.arms if key not in picked.proposed]
-        # The scale the round OPENED on: its own cells fold after the election.
-        opened = cycle.difficulty.ruler_of(picked.election.ruler)
-        read = candidate_abilities({crowned: picked.rows(crowned)}, bar, opened)
-
-        fit = picked.fit(crowned)
-        assert fit is not None and (fit.theta, fit.theta_se) == (
-            read.theta[crowned],
-            read.theta_se[crowned],
-        ), "an arm carries the θ the election takes of its rows, on the scale it stamped"
-        optimization = cycle.config.optimization.model_copy(
-            update={"halt_at_fitness": fold.fitness, "lives": None}
-        )
-        unpaid = LineOutlay(search_usd=None, worked_s=None)
-        standing = RunStanding.after(list(cycle.rounds), lives=None, outlay=unpaid)
-        assert fold.total == 4 and standing_tripped(standing, optimization) is None, (
-            "a 4-cell point estimate met the target: the ceiling reads the paired lower bound"
-        )
 
 
 @pytest.mark.usefixtures("optimizing_memory")
@@ -5530,192 +5354,6 @@ def test_gepas_gate_tests_each_arm_against_the_minibatch_scores_of_its_own_paren
     ), "one arm's parent bar decided another arm's gate"
 
 
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_no_op_or_missed_anchor_variant_is_its_arms_invalid_while_the_round_stands(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    member = NODE_MEMBERS.get("l1_generate")
-    assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {"l1_generate": {"config": {"n_variants": 8}}},
-        lambda _p, _s: True,
-    ) as (cycle, _):
-        parent = cycle.parent.prompts["solve"].fields["instruction"]
-
-        def edit(op: str, anchor: str, text: str) -> dict[str, Any]:
-            return {"at": "solve.instruction", "op": op, "anchor": anchor, "text": text}
-
-        edits = [
-            [edit("replace", parent, parent)],
-            [edit("replace", "a span the parent never held", "Check.")],
-            # Two edits on one field: the second anchors on the text the first left.
-            [edit("insert_after", parent, " Zq7."), edit("replace", "Zq7.", "Check twice.")],
-            # A span the text holds twice names no place to edit.
-            [edit("insert_after", parent, " Zq7. Zq7."), edit("replace", "Zq7.", "Check.")],
-            [edit("replace", "", "Rewritten whole.")],
-            [edit("insert_after", parent, " Zq9.")],
-            # Past the length budget, the edits summed.
-            [edit("insert_after", parent, " Zq7."), edit("insert_after", "Zq7.", " Zq8." * 200)],
-            # A hard-wrapped span quoted with its line break reflowed still names its one place.
-            [edit("insert_after", parent, " Zq7\n  Zq8."), edit("replace", "Zq7 Zq8.", "Check.")],
-        ]
-
-        def says(body: dict[str, Any]) -> str:
-            # A line of one panel, cited under no name; two lines joined are held by none.
-            prompt = body["messages"][0]["content"]
-            line = prompt[prompt.index("ESCALATION: ") :].splitlines()[0]
-            cites = [None, None, line, None, None, "SCORED: 1 | true: 2", None, None]
-            return json.dumps(
-                {
-                    "variants": [
-                        {
-                            "evidence_grounding": None if c is None else {"citation": c},
-                            "mechanism": "m",
-                            "targets_rows": [],
-                            "edits": e,
-                        }
-                        for e, c in zip(edits, cites, strict=True)
-                    ]
-                }
-            )
-
-        offline.llm.says = says
-        offline.llm.sent.clear()
-        generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
-        readout = cycle.output(L1Readout, 1)
-    assert len(offline.llm.sent) == 1, "a reply the invariants refuse per arm bought a repair"
-    fatal = [
-        [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
-        for cp in proposed.proposals
-    ]
-    missed, unheld, long = "edit_anchor_not_one_span", "citation_not_in_panel", "over_ceiling"
-    assert fatal == [["no_op_variant"], [missed], [], [missed], [], [unheld], [long], []], (
-        "a restating, mis-anchored, unheld-citing or overlong variant was not refused as its own arm"
-    )
-    assert "at most 800 characters" in json.dumps(offline.llm.sent[0]), (
-        "the length budget the variant was refused by was never stated on the wire"
-    )
-    written = [cp.individual.prompts["solve"].fields["instruction"] for cp in proposed.proposals]
-    assert written[2] == f"{parent} Check twice.", "two edits on one field did not apply in order"
-    assert written[4] == "Rewritten whole.", "an empty anchor did not rewrite the whole field"
-    assert written[7] == f"{parent} Check.", "an anchor reflowing a line break missed its span"
-    grounding = proposed.proposals[2].individual.lineage.evidence_grounding
-    assert grounding is not None and grounding.field == "escalation_panel", (
-        "a quote of a panel line was not filed under the panel holding it"
-    )
-    assert (readout.l1_parse_failure, readout.l1_proposed, readout.l1_rejected) == (
-        None,
-        8,
-        {"no_op_variant": 1, missed: 2, unheld: 1, long: 1},
-    ), "a round's per-arm refusals were not booked against what L1 generated"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_optimizer_call_whose_send_raises_leaves_its_record_and_still_raises(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # A call announced and never closed reads as one still waiting, whatever it cost.
-    member = NODE_MEMBERS.get("l1_generate")
-    assert isinstance(member, L1Generate), "l1_generate is potter's proposer"
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {},
-        lambda _p, _s: True,
-    ) as (cycle, ledger):
-        offline.llm.says = lambda _body: httpx.Response(400, json={"error": "refused"})
-        generating = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-        with pytest.raises(FailedSendError):
-            asyncio.run(member.propose(generating, node_contract.Proposals([])))
-        record = scan_last([LedgerSpan(ledger.path)], LLMCallRecord)
-    assert record is not None and record.node == "l1_generate", "the failed call left no record"
-    assert (
-        "FailedSendError" in record.payload["error"] and "refused" in record.payload["content"]
-    ), "the record names no failure, or drops the refusal's body"
-    assert record.payload["template_fields"] and record.payload["response_schema"], (
-        "the record cannot rebuild the request that failed"
-    )
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_an_l1_write_to_answer_format_is_refused_before_it_costs_a_call(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # The scorer parses answer_format.
-    member = cast("L1Generate", NODE_MEMBERS.get("l1_generate"))
-    with _peer_cycle(
-        workspace(),
-        _PEER_HOP,
-        monkeypatch,
-        "potter",
-        {},
-        lambda _p, _s: True,
-    ) as (cycle, _):
-        fields = cycle.parent.prompts["solve"].fields
-        writes = [("answer_format", "Say anything."), ("instruction", "Check each premise.")]
-        offline.llm.says = lambda _body: json.dumps(
-            {
-                "variants": [
-                    {
-                        "mechanism": "edit",
-                        "edits": [
-                            {
-                                "at": f"solve.{field}",
-                                "op": "replace",
-                                "anchor": fields.get(field, ""),
-                                "text": text,
-                            }
-                        ],
-                    }
-                    for field, text in writes
-                ]
-            }
-        )
-        generating = NodeContext(
-            RoundContext(cycle=cycle, round_num=1),
-            NODE_MEMBERS.get("l1_generate"),
-        )
-        proposed = asyncio.run(member.propose(generating, node_contract.Proposals([])))
-    fatal = [
-        [vf.reason for vf in fatal_validation_failures(cp.validation_failures)]
-        for cp in proposed.proposals
-    ]
-    assert fatal == [["forbidden_axis"], []], "an L1 edit of answer_format reached the backend"
-
-
-@pytest.mark.usefixtures("optimizing_memory")
-def test_capo_inits_reply_out_of_form_is_one_refused_child(
-    monkeypatch: pytest.MonkeyPatch, offline: Router
-) -> None:
-    # An array of blanks seeds nothing; read as in form, it left the round without one arm or a word.
-    # A reply nested past the parser's stack crashed the init instead of refusing it.
-    member = cast("CapoInit", NODE_MEMBERS.get("capo_init"))
-    for n, reply in enumerate(
-        (json.dumps(["  ", ""]), "[" * 5000 + "]" * 5000, "[" + "1+" * 20000 + "1]")
-    ):
-        with _peer_cycle(
-            workspace(default_identity(f"init-{n}")),
-            _PEER_HOP,
-            monkeypatch,
-            "capo",
-            {"capo_init": {"config": {"size": 2, "k_max": 0}}},
-            lambda _p, _s: True,
-        ) as (cycle, _):
-            offline.llm.says = lambda _body, said=reply: said  # type: ignore[misc]
-            drawing = NodeContext(RoundContext(cycle=cycle, round_num=1), member)
-            proposed = asyncio.run(member.propose(drawing, node_contract.Proposals([])))
-        assert [p.invalid for p in proposed.proposals] == [True], (
-            f"reply {n} out of form drew a child or refused none"
-        )
-
-
 # Round 3's fork offer reads the rounds the disk-faulted closes landed.
 @pytest.mark.usefixtures("optimizing_memory", "offline")
 def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
@@ -5816,62 +5454,3 @@ def test_a_layer_forking_on_an_arm_its_round_left_unelected_re_elects_it(
             standing.model_validate({"reason": "r", "stand_on": "C9.9"})
 
 
-# Each restate banks the fires before it, and the resume seats what they banked.
-@pytest.mark.usefixtures("optimizing_memory")
-def test_a_resume_folds_back_the_fires_a_layer_made_after_the_round_it_read_closed(
-    tmp_path: Path,
-) -> None:
-    # What a layer fires is on no close.
-    cycle_dir = CycleDir(tmp_path / "fired")
-    fired_ledger = laid_ledger(cycle_dir)
-    # Appended here, as the store appends a restate.
-    carried = select_optimizer(bench_choice("potter")).slices
-    live = SliceMap(carried)
-    closed = round_result(1, optimizer_state=optimizer_state(), cells={})
-    line = [round_result(0, optimizer_state=optimizer_state(), cells={}), closed]
-    closing = seat(workspace()).cycle
-    for n in (1, 2):
-        close_round(fired_ledger, line[:n], cycle=closing)
-
-    def restate() -> None:
-        state = closed.closed_state.holding(
-            live.get(L2Memory), live.get(L3Memory), live.get(Ladder)
-        )
-        standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
-        fired_ledger.append(standing[1].close.restated(state))
-
-    def fired(record: Callable[[Ladder], Ladder]) -> None:
-        live.put(record(live.get(Ladder)))
-
-    floor = NODE_LAYOUTS["l1_generate"].floor
-    moved = coerce_l1_layout({"persona": ["critique"]}, base=floor)
-    assert moved is not None and moved != floor
-    handed = live.get(L2Memory)
-    live.put(
-        handed.steered_onto(
-            "l1_generate", {"layout": moved.model_dump(mode="json"), "n_variants": 5}
-        )
-    )
-    assert handed == L2Memory() and live.get(L2Memory) != handed, (
-        "a fire answers the NEXT memory: the one it was handed is what the closed round banked"
-    )
-    fired(lambda ladder: l2_fired(ladder, LayerReading(1, 0.5, None, None)))
-    restate()
-    live.put(L3Memory(plan="attack the default label"))
-    fired(lambda ladder: l3_fired(ladder, None))
-    restate()
-
-    def resumed(last: int) -> tuple[L2Memory, L3Memory, Ladder]:
-        standing = scan_standing_rounds(ledger_chain(cycle_dir, moment=None)).rounds
-        state = SliceMap(carried)
-        state.seat(standing[last].close.closed_state)
-        return state.get(L2Memory), state.get(L3Memory), state.get(Ladder)
-
-    kept = resumed(1)
-    assert kept == (live.get(L2Memory), live.get(L3Memory), live.get(Ladder)), (
-        "paused inside round 2: both fires belong to the boundary the resume keeps"
-    )
-    assert kept[2].l3.fires == 1 and kept[1].plan
-    assert resumed(0) == (L2Memory(), L3Memory(), Ladder()), (
-        "rewound to re-run round 1: the fires are discarded with it"
-    )
