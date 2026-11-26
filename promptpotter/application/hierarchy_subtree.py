@@ -6,12 +6,12 @@ A fork IS a cycle, hung off the candidate it was cut from; status is derived aft
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cached_property, lru_cache
-from typing import Any, Literal
+from typing import Any, Literal, NamedTuple
 
 from promptpotter.application.hierarchy import (
     CycleReads,
@@ -84,6 +84,95 @@ class _Retired:
 type _Status = Literal["live", "rewound"] | _Retired
 
 
+def line_owners[T](
+    own: Iterable[int], cut: int, below: Mapping[int, T] | None, me: T
+) -> dict[int, T]:
+    """Which read owns each round of a line: *me* every round it ran, *below* (its parent's line as
+    of the fork's cut) every other round under *cut*."""
+    lifted = {} if below is None else {r: o for r, o in below.items() if r < cut}
+    return lifted | dict.fromkeys(own, me)
+
+
+def supersede_line[T](cycle: T, supersedes: Sequence[tuple[T, T]]) -> list[T]:
+    """Every fork the line of *cycle* was superseded through, nearest link first, then newest:
+    *supersedes* is each supersede fork as (its parent, itself), in listing order."""
+    line: list[T] = []
+    level = [cycle]
+    while level := [child for parent, child in supersedes if any(parent is c for c in level)]:
+        line += reversed(level)
+    return line
+
+
+class Reach[T](NamedTuple):
+    """A supersede fork as a retirement reads it: where it cut, how far it got, whether its line
+    holds the candidate asked about."""
+
+    fork: T
+    cut: int
+    reach: int
+    holds: bool
+
+
+def retired_by[T](round_: int, line: Sequence[Reach[T]]) -> T | None:
+    """The fork retiring a candidate of *round_*: of the forks on its supersede line that reached
+    its round off it, the lowest cut, the first on *line* at a tie."""
+    by = [f for f in line if round_ <= f.reach and not f.holds]
+    return min(by, key=lambda f: f.cut).fork if by else None
+
+
+def main_line(
+    round_: int, address: str, crowns: Mapping[int, str | None], hung: Sequence[MainLineStep] = ()
+) -> list[MainLineStep]:
+    """The line to the candidate at *address* in *round_*: *hung* (the line through the candidate
+    its cycle hangs from), then each elected round's crown (*crowns*, `None` where it crowned
+    none), up to the first crown after it."""
+    steps = list(hung)
+    for r in sorted(crowns.keys() | {round_}):
+        crown = None if r == round_ else crowns[r]
+        if r > round_ and crown is not None:
+            break
+        candidates = [address] if r == round_ else [] if crown is None else [crown]
+        steps.append(MainLineStep(round=r, candidates=candidates))
+    return steps
+
+
+def line_through(line: Sequence[MainLineStep], address: str) -> list[MainLineStep]:
+    """*line* up to the step holding *address*: a line continued from that candidate."""
+    return list(line[: next(i for i, step in enumerate(line) if address in step.candidates) + 1])
+
+
+class Walked[T](NamedTuple):
+    """One measurement as a candidate's descent reads it."""
+
+    of: T
+    individual: str
+    round: int
+    invalid: bool
+    # The reader's line holds it; it was read in the reader's own cycle.
+    on_line: bool
+    own_cycle: bool
+
+
+def earlier_measured[T](round_: int, walked: Iterable[Walked[T]]) -> dict[str, T]:
+    """Each individual's newest measurement in a round before *round_*: one on the reader's line
+    over one off it, then the later round, then one read in the reader's cycle; an invalid copy
+    measured nothing."""
+    latest: dict[str, T] = {}
+    kept = (w for w in walked if w.round < round_ and not w.invalid)
+    for w in sorted(kept, key=lambda w: (w.on_line, w.round, w.own_cycle)):
+        latest[w.individual] = w.of
+    return latest
+
+
+def inner_host[C](
+    spawned: SpawnedBy | None, ran: Mapping[tuple[int, ArmKey], C] | None
+) -> C | None:
+    """The candidate an inner run hangs on: the arm its spawn record names, looked up on its asking
+    cycle's *ran* (None where that cycle is not listed), never searched for."""
+    arm = None if spawned is None else spawned.arm
+    return None if ran is None or arm is None else ran.get((arm.round, arm.arm))
+
+
 @dataclass
 class _Read:
     """One cycle's record as one read saw it, and the line it stood on then."""
@@ -96,9 +185,8 @@ class _Read:
     owner: dict[int, _Read] = field(init=False)
 
     def __post_init__(self) -> None:
-        cut, below = self.cycle.index.cut_round or 0, self.below
-        lifted = {} if below is None else {r: o for r, o in below.owner.items() if r < cut}
-        self.owner = lifted | dict.fromkeys(self.elections, self)
+        below = None if self.below is None else self.below.owner
+        self.owner = line_owners(self.elections, self.cycle.index.cut_round or 0, below, self)
 
     def address(self, arm: RoundArm) -> str | None:
         """The candidate a record names by round and arm on this line: an id alone names none."""
@@ -166,21 +254,23 @@ def _similarity(a: object, b: object) -> float:
     return 1.0 if a == b else 0.0
 
 
-def _earlier(c: _Candidate, everyone: list[_Candidate]) -> dict[str, _Candidate]:
-    """Each individual's newest measurement in a round before *c*'s: an invalid copy measured nothing."""
-    latest: dict[str, _Candidate] = {}
-    for x in sorted(
-        (x for x in everyone if x.round < c.round and not x.arm.state.invalid),
-        key=lambda x: (c.read_in.holds(x), x.round, x.read_in.cycle is c.read_in.cycle),
-    ):
-        latest[x.individual.id] = x
-    return latest
-
-
 def _descent(c: _Candidate, everyone: list[_Candidate]) -> None:
     """The candidate *c* descends from: its main (first parent), its donor (second), and the loci each gave."""
     parent_ids = c.individual.lineage.parent_ids
-    earlier = _earlier(c, everyone)
+    earlier = earlier_measured(
+        c.round,
+        (
+            Walked(
+                x,
+                x.individual.id,
+                x.round,
+                x.arm.state.invalid,
+                c.read_in.holds(x),
+                x.read_in.cycle is c.read_in.cycle,
+            )
+            for x in everyone
+        ),
+    )
     parent = earlier.get(parent_ids[0]) if parent_ids else None
     c.descends_from = parent
     if parent is None:
@@ -271,53 +361,36 @@ class _ListedCycle:
 
 def _superseding(cycle: _ListedCycle, cycles: list[_ListedCycle]) -> list[_ListedCycle]:
     """Every fork the line was superseded through below *cycle*, nearest link first, then newest."""
-    line: list[_ListedCycle] = []
-    level = [cycle]
-    while level := [
-        child
+    supersedes = [
+        (child.parent, child)
         for child in cycles
-        if any(child.parent is c for c in level)
+        if child.parent is not None
         and (spec := child.index.fork)
         and spec.resolved_direction is ForkDirection.SUPERSEDE
-    ]:
-        line += reversed(level)
-    return line
+    ]
+    return supersede_line(cycle, supersedes)
 
 
 def _status(c: _Candidate, superseding: list[_ListedCycle]) -> _Status:
     """Retired iff it is off the line of a supersede fork that reached its round, else rewound."""
-    by = [fork for fork in superseding if c.round <= fork.reach and not fork.head.holds(c)]
-    if by:
-        return _Retired(min(by, key=lambda f: (f.index.cut_round or 0, by.index(f))))
+    reaches = [Reach(f, f.index.cut_round or 0, f.reach, f.head.holds(c)) for f in superseding]
+    if (by := retired_by(c.round, reaches)) is not None:
+        return _Retired(by)
     return "live" if c.read_in is c.read_in.cycle.head else "rewound"
 
 
 def _main_line(c: _Candidate) -> list[MainLineStep]:
     """As it ran, on the line it was read on, up to the first crown after it."""
     line = c.read_in
-    rounds = sorted(line.owner.keys() | {c.round})
-    base = line.owner[rounds[0]].cycle if rounds[0] in line.owner else line.cycle
+    first = min(line.owner.keys() | {c.round})
+    base = line.owner[first].cycle if first in line.owner else line.cycle
     hung = None if base.index.cut_round else base.hangs_from
-    steps = [] if hung is None else _through(hung)
-    for round_ in rounds:
-        if round_ == c.round:
-            steps.append(MainLineStep(round=round_, candidates=[c.address]))
-            continue
-        if line.owner[round_].elections[round_] is None:
-            continue
-        crown = line.crown(round_)
-        if round_ > c.round and crown is not None:
-            break
-        steps.append(MainLineStep(round=round_, candidates=[] if crown is None else [crown]))
-    return steps
+    crowns = {r: line.crown(r) for r, o in line.owner.items() if o.elections[r] is not None}
+    through = () if hung is None else line_through(_main_line(hung), hung.address)
+    return main_line(c.round, c.address, crowns, through)
 
 
-def _through(c: _Candidate) -> list[MainLineStep]:
-    line = _main_line(c)
-    return line[: next(i for i, step in enumerate(line) if c.address in step.candidates) + 1]
-
-
-def _unplaced(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
+def unplaced_reason(spawned: SpawnedBy | None, *, asker_listed: bool) -> str:
     """Why no candidate holds a run, in the words of the pass its record names."""
     asked = (
         "it carries no spawn record"
@@ -458,14 +531,15 @@ class _Build:
                 continue
             spawned = index.spawned_by
             asker = None if spawned is None else by_cycle.get(spawned.cycle_id or "")
-            arm = None if spawned is None else spawned.arm
-            host = None if asker is None or arm is None else asker.ran.get((arm.round, arm.arm))
+            host = inner_host(spawned, None if asker is None else asker.ran)
             nested = self.campaign(sandbox, inside, listed, held, depth=depth, host=host)
             if host is not None:
                 host.inner.append(nested.model_copy(update={"parent": host.address}))
                 continue
             under = asker or cycle
-            unplaced = caveat_row("unplaced", _unplaced(spawned, asker_listed=asker is not None))
+            unplaced = caveat_row(
+                "unplaced", unplaced_reason(spawned, asker_listed=asker is not None)
+            )
             under.unplaced.append(
                 nested.model_copy(
                     update={"parent": under.address, "lines": [*nested.lines, unplaced]}

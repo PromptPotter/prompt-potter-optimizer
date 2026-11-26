@@ -174,11 +174,11 @@ row it closes.
 
 ### batch/26 · addr
 
-- **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::_earlier`,
+- **The lineage subtree sorts every candidate per candidate**: `application/hierarchy_subtree.py::earlier_measured`,
   O(n² log n) per read; reported beside it, the subtree read builds the whole top family per request,
   and `_descent` compares O(n²) pairs with `SequenceMatcher` behind an lru of 4096 that thrashes from
-  ~90 candidates (`hierarchy_subtree.py:154-231`). Action: "closer to" and descent are folded once per
-  candidate on the ledger: a record kind. **Rides with:** a lineage-fold chain of its own. **Re-test:** `git grep -n "def _earlier" -- promptpotter/application/hierarchy_subtree.py` is empty.
+  ~90 candidates (`hierarchy_subtree.py:242-318`). Action: "closer to" and descent are folded once per
+  candidate on the ledger: a record kind. **Rides with:** a lineage-fold chain of its own. **Re-test:** `git grep -n "def earlier_measured" -- promptpotter/application/hierarchy_subtree.py` is empty.
 - **The feed's version spans a whole store**: `GET /feed`'s tick (`application/cycle_reads.py::feed_frames`) runs
   `application/hierarchy.py::entries_version` over every store, per connected tab, and a campaign
   subtree's version (`hierarchy_subtree.py`) covers its whole store, so any run's append re-asks every
@@ -804,7 +804,7 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
 - **A writer stamps one version per subject (root D)**: 11 `version` functions in 10 files
   (`campaign_store/store.py:243`, `draft_store.py:59`, `measurement_archive.py:493`, `ruler_store.py:42`,
   `tenant_dataset_store.py:136`, `dataset_access.py:397`, `machine_status.py:249`, `hierarchy.py:554,585`,
-  `hierarchy_subtree.py:676`, `measurement_log.py:259`) and `file_sig(` 34/15, each re-deriving a
+  `hierarchy_subtree.py:750`, `measurement_log.py:259`) and `file_sig(` 34/15, each re-deriving a
   subject's change from the files it reads. **Closes:** **The feed's version spans a whole store**,
   **The account feed never re-asks an exhibit's reads when the host's store moves**; adjacent:
   **The live reads re-serve history per poll**, **The lineage subtree sorts every candidate per candidate**,
@@ -930,10 +930,11 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `domain/cells.py:131` (the heatmap's hard-sample order, `list[str]`). Root: one name per thing, the
   heatmap's renamed for what it orders. **Re-test:**
   `git grep -nE "sample_order\s*:" -- promptpotter/domain` returns one line.
-- **`tests/test_spend.py` holds the walk's tests**: 6,021 lines, 70 lines naming a walk (tw-0 moved the
-  fake races onto the offline legs; the hand-driven `_walk`/`_round` pause, catch-up and ceiling tests
-  stay). Root: each becomes an offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and
-  `_walk`/`_round` go (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
+- **`tests/test_spend.py` holds the walk's tests**: 5,522 lines, 32 lines naming a walk (tw-j deleted
+  `_round` and the pause and catch-up tests by mutation; the hand-driven `_walk` stays under the spend
+  ceiling, skip and last-skip facts, and the inner stop patches `execute_round`). Root: each becomes an
+  offline leg (`run_one`'s knobs) or a rule exposed as a pure function, and `_walk` goes
+  (`tests/CLAUDE.md` § Three tiers). **Re-test:** `git grep -ci "walk" -- tests/test_spend.py` is 0.
 - **`scoring/query_loop.py::keep_cut` takes a refusal as a row**: `_ScoringPhase.keep_cut` (`:952`) filters
   the cell the ceiling refused back out of `walk.results` (`:960-964`, by `_budget_refusal`), because the
   refused cell was taken as a row before it stopped the phase. Root: a refusal is never a row. **Re-test:**
@@ -942,12 +943,6 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   `ArchiveEntry` and `FiledAnswer`, the archive's filed row beside the dataset's row. Root: the archive row
   and its config move to a module named for the archive; the file keeps the dataset's row.
   **Re-test:** `git grep -n "class FiledAnswer" -- promptpotter/domain/sample.py` is empty.
-- **Every process that lands recomputes the landing key** (tw-m): `maintenance/landing.py::landing_key`
-  (`:577`, `functools.cache` per process) hashes every row's schema and the code of every module a load
-  runs, which costs +20.5 MB committed (3 MB live) and 2.6 s at each entry that lands, an API's lifespan
-  among them. Root: the key is settled at build, a generated module a gate check regenerates, as
-  `presentation/api/served_contract.py` is. **Re-test:** `landing_key` is deleted and an API's first
-  open/close commits under 5 MB.
 - **Queue and task-result waits re-read on a clock** (tw-m): `application/jobs/registry.py::_QUEUE_POLL_S`
   and `host_surface.py::_SETTLE_POLL_S` each wait on a write another process makes, and no signal in
   this process carries it, so tests patch both to 0 (`test_security.py::_held_at_arms_gate` and the
@@ -959,6 +954,57 @@ its own re-test passes. Counts are `git grep -cE` hits/files over `promptpotter/
   while 17 infrastructure files import `config/`. Root: `config/` gets its row, and first-run's write
   moves to the side the row puts below it. **Re-test:** `_LAYERING` names `config/` and the gate's
   `layering` check is green.
+
+### wave-6 · what the test rework's world could not seat (tw-x, tw-j at their landing)
+
+- **A pressed L4 outer run does not repeat** (tw-j): two pressed runs of the e2e L4 fixture differ in the
+  outer `L1Critique/Generate_0,_1` requests and the inner decisions, while unpressed runs repeat, so the
+  outer's record hangs on which concurrent inner campaign files first. Root: an outer phase reads its
+  inners in an order the outer owns, not their completion order. **Rides with:** wave 6 (L4).
+  **Re-test:** two pressed runs of `offline_run.py --l4` read the same outer requests.
+- **No L4 fixture buys an outer cell ahead, so an L4 outer ending is unread** (tw-j link 1):
+  `query_loop.py`'s endings skip `land()` when `phase.cancels`, the connector's `cancel_stops_billing`,
+  which only the inner connector sets (`runner/inner/spawn.py::CONNECTOR`). So an inner cell that
+  arrived, was filed under its claim and was cut may stay the outer campaign's own memory, with no
+  `UntakenBoughtRecord`. tw-j's e2e L4 fixture discarded 0 outer cells at press depth 4 and at 6
+  seats: the path is unreached, not refuted. **Rides with:** wave 6 (L4). **Re-test:** an L4 leg
+  pressed past one outer cell discards one, and its ledger names it untaken.
+- **An operator's act is atomic in the offline world** (tw-j link 2): `offline_world.py::_acted` runs
+  a press or a pause whole while the run's loop waits, so its legs repeat, and no leg lands a cell
+  between a command's own steps, where tw-r2 and tw-r3 found their bugs. Root: the world steps the
+  command and picks the cell that lands between two steps, by an event, never the clock. **Rides
+  with:** wave 6. **Re-test:** a leg lands a cell between a pause's two steps, on every run.
+- **A rename on a run line re-keys potter** (tw-j): renaming `application/optimizers/potter/dispatch/injections/wounds.py::_guard_evidence` re-keyed potter
+  and capo-pobb, while `optimizers/potter/CLAUDE.md` says a rename on a run line re-keys nothing. The
+  fingerprint carries a name it should not (`optimizer_manifest.py::behaviour_key`), or the doc is
+  stale. Root: whichever side is wrong. **Rides with:** wave 6. **Re-test:** rename `_guard_evidence`
+  and read `offline_run.py --digests`.
+- **The world has no in-process connector door** (tw-x row 3): test_spend's ungraded-cell fact stays on
+  `factories.py::loop_session`. **Rides with:** wave 6. **Re-test:** `git grep -c "loop_session(" --
+  tests/` is 0.
+- **The never-closed-origin edge of `fork_edge` has no door** (tw-x row 5):
+  `application/fork_siblings.py:131-139` is reached by no fork, since `cut_operator_fork` refuses an
+  unmeasured origin, so test_identity's sibling stop-record stays on `mint_cycle`. Root: the edge is
+  dead (delete it) or a door reaches it. **Rides with:** wave 6. **Re-test:** the coverage run reaches
+  `fork_siblings.py:131`, or the lines are gone.
+- **No door yields a recorded capability menu or a dataset with a panel** (tw-x row 7): two
+  `write_resolved_run` seats stay in test_identity. **Rides with:** wave 6. **Re-test:**
+  `git grep -c "write_resolved_run(" -- tests/` is 0.
+- **The repair's readers have no producer** (tw-p): `application/bench/round_analysis.py::mended_round`,
+  `domain/records/run_records.py::ForkGradedRecord` (with `ledger_scan.py`'s case, `CycleFacts.direction`
+  and the `fork` override it feeds, and `fork_graded` in the generated specs and webapp types) and
+  `shared/measurement_context.py::MeasurementRole.REPAIR` (`domain/pass_kinds.py`'s row). Their one
+  writer was the archive repair's `apply_correction`, deleted as dead by tw-p: a charged hole cuts its arm
+  and an uncharged one ends the run before its round closes. Action: delete them with their readers and
+  regenerate the specs. **Rides with:** wave 6. **Re-test:** `git grep -n "mended_round(\|ForkGradedRecord("
+  -- promptpotter` names only definitions.
+- **`domain/cell_fold.py::repairable_holes` counts a charged error** (tw-p): every errored non-HALTED cell
+  counts, a charged one a re-walk pays again included, since `ErrorCategory` does not say which errors
+  are fillable. With the repair gone, name each reader and what it should count. **Rides with:** wave 6.
+  **Re-test:** `repairable_holes` excludes a charged error, or has no reader.
+- **A knob layer's tiers have no world example** (tw-x row 10): the knob-layer fact reads only
+  "campaign"-level layers; dataset vs free_tier needs a `campaign(knobs=)` layer per tier. **Rides
+  with:** wave 6. **Re-test:** a knob fact names a layer of each tier.
 
 ## Held — no wave-4 chain yet
 

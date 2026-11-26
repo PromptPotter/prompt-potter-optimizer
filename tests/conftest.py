@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
 import tempfile
 
 # CI's configuration wherever the suite is launched, set before anything reads it: no desk `.env`,
@@ -11,24 +14,17 @@ os.environ["PROMPTPOTTER_ENV_FILE"] = os.path.join(_HOME.name, ".env")
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 
 import pytest
 from factories import workspace
 from offline_world import (
-    NOT_A_KEY,
-    PROVIDER_KEYS,
-    FakeBackend,
-    FakeLLM,
     Router,
-    install_network,
     refuse_network,
 )
-from pydantic import SecretStr
-from world import World
+from world import World, offline_network
 
 from promptpotter.application.maintenance.landing import complete_registries
-from promptpotter.config.settings import settings
-from promptpotter.infrastructure.llm.registry import send_pacing
 from promptpotter.infrastructure.run_scope import scoped
 from promptpotter.infrastructure.store.archive_queries import OpenAt
 from promptpotter.infrastructure.store.stores import Stores
@@ -75,21 +71,51 @@ def built_stores() -> Stores:
 @pytest.fixture
 def offline(monkeypatch: pytest.MonkeyPatch) -> Iterator[Router]:
     """The offline run's world; a journey sets what its edges answer (`llm.says`, `backend.faults`,
-    `rates` — then `pricing.refresh_rates(force=True)` fetches them).
-
-    Its provider caps no rate and binds one account, the terminal's, as a sending entry does."""
-    for key in PROVIDER_KEYS:
-        monkeypatch.setattr(settings, key, SecretStr(NOT_A_KEY))
-    monkeypatch.setattr(settings, "RATE_LIMITS", {})
-    world = Router(FakeLLM(lambda _body: "ok"), FakeBackend([]))
-    restore = install_network(world)
-    send_pacing.cache_clear()
-    with scoped(account=workspace()):
+    `rates` — then `pricing.refresh_rates(force=True)` fetches them)."""
+    with offline_network(monkeypatch) as world:
         yield world
-    restore()
-    send_pacing.cache_clear()
-    # A refused request reads as a provider error, which a journey can assert past unseen.
-    assert not world.unrouted, f"a journey sent what the world does not answer: {world.unrouted}"
+
+
+_DSPY_CHILD = """
+import json, sys
+from pathlib import Path
+from test_connectors import dspy_cells
+from test_spend import dspy_billed
+out = Path(sys.argv[1])
+(out / "spend").mkdir(); (out / "connectors").mkdir()
+print(json.dumps({"spend": dspy_billed(out / "spend"), "connectors": dspy_cells(out / "connectors")}))
+"""
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """The facts reading the dspy child run first, so it runs while this process is still small:
+    the gate meters the two together (`scripts/processes.py::close_job`)."""
+    items.sort(key=lambda item: "dspy_child" not in getattr(item, "fixturenames", ()))
+
+
+@pytest.fixture(scope="session")
+def dspy_child(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
+    """What every dspy cell paid, run once for the suite in a child, where dspy is imported."""
+    out, tests = tmp_path_factory.mktemp("dspy"), Path(__file__).resolve().parent
+    child = subprocess.run(
+        [sys.executable, "-c", _DSPY_CHILD, str(out)],
+        cwd=tests,
+        env={
+            **os.environ,
+            # The repo root first: the child imports the promptpotter this suite runs, never the install's.
+            "PYTHONPATH": os.pathsep.join(
+                (str(tests.parent), str(tests), str(tests.parent / "scripts"))
+            ),
+            "PROMPTPOTTER_HOME": str(out / "home"),
+            "PROMPTPOTTER_ENV_FILE": str(out / ".env"),
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert child.returncode == 0, f"the dspy cells did not run: {child.stderr[-2000:]}"
+    paid: dict[str, Any] = json.loads(child.stdout.splitlines()[-1])
+    return paid
 
 
 @pytest.fixture

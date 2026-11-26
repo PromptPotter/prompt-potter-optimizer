@@ -24,8 +24,24 @@
 ## The world (`tests/world.py`)
 
 - `world` (fixture): `World(stores, net, scratch)` — the fact's stores at its own data root (`own_home`), the network answered by `scripts/offline_world.py` (`offline`).
-- `await world.campaign(optimizer="potter", rounds=1, rows=40, step_rounds=None, knobs=None, hardness=0) -> Ran`: a fresh campaign minted and run through `embedded_run.py::run_campaign`, on the offline run's script (`ByCallIdentity`, `FakeBackend`, `synthetic_rows`); `step_rounds` pauses at that boundary.
-- `await world.resume(hop) -> Ran`: the same entry, resuming.
+- `await world.campaign(optimizer="potter", rounds=1, rows=40, step_rounds=None, knobs=None, hardness=0, origin_gate=None, down=False) -> Ran`: a fresh campaign minted and run through `embedded_run.py::run_campaign`, on the offline run's script (`ByCallIdentity`, `FakeBackend`, `synthetic_rows`); `step_rounds` pauses at that boundary, `down` has the backend refuse every cell.
+- `await world.resume(hop, from_round=None, on_divergence=HALT, step_rounds=None) -> Ran`: the same entry, resuming; `from_round` rewinds as `--from` does.
+- `await world.fork(hop, round, **ForkCyclePayload) -> Ran`: a fork through the `fork_cycle` command door, run inline.
+- `await world.head_to_head(arms, h2h_id, rounds=1, rows=40) -> list[Ran]`: a head-to-head's arms minted in one act (`embedded_run.py::run_head_to_head`).
+- `async with world.opened(rows=40) as session`: the real opening (`init_services` → `laid_session` → `arm_diagnostic_scoring`), for a fact measuring one cell outside a run.
+- `world.edit_proposer()`: the proposer's template edited in this home's manifest shadow, so a resume diverges.
+- **A run several facts read is run once**: a module-scoped fixture returns `world.py::shared_run(tmp_path_factory, act)` (a `Shared`), and each fact takes `world.adopt(shared)`, its own copy of that home (~20 ms) whose script the network answers, so a fact may rewind, fork or resume it; a fixture reading the run in place takes `shared.reading()`, never a re-pointed `PROMPTPOTTER_HOME`. **Its fixture's line states the run's cost per module** (`# ~3.5 s once, ~20 ms a fact`). The first run of the session also pays the process's cold start (its first imports; the landing's key is built, `maintenance/built_key.py`).
+- **One run per shape, the fewest rows and rounds its facts need**, built `on=` the run it extends:
+
+  | run | module | shape | once | facts |
+  |---|---|---|---|---|
+  | `line` | archive | potter, 3 rounds, 32 rows (24 starve its elections) | ~2.3 s | 24, through the runs on it |
+  | `displaced` | archive | on `line`: a rewind fork at 2; a paused campaign with a fork cut | ~1.9 s | 8 |
+  | `family_tree` | archive | on `displaced`: a fork of the fork at 3, a steer off an uncrowned arm | ~2.1 s | 1 (the mask; the subtree's rules are tables) |
+  | `origin_forks` | archive | on `line`: two steers off round 1's crown, origin unmodified and edited | ~2.2 s | 2 |
+  | `gated` | archive | an origin the gate halts | ~1.5 s | 2 |
+  | `steered_line` | identity | a root on a served menu, forked at 0 on a wider one | ~4 s | 7 |
+  | `head_to_head` | scoring | potter, capo, gepa as one head-to-head, and a lone capo, 60 rows (gepa's floor) | ~5.5 s | 3 |
 - `Ran.session`, `Ran.result`, `Ran.hop`; `world.ledger(hop)`, `world.records(hop)`; `world.net` is the `Router` (`net.backend.faults`, `net.llm.sent`, `net.rates`).
 - Its teardown is the fixtures': `offline` restores the network and asserts nothing went unrouted, `own_home`'s tree goes with `tmp_path`.
 

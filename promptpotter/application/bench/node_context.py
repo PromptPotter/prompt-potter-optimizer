@@ -131,14 +131,26 @@ def restated_round(
     return RoundRestatedRecord.of(line, position_of, series, standing)
 
 
+def own_rows(line: Sequence[RoundResult], parent: ArmKey) -> CellSheet:
+    """Each sample's latest cell of *parent* ITSELF, panel top-ups included, never another's."""
+    rows = NO_CELLS
+    for rr in line:
+        rows = rows.merged(rr.raced(parent))
+    return rows
+
+
 def closed_round(
-    closing: RoundResult, prior: Sequence[RoundResult], cycle: Cycle, *, outlay: LineOutlay
+    closing: RoundResult,
+    prior: Sequence[RoundResult],
+    difficulty: DifficultyView,
+    *,
+    lives: LivesConfig | None,
+    position_of: Mapping[str, int],
+    outlay: LineOutlay,
 ) -> RoundClosedRecord:
     """*closing*'s close over *prior*, read under the line's *outlay* as it closes."""
-    line, series, standing = stated_line(
-        closing, prior, cycle.difficulty, lives=cycle.config.optimization.lives, outlay=outlay
-    )
-    return RoundClosedRecord.of(line, cycle.session.bank.position_of, series, standing)
+    line, series, standing = stated_line(closing, prior, difficulty, lives=lives, outlay=outlay)
+    return RoundClosedRecord.of(line, position_of, series, standing)
 
 
 def bank_proposals(round_: RoundContext, proposals: Sequence[Proposal], *, submitted: bool) -> None:
@@ -353,13 +365,7 @@ class Parent(CycleRead):
 
     @property
     def own_rows(self) -> CellSheet:
-        """Each sample's latest cell of the parent ITSELF, its origin-panel top-ups included, never
-        one another individual answered."""
-        key = ArmKey(self._cycle.parent.id)
-        rows = NO_CELLS
-        for rr in self._cycle.rounds:
-            rows = rows.merged(rr.raced(key))
-        return rows
+        return own_rows(self._cycle.rounds, ArmKey(self._cycle.parent.id))
 
     @property
     def fitness(self) -> FitnessFact | None:

@@ -1009,7 +1009,16 @@ def close_round(
             ledger.append(ArmRecord(round=n, arm=key, state=arm))
     assert rr.election is not None, "a closed round elects"
     ledger.append(ElectionRecord(round=n, **dict(rr.election)))
-    ledger.append(closed_round(rr, line, cycle, outlay=LineOutlay(search_usd=None, worked_s=None)))
+    ledger.append(
+        closed_round(
+            rr,
+            line,
+            cycle.difficulty,
+            lives=cycle.config.optimization.lives,
+            position_of=cycle.session.bank.position_of,
+            outlay=LineOutlay(search_usd=None, worked_s=None),
+        )
+    )
 
 
 SANDBOX_CAMPAIGN = "testds__20260101-000000"

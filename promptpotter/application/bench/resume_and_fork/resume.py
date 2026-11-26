@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.bench.resume_and_fork.ab_replay import line_divergence
 from promptpotter.application.bench.resume_and_fork.fork_siblings import ForkCut, cut_fork
-from promptpotter.application.bench.resume_and_fork.repair import apply_correction
 from promptpotter.application.bench.resume_and_fork.replayers import ReplayMismatch
 from promptpotter.application.scoring.closed_rounds import closed_rounds
 from promptpotter.domain.records.run_records import ArmAct, ForkTrigger
@@ -47,9 +46,7 @@ def _stale_generation(
     )
 
 
-async def resume_with_divergence_check(
-    cycle: Cycle, dataset: list[Any], mode: RunMode
-) -> ForkCut | None:
+def resume_with_divergence_check(cycle: Cycle, mode: RunMode) -> ForkCut | None:
     """The cycle opens on the standing the last close of the line it continues stated, a fork's
     included; a fork is answered cut and untaken (`runner/mint.py::onto_fork` takes it)."""
     session = cycle.session
@@ -80,9 +77,7 @@ async def resume_with_divergence_check(
     if accept:
         campaign_store.act(hop, ArmAct.NO_DIVERGENCE_CHECK)
 
-    fork = await apply_correction(cycle, prior, dataset)
-    if fork is None and found is not None:
-        fork = _branch(cycle, prior, *found)
+    fork = None if found is None else _branch(cycle, prior, *found)
     line = hop if fork is None else fork.child
     cycle.standing = campaign_store.standing_rounds(line, moment=None).standing
     return fork

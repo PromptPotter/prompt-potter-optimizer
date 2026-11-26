@@ -6,20 +6,20 @@ from __future__ import annotations
 
 import contextlib
 import functools
-import inspect
 import math
 import sys
 from collections import Counter
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator
 from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
-from pydantic import ConfigDict, Field, TypeAdapter, ValidationError
+from pydantic import ConfigDict, Field, ValidationError
 
 from promptpotter import connectors
 from promptpotter.application import health, optimizers
 from promptpotter.application.jobs.launcher.admission import destroying
 from promptpotter.application.jobs.registry import JobRegistry
+from promptpotter.application.maintenance.built_key import LANDING_KEY
 from promptpotter.application.maintenance.migrate import MIGRATIONS
 from promptpotter.application.maintenance.reset import (
     ResetPlan,
@@ -43,26 +43,21 @@ from promptpotter.config.prompt_blocks import PackShelf
 from promptpotter.config.settings import APP_VERSION
 from promptpotter.domain.cycle_paths import WorkspaceDir
 from promptpotter.domain.job import JOB_ADAPTER
-from promptpotter.domain.kinds import KindTable
 from promptpotter.domain.optimizer_state import STATE_KINDS
 from promptpotter.domain.prompt_block import Presumption
 from promptpotter.domain.strict_model import FrozenModel
 from promptpotter.infrastructure import projections
 from promptpotter.infrastructure.store.data_root import (
     CHECKIN_SHADOW,
-    KINDS,
     LANDED_SCHEMA_FILE,
     LIVE_LOCKS,
     LOAD_ERRORS,
     OPTIMIZER_SHADOW,
     Fate,
-    FoldedLines,
     Found,
-    Parsed,
     Staged,
     classify,
     drop_unloadable_rows,
-    row_schema,
     run_owner,
     run_unit,
     unloadable_rows,
@@ -89,8 +84,6 @@ from promptpotter.infrastructure.store.stores import (
 )
 from promptpotter.shared.clock import utcnow_iso
 from promptpotter.shared.errors import ConflictError, NextAct, PotterError
-from promptpotter.shared.hashing import stable_hash
-from promptpotter.shared.import_walk import import_closure
 from promptpotter.shared.named_rows import walked
 
 
@@ -535,50 +528,10 @@ def apply_landing(projects_root: Path, landing: Landing) -> Landing:
         rows=tuple(rows), runs=tuple(runs), torn=tuple(torn), kept=tuple(kept)
     )
     stamp = LandedStamp(
-        key=None if kept else landing_key(), version=APP_VERSION, at=utcnow_iso(), said=applied.said
+        key=None if kept else LANDING_KEY, version=APP_VERSION, at=utcnow_iso(), said=applied.said
     )
     write_text(_stamp(projects_root), stamp.model_dump_json())
     return applied
-
-
-def _ran(schema: object, modules: set[str]) -> None:
-    """The module of every function and class a core schema calls: its validators and models."""
-    if isinstance(schema, Mapping):
-        for value in schema.values():
-            _ran(value, modules)
-    elif isinstance(schema, list | tuple):
-        for value in schema:
-            _ran(value, modules)
-    elif callable(schema):
-        modules.add(inspect.unwrap(getattr(schema, "func", schema)).__module__)
-
-
-def loading_modules() -> dict[str, str]:
-    """Every package module whose code a load runs, less its prose: the import closure of each row's reader and
-    the validators and models its shape builds, and of every migration. A load dispatches by name
-    through a `KindTable` alone (a ledger line's record kind, a state kind a record nests), so
-    every table's every kind is walked: the importlib loads that registered them, never."""
-    modules: set[str] = set()
-    for kind in KINDS:
-        if isinstance(kind.shape, TypeAdapter):
-            _ran(kind.shape.core_schema, modules)
-        elif isinstance(kind.shape, Parsed | FoldedLines):
-            # A parsed or a folded row's reader is its shape's first field.
-            _ran(kind.shape[0], modules)
-            if not isinstance(kind.shape.model, KindTable):
-                _ran(TypeAdapter(kind.shape.model).core_schema, modules)
-    for table in KindTable.every:
-        _ran([TypeAdapter(one).core_schema for one in table.registered().values()], modules)
-    _ran(list(MIGRATIONS.values()), modules)
-    return import_closure(modules)
-
-
-@functools.cache
-def landing_key() -> str:
-    """Every row's patterns, fate and shape, and the code of every module a load runs, less its
-    prose: a helper a validator calls changes what loads as surely as a field does."""
-    rows = {kind.name: row_schema(kind) for kind in KINDS}
-    return stable_hash({"rows": rows, "code": loading_modules()}, length=16)
 
 
 def _stamp(projects_root: Path) -> Path:
@@ -617,7 +570,7 @@ def holding_landing(projects_root: Path) -> Iterator[None]:
 
 
 def _landed(projects_root: Path) -> bool:
-    return (stamp := last_landing(projects_root)) is not None and stamp.key == landing_key()
+    return (stamp := last_landing(projects_root)) is not None and stamp.key == LANDING_KEY
 
 
 def land_at_entry(*, every_treatment: bool) -> None:

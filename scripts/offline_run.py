@@ -85,13 +85,14 @@ from promptpotter.application.evidence.head_to_head import GuardState
 from promptpotter.application.evidence.read import subject_evidence
 from promptpotter.application.host_surface import CallTool, HostSession
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
-from promptpotter.application.maintenance.landing import check_every_treatment, plan_landing
+from promptpotter.application.maintenance.landing import check_every_treatment
 from promptpotter.application.optimizer_manifest import (
     bench_choice,
     manifest_directories,
     running_prompt,
     select_optimizer,
 )
+from promptpotter.application.optimizers.fence import FENCE_CLOSE, FENCE_OPEN_PREFIX
 from promptpotter.application.optimizers.nodes import (
     BEHAVIOUR_KEYS_FILE,
     NODE_MEMBERS,
@@ -203,7 +204,7 @@ PRESSED = "pressed"
 # depth on another box and a trace would read the box.
 PRESS = LookaheadPress(cells=4, abreast="all", auto=True)
 # Potter's warm run reading its rolling race's calls as they return, pressed, paused inside a walk
-# and resumed: the record hangs on timing, so the resume replays the order the run filed.
+# and resumed: the record hangs on arrival order, so the resume replays the order the run filed.
 ARRIVED = "arrived"
 # Potter's warm run pressed and paused inside a walk, then resumed: what the press bought ahead and
 # no turn took stays out of the campaign's own memory across the pause.
@@ -495,7 +496,12 @@ class ByCallIdentity:
         shown: Any = content
         if attempt < len(script):
             said = invalid(script[attempt], content, model=body["model"])
-            shown = said.json() if isinstance(said, httpx.Response) else said
+            # Its bytes hash into the key, so a price (the rate table's, not the run's) stays off it.
+            shown = (
+                said.json()
+                if isinstance(said, httpx.Response)
+                else {k: v for k, v in said.items() if k != "usage"}
+            )
             # A wound's last send leaves the client no rung to retry it on.
             retried = key in self.heals or attempt + 1 < len(script)
             if schema and script[attempt] is not Heal.REFUSED and retried:
@@ -970,6 +976,23 @@ def pressing(stores: Stores) -> Callable[[], Awaitable[None]]:
     return press
 
 
+def outside_the_fence(capture: Path, bank: Iterable[str]) -> list[str]:
+    """The captured requests reading a bank row outside the dataset fence: a row is data, never an
+    instruction, wherever an optimizer quotes it (a row, a wound, a critique's evidence)."""
+    stems = [" ".join(query.split())[:40] for query in bank]
+    unfenced = []
+    for sent in sorted(capture.iterdir()):
+        messages = json.loads(sent.read_text(encoding="utf-8"))["request"]["messages"]
+        text = " ".join(
+            " ".join(m["content"].split()) for m in messages if isinstance(m.get("content"), str)
+        )
+        head, *fenced = text.split(FENCE_OPEN_PREFIX)
+        outside = head + "".join(part.partition(FENCE_CLOSE)[2] for part in fenced)
+        if any(stem in outside for stem in stems):
+            unfenced.append(sent.name)
+    return unfenced
+
+
 async def banked(
     stores: Stores,
     session: Session,
@@ -1025,6 +1048,8 @@ async def banked(
         p.name: hashlib.sha256(p.read_bytes()).hexdigest()[:16]
         for p in sorted(harness.llm.capture.iterdir())
     }
+    if unfenced := outside_the_fence(harness.llm.capture, harness.backend.truth):
+        raise SystemExit(f"offline run: {name} sent a bank row outside the fence in {unfenced}")
     asked = harness.llm.inner
     BehaviourTrace(
         world=WORLD,
@@ -2368,8 +2393,7 @@ def arrived_leg(workspace: Path, leg: Future[int], pause_after: int) -> bool:
     """Potter's rolling race read in arrival order, paused inside a walk and resumed: before the
     pause some walk took a row ahead of one it sent earlier, and the resumed round reads first
     every row the run filed, in that order (`query_loop.py::_ScoringPhase.filed_reads`). Its
-    record is never held to the unpaused run's: the pause, pressed inside a call's answer, is
-    timing too."""
+    record is never held to the unpaused run's: the pause cuts the walk where it was pressed."""
     if rc := leg.result():
         print(f"potter: arrival order: FAILED (exit {rc}) -- {workspace / 'run.log'}")
         return False
@@ -2515,20 +2539,42 @@ def controlled_reading(home: Path, arm_names: Sequence[str]) -> str:
     return "\n".join([*said, *(line for line in lines if line.startswith(("arm ", "head-to-")))])
 
 
-def proven_home() -> None:
-    """A landing's plan over what the run wrote: every file named by a row, loading as it shapes, and
-    nothing for a migration to stage or the landing to drop."""
-    landing = plan_landing(default_projects_root(), reset=False)
+_PROVEN_HOMES = """
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from pathlib import Path
+from promptpotter.application.maintenance.landing import plan_landing
+for at, root in enumerate(sys.argv[2:]):
+    landing = plan_landing(Path(root), reset=False)
     unknown = list(landing.unknown)
     refused = [f"{u.path}: {u.why}" for u in (*landing.unloadable, *landing.caches, *landing.runs)]
     refused += [f"{u.path}: {u.why}" for u in landing.torn]
     refused += [one.said for one in landing.rows]
     if unknown or refused or landing.staged:
-        raise SystemExit(
-            f"offline run: the run wrote what no data-root row names {unknown}, what its row's "
-            f"reader refuses {refused}, or a shape a migration rewrites "
-            f"{[one.said for one in landing.staged]}"
-        )
+        print(json.dumps([at, (
+            f"the run wrote what no data-root row names {unknown}, what its row's reader refuses "
+            f"{refused}, or a shape a migration rewrites {[one.said for one in landing.staged]}"
+        )]))
+"""
+
+
+def proven_homes(failed: dict[str, int], planned: Mapping[Path, str]) -> None:
+    """Once every leg ran green, a landing's plan over what each wrote (*planned*: a projects root
+    and the optimizer its leg ran): every file named by a row, loading as it shapes, and nothing for
+    a migration to stage or the landing to drop. One process of its own plans them all, as a landing
+    does, so a state kind only an optimizer's import registers is refused here, its import paid once."""
+    if any(failed.values()):
+        return
+    roots = list(planned)
+    repo = str(Path(__file__).resolve().parents[1])
+    proof = [sys.executable, "-c", _PROVEN_HOMES, repo, *map(long_path, roots)]
+    proved = subprocess.run(proof, capture_output=True, text=True, check=False)
+    if proved.returncode:
+        raise SystemExit(f"offline run: the landing's own process failed: {proved.stderr.strip()}")
+    for line in proved.stdout.splitlines():
+        at, said = json.loads(line)
+        failed[planned[roots[at]]] += 1
+        print(f"{planned[roots[at]]}: a landing refuses {roots[at]}: {said}")
 
 
 def read_children(
@@ -2603,7 +2649,6 @@ def run_child_leg(args: argparse.Namespace) -> None:
             arrival=args.arrival,
         )
         print(asyncio.run(one)[0])
-    proven_home()
 
 
 def main() -> int:
@@ -2743,10 +2788,14 @@ def main() -> int:
                 stderr=subprocess.STDOUT,
             ).returncode
 
+    # Each leg's projects root, by the optimizer it runs, for one landing plan once all have run.
+    planned: dict[Path, str] = {}
+
     def spawn(name: str, workspace: Path, *extra: str, into: Path | None = None) -> Future[int]:
         """*into* is the leg whose data root it runs in: its own, unless named."""
         workspace.mkdir()
         root = data_root(into or workspace)
+        planned.setdefault(root / PROJECTS_DIR, name)
         return pool.submit(run_child, name, workspace, "run.log", args.rounds, *extra, root=root)
 
     def terminal(workspace: Path, verb: str, interrupts: int) -> int:
@@ -2842,6 +2891,7 @@ def main() -> int:
     for name, wound in wounding.items():
         failed[name] += not wounded_leg(name, home / name, wound)
     said_leg(failed, "potter", home / "potter" / L4, nesting, "an L4 campaign over inner runs")
+    proven_homes(failed, planned)
     if args.against is not None:
         print("\n".join(moved_against(home, args.against, names)))
     if args.controlled and not any(failed.values()):

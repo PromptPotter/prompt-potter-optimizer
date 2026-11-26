@@ -377,7 +377,7 @@ async def open_cycle(
         optimizer=selected,
         survey=survey,
     )
-    cut = await resume_with_divergence_check(cycle, dataset, mode) if replays else None
+    cut = resume_with_divergence_check(cycle, mode) if replays else None
     if cut is not None:
         # Off the fork's own chain: one cut at round 0 closes the origin again, then runs round 1.
         session.state.resumed_from_round = _next_round(session.store, cut.child)

@@ -218,7 +218,7 @@ BASELINE = {
     # addr-3 (+59) less addr-4 (−20) = +39: a run declaration is a fold patch over `defaults.yaml`
     # that refuses a list it cannot lay (`layer_fold.py::patch_between`), and an arm is one
     # `RunSpec` planned on its seat and numbered once at the mint (`ArmSeat`). bkeys-3 (+21): the
-    # landing key hashes the code a load runs (`landing.py::loading_modules`'s schema walk).
+    # landing key hashes the code a load runs (`build_ts_types.py::loading_modules`'s schema walk).
     # addr-4's fix pass (+85): a cycle files the cell identity it drew under and a moved one
     # refuses (`moved_leaves` over the drawn record, +45); a null clears on every layer and
     # `unbounded` is the one no-bound word on each budget axis (+19); the archive and the ruler
@@ -261,7 +261,9 @@ BASELINE = {
     # tw-r3 (+3): `_ArchiveRecorder._file` files only a cell no address names (one filing rule).
     # tw-x (+22): the level series folds off the ruler, its scope and reach
     # (`difficulty.py::level_series_of`), so its rules are a table, not a seated session.
-    "package_lines": 113734,
+    # tw-j (+11): `node_context.py::closed_round` takes the three fields it reads, not the `Cycle`,
+    # and `own_rows` is the parent's fold as a pure function, so its facts are a table.
+    "package_lines": 113745,
     # `model_copy(update=…)` calls: each a copy `StrictModel.model_copy` revalidates, keys no rename sees.
     # small-4 (+1): `spawn.py` stamps the inner campaign on the cell's facts; `l4/proxies.py`, which
     # builds them, is hashed into the L4 estimator, so stamping there re-keys every banked L4 cell.

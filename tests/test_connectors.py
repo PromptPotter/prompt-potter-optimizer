@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
-import subprocess
-import sys
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -216,35 +213,10 @@ def dspy_cells(out: Path) -> dict[str, Any]:
     }
 
 
-_DSPY_CHILD = """
-import json, sys
-from pathlib import Path
-from test_connectors import dspy_cells
-print(json.dumps(dspy_cells(Path(sys.argv[1]))))
-"""
-
-
-@pytest.fixture(scope="module")
-def dspy_paid(tmp_path_factory: pytest.TempPathFactory) -> dict[str, Any]:
-    out = tmp_path_factory.mktemp("dspy")
-    child = subprocess.run(
-        [sys.executable, "-c", _DSPY_CHILD, str(out)],
-        cwd=_TESTS,
-        env={
-            **os.environ,
-            # The repo root first: the child imports the promptpotter this suite runs, never the install's.
-            "PYTHONPATH": os.pathsep.join(
-                (str(_TESTS.parent), str(_TESTS), str(_TESTS.parent / "scripts"))
-            ),
-            "PROMPTPOTTER_HOME": str(out / "home"),
-            "PROMPTPOTTER_ENV_FILE": str(out / ".env"),
-        },
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert child.returncode == 0, f"the dspy cells did not run: {child.stderr[-2000:]}"
-    paid: dict[str, Any] = json.loads(child.stdout.splitlines()[-1])
+@pytest.fixture
+def dspy_paid(dspy_child: dict[str, Any]) -> dict[str, Any]:
+    """`dspy_cells`, as `conftest.py::dspy_child` ran it."""
+    paid: dict[str, Any] = dspy_child["connectors"]
     return paid
 
 
