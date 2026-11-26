@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from functools import cache
+from functools import cache, lru_cache
 from statistics import NormalDist
 from typing import Literal, NamedTuple, overload
 
@@ -178,9 +178,17 @@ def bounded_mean_interval(
     n, mean = len(values), sum(values) / max(len(values), 1)
     if n < (1 if binary else 2):
         return None
-    a, b = min(0.0, *values), max(1.0, *values)
-    if binary:
-        k = int(sum(declared_two_valued(values)))
+    k = int(sum(declared_two_valued(values))) if binary else None
+    return _band(n, mean, min(0.0, *values), max(1.0, *values), k, alpha)
+
+
+@lru_cache(maxsize=4096)
+def _band(
+    n: int, mean: float, a: float, b: float, k: int | None, alpha: float
+) -> tuple[float, float]:
+    """A function of the count, the mean, the support and a binary arm's hits alone, so the
+    arms and rounds that share them bisect once: *k* ``None`` is a graded arm's band."""
+    if k is not None:
 
         def accepted(mu: float) -> bool:
             above = k == 0 or _beta_cdf(mu, k, n - k + 1) > alpha / 2
