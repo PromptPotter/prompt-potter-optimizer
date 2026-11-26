@@ -51,7 +51,7 @@ from factories import (
 )
 from offline_run import DATASET
 from offline_world import Router
-from world import Ran, Shared, World, shared_run
+from world import Shared, World, shared_run
 
 from promptpotter.application.bench.difficulty import judging_ruler, regraded_ruler, ruler_rows
 from promptpotter.application.bench.resume_and_fork.decisions import decision
@@ -80,7 +80,6 @@ from promptpotter.application.hierarchy_subtree import (
     supersede_line,
     unplaced_reason,
 )
-from promptpotter.application.initialization.scoring_scope import run_memory
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.jobs.launcher.admission import request_jobs
 from promptpotter.application.jobs.launcher.launch import Inline, Launched
@@ -644,7 +643,7 @@ class _OriginForks(NamedTuple):
 @pytest.fixture(scope="module")
 def origin_forks(tmp_path_factory: pytest.TempPathFactory, line: Shared) -> Shared:
     """`line` steered at round 1 off its crown twice, its origin unmodified then edited, run once
-    for the module (~2.4 s on `line`'s): each fact adopts its own copy."""
+    for the module (~1.6 s on `line`'s): each fact adopts its own copy."""
 
     async def act(world: World) -> _OriginForks:
         (hop, scorer), stores = line.made, world.stores
@@ -787,28 +786,33 @@ def test_a_relabel_or_a_recut_moves_a_name_and_every_paid_answer_reads_on(
 
 
 async def test_a_deleted_campaigns_cells_stay_the_memory_of_the_next_campaign_on_its_dataset(
-    world: World,
+    world: World, line: Shared
 ) -> None:
-    def memory(ran: Ran) -> set[str]:
-        """Every answer a population read at *ran*'s scope holds."""
-        stores, bank = world.stores, ran.session.bank
-        with scoped(memory=run_memory(ran.session)):
+    adopted, (a, _) = world.adopt(line), line.made
+    stores = adopted.stores
+
+    def memory(campaign_id: str, bank: Bank) -> set[str]:
+        """Every answer a population read at an optimizing run of *campaign_id*'s scope holds."""
+        with scoped(memory=OpenAt(CampaignWalks(stores.campaigns, campaign_id))):
             return {
                 answer.answer
                 for entry in list_populations(stores, bank)
                 for answer in load_population(stores, entry, bank)
             }
 
-    # A walks a round B never reaches, so B's own walks name none of its children's cells.
-    a = await world.campaign(rounds=2, rows=24)
-    held = memory(a)
+    # B is minted after A is deleted, on A's bank: its own walks name none of A's cells.
+    bank = stores.tenant_datasets.labelled(DATASET)
+    assert bank is not None
+    held = memory(a.campaign_id, bank)
     assert held, "vacuous: campaign A filed nothing"
-    await CommandDispatcher(world.stores).dispatch(
-        CommandCall(DeleteCampaignPayload(campaign_id=a.hop.campaign_id), door=Door.HOST)
+    await CommandDispatcher(stores).dispatch(
+        CommandCall(DeleteCampaignPayload(campaign_id=a.campaign_id), door=Door.HOST)
     )
-    assert not world.stores.campaigns.campaign_root_dir(a.hop.campaign_id).exists(), "guard"
-    b = await world.campaign(rounds=1, rows=24)
-    assert held <= memory(b), "a deleted campaign took its cells out of the archive's memory"
+    assert not stores.campaigns.campaign_root_dir(a.campaign_id).exists(), "guard"
+    b = await adopted.minted(rows=32)
+    assert held <= memory(b.campaign_id, bank), (
+        "a deleted campaign took its cells out of the archive's memory"
+    )
 
 
 # 3. Replayed decisions, and forks
@@ -816,8 +820,8 @@ async def test_a_deleted_campaigns_cells_stay_the_memory_of_the_next_campaign_on
 
 @pytest.fixture(scope="module")
 def line(tmp_path_factory: pytest.TempPathFactory) -> Shared:
-    """Potter's three rounds on 40 rows, run once for the module (~3.5 s, ~7 s cold): each fact
-    takes `world.adopt(line)`, its own copy, at ~20 ms."""
+    """Potter's three rounds on 32 rows, run once for the module (~2.4 s): each fact takes
+    `world.adopt(line)`, its own copy, at ~25 ms."""
 
     async def act(world: World) -> tuple[CycleHop, Scorer]:
         ran = await world.campaign(rounds=3, rows=32)
@@ -843,9 +847,9 @@ def _round(**kw: Any) -> RoundResult:
 def _minted(
     stores: Stores, offline: Router, tmp_path: Path, name: str = "world"
 ) -> tuple[CycleHop, CycleEventLog]:
-    """A campaign minted into *stores* by the world's real entry, no round run: its root cycle and
+    """A campaign minted into *stores* by the world's real mint, no round run: its root cycle and
     the ledger a held handle appends to."""
-    hop = asyncio.run(World(stores, offline, tmp_path / name).campaign(rounds=0)).hop
+    hop = asyncio.run(World(stores, offline, tmp_path / name).minted())
     return hop, CycleEventLog.open(CycleDir(stores.campaigns.cycle_dir(hop)))
 
 
@@ -1872,7 +1876,7 @@ class _Displaced(NamedTuple):
 def displaced(tmp_path_factory: pytest.TempPathFactory, line: Shared) -> Shared:
     """`line` (`parent`) forked at round 2 through the `fork_cycle` door (`fork`), and a campaign
     paused after round 1 with a fork cut off it and not yet taken (`cut`); run once for the
-    module (~3 s on `line`'s): each fact adopts its own copy."""
+    module (~1.6 s on `line`'s): each fact adopts its own copy."""
 
     async def act(world: World) -> _Displaced:
         parent, _ = line.made
@@ -2090,7 +2094,7 @@ class _Family(NamedTuple):
 @pytest.fixture(scope="module")
 def family_tree(tmp_path_factory: pytest.TempPathFactory, displaced: Shared) -> _Family:
     """`displaced`'s parent as the trunk and its fork as the kid, a rewind fork of the kid and a
-    steer off an uncrowned arm, run once for the module (~2.5 s on `displaced`'s): facts read it."""
+    steer off an uncrowned arm, run once for the module (~1.7 s on `displaced`'s): facts read it."""
 
     async def act(world: World) -> dict[str, CycleHop]:
         trunk, kid = displaced.made.parent, displaced.made.fork
@@ -2101,8 +2105,8 @@ def family_tree(tmp_path_factory: pytest.TempPathFactory, displaced: Shared) -> 
         return {"trunk": trunk, "kid": kid, "grand": grand, "steered": steered}
 
     shared = shared_run(tmp_path_factory, act, on=displaced)
-    with shared.reading(), scoped(memory=OpenAt()):
-        stores, hops = workspace(), shared.made
+    with shared.reading() as stores, scoped(memory=OpenAt()):
+        hops = shared.made
         tree = hierarchy_subtree(
             stores, Subject(hops["trunk"].campaign_id).address, None, None, moment=None
         )
@@ -2331,7 +2335,7 @@ def test_the_mask_reads_the_lines_the_subtree_reads(family_tree: _Family) -> Non
 @pytest.fixture(scope="module")
 def gated(tmp_path_factory: pytest.TempPathFactory) -> Shared:
     """Potter's origin under `origin_gate: strict`, every cell refused, halted at the gate; run once
-    for the module (~3.5 s cold, ~1.5 s warm): each fact takes `world.adopt(gated)`."""
+    for the module (~0.3 s): a fact resuming it adopts its own copy, one reading it reads in place."""
 
     async def act(world: World) -> CycleHop:
         return (await world.campaign(origin_gate="strict", down=True)).hop
@@ -2360,17 +2364,17 @@ def test_a_resume_takes_the_origin_the_gate_halted_past_it_and_every_later_launc
         assert _passes(run, hop) == ["resume"], "the override was lost, or banked twice"
 
 
-def test_a_halts_own_words_are_the_stop_its_run_serves_and_its_chat_says(
-    world: World, gated: Shared
-) -> None:
+def test_a_halts_own_words_are_the_stop_its_run_serves_and_its_chat_says(gated: Shared) -> None:
     # The gate's words, raised where the run ends, reach the served stop and the chat through the
     # close every launch takes (`entry.py::close_cycle`).
-    run, hop = world.adopt(gated), gated.made
-    served = run.stores.run_state(hop).stop
+    hop = gated.made
+    with gated.reading() as stores:
+        served = stores.run_state(hop).stop
+        ledger = stores.campaigns.layout(hop).ledger
+        notices = LedgerIndex.of(ledger).view(ActivityFeed).notices
     assert served is not None and served.stop_reason is StopReason.ORIGIN_GATE and served.detail, (
         "the halt served no words of its own"
     )
-    notices = LedgerIndex.of(run.ledger(hop).path).view(ActivityFeed).notices
     assert any(said.detail == served.detail for said in notices), "the chat lost the halt's words"
     # A layer's terminate stops in its own words.
     aborted = StopLoop(StopReason.OPTIMIZER_ABORT, detail="l2: the backend's index is gone")
